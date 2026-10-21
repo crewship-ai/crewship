@@ -268,10 +268,11 @@ func TestCovNewServerMemoryInitFailureKeepsBasePaths(t *testing.T) {
 		Addr:   "127.0.0.1:0",
 		Logger: covLogger(),
 		Memory: &MemoryConfig{
-			Enabled:        true,
-			BasePath:       badAgent,
-			AgentRole:      "lead",
-			CrewMemoryPath: badCrew,
+			Enabled:            true,
+			BasePath:           badAgent,
+			TrustedStorageRoot: filepath.Dir(t.TempDir()),
+			AgentRole:          "lead",
+			CrewMemoryPath:     badCrew,
 		},
 	})
 
@@ -403,10 +404,11 @@ func TestCovStartShutdownWithCrewMemoryAndMCP(t *testing.T) {
 		Addr:   "127.0.0.1:0",
 		Logger: covLogger(),
 		Memory: &MemoryConfig{
-			Enabled:        true,
-			BasePath:       agentDir,
-			AgentRole:      "lead",
-			CrewMemoryPath: crewDir,
+			Enabled:            true,
+			BasePath:           agentDir,
+			TrustedStorageRoot: filepath.Dir(t.TempDir()),
+			AgentRole:          "lead",
+			CrewMemoryPath:     crewDir,
 		},
 		MCPServers: []MCPServerInput{{
 			ID: "srv-1", Name: "test-mcp", DisplayName: "Test MCP",
@@ -451,10 +453,11 @@ func TestCovStartServeErrorBranch(t *testing.T) {
 		Addr:   "127.0.0.1:0",
 		Logger: covLogger(),
 		Memory: &MemoryConfig{
-			Enabled:        true,
-			BasePath:       t.TempDir(),
-			AgentRole:      "lead",
-			CrewMemoryPath: crewDir,
+			Enabled:            true,
+			BasePath:           t.TempDir(),
+			TrustedStorageRoot: filepath.Dir(t.TempDir()),
+			AgentRole:          "lead",
+			CrewMemoryPath:     crewDir,
 		},
 		MCPServers: []MCPServerInput{{
 			ID: "srv-1", Name: "never-up", DisplayName: "Never Up",

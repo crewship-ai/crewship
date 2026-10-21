@@ -81,7 +81,7 @@ func TestPipelineWebhooks_Fire_FailedRun_KeepsItsDeliveryRecorded(t *testing.T) 
 
 	first := fire()
 	firstRunID, _ := first["run_id"].(string)
-	h.WaitWebhookDispatches()
+	waitPendingWebhookDispatches(t, h)
 
 	// Redelivery with the SAME key after a FAILED run is a DUPLICATE. It gets
 	// the original run's id back and executes nothing.
@@ -92,7 +92,7 @@ func TestPipelineWebhooks_Fire_FailedRun_KeepsItsDeliveryRecorded(t *testing.T) 
 	if second["run_id"] != firstRunID {
 		t.Errorf("redelivery answered run_id %v, want the original %q", second["run_id"], firstRunID)
 	}
-	h.WaitWebhookDispatches()
+	waitPendingWebhookDispatches(t, h)
 
 	if runner.calls != 1 {
 		t.Errorf("runner invoked %d times, want 1 — a redelivery must not repeat effects "+

@@ -20,12 +20,13 @@
  */
 
 import * as React from "react"
-import { AlertTriangle, ShieldAlert, Eye, ShieldCheck, UserCheck } from "lucide-react"
+import Link from "next/link"
+import { AlertTriangle, Building, ChevronRight, Eye, FolderLock, Layers, Lock, Shield, UserCheck, Users, type LucideIcon } from "lucide-react"
 
-import { Badge } from "@/components/ui/badge"
+import { UserAvatar } from "@/components/ui/user-avatar"
 import { Switch } from "@/components/ui/switch"
 import { Spinner } from "@/components/ui/spinner"
-import { SettingsCard, SettingsEmpty, SettingsRow } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsCounts, SettingsEmpty, SettingsRow } from "@/components/features/settings/shared"
 import { apiFetch } from "@/lib/api-fetch"
 import { toastSwitchError } from "@/components/ui/page-save-bar"
 import { Capability } from "@/lib/capabilities"
@@ -33,7 +34,7 @@ import { Capability } from "@/lib/capabilities"
 export interface AccessSecretsMember {
   id: string
   role: string
-  user: { id: string; email: string; full_name: string | null }
+  user: { id: string; email: string; full_name: string | null; avatar_url?: string | null }
 }
 
 export interface AccessSecretsSectionProps {
@@ -42,6 +43,23 @@ export interface AccessSecretsSectionProps {
   role: string | null | undefined
   members: AccessSecretsMember[]
 }
+
+/** The slice of GET /api/v1/credentials this page summarises. */
+interface CredentialSummary {
+  id: string
+  name: string
+  scope: string
+  crew_ids?: string[] | null
+  sensitivity?: string
+}
+
+const CLASSES: { id: string; label: string; icon: LucideIcon }[] = [
+  { id: "STANDARD", label: "Standard", icon: Shield },
+  { id: "RESTRICTED", label: "Restricted", icon: Lock },
+  { id: "SEALED", label: "Sealed", icon: AlertTriangle },
+]
+
+const OWNER_ONLY = "Only a workspace OWNER can move this switch — the API refuses everyone else, including ADMIN."
 
 interface BulkCapabilities {
   members?: { user_id: string; role: string; capabilities: string[] }[]
@@ -57,6 +75,10 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
   // The bulk capabilities read is ADMIN+; a MANAGER cannot see the grants.
   const [capsHidden, setCapsHidden] = React.useState(false)
   const [capsFailed, setCapsFailed] = React.useState(false)
+  // The credentials this caller can see — for the class counts and the
+  // "where they live" counts. The same read the Credentials page makes; a
+  // failure just shows the summaries as empty.
+  const [creds, setCreds] = React.useState<CredentialSummary[] | null>(null)
 
   React.useEffect(() => {
     let cancelled = false
@@ -97,6 +119,20 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
     return () => { cancelled = true }
   }, [workspaceId])
 
+  React.useEffect(() => {
+    let cancelled = false
+    const ws = encodeURIComponent(workspaceId)
+    apiFetch(`/api/v1/credentials?workspace_id=${ws}`)
+      .then(async (res) => (res.ok ? ((await res.json()) as unknown) : null))
+      .then((body) => {
+        if (cancelled) return
+        const list = Array.isArray(body) ? body : Array.isArray((body as { data?: unknown } | null)?.data) ? (body as { data: unknown[] }).data : []
+        setCreds(list as CredentialSummary[])
+      })
+      .catch(() => { if (!cancelled) setCreds([]) })
+    return () => { cancelled = true }
+  }, [workspaceId])
+
   async function toggle(next: boolean) {
     setSaving(true)
     try {
@@ -126,20 +162,34 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
     return members.filter((m) => (capsByUser[m.user.id] ?? []).includes(Capability.CredentialReveal))
   }, [capsByUser, members])
 
+  // Where credentials live: workspace-wide, or with a crew. A crew is the
+  // folder — its members see its credentials (credentialVisibilityFilter).
+  const placement = React.useMemo(() => {
+    if (!creds) return null
+    const crewScoped = creds.filter((c) => c.scope === "CREW")
+    const unlinked = crewScoped.filter((c) => (c.crew_ids ?? []).length === 0).length
+    return { workspaceWide: creds.length - crewScoped.length, perCrew: crewScoped.length - unlinked, unlinked }
+  }, [creds])
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <SettingsCard icon={Eye}
         title="Value reveal"
-        description="Whether anyone in this workspace may read a stored secret back in plaintext."
+        description="Whether anyone in this workspace can show a stored value in clear"
       >
         <SettingsRow
           label="Reveal is enabled"
+          lock="Owner"
+          lockTitle={OWNER_ONLY}
+          border={!policyError}
           description={
-            enabled === null
+            // The same explanation for every role (v67); who may move the
+            // switch is said by the lock beside the label and on the switch.
+            enabled === null && !policyError
               ? "Reading the current setting…"
               : enabled
-                ? "Holders of the capability can reveal a value, with a written reason, recorded in the journal."
-                : "A new workspace starts with reveal off. Turning it on is itself a journaled event."
+                  ? "Holders of the capability can reveal a value, with a fresh sign-in and a written reason, recorded in the audit log first."
+                  : "Off for new workspaces. Each reveal still needs a fresh sign-in and a reason, and is written to the audit log first."
           }
         >
           {enabled === null && !policyError ? (
@@ -154,24 +204,19 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
             />
           )}
         </SettingsRow>
-        {!isOwner && (
-          <SettingsRow label="Read-only for your role" border={false}>
-            <span className="text-label text-muted-foreground text-right">
-              Only a workspace OWNER can move this switch — the API refuses everyone else, including
-              ADMIN.
-            </span>
-          </SettingsRow>
-        )}
         {policyError && (
-          <SettingsRow label="Problem" border={false}>
-            <span role="alert" className="text-label text-destructive text-right">{policyError}</span>
+          <SettingsRow label="Problem" border={false} description={<span role="alert" className="text-destructive">{policyError}</span>}>
+            <span />
           </SettingsRow>
         )}
       </SettingsCard>
 
+      {/* Who holds the grant is a question about people, so it is answered —
+          and changed — in Members; this card only says how many and links
+          there, instead of keeping a second editable list of the same rows. */}
       <SettingsCard icon={UserCheck}
         title="Who may reveal"
-        description="OWNER and ADMIN receive reveal by default unless their membership has an explicit capability set. Individual grants and revocations take precedence; workspace policy still applies."
+        description="People who hold credentials:reveal"
       >
         {capsHidden ? (
           <SettingsEmpty>
@@ -188,59 +233,63 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
             on, no value can be revealed until someone is granted it in Members.
           </SettingsEmpty>
         ) : (
-          holders.map((m) => (
-            <SettingsRow key={m.id} label={m.user.full_name || m.user.email} description={m.user.email}>
-              <Badge variant="outline" className="text-micro px-1.5">{m.role}</Badge>
-              <Badge variant="outline" className="text-micro px-1.5 border-warn/40 text-warn">
-                can reveal
-              </Badge>
-            </SettingsRow>
-          ))
-        )}
-        {holders && holders.length > 2 && (
-          <SettingsRow label="" border={false}>
-            <span className="inline-flex items-start gap-1.5 text-label text-warn text-right">
-              <AlertTriangle className="mt-[1px] h-3 w-3 shrink-0" />
-              {holders.length} people can read secrets in plaintext. The recommendation for a
-              corporate workspace is two.
+          // v67: the count, the avatars and the way into Members. Who they are,
+          // and the warning when there are more than two, are Members' job
+          // (its "Needs attention" says so) — not a second list here.
+          <SettingsRow
+            label={<span className="tabular-nums">{holders.length} {holders.length === 1 ? "person" : "people"}</span>}
+            description="Owners and admins by default. More than 2 shows a warning."
+            border={false}
+          >
+            <span className="flex shrink-0 -space-x-1.5" aria-hidden data-slot="reveal-holders">
+              {holders.slice(0, 5).map((m) => (
+                <UserAvatar key={m.id} name={m.user.full_name} email={m.user.email} src={m.user.avatar_url ?? null} className="h-6 w-6 ring-2 ring-card" textClassName="text-micro" />
+              ))}
             </span>
+            <Link href="/settings/members?flag=reveal" className="inline-flex items-center gap-1 text-control font-medium text-primary-hover underline-offset-2 hover:underline">
+              Manage in Members<ChevronRight className="h-3 w-3" aria-hidden />
+            </Link>
           </SettingsRow>
         )}
       </SettingsCard>
 
-      <SettingsCard icon={ShieldCheck}
+      {/* Counts only, each a way into the Vault filtered to that class (the
+          Vault reads ?class=, lib/credentials/vault-url-state.ts): the class
+          itself is set on each secret there, so this card has nothing to edit. */}
+      <SettingsCard icon={Layers}
         title="Classification"
-        description="What each class means, and who can move a credential between them."
+        description="Read-only here; change it on each secret in Vault"
+        footer="Sealed values are never revealed or exported."
       >
-        <SettingsRow label="Standard" description="Dev tokens, read-only keys.">
-          <span className="text-label text-muted-foreground text-right">
-            Revealable with the full ceremony
-          </span>
-        </SettingsRow>
-        <SettingsRow label="Restricted" description="Production API keys, deploy keys.">
-          <span className="text-label text-muted-foreground text-right">
-            Revealable today; earmarked for a second approver
-          </span>
-        </SettingsRow>
-        <SettingsRow
-          label="Sealed"
-          description="Production databases, root credentials, anything an agent created."
-        >
-          <span className="inline-flex items-center gap-1.5 text-label text-destructive text-right">
-            <ShieldAlert className="h-3 w-3 shrink-0" />
-            Never revealable — rotate instead
-          </span>
-        </SettingsRow>
-        <SettingsRow label="Changing a class" description="Raise it at any time; lowering is audited." border={false}>
-          <span className="text-label text-muted-foreground text-right">
-            Manager and up can raise · Owner or Admin can lower
-          </span>
-        </SettingsRow>
+        {creds === null ? (
+          <SettingsEmpty>Loading credentials…</SettingsEmpty>
+        ) : (
+          <SettingsCounts
+            items={CLASSES.map((cls) => ({
+              icon: cls.icon,
+              label: cls.label,
+              value: creds.filter((c) => (c.sensitivity || "STANDARD").toUpperCase() === cls.id).length,
+              href: `/credentials?class=${cls.id}`,
+            }))}
+          />
+        )}
       </SettingsCard>
 
-      <p className="text-label text-muted-foreground">
-        Set a credential&rsquo;s class on its detail sheet in Credentials.
-      </p>
+      <SettingsCard icon={FolderLock} title="Where credentials live" description="Read-only">
+        {placement === null ? (
+          <SettingsEmpty>Loading credentials…</SettingsEmpty>
+        ) : creds && creds.length === 0 ? (
+          <SettingsEmpty>No credentials you can see in this workspace yet.</SettingsEmpty>
+        ) : (
+          <SettingsCounts
+            items={[
+              { icon: Building, label: "Workspace-wide", value: placement.workspaceWide, href: "/credentials" },
+              { icon: Users, label: "Per crew", value: placement.perCrew, href: "/credentials" },
+              { icon: AlertTriangle, label: "Crew-scoped, no crew", value: placement.unlinked, href: "/credentials" },
+            ]}
+          />
+        )}
+      </SettingsCard>
     </div>
   )
 }

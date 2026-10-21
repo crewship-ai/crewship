@@ -57,7 +57,7 @@ The command takes no command-specific flags. It prints `Name`, `Slug`,
 `Language`, `Allow privileged credentials`, `Pages theme`, `ID`, and
 `Created`; machine formats use the corresponding API fields `id`, `name`,
 `slug`, `created_at`, `preferred_language`, `allow_privileged_credentials`
-and `pages_theme`. `Pages theme` lists the shared Page colours as
+`pages_theme` and `appearance_default`. `Appearance default` lists the default look as `key=value` pairs, or `(none)`. `Pages theme` lists the shared Page colours as
 `key=#RRGGBB` pairs, or `(SDK defaults)` when none is set — see
 [`workspace update --pages-theme`](#workspace-update).
 
@@ -80,11 +80,12 @@ Only flags you actually set are sent — passing nothing returns `no fields to u
 | `--name <string>` | Rename the workspace. |
 | `--slug <string>` | Change the slug (URLs flip immediately). |
 | `--language <code>` | Preferred reply language for agents (e.g. `cs`, `en`). Reinforced at the top and bottom of every agent prompt — including chat sessions, assignments, and pipelines — so the agent answers in this language. |
-| `--allow-privileged-credentials` | Allow credentials in a `--privileged` crew despite the UID isolation boundary. Defaults to `false` (fails closed). |
+| `--allow-privileged-credentials` | Allow privileged runtime configuration and credential delivery. Enabling requires an instance administrator with workspace OWNER/ADMIN rights; scoped tokens need `workspace:admin` and `instance:admin`. Defaults to `false` (fails closed). Workspace administrators may disable it. |
 | `--credential-audit-retention-days` | Days of `credential_audit` history to keep. `0` means keep forever. Leave unset to use the 90-day default. |
 | `--audit-log-retention-days` | Days of `audit_logs` history to keep. `0` means keep forever, which is the default — `audit_logs` is the compliance trail and its retention obligation is yours to declare. |
 | `--approvals-retention-days` | Days of decided `approvals_queue` history (approved/denied/timeout/cancelled) to keep. `0` means keep forever. Leave unset to use the 90-day default. A pending approval is never swept regardless of age. Rejected above `106751` days (~292 years) — past that the day count overflows the retention sweep's `int64`-nanosecond cutoff arithmetic. |
 | `--pages-theme <json\|@file>` | The shared colours every custom [Page application](/guides/pages#shared-company-colors) reads through the `--crewship-page-*` design tokens: a JSON object whose keys are `accent`, `background`, `surface`, `text`, `muted` and `border` and whose values are `#RRGGBB` colours. Inline (`'{"accent":"#0f766e"}'`) or `@theme.json`. The object **replaces** the stored one — omitted keys fall back to the SDK defaults — and `{}` resets it. Any other key, any other colour form, or more than 1 KiB is refused by the server. This is the same setting as **Settings → General → Pages appearance**; `OWNER`/`ADMIN` only, and audited. |
+| `--appearance-default <json\|@file>` | The default look members get until they choose their own: a JSON object with optional keys `style`, `knobs`, `accent` and `theme` (`dark`, `light` or `system`). Inline (`'{"style":"slate","accent":"teal","theme":"dark"}'`) or `@look.json`. The object **replaces** the stored one and `{}` resets it. Ids are checked for shape and the object for 2 KiB by the server. This is the same setting as **Settings → Appearance → Workspace default**; `OWNER`/`ADMIN` only (`403` for a Manager or Member), and audited. |
 
 <Warning>
 Only flags you actually pass are sent, and that matters here: `0` is a
@@ -193,7 +194,9 @@ be granted again. See
 
 | Flag | Default | Effect |
 | --- | --- | --- |
-| `--role <ROLE>` | `MEMBER` | Role to grant. `MEMBER` or `ADMIN`. This records an invitation row; no email is sent. |
+| `--role <ROLE>` | `MEMBER` | Role to grant. `ADMIN`, `MANAGER`, `MEMBER`, or `VIEWER`; no email is sent. |
+| `--access-mode <mode>` | `trusted` | Use `restricted` for Guest access across the account. |
+| `--rights-file <file>` | — | Initial rights JSON array (file or `-` for stdin); requires restricted mode. |
 
 The role flag is mirrored on the parent `invite` command so the shortcut form (`workspace invite alice@example.com --role ADMIN`) works without an explicit `create`. No mailer is wired for this command.
 
@@ -210,9 +213,11 @@ crewship workspace invite create alice@acme.com --role ADMIN
 
 | Flag | Default | Effect |
 | --- | --- | --- |
-| `--role <ROLE>` | `MEMBER` | Role recorded on the invitation: `MEMBER` or `ADMIN`. |
+| `--role <ROLE>` | `MEMBER` | Role recorded on the invitation: `ADMIN`, `MANAGER`, `MEMBER`, or `VIEWER`. |
+| `--access-mode <mode>` | `trusted` | `restricted` creates a Guest invitation with account-wide restrictions. |
+| `--rights-file <file>` | — | Initial rights JSON array; use `-` for stdin. Requires restricted mode. |
 
-On success the CLI prints `Invitation recorded for <email> (<role> role).`
+On success the CLI prints `Invitation recorded for <email> (<role> role).` and the recipient's invitation link. Save and share that creation response privately; invitation lists expose metadata without the redemption token.
 followed by a warning that no email was sent.
 
 ### `workspace member invite`
@@ -223,6 +228,8 @@ account when needed, adds the membership, and prints a one-time setup link.
 | Flag | Default | Effect |
 | --- | --- | --- |
 | `--role <ROLE>` | `MEMBER` | Role to grant: `ADMIN`, `MANAGER`, `MEMBER`, or `VIEWER`. |
+| `--access-mode <mode>` | `trusted` | Use `restricted` for Guest access. Claimed accounts must accept an invitation instead. OWNER/ADMIN accounts are refused. |
+| `--rights-file <file>` | — | Initial rights JSON array (file or `-` for stdin); requires restricted mode. |
 | `--create-only` | `false` | Require a new account. If the email already exists, return `409` before changing membership, role or setup tokens. |
 
 Use `--create-only` for isolated demo provisioning when an existing person must
@@ -290,7 +297,7 @@ Per-member capabilities grant individual high-value actions (create routines, sk
 
 Aliases: `caps`, `capability`. **ADMIN+ required** to mutate; the CLI exits non-zero on a `403` so a misconfigured CI pipeline fails loudly. Capabilities are workspace-scoped — a user in multiple workspaces is configured separately in each.
 
-The dashboard equivalent is **Settings → Members**: one row per person, expanded to reveal that member's role and their capability grants side by side. The collapsed row summarises the grants so a capability stays comparable across the roster without expanding every row. Presets apply to the whole workspace from the card header, with a before/after diff for every member they would change.
+The dashboard equivalent is **Settings → Members** (`/settings/members`). It keeps two questions apart: the **role** says what a person manages (people, crews, settings); what they may **do** is read as three areas — **Routines**, **Content** and **Secrets** — so a row shows chips like "Routines · Content 3/4", a red "Secrets · reveal" for anyone who can read secrets in plaintext, and "Chat only" for someone with nothing beyond chat. The page starts with **Needs attention**: how many people can reveal secrets, Members or Viewers who hold skills or credentials (marked with a warning beside their role), and invitations that have expired or expire within two days, each with a button that lists or opens them. The side panel filters by role, by area ("Can do"), by "needs a look" and shows pending **Invited** people with when each invitation runs out. Clicking a row opens that person in a side panel (full screen on a phone): the role, a preset (*Chat only*, *Power user*, *Builder* = `chat`, `power`, `admin`) with what differs from it ("+Reveal −Run"), each ability as a switch grouped by area, crews and agents, and removal. When a Member or Viewer holds high-stakes access the panel says so first and offers to turn it off or make them a Manager. Tick rows to set a preset, grant or revoke for many people at once. **Add member** asks for the role and what the person may do — the role's default, or one of the three presets, applied as a `{"set"}` PATCH right after the account is created (if that fails the person is still added, and the dialog says so). Capability changes are drafts: nothing reaches the server until **Save** in the page's bar (**Discard** drops them, and leaving the page asks first); each changed person is then one `PATCH …/capabilities` with the full `set`. Putting a high-stakes grant into the draft asks first. A role change is separate and applies after its own confirmation. `/settings/members?member=<user-id>` opens one person directly; `?area=`, `?flag=` and `?status=invited` keep a filter in the link.
 
 The `chat` capability is always implied and cannot be granted or revoked individually; removing chat means removing the member entirely (`workspace member remove`). The OWNER target is immutable, and you cannot mutate your own row (downgrade-then-restore defence).
 
@@ -380,8 +387,9 @@ The shortcut form (`invite <email>`) and the explicit form (`invite create <emai
 
 - **`workspace "X" not found or not accessible`** — `workspace use` validated against `/api/v1/workspaces` and your token has no membership.
 - **`--name is required`** — `create` needs at least a name.
-- **`no fields to update`** — `update` was called without any of `--name` / `--slug` / `--language` / `--allow-privileged-credentials` / `--credential-audit-retention-days` / `--audit-log-retention-days` / `--approvals-retention-days` / `--pages-theme`.
+- **`no fields to update`** — `update` was called without any of `--name` / `--slug` / `--language` / `--allow-privileged-credentials` / `--credential-audit-retention-days` / `--audit-log-retention-days` / `--approvals-retention-days` / `--pages-theme` / `--appearance-default`.
 - **`--pages-theme must be a JSON object …`** — the value (or the `@file`) did not parse as a JSON object of strings. The colour vocabulary itself is checked by the server: `pages_theme supports accent, background, surface, text, muted and border as #RRGGBB colors` is its answer to an unknown key or a named colour.
+- **`--appearance-default must be a JSON object …`** — the value (or the `@file`) did not parse as a JSON object. The server answers an unknown key, theme or id with `appearance_default supports style, knobs, accent and theme` and similar.
 - **`no workspace selected`** — `update` ran without an active workspace. Run `crewship workspace use` first or pass `--workspace`.
 
 </Accordion>
@@ -414,6 +422,9 @@ crewship --workspace WORKSPACE --format json workspace member access get MEMBER 
 
 ### `crewship workspace member access set <member-id-or-user-id>`
 
+To deliberately take over a saved share, use `workspace member access set MEMBER --file policy.json --reissue routine:ROUTINE_ID:run` (repeatable). The right must be in the complete policy. The default policy table shows each issuer and whether a share is active or inactive. The API and CLI can explicitly reissue active shares too; Settings offers this action for inactive shares. Policy saves and reissues record old and new issuers and rights atomically in workspace activity.
+
+
 Replace the complete policy using its original membership ID and revision.
 Edit the `mode` and `rights` fields from `access get`; do not invent a revision.
 An explicit empty `rights` array in restricted mode denies all resource grants.
@@ -433,3 +444,156 @@ silently refresh it. Revisions may advance by more than one. Missing/null rights
 unknown fields and a document for a different membership are rejected.
 This command does not enable restricted model execution or stop an already
 running shared process. See [the API contract](/api-reference/workspaces#replace-member-resource-access).
+
+## `crewship workspace invite accept --token-stdin`
+
+Accept the presented invitation with the signed-in account matching its email. Requires an unrestricted credential and no active workspace. Membership and invitation consumption commit together. An already accepted invitation can be retried by the same current member without restoring an old role or a removed membership.
+
+```bash
+crewship workspace invite accept --token-stdin < /path/to/private-invitation-proof
+```
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--token-stdin` | `false` | Read invitation proof from stdin (required). |
+| `--confirm-account-restriction` | `false` | Explicitly accept Guest restrictions across all workspaces. OWNER/ADMIN accounts are refused even with consent. |
+
+Without confirmation a Guest invitation returns 400 `guest_confirmation_required`.
+Review the account-wide consequence, then retry with the flag. A stale invitation
+returns 409 `invitation_changed`; request a new link.
+
+Proof is read from standard input, never a positional argument or secret-valued flag. Use a private file or a secret manager pipe; do not paste a literal proof into shell command history. New recipient links use a fragment. The join page removes the proof from the current URL and retains it only in that tab during sign-in/signup.
+
+## `crewship workspace invite reissue <invitation-id>`
+
+Rotate an unaccepted invitation and print a new recipient link. Requires a live trusted workspace OWNER/ADMIN; an ADMIN invitation requires OWNER. The previous link immediately stops working. No email is sent. Expired or lost links can be replaced; an existing membership is not changed.
+
+```bash
+crewship workspace invite list
+crewship workspace invite reissue INVITATION_ID
+```
+
+## `crewship workspace invite revoke <invitation-id>`
+
+Revoke an unaccepted invitation without removing or changing an existing member. Uses the same issuer authority checks as reissue.
+
+```bash
+crewship workspace invite revoke INVITATION_ID
+```
+
+## `crewship workspace member access explain <member-id-or-user-id>`
+
+Read saved effective access and prerequisites as a trusted workspace OWNER/ADMIN.
+Calls `GET /api/v1/workspaces/{workspaceId}/members/{memberId}/access/effective`.
+The output includes membership revision, account restriction scope and each saved
+grant's allowed/denied/conditional/unavailable state and reason. This does not
+expose private conversations or execution results. There are no command-specific flags.
+
+```bash
+crewship --format json workspace member access explain MEMBER
+crewship workspace invite create client@example.test --role VIEWER --access-mode restricted --rights-file grants.json
+```
+
+`grants.json` is an array, for example
+`[{"kind":"routine","id":"routine-id","operation":"run"},{"kind":"agent","id":"agent-id","operation":"run"}]`.
+Grant every dependency's agent run/delegate rights separately.
+
+## `crewship workspace access`
+
+Inspect your own access in the selected workspace.
+
+## `crewship workspace access me`
+
+Calls `GET /api/v1/workspaces/{workspaceId}/access/me` without looking up the
+workspace roster. Available to Guests and trusted members. The table explains
+saved resource grants and execution prerequisites; JSON/YAML includes membership
+revision and the account-wide restriction explanation.
+
+```bash
+crewship --format json workspace access me
+```
+
+Resource policy JSON includes read-only `grant_details` with each grant’s
+`issuer_id`, `created_at` and `live` status. Saving unchanged rights preserves
+their provenance. To deliberately reissue a share as the authenticated admin,
+include its exact `{kind,id,operation}` in both `rights` and optional `reissue`.
+Unrelated edits do not reactivate shares from an inactive issuer.
+
+## Object sharing
+
+Use [`share`](./share) and [`unshare`](./unshare) to change an existing Guest's
+individual routine or project operations without replacing unrelated rights.
+The versioned member-policy commands remain available for complete policies.
+
+### List resource access presets
+
+```bash
+crewship workspace member access presets --format json
+```
+
+Lists immutable definitions and hashes for the selected workspace using the administrative API catalog. JSON, YAML and NDJSON preserve the complete definitions and API field names; the table lists each explicit level. No permissions change. Preset application remains a later operation.
+
+Administrative `workspace member access get --format json` (or YAML) preserves the server's informational `preset_selections`, including API field names in this new metadata. Existing policy YAML keys remain unchanged. These saved labels are not effective permissions. Read-edit-set can round-trip the read-only metadata, but `access set` cannot create a selection through it; the server computes the returned choices from canonical state. The default table continues to show grant issuers and active/inactive rights.
+
+
+### `crewship workspace member access preset preview MEMBER`
+
+Preview an explicit bundle for an existing restricted member without saving it. `--file` is required; provide a JSON file or `--file -` for stdin. Input contains current `membership_id`, `revision`, `resource: {kind,id}`, `preset_id`, `preset_version`, `level` and optional explicit `reissue` rights. Read the revision with `access get`; unknown/trailing/oversized input is rejected and conflicts are never silently refreshed or retried.
+
+```bash
+crewship --workspace WORKSPACE --format json workspace member access preset preview MEMBER --file selection.json
+```
+
+Table output shows the saved choice or Custom, managed changes, retained orthogonal rights and original issuers/timestamps. Review Results history, execution prerequisites, file-role floors and conditional `delete_issues` eligibility. JSON/YAML/NDJSON preserve the complete normalized selection, provenance, consequences and confirmation checksum, including exact int64 revisions. The checksum supplies no authority; this command never applies a preset. See the [API contract](../api-reference/workspaces.mdx#preview-member-access-preset).
+
+### `crewship workspace member access preset apply MEMBER`
+
+Apply an explicitly reviewed preview using required `--file confirmed.json` or `--file -` for stdin. The JSON document contains only `selection` copied unchanged from preview and its exact `confirmation_digest`. Review preview warnings and provenance before creating this document. Requires current trusted OWNER/ADMIN authority and `workspace:admin` for scoped credentials.
+
+```bash
+crewship --workspace WORKSPACE workspace member access preset apply MEMBER --file confirmed.json
+```
+
+The command resolves the member once, sends one write and returns canonical policy/provenance in table/JSON/YAML/NDJSON. Unknown/trailing/oversized or malformed consent is rejected before network access. Conflicts/denials exit nonzero without rereading, retrying or replacing consent. Recompute and review a new preview after409; inspect current policy first after an uncertain write outcome.
+
+## Review and transfer content ownership
+
+Review content requiring a human successor before removing a workspace member:
+
+```bash
+crewship workspace page-ownership list --owner USER_ID --limit 25
+crewship workspace page-ownership list --owner USER_ID --cursor NEXT_CURSOR
+crewship workspace page-ownership transfer PAGE_ID --expected-owner USER_ID --successor READER_ID
+```
+
+Choose an eligible successor from the list. The transfer takes effect immediately
+and preserves content and grant records. A successor who has lost read access,
+or an owner changed since review, causes refusal instead of an automatic grant.
+Workspace administrator access is required. Instance administrator access alone
+does not grant access to private content metadata. Use `--format json` for
+machine-readable responses, including `next_cursor` when more results exist.
+
+Scoped CLI credentials need `workspace:admin` for both listing and transfer.
+`workspace:*` and unrestricted tokens also carry this authority. Session callers
+need a current trusted workspace OWNER or ADMIN session.
+
+## `crewship workspace artifact-policy show`
+
+Read the selected workspace's artifact creation switch, complete crew allowlist
+and current policy version. Requires a trusted workspace OWNER/ADMIN and
+`workspace:admin` for scoped CLI credentials.
+
+## `crewship workspace artifact-policy set`
+
+Replace the entire administrative policy using the version just reviewed with
+`show`. This ceiling does not grant consent for individual agent runs.
+
+| Flag | Meaning |
+| --- | --- |
+| `--base-version` | Required current policy version; use 0 before the first save. |
+| `--enabled` | Required explicit `true` or `false` switch value. |
+| `--crew-id` | Complete allowed crew IDs, repeated or comma-separated. |
+| `--clear-crews` | Explicitly empty the allowlist; mutually exclusive with `--crew-id`. |
+
+A stale version refuses the change. Read the policy again before deciding on a
+replacement. Use `--format json` for machine-readable responses.

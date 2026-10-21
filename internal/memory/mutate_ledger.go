@@ -290,7 +290,7 @@ func recoverPending(ctx context.Context, db *sql.DB, blobRoot, storageRoot strin
 			if storageRoot == "" {
 				return recovered, conflicted, fmt.Errorf("memory recovery storage root is not configured for %s", k.auditPath)
 			}
-			file, err = openMutationFile(storageRoot, k.canonical, false)
+			file, err = openRootedMutationFile(storageRoot, k.canonical, false)
 			if err != nil {
 				return recovered, conflicted, fmt.Errorf("open memory recovery path %s under storage root: %w", k.auditPath, err)
 			}

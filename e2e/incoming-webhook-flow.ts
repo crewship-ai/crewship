@@ -50,67 +50,70 @@ export async function incomingWebhookFlow(page: Page) {
       (id) => localStorage.setItem("crewship.workspaceId", id),
       workspaceId,
     )
+    // The old Incoming link still works: Harbor 2 (#3395, integrations N05/N06)
+    // reads ?tab=incoming and rewrites it to the Triggers space.
     await page.goto("/integrations?tab=incoming")
+    await expect(page).toHaveURL(/[?&]space=triggers/)
     // Keep the app navigation's hover expansion away from the explorer.
     await page.mouse.move(1100, 600)
-    await page
-      .getByRole("button", { name: "Add integration", exact: true })
-      .click()
-    await page.getByRole("button", { name: /Incoming webhook/ }).click()
-    const dialog = page.getByRole("dialog")
-    await expect(
-      dialog.getByRole("combobox", { name: "Target", exact: true }),
-    ).toBeVisible()
-    await dialog.getByRole("combobox", { name: "Target", exact: true }).click()
+    // The space's one primary action in the top bar: New trigger.
+    const newTrigger = page.locator("[data-action=space-primary]")
+    await expect(newTrigger).toHaveAccessibleName("New trigger")
+    await newTrigger.click()
+    const dialog = page.getByRole("dialog", { name: /New trigger/ })
+    await expect(dialog).toBeVisible()
+    // Step 1, Goes to: a routine, this test's own.
+    await expect(dialog.getByRole("radio", { name: /^Routine/ })).toHaveAttribute("aria-checked", "true")
+    await dialog.getByRole("combobox", { name: "Routine", exact: true }).click()
     await page.getByRole("option", { name: slug, exact: true }).click()
-    await dialog
-      .getByRole("textbox", { name: "Endpoint name" })
-      .fill(`${slug} GitHub`)
-    await expect(dialog.getByRole("combobox", { name: "Webhook format" })).toHaveCount(0)
-    await dialog.getByRole("button", { name: "Advanced settings", exact: true }).click()
-    await dialog.getByRole("combobox", { name: "Webhook format" }).click()
-    await page.getByRole("option", { name: "GitHub pull requests" }).click()
+    await dialog.getByRole("button", { name: "Continue", exact: true }).click()
+    // Step 2, Sender and mapping: GitHub checks the signature and takes only
+    // pull_request events (the github ingress profile).
+    await dialog.getByRole("radio", { name: /^GitHub/ }).click()
+    await dialog.getByRole("textbox", { name: "Name" }).fill(`${slug} GitHub`)
     const createdResponse = page.waitForResponse(
       (r) =>
         r.request().method() === "POST" &&
         r.url().includes("/pipeline-webhooks"),
     )
-    await dialog.getByRole("button", { name: "Create endpoint" }).click()
+    await dialog.getByRole("button", { name: "Create", exact: true }).click()
     const created = await createdResponse
     expect(created.status()).toBe(201)
     const hook = await created.json()
     hooks.push(hook.id)
     expect(hook.ingress_profile).toBe("github")
-    // Never attach the one-time token or signing secret to test output.
+    // Step 3, URL: shown once. Never attach the one-time token or signing
+    // secret to test output.
     await expect(dialog.getByTestId("incoming-receiving-url")).toContainText(
       "/github-pull-request",
     )
-    await expect(
-      dialog.getByRole("button", { name: "Copy receiving URL" }),
-    ).toBeVisible()
-    await dialog.getByRole("button", { name: "Done" }).click()
-    await page.getByRole("button", { name: "Back to endpoints" }).click()
-    await expect(
-      page.getByText("Received · 24h", { exact: true }),
-    ).toBeVisible()
+    await expect(dialog.getByRole("button", { name: "Copy URL" })).toBeVisible()
+    // While the secret shows, Esc does not throw it away; only Done closes.
+    await page.keyboard.press("Escape")
+    await expect(dialog.getByTestId("incoming-receiving-url")).toBeVisible()
+    await dialog.getByRole("button", { name: "Done", exact: true }).click()
+    await expect(dialog).toBeHidden()
+    // Done lands on the triggers of the routine it starts.
+    await expect(page).toHaveURL(new RegExp(`starts=routine.*target=${hook.target_pipeline_id}`))
+    // A desktop list is a table; each row opens its trigger.
     await page
-      .getByRole("table")
-      .getByRole("button", { name: `${slug} GitHub`, exact: true })
+      .getByRole("row", { name: `Open ${slug} GitHub`, exact: true })
       .click()
-    await expect(page).toHaveURL(new RegExp(`section=routine.*target=${hook.target_pipeline_id}`))
+    await expect(page).toHaveURL(new RegExp(`[?&]id=${hook.id}`))
+    // The trigger page survives a reload and names what it starts.
     await page.reload()
     await expect(
-      page.getByRole("heading", { name: slug, exact: true }),
+      page.getByRole("heading", { name: `${slug} GitHub`, exact: true }),
     ).toBeVisible()
+    await expect(page.getByText(`Starts routine ${slug}`, { exact: true })).toBeVisible()
+    // After creation the URL is not shown again.
     await expect(
-      page.getByText("/api/v1/webhooks/•••••/github-pull-request", {
-        exact: true,
-      }),
+      page.getByText("Shown once, when the trigger was created", { exact: true }),
     ).toBeVisible()
     await expect(page.getByTestId("incoming-receiving-url")).toHaveCount(0)
-    await page
-      .getByRole("switch", { name: `Disable endpoint ${slug} GitHub` })
-      .click()
+    // Turning it off reaches the server.
+    await page.getByRole("tab", { name: "Settings", exact: true }).click()
+    await page.getByRole("switch", { name: "On", exact: true }).click()
     await expect
       .poll(async () => {
         const rows = await (
@@ -119,7 +122,9 @@ export async function incomingWebhookFlow(page: Page) {
         return rows.find((row: { id: string }) => row.id === hook.id)?.enabled
       })
       .toBe(false)
-    // Add through the API while the detail remains open: Refresh must fetch it.
+    // A trigger added elsewhere (the API, the CLI) shows in the list once it
+    // is read again. Harbor 2 has no Refresh button on Triggers; a reload is
+    // the read.
     const extra = await page.request.post(`${root}/pipeline-webhooks`, {
       data: {
         name: `${slug} refreshed`,
@@ -130,16 +135,18 @@ export async function incomingWebhookFlow(page: Page) {
     expect(extra.status()).toBe(201)
     const extraHook = await extra.json()
     hooks.push(extraHook.id)
-    await page.getByRole("button", { name: "Refresh", exact: true }).click()
+    await page.getByRole("button", { name: "Triggers", exact: true }).click()
+    await expect(page).not.toHaveURL(/[?&]id=/)
+    await page.reload()
     await expect(
-      page.getByRole("table").getByText(`${slug} refreshed`, { exact: true }),
+      page.getByRole("row", { name: `Open ${slug} refreshed`, exact: true }),
     ).toBeVisible()
-    await page.getByRole("button", { name: "Back to endpoints" }).click()
-    await page.getByRole("link", { name: "Tools → Triggers" }).click()
-    await expect(page).toHaveURL(/tab=tools/)
-    await expect(page.getByText("Received · 24h", { exact: true })).toHaveCount(
-      0,
-    )
+    // The Tools space is a separate place: switching to it leaves the triggers.
+    await page.getByRole("tablist", { name: "Spaces" }).getByRole("tab", { name: /^Tools/ }).click()
+    await expect(page).toHaveURL(/[?&]space=tools/)
+    await expect(
+      page.getByRole("row", { name: `Open ${slug} refreshed`, exact: true }),
+    ).toHaveCount(0)
   } finally {
     for (const id of hooks) {
       const deleted = await page.request.delete(

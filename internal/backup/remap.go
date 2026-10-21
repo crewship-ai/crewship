@@ -107,6 +107,10 @@ func newRemapCUID() string {
 // and add the real FK in a migration when one becomes possible — this map is a
 // bridge over a schema gap, not a substitute for the schema.
 var virtualForeignKeys = map[string][]foreignKeyEdge{
+	"agent_user_preferences":            {{column: "chat_id", refTable: "chats", refColumn: "id"}, {column: "feedback_id", refTable: "message_feedback", refColumn: "id"}},
+	"execution_origins":                 {{column: "chat_id", refTable: "chats", refColumn: "id"}},           // historical TEXT; follow an extant chat on fork
+	"issue_mutation_outbox":             {{column: "mission_id", refTable: "missions", refColumn: "id"}},     // historical audit target; an absent issue is valid
+	"pending_runs":                      {{column: "workspace_id", refTable: "workspaces", refColumn: "id"}}, // legacy bare TEXT; queued provenance must follow its fork
 	"workspace_conversation_messages":   {{column: "subject_agent_id", refTable: "agents", refColumn: "id"}},
 	"workspace_conversation_agent_jobs": {{column: "assignment_id", refTable: "assignments", refColumn: "id"}},
 	// journal_chain_checkpoints.workspace_id (v152,
@@ -178,6 +182,10 @@ var virtualForeignKeys = map[string][]foreignKeyEdge{
 // SSE fan-out, and the trace_id that journal_entries and eval_runs carry is an
 // agent RUN id (journal/runs.go groups runs by it), never a mission's.
 var forkRegeneratedColumns = map[string][]forkRegeneratedColumn{
+	"chat_entity_refs": {{column: "event_id", regenerate: func(string) string { return newRemapCUID() }}},
+	// Public card identity is not the callback capability. Both are independent
+	// on a fork; remapWaitpointSources handles the token PK and Inbox edges.
+	"pipeline_waitpoints": {{column: "chat_source_id", regenerate: func(string) string { return "wpc_" + rand.Text() }}},
 	// missions.trace_id is `TEXT NOT NULL UNIQUE` with no workspace in the
 	// key (migrate_consts_v02_v15.go). Its sibling `identifier` is NOT here:
 	// #1733 rescoped that one to UNIQUE(workspace_id, identifier), which is
@@ -360,6 +368,12 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 				}
 				row[rc.column] = rc.regenerate(oldVal)
 			}
+			// These IDs identify immutable operations/history within the remapped
+			// workspace/Page composite key. Reminting them breaks receipt digests
+			// and checkpoint references; the anchor FKs still remap in pass 2.
+			if table == "document_receipts" || table == "document_checkpoints" {
+				continue
+			}
 			oldID, ok := row["id"].(string)
 			if !ok || oldID == "" {
 				continue
@@ -398,7 +412,40 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 			}
 		}
 	}
+	// Composite document FKs point at documents(workspace_id,page_id), not
+	// a remapped documents.id. Follow the anchor identities explicitly.
+	for _, table := range []string{"document_updates", "document_receipts", "document_checkpoints", "document_creations"} {
+		for _, row := range dump.Tables[table] {
+			for column, anchor := range map[string]string{"workspace_id": "workspaces", "page_id": "pages"} {
+				if old, ok := row[column].(string); ok {
+					if mapped := idMap[anchor][old]; mapped != "" {
+						row[column] = mapped
+					}
+				}
+			}
+		}
+	}
+	if err := remapSlides(dump, idMap); err != nil {
+		return err
+	}
+	dump.chatTranscriptRemap = idMap
+	for source, chat := range dump.AgentChatTranscripts {
+		if mapped := idMap["chats"][chat]; mapped != "" {
+			dump.AgentChatTranscripts[source] = mapped
+		}
+	}
 	if err := remapConversationMetadata(dump, idMap); err != nil {
+		return err
+	}
+	if err := remapWaitpointSources(dump, idMap); err != nil {
+		return err
+	}
+	if err := remapApprovalSources(dump, idMap); err != nil {
+		return err
+	}
+	remapDocumentCreationRuns(dump)
+	remapChatEntityHistory(dump, idMap)
+	if err := remapChatProposals(dump, idMap); err != nil {
 		return err
 	}
 	return nil

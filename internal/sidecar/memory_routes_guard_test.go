@@ -50,12 +50,13 @@ func newLegacyMemoryRouteServer(t *testing.T, withTokens bool) (*Server, string)
 	t.Cleanup(func() { ex.Close(time.Second) })
 
 	s := &Server{
-		memoryEngine:    eng,
-		agentMemoryBase: base,
-		memoryAgentSlug: "alpha",
-		scrubber:        scrubber.New(),
-		logger:          silent,
-		memoryExec:      ex,
+		memoryEngine:      eng,
+		agentMemoryBase:   base,
+		memoryStorageRoot: filepath.Dir(t.TempDir()),
+		memoryAgentSlug:   "alpha",
+		scrubber:          scrubber.New(),
+		logger:            silent,
+		memoryExec:        ex,
 		crewMembers: []CrewMember{
 			{ID: "agent-1", Slug: "alpha"},
 			{ID: "agent-2", Slug: "beta"},

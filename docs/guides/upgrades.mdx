@@ -312,6 +312,32 @@ a service you'd chosen to keep stopped.
 
 ## Rollback / downgrade
 
+<Warning>
+Invitation proof handling changed in #3075. New invitations store a versioned
+SHA-256 digest rather than a reusable raw link token. Migration
+`20261013164106` withdraws only legacy **unaccepted raw-token** invitations;
+accepted history and already-versioned digest invitations are preserved.
+Recipients need a newly created or explicitly reissued link for withdrawn rows.
+
+Do not run an older invitation implementation against the upgraded database,
+or remove migration records to force it to start. Older signup implementations
+used email-matching invitation admission rather than requiring the link proof;
+returning to that behavior restores a weaker admission contract. Digest-valued
+pending rows are not a compatibility boundary that makes such a downgrade safe.
+A binary-only rollback also cannot restore withdrawn legacy links.
+
+If a downgrade is unavoidable, stop the service and follow the matching
+pre-upgrade database snapshot procedure below, reviewing the restored version's
+signup policy before exposing it. A snapshot restore discards subsequent database
+changes and can restore old pending invitations; reconcile invitation metadata
+and withdraw unwanted invitations only if the restored version supports that
+operation before reopening signup. Older releases may have no invitation revoke
+endpoint; in that case keep signup closed and roll forward to a fixed current
+build. Never manually convert digests back to tokens or weaken admission
+to recover links.
+</Warning>
+
+
 Migrations are **forward-only**. An older binary will **refuse to start**
 against a database a newer binary already migrated — with an error naming
 both versions — rather than silently corrupt data it doesn't understand:

@@ -3,6 +3,7 @@ package consolidate
 import (
 	"bufio"
 	"hash/fnv"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,7 +53,22 @@ func dedupAgainstPrior(rules []LearnedRule, outputDir string, now time.Time, win
 	if window <= 0 {
 		window = 7 * 24 * time.Hour
 	}
-	priors := loadPriorPatternHashes(outputDir, now, window)
+	return filterPriorRules(rules, loadPriorPatternHashes(outputDir, now, window))
+}
+
+// dedupAgainstPriorRooted is the server path: OutputDir is never promoted to
+// a storage capability. Its independently configured ancestor is mandatory.
+func dedupAgainstPriorRooted(rules []LearnedRule, storageRoot, outputDir string, now time.Time, window time.Duration) []LearnedRule {
+	if len(rules) == 0 {
+		return append([]LearnedRule(nil), rules...)
+	}
+	if window <= 0 {
+		window = 7 * 24 * time.Hour
+	}
+	return filterPriorRules(rules, loadPriorPatternHashesRooted(storageRoot, outputDir, now, window))
+}
+
+func filterPriorRules(rules []LearnedRule, priors map[uint64]struct{}) []LearnedRule {
 	if len(priors) == 0 {
 		return append([]LearnedRule(nil), rules...)
 	}
@@ -107,8 +123,31 @@ func loadPriorPatternHashes(outputDir string, now time.Time, window time.Duratio
 	if err != nil {
 		return nil
 	}
-	cutoff := now.Add(-window)
 	out := make(map[uint64]struct{}, 32)
+	for _, path := range priorPatternPaths(outputDir, entries, now, window) {
+		for _, pattern := range extractPatterns(path) {
+			out[hashPattern(pattern)] = struct{}{}
+		}
+	}
+	return out
+}
+func loadPriorPatternHashesRooted(storageRoot, outputDir string, now time.Time, window time.Duration) map[uint64]struct{} {
+	entries, err := memory.ReadDirNoFollowRoot(storageRoot, outputDir)
+	if err != nil {
+		return nil
+	}
+	out := make(map[uint64]struct{}, 32)
+	for _, path := range priorPatternPaths(outputDir, entries, now, window) {
+		for _, pattern := range extractPatternsRooted(storageRoot, path) {
+			out[hashPattern(pattern)] = struct{}{}
+		}
+	}
+	return out
+}
+
+func priorPatternPaths(outputDir string, entries []os.DirEntry, now time.Time, window time.Duration) []string {
+	cutoff := now.Add(-window)
+	paths := []string{}
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -130,11 +169,9 @@ func loadPriorPatternHashes(outputDir string, now time.Time, window time.Duratio
 			continue
 		}
 		path := filepath.Join(outputDir, name)
-		for _, p := range extractPatterns(path) {
-			out[hashPattern(p)] = struct{}{}
-		}
+		paths = append(paths, path)
 	}
-	return out
+	return paths
 }
 
 // extractPatterns reads a learned-*.md and returns the value of every
@@ -147,6 +184,19 @@ func extractPatterns(path string) []string {
 		return nil
 	}
 	defer f.Close()
+	return extractPatternLines(f)
+}
+
+func extractPatternsRooted(storageRoot, path string) []string {
+	f, err := memory.OpenFileNoFollowRoot(storageRoot, path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	return extractPatternLines(f)
+}
+
+func extractPatternLines(f io.Reader) []string {
 	const marker = "**Pattern:**"
 	var out []string
 	sc := bufio.NewScanner(f)

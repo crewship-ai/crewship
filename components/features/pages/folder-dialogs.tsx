@@ -494,7 +494,7 @@ export function MoveToFolderDialog({ workspaceId, open, onOpenChange, subject, s
   }
 
   const options: Array<{ slug: string | null; name: string; folder: PageFolderView | null }> = [
-    ...folders.folders.map((f) => ({ slug: f.slug, name: f.name, folder: f })),
+    ...folders.folders.filter(f => f.canAcceptPages === true).map((f) => ({ slug: f.slug, name: f.name, folder: f })),
     { slug: null, name: "Unfiled", folder: null },
   ]
   const listId = React.useId()
@@ -549,7 +549,7 @@ export function MoveToFolderDialog({ workspaceId, open, onOpenChange, subject, s
                     setNotice(null)
                   }}
                   className={cn(
-                    "flex min-h-8 items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs transition-colors coarse:min-h-11",
+                    "flex min-h-8 items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs transition-colors coarse:min-h-[44px]",
                     active
                       ? "border-primary/40 bg-primary/15 text-primary-hover"
                       : "border-hairline bg-foreground/[0.03] text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground",

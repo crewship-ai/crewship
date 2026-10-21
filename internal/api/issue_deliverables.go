@@ -76,12 +76,12 @@ func (h *AssignmentHandler) publishIssueDeliverables(ctx context.Context, assign
 			continue
 		}
 		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "/", nil)
-		att, created, err := h.attachments.attachBytes(req, workspace, mission, filepath.Base(relative), data, "", agent)
+		_, created, err := h.attachments.attachBytes(req, workspace, mission, filepath.Base(relative), data, "", agent)
 		if err != nil {
 			return err
 		}
 		if created {
-			h.attachments.recordAttachmentEvent(req, mission, workspace, "agent", agent, actionAttachmentAdded, att)
+			h.attachments.publishAttachmentMutation(mission, workspace)
 		}
 	}
 	return nil

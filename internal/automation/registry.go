@@ -576,6 +576,8 @@ func (r *Registry) Observer(entries []journal.Entry) {
 		if len(rules) == 0 {
 			continue
 		}
+		e = journal.PublicFolderMembership(e)
+		e = journal.PublicAuthorizationAudit(e)
 		for _, rule := range rules {
 			if !rule.Matcher.Matches(e) {
 				continue

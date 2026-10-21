@@ -143,7 +143,9 @@ func (s *Server) handleMemoryRead(w http.ResponseWriter, r *http.Request) {
 	// normalising them, and reports whether those bytes are in the form the
 	// write contract can diff.
 	//
-	// It keeps the same O_NOFOLLOW open underneath (readRegularNoFollow):
+	// StorageRoot pins the parent through os.Root; O_NOFOLLOW also rejects
+	// a final-component symlink. The earlier pathname check is not a race
+	// fence by itself:
 	// safeJoinUnder validated the path lexically, but a symlink swapped in at
 	// the final component between that check and this read would otherwise
 	// redirect the read outside the tier base. A symlink/FIFO/dir target is
@@ -151,9 +153,14 @@ func (s *Server) handleMemoryRead(w http.ResponseWriter, r *http.Request) {
 	//
 	// The ledger is nil for the same reason it is nil on the write path, so
 	// Revision is 0 and RevisionChecked is false.
-	res, err := memory.ReadCanonical(r.Context(), nil, memory.ReadRequest{
-		Path:      target,
-		AuditPath: scope + ":" + file,
+	if s.memoryStorageRoot == "" {
+		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "trusted memory storage root unavailable"})
+		return
+	}
+	res, err := memory.ReadCanonicalRooted(r.Context(), nil, memory.ReadRequest{
+		Path:        target,
+		StorageRoot: s.memoryStorageRoot,
+		AuditPath:   scope + ":" + file,
 	})
 	if err != nil {
 		if errors.Is(err, syscall.ELOOP) {

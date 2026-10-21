@@ -1,3 +1,4 @@
+import { DEFAULT_AVATAR_STYLE } from "@/lib/agent-avatar"
 import { adapterDefaultModel } from "@/lib/model-catalog"
 import type {
   AgentPersona,
@@ -82,7 +83,8 @@ export function initialAgentDraft(defaultCrewSlug: string | null): AgentDraft {
     roleTitle: "",
     description: "",
     avatarSeed: "",
-    avatarStyle: "bottts-neutral",
+    // A new agent starts on the default, Voxel Bot (#3789).
+    avatarStyle: DEFAULT_AVATAR_STYLE,
     avatarTouched: false,
 
     selectedPersona: null,

@@ -14,6 +14,7 @@ vi.mock("@/hooks/use-user-preference", () => ({
   useUserPreference: () => [pref.height, setHeight, { loading: false }],
 }))
 vi.mock("next/dynamic", () => ({ default: () => () => null }))
+vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: "ADMIN", abilities: { can: () => true } }) }))
 
 import { BottomPanel } from "../index"
 

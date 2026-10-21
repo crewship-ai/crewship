@@ -146,11 +146,38 @@ func (r *chainsListRig) dispatchAgent(t *testing.T, runID, targetSlug string) st
 	return createdAssignmentID(t, w)
 }
 
+// Admit the routine's acting agent through the real host run-start door.
+// Pipeline.RunStore records workflow history; that alone is not authenticated
+// authority for a step that mutates an issue on behalf of the lead agent.
+func (r *chainsListRig) admitRoutineIssueRun(t *testing.T, runID string) {
+	t.Helper()
+	var admitted bool
+	if err := r.db.QueryRowContext(t.Context(), `SELECT EXISTS(SELECT 1 FROM journal_entries WHERE trace_id=? AND entry_type='run.started')`, runID).Scan(&admitted); err != nil {
+		t.Fatal(err)
+	}
+	if admitted {
+		return
+	}
+	host := NewInternalHandler(r.db, "chains-internal-token", newTestLogger())
+	host.SetJournal(r.jw)
+	body, err := json.Marshal(map[string]any{"id": runID, "workspace_id": r.ws, "agent_id": r.lead, "chat_id": r.chat, "trigger_type": "SCHEDULED", "metadata": map[string]any{"pipeline_run_id": runID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/internal/runs", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	host.CreateRun(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("admit routine agent run: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
 // issueFromRun runs the issue.create verb. insertIssueTx stores author_run_id
 // on the missions row, which is the only exact record that a run CREATED an
 // issue. Returns the identifier.
 func (r *chainsListRig) issueFromRun(t *testing.T, runID, title string) string {
 	t.Helper()
+	r.admitRoutineIssueRun(t, runID)
 	raw := r.crewshipCall(t, "issue.create", runID, map[string]any{"title": title})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/internal/issues", bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
@@ -174,6 +201,7 @@ func (r *chainsListRig) issueFromRun(t *testing.T, runID, title string) string {
 // run CHANGED an issue it did not create.
 func (r *chainsListRig) moveIssueFromRun(t *testing.T, runID, identifier, status string) {
 	t.Helper()
+	r.admitRoutineIssueRun(t, runID)
 	raw := r.crewshipCall(t, "issue.update", runID, map[string]any{"status": status})
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/internal/issues/"+identifier, bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
@@ -371,6 +399,13 @@ type chainsListRow struct {
 		Assignments int    `json:"assignments"`
 	} `json:"agents"`
 	AgentCount int `json:"agent_count"`
+	Skills     []struct {
+		ID   string `json:"id"`
+		Slug string `json:"slug"`
+		Name string `json:"name"`
+		Uses int    `json:"uses"`
+	} `json:"skills"`
+	SkillCount int `json:"skill_count"`
 }
 
 func (c chainsListRow) issueIdentifiers() []string {
@@ -1529,5 +1564,61 @@ func TestAssignmentTaskTitle(t *testing.T) {
 		if got := assignmentTaskTitle(c.in); got != c.want {
 			t.Errorf("assignmentTaskTitle(%q) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+// ODCH-SK-14: Activity's skill facet needs to know which skills a piece of work
+// used. skill_invocations carries the agent and the instant; the chain's
+// assignments carry the agent and the window, so a call by that agent inside
+// that window is the chain's.
+func TestChainsList_SkillsTheChainsAgentsUsedInsideTheirWindow(t *testing.T) {
+	r := newChainsListRig(t)
+	run := r.seedRun(t, runSpec{id: "prn_skills", via: pipeline.TriggeredViaManual})
+	asn := r.dispatchAgent(t, run, "ada")
+	other := r.dispatchAgent(t, run, "bob")
+	// The dispatch goroutines stamp started_at/finished_at; let them finish
+	// before the test pins the window.
+	r.assign.WaitDispatches()
+	r.finish(t, run, pipeline.RunStatusCompleted)
+
+	start := r.tick()
+	end := start.Add(10 * time.Minute)
+	r.exec(t, `UPDATE assignments SET started_at = ?, finished_at = ? WHERE id = ?`,
+		start.Format(time.RFC3339), end.Format(time.RFC3339), asn)
+	r.exec(t, `UPDATE assignments SET started_at = ?, finished_at = ? WHERE id = ?`,
+		start.Format(time.RFC3339), end.Format(time.RFC3339), other)
+
+	var ada, bob string
+	for slug, dst := range map[string]*string{"ada": &ada, "bob": &bob} {
+		if err := r.db.QueryRow(`SELECT id FROM agents WHERE slug = ? AND workspace_id = ?`, slug, r.ws).Scan(dst); err != nil {
+			t.Fatalf("agent %s: %v", slug, err)
+		}
+	}
+	for id, slug := range map[string]string{"sk-in": "in-window", "sk-before": "before-window", "sk-foreign": "foreign-ws", "sk-bob": "bobs"} {
+		r.exec(t, `INSERT INTO skills (id, name, slug, display_name, version, category, source, verification, downloads, rating_count, pricing_tier, featured, tags, content)
+			VALUES (?, ?, ?, ?, '1.0.0', 'CODING', 'CUSTOM', 'UNVERIFIED', 0, 0, 'FREE', 0, '[]', '# s')`, id, slug, slug, "Skill "+slug)
+	}
+	r.seedWorkspace(t, "ws-skill-other", "skill-other")
+	inv := func(id, skill, agent, ws string, at time.Time) {
+		r.exec(t, `INSERT INTO skill_invocations (id, skill_id, agent_id, workspace_id, invoked_at) VALUES (?, ?, ?, ?, ?)`,
+			id, skill, agent, ws, at.Format(time.RFC3339))
+	}
+	inv("i1", "sk-in", ada, r.ws, start.Add(2*time.Minute))
+	inv("i2", "sk-in", ada, r.ws, start.Add(3*time.Minute))
+	inv("i3", "sk-before", ada, r.ws, start.Add(-time.Hour))
+	inv("i4", "sk-foreign", ada, "ws-skill-other", start.Add(time.Minute))
+	inv("i5", "sk-bob", bob, r.ws, start.Add(time.Minute))
+
+	row := decodeChainsList(t, r.list(t, "")).byOrigin(t, run)
+	got := map[string]int{}
+	for _, sk := range row.Skills {
+		got[sk.Slug] = sk.Uses
+	}
+	want := map[string]int{"in-window": 2, "bobs": 1}
+	if len(got) != len(want) || got["in-window"] != 2 || got["bobs"] != 1 {
+		t.Errorf("skills = %+v, want %v (calls outside the window, from another workspace or by an agent not on the chain must not count)", row.Skills, want)
+	}
+	if row.SkillCount != 2 {
+		t.Errorf("skill_count = %d, want 2", row.SkillCount)
 	}
 }

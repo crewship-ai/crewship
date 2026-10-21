@@ -204,3 +204,14 @@ func TestMemberRole_CallerBelowManager_Forbidden(t *testing.T) {
 		t.Fatalf("status = %d, want 403; body=%s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestMemberRole_GuestMustExplicitlyRestoreTrustedBeforeAdmin(t *testing.T) {
+	h, owner, ws := roleRig(t)
+	seedMember(t, h, ws, "guest-target", "guest-role-user", "guest-role@example.test", "MEMBER")
+	execOrFatal(t, h.db, `UPDATE workspace_members SET access_mode='restricted' WHERE id='guest-target'`)
+	rr := httptest.NewRecorder()
+	h.UpdateMemberRole(rr, roleReq(t, owner, ws, "OWNER", "guest-target", "ADMIN"))
+	if rr.Code != 409 || memberRole(t, h, "guest-target") != "MEMBER" {
+		t.Fatalf("guest promotion=%d: %s", rr.Code, rr.Body.String())
+	}
+}

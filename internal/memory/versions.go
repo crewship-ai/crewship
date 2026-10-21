@@ -275,19 +275,40 @@ func ReadVersion(ctx context.Context, db *sql.DB, workspaceID, path, sha string)
 //
 // Returns the new RecordResult on success. The blob path inside it
 // will match the historical blob path (Reused=true).
-func Restore(
-	ctx context.Context,
-	db *sql.DB,
-	canonicalPath string,
-	workspaceID, auditPath, sha, restoredBy, blobRoot string,
-	tier Tier,
-) (*RecordResult, error) {
+func Restore(ctx context.Context, db *sql.DB, canonicalPath string, workspaceID, auditPath, sha, restoredBy, blobRoot string, tier Tier, storageRoots ...string) (*RecordResult, error) {
+	if len(storageRoots) > 0 {
+		return RestoreRooted(ctx, db, canonicalPath, workspaceID, auditPath, sha, restoredBy, blobRoot, tier, storageRoots[0])
+	}
+	req, err := prepareRestore(ctx, db, canonicalPath, workspaceID, auditPath, sha, restoredBy, blobRoot, tier)
+	if err != nil {
+		return nil, err
+	}
+	res, err := Mutate(ctx, db, req)
+	return finishRestore(res, err)
+}
+
+// RestoreRooted preserves restore semantics while requiring an independently
+// configured storage capability before any read, lock, mkdir or write.
+func RestoreRooted(ctx context.Context, db *sql.DB, canonicalPath string, workspaceID, auditPath, sha, restoredBy, blobRoot string, tier Tier, storageRoot string) (*RecordResult, error) {
+	if storageRoot == "" {
+		return nil, fmt.Errorf("restore: storage root required")
+	}
+	req, err := prepareRestore(ctx, db, canonicalPath, workspaceID, auditPath, sha, restoredBy, blobRoot, tier)
+	if err != nil {
+		return nil, err
+	}
+	req.StorageRoot = storageRoot
+	res, err := MutateRooted(ctx, db, req)
+	return finishRestore(res, err)
+}
+
+func prepareRestore(ctx context.Context, db *sql.DB, canonicalPath string, workspaceID, auditPath, sha, restoredBy, blobRoot string, tier Tier) (MutateRequest, error) {
 	if canonicalPath == "" || workspaceID == "" || auditPath == "" || sha == "" || blobRoot == "" {
-		return nil, fmt.Errorf("restore: missing required field")
+		return MutateRequest{}, fmt.Errorf("restore: missing required field")
 	}
 	content, err := ReadVersion(ctx, db, workspaceID, auditPath, sha)
 	if err != nil {
-		return nil, err
+		return MutateRequest{}, err
 	}
 	// The restore goes through the §8 mutation contract like every other
 	// supported write. Before this, it went through NOTHING: no lock, on the
@@ -317,9 +338,9 @@ func Restore(
 	// still answer errors.Is.
 	opID, err := NewOperationID()
 	if err != nil {
-		return nil, fmt.Errorf("restore write: %w", err)
+		return MutateRequest{}, fmt.Errorf("restore write: %w", err)
 	}
-	res, err := Mutate(ctx, db, MutateRequest{
+	return MutateRequest{
 		// An operator restoring a named past version is an explicitly
 		// authorized human action against a whole file, not an agent write
 		// racing other agent writes. It has a ledger handle, but no meaningful
@@ -340,8 +361,10 @@ func Restore(
 		Import:        true,
 		OverrideDrift: true,
 		BlobRoot:      blobRoot,
-		RecordVersion: true,
-	})
+		RecordVersion: true}, nil
+}
+
+func finishRestore(res MutateResult, err error) (*RecordResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("restore write: %w", err)
 	}

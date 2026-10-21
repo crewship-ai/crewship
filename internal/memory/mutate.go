@@ -475,11 +475,40 @@ const (
 // Mutate applies one change to one memory file. See the package-level contract
 // above for the ordering and the ledgerless caveat.
 func Mutate(ctx context.Context, db *sql.DB, req MutateRequest) (MutateResult, error) {
+	ctx, norm, err := prepareMutation(ctx, db, req)
+	if err != nil {
+		return MutateResult{}, err
+	}
+	file, err := openMutationFile(req.StorageRoot, req.Path, true)
+	if err != nil {
+		return MutateResult{}, fmt.Errorf("open canonical parent: %w", err)
+	}
+	return mutateOpened(ctx, db, req, norm, file)
+}
+
+// MutateRooted is the mandatory capability boundary for external paths. It
+// cannot construct or pass an unconfined legacy file to the shared core.
+func MutateRooted(ctx context.Context, db *sql.DB, req MutateRequest) (MutateResult, error) {
+	if req.StorageRoot == "" {
+		return MutateResult{}, fmt.Errorf("memory mutation requires a storage root")
+	}
+	ctx, norm, err := prepareMutation(ctx, db, req)
+	if err != nil {
+		return MutateResult{}, err
+	}
+	file, err := openRootedMutationFile(req.StorageRoot, req.Path, true)
+	if err != nil {
+		return MutateResult{}, fmt.Errorf("open canonical parent: %w", err)
+	}
+	return mutateOpened(ctx, db, req, norm, file)
+}
+
+func prepareMutation(ctx context.Context, db *sql.DB, req MutateRequest) (context.Context, []byte, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
-		return MutateResult{}, fmt.Errorf("preflight context check: %w", err)
+		return ctx, nil, fmt.Errorf("preflight context check: %w", err)
 	}
 	// The profile gate runs FIRST, ahead of field validation, because it
 	// explains more. A guaranteed write missing its operation id should be told
@@ -487,10 +516,10 @@ func Mutate(ctx context.Context, db *sql.DB, req MutateRequest) (MutateResult, e
 	// that one field is empty — a caller that fixes one field at a time makes
 	// one round trip per requirement.
 	if err := req.Profile.requirements(req, db != nil); err != nil {
-		return MutateResult{}, err
+		return ctx, nil, err
 	}
 	if err := req.validate(db); err != nil {
-		return MutateResult{}, err
+		return ctx, nil, err
 	}
 
 	// The input is normalised before anything else reads it, so every later
@@ -499,13 +528,13 @@ func Mutate(ctx context.Context, db *sql.DB, req MutateRequest) (MutateResult, e
 	// invalid UTF-8 rejected.
 	normContent, err := memdiff.Normalize([]byte(req.Content))
 	if err != nil {
-		return MutateResult{}, fmt.Errorf("%w: content: %w", ErrNotCanonical, err)
+		return ctx, nil, fmt.Errorf("%w: content: %w", ErrNotCanonical, err)
 	}
 
-	file, err := openMutationFile(req.StorageRoot, req.Path, true)
-	if err != nil {
-		return MutateResult{}, fmt.Errorf("open canonical parent: %w", err)
-	}
+	return ctx, normContent, nil
+}
+
+func mutateOpened(ctx context.Context, db *sql.DB, req MutateRequest, normContent []byte, file *mutationFile) (MutateResult, error) {
 	defer file.close()
 
 	// One lock for the whole supported write contract, not for one handler.

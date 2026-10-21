@@ -25,6 +25,10 @@ package main
 // router — proving both the route registration AND the CLI's request shape
 // are correct end to end.
 import (
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"github.com/crewship-ai/crewship/internal/usermodel"
 	"log/slog"
 	"net/http/httptest"
 	"os"
@@ -45,11 +49,11 @@ const feedbackAcceptanceWorkspaceID = "cfeedbackws0000000001a"
 // MessageFeedbackHandler.Create needs to resolve message_id → chat →
 // workspace and find the caller a member, so a POST reaches a genuine 201
 // rather than the handler's own 404.
-func startFeedbackAcceptanceServer(t *testing.T) (serverURL, cfgPath, messageID string) {
+func startFeedbackAcceptanceServer(t *testing.T) (serverURL, cfgPath, messageID string, db *sql.DB) {
 	t.Helper()
 
 	dbh := testutil.MigratedDB(t)
-	db := dbh.DB
+	db = dbh.DB
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
 	mustExec := func(q string, args ...any) {
@@ -95,7 +99,7 @@ func startFeedbackAcceptanceServer(t *testing.T) (serverURL, cfgPath, messageID 
 	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
-	return serverURL, cfgPath, messageID
+	return serverURL, cfgPath, messageID, db
 }
 
 func runFeedbackCLI(t *testing.T, cfgPath string, args ...string) (string, error) {
@@ -118,7 +122,7 @@ func runFeedbackCLI(t *testing.T, cfgPath string, args ...string) (string, error
 // broader registration under Go 1.22+ ServeMux precedence, etc.) would show
 // up here as the CLI reporting failure where this test expects success.
 func TestAcceptance_Feedback_CreateListDelete_RoundTrip(t *testing.T) {
-	_, cfgPath, messageID := startFeedbackAcceptanceServer(t)
+	_, cfgPath, messageID, _ := startFeedbackAcceptanceServer(t)
 
 	createOut, err := runFeedbackCLI(t, cfgPath, "feedback", "create",
 		"--message", messageID, "--signal", "helpful", "--reason", "acceptance round trip")
@@ -160,7 +164,7 @@ func TestAcceptance_Feedback_CreateListDelete_RoundTrip(t *testing.T) {
 // specific wording, or the router-level test in internal/api would catch the
 // generic net/http 404 body first.
 func TestAcceptance_Feedback_Create_UnknownMessage_404ByName(t *testing.T) {
-	_, cfgPath, _ := startFeedbackAcceptanceServer(t)
+	_, cfgPath, _, _ := startFeedbackAcceptanceServer(t)
 
 	out, err := runFeedbackCLI(t, cfgPath, "feedback", "create",
 		"--message", "msg-that-was-never-persisted", "--signal", "helpful")
@@ -169,5 +173,64 @@ func TestAcceptance_Feedback_Create_UnknownMessage_404ByName(t *testing.T) {
 	}
 	if !strings.Contains(out, "message not found") {
 		t.Errorf("want the handler's own 'message not found' 404, got:\n%s", out)
+	}
+}
+
+func TestAcceptance_Feedback_PreferenceRoundTrip(t *testing.T) {
+	_, cfg, msg, db := startFeedbackAcceptanceServer(t)
+	if _, err := db.Exec(`UPDATE agents SET memory_enabled=1`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE conversation_messages SET role='assistant'`); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) string {
+		t.Helper()
+		out, err := runFeedbackCLI(t, cfg, args...)
+		if err != nil {
+			t.Fatalf("%v: %v %s", args, err, out)
+		}
+		return out
+	}
+	created := run("feedback", "create", "--message", msg, "--signal", "helpful", "--reason", "Next time, keep answers concise.", "--format", "json")
+	if !strings.Contains(created, "processing") {
+		t.Fatalf("missing honest async status: %s", created)
+	}
+	if err := usermodel.ProcessFeedbackPreferences(t.Context(), db); err != nil {
+		t.Fatal(err)
+	}
+	// A fork remaps the entry and feedback IDs independently.
+	if _, err := db.Exec(`UPDATE agent_user_preferences SET id='independent-entry'`); err != nil {
+		t.Fatal(err)
+	}
+	if got := run("feedback", "list", "--message", msg, "--format", "json"); !strings.Contains(got, "independent-entry") {
+		t.Fatalf("feedback returned source ID as entry ID: %s", got)
+	}
+	listed := run("feedback", "preferences", "--agent", "fb-agent", "--format", "json")
+	var entries []usermodel.FeedbackPreference
+	if err := json.Unmarshal([]byte(listed), &entries); err != nil || len(entries) != 1 || entries[0].Status != "saved" || entries[0].SourceType != "feedback_reason" {
+		t.Fatalf("preferences: %s %v", listed, err)
+	}
+	entry := entries[0]
+	run("feedback", "edit-preference", "--agent", "fb-agent", "--entry", entry.ID, "--revision", fmt.Sprint(entry.Revision), "--reason", "Next time, start with the conclusion.")
+	if err := usermodel.ProcessFeedbackPreferences(t.Context(), db); err != nil {
+		t.Fatal(err)
+	}
+	listed = run("feedback", "preferences", "--agent", "fb-agent", "--format", "json")
+	if err := json.Unmarshal([]byte(listed), &entries); err != nil || entries[0].Revision <= entry.Revision || !strings.Contains(listed, "conclusion first") {
+		t.Fatalf("edit: %s %v", listed, err)
+	}
+	run("feedback", "delete-preference", "--agent", "fb-agent", "--entry", entry.ID, "--revision", fmt.Sprint(entries[0].Revision))
+	if err := usermodel.ProcessFeedbackPreferences(t.Context(), db); err != nil {
+		t.Fatal(err)
+	}
+	body, err := usermodel.ReadFeedbackPreferences(t.Context(), db, feedbackAcceptanceWorkspaceID, "fb-agent", "fb-owner")
+	if err != nil || body != "" {
+		t.Fatalf("delete: %q %v", body, err)
+	}
+	// A stale revision cannot recreate a deleted preference through the same CLI.
+	out, err := runFeedbackCLI(t, cfg, "feedback", "edit-preference", "--agent", "fb-agent", "--entry", entry.ID, "--revision", fmt.Sprint(entry.Revision), "--reason", "Next time, keep answers concise.")
+	if err == nil {
+		t.Fatalf("stale edit accepted: %s", out)
 	}
 }

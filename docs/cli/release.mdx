@@ -1,0 +1,29 @@
+---
+title: "Release"
+description: "End a temporary agent hire before its expiry."
+icon: "user-minus"
+stability: experimental
+tag: Experimental
+---
+
+# crewship release
+
+End a temporary hire without deleting its runs, chats or memory notes. The agent
+becomes expired; [`crewship rehire`](/cli/hire#crewship-rehire) can bring it back.
+
+```bash
+crewship release <agent-slug-or-id> [--yes]
+```
+
+Requires authentication, an active workspace and the Manager role or higher.
+The CLI resolves the agent reference and calls `POST /api/v1/agents/{id}/release`.
+It prints the agent ID and expiry; structured formats contain `id`, `expired_at`
+and `released`. An already expired hire succeeds with `released: false`.
+
+| Flag | Default | Description |
+|---|---|---|
+| `-y, --yes` | `false` | Skip the confirmation prompt. |
+
+Stop a running hire before releasing it. A hire awaiting approval must instead
+be denied; a permanent agent cannot be released as a temporary hire. API errors
+remain CLI errors. See the [hire commands](/cli/hire) for hire, approval and rehire.

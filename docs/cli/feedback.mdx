@@ -45,3 +45,39 @@ crewship feedback delete --message cmsg… --signal not_helpful
 
 - [`crewship eval`](/cli/eval) — replay/regression flows that consume feedback signal.
 - [`crewship chat`](/cli/chat) — the conversations the messages come from.
+
+## `crewship feedback preferences`
+
+List your structured explicit preferences for one agent, including source feedback,
+source revision, entry revision and processing status. These records use the existing
+agent peers API; they are separate from daily peer-card Markdown.
+
+```bash
+crewship feedback create --message cmsg… --signal helpful --reason "Next time, keep answers concise."
+crewship feedback list --message cmsg… --format json
+crewship feedback preferences --agent agent… --format json
+```
+
+Catalogue v1 accepts exactly `Next time, keep answers concise.`,
+`Next time, start with the conclusion.`, `Příště piš stručněji.` and
+`Příště nejdřív ukaž závěr.` as voluntary future preferences on helpful/not_helpful
+feedback. Other reasons remain feedback without inference.
+
+## `crewship feedback edit-preference`
+
+Correct your own entry using its current revision and an exact catalogue v1 reason.
+The server reprocesses the new source revision asynchronously. A stale revision
+returns 409; editing a withdrawn entry cannot restore it.
+
+```bash
+crewship feedback edit-preference --agent agent… --entry entry… --revision 1 --reason "Next time, start with the conclusion."
+```
+
+## `crewship feedback delete-preference`
+
+Withdraw your own entry using its current revision. A durable tombstone prevents
+pending work and daily Markdown rewrites from restoring that source.
+
+```bash
+crewship feedback delete-preference --agent agent… --entry entry… --revision 2
+```

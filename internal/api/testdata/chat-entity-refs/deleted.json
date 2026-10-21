@@ -1,0 +1,38 @@
+{
+  "contract_version": 1,
+  "reset": true,
+  "next_cursor": "\u003copaque cursor\u003e",
+  "snapshot_id": "\u003csnapshot id\u003e",
+  "snapshot_complete": true,
+  "has_more": false,
+  "refs": [
+    {
+      "event_id": "\u003cevent id\u003e",
+      "operation_id": "\u003coperation id\u003e",
+      "kind": "issue",
+      "verb": "deleted",
+      "entity": {
+        "id": "\u003cissue id\u003e",
+        "identifier": "",
+        "workspace_id": "test-workspace-id",
+        "deleted": true
+      },
+      "provenance": {
+        "actor": {
+          "type": "human",
+          "id": "test-user-id"
+        },
+        "at": "2026-10-13T09:00:00Z"
+      },
+      "anchor": {
+        "trigger_message_id": "trigger-delete-chat-one",
+        "run_id": "original-run",
+        "run_status": null
+      },
+      "revision_at_action": {
+        "revision": 2,
+        "aggregate_revision": 2
+      }
+    }
+  ]
+}

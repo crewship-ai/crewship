@@ -80,6 +80,18 @@ func (h *CliPairHandler) Start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Redemption creates an independent full-role token. A limited bearer
+	// must not widen its authority through a pairing code either.
+	if AuthKindFromContext(r.Context()) == AuthKindCLIToken && limitedChatToken(r.Context()) {
+		replyError(w, http.StatusForbidden, "Tokens with limited scopes cannot create pairing codes. Sign in to pair a CLI.")
+		return
+	}
+
+	if user.SessionID == "" {
+		replyError(w, http.StatusForbidden, "A browser session is required")
+		return
+	}
+
 	var req pairStartRequest
 	// Body is optional — UI may not send anything. ReadJSON tolerates
 	// empty body via the existing helper conventions.
@@ -102,9 +114,9 @@ func (h *CliPairHandler) Start(w http.ResponseWriter, r *http.Request) {
 	id := generateCUID()
 
 	if _, err := h.db.ExecContext(r.Context(), `
-		INSERT INTO cli_pairings (id, user_id, code, status, adapter_hint, created_at, expires_at)
-		VALUES (?, ?, ?, 'pending', ?, ?, ?)`,
-		id, user.ID, code, nullableHint(hint), now.Format(time.RFC3339), expires.Format(time.RFC3339)); err != nil {
+		INSERT INTO cli_pairings (id, user_id, code, status, adapter_hint, created_at, expires_at, source_session_id)
+		VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)`,
+		id, user.ID, code, nullableHint(hint), now.Format(time.RFC3339), expires.Format(time.RFC3339), user.SessionID); err != nil {
 		replyInternalError(w, h.logger, "cli pair: insert", err)
 		return
 	}
@@ -217,9 +229,13 @@ func (h *CliPairHandler) Redeem(w http.ResponseWriter, r *http.Request) {
 	// Lock + validate the pairing row in the transaction. SQLite
 	// serializes writers, so the SELECT-then-UPDATE here is safe
 	// against a concurrent second redeem.
-	var userID, status, expiresStr string
+	var userID, status, expiresStr, sessionExpiresStr string
 	err = tx.QueryRowContext(r.Context(), `
-		SELECT user_id, status, expires_at FROM cli_pairings WHERE code = ?`, code).Scan(&userID, &status, &expiresStr)
+		SELECT p.user_id, p.status, p.expires_at, s.expires_at
+        FROM cli_pairings p
+        JOIN users u ON u.id = p.user_id AND u.suspended_at IS NULL
+        JOIN user_sessions s ON s.id = p.source_session_id AND s.user_id = p.user_id
+        WHERE p.code = ? AND s.revoked_at IS NULL`, code).Scan(&userID, &status, &expiresStr, &sessionExpiresStr)
 	if errors.Is(err, sql.ErrNoRows) {
 		replyError(w, http.StatusBadRequest, "Invalid or expired code")
 		return
@@ -234,6 +250,15 @@ func (h *CliPairHandler) Redeem(w http.ResponseWriter, r *http.Request) {
 	}
 	expires, err := time.Parse(time.RFC3339, expiresStr)
 	if err != nil || time.Now().UTC().After(expires) {
+		replyError(w, http.StatusBadRequest, "Invalid or expired code")
+		return
+	}
+
+	// Check the source session in the same transaction as consumption and
+	// minting. Unknown legacy provenance, logout, revocation and corrupt
+	// expiry must never be exchanged for a new credential.
+	sessionExpires, err := time.Parse(time.RFC3339, sessionExpiresStr)
+	if err != nil || !time.Now().UTC().Before(sessionExpires) {
 		replyError(w, http.StatusBadRequest, "Invalid or expired code")
 		return
 	}
@@ -278,11 +303,21 @@ func (h *CliPairHandler) Redeem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := tx.ExecContext(r.Context(), `
+	tokenResult, err := tx.ExecContext(r.Context(), `
 		INSERT INTO cli_tokens (id, user_id, name, token_hash, tier, created_at)
 		VALUES (?, ?, ?, ?, 'STANDARD', ?)`,
-		tokenID, userID, tokenName, tokenHashHex, now); err != nil {
+		tokenID, userID, tokenName, tokenHashHex, now)
+	if err != nil {
 		replyInternalError(w, h.logger, "cli pair redeem: insert cli_token", err)
+		return
+	}
+
+	if err := auditCLITokenTx(r.Context(), tx, userID, tokenID, "auth.cli_token_created"); err != nil {
+		replyInternalError(w, h.logger, "cli pair redeem: audit", err)
+		return
+	}
+	if err := ackCLITokenMutationTx(r.Context(), tx, tokenResult, tokenID, userID, nil); err != nil {
+		replyInternalError(w, h.logger, "cli pair redeem: acknowledge", err)
 		return
 	}
 

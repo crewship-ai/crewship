@@ -15,7 +15,17 @@ crewship chat <chat-id> [flags]
 crewship chat <subcommand> ...
 ```
 
+Open WebSocket and NDJSON streams stop after revocation or expiry of their originating session or CLI token. Reconnect with a valid credential; disconnecting does not itself stop an already started run.
+
 Auth: commands require an authenticated session (`crewship login`) except `chat share read`, which uses a dedicated share token. Authenticated commands also require a selected workspace **except `chat stream`**, which resolves tenancy from the chat row itself and so needs only a token and a chat id. The transcript hits `GET /api/v1/chats/{id}/messages?limit=500` — the cap is server-side and not paged today.
+
+## Versioned source messages
+
+`crewship chat source messages agent_session <chat-id> --format json` reads a bounded source snapshot using the same current-human authorization as the ordinary transcript. The snapshot is limited to 16 MiB of source data and 1,000 messages; an oversized snapshot returns an error instead of a partial result. Its `source_position` is an ordinal within that snapshot, not a durable event cursor.
+
+`crewship chat source messages workspace_room <room-id> --limit 50 --after-sequence 7 --format json` uses the room's native sequence and existing membership authorization. Use `--before-sequence` for earlier messages; do not combine the two cursor flags. Agent-session snapshots accept no pagination flags.
+
+The version 1 envelope identifies the workspace, source kind, source ID and original message IDs. Missing legacy identity, author, time and relationship fields remain null. Reply, thread and alternative relationships are separate fields; the read does not infer them from message order or metadata. Legacy thinking content and metadata are withheld. This read sends no message and starts no agent run.
 
 ## Subcommands
 
@@ -24,6 +34,7 @@ Auth: commands require an authenticated session (`crewship login`) except `chat 
 | `chat <chat-id>` | Print the full message history of one chat as a rendered transcript. |
 | `chat create <agent-slug-or-id>` | Open an empty chat session on an agent without sending anything to it. Prints the new chat id on stdout. |
 | `chat list <agent-slug-or-id>` | List recent chats for an agent, ordered by last activity. Includes `KIND` (what wrote the chat) and `UNREAD` (replies you haven't seen). `--kind` narrows to one; `--search`/`-q` matches titles, `--chat`/`--routine` pin one chat or one routine's chats, `--with-source` attaches the work source to each row; `--limit` and `--offset` page (the server's default and ceiling are 100), and a cut page ends with `showing 1–10 of 19 · next page: --offset 10`. |
+| `chat refs <chat-id>` | Read one authorized page of durable Issue cards, with an opaque continuation cursor. |
 | `chat read <chat-id>` | Mark a chat read for you: clears its unread count and the paired "agent replied" inbox notification. |
 | `chat rename <chat-id> <title>` | Give the session a name — what `chat list`, the sidebar and reply notifications call it. Alias: `title`. |
 | `chat attach <chat-id> <path>` | Upload a file into the chat (lands under `/output/<agent-slug>/attachments/<chat-id>/<attachment-id>/` in the container). |
@@ -50,6 +61,36 @@ Auth: commands require an authenticated session (`crewship login`) except `chat 
 | `chat room agents list / add / remove` | The agents joined to a channel (creator-only mutations; channels only). |
 | `chat room activity <room-id>` | Show, or as the creator set, whether a channel receives issue and routine lifecycle events. |
 | `chat room continue <room-id>` | Start a fresh group or channel from a DM or private group; private history is never copied. |
+
+## `crewship chat refs`
+
+```bash
+crewship chat refs <chat-id>
+crewship chat refs <chat-id> --limit 25
+crewship chat refs <chat-id> --cursor '<next_cursor>' --limit 25 --format yaml
+```
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--limit` | `100` | Maximum references per page; accepts 1–100. |
+| `--cursor` | empty | Opaque `next_cursor` from the preceding response. |
+
+Calls `GET /api/v1/chats/{chatId}/entity-refs`. The response retains `refs`,
+`reset`, `next_cursor`, `snapshot_id`, `has_more` and `snapshot_complete`.
+Default output is JSON; global `--format yaml` and `--format ndjson` are also
+supported. `--filter` applies a jq expression to the JSON response.
+
+A first page starts a replacement list (`reset: true`). Continue with its
+cursor while `has_more` is true; continuation pages share `snapshot_id`.
+Passing a completed cursor starts a new replacement snapshot. The command
+never fetches every page automatically. Discard an invalid or expired cursor
+and restart without `--cursor`; cursors also expire when the server restarts.
+
+Current chat and issue access are required. Restricted sessions are unsupported;
+unreadable references are omitted rather than replaced with metadata stubs.
+This is a read-only API projection, not a command that creates cards or work.
+See [Chat entity references](/specs/chat-entity-references) for synchronization
+rules and [Operation](/cli/operation) for operation metadata.
 
 ## Flags
 
@@ -695,3 +736,67 @@ included. Recipients can alternatively enter the ID and token at `/shared-chat`.
 The management API is `GET`/`POST /api/v1/agents/{agentId}/chats/{chatId}/shares`
 and `DELETE /api/v1/agents/{agentId}/chats/{chatId}/shares/{shareId}`. The reader
 uses `GET /api/v1/shared-chats/{shareId}/messages` with a dedicated share bearer.
+
+## Issue proposals
+
+```bash
+crewship chat proposal list <chat-id> [--cursor opaque]
+crewship chat proposal show <chat-id> <proposal-id>
+crewship chat proposal edit <chat-id> <proposal-id> --file proposal.json --version 1 --idempotency-key edit-1
+crewship chat proposal confirm <chat-id> <proposal-id> --version 2 --idempotency-key confirm-1
+crewship chat proposal discard <chat-id> <proposal-id> --version 1 --idempotency-key discard-1
+```
+
+Edit files contain `title` and the complete `items` array. Retain stable item IDs;
+set `selected: false` to exclude an item. Every mutation requires the version
+explicitly reviewed and a stable key. After an unknown network outcome, repeat
+exactly the same command and key. A changed body with the same key returns 409.
+A stale version returns 409 with the currently authorized card; review it before
+using a new key/version. Accepted/discarded/expired cards are read-only.
+
+Confirmation creates the selected backlog issues atomically, attributed to the
+human reviewer with the immutable proposing agent/run/chat provenance. It does
+not directly start agent work. Existing workspace automations still apply.
+Existing issue creation rights apply to MEMBERs; proposing
+is not mandatory for their ordinary issue commands. Guests and restricted members
+cannot access this surface. See [proposal API](/api-reference/conversations#issue-proposals).
+
+Agents use the same executable with their verified sidecar token, without a
+human login/profile:
+
+```bash
+crewship chat proposal propose --file proposal.json --idempotency-key agent-plan-1
+crewship chat proposal revise <proposal-id> --file proposal.json --version 1 --idempotency-key agent-revision-1
+```
+
+`CREWSHIP_AGENT_TOKEN` must be supplied by the runtime. These commands call the
+loopback sidecar (`--sidecar` defaults to `http://127.0.0.1:9119`), which derives
+the host identity from that token. They cannot confirm work. A revision belongs
+to the original proposing agent and chat, uses a freshly admitted run, and
+preserves the source expiry and original run/trigger provenance.
+Late edit retries after a later revision or terminal transition return the current
+authorized card, preserving the original operation receipt; confirmation retries preserve
+the original accepted outcome and Issue IDs.
+
+### crewship chat proposal propose
+
+| Flag | Meaning |
+| --- | --- |
+| `--file` | JSON file containing the proposal title and complete items array. Required. |
+| `--idempotency-key` | Stable operation key retained for retries. Required. |
+| `--sidecar` | HTTP loopback origin; defaults to `http://127.0.0.1:9119`. |
+
+### crewship chat proposal revise
+
+| Flag | Meaning |
+| --- | --- |
+| `--file` | JSON file containing the replacement title and complete items array. Required. |
+| `--version` | Existing proposal version reviewed by this agent turn. Required. |
+| `--idempotency-key` | Stable revision key retained for retries. Required. |
+| `--sidecar` | HTTP loopback origin; defaults to `http://127.0.0.1:9119`. |
+## Source-backed decisions
+
+[`crewship chat decision`](/cli/chat-decision) lists, shows and answers existing
+TEXT information requests. Use the reviewed source version and preserve the
+operation key across uncertain retries. These commands share the authoritative
+source with Inbox and cannot approve workflows, credentials or entire runs.

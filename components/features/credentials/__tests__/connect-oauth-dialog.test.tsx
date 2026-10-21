@@ -227,7 +227,7 @@ describe("ConnectOAuthDialog — the request it has always issued", () => {
         expect.objectContaining({ method: "POST" }),
       ),
     )
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/Popup blocked/)))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/Popup blocked/), { duration: Infinity }))
   })
 
   it("cancels through the shell's Cancel", async () => {

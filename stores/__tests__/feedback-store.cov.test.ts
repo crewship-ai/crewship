@@ -141,7 +141,7 @@ describe("reset", () => {
     expect(url).toBe(
       `/api/v1/feedback?message_id=${encodeURIComponent("t 1/x")}&signal=helpful`,
     )
-    expect(init).toEqual({ method: "DELETE", credentials: "include" })
+    expect(init).toEqual({ method: "DELETE", credentials: "include", signal: expect.any(AbortSignal) })
     // helpful cleared, sibling edit kept
     expect(useFeedbackStore.getState().byTurn["t 1/x"]).toEqual({ edit: true })
   })

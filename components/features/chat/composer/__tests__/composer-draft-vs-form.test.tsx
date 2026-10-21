@@ -87,6 +87,19 @@ describe("a form submit leaves the composer's own draft alone", () => {
     expect(sendMessage).not.toHaveBeenCalled()
   })
 
+  it("appends selected file context visibly once, preserving the draft and requiring explicit send", () => {
+    const applied = vi.fn()
+    const view = render(<ChatComposer {...baseProps} />)
+    fireEvent.change(screen.getByPlaceholderText("Message Riley..."), { target: { value: "Please compare these" } })
+    const context = { id: 1, text: "[File selection]sha256:v1 A2:B2[/File selection]" }
+    view.rerender(<ChatComposer {...baseProps} contextRequest={context} onContextApplied={applied} />)
+    expect(screen.getByPlaceholderText("Message Riley...")).toHaveValue("Please compare these\n\n" + context.text)
+    expect(applied).toHaveBeenCalledTimes(1)
+    view.rerender(<ChatComposer {...baseProps} contextRequest={context} onContextApplied={applied} />)
+    expect(applied).toHaveBeenCalledTimes(1)
+    expect(sendMessage).not.toHaveBeenCalled()
+  })
+
   it("keeps an existing draft when a new handoff prefill arrives", () => {
     const key = JSON.stringify(["user", "user-a", "sess-1"])
     useComposerStore.getState().setDraft(key, "My unfinished message")

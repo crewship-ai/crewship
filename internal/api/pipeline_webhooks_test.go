@@ -40,6 +40,11 @@ import (
 // of this same gap.
 func webhookHandlerRig(t *testing.T) (*PipelineHandler, *sql.DB, string, string) {
 	t.Helper()
+	return webhookHandlerRigWithDispatcher(t, true)
+}
+
+func webhookHandlerRigWithDispatcher(t *testing.T, start bool) (*PipelineHandler, *sql.DB, string, string) {
+	t.Helper()
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
@@ -47,9 +52,9 @@ func webhookHandlerRig(t *testing.T) (*PipelineHandler, *sql.DB, string, string)
 	h := NewPipelineHandler(db, logger, nil, nil)
 	h.SetWebhookStore(pipeline.NewWebhookStore(db))
 	h.SetRunStore(pipeline.NewRunStore(db))
-	// Drain async FireWebhook run goroutines before the test DB closes
-	// (registered after setupTestDB's cleanup, so it runs first).
-	t.Cleanup(h.WaitWebhookDispatches)
+	if start {
+		startWebhookTestDispatcher(t, h)
+	}
 	return h, db, userID, wsID
 }
 
@@ -623,7 +628,7 @@ func TestPipelineWebhooks_Fire_ValidSignature_Accepts202(t *testing.T) {
 	// answered 202+run_id while writing nothing to pipeline_runs). Wait
 	// for the async dispatch goroutine FireWebhook kicked off, then check
 	// the real table, not just the mock runner's having been called.
-	h.WaitWebhookDispatches()
+	waitPendingWebhookDispatches(t, h)
 	var n int
 	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM pipeline_runs WHERE id = ?`, runID).Scan(&n); err != nil {
 		t.Fatalf("count pipeline_runs for %v: %v", runID, err)

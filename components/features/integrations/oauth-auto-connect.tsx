@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { StatusBadge } from "@/components/ui/status-badge"
+import { StatusPill } from "@/components/ui/status-pill"
 import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
 
@@ -158,7 +158,7 @@ export function OAuthAutoConnect({
       <Card className="p-4 bg-surface-subtle">
         <div className="flex items-center gap-2 text-body font-medium">
           <Check className="h-4 w-4" />
-          <StatusBadge status="COMPLETED" label="OAuth connected" />
+          <StatusPill status="COMPLETED" label="OAuth connected" />
         </div>
       </Card>
     )
@@ -181,10 +181,10 @@ export function OAuthAutoConnect({
           Authentication
         </div>
         {isMissing && (
-          <StatusBadge status="FAILED" label="Credential missing" />
+          <StatusPill status="FAILED" label="Credential missing" />
         )}
         {isExpired && (
-          <StatusBadge status="BLOCKED" label="Expired" />
+          <StatusPill status="BLOCKED" label="Expired" />
         )}
       </div>
       <p className="text-label text-muted-foreground">

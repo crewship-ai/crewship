@@ -34,7 +34,7 @@ export function ConversationDetailsPanel({ section, conversation, canManage, onC
     <div className="flex min-h-0 flex-1 flex-col bg-accent/30">
       <header className="flex shrink-0 items-start gap-2 border-b px-3 py-3">
         <div className="min-w-0 flex-1"><h2 className="text-sm font-semibold">{title}</h2><p className="mt-0.5 truncate text-xs text-muted-foreground">{conversationTitle(conversation)}</p></div>
-        <Button type="button" variant="ghost" size="icon" className="size-7 coarse:size-12" aria-label="Close conversation details" onClick={onClose}><X className="size-4" /></Button>
+        <Button type="button" variant="ghost" size="icon" className="size-7 coarse:size-[44px]" aria-label="Close conversation details" onClick={onClose}><X className="size-4" /></Button>
       </header>
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-3 text-xs">
         <section aria-label="General"><h3 ref={generalHeading} tabIndex={-1} className="mb-3 text-[10px] uppercase tracking-wider text-muted-foreground outline-none">General</h3>{general}</section>

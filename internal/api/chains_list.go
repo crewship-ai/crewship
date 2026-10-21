@@ -187,6 +187,28 @@ type ChainSummary struct {
 	IssueCount int             `json:"issue_count"`
 	Agents     []ChainAgentRef `json:"agents,omitempty"`
 	AgentCount int             `json:"agent_count"`
+
+	// Skills are the skills this chain's agents called while they were on the
+	// chain's work: a skill_invocations row by an agent of one of the chain's
+	// assignments, inside that assignment's window (ODCH-SK-14). It is a join on
+	// agent and time, not a recorded link — an agent that runs two chains at
+	// once is credited to both. Capped at MaxChainSkillRefs, with SkillCount the
+	// full total, so a client filtering by skill can tell a cut list.
+	Skills     []ChainSkillRef `json:"skills,omitempty"`
+	SkillCount int             `json:"skill_count"`
+}
+
+// MaxChainSkillRefs bounds the skills one row carries. It is higher than
+// MaxChainSummaryRefs because Activity filters rows by skill: a skill that fell
+// off a short list would make a row vanish from its own filter.
+const MaxChainSkillRefs = 24
+
+// ChainSkillRef is one skill the chain used and how many times it was called.
+type ChainSkillRef struct {
+	ID   string `json:"id"`
+	Slug string `json:"slug"`
+	Name string `json:"name"`
+	Uses int    `json:"uses"`
 }
 
 // ChainIssueRef is one issue this chain created or changed.
@@ -842,6 +864,45 @@ FROM ranked
 WHERE rn <= ?
 ORDER BY origin ASC, rn ASC`
 
+// chainSkillsQuery lists the skills each chain's agents called inside their
+// assignment's window, capped per chain.
+//
+// The window is started_at (or created_at) to finished_at, open-ended while the
+// work is still going. The invocation side is fenced by workspace_id, and the
+// assignment side by a.workspace_id, because both agent_id and chain_origin are
+// bare ids. idx_skill_inv_agent_time makes each assignment one range probe.
+const chainSkillsQuery = `
+WITH work AS (
+    SELECT CASE WHEN COALESCE(a.chain_origin, '') = '' THEN a.id ELSE a.chain_origin END AS origin,
+           a.assigned_to_id AS agent_id,
+           julianday(COALESCE(a.started_at, a.created_at)) AS began,
+           COALESCE(julianday(a.finished_at), julianday('now')) AS ended
+    FROM assignments a
+    WHERE a.workspace_id = ?
+      AND (a.chain_origin IN (%[1]s)
+           OR (COALESCE(a.chain_origin, '') = '' AND a.id IN (%[1]s)))
+),
+used AS (
+    SELECT w.origin, si.skill_id, COUNT(*) AS uses
+    FROM work w
+    JOIN skill_invocations si
+      ON si.agent_id = w.agent_id
+     AND si.workspace_id = ?
+     AND julianday(si.invoked_at) BETWEEN w.began AND w.ended
+    GROUP BY w.origin, si.skill_id
+),
+ranked AS (
+    SELECT u.origin, u.skill_id, u.uses,
+           ROW_NUMBER() OVER (PARTITION BY u.origin ORDER BY u.uses DESC, u.skill_id ASC) AS rn,
+           COUNT(*)     OVER (PARTITION BY u.origin)                                       AS distinct_skills
+    FROM used u
+)
+SELECT r.origin, s.id, s.slug, COALESCE(NULLIF(s.display_name, ''), s.name), r.uses, r.distinct_skills
+FROM ranked r
+JOIN skills s ON s.id = r.skill_id
+WHERE r.rn <= ?
+ORDER BY r.origin ASC, r.rn ASC`
+
 // chainIssuesQuery lists the issues each chain created or changed, capped per
 // chain.
 //
@@ -955,7 +1016,36 @@ func (h *ChainsListHandler) attachTouched(ctx context.Context, workspaceID strin
 	if err := h.attachAgents(ctx, workspaceID, origins, at); err != nil {
 		return err
 	}
+	if err := h.attachSkills(ctx, workspaceID, origins, at); err != nil {
+		return err
+	}
 	return h.attachIssues(ctx, workspaceID, origins, at)
+}
+
+func (h *ChainsListHandler) attachSkills(ctx context.Context, workspaceID string, origins []any, at map[string]*ChainSummary) error {
+	args := append([]any{workspaceID}, origins...)
+	args = append(args, origins...) // an assignment chain's root, by id
+	args = append(args, workspaceID, MaxChainSkillRefs)
+	rows, err := h.db.QueryContext(ctx, fmt.Sprintf(chainSkillsQuery, sqlPlaceholders(len(origins))), args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			origin string
+			ref    ChainSkillRef
+			total  int
+		)
+		if err := rows.Scan(&origin, &ref.ID, &ref.Slug, &ref.Name, &ref.Uses, &total); err != nil {
+			return err
+		}
+		if c, ok := at[origin]; ok {
+			c.Skills = append(c.Skills, ref)
+			c.SkillCount = total
+		}
+	}
+	return rows.Err()
 }
 
 func (h *ChainsListHandler) attachAgents(ctx context.Context, workspaceID string, origins []any, at map[string]*ChainSummary) error {

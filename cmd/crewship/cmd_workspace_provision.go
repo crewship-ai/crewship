@@ -38,6 +38,9 @@ var workspaceMemberInviteCmd = &cobra.Command{
 		client := newAPIClient()
 		wsID := client.GetWorkspaceID()
 		body := map[string]any{"email": args[0], "role": role}
+		if err := addGuestPolicy(cmd, body); err != nil {
+			return err
+		}
 		if createOnly, _ := cmd.Flags().GetBool("create-only"); createOnly {
 			if err := requireCreateOnlyProvision(client); err != nil {
 				return err
@@ -105,6 +108,7 @@ var workspaceMemberInviteCmd = &cobra.Command{
 }
 
 func init() {
+	addGuestPolicyFlags(workspaceMemberInviteCmd)
 	workspaceMemberInviteCmd.Flags().String("role", "MEMBER", "Role to grant: ADMIN, MANAGER, MEMBER, VIEWER")
 	workspaceMemberInviteCmd.Flags().Bool("create-only", false, "Reject existing accounts without changing their membership or setup tokens")
 	workspaceMemberCmd.AddCommand(workspaceMemberInviteCmd)

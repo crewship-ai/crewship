@@ -332,6 +332,10 @@ func (h *UserPeerPrivacyHandler) DeleteMyCards(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
+	if _, err := h.db.ExecContext(r.Context(), `UPDATE agent_user_preferences SET status='withdrawn',value='',reason='',revision=revision+1 WHERE workspace_id=? AND user_id=? AND status!='withdrawn'`, wsID, userID); err != nil {
+		replyError(w, http.StatusInternalServerError, "delete preferences")
+		return
+	}
 	purged := h.purgeUserCards(r, userID, wsID)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"user_id": userID,

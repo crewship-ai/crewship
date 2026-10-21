@@ -29,6 +29,8 @@ import {
   Search,
   SkipForward,
   Trash2,
+  Archive,
+  ArchiveRestore,
   UserMinus,
   ClipboardCheck,
   ClipboardList,
@@ -122,6 +124,8 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "approval.denied": XCircle,
   "approval.timeout": Clock,
   "approval.cancelled": Ban,
+  "approval.source_retired": ShieldCheck,
+  "escalation.source_classified": ShieldCheck,
   // A standing grant and its withdrawal. ShieldCheck is the one-off keeper
   // decision's icon and these are the durable form of the same idea; Ban is
   // the withdrawal, matching approval.cancelled, because both mean a decision
@@ -248,6 +252,8 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   // ── Skills ────────────────────────────────────────────────────────
   "skill.imported": PackageOpen,
   "skill.deleted": Trash2,
+  "skill.archived": Archive,
+  "skill.restored": ArchiveRestore,
   "skill.assigned": UserPlus,
   "skill.unassigned": UserMinus,
   "skill.invoked": Sparkles,
@@ -260,6 +266,17 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "audit.entity_updated": FilePen,
   "audit.entity_deleted": FileX,
   "audit.entity_restored": RotateCcw,
+  "invitation.created": UserPlus,
+  "invitation.reissued": RotateCcw,
+  "invitation.revoked": UserMinus,
+  "invitation.accepted": UserCheck,
+  "member.access_changed": ShieldCheck,
+  "member.owner_created": ShieldCheck,
+  "member.capabilities_changed": ShieldCheck,
+  "member.added": ShieldCheck,
+  "crew.member_changed": ShieldCheck,
+  "member.role_changed": ShieldCheck,
+  "member.removed": UserMinus,
 
   // ── Memory ────────────────────────────────────────────────────────
   "memory.searched": Search,

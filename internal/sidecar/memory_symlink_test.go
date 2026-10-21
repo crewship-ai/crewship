@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -146,5 +147,37 @@ func TestHandleMemoryRead_FinalSymlink_SecureTarget(t *testing.T) {
 	s.handleMemoryRead(rr, req)
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403 for final-component symlink escape", rr.Code)
+	}
+}
+
+func TestMemoryLocalFallbackRequiresExplicitTrustedRoot(t *testing.T) {
+	s, _ := newWriteTestServer(t)
+	s.memoryStorageRoot = ""
+	for _, write := range []bool{false, true} {
+		r := httptest.NewRequest("GET", "/memory/read?file=AGENT.md", nil)
+		if write {
+			r = httptest.NewRequest("POST", "/memory/write", strings.NewReader(`{"file":"AGENT.md","content":"blocked"}`))
+		}
+		w := httptest.NewRecorder()
+		if write {
+			s.handleMemoryWrite(w, r)
+		} else {
+			s.handleMemoryRead(w, r)
+		}
+		if w.Code != http.StatusServiceUnavailable {
+			t.Fatalf("missing anchor status=%d body=%s", w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestMemoryMCPLocalFallbackRequiresExplicitTrustedRoot(t *testing.T) {
+	s := newMemoryMCPTestServer(t)
+	s.memoryStorageRoot = ""
+	r := httptest.NewRequest("POST", "/mcp/memory", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"memory.write","arguments":{"tier":"AGENT","content":"blocked","mode":"replace"}}}`))
+	r.Host = "127.0.0.1:9119"
+	w := httptest.NewRecorder()
+	s.handleMemoryMCP(w, r)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("missing anchor MCP status=%d body=%s", w.Code, w.Body.String())
 	}
 }

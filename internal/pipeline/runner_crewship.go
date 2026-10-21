@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -58,9 +59,11 @@ func (e *Executor) runCrewshipStep(ctx context.Context, step Step, render Render
 	}
 
 	out, err := e.crewship.Do(ctx, CrewshipRequest{
-		Verb:        step.Action,
-		Args:        args,
-		WorkspaceID: in.WorkspaceID,
+		Verb:         step.Action,
+		ChatOriginID: in.ChatOriginID,
+		OperationKey: routineOperationKey(ctx, runID, step.ID),
+		Args:         args,
+		WorkspaceID:  in.WorkspaceID,
 		// The AUTHOR crew, not the invoker: a routine acts as the crew that
 		// owns it, so that crew's autonomy level is what bounds the action
 		// and that crew is what the created row is attributed to. Same rule
@@ -116,4 +119,10 @@ func renderCrewshipValue(v any, render RenderContext) any {
 	default:
 		return v
 	}
+}
+
+// The logical path distinguishes foreach items while retries retain a key.
+func routineOperationKey(ctx context.Context, runID, stepID string) string {
+	sum := sha256.Sum256([]byte(runID + "\x00" + executionIn(ctx).path + "\x00" + stepID))
+	return fmt.Sprintf("routine:%x", sum)
 }

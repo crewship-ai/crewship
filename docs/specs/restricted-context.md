@@ -53,9 +53,10 @@ The web app follows the same rule (#2861):
   results poll their run until it finishes. Account security (sessions, CLI
   tokens, password) loads on open and after each change.
 
-Navigation still lists every product area; filtering it to the surfaces a
-restricted session can open, and a "not available" page for direct URLs,
-follow separately.
+Navigation uses the current membership's server-projected surfaces, within the
+account-wide route allowlist. A direct URL outside that projection shows a
+"not available" page without mounting its data hooks. See
+[member resource policy](member-resource-policy.md#what-a-restricted-sessions-shell-offers).
 
 ## Wire objects
 

@@ -73,12 +73,11 @@ package api
 // (scope='user', owner_user_id): that row carries their own address and is
 // theirs, not the team's.
 //
-// # Credentials: re-attributed to a custodian, not deleted
+// # Credentials: live custody and retired anonymization
 //
-// credentials.created_by is NOT NULL REFERENCES users(id), so it can be
-// neither nulled nor pointed at nobody, and the credential itself must stay
-// usable — every agent bound to it would otherwise lose a secret the
-// workspace still relies on, which #2308 rules out. escalation_credential.go
+// credentials.created_by remains a users FK and is required for live rows.
+// A live credential must stay usable — every agent bound to it would otherwise
+// lose a secret the workspace still relies on, which #2308 rules out. escalation_credential.go
 // already has the precedent for a credential whose human cannot be named
 // (an agent-proposed one is attributed to the workspace OWNER until an
 // approver takes it over). Here the custodian is the ADMIN WHO RAN THE
@@ -89,7 +88,10 @@ package api
 // written to the credential's own audit timeline as a REATTRIBUTED event
 // carrying the gdpr_actions id, because a credential whose custodian changed
 // with no trace on its timeline is exactly the row the timeline exists to
-// prevent. Bindings on the credential (credential_bindings.created_by,
+// prevent. Retired rows no longer need a custodian: created_by is cleared,
+// just like the nullable actor and approver attribution. Their IDs and audit
+// history remain, and a creatorless tombstone cannot become live again.
+// Bindings on the credential (credential_bindings.created_by,
 // nullable) are anonymised, not removed: deleting them would revoke the
 // credential by the back door.
 //
@@ -228,12 +230,12 @@ var identitySteps = []identityStep{
 	{key: "trust_grants_anonymised",
 		sql:  `UPDATE waitpoint_trust_grants SET revoked_by_user_id = NULL WHERE workspace_id = ? AND revoked_by_user_id = ?`,
 		args: []identityArg{argWorkspace, argSubject}},
-	// Credentials: created_by hands over to the custodian (see the file
-	// header), the nullable attribution columns are cleared. One statement,
+	// Live created_by hands over to the custodian; retired created_by and
+	// the nullable attribution columns are cleared. One statement,
 	// so a row naming the subject in two columns is counted once.
 	{key: "credentials_reattributed",
 		sql: `UPDATE credentials
-		         SET created_by          = CASE WHEN created_by = ? THEN ? ELSE created_by END,
+		         SET created_by          = CASE WHEN created_by = ? THEN CASE WHEN deleted_at IS NOT NULL THEN NULL ELSE ? END ELSE created_by END,
 		             created_by_actor_id = CASE WHEN created_by_actor_id = ? THEN NULL ELSE created_by_actor_id END,
 		             approved_by_user_id = CASE WHEN approved_by_user_id = ? THEN NULL ELSE approved_by_user_id END
 		       WHERE workspace_id = ?
@@ -349,8 +351,11 @@ var identitySteps = []identityStep{
 		sql:  `UPDATE attachments SET uploaded_by_user_id = NULL WHERE workspace_id = ? AND uploaded_by_user_id = ?`,
 		args: []identityArg{argWorkspace, argSubject}},
 	{key: "escalations_anonymised",
-		sql:  `UPDATE escalations SET resolved_by = NULL WHERE workspace_id = ? AND resolved_by = ?`,
-		args: []identityArg{argWorkspace, argSubject}},
+		sql: `UPDATE escalations SET
+            resolved_by = CASE WHEN resolved_by = ? THEN NULL ELSE resolved_by END,
+            resolved_by_user_id = CASE WHEN resolved_by_user_id = ? THEN NULL ELSE resolved_by_user_id END
+            WHERE workspace_id = ? AND (resolved_by = ? OR resolved_by_user_id = ?)`,
+		args: []identityArg{argSubject, argSubject, argWorkspace, argSubject, argSubject}},
 	{key: "gate_reward_history_anonymised",
 		sql:  `UPDATE gate_reward_history SET decided_by = NULL WHERE workspace_id = ? AND decided_by = ?`,
 		args: []identityArg{argWorkspace, argSubject}},
@@ -418,7 +423,7 @@ func identityScopeKeys() []string {
 	return keys
 }
 
-// errNoCredentialCustodian is returned when the subject created credentials
+// errNoCredentialCustodian is returned when the subject created live credentials
 // in this workspace and nobody can take them over: the admin running the
 // erasure IS the subject and the workspace has no other OWNER. The whole
 // identity step refuses rather than half-applying — see the file header.
@@ -427,7 +432,7 @@ var errNoCredentialCustodian = errors.New("gdpr erasure: the subject created cre
 // eraseSubjectIdentity runs every identityStep for targetID inside wsID, in
 // one transaction, and journals the capabilities it revoked after commit.
 // actorID is the admin running the erasure and the default custodian for
-// the subject's credentials.
+// the subject's live credentials.
 //
 // On ANY error the receipt is zeroed, not partial — the transaction rolled
 // back, and counts accumulated before the failure describe work that no
@@ -518,9 +523,9 @@ func (h *AdminGDPRHandler) eraseSubjectIdentity(ctx context.Context, actionID, a
 
 // credentialCustodian picks who takes over credentials.created_by: the admin
 // running the erasure, unless they are erasing themself, in which case the
-// oldest OWNER of the workspace who is not the subject. Returns
-// errNoCredentialCustodian only when a custodian is actually NEEDED — a
-// workspace where the subject created nothing does not care.
+// oldest OWNER of the workspace who is not the subject. Retired rows are
+// anonymized instead. Returns errNoCredentialCustodian only when live custody
+// is needed — a workspace where the subject created nothing live does not care.
 func credentialCustodian(ctx context.Context, tx *sql.Tx, wsID, targetID, actorID string) (string, error) {
 	if actorID != "" && actorID != targetID {
 		return actorID, nil
@@ -536,17 +541,16 @@ func credentialCustodian(ctx context.Context, tx *sql.Tx, wsID, targetID, actorI
 	case errors.Is(err, sql.ErrNoRows):
 		var needed bool
 		if err := tx.QueryRowContext(ctx,
-			`SELECT EXISTS (SELECT 1 FROM credentials WHERE workspace_id = ? AND created_by = ?)`,
+			`SELECT EXISTS (SELECT 1 FROM credentials WHERE workspace_id = ? AND created_by = ? AND deleted_at IS NULL)`,
 			wsID, targetID).Scan(&needed); err != nil {
 			return "", fmt.Errorf("read credentials needing a custodian: %w", err)
 		}
 		if needed {
 			return "", errNoCredentialCustodian
 		}
-		// Nothing to re-attribute; the CASE never fires. Bind the subject
-		// itself so the statement stays well-formed — the predicate cannot
-		// match a row, so the value is never written.
-		return targetID, nil
+		// No live row needs custody. The retired branch writes NULL, so this
+		// unused binding must not retain the erased subject as a fallback.
+		return "", nil
 	default:
 		return "", fmt.Errorf("find credential custodian: %w", err)
 	}
@@ -556,7 +560,7 @@ func credentialCustodian(ctx context.Context, tx *sql.Tx, wsID, targetID, actorI
 // created_by is about to change hands, so each gets its audit event.
 func collectReattributedCredentials(ctx context.Context, tx *sql.Tx, wsID, targetID string) ([]string, error) {
 	rows, err := tx.QueryContext(ctx,
-		`SELECT id FROM credentials WHERE workspace_id = ? AND created_by = ? ORDER BY id`, wsID, targetID)
+		`SELECT id FROM credentials WHERE workspace_id = ? AND created_by = ? AND deleted_at IS NULL ORDER BY id`, wsID, targetID)
 	if err != nil {
 		return nil, fmt.Errorf("read credentials to re-attribute: %w", err)
 	}

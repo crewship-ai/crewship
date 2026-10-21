@@ -413,28 +413,12 @@ describe("activity-stream-view wiring", () => {
     expect(src).toContain("export function ActivityStreamView")
   })
 
-  it("keeps no chain state of its own beside the selection", () => {
-    // The defect was a second useState the selection could not reach. One
-    // source of truth or the screen gets two answers again.
-    expect(src).not.toMatch(/setSelectedChain/)
-    expect(src).not.toMatch(/setFocus\b/)
-    // …and the walk did not reintroduce one: the path IS the selection.
-    expect(src).not.toMatch(/useState<ActivitySelection/)
-  })
-
-  it("derives the rail, the query and the column from the same path", () => {
-    expect(src).toMatch(/const surface = /)
-    expect(src).toMatch(/const focus = surface\.focus/)
-    expect(src).toMatch(/selectedChain=\{railChain\}/)
-    expect(src).toMatch(/workflowAnchor\(path\)/)
+  it("keeps the walk as the one position for the full pages", () => {
+    // The list narrows by filters; a run or a workflow is a place, and the
+    // path is the only state that says which one is open.
+    expect(src).toMatch(/useState<ActivityPath>/)
     expect(src).toMatch(/currentStop\(path\)/)
-  })
-
-  it("renders the overview only when the column is the overview", () => {
-    // The report: a workflow and the global overview on one screen. The
-    // guard is a single derived boolean so the two cannot both be true.
-    expect(src).toMatch(/const overviewShown =[\s\S]{0,200}?surface\.main === "overview"/)
-    expect(src).toMatch(/\{overviewShown && \([\s\S]{0,200}?<ActivityHome/)
+    expect(src).not.toMatch(/setSelectedChain/)
   })
 
   it("hands the workflow column to WorkflowPage with a way back and a way down", () => {

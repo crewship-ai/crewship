@@ -384,7 +384,7 @@ func (h *MemoryMutationHandler) Mutate(w http.ResponseWriter, r *http.Request) {
 		source = "sidecar:/memory/write"
 	}
 
-	res, err := memory.Mutate(r.Context(), h.db, memory.MutateRequest{
+	res, err := memory.MutateRooted(r.Context(), h.db, memory.MutateRequest{
 		// The whole point of the route. Nothing downgrades this: a caller that
 		// cannot meet the contract is refused above, or by Mutate itself.
 		Profile:     memory.ProfileGuaranteed,
@@ -471,7 +471,7 @@ func (h *MemoryMutationHandler) Read(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := memory.ReadCanonical(r.Context(), h.db, memory.ReadRequest{
+	res, err := memory.ReadCanonicalRooted(r.Context(), h.db, memory.ReadRequest{
 		WorkspaceID: wsID,
 		Path:        target.path,
 		StorageRoot: h.storagePath,

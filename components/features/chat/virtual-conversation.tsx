@@ -36,14 +36,17 @@ export function virtualChatEnabled(): boolean {
 }
 
 interface VirtualConversationProps {
+  canChat?: boolean
   turns: ChatTurn[]
+  workspaceId?: string
+  renderEntityCards?: (turn: ChatTurn) => React.ReactNode
   sessionId: string
   agentId: string
   agentName?: string
   historyLoading: boolean
   isStreaming: boolean
   animateAfter: number
-  onCopy: (s: string) => void
+  onCopy: (s: string) => Promise<boolean>
   onFileClick: (s: string) => void
   onRegenerate?: () => void
   onEditUserMessage?: (turnId: string, newContent: string) => void
@@ -73,7 +76,10 @@ const VirtuosoFooter = ({ context }: { context?: VirtuosoCtx }) => (
 const VIRTUOSO_COMPONENTS = { Footer: VirtuosoFooter }
 
 export function VirtualConversation({
+  canChat = true,
   turns,
+  workspaceId,
+  renderEntityCards,
   sessionId,
   agentId,
   agentName,
@@ -99,12 +105,14 @@ export function VirtualConversation({
 
   if (turns.length === 0 && !historyLoading) {
     return (
-      <div className="relative flex-1 overflow-y-hidden" role="log">
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto" role="log">
         <ConversationEmptyState
+          className="h-auto flex-1"
           icon={<Bot className="h-12 w-12" />}
-          title="Start a conversation"
-          description={agentName ? `Send a message to ${agentName}` : "Send a message or pick a suggestion below"}
+          title={canChat ? "Start a conversation" : "Agent shared for discovery"}
+          description={canChat ? (agentName ? `Send a message to ${agentName}` : "Send a message or pick a suggestion below") : "Chat has not been shared with you."}
         />
+        <VirtuosoFooter context={{ footer }} />
       </div>
     )
   }
@@ -129,6 +137,8 @@ export function VirtualConversation({
           <div className="mx-auto w-full max-w-3xl px-4 pb-8">
             <TurnRenderer
               turn={turn}
+              workspaceId={workspaceId}
+              entityCards={renderEntityCards?.(turn)}
               onCopy={onCopy}
               onFileClick={onFileClick}
               isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}

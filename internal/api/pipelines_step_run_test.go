@@ -4,14 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
-	"log/slog"
 )
 
 // recordingRunner captures the AgentStepRequest the handler forwards so a
@@ -30,24 +29,15 @@ func (r *recordingRunner) RunStep(_ context.Context, req pipeline.AgentStepReque
 	return pipeline.AgentStepResult{Output: r.output, CostUSD: 0.002, TokensIn: 120, TokensOut: 40, DurationMs: 7}, nil
 }
 
-// insertRawPipeline seeds a pipeline with a caller-supplied definition JSON
-// (seedSmokePipeline hardcodes a single agent_run step; step-run tests need
-// custom step shapes — a non-agent step, an interpolated prompt).
-func insertRawPipeline(t *testing.T, db *sql.DB, slug, def string) {
+// insertRawPipeline keeps custom raw definition bytes for step-run fixtures;
+// the parent identity and archive are nevertheless created by the real Store.
+func insertRawPipeline(t *testing.T, db *sql.DB, slug, definition string) {
 	t.Helper()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	_, err := db.ExecContext(context.Background(), `
-INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, ephemeral, workspace_visible, author_crew_id, author_agent_id, authored_via, last_test_run_at, last_test_run_passed, created_at, updated_at)
-VALUES (?, 'ws_smoke', ?, ?, ?, ?, 0, 1, 'crew_a', 'agent_lead', 'agent_tool_call', ?, 1, ?, ?)`,
-		"pln_test_"+slug, slug, slug, def, "hash_"+slug, now, now, now)
-	if err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+	seedSmokePipelineDef(t, db, slug, definition)
 }
 
 func TestPipelinesAPI_StepRun_ExecutesSingleStep(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	// agent_run step "extract" with a fixture-interpolated prompt.
 	def := `{"name":"parse-invoice","steps":[{"id":"extract","type":"agent_run","agent_slug":"agent_lead","prompt":"Extract from {{ inputs.name }}"}]}`
 	insertRawPipeline(t, db, "parse-invoice", def)
@@ -93,7 +83,6 @@ func TestPipelinesAPI_StepRun_ExecutesSingleStep(t *testing.T) {
 
 func TestPipelinesAPI_StepRun_SeedsUpstreamOutputsAndWarns(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	// A downstream step whose prompt consumes an upstream step's output —
 	// the common case (verify/reconcile read {{ steps.parse.output }}).
 	def := `{"name":"acct","steps":[{"id":"reconcile","type":"agent_run","agent_slug":"agent_lead","prompt":"Reconcile {{ steps.parse.output }} for {{ inputs.month }}"}]}`
@@ -144,7 +133,6 @@ func TestPipelinesAPI_StepRun_SeedsUpstreamOutputsAndWarns(t *testing.T) {
 
 func TestPipelinesAPI_StepRun_503WithoutRunner(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	insertRawPipeline(t, db, "demo", `{"name":"demo","steps":[{"id":"a","type":"agent_run","agent_slug":"agent_lead","prompt":"hi"}]}`)
 	h := NewPipelineHandler(db, slog.Default(), nil, nil)
 	req := withWorkspaceCtx(httptest.NewRequest("POST", "/x", strings.NewReader(`{"step_id":"a"}`)), "ws_smoke")
@@ -158,7 +146,6 @@ func TestPipelinesAPI_StepRun_503WithoutRunner(t *testing.T) {
 
 func TestPipelinesAPI_StepRun_UnknownStep404(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	insertRawPipeline(t, db, "demo", `{"name":"demo","steps":[{"id":"a","type":"agent_run","agent_slug":"agent_lead","prompt":"hi"}]}`)
 	h := NewPipelineHandler(db, slog.Default(), &recordingRunner{}, nil)
 	req := withWorkspaceCtx(httptest.NewRequest("POST", "/x", strings.NewReader(`{"step_id":"ghost"}`)), "ws_smoke")
@@ -178,7 +165,6 @@ func TestPipelinesAPI_StepRun_UnknownStep404(t *testing.T) {
 // code needs a sandboxed container runner item 3 didn't scope in.
 func TestPipelinesAPI_StepRun_UnsupportedStepType400(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	insertRawPipeline(t, db, "demo", `{"name":"demo","steps":[{"id":"w","type":"wait","wait":{"kind":"approval","approval_prompt":"ok?"}}]}`)
 	h := NewPipelineHandler(db, slog.Default(), &recordingRunner{}, nil)
 	req := withWorkspaceCtx(httptest.NewRequest("POST", "/x", strings.NewReader(`{"step_id":"w"}`)), "ws_smoke")
@@ -195,7 +181,6 @@ func TestPipelinesAPI_StepRun_UnsupportedStepType400(t *testing.T) {
 // subset evaluation via the same runTransformStep the real DAG uses.
 func TestPipelinesAPI_StepRun_TransformStep(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	insertRawPipeline(t, db, "demo", `{"name":"demo","steps":[{"id":"t","type":"transform","transform":{"input":"{{ inputs.raw }}","expression":"@json"}}]}`)
 	h := NewPipelineHandler(db, slog.Default(), &recordingRunner{}, nil)
 
@@ -238,7 +223,6 @@ func TestPipelinesAPI_StepRun_HTTPStep_RoutesThroughRealEgressGuard(t *testing.T
 	defer srv.Close()
 
 	db := openSmokeDB(t)
-	defer db.Close()
 	def := `{"name":"demo","steps":[{"id":"h","type":"http","http":{"method":"GET","url":"` + srv.URL + `"}}]}`
 	insertRawPipeline(t, db, "demo", def)
 	h := NewPipelineHandler(db, slog.Default(), &recordingRunner{}, nil)
@@ -261,7 +245,6 @@ func TestPipelinesAPI_StepRun_HTTPStep_RoutesThroughRealEgressGuard(t *testing.T
 // run (runScriptStep's own "no ScriptRunner wired" guard).
 func TestPipelinesAPI_StepRun_ScriptStepWithoutRunnerFailsClosed(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	insertRawPipeline(t, db, "demo", `{"name":"demo","steps":[{"id":"s","type":"script","script":{"path":"scripts/x.py"}}]}`)
 	h := NewPipelineHandler(db, slog.Default(), &recordingRunner{}, nil)
 
@@ -278,7 +261,6 @@ func TestPipelinesAPI_StepRun_ScriptStepWithoutRunnerFailsClosed(t *testing.T) {
 // routine must be refused with 409 instead of executing a step.
 func TestPipelinesAPI_StepRun_DisabledRoutine409(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	insertRawPipeline(t, db, "gov", `{"name":"gov","steps":[{"id":"a","type":"agent_run","agent_slug":"agent_lead","prompt":"hi"}]}`)
 	if _, err := db.ExecContext(context.Background(),
 		`UPDATE pipelines SET status = 'disabled' WHERE slug = 'gov'`); err != nil {
@@ -300,7 +282,6 @@ func TestPipelinesAPI_StepRun_DisabledRoutine409(t *testing.T) {
 
 func TestPipelinesAPI_StepRun_MissingStepID400(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	insertRawPipeline(t, db, "demo", `{"name":"demo","steps":[{"id":"a","type":"agent_run","agent_slug":"agent_lead","prompt":"hi"}]}`)
 	h := NewPipelineHandler(db, slog.Default(), &recordingRunner{}, nil)
 	req := withWorkspaceCtx(httptest.NewRequest("POST", "/x", strings.NewReader(`{"inputs":{}}`)), "ws_smoke")

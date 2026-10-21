@@ -71,14 +71,16 @@ beforeEach(() => {
 describe("IssueDetailSurface — failures are not empties", () => {
   it("says which sub-resource failed and retries it, instead of showing an empty comments card", async () => {
     render(<IssueDetailSurface workspaceId="ws-1" identifier="ENG-1" editable={false} />)
-    const alert = await screen.findByRole("alert")
+    // The alert waits for the issue, then its comments; under a full parallel
+    // run that chain overran findBy's default 1 s (1.65 s on candidate5).
+    const alert = await screen.findByRole("alert", {}, { timeout: 5000 })
     expect(alert).toHaveTextContent(/could not load comments/i)
     expect(screen.queryByText(/nobody has said anything/i)).toBeNull()
 
     commentsStatus = 200
     fireEvent.click(screen.getByRole("button", { name: /try again/i }))
-    await waitFor(() => expect(commentsCalls).toBe(2))
-    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull())
+    await waitFor(() => expect(commentsCalls).toBe(2), { timeout: 5000 })
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull(), { timeout: 5000 })
   })
 
   it("gives an unknown identifier a way back", async () => {

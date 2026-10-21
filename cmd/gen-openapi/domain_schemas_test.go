@@ -1,11 +1,14 @@
 package main
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestDomainSchemaMapCoversExecutionReadShapes(t *testing.T) {
 	schemas := executionSchemaComponents()
 	for _, name := range []string{
-		"RunResult", "PipelineRun", "PipelineRunList", "RunRecordList", "Schedule", "RoutineState",
+		"RunResult", "PipelineRun", "PipelineRunDetail", "AcceptedPipelineRun", "PipelineRunList", "RunRecordList", "Schedule", "RoutineState",
 		"WaitpointList", "BulkReplayResult", "FailureGroupList", "RunLogList",
 	} {
 		if _, ok := schemas[name]; !ok {
@@ -28,7 +31,7 @@ func TestDomainSchemaMapCoversExecutionReadShapes(t *testing.T) {
 func TestDomainResponseSchemasMatchReadRoutes(t *testing.T) {
 	routes := executionResponseSchemas()
 	want := map[string]string{
-		"GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}":  "PipelineRun",
+		"GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}":  "PipelineRunDetail",
 		"GET /api/v1/workspaces/{workspaceId}/pipeline-schedules":     "ScheduleList",
 		"GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/state": "RoutineState",
 		"GET /api/v1/workspaces/{workspaceId}/pipelines/waitpoints":   "WaitpointList",
@@ -65,5 +68,38 @@ func TestDomainSchemaMapReturnsFreshMaps(t *testing.T) {
 	one["RunResult"] = nil
 	if executionSchemaComponents()["RunResult"] == nil {
 		t.Fatal("DomainSchemaMap returned shared mutable state")
+	}
+}
+
+func TestPipelineRunDetailSchemaSeparatesAcceptedStartsFromActualRuns(t *testing.T) {
+	// Compile fresh generator components; exercise oneOf rather than just
+	// checking that the newly named fields appear somewhere in the schema.
+	raw, err := json.Marshal(map[string]any{"components": map[string]any{"schemas": executionSchemaComponents()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := compileAt(t, raw, "/components/schemas/PipelineRunDetail")
+	for _, test := range []struct {
+		name, body string
+		valid      bool
+	}{
+		{"queued", `{"id":"run1","workspace_id":"ws1","pipeline_id":"p1","pipeline_slug":"routine","status":"QUEUED","pending_id":"pending1","reason_code":"scheduled"}`, true},
+		{"expired unstarted", `{"id":"run1","workspace_id":"ws1","pipeline_id":"p1","pipeline_slug":"routine","status":"EXPIRED","pending_id":"pending1","reason_code":"capacity_expired"}`, true},
+		{"actual", `{"id":"run1","workspace_id":"ws1","pipeline_id":"p1","pipeline_slug":"routine","status":"completed","mode":"run","started_at":"2026-10-19T10:00:00Z"}`, true},
+		{"missing pending reason", `{"id":"run1","workspace_id":"ws1","pipeline_id":"p1","pipeline_slug":"routine","status":"QUEUED","pending_id":"pending1"}`, false},
+		{"missing pending identity", `{"id":"run1","workspace_id":"ws1","pipeline_id":"p1","pipeline_slug":"routine","status":"QUEUED","reason_code":"scheduled"}`, false},
+		{"actual missing start", `{"id":"run1","workspace_id":"ws1","pipeline_id":"p1","pipeline_slug":"routine","status":"completed","mode":"run"}`, false},
+		{"queued invents start", `{"id":"run1","workspace_id":"ws1","pipeline_id":"p1","pipeline_slug":"routine","status":"QUEUED","pending_id":"pending1","reason_code":"scheduled","started_at":"2026-10-19T10:00:00Z"}`, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var body any
+			if err := json.Unmarshal([]byte(test.body), &body); err != nil {
+				t.Fatal(err)
+			}
+			err := schema.Validate(body)
+			if (err == nil) != test.valid {
+				t.Fatalf("valid=%v want %v: %v", err == nil, test.valid, err)
+			}
+		})
 	}
 }

@@ -12,13 +12,12 @@ const TIMEOUT = 15_000
 async function openCrewSettings(page: Page) {
   await page.goto("/crews")
   const crewRow = page
-    .locator("aside button")
-    .filter({ hasText: /^(Research|DevOps|Engineering|Quality)/ })
+    .locator("[data-crew-row] > [role=button]")
     .first()
   await expect(crewRow).toBeVisible({ timeout: TIMEOUT })
   await crewRow.click()
   await expect(page).toHaveURL(/[?&]crew=/, { timeout: TIMEOUT })
-  await page.getByRole("tab", { name: /Settings/i }).click()
+  await page.getByRole("tab", { name: /^Settings$/i }).click()
   await expect(page.getByRole("heading", { name: /Runtime & security/i })).toBeVisible({
     timeout: TIMEOUT,
   })
@@ -42,16 +41,22 @@ test.describe("crew runtime — container-privilege controls (#1380)", () => {
     await openSecurityTab(page)
 
     // The whole point of the issue: the escape hatch that deserves the most
-    // friction must carry the explanation, not be a bare JSON key.
-    await expect(page.getByText(/no-new-privileges/i)).toBeVisible()
-    await expect(page.getByText(/read-only rootfs/i)).toBeVisible()
+    // friction must carry the explanation, not be a bare JSON key. The
+    // explanation shows while privileged mode is on
+    // (runtime-security-config.tsx), so it is checked in that state.
+    const explained = async () => {
+      await expect(page.getByText(/no-new-privileges/i)).toBeVisible()
+      await expect(page.getByText(/read-only rootfs/i)).toBeVisible()
+    }
 
     const toggle = page.getByRole("switch", { name: /Privileged mode/i })
     const wasOn = (await toggle.getAttribute("aria-checked")) === "true"
+    if (wasOn) await explained()
     if (await toggle.isEnabled()) {
       await toggle.click()
       // Posture is surfaced immediately, before any save.
       if (!wasOn) {
+        await explained()
         await expect(page.getByText(/Isolation reduced/i).first()).toBeVisible()
       }
       // Leave the crew exactly as we found it — this spec must not mutate
@@ -70,9 +75,14 @@ test.describe("crew runtime — container-privilege controls (#1380)", () => {
     // NET_BIND_SERVICE is the sole directly-grantable cap
     // (internal/devcontainer/features.go allowedFeatureCapAdd).
     await expect(page.getByRole("checkbox", { name: "NET_BIND_SERVICE" })).toBeEnabled()
-    // Everything broader would 400 on save — it must not be selectable.
-    await expect(page.getByRole("checkbox", { name: "SYS_ADMIN" })).toBeDisabled()
-    await expect(page.getByText(/privileged only/i).first()).toBeVisible()
+    // Everything broader would 400 on save — it must not be selectable: the
+    // others are folded under "N more the save path refuses — privileged mode
+    // only", as text rather than checkboxes.
+    await expect(page.getByRole("checkbox", { name: "SYS_ADMIN" })).toHaveCount(0)
+    const refused = page.getByText(/more the save path refuses — privileged mode only/i).first()
+    await expect(refused).toBeVisible()
+    await refused.click()
+    await expect(page.getByText("SYS_ADMIN", { exact: true }).first()).toBeVisible()
   })
 
   test("mount editor rejects the docker socket inline", async ({ page }) => {

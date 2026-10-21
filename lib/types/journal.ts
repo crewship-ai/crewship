@@ -39,6 +39,9 @@ export const JOURNAL_ENTRY_TYPES = [
   "approval.denied",
   "approval.timeout",
   "approval.cancelled",
+  // Host-only privacy markers; ordinary journal reads suppress these rows.
+  "approval.source_retired",
+  "escalation.source_classified",
   // Standing decisions: "approve this gate for me from now on", and the
   // withdrawal of that permission. Namespaced under approval.* on purpose —
   // one filter has to show the one-off decision and the standing grant that
@@ -143,6 +146,8 @@ export const JOURNAL_ENTRY_TYPES = [
   // Skills
   "skill.imported",
   "skill.deleted",
+  "skill.archived",
+  "skill.restored",
   "skill.assigned",
   "skill.unassigned",
   "skill.invoked",
@@ -151,6 +156,17 @@ export const JOURNAL_ENTRY_TYPES = [
   "audit.entity_updated",
   "audit.entity_deleted",
   "audit.entity_restored",
+  "invitation.created",
+  "invitation.reissued",
+  "invitation.revoked",
+  "invitation.accepted",
+    "member.access_changed",
+    "member.owner_created",
+    "member.capabilities_changed",
+    "member.added",
+    "crew.member_changed",
+    "member.role_changed",
+    "member.removed",
   // Memory (extended)
   "memory.write_rejected",
   "memory.consolidation_proposed",

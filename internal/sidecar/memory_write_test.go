@@ -29,11 +29,12 @@ func newWriteTestServer(t *testing.T) (*Server, string) {
 	ex := newMemoryExecutor(silent)
 	t.Cleanup(func() { ex.Close(time.Second) })
 	return &Server{
-		memoryEngine:    eng,
-		agentMemoryBase: base,
-		scrubber:        scrubber.New(),
-		logger:          silent,
-		memoryExec:      ex,
+		memoryEngine:      eng,
+		agentMemoryBase:   base,
+		memoryStorageRoot: filepath.Dir(t.TempDir()),
+		scrubber:          scrubber.New(),
+		logger:            silent,
+		memoryExec:        ex,
 	}, base
 }
 

@@ -20,6 +20,8 @@ import { getCrewDotColor } from "@/lib/crew-icons"
 import { getModelLabel } from "@/lib/cli-adapters"
 import { cn } from "@/lib/utils"
 
+import { LeadStar } from "./cr-card"
+
 import type { AgentSummary } from "./crew-canvas-tabs/types"
 
 function ringColor(crewColor: string | null | undefined): string {
@@ -94,6 +96,46 @@ export function AgentRingAvatar({
   )
 }
 
+/**
+ * The agent page head (v67): a 52 px rounded-square tile holding the agent's
+ * own avatar, a star when it leads and a dot while it works. No ring, no
+ * engine badge; the engine is a chip in the head.
+ */
+export function AgentHeadTile({
+  seed,
+  style,
+  avatarUrl,
+  crewColor,
+  status,
+  lead = false,
+  className,
+}: {
+  seed: string
+  style?: string | null
+  avatarUrl?: string | null
+  crewColor?: string | null
+  status?: string | null
+  lead?: boolean
+  className?: string
+}) {
+  const working = status === "RUNNING"
+  return (
+    <span className={cn("relative inline-flex shrink-0", className)}>
+      <span
+        data-slot="agent-head-tile"
+        className="grid place-items-center overflow-hidden"
+        style={{ width: 52, height: 52, borderRadius: "28%", backgroundColor: `color-mix(in srgb, ${ringColor(crewColor)} 18%, var(--card))` }}
+      >
+        <AgentAvatar seed={seed} style={style} avatarUrl={avatarUrl} className="size-full rounded-none" />
+      </span>
+      {lead && <LeadStar className="-right-1 -top-1 size-4" />}
+      {working && (
+        <span role="img" aria-label="Working" className="absolute -bottom-0.5 -right-0.5 size-3 animate-pulse rounded-full bg-primary ring-2 ring-card" />
+      )}
+    </span>
+  )
+}
+
 export function HarborAgentCard({
   agent,
   crewName,
@@ -136,12 +178,12 @@ export function HarborAgentCard({
           </span>
           <span className="block truncate text-sm text-muted-foreground">{role}</span>
           {crewName && (
-            <span className="mt-0.5 block truncate font-mono text-[11px]" style={{ color: ringColor(crewColor) }}>
+            <span className="mt-0.5 block truncate text-label" style={{ color: ringColor(crewColor) }}>
               {crewName}
             </span>
           )}
         </span>
-        <StatusPill status={agent.status} live={agent.status === "RUNNING"} />
+        <StatusPill className="font-sans" status={agent.status} live={agent.status === "RUNNING"} />
       </span>
       {agent.llm_model && (
         <span className="mt-auto flex items-center justify-between gap-2 border-t border-border pt-2.5 text-[11px] text-muted-foreground-soft">

@@ -236,5 +236,15 @@ func (h *ChatSharesHandler) Messages(w http.ResponseWriter, r *http.Request) {
 		}
 		result = append(result, sharedChatText{ID: msg.ID, Role: msg.Role, Content: content, CreatedAt: msg.Timestamp})
 	}
+	// A creation consent can seal the source while IPC is loading history.
+	// A previously valid sharing link must not release the later private output.
+	if _, err := h.store.Validate(r.Context(), shareID, token); err != nil {
+		if errors.Is(err, chatshare.ErrDenied) || errors.Is(err, chatshare.ErrInvalid) {
+			replyError(w, http.StatusNotFound, "chat share not found")
+		} else {
+			replyError(w, http.StatusServiceUnavailable, "chat share unavailable")
+		}
+		return
+	}
 	writeJSON(w, http.StatusOK, chatShareMessagesResponse{Messages: result})
 }

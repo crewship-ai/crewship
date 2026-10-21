@@ -23,6 +23,8 @@ import { controlHeight } from "@/components/features/settings/shared"
 export interface AuditPerson {
   id: string
   label: string
+  /** Their profile photo, when they have one. */
+  avatarUrl?: string | null
 }
 
 const SEARCH_DEBOUNCE_MS = 300
@@ -90,8 +92,10 @@ export function AuditToolbar({
               onClick={() =>
                 onChange(
                   chip.key === "range"
-                    ? { range: DEFAULT_AUDIT_FILTERS.range, from: "", to: "" }
-                    : { [chip.key]: DEFAULT_AUDIT_FILTERS[chip.key] },
+                    ? { range: DEFAULT_AUDIT_FILTERS.range, from: "", to: "", sliceFrom: "", sliceTo: "" }
+                    : chip.key === "slice"
+                      ? { sliceFrom: "", sliceTo: "" }
+                      : { [chip.key]: DEFAULT_AUDIT_FILTERS[chip.key] },
                 )
               }
               className="inline-flex h-6 items-center gap-1 rounded-full border border-border bg-surface-subtle pl-2.5 pr-1.5 text-micro text-foreground transition-colors hover:border-line-strong"

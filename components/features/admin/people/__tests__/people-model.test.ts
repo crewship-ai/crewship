@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import {
-  facetMatches, isLastOwner, personMatches, personStatus, byAttentionThenName, daysUntil, type Person,
+  isPersonal, workspaceMatches, facetMatches, isLastOwner, personMatches, personStatus, byAttentionThenName, daysUntil, type Person,
 } from "../people-model"
 
 const NOW = Date.parse("2026-09-29T12:00:00Z")
@@ -60,5 +60,23 @@ describe("search and dates", () => {
   it("rounds days until a link expires up, and never below zero", () => {
     expect(daysUntil("2026-09-30T00:00:00Z", NOW)).toBe(1)
     expect(daysUntil("2026-09-01T00:00:00Z", NOW)).toBe(0)
+  })
+})
+
+describe("team and personal workspaces", () => {
+  const ws = (over: Record<string, unknown>) => ({ id: "w", name: "Lab", slug: "lab", created_at: "", _count_members: 1, _count_agents: 0, _count_crews: 0, ...over }) as never
+
+  it("reads the server's kind, and the sign-up pattern from an older server", () => {
+    expect(isPersonal(ws({ kind: "personal", name: "Design" }))).toBe(true)
+    expect(isPersonal(ws({ kind: "team", name: "Ivana's Workspace" }))).toBe(false)
+    expect(isPersonal(ws({ name: "Ivana's Workspace" }))).toBe(true)
+    expect(isPersonal(ws({ name: "Ivana's Workspace", _count_members: 3 }))).toBe(false)
+  })
+
+  it("finds a workspace by its owner's name or email", () => {
+    const owner = { id: "u1", email: "ivana@ex.com", full_name: "Ivana Viewer", memberships: [{ workspace_id: "w", role: "OWNER" }] } as never
+    expect(workspaceMatches(ws({ name: "Ivana Viewer's Workspace" }), "viewer", [owner])).toBe(true)
+    expect(workspaceMatches(ws({ name: "Design" }), "ivana@", [owner])).toBe(true)
+    expect(workspaceMatches(ws({ name: "Design" }), "tom", [owner])).toBe(false)
   })
 })

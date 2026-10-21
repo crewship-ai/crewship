@@ -129,7 +129,8 @@ export const CAPABILITY_LABELS: Record<
   },
 } as const
 
-/** Named bundles — match BundleCapabilities in capabilities.go. */
+/** Named bundles — match BundleCapabilities in internal/api/capabilities.go
+ *  exactly (capabilities.test.ts holds them to it). */
 export const CAPABILITY_BUNDLES = {
   chat: [Capability.Chat],
   power: [
@@ -146,6 +147,7 @@ export const CAPABILITY_BUNDLES = {
     Capability.SkillCreate,
     Capability.CredentialCreate,
     Capability.CredentialRotate,
+    Capability.CredentialReveal,
     Capability.IssueCreate,
     Capability.MemoryWrite,
   ],

@@ -16,6 +16,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/missionactivity"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -25,11 +26,11 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 		return err
 	}
 	defer tx.Rollback()
-	var taskID, missionID string
+	var taskID, missionID, workspaceID string
 	var assignedAgentID sql.NullString
 	err = tx.QueryRowContext(ctx,
-		`SELECT id, mission_id, assigned_agent_id FROM mission_tasks WHERE assignment_id = ?`,
-		assignmentID).Scan(&taskID, &missionID, &assignedAgentID)
+		`SELECT t.id,t.mission_id,t.assigned_agent_id,m.workspace_id FROM mission_tasks t JOIN missions m ON m.id=t.mission_id WHERE t.assignment_id=?`,
+		assignmentID).Scan(&taskID, &missionID, &assignedAgentID, &workspaceID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil // assignment not linked to a mission task
@@ -172,37 +173,41 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 		}
 		if commentBody != "" {
 			commentID := "assignment-comment:" + assignmentID
-			_, err = tx.ExecContext(ctx,
-				`INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at) VALUES (?, ?, 'agent', ?, ?, ?, ?)`,
-				commentID, missionID, assignedAgentID.String, commentBody, now, now)
-			if err != nil {
-				return err
+			written, commentErr := writeAssignmentResultCommentTx(ctx, tx, assignmentID, workspaceID, missionID, assignedAgentID.String, commentID, commentBody, now)
+			if commentErr != nil {
+				if errors.Is(commentErr, runauthority.ErrUnavailable) || errors.Is(commentErr, runauthority.ErrIdentityMismatch) || errors.Is(commentErr, runauthority.ErrRequesterStale) {
+					e.logger.Warn("mission result comment withheld", "assignment_id", assignmentID, "error", commentErr)
+				} else {
+					return commentErr
+				}
 			}
-			// Activity log — through missionactivity.Emit, the one
-			// seq-allocating helper every mission_activity writer now goes
-			// through (PRD-ISSUES-AND-ROUTINES-2026 §9.1, #2332/B1), rather
-			// than a bare INSERT. This package cannot call the internal/api
-			// emitter directly (internal/api already imports
-			// internal/orchestrator, so the reverse import would cycle), so
-			// — unlike assignments_run.go's two sites, which moved onto that
-			// emitter — this one keeps writing the row itself and does not
-			// gain a journal entry or hub nudge; it only gains a race-free
-			// seq.
-			action := "task_completed"
-			if taskStatus == "FAILED" {
-				action = "task_failed"
-			} else if taskStatus == "AWAITING_APPROVAL" {
-				action = "commented"
-			}
-			if _, err := missionactivity.EmitTx(ctx, tx, missionactivity.Entry{
-				ID:        "assignment-activity:" + assignmentID,
-				MissionID: missionID,
-				ActorType: "agent",
-				ActorID:   assignedAgentID.String,
-				Action:    action,
-				Details:   commentBody,
-			}); err != nil {
-				return err
+			if written {
+				// Activity log — through missionactivity.Emit, the one
+				// seq-allocating helper every mission_activity writer now goes
+				// through (PRD-ISSUES-AND-ROUTINES-2026 §9.1, #2332/B1), rather
+				// than a bare INSERT. This package cannot call the internal/api
+				// emitter directly (internal/api already imports
+				// internal/orchestrator, so the reverse import would cycle), so
+				// — unlike assignments_run.go's two sites, which moved onto that
+				// emitter — this one keeps writing the row itself and does not
+				// gain a journal entry or hub nudge; it only gains a race-free
+				// seq.
+				action := "task_completed"
+				if taskStatus == "FAILED" {
+					action = "task_failed"
+				} else if taskStatus == "AWAITING_APPROVAL" {
+					action = "commented"
+				}
+				if _, err := missionactivity.EmitTx(ctx, tx, missionactivity.Entry{
+					ID:        "assignment-activity:" + assignmentID,
+					MissionID: missionID,
+					ActorType: "agent",
+					ActorID:   assignedAgentID.String,
+					Action:    action,
+					Details:   commentBody,
+				}); err != nil {
+					return err
+				}
 			}
 		}
 	}

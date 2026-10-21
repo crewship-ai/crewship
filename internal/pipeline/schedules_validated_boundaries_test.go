@@ -99,7 +99,8 @@ func TestStoredSchedulePresetValidatesPinnedVersionAndStorageErrors(t *testing.T
 		t.Fatal(err)
 	}
 	// Only the version identity and definition are needed by this read boundary.
-	if _, err := db.Exec(`DROP TABLE IF EXISTS pipeline_versions; CREATE TABLE pipeline_versions (pipeline_id TEXT,version INTEGER,definition_json TEXT); INSERT INTO pipeline_versions VALUES ('recipe',1,?)`, presetGateV1); err != nil {
+	if _, err := db.Exec(`DROP TABLE IF EXISTS pipeline_versions; CREATE TABLE pipeline_versions (
+chat_origin_id TEXT,pipeline_id TEXT,version INTEGER,definition_json TEXT); INSERT INTO pipeline_versions(pipeline_id,version,definition_json) VALUES ('recipe',1,?)`, presetGateV1); err != nil {
 		t.Fatal(err)
 	}
 	v := 1

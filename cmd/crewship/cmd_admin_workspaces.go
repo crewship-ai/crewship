@@ -31,9 +31,11 @@ import (
 
 // adminWorkspaceRow mirrors internal/api.AdminHandler.ListWorkspaces's wsRow.
 type adminWorkspaceRow struct {
-	ID          string `json:"id" yaml:"id"`
-	Name        string `json:"name" yaml:"name"`
-	Slug        string `json:"slug" yaml:"slug"`
+	ID   string `json:"id" yaml:"id"`
+	Name string `json:"name" yaml:"name"`
+	Slug string `json:"slug" yaml:"slug"`
+	// "team" or "personal" (created at sign-up); empty from an older server.
+	Kind        string `json:"kind,omitempty" yaml:"kind,omitempty"`
 	CreatedAt   string `json:"created_at" yaml:"created_at"`
 	UpdatedAt   string `json:"updated_at" yaml:"updated_at"`
 	MemberCount int    `json:"_count_members" yaml:"_count_members"`
@@ -86,7 +88,7 @@ Examples:
 
 		return resolvedFormatter(cmd).AutoHuman(rows, func() {
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "NAME\tSLUG\tMEMBERS\tAGENTS\tCREWS\tRUNS 7D\tSPEND 30D\tLAST ACTIVITY\tCREATED")
+			fmt.Fprintln(w, "NAME\tSLUG\tKIND\tMEMBERS\tAGENTS\tCREWS\tRUNS 7D\tSPEND 30D\tLAST ACTIVITY\tCREATED")
 			for _, r := range rows {
 				name := r.Name
 				if r.Current {
@@ -102,8 +104,12 @@ Examples:
 				if r.LastActivityAt != nil {
 					last = shortAdminTime(*r.LastActivityAt)
 				}
-				fmt.Fprintf(w, "%s\t%s\t%d\t%d\t%d\t%s\t%s\t%s\t%s\n",
-					name, r.Slug, r.MemberCount, r.AgentCount, r.CrewCount, runs, spend, last, r.CreatedAt)
+				kind := r.Kind
+				if kind == "" {
+					kind = "-"
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%d\t%d\t%s\t%s\t%s\t%s\n",
+					name, r.Slug, kind, r.MemberCount, r.AgentCount, r.CrewCount, runs, spend, last, r.CreatedAt)
 			}
 			_ = w.Flush()
 			if len(rows) == 0 {

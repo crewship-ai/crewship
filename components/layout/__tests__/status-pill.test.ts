@@ -127,3 +127,54 @@ describe("describeSystemStatus — what the tooltip may recite", () => {
     expect(describeSystemStatus("connected", "connected", null).fleetKnown).toBe(false)
   })
 })
+
+describe("describeSystemStatus — what the pill itself shows", () => {
+  // One message, one tone, the worst state winning. The pill used to print
+  // "Online · 1 error" — green and red inside one green capsule — so a broken
+  // agent read as a footnote to good news.
+  const cases: Array<{
+    name: string
+    engine: string
+    ws: string
+    crews: typeof OK | null
+    want: { label: string | null; tone: string; icon: string }
+  }> = [
+    { name: "healthy shrinks to the icon", engine: "connected", ws: "connected", crews: OK, want: { label: null, tone: "success", icon: "wifi" } },
+    { name: "healthy before counts arrive", engine: "connected", ws: "connected", crews: null, want: { label: null, tone: "success", icon: "wifi" } },
+    { name: "an error stands alone and names its subject", engine: "connected", ws: "connected", crews: { ...OK, error: 1 }, want: { label: "1 agent error", tone: "destructive", icon: "alert" } },
+    { name: "errors pluralise and cap", engine: "connected", ws: "connected", crews: { ...OK, error: 250 }, want: { label: "99+ agent errors", tone: "destructive", icon: "alert" } },
+    { name: "an error outranks a queue", engine: "connected", ws: "connected", crews: { ...OK, error: 2, queued: 9 }, want: { label: "2 agent errors", tone: "destructive", icon: "alert" } },
+    { name: "a queue", engine: "connected", ws: "connected", crews: { ...OK, queued: 3 }, want: { label: "3 queued", tone: "warn", icon: "queue" } },
+    { name: "no agents", engine: "connected", ws: "connected", crews: { ...OK, total: 0, idle: 0 }, want: { label: "No agents", tone: "muted", icon: "empty" } },
+    { name: "offline outranks every fleet message", engine: "offline", ws: "disconnected", crews: { ...OK, error: 4 }, want: { label: "Offline", tone: "destructive", icon: "wifi-off" } },
+    { name: "reconnecting", engine: "degraded", ws: "connected", crews: { ...OK, error: 4 }, want: { label: "Reconnecting", tone: "warn", icon: "wifi" } },
+    { name: "connecting", engine: "checking", ws: "connecting", crews: OK, want: { label: "Connecting", tone: "warn", icon: "wifi" } },
+  ]
+  for (const c of cases) {
+    it(c.name, () => {
+      expect(describeSystemStatus(c.engine, c.ws, c.crews).display).toEqual(c.want)
+    })
+  }
+})
+
+describe("describeSystemStatus — a restart does not turn the pill red (#3783)", () => {
+  it("says Reconnecting, in warn, while the realtime socket retries a drop", () => {
+    for (const engine of ["connected", "degraded", "disconnected"]) {
+      for (const reason of ["retrying", "restart"] as const) {
+        const s = describeSystemStatus(engine, "connecting", OK, reason)
+        expect(s.connection).toEqual({ label: "Reconnecting", tone: "warn" })
+        expect(s.display.tone).not.toBe("destructive")
+      }
+    }
+  })
+
+  it("keeps Connecting for the first connect", () => {
+    expect(describeSystemStatus("connected", "connecting", OK, null).connection.label).toBe("Connecting")
+  })
+
+  it("goes red only once Crewship cannot be reached", () => {
+    expect(describeSystemStatus("disconnected", "offline", OK, "unreachable").connection).toEqual({ label: "Offline", tone: "destructive" })
+    // The browser has no network: nothing is wrong with Crewship.
+    expect(describeSystemStatus("disconnected", "offline", OK, "browser-offline").connection).toEqual({ label: "Offline", tone: "warn" })
+  })
+})

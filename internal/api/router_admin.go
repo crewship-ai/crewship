@@ -86,6 +86,7 @@ func (r *Router) registerAdminRoutes() {
 	// instance admins. authedInstance: an instance admin, and no workspace in
 	// the request — they need not belong to what they manage.
 	inst := NewInstanceAdminHandler(r.db, r.logger, r.sessionsStore, r.Journal(), r.hub)
+	inst.streams = r.authMw.streams
 	// openapi: responses 201,400,401,403,404,409,500,503
 	r.authedInstance("POST", "/api/v1/admin/instance/people", inst.CreatePerson)
 	// openapi: responses 200,400,401,403,404,409,500
@@ -108,6 +109,8 @@ func (r *Router) registerAdminRoutes() {
 	r.authedInstance("POST", "/api/v1/admin/instance/workspaces", inst.CreateWorkspace)
 	// openapi: responses 200,400,401,403,404,409,500
 	r.authedInstance("POST", "/api/v1/admin/instance/workspaces/{workspaceId}/transfer-ownership", inst.TransferOwnership)
+	// openapi: responses 200,400,401,403,404,500
+	r.authedInstance("PATCH", "/api/v1/admin/instance/workspaces/{workspaceId}", inst.UpdateWorkspace)
 	// openapi: responses 204,400,401,403,404,500
 	r.authedInstance("DELETE", "/api/v1/admin/instance/workspaces/{workspaceId}", inst.DeleteWorkspace)
 	// openapi: responses 200,401,403,500
@@ -203,7 +206,7 @@ func (r *Router) registerAdminRoutes() {
 	// Master-key re-encryption (E1). Instance-wide walk of every stored
 	// AES-256-GCM envelope, re-encrypted to the current key version — the
 	// missing half of ENCRYPTION_KEY rotation (decrypt-old always worked;
-	// this moves rows forward so the old key can be retired). Mutation →
+	// this moves envelopes forward; audit root retention is separate). Mutation →
 	// roleManage, same gate as the other instance-scoped admin operations
 	// (backups, prune-legacy-resources).
 	reencryptH := NewReencryptHandler(r.db, r.logger)
@@ -419,6 +422,8 @@ func (r *Router) registerAdminRoutes() {
 	// Attachment blobs live under the same storage root AttachmentHandler
 	// writes to (attachments/<workspace>/<sha[:2]>/<sha>).
 	backupH.SetAttachmentRoot(r.storagePath)
+	backupH.SetTranscriptLock(r.transcriptLock)
+	backupH.SetTranscriptSnapshotLock(r.transcriptSnapshotLock)
 	backupH.pageProjectsPath = r.pageProjectsPath
 	// Wire the slug→container-name mapping from the active container
 	// provider so the backup runner uses the per-instance prefix
@@ -445,6 +450,7 @@ func (r *Router) registerAdminRoutes() {
 	svc := backupplan.New(r.db, r.logger)
 	svc.Workspace = &backupplan.WorkspaceExecutor{
 		DB: r.db, DockerOps: backupDockerOps, CrewContainerName: backupH.resolveCrewContainerName(),
+		LockTranscripts:  backupH.createTranscriptLock(),
 		ServiceSnapshots: r.instanceRecoveryConfig().ServiceSnapshots,
 		BlobRoot:         r.memoryVersionsBlobRoot, AttachmentRoot: r.storagePath, PageProjectsPath: r.pageProjectsPath,
 		CrewshipVersion: os.Getenv("CREWSHIP_VERSION"),

@@ -15,10 +15,8 @@ package backup_test
 //     (RestoreResult.CapabilityTokensReminted), because a webhook or
 //     public link that arrives revoked is a fact, not a footnote.
 //
-// workspace_invitations is the one token stored in the clear, so its
-// re-mint is FUNCTIONAL: the fork's admin re-reads the new link from
-// the invitation list. The digest-only tables arrive with a capability
-// nobody can present — deliberately; see remap_capability_tokens.go.
+// Invitation proofs are digest-only too. A newly forked pending invitation
+// requires explicit reissue; source rows and accepted history are unchanged.
 
 import (
 	"context"
@@ -148,6 +146,15 @@ func TestForkedRestore_CapabilityTokens(t *testing.T) {
 	workspaceID := seedWorkspace(t, source)
 	seedLiveMission(t, source, workspaceID)
 	seedRowPerBackupTable(t, source, workspaceID)
+	// Docs and Slides exclusive-content constraints require separate Page parents.
+	// Assert source coverage before restore so fixture omissions cannot look
+	// like lost capabilities on the fork.
+	for _, table := range []string{"documents", "slides_heads", "slides_revisions", "slides_receipts", "slides_object_ids", "page_panels", "page_webhooks"} {
+		var count int
+		if err := source.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table).Scan(&count); err != nil || count == 0 {
+			t.Fatalf("source fixture missing %s: count=%d err=%v", table, count, err)
+		}
+	}
 	fixture := seedCapabilityRows(t, source, workspaceID)
 
 	const passphrase = "fork-capability-pass-123"
@@ -177,8 +184,9 @@ func TestForkedRestore_CapabilityTokens(t *testing.T) {
 	}
 
 	assertNoFKViolations(t, source, "after capability-token fork")
+	assertForkedSlidesFixture(t, source, workspaceID, forkID)
 
-	// --- workspace_invitations: row lands, with a WORKING fresh token.
+	// --- workspace_invitations: row lands with a digest requiring explicit reissue.
 	forkInviteToken := queryStringValue(t, source,
 		`SELECT token FROM workspace_invitations WHERE workspace_id = ?`, forkID)
 	if forkInviteToken == "" {
@@ -187,11 +195,12 @@ func TestForkedRestore_CapabilityTokens(t *testing.T) {
 	if forkInviteToken == fixture.invitationToken {
 		t.Fatal("fork inherited the source's invitation token: the same invite link would join two workspaces")
 	}
-	if len(forkInviteToken) != 64 { // 32 bytes hex — the API's mint shape
-		t.Errorf("fork invitation token is %d chars, want the 64-hex API shape so the link is re-displayable", len(forkInviteToken))
+	if !strings.HasPrefix(forkInviteToken, "sha256:v1:") || len(forkInviteToken) != 74 {
+		t.Errorf("fork invitation proof is not a versioned digest")
 	}
-	// The token is the redeem lookup key: the fork's token resolves to
-	// the fork's row only, the source's to the source's only.
+
+	// Stored digest identity belongs only to the fork; it is not a bearer
+	// proof. The source stored value remains unchanged.
 	if got := queryStringValue(t, source,
 		`SELECT workspace_id FROM workspace_invitations WHERE token = ?`, forkInviteToken); got != forkID {
 		t.Errorf("fork invitation token resolves to workspace %q, want the fork %q", got, forkID)
@@ -379,7 +388,9 @@ func TestForkedRestore_CapabilityTokens(t *testing.T) {
 		var freshArgs []any
 		if c.table == "page_public_tokens" {
 			freshTable = "page_public_tokens"
-			freshInsert = `INSERT INTO page_public_tokens (id, page_id, token_hash, expires_at, created_by_user_id, created_at) SELECT 'pt_fresh', p.id, ?, datetime('now', '+30 days'), 'u_admin', ? FROM pages p WHERE p.workspace_id = ?`
+			// Reissue on the carried token's Page, not every Page in the fork;
+			// the document fixture contributes its own separate Page.
+			freshInsert = `INSERT INTO page_public_tokens (id, page_id, token_hash, expires_at, created_by_user_id, created_at) SELECT 'pt_fresh', p.id, ?, datetime('now', '+30 days'), 'u_admin', ? FROM pages p JOIN page_public_tokens prior ON prior.page_id=p.id WHERE p.workspace_id = ? LIMIT 1`
 			freshArgs = []any{freshDigest, time.Now().UTC().Format(time.RFC3339), forkID}
 		} else {
 			freshTable = "page_webhooks"

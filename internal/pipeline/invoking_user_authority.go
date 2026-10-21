@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/runauthority"
 )
 
 // ErrInvokingUserNotMember stops human-triggered work after membership
@@ -14,11 +16,25 @@ var ErrInvokingUserNotMember = errors.New("routine invoking user is no longer a 
 
 // checkInvokingUser uses the persisted trigger identity, including deferred,
 // resumed and nested runs. No cached authorization is carried across waits.
-// Unattended triggers have no human actor and retain their existing gates.
+// Unattended triggers additionally retain the live human author account gate.
 // Bare test executors may omit memberCheck; production always wires it.
 // Revocation stops subsequent dispatches, not an already running operation.
 func (e *Executor) checkInvokingUser(ctx context.Context, in RunInput) error {
-	if (in.InvokingUserID == "" && in.InvocationAuthority == "") || in.Mode == ModeDryRun {
+	if in.Mode == ModeDryRun {
+		return nil
+	}
+	if in.ChatOriginID != "" {
+		if e.store == nil || e.store.db == nil {
+			return runauthority.ErrUnavailable
+		}
+		if _, err := runauthority.ValidateOriginReceipt(ctx, e.store.db, in.ChatOriginID, in.WorkspaceID); err != nil {
+			return err
+		}
+	}
+	if in.InvokingUserID == "" && in.InvocationAuthority == "" {
+		if unattendedAccountTrigger(in.TriggeredVia) && e.invocationCheck != nil {
+			return e.invocationCheck(ctx, in)
+		}
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)

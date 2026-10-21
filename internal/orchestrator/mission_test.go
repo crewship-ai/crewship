@@ -31,7 +31,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 		CREATE TABLE agents (id TEXT PRIMARY KEY, workspace_id TEXT, crew_id TEXT, name TEXT, slug TEXT,
 			agent_role TEXT DEFAULT 'AGENT', lead_mode TEXT DEFAULT 'active', status TEXT DEFAULT 'IDLE',
 			deleted_at TEXT);
-		CREATE TABLE missions (planning_assignment_id TEXT, id TEXT PRIMARY KEY, workspace_id TEXT, crew_id TEXT, lead_agent_id TEXT,
+		CREATE TABLE missions (planning_assignment_id TEXT, id TEXT PRIMARY KEY, workspace_id TEXT, crew_id TEXT, lead_agent_id TEXT, chat_origin_id TEXT,
 			trace_id TEXT UNIQUE, title TEXT, description TEXT, status TEXT DEFAULT 'PLANNING',
 			plan TEXT, workflow_template TEXT, total_token_count INTEGER, total_estimated_cost REAL,
 			author_agent_id TEXT, created_by_user_id TEXT,
@@ -45,13 +45,13 @@ func setupTestDB(t *testing.T) *sql.DB {
 			confidence REAL, needs_review INTEGER DEFAULT 0, handoff_context TEXT,
 			evaluation_status TEXT, evaluation_notes TEXT,
 			approval_required INTEGER DEFAULT 0, approval_status TEXT, approved_by TEXT, approved_at TEXT);
-		CREATE TABLE assignments (id TEXT PRIMARY KEY, workspace_id TEXT, chat_id TEXT,
+		CREATE TABLE assignments (id TEXT PRIMARY KEY, workspace_id TEXT, chat_id TEXT, chat_origin_id TEXT,
 			assigned_by_id TEXT, assigned_to_id TEXT, task TEXT, status TEXT DEFAULT 'PENDING',
 			started_at TEXT, finished_at TEXT, result_summary TEXT, error_message TEXT, outcome TEXT,
 			group_id TEXT, created_at TEXT,
 			depth INTEGER NOT NULL DEFAULT 0, parent_assignment_id TEXT, mission_id TEXT,
 			author_agent_id TEXT, created_by_user_id TEXT, lead_planning INTEGER NOT NULL DEFAULT 0, session_id TEXT);
-		CREATE TABLE mission_comments (id TEXT PRIMARY KEY, mission_id TEXT, author_type TEXT, author_id TEXT, body TEXT, created_at TEXT, updated_at TEXT);
+		CREATE TABLE mission_comments (id TEXT PRIMARY KEY, mission_id TEXT, author_type TEXT, chat_origin_id TEXT, author_id TEXT, body TEXT, created_at TEXT, updated_at TEXT);
 		CREATE TABLE mission_activity (id TEXT PRIMARY KEY, mission_id TEXT, actor_type TEXT, actor_id TEXT, action TEXT, details TEXT, created_at TEXT, workspace_id TEXT, seq INTEGER, payload_json TEXT, source_kind TEXT, source_id TEXT);
 		CREATE TABLE chats (id TEXT PRIMARY KEY, agent_id TEXT, workspace_id TEXT,
 			title TEXT, mode TEXT, status TEXT, started_at TEXT, created_at TEXT, updated_at TEXT);

@@ -27,9 +27,10 @@ func setupMemoryServer(t *testing.T) (*Server, string) {
 		Addr:   "127.0.0.1:0",
 		Logger: slog.Default(),
 		Memory: &MemoryConfig{
-			Enabled:   true,
-			BasePath:  dir,
-			AgentSlug: "test-agent",
+			Enabled:            true,
+			BasePath:           dir,
+			TrustedStorageRoot: filepath.Dir(t.TempDir()),
+			AgentSlug:          "test-agent",
 		},
 	})
 
@@ -300,11 +301,12 @@ func setupMemoryServerWithCrew(t *testing.T) (*Server, string, string) {
 		Addr:   "127.0.0.1:0",
 		Logger: slog.Default(),
 		Memory: &MemoryConfig{
-			Enabled:        true,
-			BasePath:       agentDir,
-			AgentSlug:      "lead",
-			AgentRole:      "lead",
-			CrewMemoryPath: crewDir,
+			Enabled:            true,
+			BasePath:           agentDir,
+			TrustedStorageRoot: filepath.Dir(t.TempDir()),
+			AgentSlug:          "lead",
+			AgentRole:          "lead",
+			CrewMemoryPath:     crewDir,
 		},
 	})
 
@@ -530,11 +532,12 @@ func TestNewServer_CrewMemoryInitForLead(t *testing.T) {
 		Addr:   "127.0.0.1:0",
 		Logger: slog.Default(),
 		Memory: &MemoryConfig{
-			Enabled:        true,
-			BasePath:       t.TempDir(),
-			AgentSlug:      "lead",
-			AgentRole:      "lead",
-			CrewMemoryPath: crewDir,
+			Enabled:            true,
+			BasePath:           t.TempDir(),
+			TrustedStorageRoot: filepath.Dir(t.TempDir()),
+			AgentSlug:          "lead",
+			AgentRole:          "lead",
+			CrewMemoryPath:     crewDir,
 		},
 	})
 
@@ -554,11 +557,12 @@ func TestNewServer_CrewMemoryNotInitForAgent(t *testing.T) {
 		Addr:   "127.0.0.1:0",
 		Logger: slog.Default(),
 		Memory: &MemoryConfig{
-			Enabled:        true,
-			BasePath:       t.TempDir(),
-			AgentSlug:      "worker",
-			AgentRole:      "agent",
-			CrewMemoryPath: t.TempDir(),
+			Enabled:            true,
+			BasePath:           t.TempDir(),
+			TrustedStorageRoot: filepath.Dir(t.TempDir()),
+			AgentSlug:          "worker",
+			AgentRole:          "agent",
+			CrewMemoryPath:     t.TempDir(),
 		},
 	})
 
@@ -580,9 +584,10 @@ func TestNewServer_MemoryInitialization(t *testing.T) {
 			Addr:   "127.0.0.1:0",
 			Logger: slog.Default(),
 			Memory: &MemoryConfig{
-				Enabled:   true,
-				BasePath:  dir,
-				AgentSlug: "test",
+				Enabled:            true,
+				BasePath:           dir,
+				TrustedStorageRoot: filepath.Dir(t.TempDir()),
+				AgentSlug:          "test",
 			},
 		})
 

@@ -112,8 +112,12 @@ bookkeeping is skipped).`,
 		// misleading "[ ]" / "0→0 tok".
 		if res.Adapter != "" || res.Model != "" {
 			fmt.Printf("Step %s (%s) → %s  [%s %s]\n", res.StepID, res.StepType, verdict, res.Adapter, res.Model)
-			fmt.Printf("  cost $%.4f · %d→%d tok · %dms · live execution (no run record)\n",
-				res.CostUSD, res.TokensIn, res.TokensOut, res.DurationMs)
+			cost := ""
+			if res.CostUSD != nil {
+				cost = fmt.Sprintf("cost $%.4f · ", *res.CostUSD)
+			}
+			fmt.Printf("  %s%d→%d tok · %dms · live execution (no run record)\n",
+				cost, res.TokensIn, res.TokensOut, res.DurationMs)
 		} else {
 			fmt.Printf("Step %s (%s) → %s\n", res.StepID, res.StepType, verdict)
 			fmt.Printf("  %dms · live execution (no run record)\n", res.DurationMs)

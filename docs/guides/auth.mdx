@@ -142,7 +142,9 @@ crewship workspace member invite them@example.com --role MEMBER
 They keep the same user account throughout — only the membership row is recreated.
 </Warning>
 
-Requires **ADMIN** or **OWNER**. The link's origin is derived from the request, so a default install needs no configuration. Set `CREWSHIP_PUBLIC_URL` only when Crewship sits behind a proxy that rewrites the host — then it pins the externally reachable URL instead.
+Requires **ADMIN** or **OWNER**. Only an **OWNER** may provision an account with the **ADMIN** role, matching invitation and membership role assignment. An **ADMIN** may provision MANAGER, MEMBER and VIEWER accounts. A refused ADMIN assignment creates no account, membership or setup link and preserves an existing account's setup link.
+
+The link's origin is derived from the request, so a default install needs no configuration. Set `CREWSHIP_PUBLIC_URL` only when Crewship sits behind a proxy that rewrites the host — then it pins the externally reachable URL instead.
 
 <Note>
 This is the one place the origin is *not* taken from `CREWSHIP_PUBLIC_URL` first, which is worth explaining because [the rule stated in the overview](#overview) is otherwise absolute.
@@ -155,8 +157,12 @@ Once a mailer is configured, the same action can also email the link. The copyab
 </Note>
 
 <Warning>
-`crewship workspace invite` is a different, older command: it records an invitation row but sends nothing, because no mailer is wired to it. Use `workspace member invite` above to actually get someone in.
+`crewship workspace invite <email>` records a pending invitation and prints a link for the intended recipient; it sends no email. Save that creation response: invitation listing contains metadata only, without the redemption token. If the link is lost or expired, a current authorized issuer can run `workspace invite reissue <invitation-id>`; `workspace invite revoke <invitation-id>` withdraws it. The recipient opens `/join#invitation_token=…`, signs in with the invited email, and explicitly accepts. A new user can choose Create an account; signup presents the same token and joins only its matching workspace. Ordinary signup without a token creates its own workspace.
+
+Existing accounts may also run `crewship workspace invite accept --token-stdin` with an unrestricted credential. This does not require an active workspace. A successful same-account retry changes no membership or role. Wrong-account, expired, withdrawn or unavailable invitations do not create membership. Signup keeps its generic `202` response and never reveals whether an account exists. `workspace member invite` remains the separate direct provisioning/setup-link flow above.
 </Warning>
+
+Invitation upgrade and downgrade precautions are documented in [Upgrades → Rollback / downgrade](/guides/upgrades#rollback-/-downgrade). A binary rollback alone does not restore withdrawn legacy invitation links.
 
 ### 7. Mint a CLI token (for scripts / CI)
 

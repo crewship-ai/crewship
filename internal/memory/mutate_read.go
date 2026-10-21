@@ -104,21 +104,50 @@ type Provenance struct {
 // the first write's base hash will be, so a client can CAS against "not there
 // yet" the same way it CASes against any other state.
 func ReadCanonical(ctx context.Context, db *sql.DB, req ReadRequest) (ReadResult, error) {
-	if ctx == nil {
-		ctx = context.Background()
+	ctx, err := prepareCanonicalRead(ctx, req)
+	if err != nil {
+		return ReadResult{}, err
 	}
-	if strings.TrimSpace(req.Path) == "" {
-		return ReadResult{}, fmt.Errorf("read: path required")
-	}
-	if strings.TrimSpace(req.AuditPath) == "" {
-		return ReadResult{}, fmt.Errorf("read: audit_path required")
-	}
-
 	file, err := openMutationFile(req.StorageRoot, req.Path, false)
 	if err != nil {
 		return ReadResult{}, fmt.Errorf("open canonical parent: %w", err)
 	}
+	return readCanonicalOpened(ctx, db, req, file)
+}
+
+// ReadCanonicalRooted cannot reach the trusted legacy pathname reader.
+func ReadCanonicalRooted(ctx context.Context, db *sql.DB, req ReadRequest) (ReadResult, error) {
+	if req.StorageRoot == "" {
+		return ReadResult{}, fmt.Errorf("memory read requires a storage root")
+	}
+	ctx, err := prepareCanonicalRead(ctx, req)
+	if err != nil {
+		return ReadResult{}, err
+	}
+	file, err := openRootedMutationFile(req.StorageRoot, req.Path, false)
+	if err != nil {
+		return ReadResult{}, fmt.Errorf("open canonical parent: %w", err)
+	}
+	return readCanonicalOpened(ctx, db, req, file)
+}
+
+func prepareCanonicalRead(ctx context.Context, req ReadRequest) (context.Context, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if strings.TrimSpace(req.Path) == "" {
+		return ctx, fmt.Errorf("read: path required")
+	}
+	if strings.TrimSpace(req.AuditPath) == "" {
+		return ctx, fmt.Errorf("read: audit_path required")
+	}
+
+	return ctx, nil
+}
+
+func readCanonicalOpened(ctx context.Context, db *sql.DB, req ReadRequest, file *mutationFile) (ReadResult, error) {
 	defer file.close()
+
 	content, err := file.read()
 	exists := true
 	if errors.Is(err, os.ErrNotExist) {

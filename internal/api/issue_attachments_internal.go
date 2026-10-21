@@ -350,11 +350,7 @@ func (h *InternalAttachmentHandler) Attach(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if created {
-		actorType, actorID := "agent", agentID
-		if actorID == "" {
-			actorType = "system"
-		}
-		h.pub.recordAttachmentEvent(r, missionID, req.WorkspaceID, actorType, actorID, actionAttachmentAdded, att)
+		h.pub.publishAttachmentMutation(missionID, req.WorkspaceID)
 		writeJSON(w, http.StatusCreated, toAgentAttachment(att))
 		return
 	}

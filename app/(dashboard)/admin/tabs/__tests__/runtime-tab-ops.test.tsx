@@ -18,6 +18,7 @@ const ok = (body: unknown, status = 200) => ({ ok: status < 400, status, json: a
 let legacyPresent = false
 let logPutFails = false
 const LOG = { level: "info", baseline: "info" }
+let AUDIT: unknown[] = []
 
 function routes(url: string, init?: RequestInit) {
   const u = String(url)
@@ -31,6 +32,7 @@ function routes(url: string, init?: RequestInit) {
     }
     return ok(LOG)
   }
+  if (u.startsWith("/api/v1/admin/instance/audit?entity_id=log-level")) return ok(AUDIT)
   if (u.startsWith("/api/v1/admin/legacy-resources")) return ok({ present: legacyPresent })
   if (u.startsWith("/api/v1/admin/reap-orphan-containers")) {
     const apply = u.includes("apply=true")
@@ -48,6 +50,7 @@ beforeEach(() => {
   cleanup()
   legacyPresent = false
   logPutFails = false
+  AUDIT = []
   vi.mocked(toast.error).mockReset()
   h.apiFetch.mockReset()
   h.apiFetch.mockImplementation(async (u: string, init?: RequestInit) => routes(u, init))
@@ -67,16 +70,15 @@ function renderTab() {
 const calls = (pred: (u: string, init?: RequestInit) => boolean) =>
   h.apiFetch.mock.calls.filter(([u, init]) => pred(String(u), init as RequestInit | undefined))
 
-describe("Runtime — summary", () => {
-  it("says in one line what runs the agents, the daemon, agents and the log level", async () => {
+describe("Runtime — strip", () => {
+  it("shows the runtime, the daemon, agents and the log level as four figures", async () => {
     renderTab()
-    const line = document.querySelector("[data-slot=runtime-summary]") as HTMLElement
-    expect(line).toHaveTextContent("Docker 29.3.0 in use")
-    await waitFor(() => expect(line).toHaveTextContent("Daemon healthy · up 1h 2m"))
-    expect(line).toHaveTextContent("3 running · 13 idle · 1 queued")
-    expect(line).toHaveTextContent("Log info")
-    // The figures row is gone: one line, not four tiles.
-    expect(document.querySelector("[data-slot=admin-kpi]")).toBeNull()
+    const strip = screen.getByRole("list", { name: "Runtime at a glance" })
+    const item = (slot: string) => strip.querySelector(`[data-strip=${slot}]`) as HTMLElement
+    expect(item("runtime")).toHaveTextContent("Docker 29.3.0")
+    await waitFor(() => expect(item("daemon")).toHaveTextContent("healthy · up 1h 2m"))
+    expect(item("agents")).toHaveTextContent("3 running · 13 idle · 1 queued")
+    expect(item("log")).toHaveTextContent("info")
   })
 })
 
@@ -98,6 +100,24 @@ describe("Runtime — logging", () => {
     await waitFor(() => expect(calls((u, i) => u.startsWith("/api/v1/admin/log-level") && i?.method === "PUT")).toHaveLength(2))
     const [, back] = calls((u, i) => u.startsWith("/api/v1/admin/log-level") && i?.method === "PUT")[1]
     expect(JSON.parse(String(back!.body))).toEqual({ level: "info", ttl_seconds: 0 })
+  })
+
+  it("offers a duration only away from the baseline, and says who changed the level", async () => {
+    AUDIT = [
+      { id: "a2", user_email: null, action: "instance.log_level_reverted", metadata: JSON.stringify({ from: "error", to: "info" }), created_at: "2026-10-13T11:18:58Z" },
+      { id: "a1", user_email: "demo@crewship.ai", action: "instance.log_level_changed", metadata: JSON.stringify({ from: "info", to: "error", ttl_seconds: 3600 }), created_at: "2026-10-13T10:18:58Z" },
+    ]
+    renderTab()
+    await waitFor(() => expect(document.querySelector("[data-slot=log-current]")).not.toBeNull())
+    expect(document.querySelector("[data-slot=log-current]")).toHaveTextContent("CREWSHIP_LOG_LEVEL")
+    // At the baseline there is nothing to drop back from.
+    expect(screen.getByRole("button", { name: "1 hour" })).toBeDisabled()
+    fireEvent.click(screen.getByRole("button", { name: "warn" }))
+    expect(screen.getByRole("button", { name: "1 hour" })).toBeEnabled()
+    const history = await waitFor(() => { const el = document.querySelector("[data-slot=log-history]"); if (!el) throw new Error("no history"); return el })
+    expect(history).toHaveTextContent("info → error for 1 hour")
+    expect(history).toHaveTextContent("demo@crewship.ai")
+    expect(history).toHaveTextContent("error → info · time ran out · the server")
   })
 
   it("shows nothing to save until a level is picked, and Discard drops the pick", async () => {
@@ -125,7 +145,7 @@ describe("Runtime — logging", () => {
 })
 
 describe("Runtime — maintenance", () => {
-  it("checks for orphaned containers first and removes them only when asked", async () => {
+  it("checks for orphaned containers first and removes them only after the confirmation", async () => {
     renderTab()
     fireEvent.click(screen.getByRole("button", { name: "Check" }))
     const remove = await screen.findByRole("button", { name: "Remove 1" })
@@ -134,6 +154,11 @@ describe("Runtime — maintenance", () => {
     expect(first[0][0]).not.toContain("apply=true")
     expect(first[0][1]).toMatchObject({ method: "POST" })
     fireEvent.click(remove)
+    // Asks first, and says what stays.
+    const dialog = await screen.findByRole("alertdialog", { name: "Remove 1 orphaned container?" })
+    expect(dialog).toHaveTextContent("Volumes and images stay")
+    expect(calls((u) => u.includes("reap-orphan-containers?apply=true"))).toHaveLength(0)
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove 1" }))
     await waitFor(() => expect(calls((u) => u.includes("reap-orphan-containers?apply=true"))).toHaveLength(1))
     expect(await screen.findByText(/Removed 1 of 1 orphaned container/)).toBeInTheDocument()
   })
@@ -148,18 +173,30 @@ describe("Runtime — maintenance", () => {
     expect(await screen.findByTestId("legacy-remove")).toBeInTheDocument()
   })
 
-  it("removes every crew runtime from the Danger zone, only after the word is typed", async () => {
+  it("remove every runtime needs typed phrase, dialog stays open on error", async () => {
+    let fail = true
+    h.apiFetch.mockImplementation(async (u: string, init?: RequestInit) =>
+      String(u).startsWith("/api/v1/admin/prune-crew-runtimes") && fail
+        ? { ok: false, status: 500, json: async () => ({ error: "docker is busy" }), text: async () => JSON.stringify({ error: "docker is busy" }) }
+        : routes(u, init))
     renderTab()
     const zone = screen.getByRole("region", { name: "Danger zone" })
-    fireEvent.click(within(zone).getByRole("button", { name: /remove runtimes/i }))
-    const go = within(zone).getByRole("button", { name: "Remove every runtime" })
+    fireEvent.click(within(zone).getByRole("button", { name: "Remove every runtime…" }))
+    const dialog = await screen.findByRole("alertdialog", { name: "Remove every crew runtime?" })
+    const go = within(dialog).getByRole("button", { name: "Remove every runtime" })
     expect(go).toBeDisabled()
-    fireEvent.change(within(zone).getByLabelText(/type/i), { target: { value: "remov" } })
+    fireEvent.change(within(dialog).getByLabelText(/type/i), { target: { value: "remov" } })
     expect(go).toBeDisabled()
-    fireEvent.change(within(zone).getByLabelText(/type/i), { target: { value: "remove" } })
+    fireEvent.change(within(dialog).getByLabelText(/type/i), { target: { value: "remove" } })
     expect(go).toBeEnabled()
     fireEvent.click(go)
     await waitFor(() => expect(calls((u, i) => u.startsWith("/api/v1/admin/prune-crew-runtimes") && i?.method === "POST")).toHaveLength(1))
+    // Refused: the dialog stays where it was, with the reason in a toast.
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
+    expect(screen.getByRole("alertdialog", { name: "Remove every crew runtime?" })).toBeInTheDocument()
+    fail = false
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove every runtime" }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
     expect(await screen.findByText(/Removed the runtime of 2 crews/)).toBeInTheDocument()
   })
 

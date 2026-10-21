@@ -26,6 +26,7 @@
 // beta budget is a crash-only signal, not a session-replay quota burn.
 
 import * as Sentry from "@sentry/nextjs"
+import { crashDataCollection } from "./lib/sentry-data-collection"
 
 // Narrow shape for the legacy `modules` field that some Sentry
 // integrations still attach to events but is not part of the
@@ -66,6 +67,12 @@ export function scrubEvent(event: Sentry.ErrorEvent): Sentry.ErrorEvent {
   // Never identify the user. Even an IP address gleaned from request
   // metadata is more than we want to ship for a v0.1 beta.
   event.user = undefined
+
+  // HttpContext can still attach the current page URL in Sentry 11 even
+  // with dataCollection.urlQueryParams disabled. Drop browser request
+  // metadata at the final boundary so URL tokens and other request data
+  // cannot escape through that integration.
+  event.request = undefined
 
   // Modules is the bundled-deps list — not strictly PII but reveals the
   // customer's exact JS toolchain inventory. Release tag covers the same
@@ -124,6 +131,7 @@ void (async () => {
 
   Sentry.init({
     dsn: DSN,
+    dataCollection: crashDataCollection,
     release: process.env.NEXT_PUBLIC_CREWSHIP_VERSION || undefined,
     environment: classifyEnv(process.env.NEXT_PUBLIC_CREWSHIP_VERSION ?? ""),
 
@@ -155,6 +163,7 @@ void (async () => {
         return ![
           "Modules", // dependency list shipping → scrubbed anyway
           "ContextLines", // local source context (paths can carry usernames)
+          "BrowserSession", // release-health sessions are outside crash-only reporting
         ].includes(integration.name)
       }),
 

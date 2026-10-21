@@ -240,7 +240,9 @@ describe("submitCrew — browse (template) mode", () => {
   it("stores avatar renders for the agents the template created", async () => {
     fetcher.queueResponse({ ok: true, body: { crew_id: "crew_42", crew_name: "Engineering", crew_slug: "engineering" } })
     fetcher.queueResponse({ ok: true, body: {} }) // PATCH
-    fetcher.queueResponse({ ok: true, body: [{ id: "ag_1", slug: "lead" }, { id: "ag_2", slug: "dev", avatar_url: "/stored" }] })
+    // ag_3 has no style, so it draws the default, Voxel Bot, which is always
+    // drawn live and never stored (#3789).
+    fetcher.queueResponse({ ok: true, body: [{ id: "ag_1", slug: "lead", avatar_style: "lorelei" }, { id: "ag_2", slug: "dev", avatar_url: "/stored" }, { id: "ag_3", slug: "qa" }] })
     fetcher.queueResponse({ ok: true, body: { avatar_url: "/x" } }) // PUT
 
     await submitCrew(WS, fullState({ mode: "browse", pickedTemplateSlug: "software-development" }))

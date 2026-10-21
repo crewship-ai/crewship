@@ -45,7 +45,7 @@ func TestRunSeedCov2_NukeWithExtras(t *testing.T) {
 	s := covSeedStub(t)
 	// Workspace identity + entity lists consumed by confirmNuke + seedNuke.
 	s.OnGet("/api/v1/workspaces", clitest.JSONResponse(200, []map[string]string{
-		{"id": covSeedWSID, "name": "Demo", "slug": "demo"},
+		{"id": covSeedWSID, "name": "Demo", "slug": "demo", "currentUserRole": "OWNER"},
 	}))
 	empty := clitest.JSONResponse(200, []map[string]string{})
 	for _, p := range []string{
@@ -128,8 +128,8 @@ func TestRunSeedCov2_NukeWithExtras(t *testing.T) {
 	}
 	// --with-users placed the whole fixture: one signup per demo user, and
 	// the credential table printed for each.
-	if n := len(s.CallsFor("POST", "/api/v1/workspaces/"+covSeedWSID+"/members/provision")); n != len(demoUsers) {
-		t.Errorf("signups = %d, want %d", n, len(demoUsers))
+	if n := len(s.CallsFor("POST", "/api/v1/workspaces/"+covSeedWSID+"/members/provision")); n != len(demoUsers)+len(demoCapabilityUsers()) {
+		t.Errorf("signups = %d, want %d", n, len(demoUsers)+len(demoCapabilityUsers()))
 	}
 	for _, u := range demoUsers {
 		if !strings.Contains(out, u.Email) {
@@ -310,7 +310,7 @@ func TestRunSeedCov2_AsyncTriggerErrorIsNonFatal(t *testing.T) {
 func TestRunSeedCov2_NukeFailureAborts(t *testing.T) {
 	s := covSeedStub(t)
 	s.OnGet("/api/v1/workspaces", clitest.JSONResponse(200, []map[string]string{
-		{"id": covSeedWSID, "name": "Demo", "slug": "demo"},
+		{"id": covSeedWSID, "name": "Demo", "slug": "demo", "currentUserRole": "OWNER"},
 	}))
 	// GET /api/v1/issues (and the other nuke lists) fall through to the
 	// fallback OBJECT body, which fails the []item decode → failures.
@@ -496,6 +496,29 @@ func TestSeedBootstrapCov2_ForwardsSetupToken(t *testing.T) {
 	}
 }
 
+// A fresh bootstrap names the demo workspace after a company, not after its
+// owner, so it does not read as someone's personal account.
+func TestSeedBootstrapCov2_FreshNamesTheDemoWorkspace(t *testing.T) {
+	saveCLIState(t)
+	covSeedEnv(t)
+	s := clitest.NewStubServer()
+	defer s.Close()
+	s.OnPost("/api/v1/bootstrap", clitest.JSONResponse(201, map[string]string{
+		"user_id": covSeedUserID, "workspace_id": covSeedWSID, "cli_token": "tok-x",
+	}))
+	s.OnPatch("/api/v1/workspaces/"+covSeedWSID, clitest.JSONResponse(200, map[string]string{"id": covSeedWSID, "name": "Acme Company"}))
+	flagServer = s.URL()
+	cliCfg = &cli.CLIConfig{}
+
+	if _, _, err := seedBootstrap(context.Background(), "pw"); err != nil {
+		t.Fatalf("seedBootstrap: %v", err)
+	}
+	calls := s.CallsFor("PATCH", "/api/v1/workspaces/"+covSeedWSID)
+	if len(calls) != 1 || !strings.Contains(string(calls[0].Body), `"name":"Acme Company"`) {
+		t.Errorf("rename calls = %+v, want one naming Acme Company", calls)
+	}
+}
+
 func TestSeedBootstrapCov2_FreshButBadJSON(t *testing.T) {
 	saveCLIState(t)
 	covSeedEnv(t)
@@ -600,5 +623,23 @@ func TestPostBootstrapCov2_InvalidServerURL(t *testing.T) {
 	_, err := postBootstrap(context.Background(), "http://\x7f", "", map[string]string{})
 	if err == nil {
 		t.Error("want request construction error for invalid URL; got nil")
+	}
+}
+
+func TestRunSeedCov2_RBACAdminRefusedBeforeNuke(t *testing.T) {
+	s := covSeedStub(t)
+	s.OnGet("/api/v1/workspaces", clitest.JSONResponse(200, []map[string]string{{"id": covSeedWSID, "name": "Demo", "slug": "demo", "currentUserRole": "ADMIN"}}))
+	covSetupRunSeed(t, s)
+	covSetFlag(t, seedCmd, "with-users", "true")
+	covSetFlag(t, seedCmd, "nuke", "true")
+	covSetFlag(t, seedCmd, "yes", "true")
+	_, err := covCaptureStdout(t, func() error { return seedCmd.RunE(seedCmd, nil) })
+	if err == nil || !strings.Contains(err.Error(), "OWNER") {
+		t.Fatalf("ADMIN RBAC seed should require OWNER, got %v", err)
+	}
+	for _, call := range s.Calls() {
+		if call.Method == "DELETE" || call.Path == "/api/v1/admin/prune-crew-runtimes" || call.Path == "/api/v1/workspaces/"+covSeedWSID+"/members/provision" {
+			t.Fatalf("refused caller started cleanup/provisioning: %s %s", call.Method, call.Path)
+		}
 	}
 }

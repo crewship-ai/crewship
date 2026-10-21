@@ -70,6 +70,9 @@ type restoreChecksView struct {
 		OK       bool     `json:"ok" yaml:"ok"`
 		Detail   string   `json:"detail" yaml:"detail"`
 		Warnings []string `json:"warnings" yaml:"warnings"`
+		// Crews of the archive compared with this server's image today.
+		ImagesChecked int `json:"images_checked" yaml:"images_checked"`
+		ImagesOlder   int `json:"images_older" yaml:"images_older"`
 	} `json:"runtime" yaml:"runtime"`
 	Unsafe    []string `json:"unsafe" yaml:"unsafe"`
 	Conflicts struct {
@@ -306,6 +309,9 @@ restore applies.`,
 			fmt.Fprintf(w, "%s runtime    %s\n", mark(out.Runtime.OK), out.Runtime.Detail)
 			for _, x := range out.Runtime.Warnings {
 				fmt.Fprintf(w, "     warning    %s\n", x)
+			}
+			if out.Runtime.ImagesChecked > 0 {
+				fmt.Fprintf(w, "     images     %d of %d crews were built on an older image than this server's\n", out.Runtime.ImagesOlder, out.Runtime.ImagesChecked)
 			}
 			for _, e := range out.Environments {
 				fmt.Fprintf(w, "     environment %s: %s — %s\n", e.Crew, e.Action, e.Detail)

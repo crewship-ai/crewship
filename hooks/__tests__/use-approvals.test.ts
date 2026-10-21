@@ -163,6 +163,35 @@ describe("useApprovals", () => {
     expect(fetchMock).toHaveBeenCalledTimes(4)
   })
 
+  it("stops paging when a page claims has_more but repeats rows already loaded", async () => {
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>
+    // Bounded so a regression fails the assertion rather than hanging.
+    for (let i = 0; i < 20; i++) {
+      fetchMock.mockResolvedValueOnce(okJSON(listBody([sampleRow], { has_more: true })))
+    }
+    fetchMock.mockResolvedValue(okJSON(listBody([], { has_more: false })))
+
+    const { result } = renderHook(() => useApprovals({ status: "all", pollMs: 0, loadAll: true }))
+    await vi.waitFor(() => expect(result.current.loading).toBe(false))
+
+    expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(2)
+    expect(result.current.rows.map((r) => r.id)).toEqual(["appr_1"])
+  })
+
+  it("stops paging when a page claims has_more but is empty", async () => {
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>
+    fetchMock.mockResolvedValueOnce(okJSON(listBody([sampleRow], { has_more: true })))
+    for (let i = 0; i < 20; i++) {
+      fetchMock.mockResolvedValueOnce(okJSON(listBody([], { has_more: true })))
+    }
+    fetchMock.mockResolvedValue(okJSON(listBody([], { has_more: false })))
+
+    const { result } = renderHook(() => useApprovals({ status: "all", pollMs: 0, loadAll: true }))
+    await vi.waitFor(() => expect(result.current.loading).toBe(false))
+
+    expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(2)
+  })
+
   it("walks all approval history pages when loadAll is enabled", async () => {
     const fetchMock = global.fetch as ReturnType<typeof vi.fn>
     fetchMock

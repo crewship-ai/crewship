@@ -99,3 +99,17 @@ export function facetCounts(events: ActivityEvent[], filters: AuditFilters, boun
   }
   return out
 }
+
+/**
+ * How loud an event is, on the Crew Journal's scale, so the Audit log's chart
+ * stacks like the Journal's: a failed run is an error, a deletion or a
+ * revocation a warning, any other change a notice, and runs that finished,
+ * reads and file access are info.
+ */
+export function auditSeverity(action: string): "info" | "notice" | "warn" | "error" {
+  const a = action.toLowerCase()
+  if (a.endsWith(".failed") || a.includes(".denied")) return "error"
+  if (/\.(delete|deleted|remove|removed|revoke|revoked|purge|purged)\b/.test(a)) return "warn"
+  if (a.endsWith(".completed") || a.includes(".read") || a.includes("file_access") || a.includes(".viewed")) return "info"
+  return "notice"
+}

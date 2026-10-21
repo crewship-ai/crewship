@@ -1,3 +1,5 @@
+import { assertWorkspaceRequest, captureWorkspaceRequest, workspaceFetch, WorkspaceUnavailableError } from "./workspace-availability"
+
 /**
  * fetch wrapper with exponential-backoff retry for transient *gateway*
  * hiccups (502/503/504). 429 is intentionally NOT retried — when the
@@ -32,6 +34,7 @@ export async function fetchWithRetry(
       ? requestedRetries
       : 0
   const baseDelay = init?.baseDelayMs ?? 250
+  const workspaceRequest = captureWorkspaceRequest(input, init)
   let lastError: unknown
 
   // For non-replayable bodies (ReadableStream / Request with body) we
@@ -46,6 +49,7 @@ export async function fetchWithRetry(
   const replayable = bodyIsReplayable(init?.body) && inputIsReplayable(input)
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
+      assertWorkspaceRequest(workspaceRequest)
       let res: Response
       if (replayable) {
         // Lazy import keeps this module free of a `lib/api-fetch` cycle
@@ -53,7 +57,7 @@ export async function fetchWithRetry(
         const { apiFetch } = await import("./api-fetch")
         res = await apiFetch(input, init)
       } else {
-        res = await fetch(input, init)
+        res = await workspaceFetch(input, init)
       }
       if (res.ok) return res
       // Only retry true gateway flaps. 429 means "stop calling me" —
@@ -70,6 +74,7 @@ export async function fetchWithRetry(
         : baseDelay * Math.pow(2, attempt) + Math.random() * 100
       await sleep(backoff)
     } catch (err) {
+      if (err instanceof WorkspaceUnavailableError) throw err
       lastError = err
       if ((err as { name?: string })?.name === "AbortError") throw err
       if (attempt === retries) throw err

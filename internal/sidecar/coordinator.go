@@ -238,6 +238,9 @@ func (s *Server) proxyToAPIFiltered(
 		return
 	}
 	req.Header.Set("X-Internal-Token", s.ipc.Token)
+	if token := routineSourceToken(ctx); token != "" {
+		req.Header.Set("X-Crewship-Run-Token", token)
+	}
 	if bodyReader != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

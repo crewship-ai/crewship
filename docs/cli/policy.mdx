@@ -10,6 +10,16 @@ tag: Experimental
 
 Manage per-crew autonomy and behavior-mode policy.
 
+`crewship policy set --crew sandbox --level guided --whole-run-approval` opts
+that crew into the existing whole-run `agent_run` gate. Use
+`--whole-run-approval=false` with `--level` to disable it. Omitting the flag
+preserves the saved setting. `get` and JSON `list` include `whole_run_approval`.
+The default is false; strict/guided block matching runs, trusted records an
+asynchronous review, and full bypasses the gate.
+When this flag is requested, the CLI first verifies that the backend exposes
+the setting and checks its returned value before reporting success. An older
+backend without the field is refused before any policy update.
+
 Each crew carries an `autonomy_level` (`strict` | `guided` | `trusted` | `full`) and a `behavior_mode` (`warn` | `block`) that together drive every HITL decision the orchestrator makes — memory writes, skill creation, behavior-monitor escalations, ephemeral spawns. The dial lives in `crews.autonomy_level` / `crews.behavior_mode` (v98 migration) and is consumed by every PR-B / PR-C subsystem via the shared `policy.Resolver`.
 
 ```bash
@@ -98,6 +108,7 @@ crewship policy set --crew sandbox --level strict --behavior block
 | `--behavior` | `string` | `warn` | Behavior mode. One of `warn`, `block`. |
 | `--reason` | `string` | | Operator-supplied reason. Required when `--level=full`. |
 | `--max-ephemeral` | `int` | `-1` | Per-crew live ephemeral-agent quota, from `0` to `100`; may be set alone or with `--level`. |
+| `--whole-run-approval` | `bool` | omitted | Match whole-run approval rules for this crew; requires `--level`. Omitted preserves the current setting; `=false` disables it. |
 | `--yes` | `bool` | `false` | Skip the loose-transition confirmation prompt. |
 
 <Warning>

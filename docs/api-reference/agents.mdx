@@ -9,6 +9,10 @@ tag: Experimental
 An **agent** is an AI coding agent with a configurable role, CLI adapter, skills, and credentials. Agents belonging to the same crew share one Linux container. These endpoints cover the full agent lifecycle: creating and configuring permanent agents, hiring short-lived ephemeral "contractors", managing their skills and credentials, driving chats and runs, inspecting workspace files, and tuning the persona and self-learning layers that shape each agent's behavior.
 
 <Note>
+  Cost fields on this page are `OWNER` / `ADMIN` only. Other roles receive the same response with them left out — see [Who sees cost figures](/api-reference/paymaster#who-sees-cost-figures).
+</Note>
+
+<Note>
   All `/api/v1/agents/*` endpoints require authentication and workspace context. Workspace context may be supplied as `workspace_id`, a `{workspaceId}` path value, or the `X-Workspace-ID` header; the chat-message proxy (`/api/v1/chats/{chatId}/messages`) is the exception — it resolves the workspace from the chat row and takes no workspace context parameter.
 </Note>
 
@@ -27,6 +31,7 @@ An **agent** is an AI coding agent with a configurable role, CLI adapter, skills
 | POST | [/api/v1/agents/{agentId}/webhook-secret/rotate](#rotate-webhook-secret) | Rotate and return an agent webhook secret once |
 | POST | [/api/v1/agents/hire](#hire-agent) | Spawn a new ephemeral agent under a crew |
 | POST | [/api/v1/agents/{agentId}/rehire](#rehire-agent) | Resurrect or extend an ephemeral agent |
+| POST | [/api/v1/agents/{agentId}/release](#release-agent) | End a temporary hire now |
 | POST | [/api/v1/agents/{agentId}/approve-hire](#approve-hire) | Approve a guided-autonomy pending hire |
 | GET | [/api/v1/agents/{agentId}/persona](#get-persona) | Get the resolved persona |
 | PUT | [/api/v1/agents/{agentId}/persona](#set-persona) | Operator-only direct persona write |
@@ -307,7 +312,7 @@ headers to say "showing 1–100 of 103" instead of calling a page the whole.
 | `llm_model` | string? | LLM model identifier |
 | `system_prompt` | string? | System prompt for the agent |
 | `avatar_seed` | string? | Seed for avatar generation |
-| `avatar_style` | string? | Avatar style (e.g., `"bottts"`, `"pixel-art"`) |
+| `avatar_style` | string? | Avatar style slug (e.g., `"voxel-bot"`, `"pixel-art"`); `null` follows the crew's style, else the default. See [Avatar styles](#avatar-styles). |
 | `avatar_url` | string? | Serve URL for the agent's **stored** avatar, or `null` when it has none and is still generated from the seed. See [Agent avatars](#agent-avatars). |
 | `timeout_seconds` | integer | Maximum execution time |
 | `tool_profile` | string | Tool access profile |
@@ -356,7 +361,7 @@ POST /api/v1/agents?workspace_id={workspaceId}
 | `llm_model` | string | No | `null` | LLM model |
 | `system_prompt` | string | No | `null` | System prompt |
 | `avatar_seed` | string | No | `null` | Avatar seed |
-| `avatar_style` | string | No | `null` | Avatar style |
+| `avatar_style` | string | No | `null` | Avatar style slug ([Avatar styles](#avatar-styles)); `null` follows the crew, else Voxel Bot. An unknown slug is a `400`. |
 | `timeout_seconds` | integer | No | `1800` | Max execution time in seconds |
 | `tool_profile` | string | No | `"CODING"` | Tool profile |
 | `memory_enabled` | boolean | No | `false` | Enable agent memory |
@@ -723,6 +728,24 @@ agent's persisted `status` (rehire does not change it) and the updated
 | `403` | Caller lacks MANAGER+, or `strict` autonomy rejected the rehire. |
 | `404` | Agent not found in this workspace, or the agent is **not ephemeral**. |
 | `429` | Crew quota reached (only when rehiring a ghost). |
+
+### Release Agent
+
+```
+POST /api/v1/agents/{agentId}/release?workspace_id={workspaceId}
+```
+
+Ends a temporary hire before its TTL: the agent becomes an expired hire (`expired_at` and `expires_at` set to now, a `release` line appended to `hire_reason`) exactly as the expiry sweeper would make it. Runs, chats and memory stay, and Rehire brings it back. Releasing a hire that has already expired changes nothing.
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role. No request body.
+
+**Response:** `200 OK`, `{ "id": "...", "expired_at": "...", "released": true }`; `released` is `false` when the hire had already expired.
+
+| Status | Condition |
+|---|---|
+| `403` | Caller below MANAGER. |
+| `404` | Agent not found in this workspace, or the agent is **not ephemeral**. |
+| `409` | The hire is running (stop its run first) or still waits for approval (deny it instead). |
 
 ### Approve Hire
 
@@ -1292,6 +1315,45 @@ header. Rebuilding the URL by hand and dropping that parameter yields a
   it skipped because you cannot edit them. To store an SVG of your own instead,
   use [`crewship agent avatar set`](/cli/agent#crewship-agent-avatar-set).
 </Note>
+
+### Avatar styles
+
+`avatar_style` (on agents and crews) is one of these slugs; anything else is
+refused with `400 unknown avatar style "…" (one of: …)` by `POST /agents`,
+`PATCH /agents/{id}`, `PATCH /crews/{id}` and `POST /crews/{id}/apply-avatar-style`,
+and by the CLI before it sends anything:
+
+`voxel-bot`, `voxel-art`, `bottts-neutral`, `bottts`, `adventurer`, `adventurer-neutral`, `avataaars`, `avataaars-neutral`, `big-ears`, `big-ears-neutral`, `big-smile`, `croodles`, `croodles-neutral`, `dylan`, `fun-emoji`, `lorelei`, `lorelei-neutral`, `micah`, `miniavs`, `notionists`, `notionists-neutral`, `open-peeps`, `personas`, `pixel-art`, `pixel-art-neutral`, `thumbs`, `toon-head`.
+
+- **Default: Voxel Bot.** An agent with no style of its own, in a crew with no
+  style (or in no crew), is drawn as `voxel-bot`. That includes every agent
+  created after #3789 without a style, from the dashboard, the CLI, the API or
+  a template.
+- **Existing agents keep their face.** The default used to be `bottts-neutral`.
+  Upgrading runs a migration that writes `bottts-neutral` into every agent that
+  was drawn with the old default (no style of its own, and no crew style).
+  Agents with their own style, agents that follow a crew with a style, and all
+  crews are left as they were. Restoring a backup taken before the upgrade
+  applies the same pin to the restored agents. Those agents now show
+  **Bottts Neutral** in the picker instead of "Follow the crew".
+- **Voxel Bot and Voxel Art move.** They come from DiceBear 10 (pinned exactly,
+  loaded beside the 9.4 library the other 25 styles keep using, because 10.x
+  draws a different face for the same seed). Drawn at 32 px or larger, they
+  blink and stretch now and then; smaller, they are still. They are still too
+  when the viewer's Reduce motion is On, when their **Animated avatars** switch
+  is off ([Settings → Appearance](/guides/account-and-top-bar)),
+  or when the operating system asks for reduced motion and Reduce motion is
+  System — the app checks the OS setting and draws the still render, and the
+  SVG's own animation also sits inside
+  `@media (prefers-reduced-motion: no-preference)`.
+  Motion never stands for anything: an agent's state always has its own
+  label or badge.
+- **Voxel avatars are never stored.** DiceBear 10's markup uses `<use href>`
+  and an XML comment, which the stored-avatar allowlist refuses, and a stored
+  render would freeze the motion. They are always drawn live (`avatar_url`
+  stays `null`), and the backfill counts them as drawn live rather than
+  missing. Their faces are pinned by the exact package versions and by golden
+  hashes in the test suite.
 
 ### Get stored avatar
 
@@ -2113,3 +2175,29 @@ Get messages for a specific chat session. Proxied through crewshipd. Supports `?
 |---|---|
 | `403` | Caller lacks `read`-tier role, or is not a member of the chat's workspace |
 | `502` | Sidecar IPC call failed |
+
+### Explicit preferences in the peer API
+
+`GET /api/v1/agents/{agentId}/peers` additionally returns `preferences`, restricted
+to the authenticated subject in the selected workspace. Each entry has `id`,
+`revision`, `feedback_id`, `source_revision`, `chat_id`, `message_id`, `reason`,
+`value`, `status` and `source_type` (`feedback_reason`). Only currently accessible
+private sources qualify. Existing `peers` records are unchanged. Solo agents also
+return this list, with an empty `peers` array because they have no crew Markdown directory.
+
+`PATCH /api/v1/agents/{agentId}/peers/{userId}` corrects one own preference:
+
+```json
+{"entry_id":"entry…","revision":1,"reason":"Next time, start with the conclusion."}
+```
+
+A valid catalogue v1 reason creates a new feedback source revision for asynchronous
+verification. Returns 204; 400 for invalid input, 404 for a missing or inaccessible
+entry, 403 for another subject and 409 for stale or withdrawn entries.
+
+`DELETE /api/v1/agents/{agentId}/peers/{userId}?entry_id=entry…&revision=2`
+withdraws one own entry with the same revision checks. Omitting `entry_id` deletes
+the legacy peer card and withdraws this subject's preferences for the agent.
+Both use existing self-service authorization. The CLI equivalents are
+`crewship feedback preferences`, `crewship feedback edit-preference` and
+`crewship feedback delete-preference`.

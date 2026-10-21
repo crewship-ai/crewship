@@ -48,6 +48,15 @@ export function useShallowSearchParam(
     [key, fallback],
   )
 
+  // A next/navigation change of this param (router.replace / push to the same
+  // page, e.g. a create dialog opening what it made) is a navigation: the URL
+  // wins over the value picked in place. Keyed on the param's value, so this
+  // hook's own replaceState writes never bounce back.
+  const navigated = searchParams.get(key)
+  useEffect(() => {
+    setValue(navigated ?? fallback)
+  }, [navigated, fallback])
+
   useEffect(() => {
     if (typeof window === "undefined") return
     const onPop = () => {

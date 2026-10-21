@@ -16,6 +16,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/paymaster"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 	"github.com/crewship-ai/crewship/internal/telemetry"
 )
 
@@ -500,7 +501,16 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 	}
 
 	runReq.RuntimeUse = runtimeUse
+	childRunID := generateRunID()
+	runReq.RunID = childRunID
+	ctx = runauthority.WithOriginID(ctx, req.ChatOriginID)
+	if err := r.resolver.CreateRun(ctx, childRunID, agentID, chatID, req.WorkspaceID, "ROUTINE", map[string]interface{}{"pipeline_id": req.PipelineID, "pipeline_run_id": req.PipelineRunID, "step_id": req.StepID}); err != nil {
+		return AgentStepResult{}, fmt.Errorf("admit routine child: %w", err)
+	}
 	runErr := r.orch.RunAgent(ctx, runReq, finalHandler)
+	if terminalErr := r.recordChildTerminal(ctx, childRunID, runErr); terminalErr != nil && runErr == nil {
+		runErr = fmt.Errorf("record routine child terminal: %w", terminalErr)
+	}
 	// Surface volume-bounding so operators can tell a sparse trace from a
 	// throttled one (a chatty agent hitting the per-step cap / detail cap).
 	if recorder != nil && (recorder.Dropped() > 0 || recorder.Truncated() > 0) {
@@ -747,4 +757,21 @@ func (r *OrchestratorRunner) resolveAgentID(ctx context.Context, workspaceID, cr
 		return "", err
 	}
 	return agentID, nil
+}
+
+// Unconfirmed detached execution remains admitted for its reconciliation owner.
+func (r *OrchestratorRunner) recordChildTerminal(ctx context.Context, runID string, runErr error) error {
+	if errors.Is(runErr, orchestrator.ErrDetachedStillRunning) {
+		return nil
+	}
+	terminalCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	status := "COMPLETED"
+	var reason *string
+	if runErr != nil {
+		status = "FAILED"
+		message := runErr.Error()
+		reason = &message
+	}
+	return r.resolver.UpdateRun(terminalCtx, runID, status, nil, reason, nil)
 }

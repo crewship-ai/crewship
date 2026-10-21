@@ -3,41 +3,40 @@
 import { formatRoutineTime } from "@/lib/routine-time"
 
 import { describeStep } from "@/lib/routine-step-describe"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useIsMobile } from "@/hooks/use-mobile"
+import { RoutineRunSteps } from "./routine-run-steps"
+import { Segmented } from "@/components/ui/segmented"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { RoutineRunInputsDialog } from "./routine-run-inputs-dialog"
 import { routineInputSpecs, type RoutineInputSpec } from "@/lib/routine-inputs"
 import { apiFetch } from "@/lib/api-fetch"
 import { RoutineStartIntent } from "@/lib/routine-start-intent"
 import { useAbilities } from "@/hooks/use-abilities"
 import { useWorkspaceAgentDirectory } from "@/hooks/use-workspace-agent-directory"
-import { canApproveRoutine, roleAtLeast, routinePermissions } from "@/lib/routine-governance"
+import { canKillRoutine, roleAtLeast, routinePermissions } from "@/lib/routine-governance"
+import { runTraceMarkdown, timelineBars } from "@/lib/routine-page"
+import { usePipelineRunRecords } from "@/hooks/use-pipeline-run-records"
+import { SubBarActions, SubBarIconButton, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
+import { RoutinePreviousRuns, RoutineRunPeek } from "./routine-run-peek"
+import { RoutineRunTimeline } from "./routine-run-timeline"
 import { useTrace } from "@/hooks/use-trace"
 import { usePendingApproval } from "@/hooks/use-pending-approval"
-import { TraceCanvas } from "@/components/features/activity/trace-canvas"
 import { RunActivityTimeline } from "@/components/features/activity/run-activity-timeline"
 import { RunEvidencePanel } from "@/components/features/activity/run-evidence-panel"
 import { declaredCredentialTypes, readableOriginSource, routineRunOrigin } from "@/lib/routine-run-provenance"
 import { RoutineRunArtifacts } from "./routine-run-artifacts"
 import { RoutineExecutionHistory } from "./routine-execution-history"
 import { RoutineExecutionInsights } from "./routine-execution-insights"
-import { RoutineStepSpine } from "./routine-step-spine"
 import { useRunExecutions } from "@/hooks/use-run-executions"
 import { RoutineApprovalBanner } from "./routine-approval-banner"
 import { Button } from "@/components/ui/button"
 import { formatDurationMs } from "@/lib/activity-stream"
 
 import { RoutineResultContent } from "./routine-result-content"
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "@/components/ui/dialog"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import {
   FileText,
   Activity,
@@ -48,8 +47,13 @@ import {
   History,
   Lightbulb,
   XCircle,
+  Copy,
+  RotateCcw,
+  X,
 } from "lucide-react"
-import { DetailCard, Pill } from "@/components/ui/detail"
+import { DetailCard } from "@/components/ui/detail"
+import { StatusPill } from "@/components/ui/status-pill"
+import { toStatusTone } from "@/lib/status-tone"
 import { RoutineIdentityHeader } from "./routine-identity-header"
 import { routineViewHref } from "./routine-navigation"
 import {
@@ -68,17 +72,27 @@ type RoutineDetailWithDraft = RoutineDetail & { draft?: RoutineDraftSummary | nu
 
 import { RoutineSavedInputs, readableFieldName } from "./routine-saved-inputs"
 import { REPORTED_USAGE_HINT, formatReportedUsage } from "./routine-cost-format"
+import { isCostShown } from "@/lib/cost-visibility"
 
-const EMPTY = new Map()
 
 /** Shared run surface: every entry point loads the run directly, including old runs. */
 interface RoutineRunDetailProps {
   workspaceId: string
   runId: string
+  /** The top bar's action slot (Routines); the actions sit in the header without one (Activity). */
+  /** Put the actions in the page's SubBar (SubBarActions); in the header without one. */
+  actionsInBar?: boolean
+  /** Back to the routine. */
+  onClose?: () => void
+  /** Opens another run of the same routine (from the peek). */
+  onOpenRun?: (runId: string) => void
 }
 
-export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) {
+export function RoutineRunDetail({ workspaceId, runId, actionsInBar, onClose, onOpenRun }: RoutineRunDetailProps) {
   const { run, dsl, loading, error, refresh } = useTrace(workspaceId, runId)
+  const { records: siblings } = usePipelineRunRecords(run?.pipeline_slug ? workspaceId : null, run?.pipeline_slug ?? null)
+  const [peek, setPeek] = useState<string | null>(null)
+  const [stepView, setStepView] = useState<"list" | "time">("list")
   const [routine, setRoutine] = useState<RoutineDetailWithDraft | null>(null)
   const [identityRevision, setIdentityRevision] = useState(0)
   useEffect(() => {
@@ -108,9 +122,11 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
     runId,
     ["queued", "running", "waiting", "paused"].includes(run?.status ?? ""),
   )
-  const [selectedStep, setSelectedStep] = useState<string | null>(null)
+  const bars = useMemoBars(executions.rows)
   const { role, capabilities } = useAbilities()
   const canRun = routinePermissions(role, capabilities).run
+  // Stopping a run is POST …/runs/{id}/cancel, Owner and Admin on the server.
+  const canStop = canKillRoutine(role)
   // "Ask the lead to fix it" opens the crew lead's chat with the run pinned
   // in the prompt (the chat page reads ?prompt= and sends it once). The
   // directory rows carry crew_id and agent_role beyond the typed identity.
@@ -135,21 +151,18 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
   const [stopping, setStopping] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [confirmStop, setConfirmStop] = useState(false)
+  // KPI "Produced": the files the run left, as the results list reports them.
+  const [producedState, setProduced] = useState<{ runId: string; count: number; more: boolean } | null>(null)
+  const produced = producedState?.runId === runId ? producedState : null
+  const reportProduced = useCallback((count: number, more: boolean) => setProduced({ runId, count, more }), [runId])
+  const phone = useIsMobile()
   // One disclosure holds every piece of evidence a finished run leaves behind;
   // both lazy lists inside it mount on the first open.
   const [showTechnical, setShowTechnical] = useState(false)
   useEffect(() => {
-    setSelectedStep(null)
     setConfirmStop(false)
     setShowTechnical(false)
   }, [runId])
-  const tokens = useMemo(
-    () =>
-      approval.waitpoint && !approval.waitpoint.decision_form
-        ? new Map([[approval.waitpoint.step_id, approval.waitpoint.token]])
-        : EMPTY,
-    [approval.waitpoint],
-  )
   if (!run && error === "run: 404")
     return (
       <div className="p-6">
@@ -183,7 +196,8 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
         )}
       </div>
     )
-  const stop = async () => {
+  /** Resolves true once the server accepted the cancel. */
+  const stop = async (): Promise<boolean> => {
     setStopping(true)
     setActionError(null)
     try {
@@ -196,8 +210,10 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
       setConfirmStop(false)
       await refresh()
       await approval.refresh()
+      return true
     } catch (e) {
       setActionError(e instanceof Error ? e.message : String(e))
+      return false
     } finally {
       setStopping(false)
     }
@@ -290,10 +306,6 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
         .exec(run.output.slice(run.output.lastIndexOf("---HANDOFF---")))?.[1]
         ?.trim()
     : undefined
-  const selectedStepId =
-    dsl?.steps?.find((s) => s.id === (selectedStep || run.current_step_id))?.id ||
-    dsl?.steps?.[0]?.id ||
-    null
   const presentation = routineRunPresentation(run)
   const currentStep = dsl?.steps?.find((s) => s.id === run.current_step_id)
   const active = ["queued", "running", "waiting", "paused"].includes(run.status)
@@ -423,25 +435,45 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
       )}
     </DetailCard>
   )
-  const spineRecord = {
-    lookup: (stepId: string) => ({
-      execution: executions.byStep.get(stepId),
-      hasOutput: Object.hasOwn(run.step_outputs ?? {}, stepId),
-      output: run.step_outputs?.[stepId],
-    }),
-    outputsAvailable: run.step_outputs_available !== false,
-    subSpans: run.sub_spans as Record<string, unknown> | undefined,
-    currentStepId: run.current_step_id,
-    failedStepId: run.failed_at_step,
-    active,
-    executionsError: executions.error,
-    executionsTruncated: executions.truncated,
-    onRetryExecutions: executions.refresh,
-    onLoadMoreExecutions: executions.loadMore,
+  const copyForAI = () => {
+    const md = runTraceMarkdown(
+      { ...run, pipeline_version: run.pipeline_version ?? null, duration_ms: run.duration_ms ?? null, cost_usd: run.cost_usd ?? null },
+      (dsl?.steps ?? []).map((s) => ({ id: s.id, name: describeStep(s, 1).title, type: s.type })),
+      (executions.rows ?? []).map((r) => ({ step_id: r.step_id, status: r.status, started_at: r.started_at, ended_at: r.ended_at, attempt: r.attempt, error: r.error })),
+    )
+    void navigator.clipboard?.writeText(md).then(
+      () => toast.success("Run trace copied as Markdown", { description: "Inputs that look like secrets are left out." }),
+      () => toast.error("Could not copy the trace"),
+    )
   }
-  // The graph is one view of the step list, not a place of its own, and it is
-  // as tall as the recipe it draws.
-  const mapHeight = Math.min(560, Math.max(300, (dsl?.steps?.length ?? 1) * 78))
+  const runActions = (
+    <>
+      <SubBarSecondary icon={Copy} onClick={copyForAI} title="Copy this run as Markdown for an assistant">
+        Copy for AI
+      </SubBarSecondary>
+      {canStop && active && (
+        <SubBarSecondary icon={Square} disabled={stopping} onClick={() => setConfirmStop(true)}>
+          {stopping ? "Stopping…" : "Stop"}
+        </SubBarSecondary>
+      )}
+      {canRun && !active && (
+        <SubBarPrimary icon={RotateCcw} disabled={starting} onClick={() => void prepareAgain()}>
+          {starting ? "Preparing…" : "Run again"}
+        </SubBarPrimary>
+      )}
+      {failed && roleAtLeast(role, "MEMBER") && (
+        <SubBarSecondary asChild>
+          <Link href={askLeadHref} onClick={askLead}>
+            Ask the lead to fix it
+          </Link>
+        </SubBarSecondary>
+      )}
+      {onClose && <SubBarIconButton icon={X} onClick={onClose} aria-label="Back to routine" title="Back to routine" />}
+    </>
+  )
+  const doneSteps = executions.rows ? new Set(executions.rows.filter((r) => r.status === "completed" || r.status === "succeeded").map((r) => r.step_id)).size : null
+  const totalSteps = dsl?.steps?.length ?? null
+  const cap = typeof (dsl as { max_cost_usd?: unknown } | null)?.max_cost_usd === "number" ? (dsl as { max_cost_usd: number }).max_cost_usd : null
   return (
     <div className="mx-auto flex max-w-[1800px] flex-col gap-4 p-4">
       {/* A run reached by a deep link (Inbox banner, a shared URL) needs a way
@@ -464,44 +496,14 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
         <span aria-hidden>›</span>
         <span>Run</span>
       </nav>
+      {actionsInBar && <SubBarActions>{runActions}</SubBarActions>}
       <RoutineIdentityHeader
         routine={identity}
         workspaceId={workspaceId}
         onChanged={() => setIdentityRevision((v) => v + 1)}
-        actions={
-          <>
-            {canApproveRoutine(role) && active && (
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={stopping}
-                onClick={() => setConfirmStop(true)}
-              >
-                <Square className="mr-1.5 h-3.5 w-3.5" />
-                {stopping ? "Stopping…" : "Stop"}
-              </Button>
-            )}
-            {canRun && !active && (
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={starting}
-                onClick={() => void prepareAgain()}
-              >
-                {starting ? "Preparing…" : "Run again"}
-              </Button>
-            )}
-            {failed && roleAtLeast(role, "MEMBER") && (
-              <Button asChild variant="outline" size="sm">
-                <Link href={askLeadHref} onClick={askLead}>
-                  Ask the lead to fix it
-                </Link>
-              </Button>
-            )}
-          </>
-        }
+        actions={actionsInBar ? undefined : runActions}
       >
-        <Pill tone={presentation.tone}>{presentation.label}</Pill>
+        <StatusPill size="md" tone={toStatusTone(presentation.tone)} label={presentation.label} />
         {/* The facts of this run as one sentence: what used to be a four-cell
           stat strip below a second row of tabs. */}
         <span className="text-xs text-muted-foreground" data-testid="run-facts">
@@ -581,18 +583,6 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
               </div>
             )}
           </div>
-          {run.status === "running" && canApproveRoutine(role) && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="shrink-0"
-              disabled={stopping}
-              onClick={() => setConfirmStop(true)}
-            >
-              <Square className="mr-1.5 h-3.5 w-3.5" />
-              {stopping ? "Stopping…" : "Stop"}
-            </Button>
-          )}
           <Link
             className="inline-flex shrink-0 items-center gap-1.5 text-xs text-primary hover:underline"
             href={activityHref}
@@ -610,6 +600,16 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
           </Link>
         )}
       </div>
+      <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4" data-testid="run-kpis">
+        <Kpi label="Duration" value={!active && run.duration_ms != null ? formatDurationMs(run.duration_ms) : active ? "running" : "—"} />
+        {/* Absent below ADMIN (#3590): no tile rather than "none reported". */}
+        {isCostShown(run.cost_usd) && <Kpi label="Cost" value={formatReportedUsage(run.cost_usd)} note={cap != null ? `of $${cap.toFixed(2)} cap` : undefined} />}
+        <Kpi label="Steps" value={doneSteps != null && totalSteps ? `${doneSteps} / ${totalSteps}` : totalSteps ? `— / ${totalSteps}` : "—"} />
+        <Kpi label="Produced" value={produced ? `${produced.count}${produced.more ? "+" : ""}` : "—"} note={produced && produced.count > 0 ? (produced.count === 1 && !produced.more ? "file" : "files") : undefined} />
+      </dl>
+      {siblings.length > 1 && (
+        <RoutinePreviousRuns runs={siblings} current={runId} onPeek={setPeek} />
+      )}
       {failed && (
         <DetailCard title="What to do next" icon={Lightbulb} data-testid="run-next-step">
           <ul className="space-y-1.5 text-xs leading-relaxed">
@@ -678,30 +678,20 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
         </p>
       )}
 
-      <Dialog open={confirmStop} onOpenChange={setConfirmStop}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Stop this run?</DialogTitle>
-            <DialogDescription>
-              Pending work is asked to stop. What already happened — a ledger write, a
-              message — is not undone. Actions that already happened are not rolled back;
-              recorded results stay in History.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setConfirmStop(false)}
-              disabled={stopping}
-            >
-              Keep running
-            </Button>
-            <Button variant="destructive" onClick={stop} disabled={stopping}>
-              {stopping ? "Stopping…" : "Stop this run"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={confirmStop}
+        onOpenChange={setConfirmStop}
+        title="Stop this run?"
+        description="Pending work is asked to stop. What already happened — a ledger write, a message — is not undone. Actions that already happened are not rolled back; recorded results stay in History."
+        cancelLabel="Keep running"
+        confirmLabel="Stop this run"
+        destructive
+        onConfirm={async () => {
+          // A refused cancel keeps the question open, as before: the error
+          // is shown and the person can try again or keep the run going.
+          if (!(await stop())) throw new Error("cancel refused")
+        }}
+      />
       <RoutineRunInputsDialog
         definition={runDefinition}
         versionChoices={[
@@ -763,6 +753,7 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
         active={active}
         compact
         noFinalResult={!run.output && run.step_outputs_available !== false}
+        onCount={reportProduced}
       />
 
       <RoutineExecutionInsights
@@ -770,34 +761,39 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
         partial={executions.truncated}
         definition={dsl}
       />
-      {dsl ? (
-        <RoutineStepSpine
-          behavior={run.behavior}
+      {dsl && (executions.rows?.length ?? 0) > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Segmented<"list" | "time">
+            ariaLabel="Show steps as"
+            value={stepView}
+            onChange={setStepView}
+            options={[
+              { value: "list", label: "Steps" },
+              { value: "time", label: "Timeline" },
+            ]}
+          />
+          {stepView === "time" && <span className="text-xs text-muted-foreground">Bars show when each step ran, on this run's clock.</span>}
+        </div>
+      )}
+      {dsl && stepView === "time" && (executions.rows?.length ?? 0) > 0 ? (
+        <RoutineRunTimeline bars={bars} nameOf={(id) => { const s = dsl.steps?.find((x) => x.id === id); return s ? describeStep(s, 1).title : id }} />
+      ) : dsl?.steps?.length ? (
+        // RT-RUN: the steps with an inspector (Output · Input · Log · Details).
+        <RoutineRunSteps
+          key={`steps-${runId}`}
           workspaceId={workspaceId}
-          definition={dsl}
-          record={spineRecord}
-          initialLimit={12}
-          map={({ openStep }) => (
-            <div className="overflow-hidden" style={{ height: mapHeight }}>
-              <TraceCanvas
-                run={run}
-                dsl={dsl}
-                workspaceId={workspaceId}
-                selectedStepId={selectedStepId}
-                onStepSelect={(id) => {
-                  setSelectedStep(id)
-                  if (id) openStep(id)
-                }}
-                waitpointTokensByStepId={tokens}
-                heatmapBuckets={EMPTY}
-                stepMetrics={EMPTY}
-                initialFocus="all"
-                centerOnSelect
-                recenterOnResize
-              />
-            </div>
-          )}
+          runId={runId}
+          steps={dsl.steps}
+          executions={executions.byStep}
+          outputs={run.step_outputs_available === false ? null : run.step_outputs}
+          runInputs={run.inputs}
+          currentStepId={run.current_step_id}
+          failedStepId={run.failed_at_step}
+          limits={{ costCap: cap, concurrency: concurrencyLine(dsl) }}
+          phone={phone}
         />
+      ) : dsl ? (
+        <p className="rounded-xl border border-border/60 bg-card p-4 text-sm text-muted-foreground">This recipe has no steps.</p>
       ) : (
         <p className="rounded-xl border border-border/60 bg-card p-4 text-sm text-muted-foreground">
           The historical recipe is unavailable. Recorded outputs and activity remain
@@ -805,6 +801,22 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
         </p>
       )}
 
+      {executions.error && (
+        <p role="alert" className="text-xs text-destructive">
+          The step records could not be loaded, so states and times are missing.{" "}
+          <button type="button" className="underline" onClick={executions.refresh}>
+            Retry
+          </button>
+        </p>
+      )}
+      {executions.truncated && (
+        <p className="text-xs text-muted-foreground">
+          Only the first recorded executions are shown.{" "}
+          <button type="button" className="text-primary underline" onClick={executions.loadMore}>
+            Load more
+          </button>
+        </p>
+      )}
       <RoutineSavedInputs key={`inputs-${runId}`} values={run.inputs} definition={dsl} />
 
       {/* Live work is what the reader came for while a run is going, so it stays
@@ -853,6 +865,20 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
           definitionHash: run.definition_hash,
         }}
       />
+      {peek && (
+        <RoutineRunPeek
+          workspaceId={workspaceId}
+          runs={siblings}
+          runId={peek}
+          onChange={setPeek}
+          onClose={() => setPeek(null)}
+          onOpen={(id) => {
+            setPeek(null)
+            if (onOpenRun) onOpenRun(id)
+            else router.push(`/routines?${new URLSearchParams({ slug: run.pipeline_slug, run: id })}`)
+          }}
+        />
+      )}
       <details
         data-testid="run-technical-details"
         onToggle={(e) => setShowTechnical(e.currentTarget.open)}
@@ -868,8 +894,12 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
             <dd className="break-all font-mono">{run.id}</dd>
             <dt>Recipe hash</dt>
             <dd className="break-all font-mono">{run.definition_hash || "unavailable"}</dd>
-            <dt>Reported usage</dt>
-            <dd className="font-mono" title={REPORTED_USAGE_HINT}>{formatReportedUsage(run.cost_usd)}</dd>
+            {isCostShown(run.cost_usd) && (
+              <>
+                <dt>Reported usage</dt>
+                <dd className="font-mono" title={REPORTED_USAGE_HINT}>{formatReportedUsage(run.cost_usd)}</dd>
+              </>
+            )}
             <dt>Mode</dt>
             <dd>{run.mode}</dd>
             {run.failed_at_step && (
@@ -933,6 +963,30 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
           </section>
         </div>
       </details>
+    </div>
+  )
+}
+
+/** How many runs of this routine may go at once, from the executed recipe. */
+function concurrencyLine(dsl: unknown): string | null {
+  const d = (dsl ?? {}) as { max_concurrent?: unknown; concurrency_key?: unknown; concurrency_policy?: unknown }
+  if (typeof d.max_concurrent === "number" && d.max_concurrent > 1) return `Up to ${d.max_concurrent} at a time`
+  if (typeof d.concurrency_key === "string" && d.concurrency_key) return d.concurrency_policy === "skip" ? "1 at a time; a new start is skipped" : "1 at a time; a new start waits in line"
+  return null
+}
+
+function useMemoBars(rows: { step_id: string; status: string; started_at: string; ended_at: string; attempt: number }[] | null) {
+  return useMemo(() => timelineBars((rows ?? []).map((r) => ({ ...r, ended_at: r.ended_at || undefined }))), [rows])
+}
+
+function Kpi({ label, value, note }: { label: string; value: string; note?: string }) {
+  return (
+    <div className="rounded-lg border border-hairline bg-card px-3 py-2">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="font-mono text-sm tabular-nums">
+        {value}
+        {note && <span className="ml-1 text-xs text-muted-foreground">{note}</span>}
+      </dd>
     </div>
   )
 }

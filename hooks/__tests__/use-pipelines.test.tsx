@@ -127,3 +127,23 @@ it.each(["catalog", "history"])("ignores an obsolete %s transport rejection afte
   await act(async () => { reject(new DOMException("aborted", "AbortError")) })
   expect(result.current).toMatchObject({ loading: false, error: null })
 })
+
+
+describe("routine history path boundaries", () => {
+  it.each(["recipe/child", "../auth/session?x=#fragment", "recipe?query", "recipe#fragment"])("keeps slug %s in one segment", async (slug) => {
+    fetchMock.mockResolvedValue(response([]))
+    const workspaceId = "workspace/child?x=#fragment"
+    renderHook(() => usePipelineRuns(workspaceId, slug))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(slug)}/runs?limit=50&include_steps=1`,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ))
+  })
+  it.each([".", ".."]) ("rejects exact dot slug %s without sending history requests", async (slug) => {
+    fetchMock.mockResolvedValue(response([]))
+    const { result } = renderHook(() => usePipelineRuns("ws", slug))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(result.current.runs).toEqual([])
+  })
+})

@@ -3,9 +3,10 @@
 import * as React from "react"
 import { useRouter } from "next/navigation"
 import { CircleCheck, Loader2 } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { cn } from "@/lib/utils"
+import { registerNavigationGuard } from "@/hooks/use-navigation-guard"
 import { Button } from "@/components/ui/button"
 import {
   AlertDialog,
@@ -199,6 +200,21 @@ export function PageSaveProvider({ children, guardLeaving = true }: {
     else go()
   }, [])
 
+  // Switching workspaces is not a navigation (hooks/use-workspace), nor is a
+  // push from the palette or the bells: without this the page's drafts stayed
+  // on screen and Save wrote them into the workspace switched to. It asks the
+  // same question as leaving; the answer's own retry passes once.
+  const passOnce = React.useRef(false)
+  React.useEffect(() => {
+    if (!dirty || !guardLeaving) return
+    passOnce.current = false
+    return registerNavigationGuard((retry) => {
+      if (passOnce.current) { passOnce.current = false; return true }
+      setLeaveTo(() => () => { passOnce.current = true; retry() })
+      return false
+    })
+  }, [dirty, guardLeaving])
+
   // Once a "Save and leave" lands with nothing left pending, go.
   React.useEffect(() => {
     const go = leaveAfterSave.current
@@ -368,10 +384,17 @@ export function usePageSave(entry: PageSaveEntry): boolean {
 /**
  * The floating bar. Place it once inside the page's content pane (a
  * `relative` box around the scroller); it docks to the phone tab bar below
- * `sm`. Leave ~6rem of bottom padding in the scroller so it never covers the
+ * `md` (768 px) and rides above the on-screen keyboard. Leave ~6rem of bottom padding in the scroller so it never covers the
  * last card.
  */
-export function PageSaveBar({ className }: { className?: string }) {
+export function PageSaveBar({
+  className,
+  saveLabel = "Save",
+}: {
+  className?: string
+  /** The primary's words where Save undersells it: "Save as draft" on a routine editor. */
+  saveLabel?: string
+}) {
   const s = React.useContext(PageSaveStateContext)
   if (!s || (s.count === 0 && !s.saving && !s.justSaved)) return null
   const done = s.count === 0 && !s.saving
@@ -385,7 +408,10 @@ export function PageSaveBar({ className }: { className?: string }) {
       className={cn(
         "z-40 flex items-center gap-3 border border-[var(--save-bar-border)] bg-[var(--save-bar-bg)] text-xs text-[var(--save-bar-fg)]",
         "absolute bottom-6 left-1/2 -translate-x-1/2 rounded-xl py-1.5 pl-4 pr-1.5 whitespace-nowrap",
-        "max-sm:fixed max-sm:inset-x-0 max-sm:bottom-[var(--mobile-tab-bar-h)] max-sm:translate-x-0 max-sm:rounded-none max-sm:border-x-0 max-sm:border-b-0 max-sm:px-3 max-sm:py-2",
+        // Docked on every phone width (< 768, the app's phone breakpoint; it was
+        // 640, which left 640–767 floating over the tab bar), above the tab
+        // bar and above the on-screen keyboard (components/layout/phone-keyboard).
+        "max-md:fixed max-md:inset-x-0 max-md:bottom-[calc(var(--mobile-tab-bar-h)+var(--keyboard-inset,0px))] max-md:translate-x-0 max-md:rounded-none max-md:border-x-0 max-md:border-b-0 max-md:px-3 max-md:py-2",
         done ? "shadow-[0_16px_40px_rgba(0,0,0,.45)]" : "save-bar-glow",
         className,
       )}
@@ -401,19 +427,19 @@ export function PageSaveBar({ className }: { className?: string }) {
               <span className="absolute inline-flex h-full w-full rounded-full bg-[var(--save-bar-fg)] opacity-70 motion-safe:animate-ping" />
               <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--save-bar-fg)]" />
             </span>
-            <span><span className="font-mono tabular-nums">{s.count}</span> unsaved change{s.count === 1 ? "" : "s"}</span>
+            <span><span className="tabular-nums">{s.count}</span> unsaved change{s.count === 1 ? "" : "s"}</span>
           </span>
-          <kbd className="hidden rounded border border-[var(--save-bar-border)] px-1.5 font-mono text-[11px] sm:inline">⌘S</kbd>
+          <kbd className="hidden rounded border border-[var(--save-bar-border)] px-1.5 font-mono text-micro sm:inline">⌘S</kbd>
           <Button type="button" variant="ghost" size="sm"
-            className="h-7 text-xs text-[var(--save-bar-fg)] opacity-85 hover:bg-[color-mix(in_oklab,var(--save-bar-fg)_10%,transparent)] hover:text-[var(--save-bar-fg)] hover:opacity-100 coarse:h-[2.75rem]"
+            className="h-7 text-xs text-[var(--save-bar-fg)] opacity-85 hover:bg-[color-mix(in_oklab,var(--save-bar-fg)_10%,transparent)] hover:text-[var(--save-bar-fg)] hover:opacity-100 coarse:h-[44px]"
             disabled={s.saving} onClick={s.discardAll}>
             Discard
           </Button>
           <Button type="button" size="sm"
-            className="h-7 gap-1.5 bg-[var(--save-bar-action)] text-xs font-semibold text-[var(--save-bar-action-fg)] hover:bg-[var(--save-bar-action)] hover:brightness-110 coarse:h-[2.75rem]"
+            className="h-7 gap-1.5 bg-[var(--save-bar-action)] text-xs font-semibold text-[var(--save-bar-action-fg)] hover:bg-[var(--save-bar-action)] hover:brightness-110 coarse:h-[44px]"
             disabled={s.saving || !s.canSave} onClick={s.saveAll}>
             {s.saving && <Loader2 className="h-3 w-3 animate-spin" />}
-            {s.saving ? "Saving…" : "Save"}
+            {s.saving ? "Saving…" : saveLabel}
           </Button>
         </>
       )}

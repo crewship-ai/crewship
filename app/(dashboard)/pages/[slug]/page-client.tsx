@@ -5,6 +5,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useUrlSegment } from "@/lib/use-url-segment"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { PagesLayout } from "@/components/features/pages/pages-layout"
+import { useAccessContext } from "@/components/features/restricted/access-notice"
 import { RestrictedPages } from "@/components/features/pages/restricted-pages"
 import { useAccessMode } from "@/hooks/use-access-mode"
 
@@ -17,6 +18,7 @@ const PAGE_PATH_RE = /^\/pages\/([^/]+)\/?$/
 
 export function PageDetailClient() {
   const { workspaceId, loading: wsLoading } = useWorkspace()
+  const access = useAccessContext()
   // The slug comes from the URL, never from useParams(). Under
   // `output: "export"` this route is exported once, as /pages/_/index.html,
   // and the Go binary serves that file for every real slug — so useParams()
@@ -41,6 +43,6 @@ export function PageDetailClient() {
     )
   }
 
-  if (accessMode === "restricted") return <RestrictedPages key={workspaceId} workspaceId={workspaceId} />
+  if (accessMode === "restricted") return <RestrictedPages key={workspaceId} workspaceId={workspaceId} access={access} />
   return <PagesLayout workspaceId={workspaceId} slug={slug} />
 }

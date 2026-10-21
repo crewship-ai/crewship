@@ -99,3 +99,8 @@ func (r *NativeRunner) ExecuteDelegatedRun(ctx context.Context, request Delegate
 	_, err := r.ExecuteWorkflowRun(ctx, request, emit)
 	return err
 }
+
+// DeclaresWorkflowProfile describes the adapter independently of runtime health.
+func (r *NativeRunner) DeclaresWorkflowProfile(profile string) bool {
+	return r != nil && profile == "native_api_key"
+}

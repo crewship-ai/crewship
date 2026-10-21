@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import { RoutinesWorkspace, routineLastState } from "../routines-workspace"
@@ -40,6 +40,10 @@ vi.mock("@/hooks/use-automations", () => ({
   useAutomations: () => ({ automations: h.automations, loading: false, error: null }),
 }))
 vi.mock("../routine-calendar", () => ({ RoutineCalendar: () => <div>Calendar</div> }))
+vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: "MANAGER" }) }))
+vi.mock("@/hooks/use-workspace-waitpoints", () => ({ useWorkspaceWaitpoints: () => ({ waitpoints: [], decide: vi.fn(async () => true), refresh: vi.fn() }) }))
+vi.mock("@/hooks/use-routine-health", () => ({ useRoutineHealth: () => null }))
+vi.mock("@/hooks/use-routine-budget", () => ({ useBudgetSummary: () => ({ summary: null, loading: false, error: null, refresh: vi.fn() }) }))
 vi.mock("@/components/features/dashboard/run-volume-chart", () => ({ RunVolumeChart: () => <div data-testid="run-volume" /> }))
 
 const rows = [
@@ -102,16 +106,21 @@ describe("<RoutinesWorkspace> — the overview pane", () => {
 
   it("is the dashboard, not a second copy of the sidebar's list, with runs living in Activity", () => {
     renderPane()
-    expect(screen.getByRole("button", { name: "Overview" })).toHaveAttribute("aria-pressed", "true")
+    // PAR-046: v67 has no Overview | Calendar strip; Calendar is a sidebar destination.
+    expect(screen.queryByRole("navigation", { name: "Routines views" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Overview" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Calendar" })).toBeNull()
     expect(screen.getByTestId("routines-dashboard")).toBeInTheDocument()
     // No catalog rows and no third tab: the explorer owns the list, Activity the runs.
     expect(screen.queryByText("Summarize service health")).toBeNull()
     expect(screen.queryByRole("button", { name: /Recent runs/ })).toBeNull()
-    expect(screen.getByRole("link", { name: /Runs in Activity/ })).toHaveAttribute("href", "/activity?lens=routines")
+    // The Latest results card links to every run in Activity.
+    expect(screen.getByRole("link", { name: /All runs/ })).toHaveAttribute("href", "/activity?lens=routines")
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument()
   })
 
-  it("feeds the dashboard the runs and schedules the page loads, filtered like the sidebar", () => {
+  it("feeds the overview board and the dashboard the runs and schedules the page loads, filtered like the sidebar", () => {
+    h.runs = [{ id: "run_1", pipeline_slug: "report", pipeline_name: "Weekly report", status: "waiting", started_at: new Date(Date.now() - 4 * 60_000).toISOString() }]
     h.recorded = [
       { id: "run_1", pipeline_slug: "report", pipeline_name: "Weekly report", status: "waiting", started_at: new Date(Date.now() - 4 * 60_000).toISOString() },
       { id: "run_2", pipeline_slug: "broken", pipeline_name: "Broken routine", status: "failed", started_at: new Date(Date.now() - 60_000).toISOString() },
@@ -119,14 +128,18 @@ describe("<RoutinesWorkspace> — the overview pane", () => {
     h.schedules = [
       { id: "s1", enabled: true, target_pipeline_slug: "report", cron_expr: "30 2 * * *", timezone: "Europe/Prague", next_run_at: new Date(Date.now() + 3_600_000).toISOString() },
     ]
-    renderPane()
-    expect(screen.getByRole("link", { name: /1 decision waiting/ })).toHaveAttribute("href", "/routines?slug=report&run=run_1")
-    expect(screen.getByRole("link", { name: /Next start/ })).toHaveAttribute("href", "/routines?slug=report&view=plan")
+    const onOpenRun = vi.fn()
+    renderPane({ onOpenRun })
+    const needs = screen.getByRole("region", { name: "Needs you" })
+    expect(within(needs).getByText(/is waiting for a decision/)).toBeInTheDocument()
+    fireEvent.click(within(needs).getByRole("button", { name: "Open run" }))
+    expect(onOpenRun).toHaveBeenCalledWith("report", "run_1")
+    expect(within(screen.getByRole("region", { name: "Next 24 hours" })).getAllByRole("listitem")).toHaveLength(1)
     // The explorer's status filter narrows the pane too.
     cleanup()
     renderPane({ filters: { ...filters, status: "failed" } })
-    expect(screen.queryByRole("link", { name: /decision waiting/ })).toBeNull()
-    expect(screen.getByRole("link", { name: /1 could not finish/ })).toBeInTheDocument()
+    expect(within(screen.getByRole("region", { name: "Needs you" })).queryByText(/is waiting for a decision/)).toBeNull()
+    expect(within(screen.getByRole("region", { name: "Needs you" })).getByText(/could not finish/)).toBeInTheDocument()
     expect(screen.getAllByRole("link", { name: /Open run/ })).toHaveLength(1)
   })
 
@@ -149,6 +162,34 @@ describe("<RoutinesWorkspace> — the overview pane", () => {
       <RoutinesWorkspace workspaceId="ws" routines={[]} loading={false} error={null} onSelect={vi.fn()} />,
     )
     expect(screen.getByText(/No routines yet/)).toBeVisible()
+  })
+
+  it("empty workspace shows New routine and the CLI hint; without the role there is no New routine", () => {
+    const onNew = vi.fn()
+    render(<RoutinesWorkspace workspaceId="ws" routines={[]} loading={false} error={null} onSelect={vi.fn()} onNew={onNew} />)
+    screen.getByRole("button", { name: "New routine" }).click()
+    expect(onNew).toHaveBeenCalled()
+    expect(screen.getByText("crewship routine init")).toBeInTheDocument()
+    cleanup()
+    render(<RoutinesWorkspace workspaceId="ws" routines={[]} loading={false} error={null} onSelect={vi.fn()} />)
+    expect(screen.queryByRole("button", { name: "New routine" })).not.toBeInTheDocument()
+  })
+
+  it("an empty workspace explains routines under the empty state, without templates or figures (RT-09)", () => {
+    render(<RoutinesWorkspace workspaceId="ws" routines={[]} loading={false} error={null} onSelect={vi.fn()} />)
+    expect(screen.getByText(/No routines yet/)).toBeVisible()
+    expect(screen.getByRole("heading", { name: "From a sentence to a routine in three steps" })).toBeInTheDocument()
+    expect(screen.getByText("Runs without you")).toBeInTheDocument()
+    expect(screen.queryByText(/template/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/In this workspace this week/)).not.toBeInTheDocument()
+  })
+
+  it("a load error offers Retry", () => {
+    const onRetry = vi.fn()
+    render(<RoutinesWorkspace workspaceId="ws" routines={[]} loading={false} error="boom" onSelect={vi.fn()} onRetry={onRetry} />)
+    expect(screen.getByRole("alert")).toHaveTextContent("Routines could not load")
+    screen.getByRole("button", { name: "Retry" }).click()
+    expect(onRetry).toHaveBeenCalled()
   })
 })
 

@@ -16,6 +16,7 @@ import {
   pillLabelOf,
   type EntryGroup,
 } from "@/lib/journal-style"
+import { JOURNAL_ENTRY_ICONS } from "@/lib/journal-icons"
 import { JOURNAL_ENTRY_TYPES } from "@/lib/types/journal"
 
 /* ------------------------------------------------------------------ *
@@ -352,5 +353,23 @@ describe("pillLabelOf", () => {
   it("abbreviates only types the backend can emit", () => {
     const go = new Set(GO_ENTRY_TYPES)
     expect(Object.keys(TYPE_PILL_LABEL).filter((t) => !go.has(t))).toEqual([])
+  })
+})
+
+
+describe("invitation lifecycle presentation", () => {
+  it.each([
+    "invitation.created",
+    "invitation.reissued",
+    "invitation.revoked",
+    "invitation.accepted",
+  ] as const)("keeps %s visible in audit and security filters", (type) => {
+    expect(JOURNAL_ENTRY_TYPES).toContain(type)
+    expect(groupOf(type)).toBe("audit")
+    expect(entryTypesForGroups(new Set(["audit"]))).toContain(type)
+    expect(activitySource(type)).toBe("security")
+    expect(sourceEntryTypes("security")).toContain(type)
+    expect(pillLabelOf(type)).not.toBe(type)
+    expect(JOURNAL_ENTRY_ICONS[type]).toBeDefined()
   })
 })

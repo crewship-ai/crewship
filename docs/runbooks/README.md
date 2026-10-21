@@ -26,3 +26,4 @@ reports are ignored build output, not an operational procedure.
 - [Trusted CI control inventory](ci-inventory-guard.md): main-owned metadata guard, explicit administrator exceptions and shared-App enforcement limits.
 
 - [Assignment work ownership upgrade](assignment-work-upgrade.md) — queue cutover, ambiguous legacy exec refusal, cancellation and terminal projection.
+- [Pull-request credential diagnostics](pull-request-credentials.md): distinguish local credential preconditions from provider failures without exposing secrets.

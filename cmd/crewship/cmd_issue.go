@@ -22,6 +22,10 @@ import (
 // rather than "crew_id"). Without the yaml tag, --format yaml and --format
 // json return the same data under different key casing (#1211).
 type issueItem struct {
+	ProjectID            *string        `json:"project_id,omitempty" yaml:"project_id,omitempty"`
+	Revision             int64          `json:"revision" yaml:"revision"`
+	AggregateRevision    int64          `json:"aggregate_revision" yaml:"aggregate_revision"`
+	AllowedActions       []string       `json:"allowed_actions" yaml:"allowed_actions"`
 	WorkMode             string         `json:"work_mode" yaml:"work_mode"`
 	BriefRevision        int            `json:"brief_revision" yaml:"brief_revision"`
 	ClientReviewRequired bool           `json:"client_review_required" yaml:"client_review_required"`
@@ -128,11 +132,12 @@ type issueLabel struct {
 }
 
 type issueComment struct {
-	ID        string  `json:"id" yaml:"id"`
-	Body      string  `json:"body" yaml:"body"`
-	AuthorID  *string `json:"author_id" yaml:"author_id"`
-	Author    *string `json:"author_name" yaml:"author_name"`
-	CreatedAt string  `json:"created_at" yaml:"created_at"`
+	GuestVisible bool    `json:"guest_visible,omitempty" yaml:"guest_visible,omitempty"`
+	ID           string  `json:"id" yaml:"id"`
+	Body         string  `json:"body" yaml:"body"`
+	AuthorID     *string `json:"author_id" yaml:"author_id"`
+	Author       *string `json:"author_name" yaml:"author_name"`
+	CreatedAt    string  `json:"created_at" yaml:"created_at"`
 }
 
 // labelItem decodes one row of the label surface — GET /api/v1/labels and
@@ -267,6 +272,23 @@ var issueListCmd = &cobra.Command{
 		}
 		if v, _ := flags.GetString("assignee"); v != "" {
 			params.Set("assignee_id", v)
+		}
+		if v, _ := flags.GetString("owner"); v != "" {
+			params.Set("owner_id", v)
+		}
+		if v, _ := flags.GetString("delegate"); v != "" {
+			params.Set("delegate_id", v)
+		}
+		if v, _ := flags.GetString("work-mode"); v != "" {
+			params.Set("work_mode", v)
+		}
+		if v, _ := flags.GetString("needs"); v != "" {
+			params.Set("needs", v)
+		}
+		for flag, param := range map[string]string{"mine": "mine", "working": "working", "blocked": "blocked"} {
+			if on, _ := flags.GetBool(flag); on {
+				params.Set(param, "1")
+			}
 		}
 		if v, _ := flags.GetString("label"); v != "" {
 			params.Set("label", v)
@@ -512,6 +534,13 @@ func init() {
 	issueListCmd.Flags().String("crew", "", "Filter by crew slug or ID")
 	issueListCmd.Flags().String("assignee", "", "Filter by assignee ID")
 	issueListCmd.Flags().String("label", "", "Filter by label name")
+	issueListCmd.Flags().String("owner", "", "Only issues owned by this user ID, or \"me\"")
+	issueListCmd.Flags().String("delegate", "", "Only issues delegated to this agent ID")
+	issueListCmd.Flags().String("work-mode", "", "Who holds the work: agent or human")
+	issueListCmd.Flags().Bool("mine", false, "My work: open issues I own or hold as the worker")
+	issueListCmd.Flags().Bool("working", false, "Agents working: an agent holds the issue and its session is active or stale")
+	issueListCmd.Flags().String("needs", "", "Needs me: reply (a session awaits input or failed, or the execution needs a person, on an issue I own or hold) or review (in REVIEW with client acceptance on, and I am the requester)")
+	issueListCmd.Flags().Bool("blocked", false, "Blocked: an open issue blocks it")
 	issueListCmd.Flags().String("search", "", "Search issues by title or identifier (server-side)")
 	addListPagingFlags(issueListCmd.Flags(), 50)
 	issueListCmd.Flags().Bool("counts", false, "Also report how many issues sit in each status under the same filter (?counts=1, X-Status-Counts)")
@@ -524,6 +553,8 @@ func init() {
 	issueCreateCmd.Flags().String("status", "", "Starting status: BACKLOG (default), TODO, IN_PROGRESS, CANCELLED, DUPLICATE")
 	issueCreateCmd.Flags().String("assignee", "", "Assignee: an agent slug or ID (delegate), or with --assignee-type user a member's email or user ID (owner)")
 	issueCreateCmd.Flags().String("assignee-type", "agent", "Assignee type: agent (sets the delegate) or user (sets the human owner)")
+	issueCreateCmd.Flags().String("owner", "", "Human owner (accountable person): a member's email or user ID. Combine with --delegate; not with --assignee")
+	issueCreateCmd.Flags().String("delegate", "", "Agent that does the work: a slug or ID. Combine with --owner; not with --assignee")
 	issueCreateCmd.Flags().String("labels", "", "Comma-separated label IDs")
 	issueCreateCmd.Flags().String("due-date", "", "Due date (ISO 8601)")
 	// PR #292 panel parity: project/milestone/parent/estimate/sort-order/routine-id
@@ -535,6 +566,8 @@ func init() {
 	issueCreateCmd.Flags().String("routine-id", "", "Bind to a routine (pipeline ID)")
 
 	// issue update flags
+	issueUpdateCmd.Flags().Int64("expected-revision", 0, "Expected issue revision; stale edits return a conflict")
+	issueUpdateCmd.Flags().String("idempotency-key", "", "Stable operation key; reuse on retry")
 	issueUpdateCmd.Flags().String("title", "", "New title")
 	issueUpdateCmd.Flags().String("description", "", "New description")
 	issueUpdateCmd.Flags().String("status", "", "New status: BACKLOG, TODO, IN_PROGRESS, REVIEW, DONE, FAILED, CANCELLED, DUPLICATE")
@@ -572,7 +605,9 @@ func init() {
 	issueStopCmd.Flags().Bool("hard", false, "also terminate the running process (Tier 2); cooperative stop alone only prevents further work from starting")
 
 	// issue comment flags
+	issueCommentCmd.Flags().String("idempotency-key", "", "Stable operation key; reuse on retry")
 	issueCommentCmd.Flags().String("body", "", "Comment body (alternative to positional args)")
+	issueCommentCmd.Flags().Bool("guest-visible", false, "Explicitly share this new comment with Guests who can read the current project; agent mentions must stay private")
 	issueCommentCmd.Flags().StringArray("mention", nil, "Mention an agent by slug (repeatable) — resolved to the "+
 		"workspace agent and written as the real [@slug](crewship:agent/<id>) link the server requires. "+
 		"A bare @slug typed into the body or --body is plain text and mentions nobody.")

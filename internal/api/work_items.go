@@ -335,7 +335,7 @@ func (h *WorkItemsHandler) List(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "name work items", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, workItemPage{Items: items, NextCursor: next})
+	writeCostAwareJSON(w, r, http.StatusOK, workItemPage{Items: items, NextCursor: next})
 }
 
 // Get returns one work item with its attempts and its whole history.
@@ -374,7 +374,7 @@ func (h *WorkItemsHandler) Get(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "name work item", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, workItemDetailView{workItemView: one[0], Attempts: attempts, Events: events})
+	writeCostAwareJSON(w, r, http.StatusOK, workItemDetailView{workItemView: one[0], Attempts: attempts, Events: events})
 }
 
 // readItem fetches one item and fences it to the workspace. A work item in

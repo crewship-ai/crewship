@@ -280,6 +280,7 @@ func writeMCPDroid(
 	specs = injectMemoryMCP(specs, req.AgentSlug, memorySinkReady(ctx, container, containerID))
 	specs = injectRoutinesMCP(specs)
 	specs = injectNotifyMCP(specs)
+	specs = injectIssuesMCP(specs)
 	if len(specs) == 0 {
 		return nil
 	}
@@ -323,6 +324,7 @@ func writeMCPGemini(
 	specs = injectMemoryMCP(specs, req.AgentSlug, memorySinkReady(ctx, container, containerID))
 	specs = injectRoutinesMCP(specs)
 	specs = injectNotifyMCP(specs)
+	specs = injectIssuesMCP(specs)
 	if len(specs) == 0 {
 		return nil
 	}
@@ -385,6 +387,7 @@ func writeMCPOpenCode(
 	specs = injectMemoryMCP(specs, req.AgentSlug, memorySinkReady(ctx, container, containerID))
 	specs = injectRoutinesMCP(specs)
 	specs = injectNotifyMCP(specs)
+	specs = injectIssuesMCP(specs)
 	if len(specs) == 0 {
 		return nil
 	}
@@ -460,6 +463,7 @@ func writeMCPCodex(
 	specs = injectMemoryMCP(specs, req.AgentSlug, memorySinkReady(ctx, container, containerID))
 	specs = injectRoutinesMCP(specs)
 	specs = injectNotifyMCP(specs)
+	specs = injectIssuesMCP(specs)
 	if len(specs) == 0 {
 		return nil
 	}

@@ -220,22 +220,43 @@ func (r *restrictedExecutor) ExecuteRunWithProjectFiles(ctx context.Context, use
 }
 
 // Capability checking happens before graph admission, including every nested leaf.
-func (r *restrictedExecutor) SupportsWorkflowProfile(profile string) bool {
+func (r *restrictedExecutor) workflowProfileRunner(profile string) api.RestrictedTextExecutor {
 	if r == nil {
-		return false
+		return nil
 	}
-	var runner api.RestrictedTextExecutor
 	switch profile {
 	case "responses_text":
-		runner = r.text
+		return r.text
 	case "native_api_key":
-		runner = r.native
+		return r.native
 	default:
+		return nil
+	}
+}
+
+func workflowRunnerHasProof(runner api.RestrictedTextExecutor) bool {
+	_, ok := runner.(interface {
+		ExecuteWorkflowRun(context.Context, restricteddispatch.DelegatedRunRequest, func(string, string) error) (restricteddispatch.RunProof, error)
+	})
+	return ok
+}
+
+func (r *restrictedExecutor) DeclaresWorkflowProfile(profile string) bool {
+	runner := r.workflowProfileRunner(profile)
+	if !workflowRunnerHasProof(runner) {
 		return false
 	}
-	if _, ok := runner.(interface {
-		ExecuteWorkflowRun(context.Context, restricteddispatch.DelegatedRunRequest, func(string, string) error) (restricteddispatch.RunProof, error)
-	}); !ok {
+	if declared, ok := runner.(interface{ DeclaresWorkflowProfile(string) bool }); ok {
+		return declared.DeclaresWorkflowProfile(profile)
+	}
+	return profile == "responses_text"
+}
+
+func (r *restrictedExecutor) SupportsWorkflowProfile(profile string) bool {
+	runner := r.workflowProfileRunner(profile)
+	// Keep the execution contract for existing explicitly advertised adapters;
+	// the new static navigation declaration never gates execution readiness.
+	if !workflowRunnerHasProof(runner) {
 		return false
 	}
 	if capable, ok := runner.(interface{ SupportsWorkflowProfile(string) bool }); ok {

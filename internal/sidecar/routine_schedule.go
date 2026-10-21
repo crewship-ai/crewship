@@ -41,8 +41,12 @@ package sidecar
 // to claim enforcement elsewhere, name the function, not the layer.
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 // handleRoutineScheduleCreate proxies POST /routines/schedules/create
@@ -54,7 +58,43 @@ func (s *Server) handleRoutineScheduleCreate(w http.ResponseWriter, r *http.Requ
 		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
 		return
 	}
+	ctx, ok := s.routineOrigin(w, r)
+	if !ok {
+		return
+	}
+	agent, ok := s.actingAgentID(r)
+	if !ok {
+		writeJSONResponse(w, 403, map[string]string{"error": "unrecognized agent token"})
+		return
+	}
+	var payload map[string]json.RawMessage
+	if !decodeCappedJSONLimit(w, r, &payload, pipelineMaxBodyBytes) {
+		return
+	}
+	if payload == nil {
+		writeJSONResponse(w, 400, map[string]string{"error": "schedule object required"})
+		return
+	}
+	for key := range payload {
+		for _, reserved := range []string{"source_run_id", "source_agent_id", "chat_origin_id", "workspace_id", "crew_id"} {
+			if strings.EqualFold(key, reserved) {
+				delete(payload, key)
+				break
+			}
+		}
+	}
+	payload["source_run_id"], _ = json.Marshal(routineSourceRun(ctx))
+	payload["source_agent_id"], _ = json.Marshal(agent)
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		writeJSONResponse(w, 400, map[string]string{"error": "invalid schedule"})
+		return
+	}
+	r = r.Clone(ctx)
+	r.Body = io.NopCloser(bytes.NewReader(raw))
+	r.ContentLength = int64(len(raw))
 	q := url.Values{}
 	q.Set("workspace_id", s.ipc.WorkspaceID)
+	q.Set("crew_id", s.ipc.CrewID)
 	s.proxyToAPI(w, r, http.MethodPost, "/api/v1/internal/routines/schedules?"+q.Encode())
 }

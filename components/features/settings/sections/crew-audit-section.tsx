@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react"
 import { Shield, ChevronRight, ChevronLeft, RefreshCw, Download, ScrollText, Cpu } from "lucide-react"
 import { motion, AnimatePresence } from "motion/react"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -48,7 +48,8 @@ function normalizeLog(raw: Record<string, unknown>): AuditLog {
     const u = raw.user as Record<string, unknown>
     user = { id: String(u.id ?? ""), email: String(u.email ?? ""), full_name: (u.full_name as string | null) ?? null }
   } else if (raw.user_email) {
-    user = { id: "", email: String(raw.user_email), full_name: (raw.user_name as string | null) ?? null }
+    // The flat shape names the person beside the row's user_id.
+    user = { id: String(raw.user_id ?? ""), email: String(raw.user_email), full_name: (raw.user_name as string | null) ?? null }
   }
 
   let metadata: Record<string, unknown> | null = null
@@ -194,9 +195,15 @@ interface CrewAuditSectionProps {
   groupRepeats?: boolean
   /** Mark rows that change who can reach what. */
   highlightAccess?: boolean
+  /** Profile photos by user id: the audit API names a person but sends no
+   *  photo, and the page already holds the roster. */
+  avatars?: Record<string, string | null | undefined>
 }
 
-export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersChange, showSources = true, title = "Audit log", description = "Every state-changing action on this workspace, immutably recorded", showToolbar = true, groupRepeats = true, highlightAccess = true }: CrewAuditSectionProps) {
+/** The rows read the photos from here rather than through every prop list. */
+const AuditAvatars = createContext<Record<string, string | null | undefined>>({})
+
+export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersChange, showSources = true, title = "Audit log", description = "Every state-changing action on this workspace, immutably recorded", showToolbar = true, groupRepeats = true, highlightAccess = true, avatars = EMPTY_AVATARS }: CrewAuditSectionProps) {
   const [logs, setLogs] = useState<AuditLog[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -205,7 +212,24 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
   const [ownFilters, setOwnFilters] = useAuditFilters()
   const filters = controlled ?? ownFilters
   const setFilters = onFiltersChange ?? setOwnFilters
-  const [page, setPage] = useState(1)
+  // The page belongs to the filters it was turned on: when they change — here
+  // or in the Audit log page's side panel, which sets them directly — the
+  // list starts again at page one, in the same render (no stray fetch of
+  // page N under the new filters).
+  const filterKey = JSON.stringify(filters)
+  const [paging, setPaging] = useState({ key: filterKey, page: 1 })
+  const page = paging.key === filterKey ? paging.page : 1
+  const setPage = useCallback((next: number | ((p: number) => number)) =>
+    setPaging((cur) => {
+      const from = cur.key === filterKey ? cur.page : 1
+      return { key: filterKey, page: typeof next === "function" ? next(from) : next }
+    }), [filterKey])
+  const [expandedFor, setExpandedFor] = useState(`${filterKey}#1`)
+  if (expandedFor !== `${filterKey}#${page}`) {
+    // A row open on another page or under other filters is not on screen.
+    setExpandedFor(`${filterKey}#${page}`)
+    if (expandedId !== null) setExpandedId(null)
+  }
   const [pagination, setPagination] = useState<AuditPagination | null>(null)
   const [exporting, setExporting] = useState(false)
   const people = useWorkspacePeople(workspaceId)
@@ -221,7 +245,6 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
   // Every filter change starts again from page one.
   const changeFilters = useCallback((next: Partial<AuditFilters>) => {
     setFilters(next)
-    setPage(1)
     setExpandedId(null)
   }, [setFilters])
 
@@ -353,26 +376,28 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
   const filtered = activeFilterChips(filters, {}).length > 0
 
   return (
+    <AuditAvatars.Provider value={avatars}>
     <SettingsCard icon={ScrollText}
       title={title}
-      description={description}
+      // v67: the line that says what is shown sits on the right of the head,
+      // beside an icon-only refresh and Export CSV, not under the title.
       actions={
         <>
+          {description && <span className="hidden text-label text-muted-foreground sm:inline">{description}</span>}
           <Button
-            variant="outline"
-            size="sm"
-            className="h-7 px-2.5 text-xs"
+            variant="ghost"
+            size="icon-sm"
             onClick={() => fetchLogs({ silent: true })}
             disabled={loading || refreshing}
             aria-label="Refresh audit log"
+            title="Refresh"
           >
-            <RefreshCw className={cn("h-3 w-3 mr-1.5", refreshing && "animate-spin")} />
-            Refresh
+            <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
           </Button>
           <Button
             variant="outline"
             size="sm"
-            className="h-7 px-2.5 text-xs"
+            className="px-2.5 text-xs"
             onClick={handleExport}
             disabled={(pagination?.total ?? 0) === 0 || exporting || loading}
             aria-label="Export audit log to CSV"
@@ -384,7 +409,7 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 px-2.5 text-xs text-muted-foreground hover:text-foreground"
+              className="px-2.5 text-xs text-muted-foreground hover:text-foreground"
               onClick={handleCancelExport}
               aria-label="Cancel export"
             >
@@ -454,7 +479,7 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
         // opposite ("your rows are still here, they're just old").
         <div className="p-6 text-center">
           <p role="alert" className="text-xs text-destructive mb-3">{error}</p>
-          <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={() => fetchLogs()}>
+          <Button variant="outline" size="sm" className="px-2.5 text-xs" onClick={() => fetchLogs()}>
             Retry
           </Button>
         </div>
@@ -481,10 +506,10 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
               {/* A day is the unit people actually search in ("what happened
                   on the 27th"), and it is free to compute — the server
                   already returns newest-first. */}
-              <h3 className="sticky top-0 z-10 border-b border-border/40 bg-card/95 px-4 py-1.5 font-mono text-micro font-medium uppercase tracking-[0.08em] text-muted-foreground backdrop-blur">
+              <h3 className="sticky top-0 z-10 border-b border-border/40 bg-card/95 px-4 py-1.5 text-micro font-semibold uppercase tracking-[0.04em] text-muted-foreground backdrop-blur">
                 {dayHeading(bucket.day)}
-                <span className="ml-2 font-mono text-micro font-normal normal-case tracking-normal text-muted-foreground-soft">
-                  {bucket.logs.length}
+                <span className="ml-1.5 font-normal tabular-nums text-muted-foreground-soft">
+                  · {bucket.logs.length}
                 </span>
               </h3>
               {(groupRepeats ? foldRuns(bucket.logs) : bucket.logs.map((log) => ({ key: log.id, logs: [log] }))).map((group) =>
@@ -508,14 +533,14 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
           {/* Pagination */}
           {total > 0 && (
             <div className="flex items-center justify-between gap-2 flex-wrap px-4 py-2.5 border-t border-border/40">
-              <span className="text-micro text-muted-foreground font-mono tabular-nums">
+              <span className="text-micro text-muted-foreground tabular-nums">
                 {rangeStart}–{rangeEnd} of {total.toLocaleString()} events
               </span>
               <div className="flex items-center gap-1.5">
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-7 px-2 text-xs"
+                  className="px-2 text-xs"
                   disabled={page <= 1}
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                 >
@@ -525,7 +550,7 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-7 px-2 text-xs"
+                  className="px-2 text-xs"
                   disabled={page >= totalPages}
                   onClick={() => setPage((p) => p + 1)}
                 >
@@ -538,6 +563,7 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
         </>
       )}
     </SettingsCard>
+    </AuditAvatars.Provider>
   )
 }
 
@@ -557,7 +583,10 @@ function shortIdLabel(label: string): string {
   return label
 }
 
+const EMPTY_AVATARS: Record<string, string | null | undefined> = {}
+
 function Actor({ user }: { user: AuditLog["user"] }) {
+  const avatars = useContext(AuditAvatars)
   const label = personLabel(user?.full_name, user?.email ?? "")
   if (!label) {
     return (
@@ -569,7 +598,7 @@ function Actor({ user }: { user: AuditLog["user"] }) {
   }
   return (
     <span className="flex min-w-0 items-center gap-2 text-xs">
-      <UserAvatar name={user?.full_name} email={user?.email ?? ""} className="h-5 w-5 shrink-0" textClassName="text-micro" />
+      <UserAvatar name={user?.full_name} email={user?.email ?? ""} src={user ? avatars[user.id] ?? null : null} className="h-5 w-5 shrink-0" textClassName="text-micro" />
       <span className="truncate text-foreground">{label}</span>
     </span>
   )
@@ -754,5 +783,6 @@ function FoldedRun({ group, highlightAccess = true }: { group: AuditGroup; highl
 function formatTimeOfDay(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return "--:--"
-  return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+  // The wireframe's 24-hour clock ("09:16"); the app has no per-workspace time format.
+  return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false })
 }

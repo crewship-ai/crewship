@@ -23,9 +23,10 @@ func newReadTestServer(t *testing.T) (*Server, string) {
 	}
 	t.Cleanup(func() { _ = eng.Close() })
 	return &Server{
-		memoryEngine:    eng,
-		agentMemoryBase: base,
-		logger:          silent,
+		memoryEngine:      eng,
+		agentMemoryBase:   base,
+		memoryStorageRoot: filepath.Dir(t.TempDir()),
+		logger:            silent,
 	}, base
 }
 

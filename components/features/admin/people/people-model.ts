@@ -1,3 +1,5 @@
+import { Ban, Clock, Lock, ShieldCheck, TriangleAlert, UserX, Users, type LucideIcon } from "lucide-react"
+
 import type { AdminMembership, AdminOrg, AdminUser } from "@/app/(dashboard)/admin/types"
 
 /**
@@ -36,15 +38,39 @@ export const STATUS_LABEL: Record<PersonStatus, string> = {
 
 export type Facet = "all" | "attention" | "setup" | "locked" | "suspended" | "noaccess" | "admins"
 
-export const FACETS: { key: Facet; label: string; dot?: string }[] = [
-  { key: "all", label: "All people" },
-  { key: "attention", label: "Needs attention", dot: "bg-warn" },
-  { key: "setup", label: "Setup pending", dot: "bg-primary" },
-  { key: "locked", label: "Locked", dot: "bg-destructive" },
-  { key: "suspended", label: "Suspended", dot: "bg-muted-foreground" },
-  { key: "noaccess", label: "No workspace", dot: "bg-border" },
-  { key: "admins", label: "Instance admins", dot: "bg-[var(--purple)]" },
+export const FACETS: { key: Facet; label: string; icon: LucideIcon; tone?: string; hint?: string }[] = [
+  { key: "all", label: "Everyone", icon: Users },
+  { key: "attention", label: "Needs attention", icon: TriangleAlert, tone: "text-warn" },
+  { key: "setup", label: "Setup pending", icon: Clock, tone: "text-primary-hover", hint: "Has not chosen a password" },
+  { key: "locked", label: "Locked", icon: Lock, tone: "text-destructive", hint: "Too many failed sign-ins" },
+  { key: "suspended", label: "Suspended", icon: Ban },
+  { key: "noaccess", label: "No workspace", icon: UserX, hint: "Signs in to nothing" },
+  { key: "admins", label: "Instance admins", icon: ShieldCheck, tone: "text-[var(--purple)]" },
 ]
+
+// ── Workspaces and personal accounts ──────────────────────────────────────
+
+/**
+ * A personal workspace is the empty "<Name>'s Workspace" a sign-up without an
+ * invitation gets (the server's `kind`). An older server sends no kind: then
+ * the pattern decides — one member, named "…'s Workspace".
+ */
+export function isPersonal(w: Pick<Workspace, "kind" | "name" | "_count_members">): boolean {
+  if (w.kind) return w.kind === "personal"
+  return w._count_members <= 1 && /'s Workspace$/.test(w.name)
+}
+
+/** Nothing in it yet: no crews, no agents, no runs this week. */
+export function isEmptyWorkspace(w: Workspace): boolean {
+  return (w._count_crews ?? 0) === 0 && (w._count_agents ?? 0) === 0 && (w.runs_7d ?? 0) === 0
+}
+
+/** Personal workspaces are named after their owner; the person is the label. */
+export function personalOwnerName(w: Workspace, people: Person[]): string {
+  const owner = people.find((p) => p.id === w.personal_owner_id)
+    ?? people.find((p) => p.memberships.some((m) => m.workspace_id === w.id && m.role === "OWNER"))
+  return owner ? displayName(owner) : w.name.replace(/'s Workspace$/, "")
+}
 
 export function facetMatches(p: Person, facet: Facet, now = Date.now()): boolean {
   const s = personStatus(p, now)
@@ -70,9 +96,12 @@ export function personMatches(p: Person, q: string): boolean {
   return `${p.full_name ?? ""} ${p.email} ${p.memberships.map((m) => m.name).join(" ")}`.toLowerCase().includes(needle)
 }
 
-export function workspaceMatches(w: Workspace, q: string): boolean {
+export function workspaceMatches(w: Workspace, q: string, people: Person[] = []): boolean {
   const needle = q.trim().toLowerCase()
-  return !needle || `${w.name} ${w.slug}`.toLowerCase().includes(needle)
+  if (!needle) return true
+  // A personal workspace is found by its owner too: "ivana" finds Ivana's.
+  const owners = people.filter((p) => p.memberships.some((m) => m.workspace_id === w.id && m.role === "OWNER"))
+  return `${w.name} ${w.slug} ${owners.map((p) => `${displayName(p)} ${p.email}`).join(" ")}`.toLowerCase().includes(needle)
 }
 
 export const displayName = (p: Pick<AdminUser, "full_name" | "email">) => p.full_name?.trim() || p.email

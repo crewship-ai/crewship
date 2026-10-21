@@ -312,10 +312,18 @@ func buildDocument(routes []route) map[string]any {
 	_, restrictedContextComponents := restrictedContextSchemaCatalog()
 	_, restrictedWorkflowComponents := restrictedWorkflowSchemaCatalog()
 	_, chatShareComponents := chatShareSchemaCatalog()
+	_, chatEntityComponents := chatEntitySchemaCatalog()
+	_, chatProposalComponents := chatProposalSchemaCatalog()
+	_, chatRunPreflightComponents := chatRunPreflightSchemaCatalog()
+	_, chatDecisionComponents := chatDecisionSchemaCatalog()
+	_, routineOriginComponents := routineOriginBindingSchemaCatalog()
+	_, issueOutboxComponents := issueOutboxFailedSchemaCatalog()
+	_, accessPresetComponents := accessPresetSchemaCatalog()
 	for _, catalog := range []map[string]any{
-		coreResourceSchemas(), issueSkillCredentialSchemaComponents(), executionSchemaComponents(), crewWorkspaceComponentsV1,
+		memberAccessSchemaComponents(), presetSelectionSchemaComponents(), coreResourceSchemas(), issueSkillCredentialSchemaComponents(), executionSchemaComponents(), crewWorkspaceComponentsV1,
 		credentialComponents, remainingCrewAgentComponentsV1, remainingComponents, finalAdminPlatformComponents, finalComponents,
-		coreResourceRequestComponentsV2, integrationsAuthRequestComponents, adminSpecialComponents, finalCoreRequestComponents, finalAuthComponents, onboardingProposalComponents, workspaceConversationComponents, routinesWorkspaceComponents, workLedgerComponents, chatShareComponents, restrictedContextComponents, restrictedWorkflowComponents,
+		coreResourceRequestComponentsV2, integrationsAuthRequestComponents, adminSpecialComponents, finalCoreRequestComponents, finalAuthComponents, onboardingProposalComponents, workspaceConversationComponents, routinesWorkspaceComponents, workLedgerComponents, chatShareComponents, chatEntityComponents, chatProposalComponents, chatRunPreflightComponents, chatDecisionComponents, routineOriginComponents, issueOutboxComponents, accessPresetComponents, restrictedContextComponents, restrictedWorkflowComponents,
+		chatSourceSchemaComponents(),
 	} {
 		for name, schema := range catalog {
 			// Domain catalogs are the audited source of truth.  They intentionally
@@ -327,8 +335,27 @@ func buildDocument(routes []route) map[string]any {
 	for name, schema := range workflowRequestComponents {
 		schemas[name] = schema
 	}
+	for name, schema := range documentSchemaComponents() {
+		schemas[name] = schema
+	}
+	_, slidesComponents := slidesHumanSchemaCatalog()
+	for name, schema := range slidesComponents {
+		schemas[name] = schema
+	}
+	_, ownershipComponents := workspacePageOwnershipSchemaCatalog()
+	for name, schema := range ownershipComponents {
+		schemas[name] = schema
+	}
+	_, policyComponents := artifactCreationPolicySchemaCatalog()
+	for name, schema := range policyComponents {
+		schemas[name] = schema
+	}
 	_, providerLoginComponents := providerLoginSchemaCatalog()
 	for name, schema := range providerLoginComponents {
+		schemas[name] = schema
+	}
+	_, routineOrganisationComponents := routineOrganisationSchemaCatalog()
+	for name, schema := range routineOrganisationComponents {
 		schemas[name] = schema
 	}
 	components["securitySchemes"] = map[string]any{
@@ -364,6 +391,9 @@ func buildDocument(routes []route) map[string]any {
 				}
 			}
 			info.statuses = success
+		}
+		for _, status := range routeSchemaCatalog()[rt.method+" "+rt.path].ErrorStatuses {
+			info.statuses[status] = true
 		}
 		var params []map[string]any
 		for _, name := range pathParams(rt.path) {
@@ -471,7 +501,9 @@ func buildDocument(routes []route) map[string]any {
 		}
 		switch rt.method {
 		case "POST", "PUT", "PATCH":
-			op["requestBody"] = requestBodyForRoute(rt)
+			if !routeSchemaCatalog()[rt.method+" "+rt.path].NoRequest {
+				op["requestBody"] = requestBodyForRoute(rt)
+			}
 		case "DELETE":
 			// A DELETE gets a body only when its catalog entry declares one:
 			// two handlers read a confirmation body (a draft revision, a
@@ -501,6 +533,10 @@ func buildDocument(routes []route) map[string]any {
 
 func routeSchemaCatalog() map[string]DomainSchema {
 	result := map[string]DomainSchema{}
+	outboxRoutes, _ := issueOutboxFailedSchemaCatalog()
+	for key, schema := range outboxRoutes {
+		result[key] = schema
+	}
 	for key, schema := range pageProjectSchemaCatalog() {
 		result[key] = schema
 	}
@@ -586,6 +622,9 @@ func routeSchemaCatalog() map[string]DomainSchema {
 		if schema.SuccessStatuses != nil {
 			merged.SuccessStatuses = schema.SuccessStatuses
 		}
+		if schema.ErrorStatuses != nil {
+			merged.ErrorStatuses = schema.ErrorStatuses
+		}
 		result[key] = merged
 	}
 	for key, schema := range finalWorkflowIssueSchemaCatalog() {
@@ -611,14 +650,36 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	for key, schema := range finalSpecialDomainSchemaCatalog() {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
+	for key, schema := range guestIssueContributionSchemaCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
 	for key, schema := range final21GenericResponseSchemaCatalog() {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	for key, schema := range routineTrustSchemaCatalog() {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
+	for key, schema := range documentSchemaCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	slidesRoutes, _ := slidesHumanSchemaCatalog()
+	for key, schema := range slidesRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	ownershipRoutes, _ := workspacePageOwnershipSchemaCatalog()
+	for key, schema := range ownershipRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	policyRoutes, _ := artifactCreationPolicySchemaCatalog()
+	for key, schema := range policyRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
 	providerLoginRoutes, _ := providerLoginSchemaCatalog()
 	for key, schema := range providerLoginRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	routineOrganisationRoutes, _ := routineOrganisationSchemaCatalog()
+	for key, schema := range routineOrganisationRoutes {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	coreResourceRequestsV2, _ := coreResourceRequestSchemaCatalogV2()
@@ -657,6 +718,26 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	for key, schema := range workLedgerRoutes {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
+	routineOriginRoutes, _ := routineOriginBindingSchemaCatalog()
+	for key, schema := range routineOriginRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	chatProposalRoutes, _ := chatProposalSchemaCatalog()
+	for key, schema := range chatProposalRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	chatRunPreflightRoutes, _ := chatRunPreflightSchemaCatalog()
+	for key, schema := range chatRunPreflightRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	chatDecisionRoutes, _ := chatDecisionSchemaCatalog()
+	for key, schema := range chatDecisionRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	chatEntityRoutes, _ := chatEntitySchemaCatalog()
+	for key, schema := range chatEntityRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
 	chatShareRoutes, _ := chatShareSchemaCatalog()
 	for key, schema := range chatShareRoutes {
 		result[key] = mergeDomainSchema(result[key], schema)
@@ -672,10 +753,19 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	for key, schema := range restrictedWorkflowRoutes {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
+	presetRoutes, _ := accessPresetSchemaCatalog()
+	for key, schema := range presetRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	for key, schema := range chatSourceSchemaRoutes() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+
 	return result
 }
 
 func mergeDomainSchema(existing, incoming DomainSchema) DomainSchema {
+	existing.NoRequest = existing.NoRequest || incoming.NoRequest
 	if incoming.SuccessHeaders != nil {
 		existing.SuccessHeaders = incoming.SuccessHeaders
 	}
@@ -697,6 +787,9 @@ func mergeDomainSchema(existing, incoming DomainSchema) DomainSchema {
 	}
 	if incoming.SuccessStatuses != nil {
 		existing.SuccessStatuses = incoming.SuccessStatuses
+	}
+	if incoming.ErrorStatuses != nil {
+		existing.ErrorStatuses = incoming.ErrorStatuses
 	}
 	if incoming.ErrorMedia != nil {
 		existing.ErrorMedia = incoming.ErrorMedia
@@ -845,7 +938,7 @@ func responseComponents() map[string]any {
 
 	workspace := object(map[string]any{
 		"id": scalar("string"), "name": scalar("string"), "slug": scalar("string"),
-		"logo_url": nullable("string"), "preferred_language": nullable("string"), "pages_theme": pagesThemeSchema(),
+		"logo_url": nullable("string"), "preferred_language": nullable("string"), "pages_theme": pagesThemeSchema(), "appearance_default": appearanceDefaultSchema(),
 		"created_at": scalar("string"), "updated_at": scalar("string"),
 		"currentUserRole": nullable("string"), "currentUserCapabilities": array(scalar("string")),
 		"allow_privileged_credentials": scalar("boolean"), "run_retention_days": nullable("integer"),

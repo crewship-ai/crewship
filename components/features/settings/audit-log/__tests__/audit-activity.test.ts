@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 
-import { addDays, dayInBounds, facetCounts, lastDays, monthGrid, tallyByDay, type ActivityEvent } from "../audit-activity"
+import { addDays, auditSeverity, dayInBounds, facetCounts, lastDays, monthGrid, tallyByDay, type ActivityEvent } from "../audit-activity"
 import { DEFAULT_AUDIT_FILTERS, type AuditFilters } from "../audit-filters"
 
 const f = (over: Partial<AuditFilters> = {}): AuditFilters => ({ ...DEFAULT_AUDIT_FILTERS, ...over })
@@ -66,5 +66,15 @@ describe("facetCounts", () => {
     expect(c.result).toEqual({})
     expect(c.category).toMatchObject({ all: 1, agent_run: 1 })
     expect(c.category.CREW).toBeUndefined()
+  })
+})
+
+describe("auditSeverity — the Journal's scale", () => {
+  it("reads failures as errors, removals as warnings, changes as notices and the rest as info", () => {
+    expect(auditSeverity("agent.run.failed")).toBe("error")
+    expect(auditSeverity("hook.delete")).toBe("warn")
+    expect(auditSeverity("member.removed")).toBe("warn")
+    expect(auditSeverity("hook.create")).toBe("notice")
+    expect(auditSeverity("agent.run.completed")).toBe("info")
   })
 })

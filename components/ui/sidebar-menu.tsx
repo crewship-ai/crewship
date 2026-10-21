@@ -58,8 +58,8 @@ const sidebarMenuButtonVariants = cva(
         // the 44px class — `h-11` lands at 40.5px and misses. Icon mode is
         // handled separately in the base string above, because its size is
         // forced with `!`.
-        default: "h-8 coarse:h-12 text-sm",
-        sm: "h-7 coarse:h-12 text-xs",
+        default: "h-8 coarse:h-[44px] text-sm",
+        sm: "h-7 coarse:h-[44px] text-xs",
         lg: "h-12 text-sm group-data-[collapsible=icon]:!p-0",
       },
     },

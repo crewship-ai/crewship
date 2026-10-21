@@ -130,26 +130,34 @@ func (f *pageFolderRecord) ref() *pageFolderRef {
 // `people_and_crews` or `workspace` (folderSharedLabel; #2533 §3/10); the
 // ACL itself is behind GET …/acl and its gate.
 type pageFolderWire struct {
-	ID            string `json:"id"`
-	Slug          string `json:"slug"`
-	Name          string `json:"name"`
-	Icon          string `json:"icon"`
-	Color         string `json:"color"`
-	Owner         string `json:"owner"`
-	OwnerCrewName string `json:"owner_crew_name"`
-	PageCount     int    `json:"page_count"`
-	Shared        string `json:"shared"`
-	ACLVersion    int64  `json:"acl_version"`
-	CreatedAt     string `json:"created_at"`
-	UpdatedAt     string `json:"updated_at"`
+	ID             string `json:"id"`
+	Slug           string `json:"slug"`
+	Name           string `json:"name"`
+	Icon           string `json:"icon"`
+	Color          string `json:"color"`
+	Owner          string `json:"owner"`
+	OwnerCrewName  string `json:"owner_crew_name"`
+	PageCount      int    `json:"page_count"`
+	Shared         string `json:"shared"`
+	ACLVersion     int64  `json:"acl_version"`
+	CreatedAt      string `json:"created_at"`
+	UpdatedAt      string `json:"updated_at"`
+	CanRename      bool   `json:"can_rename"`
+	CanShare       bool   `json:"can_share"`
+	CanDelete      bool   `json:"can_delete"`
+	CanAcceptPages bool   `json:"can_accept_pages"`
 }
 
-func (f *pageFolderRecord) wire(pageCount int, acl []pageFolderACLRecord) pageFolderWire {
+func (f *pageFolderRecord) wire(pageCount int, acl []pageFolderACLRecord, viewer *pageViewer) pageFolderWire {
 	return pageFolderWire{
 		ID: f.ID, Slug: f.Slug, Name: f.Name, Icon: f.Icon, Color: f.Color,
 		Owner: "crew/" + f.OwnerCrewSlug, OwnerCrewName: f.OwnerCrewName,
 		PageCount: pageCount, Shared: folderSharedLabel(acl), ACLVersion: f.ACLVersion,
 		CreatedAt: f.CreatedAt, UpdatedAt: f.UpdatedAt,
+		CanRename:      mayArrangeFolder(viewer, f, acl),
+		CanShare:       mayAdministerFolder(viewer, f),
+		CanDelete:      mayAdministerFolder(viewer, f),
+		CanAcceptPages: mayArrangeFolder(viewer, f, acl),
 	}
 }
 
@@ -198,7 +206,7 @@ func scanPageFolder(row interface{ Scan(...any) error }) (*pageFolderRecord, err
 // loadFoldersIn is every folder in the workspace, keyed by id, in ONE
 // statement — the index calls it for the whole workspace.
 func (h *PageHandler) loadFoldersIn(ctx context.Context, wsID string) (map[string]*pageFolderRecord, error) {
-	rows, err := h.db.QueryContext(ctx, pageFolderSelect+` WHERE f.workspace_id = ?`, wsID)
+	rows, err := h.pageAuthReader(ctx).QueryContext(ctx, pageFolderSelect+` WHERE f.workspace_id = ?`, wsID)
 	if err != nil {
 		return nil, err
 	}
@@ -215,13 +223,13 @@ func (h *PageHandler) loadFoldersIn(ctx context.Context, wsID string) (map[strin
 }
 
 func (h *PageHandler) loadFolder(ctx context.Context, wsID, slug string) (*pageFolderRecord, error) {
-	return scanPageFolder(h.db.QueryRowContext(ctx, pageFolderSelect+` WHERE f.workspace_id = ? AND f.slug = ?`, wsID, slug))
+	return scanPageFolder(h.pageAuthReader(ctx).QueryRowContext(ctx, pageFolderSelect+` WHERE f.workspace_id = ? AND f.slug = ?`, wsID, slug))
 }
 
 // loadFolderByID is the loader a page's folder_id needs. The workspace is
 // not re-checked: the id came from a pages row already scoped to it.
 func (h *PageHandler) loadFolderByID(ctx context.Context, id string) (*pageFolderRecord, error) {
-	return scanPageFolder(h.db.QueryRowContext(ctx, pageFolderSelect+` WHERE f.id = ?`, id))
+	return scanPageFolder(h.pageAuthReader(ctx).QueryRowContext(ctx, pageFolderSelect+` WHERE f.id = ?`, id))
 }
 
 // folderRefFor is the single-page read's folder, for pageDocumentFor. One
@@ -396,7 +404,7 @@ func (h *PageHandler) ListFolders(w http.ResponseWriter, r *http.Request) {
 		if counts[f.ID] == 0 && !folderStanding(viewer, f, index.acl[f.ID]) {
 			continue
 		}
-		out = append(out, f.wire(counts[f.ID], index.acl[f.ID]))
+		out = append(out, f.wire(counts[f.ID], index.acl[f.ID], viewer))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"folders": out})
 }
@@ -427,7 +435,7 @@ func (h *PageHandler) GetFolder(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusNotFound, fmt.Sprintf("folder %q not found", slug))
 		return
 	}
-	out := pageFolderShowWire{pageFolderWire: f.wire(len(index.rows), index.acl[f.ID]), Pages: make([]pageListWire, 0, len(index.rows))}
+	out := pageFolderShowWire{pageFolderWire: f.wire(len(index.rows), index.acl[f.ID], viewer), Pages: make([]pageListWire, 0, len(index.rows))}
 	for i := range index.rows {
 		out.Pages = append(out.Pages, h.pageListRow(&index.rows[i], index.folders, viewer))
 	}
@@ -516,7 +524,7 @@ func (h *PageHandler) CreateFolder(w http.ResponseWriter, r *http.Request) {
 	broadcastWorkspaceEvent(h.hub, wsID, pageFolderEvent, map[string]any{"slug": f.Slug, "folder_id": f.ID})
 	// Option (c): a new folder has no ACL entry; the owning crew and admins
 	// reach it, and "everyone in the workspace" is switched on explicitly.
-	writeJSON(w, http.StatusCreated, f.wire(0, nil))
+	writeJSON(w, http.StatusCreated, f.wire(0, nil, viewer))
 }
 
 // ── 4. Update — PATCH /api/v1/page-folders/{slug} ──────────────────────────
@@ -596,7 +604,7 @@ func (h *PageHandler) UpdateFolder(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "count page folder pages", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, f.wire(len(index.rows), acl))
+	writeJSON(w, http.StatusOK, f.wire(len(index.rows), acl, viewer))
 }
 
 // ── 5. Delete — DELETE /api/v1/page-folders/{slug} ─────────────────────────
@@ -722,8 +730,7 @@ func (h *PageHandler) AddFolderPage(w http.ResponseWriter, r *http.Request) {
 	}
 	rec.FolderID = f.ID
 	rec.PagesVersion++
-	h.journalFolderMembership(r.Context(), wsID, user, rec, "moved", from, f.Slug)
-	broadcastWorkspaceEvent(h.hub, wsID, "page.updated", map[string]any{"page_id": rec.ID, "slug": rec.Slug})
+	h.publishFolderMembership(r.Context(), wsID, user, rec, "moved", from, f.Slug)
 	h.replyFolderPage(w, r, wsID, viewer, rec, false)
 }
 
@@ -783,8 +790,7 @@ func (h *PageHandler) RemoveFolderPage(w http.ResponseWriter, r *http.Request) {
 	}
 	rec.FolderID = ""
 	rec.PagesVersion++
-	h.journalFolderMembership(r.Context(), wsID, user, rec, "removed", f.Slug, "")
-	broadcastWorkspaceEvent(h.hub, wsID, "page.updated", map[string]any{"page_id": rec.ID, "slug": rec.Slug})
+	h.publishFolderMembership(r.Context(), wsID, user, rec, "removed", f.Slug, "")
 	// A `w` holder who just removed a page they reached only through the
 	// folder no longer reaches it: the row comes back with an empty reach,
 	// which is the honest answer to their own action, not a 404.
@@ -981,7 +987,29 @@ func (h *PageHandler) journalFolderChange(ctx context.Context, wsID string, acto
 	}
 }
 
-func (h *PageHandler) journalFolderMembership(ctx context.Context, wsID string, actor *AuthUser, rec *pageRecord, op, from, to string) {
+// Preserve the canonical audit target while sharing one conservative classification
+// between its public projection and the workspace invalidation.
+func (h *PageHandler) publishFolderMembership(ctx context.Context, wsID string, actor *AuthUser, rec *pageRecord, op, from, to string) {
+	public := map[string]any{}
+	if rec != nil && rec.ID != "" && !rec.PrivateAudience {
+		current := *rec
+		var hasPanels bool
+		// Read current ownership and extensions together, not a stale pre-move
+		// HasDocument flag. Missing identity or failed classification hides even ID.
+		if err := h.db.QueryRowContext(ctx, `SELECT p.private_audience,COALESCE(p.owner_user_id,''),
+ EXISTS(SELECT 1 FROM documents WHERE page_id=p.id),
+ EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=p.id),
+ EXISTS(SELECT 1 FROM page_project_live WHERE page_id=p.id AND published=1),
+ EXISTS(SELECT 1 FROM page_panels WHERE page_id=p.id)
+ FROM pages p WHERE p.id=? AND p.workspace_id=?`, rec.ID, wsID).Scan(&current.PrivateAudience, &current.OwnerUserID, &current.HasDocument, &current.HasProject, &current.HasApplication, &hasPanels); err == nil {
+			public = pageWorkspaceInvalidation(&current, hasPanels)
+		}
+	}
+	h.journalFolderMembership(ctx, wsID, actor, rec, op, from, to, public)
+	broadcastWorkspaceEvent(h.hub, wsID, "page.updated", public)
+}
+
+func (h *PageHandler) journalFolderMembership(ctx context.Context, wsID string, actor *AuthUser, rec *pageRecord, op, from, to string, public map[string]any) {
 	if h.journal == nil {
 		return
 	}
@@ -991,6 +1019,8 @@ func (h *PageHandler) journalFolderMembership(ctx context.Context, wsID string, 
 	} else if from != "" {
 		summary = fmt.Sprintf("%s moved page %s from folder %s into folder %s", actor.Email, rec.Slug, from, to)
 	}
+	_, publicID := public["page_id"]
+	_, publicSlug := public["slug"]
 	if _, err := h.journal.Emit(ctx, journal.Entry{
 		WorkspaceID: wsID,
 		Type:        entryPageFolderMembershipChanged,
@@ -1001,6 +1031,7 @@ func (h *PageHandler) journalFolderMembership(ctx context.Context, wsID string, 
 		Payload: map[string]any{
 			"page": rec.Slug, "page_id": rec.ID, "op": op, "from": from, "to": to,
 			"pages_version": rec.PagesVersion, "actor_user_id": actor.ID,
+			"private_audience": !publicID, "private_output_metadata": !publicSlug,
 		},
 	}); err != nil && h.logger != nil {
 		h.logger.Warn("pages: folder membership change was not journalled", "page", rec.Slug, "op", op, "error", err)

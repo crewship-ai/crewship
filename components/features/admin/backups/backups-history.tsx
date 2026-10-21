@@ -1,18 +1,23 @@
 "use client"
 
 import * as React from "react"
-import { History, Pin } from "lucide-react"
+import { Download, History, Pin, PinOff, X } from "lucide-react"
+
+import { toast } from "@/lib/toast"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { CreateSurface, CreateSurfaceBody, CreateSurfaceFooter, CreateSurfaceHeader } from "@/components/layout/create-surface"
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet"
-import { SettingsSegmented, SettingsSummary, SummaryItem, nativeSelect, settingsTable, settingsTh, settingsTd, settingsTableRowLink } from "@/components/features/settings/shared"
+import {
+  SettingsSegmented, SettingsSummary, SummaryItem, nativeSelect, selectionBar, selectionBarAction, selectionBarButton,
+  settingsTable, settingsTh, settingsTd, settingsTableRowLink,
+} from "@/components/features/settings/shared"
 import { Chip, Gate, WsName } from "./backups-kit"
 import { formatPhases, formatSize, formatWhen, proofLabel, runPlanLabel, runResult, type BackupRun } from "./backups-model"
 import { checkBundle, downloadHref, pinBundle, useBackupRuns, workspaceFor } from "./use-backup-runs"
 import { perform } from "./use-backups-data"
-import type { RunFilter, RunQuery, SectionCtx } from "./backups-console"
+import type { RunFilter, RunQuery, SectionCtx } from "./backups-scope"
 
 const FILTERS: { value: RunFilter; label: string }[] = [
   { value: "all", label: "All" },
@@ -79,13 +84,38 @@ export function HistoryBody({ runs, ctx, legacy, reload, now = new Date() }: { r
   const [checking, setChecking] = React.useState<BackupRun | null>(null)
   const [checked, setChecked] = React.useState<Record<string, { level: 1 | 2; ok: boolean; detail: string }>>({})
 
-  const inScope = runsInScope(runs, ctx, !!legacy).filter((r) => matchesQuery(r, ctx.runQuery))
+  const slice = ctx.runSlice
+  const inScope = runsInScope(runs, ctx, !!legacy).filter((r) => matchesQuery(r, ctx.runQuery)
+    && (!slice || (Date.parse(r.started_at) >= slice.fromMs && Date.parse(r.started_at) < slice.toMs)))
+  // On the nested page rows can be ticked: the selection bar pins, unpins or
+  // downloads several at once. A check and a restore stay one run at a time.
+  const selectable = !!ctx.inDrill && !legacy
+  const [picked, setPicked] = React.useState<Set<string>>(() => new Set())
   const plans = [...new Set(inScope.filter((r) => r.plan_name).map((r) => r.plan_name!))]
   const list = inScope.filter((r) => matches(r, filter) && (!plan || r.plan_name === plan))
   const current = inScope.find((r) => r.id === open) ?? null
   const count = (f: RunFilter) => inScope.filter((r) => matches(r, f)).length
   const nFailed = count("failed"), nIncomplete = count("incomplete"), nPinned = count("pinned")
   const filterLabel = FILTERS.find((f) => f.value === filter)?.label
+  const pickedRuns = list.filter((r) => picked.has(r.id) && r.bundle_path)
+  const allOn = list.length > 0 && list.every((r) => picked.has(r.id))
+  const tick = (ids: string[], on: boolean) => setPicked((prev) => { const n = new Set(prev); for (const id of ids) { if (on) n.add(id); else n.delete(id) } return n })
+  const pinAll = async (pin: boolean) => {
+    let ok = 0
+    for (const r of pickedRuns) if (r.pinned !== pin && await perform(ctx.demo, () => pinBundle(r.bundle_path!, pin), "", pin ? "Could not pin" : "Could not unpin")) ok++
+    if (ok) toast.success(`${pin ? "Pinned" : "Unpinned"} ${ok} ${ok === 1 ? "backup" : "backups"}${pin ? " · rotation never deletes them" : ""}`)
+    setPicked(new Set())
+    reload?.()
+  }
+  const downloadAll = () => {
+    for (const r of pickedRuns) {
+      const href = downloadHref(r.bundle_path!, workspaceFor(ctx, r.workspace_id), r.scope)
+      if (!href) continue
+      const a = document.createElement("a")
+      a.href = href; a.download = ""; a.rel = "noopener"
+      document.body.appendChild(a); a.click(); a.remove()
+    }
+  }
 
   return (
     <>
@@ -129,12 +159,18 @@ export function HistoryBody({ runs, ctx, legacy, reload, now = new Date() }: { r
           <table className={settingsTable}>
             <thead>
               <tr>
+                {selectable && (
+                  <th className={cn(TH, "w-9")}>
+                    <input type="checkbox" aria-label="Select every run shown" checked={allOn} disabled={list.length === 0}
+                      onChange={(e) => tick(list.map((r) => r.id), e.target.checked)} className="size-3.5 accent-[var(--primary)]" />
+                  </th>
+                )}
                 {["Started", "Scope", "Plan", "Size", "Result", "Checked to"].map((h) => <th key={h} className={cn(TH, h === "Size" && "text-right")}>{h}</th>)}
                 <th className={TH}><span className="sr-only">Pinned</span></th>
               </tr>
             </thead>
             <tbody>
-              {list.length === 0 && <tr><td colSpan={7} className="px-3 py-8 text-center text-label text-muted-foreground">No runs {filter === "all" && !plan ? "in this scope yet" : "match this filter"}.</td></tr>}
+              {list.length === 0 && <tr><td colSpan={selectable ? 8 : 7} className="px-3 py-8 text-center text-label text-muted-foreground">No runs {filter === "all" && !plan ? "in this scope yet" : "match this filter"}.</td></tr>}
               {list.map((r) => {
                 const res = runResult(r)
                 const proof = checked[r.bundle_path ?? ""]?.level ?? r.proof_level
@@ -142,7 +178,13 @@ export function HistoryBody({ runs, ctx, legacy, reload, now = new Date() }: { r
                   <tr key={r.id} tabIndex={0} aria-selected={open === r.id} data-run={r.id}
                     onClick={() => setOpen(r.id)}
                     onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen(r.id) } }}
-                    className={cn(settingsTableRowLink, "aria-selected:bg-accent")}>
+                    className={cn(settingsTableRowLink, "aria-selected:bg-accent", picked.has(r.id) && "bg-accent/40")}>
+                    {selectable && (
+                      <td className={TD} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                        <input type="checkbox" aria-label={`Select the run of ${formatWhen(r.started_at, now)}`} checked={picked.has(r.id)} disabled={!r.bundle_path}
+                          onChange={(e) => tick([r.id], e.target.checked)} className="size-3.5 accent-[var(--primary)] disabled:opacity-30" />
+                      </td>
+                    )}
                     <td className={cn(TD, "whitespace-nowrap")}>{formatWhen(r.started_at, now)}</td>
                     <td className={cn(TD, "whitespace-nowrap")}>{r.scope === "instance" ? <WsName name="Whole instance" instance /> : <WsName name={r.workspace_name ?? "—"} />}</td>
                     <td className={cn(TD, "min-w-[10rem]")}>{runPlanLabel(r)}</td>
@@ -157,6 +199,19 @@ export function HistoryBody({ runs, ctx, legacy, reload, now = new Date() }: { r
           </table>
         </div>
       </section>
+      {selectable && pickedRuns.length > 0 && (
+        <div role="toolbar" aria-label="Change the selected runs" data-slot="runs-bulk"
+          className={cn(selectionBar, "fixed bottom-6 left-1/2 -translate-x-1/2 whitespace-nowrap",
+            "max-sm:inset-x-3 max-sm:bottom-[calc(var(--mobile-tab-bar-h,0px)+0.75rem)] max-sm:translate-x-0 max-sm:justify-between max-sm:gap-1 max-sm:px-2")}>
+          <span className="px-1"><span className="font-semibold tabular-nums">{pickedRuns.length}</span><span className="max-sm:hidden"> selected</span></span>
+          <Button type="button" size="sm" className={cn(selectionBarAction, "max-sm:px-2")} onClick={() => void pinAll(true)}><Pin />Pin</Button>
+          <Button type="button" size="sm" variant="outline" className={cn(selectionBarButton, "max-sm:px-2")} onClick={() => void pinAll(false)}><PinOff />Unpin</Button>
+          <Button type="button" size="sm" variant="outline" className={cn(selectionBarButton, "max-sm:px-2")} onClick={downloadAll}><Download />Download</Button>
+          <Button type="button" variant="ghost" size="icon-sm" className={cn(selectionBarButton, "w-8 px-0")} aria-label="Clear selection" onClick={() => setPicked(new Set())}>
+            <X className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      )}
       <Sheet open={!!current} onOpenChange={(o) => { if (!o) setOpen(null) }}>
         <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-2xl">
           {current && (
@@ -194,7 +249,7 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
 function Rung({ n, label, children }: { n: 1 | 2 | 3; label: string; children: React.ReactNode }) {
   return (
     <li className="flex items-start gap-3 border-b border-border py-2.5 last:border-b-0">
-      <span aria-hidden className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-muted font-mono text-micro text-muted-foreground">{n}</span>
+      <span aria-hidden className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-muted text-micro tabular-nums text-muted-foreground">{n}</span>
       <div className="min-w-0 flex-1">
         <div>{label}</div>
         <div className="mt-1 flex flex-wrap items-center gap-2 text-label text-muted-foreground">{children}</div>
@@ -271,16 +326,24 @@ function CheckDialog({ run, legacy, onClose, onCheck }: {
   const [passphrase, setPassphrase] = React.useState("")
   const [busy, setBusy] = React.useState(false)
   React.useEffect(() => { if (!run) { setIdentity(""); setPassphrase(""); setBusy(false) } }, [run])
+  const close = () => { if (!busy) onClose() }
+  const canCheck = !busy && (legacy || !!identity.trim() || !!passphrase)
+  const check = async () => {
+    if (!canCheck) return
+    setBusy(true)
+    await onCheck(legacy ? {} : { identity: identity.trim() || undefined, passphrase: passphrase || undefined })
+  }
   return (
-    <Dialog open={!!run} onOpenChange={(o) => { if (!o && !busy) onClose() }}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Check contents</DialogTitle>
-          <DialogDescription>
+    <CreateSurface open={!!run} onOpenChange={(o) => { if (!o) close() }} size="sm" onSubmit={() => void check()}>
+        <CreateSurfaceHeader
+          title="Check contents"
+          description={<>
             Decrypts the backup and reads every section, comparing row counts and hashes with what it recorded. Nothing is restored.
             The key is used for this check only and never stored.
-          </DialogDescription>
-        </DialogHeader>
+          </>}
+          onClose={close}
+        />
+        <CreateSurfaceBody>
         {legacy ? (
           <p className="text-xs text-muted-foreground">This server can only verify the checksum for now, which needs no key.</p>
         ) : (
@@ -293,18 +356,18 @@ function CheckDialog({ run, legacy, onClose, onCheck }: {
             <label className="flex flex-col gap-1">
               <span className="text-muted-foreground">or passphrase (older bundles)</span>
               <input type="password" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} autoComplete="off"
-                className="h-8 rounded-md border border-control-border bg-surface-subtle px-2 coarse:h-[2.75rem]" />
+                className="h-8 rounded-md border border-control-border bg-surface-subtle px-2 coarse:h-[44px]" />
             </label>
           </div>
         )}
-        <DialogFooter>
-          <Button type="button" size="sm" variant="ghost" className="h-7 text-xs" onClick={onClose} disabled={busy}>Cancel</Button>
-          <Button type="button" size="sm" className="h-7 text-xs" disabled={busy || (!legacy && !identity.trim() && !passphrase)}
-            onClick={async () => { setBusy(true); await onCheck(legacy ? {} : { identity: identity.trim() || undefined, passphrase: passphrase || undefined }) }}>
-            {busy ? "Checking…" : "Check"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </CreateSurfaceBody>
+        <CreateSurfaceFooter
+          onCancel={close}
+          primaryLabel={busy ? "Checking…" : "Check"}
+          onPrimary={() => void check()}
+          primaryDisabled={!canCheck}
+          busy={busy}
+        />
+    </CreateSurface>
   )
 }

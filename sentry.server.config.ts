@@ -14,6 +14,7 @@
 // peers in the Sentry project, not two unrelated event streams.
 
 import * as Sentry from "@sentry/nextjs"
+import { crashDataCollection } from "./lib/sentry-data-collection"
 
 // Narrow shape for the legacy `modules` field that some Sentry
 // integrations still attach to events but is not part of the public
@@ -32,6 +33,7 @@ function classifyEnv(version: string): string {
 if (DSN) {
   Sentry.init({
     dsn: DSN,
+    dataCollection: crashDataCollection,
     release: process.env.NEXT_PUBLIC_CREWSHIP_VERSION || undefined,
     environment: classifyEnv(process.env.NEXT_PUBLIC_CREWSHIP_VERSION ?? ""),
     tracesSampleRate: 0,

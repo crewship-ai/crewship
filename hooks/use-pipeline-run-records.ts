@@ -25,7 +25,8 @@ export interface PipelineRunRecord {
   ended_at?: string
   current_step_id?: string
   output?: string
-  cost_usd: number
+  /** Absent below ADMIN (#3590). */
+  cost_usd?: number
   duration_ms: number
   error_message?: string
   failed_at_step?: string

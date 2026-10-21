@@ -16,29 +16,30 @@ import { StatusIconBadge } from "@/components/ui/status-icon-badge"
 import { CircleCheckIcon } from "@/components/ui/circle-check"
 import { LoaderPinwheelIcon } from "@/components/ui/loader-pinwheel"
 import type { MissionStatus, MissionTaskStatus } from "@/lib/types/mission"
-import { STATUS_STYLES, type StatusConfigEntryWithIcon } from "@/lib/status-config"
+import type { StatusConfigEntryWithIcon } from "@/lib/status-config"
+import { statusTone } from "@/lib/status-tone"
 
 const MISSION_STATUS_CONFIG: Record<MissionStatus, StatusConfigEntryWithIcon> = {
-  PLANNING:    { label: "Planning",    className: STATUS_STYLES.slate,   icon: FileEdit },
-  IN_PROGRESS: { label: "In Progress", className: STATUS_STYLES.blue,    icon: Loader2 },
-  REVIEW:      { label: "Review",      className: STATUS_STYLES.purple,  icon: Eye },
-  COMPLETED:   { label: "Completed",   className: STATUS_STYLES.emerald, icon: CheckCircle2 },
-  FAILED:      { label: "Failed",      className: STATUS_STYLES.red,     icon: XCircle },
-  CANCELLED:   { label: "Cancelled",   className: STATUS_STYLES.gray,    icon: Ban },
-  BACKLOG:     { label: "Backlog",     className: STATUS_STYLES.slate,   icon: Clock },
-  TODO:        { label: "Todo",        className: STATUS_STYLES.slate,   icon: Clock },
-  DONE:        { label: "Done",        className: STATUS_STYLES.emerald, icon: CheckCircle2 },
-  DUPLICATE:   { label: "Duplicate",   className: STATUS_STYLES.gray,    icon: Ban },
+  PLANNING:    { label: "Planning",    tone: statusTone("PLANNING"), icon: FileEdit },
+  IN_PROGRESS: { label: "In Progress", tone: statusTone("IN_PROGRESS"), icon: Loader2 },
+  REVIEW:      { label: "Review",      tone: statusTone("REVIEW"), icon: Eye },
+  COMPLETED:   { label: "Completed",   tone: statusTone("COMPLETED"), icon: CheckCircle2 },
+  FAILED:      { label: "Failed",      tone: statusTone("FAILED"), icon: XCircle },
+  CANCELLED:   { label: "Cancelled",   tone: statusTone("CANCELLED"), icon: Ban },
+  BACKLOG:     { label: "Backlog",     tone: statusTone("BACKLOG"), icon: Clock },
+  TODO:        { label: "Todo",        tone: statusTone("TODO"), icon: Clock },
+  DONE:        { label: "Done",        tone: statusTone("DONE"), icon: CheckCircle2 },
+  DUPLICATE:   { label: "Duplicate",   tone: statusTone("DUPLICATE"), icon: Ban },
 }
 
 const TASK_STATUS_CONFIG: Record<MissionTaskStatus, StatusConfigEntryWithIcon> = {
-  PENDING:           { label: "Pending",           className: STATUS_STYLES.amber,   icon: Clock },
-  BLOCKED:           { label: "Blocked",           className: STATUS_STYLES.orange,  icon: Lock },
-  IN_PROGRESS:       { label: "Working",           className: STATUS_STYLES.blue,    icon: Loader2 },
-  COMPLETED:         { label: "Completed",         className: STATUS_STYLES.emerald, icon: CheckCircle2 },
-  FAILED:            { label: "Failed",            className: STATUS_STYLES.red,     icon: XCircle },
-  SKIPPED:           { label: "Skipped",           className: STATUS_STYLES.gray,    icon: MinusCircle },
-  AWAITING_APPROVAL: { label: "Awaiting Approval", className: STATUS_STYLES.violet,  icon: ShieldAlert },
+  PENDING:           { label: "Pending",           tone: statusTone("PENDING"), icon: Clock },
+  BLOCKED:           { label: "Blocked",           tone: statusTone("BLOCKED"), icon: Lock },
+  IN_PROGRESS:       { label: "Working",           tone: statusTone("IN_PROGRESS"), icon: Loader2 },
+  COMPLETED:         { label: "Completed",         tone: statusTone("COMPLETED"), icon: CheckCircle2 },
+  FAILED:            { label: "Failed",            tone: statusTone("FAILED"), icon: XCircle },
+  SKIPPED:           { label: "Skipped",           tone: statusTone("SKIPPED"), icon: MinusCircle },
+  AWAITING_APPROVAL: { label: "Awaiting Approval", tone: statusTone("AWAITING_APPROVAL"), icon: ShieldAlert },
 }
 
 function StatusIcon({ status, icon: Icon }: { status: string; icon: React.ComponentType<{ className?: string }> }) {

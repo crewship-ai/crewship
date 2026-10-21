@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -45,34 +46,42 @@ func (h *PageHandler) RestrictedCatalog(w http.ResponseWriter, req *http.Request
 		replyRestrictedRuntimeUnavailable(w)
 		return
 	}
-	workspace := WorkspaceIDFromContext(req.Context())
-	viewer, err := h.loadViewer(req.Context(), workspace, user.ID)
-	if err != nil {
-		replyInternalError(w, h.logger, "load Page viewer", err)
-		return
-	}
-	index, err := h.loadPageIndex(req.Context(), workspace, viewer, pagesInWorkspace(workspace))
+	result, err := h.restrictedPageCatalog(req.Context(), user.ID, WorkspaceIDFromContext(req.Context()), h.restrictedWorkflow().PageActionFingerprint)
 	if err != nil {
 		replyInternalError(w, h.logger, "load Page directory", err)
 		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Total-Count", strconv.Itoa(len(result)))
+	writeJSON(w, http.StatusOK, result)
+}
+
+// restrictedPageCatalog is shared by executable catalogs and runtime-independent
+// navigation authority. It never invokes actions or grants execution authority.
+func (h *PageHandler) restrictedPageCatalog(ctx context.Context, user, workspace string, fingerprint func(context.Context, string, string, pipeline.PageActionInvocation) (string, error), firstOnly ...bool) ([]restrictedPage, error) {
+	viewer, err := h.loadViewer(ctx, workspace, user)
+	if err != nil {
+		return nil, err
+	}
+	index, err := h.loadPageIndex(ctx, workspace, viewer, pagesInWorkspace(workspace))
+	if err != nil {
+		return nil, err
 	}
 	result := []restrictedPage{}
 	for _, candidate := range index.rows {
 		rec := candidate.rec
 		var raw string
-		if err = h.db.QueryRowContext(req.Context(), `SELECT spec_json FROM pages WHERE id=? AND workspace_id=?`, rec.ID, workspace).Scan(&raw); err != nil {
-			replyInternalError(w, h.logger, "load Page declaration", err)
-			return
+		if err = h.db.QueryRowContext(ctx, `SELECT spec_json FROM pages WHERE id=? AND workspace_id=?`, rec.ID, workspace).Scan(&raw); err != nil {
+			return nil, err
 		}
 		publication := int64(0)
 		if rec.HasProject || rec.PublicationVersion > 0 {
-			err = h.db.QueryRowContext(req.Context(), `SELECT l.version FROM page_project_live l JOIN page_project_publications p ON p.page_id=l.page_id AND p.version=l.version WHERE l.page_id=? AND l.published=1 AND p.spec_json=?`, rec.ID, raw).Scan(&publication)
+			err = h.db.QueryRowContext(ctx, `SELECT l.version FROM page_project_live l JOIN page_project_publications p ON p.page_id=l.page_id AND p.version=l.version WHERE l.page_id=? AND l.published=1 AND p.spec_json=?`, rec.ID, raw).Scan(&publication)
 			if err == sql.ErrNoRows {
 				continue
 			}
 			if err != nil {
-				replyInternalError(w, h.logger, "load Page publication", err)
-				return
+				return nil, err
 			}
 		}
 		var doc pages.Document
@@ -81,7 +90,7 @@ func (h *PageHandler) RestrictedCatalog(w http.ResponseWriter, req *http.Request
 		}
 		entry := restrictedPage{Slug: rec.Slug, Name: rec.Name, Publication: publication, Actions: []restrictedPageAction{}}
 		for _, panel := range doc.Spec.Panels {
-			if _, _, err = h.resolvePanelForCaller(req.Context(), workspace, user.ID, rec.Slug, panel.ID); err != nil {
+			if _, _, err = h.resolvePanelForCaller(ctx, workspace, user, rec.Slug, panel.ID); err != nil {
 				continue
 			}
 			for i := range panel.Actions {
@@ -89,12 +98,12 @@ func (h *PageHandler) RestrictedCatalog(w http.ResponseWriter, req *http.Request
 				if action.Kind != pages.ActionCall {
 					continue
 				}
-				pipelineID, _, _, lookupErr := h.lookupActionRoutine(req.Context(), workspace, action.Routine)
+				pipelineID, _, _, lookupErr := h.lookupActionRoutine(ctx, workspace, action.Routine)
 				if lookupErr != nil {
 					continue
 				}
 				authority := pipeline.PageActionInvocation{PageID: rec.ID, PanelID: panel.ID, ActionID: action.ID, PipelineID: pipelineID, ActionDigest: pipeline.PageActionDigest(action), Publication: publication}
-				fingerprint, fingerprintErr := h.restrictedWorkflow().PageActionFingerprint(req.Context(), user.ID, workspace, authority)
+				fingerprint, fingerprintErr := fingerprint(ctx, user, workspace, authority)
 				if fingerprintErr != nil {
 					continue
 				}
@@ -103,13 +112,15 @@ func (h *PageHandler) RestrictedCatalog(w http.ResponseWriter, req *http.Request
 					wire.Inputs = append(wire.Inputs, restrictedPageInput{Name: input.Name, Label: input.Label, Type: input.EffectiveType(), Required: input.Required && input.Default == "", Options: input.Options})
 				}
 				entry.Actions = append(entry.Actions, wire)
+				if len(firstOnly) > 0 && firstOnly[0] {
+					return append(result, entry), nil
+				}
 			}
 		}
 		if len(entry.Actions) > 0 {
 			result = append(result, entry)
 		}
 	}
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("X-Total-Count", strconv.Itoa(len(result)))
-	writeJSON(w, http.StatusOK, result)
+
+	return result, nil
 }

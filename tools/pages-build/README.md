@@ -142,7 +142,7 @@ v2 YAML/JSON; exports with source use a single `.bundle.yaml`. Import creates an
 inert draft and does not run code or routines.
 
 The supported profile pins React 19.2.8, ReactDOM 19.2.8, TypeScript 7.0.2 and
-Vite 8.2.2. Keep the supplied dependency maps and lockfile unchanged. Full React,
+Vite 8.2.4. Keep the supplied dependency maps and lockfile unchanged. Full React,
 TypeScript and custom CSS are supported; arbitrary npm dependencies, build
 plugins, package scripts and custom Vite/PostCSS/Tailwind config are not.
 The entry is `src/main.tsx`, mounted into `#root`. The trusted runtime owns the

@@ -76,10 +76,12 @@ const (
 // in the DB until the run ends. step_outputs_json is opaque to the
 // store; callers marshal/unmarshal as needed (typically map[string]string).
 type RunRecord struct {
-	ID           string
-	WorkspaceID  string
-	PipelineID   string
-	PipelineSlug string
+	ChatOriginID          string `json:"-"` // Server-owned inherited chat authority; never authored metadata.
+	InvocationSourceRunID string `json:"-"` // Fresh verified invocation only; never inherited recipe authority.
+	ID                    string
+	WorkspaceID           string
+	PipelineID            string
+	PipelineSlug          string
 	// PipelineVersion mirrors pipelines.head_version at insert time.
 	// NULL = unknown/HEAD. DefinitionHash below is the drift gate:
 	// it compares content directly, independent of version
@@ -279,6 +281,14 @@ var ErrUnknownRunCursor = errors.New("pipeline_runs: unknown cursor")
 // CreatedAt + UpdatedAt are server-stamped if zero so callers can pass
 // a partially-filled struct without remembering boilerplate.
 func (s *RunStore) Insert(ctx context.Context, r *RunRecord) error {
+	return s.insert(ctx, s.db, r)
+}
+
+type runInserter interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func (s *RunStore) insert(ctx context.Context, db runInserter, r *RunRecord) error {
 	if r.ID == "" {
 		return errors.New("pipeline_runs: id required")
 	}
@@ -317,22 +327,22 @@ func (s *RunStore) Insert(ctx context.Context, r *RunRecord) error {
 		r.UpdatedAt = now
 	}
 
-	_, err := s.db.ExecContext(ctx, `
+	_, err := db.ExecContext(ctx, `
 INSERT INTO pipeline_runs (
     id, workspace_id, pipeline_id, pipeline_slug, pipeline_version, definition_hash,
     status, mode, started_at, ended_at, current_step_id,
     step_outputs_json, output, cost_usd, duration_ms,
     error_message, failed_at_step, error_fingerprint,
-    invoking_crew_id, invoking_agent_id, invoking_user_id, invocation_authority,
+    invoking_crew_id, invoking_agent_id, invoking_user_id, invocation_authority, chat_origin_id, invocation_source_run_id,
     triggered_via, triggered_by_id, idempotency_key,
     inputs_json, concurrency_key, metadata_json, is_replay, replay_of, warnings_json,
     chain_depth, chain_origin, created_at, updated_at, due_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.WorkspaceID, r.PipelineID, r.PipelineSlug, nullableIntPtr(r.PipelineVersion), nullableStr(r.DefinitionHash),
 		string(r.Status), string(r.Mode), formatRFC3339(r.StartedAt), nullableTime(r.EndedAt), nullableStr(r.CurrentStepID),
 		r.StepOutputsJSON, nullableStr(r.Output), r.CostUSD, r.DurationMs,
 		nullableStr(r.ErrorMessage), nullableStr(r.FailedAtStep), nullableStr(r.ErrorFingerprint),
-		nullableStr(r.InvokingCrewID), nullableStr(r.InvokingAgentID), nullableStr(r.InvokingUserID), r.InvocationAuthority,
+		nullableStr(r.InvokingCrewID), nullableStr(r.InvokingAgentID), nullableStr(r.InvokingUserID), r.InvocationAuthority, nullableStr(r.ChatOriginID), nullableStr(r.InvocationSourceRunID),
 		string(r.TriggeredVia), nullableStr(r.TriggeredByID), nullableStr(r.IdempotencyKey),
 		r.InputsJSON, nullableStr(r.ConcurrencyKey), r.MetadataJSON, boolToInt(r.IsReplay), nullableStr(r.ReplayOf), r.WarningsJSON,
 		r.ChainDepth, nullableStr(r.ChainOrigin), formatRFC3339(r.CreatedAt), formatRFC3339(r.UpdatedAt), nullableTime(r.DueAt))
@@ -948,7 +958,7 @@ SELECT id, workspace_id, pipeline_id, pipeline_slug, pipeline_version,
        status, mode, started_at, ended_at, COALESCE(current_step_id,''),
        step_outputs_json, COALESCE(output,''), cost_usd, duration_ms,
        COALESCE(error_message,''), COALESCE(failed_at_step,''), COALESCE(error_fingerprint,''),
-       COALESCE(invoking_crew_id,''), COALESCE(invoking_agent_id,''), COALESCE(invoking_user_id,''), invocation_authority,
+       COALESCE(invoking_crew_id,''), COALESCE(invoking_agent_id,''), COALESCE(invoking_user_id,''), invocation_authority, COALESCE(chat_origin_id,''), COALESCE(invocation_source_run_id,''),
        triggered_via, COALESCE(triggered_by_id,''), COALESCE(idempotency_key,''),
        inputs_json, COALESCE(concurrency_key,''),
        COALESCE(metadata_json,'{}'), COALESCE(is_replay,0), COALESCE(replay_of,''),
@@ -979,7 +989,7 @@ func scanRun(row scanRunRow) (*RunRecord, error) {
 		&status, &mode, &startedAt, &endedAt, &r.CurrentStepID,
 		&r.StepOutputsJSON, &r.Output, &r.CostUSD, &r.DurationMs,
 		&r.ErrorMessage, &r.FailedAtStep, &r.ErrorFingerprint,
-		&r.InvokingCrewID, &r.InvokingAgentID, &r.InvokingUserID, &r.InvocationAuthority,
+		&r.InvokingCrewID, &r.InvokingAgentID, &r.InvokingUserID, &r.InvocationAuthority, &r.ChatOriginID, &r.InvocationSourceRunID,
 		&triggeredVia, &r.TriggeredByID, &r.IdempotencyKey,
 		&r.InputsJSON, &r.ConcurrencyKey,
 		&r.MetadataJSON, &isReplay, &r.ReplayOf,

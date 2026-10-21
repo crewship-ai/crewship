@@ -3,6 +3,7 @@
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAccessMode } from "@/hooks/use-access-mode"
+import { useAccessContext } from "@/components/features/restricted/access-notice"
 import { RestrictedRoutines } from "@/components/features/routines/restricted-routines"
 import { RoutinesLayout } from "@/components/features/routines/routines-layout"
 
@@ -15,6 +16,7 @@ import { RoutinesLayout } from "@/components/features/routines/routines-layout"
 // See PIPELINES.md §17.3 for the full architecture.
 export default function RoutinesPage() {
   const { workspaceId, loading: wsLoading } = useWorkspace()
+  const access = useAccessContext()
   // Session-level, not the selected workspace's row: one restricted
   // membership restricts every request the account makes (#2861).
   const accessMode = useAccessMode()
@@ -31,5 +33,5 @@ export default function RoutinesPage() {
     )
   }
 
-  return accessMode === "restricted" ? <RestrictedRoutines key={workspaceId} workspaceId={workspaceId} /> : <RoutinesLayout workspaceId={workspaceId} />
+  return accessMode === "restricted" ? <RestrictedRoutines key={workspaceId} workspaceId={workspaceId} access={access} /> : <RoutinesLayout workspaceId={workspaceId} />
 }

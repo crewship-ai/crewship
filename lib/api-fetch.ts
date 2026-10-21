@@ -23,6 +23,7 @@
  * fetch-with-retry.ts.
  */
 
+import { assertWorkspaceRequest, captureWorkspaceRequest, workspaceFetch } from "./workspace-availability"
 import { bodyIsReplayable, inputIsReplayable } from "./fetch-with-retry"
 import { getAuthMode, getBearerToken, getServerOrigin, withServerBase } from "./server-base"
 
@@ -95,7 +96,7 @@ function assertSameOrigin(input: RequestInfo | URL): string {
 
 /**
  * Surfaces the two failure classes that are invisible from the UI: a 429 from
- * the 120/min bucket and any 5xx. Both present identically to a user — the
+ * a request budget and any 5xx. Both present identically to a user — the
  * screen simply stops updating and the realtime stream reconnects — so a
  * report of "it broke" carries no evidence unless the console says which call
  * was rejected.
@@ -118,13 +119,14 @@ function reportBadStatus(target: RequestInfo | URL, res: Response): void {
   const url = typeof target === "string" ? target : String((target as Request).url ?? target)
   console.warn(
     res.status === 429
-      ? `[crewship] 429 rate limited: ${url} — the 120/min bucket is full; the UI will look frozen until it drains.`
+      ? `[crewship] 429 rate limited: ${url} — the request budget is exhausted; respect Retry-After before retrying.`
       : `[crewship] ${res.status} from ${url}`,
   )
 }
 
 export async function apiFetch(input: RequestInfo | URL, init?: ApiFetchInit): Promise<Response> {
   assertSameOrigin(input)
+  const workspaceRequest = captureWorkspaceRequest(input, init)
   // Remote-server mode (desktop shell): prefix relative /api/* string paths
   // with the configured base. Same-origin default leaves input untouched.
   const target: RequestInfo | URL = typeof input === "string" ? withServerBase(input) : input
@@ -144,7 +146,7 @@ export async function apiFetch(input: RequestInfo | URL, init?: ApiFetchInit): P
     delete (initWithCreds as ApiFetchInit).skipRefresh
   }
 
-  const res = await fetch(target, initWithCreds)
+  const res = await workspaceFetch(target, initWithCreds)
   reportBadStatus(target, res)
   // Bearer tokens are long-lived CLI-class credentials: there is no cookie
   // rotation to attempt, so a 401 is terminal for this request. Emit the
@@ -173,9 +175,13 @@ export async function apiFetch(input: RequestInfo | URL, init?: ApiFetchInit): P
   // failure means we can't tell yet; surface the original 401 to
   // the caller and let the page recover when the backend comes back,
   // rather than evicting valid sessions on every blip.
-  const refreshResult = await tryRefresh()
+  const { result: refreshResult, reason: refreshReason } = await refreshShared()
   if (refreshResult === "auth_failed") {
-    emitSessionExpired(reason ?? "session_expired")
+    // The refresh's own reason decides what happened to the session: a
+    // dropped access cookie (no_credentials on the request) over a dead
+    // refresh token is still an expired session, and no refresh cookie at
+    // all (no_credentials from the refresh) is a visitor who never had one.
+    emitSessionExpired(refreshReason ?? reason ?? "session_expired")
     return res
   }
   if (refreshResult === "retryable_failed") {
@@ -219,7 +225,8 @@ export async function apiFetch(input: RequestInfo | URL, init?: ApiFetchInit): P
 
   // Refresh wrote new cookies; the retry inherits them via the same
   // `credentials: include` and lands on a fresh access token.
-  return fetch(target, initWithCreds)
+  assertWorkspaceRequest(workspaceRequest)
+  return workspaceFetch(target, initWithCreds)
 }
 
 /** bearerHeaders merges the shell token into caller headers without
@@ -248,7 +255,13 @@ function bearerHeaders(headers?: HeadersInit): Headers {
  */
 export type RefreshResult = "ok" | "auth_failed" | "retryable_failed"
 
-let refreshInflight: Promise<RefreshResult> | null = null
+/** One refresh round-trip: its outcome and, for a 401, the server's reason. */
+interface RefreshOutcome {
+  result: RefreshResult
+  reason: string | null
+}
+
+let refreshInflight: Promise<RefreshOutcome> | null = null
 
 /** tryRefresh dedupes concurrent refresh attempts. The first call wins
  *  the network round-trip; followers await its result without firing
@@ -271,8 +284,12 @@ let refreshInflight: Promise<RefreshResult> | null = null
 const REFRESH_TIMEOUT_MS = 10_000
 
 export async function tryRefresh(): Promise<RefreshResult> {
+  return (await refreshShared()).result
+}
+
+function refreshShared(): Promise<RefreshOutcome> {
   if (refreshInflight) return refreshInflight
-  const promise = (async (): Promise<RefreshResult> => {
+  const promise = (async (): Promise<RefreshOutcome> => {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS)
     try {
@@ -285,18 +302,18 @@ export async function tryRefresh(): Promise<RefreshResult> {
         headers: { Accept: "application/json" },
         signal: controller.signal,
       })
-      if (r.ok) return "ok"
+      if (r.ok) return { result: "ok", reason: null }
       // Only a 401 from the refresh endpoint is "your session is gone".
       // 5xx / 502 / 503 / 504 / 429 / anything else means the server
       // is temporarily unhappy; the user's cookies are still valid in
       // principle, just not actionable until the backend recovers.
-      if (r.status === 401) return "auth_failed"
-      return "retryable_failed"
+      if (r.status === 401) return { result: "auth_failed", reason: await peekReason(r) }
+      return { result: "retryable_failed", reason: null }
     } catch {
       // Network rejection / abort (timeout) / DNS / etc. — transient.
       // Includes the abort our own setTimeout fires when the backend
       // hangs past REFRESH_TIMEOUT_MS.
-      return "retryable_failed"
+      return { result: "retryable_failed", reason: null }
     } finally {
       clearTimeout(timer)
     }

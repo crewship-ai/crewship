@@ -15,9 +15,24 @@ Pages combine typed producer payloads, freshness metadata and per-panel
 authorization. Producers own data access; the page itself holds no data-source
 credentials. The sections below define the technical boundaries and tests.
 
+## Caller-specific folder controls
+
+Folder responses expose `can_rename`, `can_share`, `can_delete` and
+`can_accept_pages`, derived from the same live crew membership, workspace role
+and folder ACL predicates as mutations. Page index rows expose `can_move` and
+`can_remove_from_folder`, including page ownership and live folder write shares.
+The Pages rail offers each operation only when its corresponding server flag is
+true. Missing flags offer no mutation. Folder write shares permit arrangement,
+not sharing or deletion; VIEWER page owners retain their own move controls. Move
+destinations require `can_accept_pages`. Existing server checks, version fences
+and empty-folder requirements remain authoritative.
+
 ## 1. What a Page is
 
 A **Page** is a workspace-scoped, slug-addressable record holding an ordered list of **panels**.
+Native saved-result links can address `@<page-id>` instead of a slug. This explicit
+reference is resolved by immutable ID inside the same workspace and ACL checks;
+it never falls back to a reused slug when the original Page no longer exists.
 A panel declares:
 
 - a **schema** from a closed set of five (§3),
@@ -275,6 +290,38 @@ architecture and reuses two systems that already exist here.
 
 ## 7. Permission model
 
+Private chat artifacts are an explicit exception to the ordinary Page role and
+grant paths described below. Their persisted private audience permits only the
+human custodian and workspace OWNER; ADMIN has no automatic access. Unauthorized
+reads return 404 and catalogs omit the name and entry. OWNER opening another
+human's private output writes a content-free audit before metadata or content is
+released; unavailable audit storage refuses that access. Ordinary grants,
+folders and legacy public links cannot silently publish a private artifact. Private grant administration and production are also limited to the custodian and workspace OWNER; an ADMIN role or a legacy producer grant does not widen those controls.
+Shared Page authorization and workspace-wide storage accounting are unchanged.
+Private read checks require a live account, workspace and membership. Guest
+catalogs omit unauthorized private outputs without failing the whole listing.
+The Page metadata reader checks a live custodian independently of trusted
+mutation authority; the account-wide Guest ceiling disables the OWNER override
+for others' outputs. Public routes retain the Guest allowlist, and the Document
+engine retains its trusted-account gate: this metadata check does not enable
+Document content access for a globally restricted custodian. Private mutation
+checks retain their separate trusted-account requirement.
+
+Metadata detail, export, versions, grants and Page/subject access reports retain
+one read snapshot for classification, custody, role and the emitted metadata.
+Ordinary reads use a read-only transaction without acquiring the SQLite writer
+lock. Private reads restart with fresh authorization inside a writer transaction;
+subject access re-prepares its final page once and audits only private entries
+actually emitted. Required audit inserts and the complete final batch are checked
+natively and committed before metadata is released. A later audit insert removing
+an earlier row, an ignored insert or commit failure withholds the response.
+Document engine reads retain their separately captured actual-read custodian;
+this metadata boundary does not replace that identity with a later owner lookup.
+Project/publication source and panel-history reads are not newly qualified by
+these metadata consumers.
+
+
+
 The requirement: creator owns the page; a page created by an agent is owned by the human who
 authorised the agent; crew members inherit visibility of their crew's panels; the owner can grant
 read and write to others.
@@ -285,11 +332,15 @@ read and write to others.
    `owner_crew_id`. An agent-created page records the authorising human as owner and the agent as
    `created_by_agent_id`; an agent never owns permissions, it acts under one. A crew-owned page is
    the natural home for a crew's own status board and needs no personal owner at all.
-1b. **When a user owner leaves the workspace, the page transfers to a crew, it is not deleted.**
+1b. **When a user owner leaves the workspace, a regular panel page transfers to a crew, it is not deleted.**
    Target crew, in order: the crew that owns the most panels on that page, else the crew the
    departing user belonged to. The transfer emits a journal entry and notifies workspace
    ADMIN/OWNER through the existing notification path, so a role that does not leave can reassign
    the page. A page must never be orphaned and must never silently vanish.
+
+   Private Documents, Artifacts, Boards and Slides retain human custody and
+   require an explicit reassignment through the workspace page-ownership API or
+   `crewship workspace page-ownership` commands before the owner can leave.
 
    ⚠ **An earlier draft ended that list with "else none", which is the orphan the same rule
    forbids.** Corrected 2026-08-12 during implementation. The database enforces it rather than
@@ -368,6 +419,26 @@ the same path, so agent A cannot claim to be agent B.
 
 **Every grant change is journalled** (`page.grant_added` / `page.grant_removed`, actor and
 subject recorded) — an ACL nobody can audit is not a security control.
+
+`PUT` and `DELETE` grant mutations commit together with the configured keyed
+journal. They recheck the current human account, trusted workspace membership
+and page owner/ADMIN/OWNER authority under the writer fence. A journal failure,
+ignored insert, altered final grant or failed commit rolls back the mutation;
+notifications follow the successful commit. Existing Page events retain their
+actor, subject, level and panel fields and add `previous_grant` / `grant` stored
+row snapshots (`null` at creation/removal respectively). These snapshots remain
+canonical audit data: the common GET/SSE/WS serializer omits only these two new
+keys, preserves the previous public event fields and never rewrites the stored
+payload. Reissuing still records
+one fact and reanchors its issuer. Revoking every level records each removed row,
+including grants whose subject has departed; a missing grant remains 404 without
+a change event. When a reference matches both a resolved subject and a departed
+stored ID, revoke checks and removes every matching stored row, preserves other
+subjects and unselected levels, and records each removal in the same transaction. References matching multiple live subjects return 400 without mutation; PUT also verifies that every other subject grant remains unchanged before commit.
+Loss of issuer authority at the final commit check returns 403 and rolls back
+the grant and audit; operational database errors remain 500. Folder ACL mutations and broader permission-audit coverage are
+separate work.
+
 
 Three rules decided 2026-08-12:
 
@@ -1265,3 +1336,26 @@ Public implementation references: `internal/pages/`, `internal/api/pages_*.go`,
 `cmd/crewship/cmd_page.go` and `components/features/pages/`.
 Market research and its bibliography are retained in private context; they
 are not required to build, test or use the product.
+
+
+A Page grant issuer must also have an active trusted account and no restricted membership anywhere. Every non-NULL suspension value, including an empty string, makes its Page shares inactive at use time. Existing membership/ownership/crew conditions remain required; the administrative grants list preserves inactive metadata and explains account unavailability.
+
+
+### Folder membership event privacy
+
+Folder add, move, remove and batch move retain their canonical journal target
+Page ID and summary. Their workspace invalidations use the existing Page output
+classification: private chat audiences disclose no Page identity; Documents and
+empty human staging Pages expose only opaque IDs. Failed or missing native
+classification discloses neither identity nor descriptive metadata.
+
+Folder membership journal producers record two internal boolean classifications.
+The shared public projection removes these markers and preserves canonical input.
+It is applied to journal List/Get/SSE/WS serialization, before automation preview
+matching and before runtime automation matching/rendering. Only newly classified
+ordinary events retain their public descriptive metadata. Historical unclassified
+(including ordinary), missing or malformed classifications receive a generic
+projection without Page identity. Full-text List/Count excludes private-output and
+unclassified folder entries before matching, preventing title confirmation.
+Canonical backup/recovery data retains its existing OWNER/instance-admin gates;
+this does not introduce Page folder ACL mutation auditing or change its atomicity.

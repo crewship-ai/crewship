@@ -3,11 +3,19 @@ import localFont from "next/font/local"
 import { Providers } from "@/components/providers"
 import { HISTORY_NAVIGATION_GUARD_SCRIPT } from "@/lib/navigation-history-guard"
 import { ACCENT_BOOT_SCRIPT } from "@/lib/theme/accents"
+import { APPEARANCE_BOOT_SCRIPT } from "@/lib/theme/appearance"
 import "./globals.css"
 
-// Harbor typography: the UI runs on the platform's system face (SF on Apple,
-// Segoe UI on Windows — the stack lives in --font-sans in globals.css), so
-// the bundled mono face carries eyebrows, ids, chips and code.
+// Harbor 2 typography: Inter for the interface (one bundled variable file,
+// weights 400–650; --font-sans in globals.css falls back to the platform
+// face) and the bundled mono face for eyebrows, ids, chips and code. Both
+// ship with the app; no font is fetched from a third party.
+const inter = localFont({
+  src: [{ path: "../public/fonts/inter/InterVariable.woff2", weight: "100 900", style: "normal" }],
+  display: "swap",
+  variable: "--font-inter",
+})
+
 const jetbrainsMono = localFont({
   src: [
     { path: "../public/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2", weight: "400", style: "normal" },
@@ -60,8 +68,10 @@ export default function RootLayout({
         <script id="crewship-history-guard" dangerouslySetInnerHTML={{ __html: HISTORY_NAVIGATION_GUARD_SCRIPT }} />
         {/* Paints the stored accent theme before first paint (lib/theme/accents.ts). */}
         <script id="crewship-accent" dangerouslySetInnerHTML={{ __html: ACCENT_BOOT_SCRIPT }} />
+        {/* Paints the stored density and reduce-motion choice the same way (lib/theme/appearance.ts). */}
+        <script id="crewship-appearance" dangerouslySetInnerHTML={{ __html: APPEARANCE_BOOT_SCRIPT }} />
       </head>
-      <body className={`${jetbrainsMono.variable} font-sans antialiased`}>
+      <body className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased`}>
         <Providers>{children}</Providers>
       </body>
     </html>

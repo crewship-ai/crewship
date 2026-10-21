@@ -17,6 +17,7 @@ import { render, screen, waitFor, fireEvent, act } from "@testing-library/react"
 // connected because they are HTTP.
 // =============================================================================
 
+const access = vi.hoisted(()=>({restricted:false}))
 const sendMessage = vi.fn()
 const resubscribeSession = vi.fn()
 const socket = vi.hoisted(() => ({ outcome: "connected" as "connected" | "error" | "never", delayMs: 30 }))
@@ -36,7 +37,7 @@ vi.mock("@/hooks/use-chat", async () => {
       }, [profile])
       return {
         turns: [], sendMessage, stopGeneration: vi.fn(), regenerateLastTurn: vi.fn(), editAndResend: vi.fn(),
-        loadHistory: vi.fn(), markHistoryUnavailable: vi.fn(), resubscribeSession, isStreaming: false,
+        loadHistory: vi.fn(), markHistoryUnavailable: vi.fn(), markHistoryDenied: vi.fn(), resubscribeSession, isStreaming: false,
         connectionStatus: profile === "restricted" ? "connected" : status,
       }
     },
@@ -45,7 +46,7 @@ vi.mock("@/hooks/use-chat", async () => {
 vi.mock("@/hooks/use-auth", () => ({
   useSessionSafe: () => ({ data: { user: { id: "user-1" } } }), useSession: () => ({ data: { user: { id: "user-1" } } }),
 }))
-vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "ws-test", loading: false }) }))
+vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "ws-test", loading: false, workspaces: access.restricted ? [{id:"ws-test",currentUserAccessMode:"restricted",restricted_session:true}] : [] }) }))
 vi.mock("../right-panel", () => ({ RightPanel: () => null }))
 vi.mock("../right-rail", () => ({ RightRail: () => null }))
 vi.mock("../right-drawer", () => ({ RightDrawer: () => null }))
@@ -68,6 +69,9 @@ let createdProfile: "trusted" | "restricted" | null
 let createStatus: number
 let creates: string[]
 let holdCreate: Promise<void> | null
+/** Chat-scoped card reads (entity refs, proposals, decisions) the panel made. */
+let reads: string[]
+let refsStatus: number
 
 function installFetch() {
   global.fetch = vi.fn(async (url: string, init?: RequestInit) => {
@@ -79,6 +83,16 @@ function installFetch() {
       if (!rows.has(id) || !createdProfile) return json(404, { error: "not found" })
       return json(200, { mode: createdProfile })
     }
+    if (u.includes("/entity-refs")) {
+      reads.push(u)
+      const id = decodeURIComponent(u.split("/chats/")[1].split("/")[0])
+      if (!rows.has(id)) return json(404, { error: "Chat not found" })
+      if (refsStatus !== 200) return json(refsStatus, { error: "denied" })
+      return json(200, { contract_version: 1, reset: true, next_cursor: "c", snapshot_id: "s", snapshot_complete: true, has_more: false, refs: [] })
+    }
+    if (u.includes("/proposals?") || u.includes("/decisions?")) reads.push(u)
+    if (u.includes("/restricted-files") || u.includes("/project-input-options")) return json(200, { files: [], has_more: false })
+    if (u.includes("/restricted-context")) return json(200, { entries: [] })
     if (u.includes("/messages")) return json(404, { error: "Chat not found" })
     if (u.includes("/participants")) return json(200, { participants: [] })
     if (u.includes("/chats") && method === "POST") {
@@ -104,15 +118,27 @@ async function typeAndSend(text: string) {
 
 describe("ChatPanel — the first send of a draft (#2898)", () => {
   beforeEach(() => {
+    access.restricted=false
     vi.clearAllMocks()
     rows = new Set()
     createdProfile = "trusted"
     createStatus = 201
     creates = []
     holdCreate = null
+    reads = []
+    refsStatus = 200
     socket.outcome = "connected"
     socket.delayMs = 30
     installFetch()
+  })
+
+  it("offers no send or first-session mutation for a discover-only Guest", async () => {
+    access.restricted=true
+    render(<ChatPanel {...panelProps} agentMeta={{id:"agent-1",slug:"riley",name:"Riley",current_user_can_chat:false}} />)
+    await screen.findByText(/Ask your administrator for chat access/)
+    expect(screen.queryByRole("textbox")).toBeNull()
+    expect(creates).toEqual([])
+    expect(sendMessage).not.toHaveBeenCalled()
   })
 
   it("offers Send on a draft and sends once the row exists and the socket is open", async () => {
@@ -210,4 +236,28 @@ describe("ChatPanel — the first send of a draft (#2898)", () => {
     await act(async () => { releaseProbe() })
     await waitFor(() => expect(screen.getByRole("button", { name: /submit/i })).not.toBeDisabled())
   })
+
+  it("verifies a trusted draft at its first send so linked issues load without a reload", async () => {
+    render(<ChatPanel {...panelProps} />)
+    await typeAndSend("open an issue for this")
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1))
+
+    await waitFor(() => expect(reads.some(u => u.includes("/chats/draft-1/entity-refs?"))).toBe(true))
+    await waitFor(() => expect(reads.some(u => u.includes("/chats/draft-1/proposals?"))).toBe(true))
+    await waitFor(() => expect(reads.some(u => u.includes("/chats/draft-1/decisions?"))).toBe(true))
+    await waitFor(() => expect(screen.queryByText("Checking current access…")).toBeNull())
+    expect(screen.queryByText(/^(Linked issues )?unavailable$/i)).toBeNull()
+  })
+
+  it("keeps a restricted first send away from linked issues", async () => {
+    createdProfile = "restricted"
+    socket.outcome = "never"
+    render(<ChatPanel {...panelProps} />)
+    await typeAndSend("summarise the brief")
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1))
+
+    await new Promise((r) => setTimeout(r, 50))
+    expect(reads).toEqual([])
+  })
+
 })

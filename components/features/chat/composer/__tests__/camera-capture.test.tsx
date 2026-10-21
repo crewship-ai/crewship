@@ -22,6 +22,12 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 vi.mock("@/hooks/use-workspace", () => ({
   useWorkspace: () => ({ workspaceId: "ws-test", loading: false }),
 }))
+vi.mock("@/hooks/use-auth", async (orig) => ({
+  ...(await orig<typeof import("@/hooks/use-auth")>()),
+  useSessionSafe: () => ({ data: { user: { id: "user-test", name: "t", email: "" } }, status: "authenticated" }),
+}))
+/** The store is keyed by human + workspace + chat (hooks/use-attachment-scope.ts). */
+const K = "user-test::ws-test::"
 
 // The mention picker and the slash palette are irrelevant here and pull in
 // heavy trees; the desktop branch only needs to render enough to be counted.
@@ -107,7 +113,7 @@ describe("composer camera capture", () => {
     // …and the chip lands in the same per-session attachment list the
     // paperclip writes to, promoted to "ready" with the server-side path.
     await waitFor(() => {
-      const list = useComposerStore.getState().attachments["sess-1"] ?? []
+      const list = useComposerStore.getState().attachments[K + "sess-1"] ?? []
       expect(list).toHaveLength(1)
       expect(list[0].status).toBe("ready")
       expect(list[0].url).toBe("/output/filip/attachments/sess-1/photo.jpg")

@@ -249,6 +249,27 @@ func (m *MobyDockerOps) ImagePlatform(ctx context.Context, ref string) (Platform
 	return Platform{OS: res.Os, Architecture: res.Architecture, Variant: res.Variant}, nil
 }
 
+// ImageDigester is the optional capability that resolves a local image to the
+// digest the daemon holds for it: the registry digest when it has one, else
+// the image id. Backups pin it per crew; restore checks compare against it.
+type ImageDigester interface {
+	ImageDigest(ctx context.Context, ref string) (string, error)
+}
+
+// ImageDigest implements ImageDigester.
+func (m *MobyDockerOps) ImageDigest(ctx context.Context, ref string) (string, error) {
+	res, err := m.Client.ImageInspect(ctx, ref)
+	if err != nil {
+		return "", fmt.Errorf("backup: docker image inspect %s: %w", ref, err)
+	}
+	if len(res.RepoDigests) > 0 {
+		if i := strings.LastIndex(res.RepoDigests[0], "@"); i >= 0 {
+			return res.RepoDigests[0][i+1:], nil
+		}
+	}
+	return res.ID, nil
+}
+
 // ImageExists implements EnvironmentOps.
 func (m *MobyDockerOps) ImageExists(ctx context.Context, ref string) (bool, error) {
 	_, err := m.Client.ImageInspect(ctx, ref)

@@ -1,7 +1,14 @@
 "use client"
 
+import "./globals.css"
+
 import { useEffect } from "react"
 import * as Sentry from "@sentry/nextjs"
+
+import { BareState } from "@/components/layout/app-frame"
+import { PageError } from "@/components/layout/page-state"
+import { CopyErrorDetails } from "@/components/layout/copy-error-details"
+import { globalErrorScheme } from "@/lib/theme/global-error-scheme"
 
 export default function GlobalError({
   error,
@@ -21,62 +28,22 @@ export default function GlobalError({
     })
   }, [error])
 
+  // Harbor 2 G07: the same error card as every other failure, from the app's
+  // own tokens (globals.css is imported above, not inherited from the layout
+  // that crashed), on the ground with the lockup.
   return (
-    <html lang="en">
-      <body style={{ fontFamily: "system-ui, sans-serif", margin: 0, padding: 0 }}>
-        <div
-          style={{
-            display: "flex",
-            minHeight: "100vh",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "24px",
-            backgroundColor: "#fafafa",
-          }}
-        >
-          <div style={{ textAlign: "center", maxWidth: "400px" }}>
-            <div
-              style={{
-                width: "48px",
-                height: "48px",
-                borderRadius: "12px",
-                backgroundColor: "#fee2e2",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                margin: "0 auto 16px",
-                fontSize: "24px",
-              }}
-            >
-              !
-            </div>
-            <h2 style={{ fontSize: "18px", fontWeight: 600, margin: "0 0 8px" }}>
-              Critical Error
-            </h2>
-            <p style={{ fontSize: "14px", color: "#6b7280", margin: "0 0 24px" }}>
-              The application encountered a critical error. Please reload the page.
-            </p>
-            {error.digest && (
-              <p style={{ fontSize: "12px", color: "#9ca3af", fontFamily: "monospace", margin: "0 0 16px" }}>
-                Error ID: {error.digest}
-              </p>
-            )}
-            <button
-              onClick={reset}
-              style={{
-                padding: "8px 20px",
-                backgroundColor: "#18181b",
-                color: "#fff",
-                border: "none",
-                borderRadius: "6px",
-                fontSize: "14px",
-                cursor: "pointer",
-              }}
-            >
-              Reload
-            </button>
-          </div>
-        </div>
+    <html lang="en" className={globalErrorScheme() === "dark" ? "dark" : undefined}>
+      <body className="font-sans antialiased">
+        <BareState>
+          <PageError
+            title="Crewship couldn’t start this page"
+            description="Reload to try again. If it keeps happening, copy the details for support."
+            onRetry={reset}
+            retryLabel="Reload"
+            errorId={error.digest}
+            actions={<CopyErrorDetails digest={error.digest} />}
+          />
+        </BareState>
       </body>
     </html>
   )

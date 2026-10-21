@@ -98,6 +98,16 @@ current base; do not repeatedly update branches to chase main. Do not use
 operator, reason, reviewed SHA and successful exact-SHA required checks.
 See [CONTRIBUTING.md → Merge through the queue](CONTRIBUTING.md#merge-through-the-queue).
 
+**Risk tiers:** low-risk changes (docs, tests, additive code behind a default-off
+flag) merge on green required checks and an automated review by another
+session; authorization, privacy, data deletion, migrations, CI workflows,
+branch rules and infrastructure need a deep independent review of the exact
+head SHA by a separate session plus a regression test. Only irreversible actions
+(production, destructive data operations, secrets, history rewrites, removing
+required checks) wait for the maintainer. Cap review at three rounds, then merge with recorded debt or
+close. Fix a red main by revert first. Details:
+[CONTRIBUTING.md → Review scaled by risk](CONTRIBUTING.md#review-scaled-by-risk).
+
 ## Architecture map (`internal/`)
 
 ```text

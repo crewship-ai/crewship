@@ -53,15 +53,19 @@ COPY public/ ./public/
 # Shared JSON contracts are imported by the UI; exclude their Go sources.
 COPY config/*.json ./config/
 COPY schemas/*.json ./schemas/
+COPY internal/pages/content_types.json ./internal/pages/
 COPY e2e/ ./e2e/
-COPY scripts/prepare-pdf-assets.mjs scripts/check-control-accessibility.tsx ./scripts/
+COPY scripts/prepare-pdf-assets.mjs scripts/prepare-chat-workers.mjs scripts/check-control-accessibility.tsx ./scripts/
 COPY tools/pages-build/sdk.ts ./tools/pages-build/
+# The browser instantiates this shared closed model with its own pinned Yjs.
+# Copy only the schema source, without the separate Docs service runtime.
+COPY tools/docs-service/schema-core.mjs ./tools/docs-service/
 ARG VERSION=dev
 ARG NEXT_PUBLIC_SENTRY_DSN=""
 ENV NEXT_PUBLIC_CREWSHIP_VERSION=$VERSION
 RUN pnpm build
 
-FROM --platform=$BUILDPLATFORM golang:1.27.2-alpine AS backend
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine AS backend
 ARG TARGETOS
 ARG TARGETARCH
 # This tag is the compiler for the shipped binary, and it is the one Go version

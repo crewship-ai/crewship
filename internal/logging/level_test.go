@@ -138,3 +138,50 @@ func TestParseLevelStrict(t *testing.T) {
 		}
 	}
 }
+
+// The record of a level change lands even when the new level is above WARN.
+func TestAlways_LandsWhateverTheLevel(t *testing.T) {
+	defer ResetLevel()
+	var buf bytes.Buffer
+	logger := New("info", "json", &buf)
+	if _, err := SetLevel("error", 0); err != nil {
+		t.Fatal(err)
+	}
+	logger.Warn("swallowed")
+	Always(logger, "log level changed", "new_level", "error")
+	if strings.Contains(buf.String(), "swallowed") {
+		t.Fatalf("a plain WARN passed an error level: %q", buf.String())
+	}
+	if !strings.Contains(buf.String(), `"msg":"log level changed"`) || !strings.Contains(buf.String(), `"new_level":"error"`) {
+		t.Fatalf("Always did not write through: %q", buf.String())
+	}
+}
+
+// A timed override that runs out is reported, with what it was and what it is now.
+func TestOnAutoRevert_HearsTheExpiry(t *testing.T) {
+	defer ResetLevel()
+	defer OnAutoRevert(nil)
+	New("info", "json", &bytes.Buffer{})
+	got := make(chan [2]string, 1)
+	OnAutoRevert(func(from, to string) { got <- [2]string{from, to} })
+	if _, err := SetLevel("debug", 30*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case g := <-got:
+		if g != [2]string{"debug", "info"} {
+			t.Errorf("revert = %v, want debug → info", g)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no revert reported")
+	}
+	// An explicit change is not an expiry.
+	if _, err := SetLevel("warn", 0); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case g := <-got:
+		t.Errorf("reported %v for an explicit change", g)
+	case <-time.After(80 * time.Millisecond):
+	}
+}

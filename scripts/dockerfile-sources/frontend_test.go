@@ -72,6 +72,10 @@ func excludedTypeScript(t *testing.T, file string, excludes []string) bool {
 			if strings.HasSuffix(file, ".test.tsx") {
 				return true
 			}
+		case "e2e/**/*.fixture.tsx":
+			if strings.HasPrefix(file, "e2e/") && strings.HasSuffix(file, ".fixture.tsx") {
+				return true
+			}
 		default:
 			if strings.ContainsAny(pattern, "*?[") {
 				t.Fatalf("new tsconfig exclusion %q needs source-contract support", pattern)
@@ -105,11 +109,34 @@ func TestFrontendStagePreservesTypecheckAndBuildInputs(t *testing.T) {
 	if !includes["**/*.ts"] || !includes["**/*.tsx"] {
 		t.Fatal("production tsconfig include changed; review frontend source contract")
 	}
+	// Browser fixture entrypoints can import backend-generated JSON. They are
+	// checked by the test project, outside the narrowed production image context.
+	for _, exclusion := range config.Exclude {
+		if exclusion != "e2e/**/*.fixture.tsx" {
+			continue
+		}
+		testRaw, err := os.ReadFile(filepath.Join(root, "tsconfig.tests.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var testConfig struct{ Include []string }
+		if err := json.Unmarshal(testRaw, &testConfig); err != nil {
+			t.Fatal(err)
+		}
+		covered := false
+		for _, inclusion := range testConfig.Include {
+			covered = covered || inclusion == exclusion
+		}
+		if !covered {
+			t.Fatal("browser fixtures excluded from production must remain in test typechecking")
+		}
+	}
 	output, err := exec.Command("git", "-C", root, "ls-files", "-z").Output()
 	if err != nil {
 		t.Fatal(err)
 	}
 	jsonImports := regexp.MustCompile(`@/([^"'\s]+\.json)`)
+	relativeImports := regexp.MustCompile(`(?:from\s+|import\s*\(\s*)["'](\.{1,2}/[^"'\s]+\.(?:mjs|js|json))["']`)
 	for _, file := range strings.Split(string(output), "\x00") {
 		if !strings.HasSuffix(file, ".ts") && !strings.HasSuffix(file, ".tsx") {
 			continue
@@ -125,6 +152,17 @@ func TestFrontendStagePreservesTypecheckAndBuildInputs(t *testing.T) {
 			dependency := string(match[1])
 			if !copiedBy(sources, dependency) {
 				t.Errorf("frontend COPY omits JSON contract %s referenced by %s", dependency, file)
+			}
+		}
+		// Browser adapters can share closed implementations outside the TS
+		// source tree. A full-checkout build hides missing in-image modules.
+		for _, match := range relativeImports.FindAllSubmatch(content, -1) {
+			dependency := filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Dir(file), string(match[1]))))
+			if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(dependency))); err != nil {
+				t.Fatal(err)
+			}
+			if !copiedBy(sources, dependency) {
+				t.Errorf("frontend COPY omits shared module %s referenced by %s", dependency, file)
 			}
 		}
 		if !copiedBy(sources, file) {
@@ -152,7 +190,7 @@ func TestFrontendStagePreservesTypecheckAndBuildInputs(t *testing.T) {
 		}
 	}
 	for _, file := range []string{"internal/api/api.go", "cmd/crewship/main.go", "config/embed.go", "config/rate-limits.yml",
-		"schemas/embed.go", "scripts/claim-issue.sh", "tools/gen-licenses/main.go", "docs/README.md"} {
+		"schemas/embed.go", "scripts/claim-issue.sh", "tools/gen-licenses/main.go", "tools/docs-service/service.mjs", "docs/README.md"} {
 		if copiedBy(sources, file) {
 			t.Errorf("backend/unrelated input %s invalidates frontend source cache", file)
 		}

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react"
 
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { InviteMemberDialog } from "../invite-member-dialog"
 
 const apiFetch = vi.fn()
@@ -39,6 +40,12 @@ describe("InviteMemberDialog", () => {
     Object.defineProperty(navigator, "clipboard", {
       value: { writeText }, configurable: true, writable: true,
     })
+  })
+
+  // v67 parity (PAR-101): Add member is the page's blue primary action.
+  it("opens from the primary button", () => {
+    render(<InviteMemberDialog workspaceId="ws1" onInvited={vi.fn()} />)
+    expect(screen.getByRole("button", { name: "Add member" })).toHaveAttribute("data-variant", "default")
   })
 
   it("provisions the account instead of writing an invitation nobody delivers", async () => {
@@ -230,4 +237,65 @@ describe("InviteMemberDialog — existing account", () => {
     expect(screen.queryByLabelText("Setup link")).toBeNull()
     expect(screen.queryByRole("button", { name: /copy/i })).toBeNull()
   })
+})
+
+// What the person may do is chosen with the role: a preset is the full set,
+// sent as one `{"set"}` PATCH once the account exists. "Role default" sends
+// nothing, and a preset that could not be applied is said next to the link —
+// the person is added either way.
+describe("InviteMemberDialog — what they can do", () => {
+  beforeEach(() => { cleanup(); apiFetch.mockReset() })
+
+  async function addWith(access: string, patchStatus = 200) {
+    apiFetch.mockImplementation(async (_url: string, init?: RequestInit) =>
+      init?.method === "PATCH"
+        ? jsonResponse({}, patchStatus)
+        : jsonResponse({ setup_url: SETUP_URL, created_user: true, email: "new@example.com", user_id: "u-new" }, 201))
+    render(<InviteMemberDialog workspaceId="ws1" onInvited={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: /add member/i }))
+    fireEvent.change(await screen.findByLabelText(/email/i), { target: { value: "new@example.com" } })
+    fireEvent.click(screen.getByRole("radio", { name: "Manager" }))
+    fireEvent.click(screen.getByRole("radio", { name: access }))
+    fireEvent.click(screen.getByRole("button", { name: /^add member$/i }))
+    await screen.findByDisplayValue(SETUP_URL)
+  }
+
+  it("provisions with the picked role, then sets the preset", async () => {
+    await addWith("Power user")
+    expect(JSON.parse(String(apiFetch.mock.calls[0][1].body)).role).toBe("MANAGER")
+    expect(apiFetch.mock.calls[1][0]).toBe("/api/v1/workspaces/ws1/members/u-new/capabilities?workspace_id=ws1")
+    expect(JSON.parse(String(apiFetch.mock.calls[1][1].body))).toEqual({ set: ["chat", "routine.create", "routine.run", "issue.create", "memory.write"] })
+  })
+
+  it("sends no capabilities for the role's default", async () => {
+    await addWith("Role default")
+    expect(apiFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("says so when the preset could not be applied, and still shows the link", async () => {
+    await addWith("Builder", 403)
+    expect(await screen.findByText(/preset could not be applied/)).toBeTruthy()
+    expect(screen.getByDisplayValue(SETUP_URL)).toBeTruthy()
+  })
+})
+
+it("creates a Guest with selected initial grants in one request", async () => {
+  cleanup();apiFetch.mockReset()
+  apiFetch.mockImplementation(async (_url:string,init?:RequestInit)=>init?.method==="POST"
+    ?jsonResponse({token:"test-token",email:"guest@example.test"},201)
+    :jsonResponse([{id:"routine-1",name:"Shared routine"}]))
+  const client=new QueryClient({defaultOptions:{queries:{retry:false}}})
+  render(<QueryClientProvider client={client}><InviteMemberDialog workspaceId="ws1" /></QueryClientProvider>)
+  fireEvent.click(screen.getByRole("button",{name:"Add member"}))
+  fireEvent.change(await screen.findByLabelText(/Email address/),{target:{value:"guest@example.test"}})
+  fireEvent.click(screen.getByLabelText("Guest access"))
+  await screen.findByRole("option",{name:"Shared routine"})
+  fireEvent.change(screen.getByLabelText("Initial resource"),{target:{value:"routine-1"}})
+  fireEvent.click(screen.getByRole("button",{name:"Share resource"}))
+  fireEvent.click(screen.getByRole("button",{name:/^(add|create|send)/i}))
+  await waitFor(()=>expect(apiFetch.mock.calls.some(([,init])=>init?.method==="POST")).toBe(true))
+  const writes=apiFetch.mock.calls.filter(([,init])=>init?.method==="POST"||init?.method==="PATCH")
+  expect(writes).toHaveLength(1)
+  expect(writes[0][0]).toContain("/invitations?")
+  expect(JSON.parse(writes[0][1].body)).toMatchObject({access_mode:"restricted",rights:[{kind:"routine",id:"routine-1",operation:"run"}]})
 })

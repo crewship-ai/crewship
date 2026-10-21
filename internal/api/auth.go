@@ -6,6 +6,8 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"github.com/crewship-ai/crewship/internal/keeper/governance"
 	"log/slog"
 	"net/http"
@@ -17,19 +19,24 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
+	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/mailer"
 	"github.com/crewship-ai/crewship/internal/retention"
 )
 
 // AuthHandler provides user authentication endpoints including signup, login, and WebSocket token exchange.
 type AuthHandler struct {
-	db          *sql.DB
-	logger      *slog.Logger
-	validator   *auth.JWTValidator
-	sessions    sessions.Store
-	allowSignup bool
+	db                *sql.DB
+	logger            *slog.Logger
+	validator         *auth.JWTValidator
+	sessions          sessions.Store
+	allowSignup       bool
+	invitationJournal journal.Emitter
+	license           *license.License
 
 	// mail carries the out-of-band half of the de-enumerated signup:
 	// the "you already have an account" notice. Optional — nil (tests)
@@ -285,9 +292,10 @@ type stringError string
 func (e stringError) Error() string { return string(e) }
 
 type signupRequest struct {
-	FullName string `json:"full_name"`
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	FullName        string `json:"full_name"`
+	Email           string `json:"email"`
+	Password        string `json:"password"`
+	InvitationToken string `json:"invitation_token,omitempty"`
 }
 
 var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
@@ -395,6 +403,8 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 	workspaceID := generateCUID()
 	memberID := generateCUID()
 
+	ctx, publishAudit := withInvitationAudit(r.Context(), h.invitationJournal)
+	r = r.WithContext(ctx)
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		replyInternalError(w, h.logger, "begin tx", err)
@@ -423,17 +433,24 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 	// Invitations first: a person who signs up because they were invited
 	// joins those workspaces and gets no empty workspace of their own
 	// (#3006). Only a signup with nothing to redeem gets one to work in.
-	joined, err := redeemPendingInvitations(r.Context(), tx, userID, req.Email, now)
+	joined, err := redeemPendingInvitations(r.Context(), tx, userID, req.Email, req.InvitationToken, now, h.checkInvitationAdmission)
+	if errors.Is(err, errInvitationConflict) || errors.Is(err, errGuestAdministrator) {
+		writeJSON(w, http.StatusConflict, invitationConflict(err))
+		return
+	}
 	if err != nil {
 		replyInternalError(w, h.logger, "redeem invitations", err)
 		return
 	}
 
 	slug := ""
+	var notifyOwner func()
 	if joined == 0 {
 		slug = slugBase + "-" + workspaceID[:8]
+		// kind = personal: this one person's own space, kept apart from the
+		// workspaces people share in Admin › People & workspaces.
 		_, err = tx.ExecContext(r.Context(),
-			"INSERT INTO workspaces (id, name, slug, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+			"INSERT INTO workspaces (id, name, slug, kind, created_at, updated_at) VALUES (?, ?, ?, 'personal', ?, ?)",
 			workspaceID, req.FullName+"'s Workspace", slug, now, now)
 		if err != nil {
 			replyInternalError(w, h.logger, "insert workspace", err)
@@ -448,11 +465,16 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 			replyInternalError(w, h.logger, "retention defaults", err)
 			return
 		}
-		_, err = tx.ExecContext(r.Context(),
+		memberResult, err := tx.ExecContext(r.Context(),
 			"INSERT INTO workspace_members (id, workspace_id, user_id, role, created_at) VALUES (?, ?, ?, ?, ?)",
 			memberID, workspaceID, userID, "OWNER", now)
 		if err != nil {
 			replyInternalError(w, h.logger, "insert membership", err)
+			return
+		}
+		notifyOwner, err = appendWorkspaceOwnerAudit(r.Context(), tx, h.invitationJournal, memberResult, workspaceID, memberID, userID, "signup_personal")
+		if err != nil {
+			replyInternalError(w, h.logger, "audit initial workspace owner", err)
 			return
 		}
 	}
@@ -462,49 +484,41 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	publishAudit()
+	if notifyOwner != nil {
+		notifyOwner()
+	}
 	h.logger.Info("signup: account created", "user_id", userID, "workspace", slug, "invitations_redeemed", joined)
 	writeSignupResponse(w)
 }
 
-// redeemPendingInvitations places a freshly created account into every
-// workspace that had invited its address, and marks those invitations
-// accepted. Runs inside the signup transaction so a user either lands
-// everywhere they were invited or nowhere.
-//
-// This is the redemption half of POST /workspaces/{id}/invitations,
-// which could always name an address with no account behind it but had
-// nothing to consume the row. Signup is the right moment: the address
-// only gets placed because whoever holds it turned up and chose a
-// password. That consent is what keeps "add a member by email" honest —
-// an OWNER can invite any address, but cannot pull an existing account
-// into their workspace, and gets no signal about whether the address
-// has one (the invitation POST answers the same either way).
-//
-// Only the created path calls this. The collision branch must stay a
-// no-op — see TestSignup_ExistingAccount_DoesNotRedeemInvitations.
-//
-// Returns how many invitations were redeemed, for the log line.
-func redeemPendingInvitations(ctx context.Context, tx *sql.Tx, userID, email, now string) (int, error) {
-	// Only live workspaces: an invitation to a workspace deleted since is no
-	// place to land, and the signup then gets a workspace of its own.
-	// LOWER() on both sides because the inviter typed the address by
-	// hand. expires_at is stored RFC3339 ("...T...Z") while datetime()
-	// yields "... ..." — comparing them as TEXT makes every stored value
-	// sort after every clock value ('T' > ' '), i.e. nothing ever
-	// expires. datetime() on both sides normalises them first.
+// redeemPendingInvitations binds redemption to the presented invitation secret
+// and the account's email. It runs inside the caller's transaction so membership
+// and token consumption commit together. Existing-account signup never calls it.
+func redeemPendingInvitations(ctx context.Context, tx *sql.Tx, userID, email, token, now string, admission ...func(context.Context, *sql.Tx, string) error) (int, error) {
+	if !validInvitationProof(token) {
+		return 0, nil
+	}
+	// Compare parsed instants: RFC3339 TEXT and SQLite datetime TEXT sort
+	// differently within one date. julianday also handles offsets/fractions.
 	rows, err := tx.QueryContext(ctx, `
-		SELECT i.id, i.workspace_id, i.role FROM workspace_invitations i
+		SELECT i.id, i.workspace_id, i.role,i.token,i.access_mode,i.rights_json,i.invited_by FROM workspace_invitations i
 		JOIN workspaces w ON w.id = i.workspace_id AND w.deleted_at IS NULL
-		WHERE LOWER(i.email) = LOWER(?) AND i.accepted_at IS NULL
-		  AND datetime(i.expires_at) > datetime('now')`, email)
+		WHERE LOWER(i.email) = LOWER(?) AND (i.token=? OR (i.token NOT LIKE 'sha256:%' AND i.token=?)) AND i.accepted_at IS NULL
+		  AND julianday(i.expires_at) > julianday('now')
+ AND i.role IN ('ADMIN','MANAGER','MEMBER','VIEWER')
+ AND EXISTS(SELECT 1 FROM users inviter JOIN workspace_members grantor ON grantor.user_id=inviter.id AND grantor.workspace_id=i.workspace_id
+ WHERE inviter.id=i.invited_by AND inviter.suspended_at IS NULL
+ AND grantor.role IN ('OWNER','ADMIN') AND (i.role!='ADMIN' OR grantor.role='OWNER')
+ AND NOT EXISTS(SELECT 1 FROM workspace_members restricted_member WHERE restricted_member.user_id=inviter.id AND restricted_member.access_mode='restricted'))`, email, invitationTokenHash(token), token)
 	if err != nil {
 		return 0, err
 	}
-	type invite struct{ id, workspaceID, role string }
+	type invite struct{ id, workspaceID, role, storedToken, mode, rights, issuer string }
 	var pending []invite
 	for rows.Next() {
 		var inv invite
-		if err := rows.Scan(&inv.id, &inv.workspaceID, &inv.role); err != nil {
+		if err := rows.Scan(&inv.id, &inv.workspaceID, &inv.role, &inv.storedToken, &inv.mode, &inv.rights, &inv.issuer); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -516,20 +530,81 @@ func redeemPendingInvitations(ctx context.Context, tx *sql.Tx, userID, email, no
 	}
 	rows.Close()
 
-	for _, inv := range pending {
-		// OR IGNORE guards the UNIQUE(workspace_id, user_id): two live
-		// invitations for the same workspace are legal rows, and the
-		// second one must not fail the whole signup.
-		if _, err := tx.ExecContext(ctx, `
-			INSERT OR IGNORE INTO workspace_members (id, workspace_id, user_id, role, created_at)
-			VALUES (?, ?, ?, ?, ?)`, generateCUID(), inv.workspaceID, userID, inv.role, now); err != nil {
+	if len(pending) == 0 {
+		var stale bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM workspace_invitations WHERE LOWER(email)=LOWER(?) AND (token=? OR token=?) AND accepted_at IS NULL AND access_mode='restricted')`, email, invitationTokenHash(token), token).Scan(&stale); err != nil {
 			return 0, err
 		}
-		if _, err := tx.ExecContext(ctx,
-			`UPDATE workspace_invitations SET accepted_at = ? WHERE id = ?`, now, inv.id); err != nil {
-			return 0, err
+		if stale {
+			return 0, errInvitationConflict
 		}
 	}
+	for _, inv := range pending {
+		if err := administratorAccountEligible(ctx, tx, userID, inv.role); err != nil {
+			return 0, err
+		}
+		if inv.mode == "restricted" {
+			if err := guestAccountEligible(ctx, tx, userID); err != nil {
+				return 0, err
+			}
+		}
+		var existingRole string
+		err := tx.QueryRowContext(ctx, `SELECT role FROM workspace_members WHERE workspace_id=? AND user_id=?`, inv.workspaceID, userID).Scan(&existingRole)
+		if err != nil && err != sql.ErrNoRows {
+			return 0, err
+		}
+		if err == nil && (existingRole != inv.role || inv.mode == "restricted") {
+			return 0, errInvitationConflict
+		}
+		if err == sql.ErrNoRows {
+			for _, check := range admission {
+				if check != nil {
+					if err := check(ctx, tx, inv.workspaceID); err != nil {
+						return 0, err
+					}
+				}
+			}
+		}
+		claim, err := tx.ExecContext(ctx, `UPDATE workspace_invitations SET accepted_at=? WHERE id=? AND token=? AND accepted_at IS NULL AND julianday(expires_at)>julianday('now')`, now, inv.id, inv.storedToken)
+		if err != nil {
+			return 0, err
+		}
+		n, err := claim.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
+		if n != 1 {
+			return 0, errInvitationConflict
+		}
+		if existingRole == "" {
+			memberID := generateCUID()
+			if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_members(id,workspace_id,user_id,role,created_at) VALUES(?,?,?,?,?)`, memberID, inv.workspaceID, userID, inv.role, now); err != nil {
+				return 0, err
+			}
+		}
+		if inv.mode == "restricted" {
+			var rights []access.Right
+			if json.Unmarshal([]byte(inv.rights), &rights) != nil || rights == nil {
+				return 0, errInvitationConflict
+			}
+			var membershipID string
+			if err := tx.QueryRowContext(ctx, `SELECT id FROM workspace_members WHERE user_id=? AND workspace_id=?`, userID, inv.workspaceID).Scan(&membershipID); err != nil {
+				return 0, err
+			}
+			if _, err := (access.Store{}).ReplaceIn(ctx, tx, inv.issuer, userID, inv.workspaceID, "restricted", access.Membership{ID: membershipID, Revision: 1}, rights); err != nil {
+				if errors.Is(err, access.ErrDenied) || errors.Is(err, access.ErrConflict) {
+					return 0, errInvitationConflict
+				}
+				return 0, err
+			}
+		}
+
+		if err := appendInvitationAudit(ctx, tx, journal.EntryInvitationAccepted, inv.workspaceID, userID, inv.id, inv.role, userID); err != nil {
+			return 0, err
+		}
+
+	}
+
 	return len(pending), nil
 }
 
@@ -788,7 +863,7 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = tx.ExecContext(r.Context(),
+	memberResult, err := tx.ExecContext(r.Context(),
 		"INSERT INTO workspace_members (id, workspace_id, user_id, role, created_at) VALUES (?, ?, ?, ?, ?)",
 		memberID, workspaceID, userID, "OWNER", now)
 	if err != nil {
@@ -819,7 +894,7 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 	// don't auto-issue an admin token here because the bootstrap
 	// flow is unauthenticated up to this point; the user hasn't
 	// agreed to any 7-day expiry contract yet.
-	_, err = tx.ExecContext(r.Context(),
+	tokenResult, err := tx.ExecContext(r.Context(),
 		"INSERT INTO cli_tokens (id, user_id, name, token_hash, tier, created_at) VALUES (?, ?, ?, ?, 'STANDARD', ?)",
 		tokenID, userID, "bootstrap", tokenHashHex, now)
 	if err != nil {
@@ -827,9 +902,27 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := auditCLITokenTx(r.Context(), tx, userID, tokenID, "auth.cli_token_created"); err != nil {
+		replyInternalError(w, h.logger, "bootstrap: token audit", err)
+		return
+	}
+	notifyOwner, err := appendWorkspaceOwnerAudit(r.Context(), tx, h.invitationJournal, memberResult, workspaceID, memberID, userID, "bootstrap")
+	if err != nil {
+		replyInternalError(w, h.logger, "bootstrap: audit initial workspace owner", err)
+		return
+	}
+	if err := ackCLITokenMutationTx(r.Context(), tx, tokenResult, tokenID, userID, nil); err != nil {
+		replyInternalError(w, h.logger, "bootstrap: acknowledge token", err)
+		return
+	}
+
 	if err := tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "bootstrap: commit", err)
 		return
+	}
+
+	if notifyOwner != nil {
+		notifyOwner()
 	}
 
 	// One-shot: close the deploy-race window so a second POST gets 410
@@ -874,21 +967,24 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 }
 
 // WsToken generates a short-lived JWE for authenticating WebSocket connections.
-// GET /api/v1/ws-token — works with both session cookies and CLI tokens.
+// GET /api/v1/ws-token — works with session cookies and unrestricted CLI tokens.
+// Limited CLI tokens cannot mint a ticket until scope-bearing chat authority is
+// supported; issuing an identity-only ticket would discard their restrictions.
 //
 // For browser auth: ticket carries user.SessionID so the WS hub can
 // enforce server-side revocation (close 4401 if the session gets
 // revoked while the WS is up).
 //
-// For CLI auth: ticket is issued without a session id. The WS hub's
-// validator allows empty sid for kind=ws because CLI tokens have their
-// own revocation table (cli_tokens) that the hub does not consult mid-
-// stream — the trade-off is that revoking a CLI token does not kick
-// already-open WS connections; users should disconnect them manually.
+// CLI tickets carry the original CLI-token row ID and its expiry. Both kinds
+// are revalidated on upgrade and revoked through the shared stream registry.
 func (h *AuthHandler) WsToken(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
 		writeAuthError(w, http.StatusUnauthorized, reasonNoCredentials)
+		return
+	}
+	if limitedChatToken(r.Context()) {
+		replyError(w, http.StatusForbidden, "scoped_token_chat_unavailable")
 		return
 	}
 	// Audit H7: defensive nil check. The router only mounts AuthHandler
@@ -901,7 +997,7 @@ func (h *AuthHandler) WsToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jweToken, err := h.validator.IssueWSTicket(user.ID, user.SessionID, user.Name, user.Email)
+	jweToken, err := h.validator.IssueCredentialWSTicket(user.ID, user.SessionID, user.TokenID, user.Name, user.Email, user.CredentialExpiresAt)
 	if err != nil {
 		replyInternalError(w, h.logger, "issue ws ticket", err)
 		return

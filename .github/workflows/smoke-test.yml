@@ -35,7 +35,7 @@ env:
   # workflow_run triggered by a tag push, head_branch is the tag name. Empty on
   # pull_request events (those jobs don't use it — they build a snapshot).
   TAG: ${{ github.event.workflow_run.head_branch }}
-  GO_VERSION: "1.27.2"
+  GO_VERSION: "1.27.3"
 
 jobs:
   binary:
@@ -474,7 +474,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@90ad2b35f69faf97585ad74d28fa006d2739b7af # upstream main 2026-09-28 (cache 6.3.0)
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
@@ -490,14 +490,14 @@ jobs:
       # texts. Generate the same bundle as release/nightly from the locked
       # install before the snapshot, even though this smoke skips the UI build.
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: "22"
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: make licenses
 
-      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7
         with:
           version: "v2.6.1"
           install-only: true

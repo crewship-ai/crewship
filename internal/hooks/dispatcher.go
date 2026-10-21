@@ -28,6 +28,11 @@ import (
 // are aggregated into the returned error via errors.Join so the caller
 // can log them without losing the Block short-circuit signal.
 func Dispatch(ctx context.Context, db *sql.DB, emitter journal.Emitter, event Event, ec EventContext) error {
+	// Paused (paused.go): nothing is read and nothing runs, so a gate call
+	// site sees "no hook objected" exactly as with an empty registry.
+	if !Enabled() {
+		return nil
+	}
 	if ec.WorkspaceID == "" {
 		return &DispatchError{Event: event, Cause: errors.New("workspace_id required")}
 	}

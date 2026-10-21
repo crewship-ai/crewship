@@ -36,6 +36,24 @@ import "sort"
 // table. Drift detection catches the omission in tests so an oversight
 // surfaces before a bundle ships missing rows.
 var BackupTableIntent = map[string]ScopedTableIntent{
+	"document_iteration_intents": IntentExcludeRuntime, // original live targeted-message grants never survive restore
+	"document_creation_consents": IntentExcludeRuntime, // live creation permission must be freshly admitted after restore
+	"slides_heads":               IntentInclude,
+	"slides_revisions":           IntentInclude,
+	"slides_receipts":            IntentInclude,
+	"slides_object_ids":          IntentInclude,
+	"slides_writer_fence":        IntentExcludeRuntime, // installation-local serialization singleton
+
+	"document_creations":    IntentInclude, // durable provenance, never live creation consent
+	"documents":             IntentInclude,
+	"document_updates":      IntentInclude,
+	"document_receipts":     IntentInclude,
+	"document_checkpoints":  IntentInclude,
+	"document_writer_fence": IntentExcludeRuntime, // installation-local SQL serialization singleton
+
+	"workspace_artifact_creation_policy":    IntentInclude,
+	"workspace_artifact_creation_crews":     IntentInclude,
+	"artifact_run_principals":               IntentExcludeRuntime, // active chat/run admission must be freshly captured after restore
 	"restricted_workflow_recipe_bindings":   IntentExcludeRuntime, // frozen private recipe authority requires fresh admission after restore
 	"restricted_workflow_provider_policies": IntentExcludeRuntime, // immutable provider policies belong to private queued authority
 	"restricted_workflow_delegate_slots":    IntentExcludeRuntime, // active host delegation slots cannot survive restore
@@ -48,6 +66,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"restricted_workflow_jobs":              IntentExcludeRuntime, // copying private queue capsules must not replay paid work
 	"restricted_workflow_attempt_roots":     IntentExcludeRuntime, // dispatch fences and stop identities belong to excluded work attempts; never transplant runtime authority
 	"access_files":                          IntentExcludeRuntime, // classified outputs depend on excluded attempt authority
+	"access_preset_selections":              IntentInclude,        // saved explicit intent, never execution authority
 	"access_grants":                         IntentInclude,        // exact member/resource rights survive restore
 	"access_context_dependencies":           IntentExcludeRuntime, // dependency authority requires fresh admission
 	"access_context":                        IntentExcludeRuntime, // prompt context requires fresh admission
@@ -78,6 +97,12 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"agent_slug_reservations":  IntentInclude, // restored crew data under a slug stays out of reach of a new agent
 	"crew_members":             IntentInclude,
 	"chats":                    IntentInclude,
+	"chat_issue_proposals":     IntentInclude, // durable inert user intent and immutable source provenance
+	"chat_proposal_operations": IntentInclude, // source-owned idempotency receipts; no execution authority
+	"agent_operations":         IntentInclude, // durable mutation results and provenance; not a bearer authority
+	"issue_mutation_outbox":    IntentInclude, // source-transaction delivery intent; forks never resume effects
+	"chat_entity_refs":         IntentInclude, // durable chat cards, including human deletion receipts
+	"execution_origins":        IntentInclude, // durable provenance; a fork strips its admission receipt
 	"agent_mcp_bindings":       IntentInclude,
 	"journal_entries":          IntentInclude,
 	// Replay receipts authenticate execution against this installation's
@@ -104,6 +129,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 
 	// === Credentials & secrets (round-trip; cipher preserved) ========
 	"credentials":          IntentInclude,
+	"credential_folders":   IntentInclude, // Vault folders and their reveal policy (ODCH-VLT-01)
 	"agent_credentials":    IntentInclude,
 	"credential_audit":     IntentInclude,
 	"credential_rotations": IntentInclude,
@@ -236,9 +262,10 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// recovery entry able to name what it is closing.
 	"page_panel_alerts": IntentInclude,
 	// `hooks` used to sit here; the table is hooks_config (#2274).
-	"labels":     IntentInclude,
-	"milestones": IntentInclude,
-	"projects":   IntentInclude,
+	"labels":                     IntentInclude,
+	"milestones":                 IntentInclude,
+	"projects":                   IntentInclude,
+	"project_guest_issue_intake": IntentInclude,
 
 	// === Eval / training (round-trip) =========================
 	"eval_runs":           IntentInclude,
@@ -570,6 +597,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"mission_tasks":            IntentInclude,
 	"peer_card_audit":          IntentExcludeOperational, // audit trail
 	"peer_cards":               IntentInclude,
+	"agent_user_preferences":   IntentInclude,
 	// pending_runs holds deferred/debounced triggers waiting to fire
 	// (delay/ttl/priority). A pending row is a scheduled future run —
 	// durable, like a waitpoint; dropping it on restore loses queued work.
@@ -600,6 +628,14 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"pipeline_waitpoints": IntentInclude,
 	"pipeline_webhooks":   IntentInclude,
 	"pipelines":           IntentInclude,
+	// routine_folders / routine_templates / routine_test_results are routine
+	// organisation and authoring data a restored workspace is expected to
+	// keep: folders group the routines, templates are saved definitions, and a
+	// test result is the proof a draft or version was tested.
+	"routine_folders":        IntentInclude,
+	"routine_folder_members": IntentInclude,
+	"routine_templates":      IntentInclude,
+	"routine_test_results":   IntentInclude,
 	// waitpoint_trust_grants = standing "stop asking me" decisions an
 	// operator made on a specific gate. Durable governance state, not
 	// runtime: dropping these on restore silently re-arms every gate the

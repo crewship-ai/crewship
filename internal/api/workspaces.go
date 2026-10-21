@@ -9,6 +9,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/license"
+	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
 	wshub "github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -115,10 +116,13 @@ type WorkspaceHandler struct {
 	// that RemoveMember triggers when the departing member owns a page.
 	// nil is safe: transferDepartingUserPages falls back to a no-op
 	// emitter on its own, matching every other SetJournal in this package.
-	journal journal.Emitter
+	journal           journal.Emitter
+	invitationJournal journal.Emitter
+	policyJournal     journal.Emitter
 	// storageRoot keeps uploaded workspace logos (#3005); the router's
 	// storagePath, set by SetStorageRoot.
-	storageRoot string
+	storageRoot        string
+	restrictedWorkflow func() *restrictedworkflow.Service
 }
 
 // NewWorkspaceHandler creates a WorkspaceHandler with the given database and logger.
@@ -137,7 +141,11 @@ func (h *WorkspaceHandler) SetHub(hub *wshub.Hub) { h.hub = hub }
 // SetJournal wires a journal emitter so RemoveMember's page-owner transfer
 // (§7.1 rule 1b) lands in the real Crew Journal once the router has resolved
 // one. A nil argument is fine — see the journal field comment.
-func (h *WorkspaceHandler) SetJournal(j journal.Emitter) { h.journal = j }
+func (h *WorkspaceHandler) SetJournal(j journal.Emitter) {
+	h.journal = j
+	h.invitationJournal = j
+	h.policyJournal = j
+}
 
 // workspaceCounts is the nested `_count` object the settings UI reads
 // (settings-layout.tsx: org._count.{crews,agents,members}). Always
@@ -148,17 +156,32 @@ type workspaceCounts struct {
 	Members int `json:"members"`
 }
 
+// personalOwnerSQL names whose personal account a workspace is: the member
+// who has been its OWNER longest — the person sign-up made it for, even after
+// someone else (an instance admin, say) joins it as an owner too. NULL for a
+// team workspace. Expects the workspace aliased as w.
+const personalOwnerSQL = `CASE WHEN w.kind = 'personal' THEN (SELECT po.user_id FROM workspace_members po
+	WHERE po.workspace_id = w.id AND po.role = 'OWNER' ORDER BY po.created_at, po.id LIMIT 1) END`
+
 type workspaceResponse struct {
-	pagesThemeJSON    string
-	PagesTheme        json.RawMessage `json:"pages_theme"`
-	ID                string          `json:"id"`
-	Name              string          `json:"name"`
-	Slug              string          `json:"slug"`
-	LogoURL           *string         `json:"logo_url"`
-	PreferredLanguage *string         `json:"preferred_language"`
-	CreatedAt         string          `json:"created_at"`
-	UpdatedAt         string          `json:"updated_at"`
-	CurrentUserRole   *string         `json:"currentUserRole,omitempty"`
+	pagesThemeJSON string
+	PagesTheme     json.RawMessage `json:"pages_theme"`
+	// AppearanceDefault is the workspace default look (WSD-01); `{}` for none.
+	appearanceDefaultJSON string
+	AppearanceDefault     json.RawMessage `json:"appearance_default"`
+	ID                    string          `json:"id"`
+	Name                  string          `json:"name"`
+	Slug                  string          `json:"slug"`
+	// Kind is "team" or "personal": a personal one was made at sign-up for
+	// its owner alone, and the switcher shows it as their personal account.
+	Kind string `json:"kind"`
+	// PersonalOwnerID is whose personal account it is (kind "personal" only).
+	PersonalOwnerID   *string `json:"personal_owner_id,omitempty"`
+	LogoURL           *string `json:"logo_url"`
+	PreferredLanguage *string `json:"preferred_language"`
+	CreatedAt         string  `json:"created_at"`
+	UpdatedAt         string  `json:"updated_at"`
+	CurrentUserRole   *string `json:"currentUserRole,omitempty"`
 	// CurrentUserCapabilities (#1034) — the caller's resolved per-membership
 	// capability grants (v109), sorted. The frontend ability layer reads
 	// these so UI can gate on capability (e.g. show Rotate for a MANAGER
@@ -203,6 +226,10 @@ type workspaceResponse struct {
 // object so both shapes stay in lockstep no matter which query path
 // populated the row.
 func (ws *workspaceResponse) fillNestedCount() {
+	ws.AppearanceDefault = json.RawMessage(ws.appearanceDefaultJSON)
+	if validateWorkspaceAppearanceDefault(ws.AppearanceDefault) != nil {
+		ws.AppearanceDefault = json.RawMessage(`{}`)
+	}
 	ws.PagesTheme = json.RawMessage(ws.pagesThemeJSON)
 	if validateWorkspacePagesTheme(ws.PagesTheme) != nil {
 		ws.PagesTheme = json.RawMessage(`{}`)
@@ -218,7 +245,7 @@ func (ws *workspaceResponse) fillNestedCount() {
 // GET /api/v1/workspaces
 
 func (h *WorkspaceHandler) List(w http.ResponseWriter, r *http.Request) {
-	if restrictedWorkspaceDirectory(h.db, w, r) {
+	if h.restrictedWorkspaceDirectory(w, r) {
 		return
 	}
 	user := UserFromContext(r.Context())
@@ -228,10 +255,10 @@ func (h *WorkspaceHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT w.id, w.name, w.slug, w.logo_url, w.preferred_language, w.created_at, w.updated_at,
+		SELECT w.id, w.name, w.slug, w.kind, `+personalOwnerSQL+`, w.logo_url, w.preferred_language, w.created_at, w.updated_at,
 			wm.role, wm.capabilities, w.allow_privileged_credentials,
 			w.run_retention_days, w.credential_audit_retention_days, w.audit_log_retention_days,
-			w.approvals_retention_days, w.pages_theme,
+			w.approvals_retention_days, w.pages_theme, w.appearance_default,
 			(SELECT COUNT(*) FROM crews WHERE workspace_id = w.id AND deleted_at IS NULL) AS crew_count,
 			(SELECT COUNT(*) FROM agents WHERE workspace_id = w.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM workspace_members WHERE workspace_id = w.id) AS member_count
@@ -250,10 +277,10 @@ func (h *WorkspaceHandler) List(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var ws workspaceResponse
 		var capsJSON sql.NullString
-		if err := rows.Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.LogoURL, &ws.PreferredLanguage,
+		if err := rows.Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.Kind, &ws.PersonalOwnerID, &ws.LogoURL, &ws.PreferredLanguage,
 			&ws.CreatedAt, &ws.UpdatedAt, &ws.CurrentUserRole, &capsJSON, &ws.AllowPrivilegedCredentials,
 			&ws.RunRetentionDays, &ws.CredentialAuditRetentionDays, &ws.AuditLogRetentionDays,
-			&ws.ApprovalsRetentionDays, &ws.pagesThemeJSON,
+			&ws.ApprovalsRetentionDays, &ws.pagesThemeJSON, &ws.appearanceDefaultJSON,
 			&ws.CrewCount, &ws.AgentCount, &ws.MemberCount); err != nil {
 			replyInternalError(w, h.logger, "scan workspace", err)
 			return
@@ -275,6 +302,7 @@ func (h *WorkspaceHandler) List(w http.ResponseWriter, r *http.Request) {
 		result = []workspaceResponse{}
 	}
 
+	w.Header().Set("X-Workspace-Directory-Complete", "true")
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -284,19 +312,19 @@ func (h *WorkspaceHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	var ws workspaceResponse
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT w.id, w.name, w.slug, w.logo_url, w.preferred_language, w.created_at, w.updated_at,
+		SELECT w.id, w.name, w.slug, w.kind, `+personalOwnerSQL+`, w.logo_url, w.preferred_language, w.created_at, w.updated_at,
 			w.allow_privileged_credentials,
 			w.run_retention_days, w.credential_audit_retention_days, w.audit_log_retention_days,
-			w.approvals_retention_days, w.pages_theme,
+			w.approvals_retention_days, w.pages_theme, w.appearance_default,
 			(SELECT COUNT(*) FROM crews WHERE workspace_id = w.id AND deleted_at IS NULL) AS crew_count,
 			(SELECT COUNT(*) FROM agents WHERE workspace_id = w.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM workspace_members WHERE workspace_id = w.id) AS member_count
 		FROM workspaces w
 		WHERE w.id = ? AND w.deleted_at IS NULL
-	`, workspaceID).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.LogoURL, &ws.PreferredLanguage,
+	`, workspaceID).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.Kind, &ws.PersonalOwnerID, &ws.LogoURL, &ws.PreferredLanguage,
 		&ws.CreatedAt, &ws.UpdatedAt, &ws.AllowPrivilegedCredentials,
 		&ws.RunRetentionDays, &ws.CredentialAuditRetentionDays, &ws.AuditLogRetentionDays,
-		&ws.ApprovalsRetentionDays, &ws.pagesThemeJSON,
+		&ws.ApprovalsRetentionDays, &ws.pagesThemeJSON, &ws.appearanceDefaultJSON,
 		&ws.CrewCount, &ws.AgentCount, &ws.MemberCount)
 	if err != nil {
 		if err == sql.ErrNoRows {

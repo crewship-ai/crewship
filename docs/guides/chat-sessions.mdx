@@ -30,6 +30,79 @@ For one-off "ask the agent a question" use, just open `/chat/<agent>` and start 
 
 ## Key concepts
 
+### Reading progress and restored replies
+
+When a server supplies versioned progress, the transcript keeps the server's
+turn and part identities across live updates and history. A provider result or
+closed connection does not confirm that a reply was saved. A missing replay
+segment displays **Partial response — stream recovery pending** until received
+progress or a confirmed history checkpoint covers the gap. Requesting Stop
+keeps the turn pending until the server reports its outcome.
+
+Reasoning blocks show only an explicitly permitted summary. Private reasoning
+is redacted, and older records without summary provenance show **Reasoning
+unavailable**. Displayed duration comes from completed server-recorded intervals;
+legacy content does not acquire an estimated timer.
+
+Changing the signed-in user or conversation clears the previous transcript before
+the new source appears. A definitive access denial clears protected history and
+rejects late events, including in restricted chats that use polling. A missing
+new draft is treated as empty; a missing previously confirmed source is denied.
+Temporary server failures preserve the current user’s verified history.
+
+Activity uses correlated tool identities, including nested calls. Failed,
+denied, interrupted and unknown outcomes remain distinct from success. Open a
+step for its permitted details; bounded output and diff previews indicate when
+their contents were truncated.
+
+Temporary history failures preserve the current user's visible response.
+Definitive access denial or a change of signed-in identity clears protected
+transcript state. These presentation rules do not grant access to a source.
+
+### Questions and decisions
+
+When an agent asks for information, its authorized decision form appears at the
+originating conversation turn and under **Waiting for you** in Work. Open the
+question on the right, or in the full-screen panel on a phone. Both surfaces
+refer to the same source; answering in Inbox also updates the chat card.
+
+An answered, expired, rejected or cancelled source displays its authoritative
+result without reopening the form. A workflow choice applies to that workflow
+step; a whole-run approval applies only to its named run. An information reply
+does not grant permission for another operation. Available kinds depend on the
+source backends installed on your server.
+
+If a response times out, retry the same response with its saved operation key.
+Reloading does not send it automatically. A changed version requires explicit
+review before another answer. Temporary access-check failures preserve the
+draft and disable submitting; explicit denial removes the card, detail and
+protected recovery. Restricted accounts do not receive these decision cards.
+
+### Issue proposals in chat
+
+An agent's issue proposal appears beside its originating conversation turn. Review
+the selected issues, edit their titles, priorities and assignees, then save the
+reviewed version before confirming. Confirmation creates the selected issues
+atomically with your current permissions. Confirmation does not directly start agents; existing workspace automations still apply.
+Discarding a proposal creates no issues.
+
+**Open in Work** shows the same proposal in the right panel; on a phone it opens
+a full-screen panel. **Back to Work**, Escape or closing the phone panel returns
+to the conversation. The card and panel keep separate field and comment drafts.
+A comment is sent through the existing conversation composer path; it is not a
+new comment on an issue that has not been created yet.
+
+If somebody changes the proposal, review the current version explicitly before
+replacing your field draft. After an uncertain save or confirmation, retry the
+original operation instead of submitting a different action. A conflicting
+operation key requires reading and reviewing the current proposal first.
+
+A temporary network or server failure leaves the last verified card and draft
+visible with writes disabled. Explicit access denial clears the card, panel and
+their private recovery data. Signing out or changing the verified signed-in user
+also clears protected proposal/decision recovery; an ordinary reload by the same
+user preserves it. Restricted accounts do not receive proposal cards.
+
 <Accordion title="Glossary — session, origin, branch, attachment, panel, and friends">
 
 | Term | What it means here |
@@ -520,6 +593,18 @@ Enter sends; Shift-Enter inserts a newline. `Ctrl+K` opens the palette unconditi
 
 Hovering over a user message reveals an "Edit" button. Editing the message rewrites that turn and **truncates** the conversation — every message after it is dropped. The new edit is sent as a fresh user turn. This matches the ChatGPT/Claude UX and lets operators reroll an agent's response without abandoning the whole session.
 
+## Tool activity and reasoning
+
+Consecutive tool steps in a reply collapse into one group. Each step is matched to its own result, including when several tools ran in parallel. The group title says **Worked** only when every step completed successfully. If a step failed, the title becomes **Activity incomplete**, the group opens by itself and the failed step carries its own label. While steps are still running the group reads **Working**. A reply whose steps have no recorded result reads **Finished**, which is neither success nor failure.
+
+A reasoning block is collapsed by default. Its header shows the first line of the approved safe summary next to the recorded time; redacted or unavailable reasoning shows no summary line.
+
+Subagent steps nest under their parent when the server correlates them, and approval requests stay outside the group.
+
+## Attachments
+
+Files you pick, drop, paste or photograph go into one upload queue per conversation and upload one at a time, in the order you added them. Each file shows its state in words: **Waiting**, **Uploading**, **Failed** or **Cancelled**; none of them counts as attached until it is ready. **Cancel** stops a waiting or running upload and keeps the chip so **Retry** can queue it again; the remove button deletes it. For now a message takes at most 10 files of 25 MB each; these are provisional client limits, not server-approved ones, and will follow the server's stated limits once it provides them. Anything beyond that is refused with the reason. Sending is blocked while a file is waiting or uploading, and while a failed or cancelled file is still in the composer: retry or remove it first. When a pasted clipboard holds both text and a file, the file is attached and the text is still inserted. Pasting plain text behaves as usual; pasting a file attaches it.
+
 ## Message reactions
 
 An assistant message renders any emoji reactions it already carries (❤️ 🤔 🚀 …). Reactions are workspace-shared — if two operators are in the same workspace, they each see the other's. Migration v57 added the `message_reactions` table. They are **added from the CLI only** ([`crewship chat react`](/cli/chat)); the chat surface reads them back but offers no picker, because in a one-person conversation an emoji has no audience. The 👍 / 👎 in the message action row are a different mechanism — `message_feedback`, not `message_reactions`.
@@ -555,7 +640,7 @@ There is no terminal or diff in the chat: what an agent is running is the [Crew 
 
 ## Presence and reconnect
 
-The composer footer shows a small presence chip — "online", "thinking", "blocked", or "offline" — driven by the [Watch Roster](/guides/watch-roster). When the WS connection drops, a reconnect banner appears at the top of the chat ("Reconnecting…"), the composer disables sends, and queued user messages are flushed once the socket re-establishes.
+The composer footer shows a small presence chip — "online", "thinking", "blocked", or "offline" — driven by the [Watch Roster](/guides/watch-roster). When the WS connection drops, the composer disables sends and queued user messages are flushed once the socket re-establishes. A drop shorter than 4 s shows nothing; after that a neutral bar at the top of the chat says "Reconnecting…" (or "Crewship is restarting · reconnecting…" during a planned restart, or "You're offline · Crewship will reconnect when you're back" when the browser has no network). After about two minutes of failed attempts it turns into a warning, "Can't reach Crewship · retrying every 30 s", with **Retry now**; Crewship keeps retrying on its own, and at once when the network returns, the tab becomes visible or the window regains focus. When the app-wide banner already says the same thing, the chat's bar steps aside, and the bar disappears without a "Reconnected" notice once the socket is back.
 
 Network blips do not lose messages. Sends that were in-flight at disconnect time are retried with the same client-generated `request_id`; the server idempotently dedupes by `request_id` so a retry never duplicates a turn.
 
@@ -604,7 +689,7 @@ Rooms are a separate table from agent sessions: their IDs and message sequences 
 
 ### Notification sounds
 
-**Settings → Notification sounds** (`/settings?tab=sounds`, also in the user menu) chooses a per-browser sound for two categories: **Chat** — a new message in one of your rooms, or an agent finished a reply in a session you have open — and **Inbox** — a new inbox item, escalation or waitpoint arrived. Five presets (Soft pop, Glass, Chime, Inbox drop, Attention) or **Off** per category, one volume slider, a **Do not disturb** switch that silences everything but the **Preview** buttons, and **Enable sounds** as the master switch. Browsers only play audio after a click, so the page asks you to **Activate audio** once per session; a reply that lands in several open tabs plays once, not once per tab (the tabs coordinate through shared storage — a browser without it can still preview but will not play automatically). The setting is saved in the browser for this account and workspace, not on the server.
+**Settings → Notification sounds** (`/settings?tab=sounds`; the user menu carries an on/off switch for the master setting) chooses a per-browser sound for two categories: **Chat** — a new message in one of your rooms, or an agent finished a reply in a session you have open — and **Inbox** — a new inbox item, escalation or waitpoint arrived. Five presets (Soft pop, Glass, Chime, Inbox drop, Attention) or **Off** per category, one volume slider, a **Do not disturb** switch that silences everything but the **Preview** buttons, and **Enable sounds** as the master switch. Browsers only play audio after a click, so the page asks you to **Activate audio** once per session; a reply that lands in several open tabs plays once, not once per tab (the tabs coordinate through shared storage — a browser without it can still preview but will not play automatically). The setting is saved with your account, per workspace (key `notification-sounds.<workspace-id>` of `/api/v1/me/preferences`; CLI: `crewship preferences`), so every device you sign in on uses it; only the browser's one-time audio permission is per device.
 
 ### Image and PDF previews
 
@@ -673,3 +758,57 @@ participant count.
 - [User preferences API](/api-reference/preferences) — composer settings (default model, slash-palette behaviour).
 - [Conversations API](/api-reference/conversations) — message reactions, attachments, crew messaging, and the workspace rooms behind direct messages, groups and channels.
 - [Webhooks](/api-reference/webhooks) — programmatic chat-session creation (`origin=WEBHOOK`).
+
+### Advisory details before work
+
+The chat composer offers configured-model payer, remaining budget and gate details
+after checking the current viewer and chat execution profile. This collapsed
+section is available on desktop and mobile. It does not reserve funds or approve
+a run; the actual launch and provider admission checks remain authoritative.
+Price is unknown unless Paymaster can supply an estimate. Changing viewer, workspace
+or chat requires a new successful profile check before protected reads begin.
+## Budget and gate before work
+
+`crewship chat run-preflight <chat-id>` reads the current payer selected by the
+runtime for the chat agent's configured model, applicable Paymaster budget
+balances, and a predicted whole-run gate. The equivalent read-only endpoint is
+`GET /api/v1/chats/{chatId}/run-preflight`. Restricted accounts and guests do not
+receive this projection. Payer labels retain their normal credential visibility rules; MEMBER callers
+receive a generic connected-account label when vault metadata is hidden. No
+credential IDs, binding/delivery metadata or secrets are returned or decrypted.
+Budget balances cover only the current workspace, crew and agent scopes already
+readable through Paymaster; no institution/global budget is included.
+
+The scope is `configured_chat_agent`: model/provider overrides are outside this
+snapshot. `estimate_state` is `unknown` and `estimate_usd` is null because there is
+no evidence for the complete run's token usage. A remaining balance is neither a
+reservation nor permission to spend. `gate.predicted_mode` uses current policy
+and reward history; the actual mode is recorded in the existing approval item
+when the gate runs. Async review is nonblocking. Prompt changes start a new gate
+check and cannot borrow an earlier run's approval. Provider admission rechecks
+live budget policy before each paid request, including after a human wait.
+Legacy proxy traffic under a hard budget requires the restricted broker even
+when a balance remains; preflight reports that existing constraint.
+
+Changing conversations clears the previous transcript before the new history is loaded, including when the current account and workspace stay the same. Responses from the previous conversation cannot repopulate the new view.
+
+## Sidebar views
+
+Behind `NEXT_PUBLIC_CHAT_SIDEBAR_VIEWS=true` (build time, default off) the chat
+sidebar shows view chips: **All**, **Unreads** and **Agents running**.
+"Agents running" lists agents whose status is running; it does not mean the
+chat you have open is running. The sidebar search applies inside a view; the
+filter menu applies to **All** only. Favorites stay in their own section, so a
+favorite can appear both there and in a view. Your open chat stays in the list,
+marked "Open chat", even when the view would otherwise filter it out; it is not
+counted. An agent row stays disabled until its sessions have loaded, and opens
+the session that has the unread messages.
+
+With the same flag, lists do not move while your pointer or keyboard focus is
+on them: background updates change rows in place, and a **Refresh** button
+appears when the order changed. Your own actions (typing in search, starring,
+opening a row) apply immediately.
+
+Mentions, Threads, Saved, Drafts, Waiting for you and Review are previews on
+sample data, enabled for development only with
+`NEXT_PUBLIC_CHAT_SIDEBAR_SMART_SECTIONS=true`.

@@ -15,20 +15,22 @@ import (
 // fields the CLI renders are decoded; unknown members pass through the
 // JSON decoder untouched, so server-side additions don't break older CLIs.
 type PipelineRunDetail struct {
-	ID           string  `json:"id"`
-	WorkspaceID  string  `json:"workspace_id"`
-	PipelineSlug string  `json:"pipeline_slug"`
-	PipelineName string  `json:"pipeline_name"`
-	Status       string  `json:"status"`
-	Mode         string  `json:"mode"`
-	CurrentStep  string  `json:"current_step_id"`
-	Output       string  `json:"output"`
-	StartedAt    string  `json:"started_at"`
-	EndedAt      string  `json:"ended_at"`
-	ErrorMessage string  `json:"error_message"`
-	FailedAtStep string  `json:"failed_at_step"`
-	CostUSD      float64 `json:"cost_usd"`
-	DurationMs   int64   `json:"duration_ms"`
+	ID           string `json:"id"`
+	WorkspaceID  string `json:"workspace_id"`
+	PipelineSlug string `json:"pipeline_slug"`
+	PipelineName string `json:"pipeline_name"`
+	Status       string `json:"status"`
+	Mode         string `json:"mode"`
+	CurrentStep  string `json:"current_step_id"`
+	Output       string `json:"output"`
+	StartedAt    string `json:"started_at"`
+	EndedAt      string `json:"ended_at"`
+	ErrorMessage string `json:"error_message"`
+	FailedAtStep string `json:"failed_at_step"`
+	// CostUSD is nil when the server withholds it: cost figures are
+	// OWNER/ADMIN only (#3590). nil is "not shown to you", never "free".
+	CostUSD    *float64 `json:"cost_usd"`
+	DurationMs int64    `json:"duration_ms"`
 	// Inputs + StepOutputs power `routine report` — the run's declared inputs
 	// and each step's output (keyed by step_id). Values are decoded loosely
 	// (a step output is usually a string but may be structured).

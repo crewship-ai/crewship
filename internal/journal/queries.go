@@ -16,9 +16,12 @@ import (
 // validates against an upper bound (1000) before calling in.
 type Query struct {
 	WorkspaceID string
-	CrewID      string
-	AgentID     string
-	MissionID   string
+	// HTTP readers apply the current audience only to verified TEXT source projections.
+	SourceAudienceSQL  string
+	SourceAudienceArgs []any
+	CrewID             string
+	AgentID            string
+	MissionID          string
 	// CrewIDs / AgentIDs are multi-valued counterparts to CrewID /
 	// AgentID. When non-empty they take precedence — the SQL emits an
 	// IN-clause covering every supplied id. Single-valued fields are
@@ -133,6 +136,10 @@ func hasTokenChar(s string) bool {
 func buildJournalFilters(q Query) (conds []string, args []any) {
 	conds = append(conds, "workspace_id = ?")
 	args = append(args, q.WorkspaceID)
+	if q.SourceAudienceSQL != "" {
+		conds = append(conds, q.SourceAudienceSQL)
+		args = append(args, q.SourceAudienceArgs...)
+	}
 
 	if len(q.CrewIDs) > 0 {
 		conds = append(conds, "crew_id IN ("+sqlInPlaceholders(len(q.CrewIDs))+")")
@@ -227,9 +234,28 @@ func buildJournalFilters(q Query) (conds []string, args []any) {
 func applyFTS(q Query, conds []string, args []any) ([]string, []any, string) {
 	from := "FROM journal_entries"
 	if match := fts5Query(q.FTSQuery); match != "" {
-		from = "FROM journal_entries JOIN journal_entries_fts fts ON fts.rowid = journal_entries.rowid"
-		conds = append(conds, "journal_entries_fts MATCH ?")
-		args = append(args, match)
+		conds = append(conds, publicFolderSearchSQL)
+		// Protected authorization events contain canonical-only snapshots.
+		// Search their summary only, including historical public payload fields.
+		// Keep MATCH in separate SELECTs: FTS5 cannot safely plan it under OR.
+		workspace := ""
+		if q.WorkspaceID != "" {
+			workspace = "j.workspace_id=? AND "
+		}
+		const protected = "?,?,?,?,?,?,?"
+		conds = append(conds, `journal_entries.rowid IN (
+ SELECT j.rowid FROM journal_entries j JOIN journal_entries_fts ON journal_entries_fts.rowid=j.rowid
+ WHERE `+workspace+`j.entry_type IN (`+protected+`) AND journal_entries_fts.summary MATCH ?
+ UNION ALL
+ SELECT j.rowid FROM journal_entries j JOIN journal_entries_fts ON journal_entries_fts.rowid=j.rowid
+ WHERE `+workspace+`j.entry_type NOT IN (`+protected+`) AND journal_entries_fts MATCH ?)`)
+		for range 2 {
+			if q.WorkspaceID != "" {
+				args = append(args, q.WorkspaceID)
+			}
+			args = append(args, string(EntryMemberCapabilitiesChanged), string(EntryPageGrantAdded),
+				string(EntryPageGrantRemoved), "page.folder_acl_changed", string(EntryMemberAdded), string(EntryMemberAccessChanged), string(EntryMemberOwnerCreated), match)
+		}
 	}
 	return conds, args, from
 }

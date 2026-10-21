@@ -123,6 +123,7 @@ func newCrewshipActions(baseURL, internalToken string, pol *policy.Resolver, db 
 var crewshipInjected = []string{
 	"workspace_id", "crew_id", "author_agent_id", "author_run_id",
 	"agent_id", "actor_agent_id",
+	"source_run_id", "source_agent_id", "chat_origin_id", "human_authority", "trigger_message_id", "operation_key",
 }
 
 // crewshipTenantScopedArgs are author-supplied args that NAME A ROW in the
@@ -156,6 +157,9 @@ var crewshipTenantScopedArgs = map[string]string{
 // Do gates the verb on the author crew's autonomy level, then performs the
 // call.
 func (c *crewshipActions) Do(ctx context.Context, req pipeline.CrewshipRequest) (string, error) {
+	if req.ChatOriginID != "" && strings.HasPrefix(req.Verb, "issue.") && req.Verb != "issue.create" && req.Verb != "issue.update" && req.Verb != "issue.comment" {
+		return "", fmt.Errorf("chat_issue_action_not_supported: %s", req.Verb)
+	}
 	method, pathTmpl, ok := pipeline.CrewshipVerbRoute(req.Verb)
 	if !ok {
 		return "", fmt.Errorf("crewship: unknown action %q", req.Verb)
@@ -227,6 +231,10 @@ func (c *crewshipActions) Do(ctx context.Context, req pipeline.CrewshipRequest) 
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("X-Internal-Token", c.internalToken)
+	httpReq.Header.Set("X-Crewship-Pipeline-Run", req.RunID)
+	if req.ChatOriginID != "" {
+		httpReq.Header.Set("X-Crewship-Chat-Origin", req.ChatOriginID)
+	}
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
@@ -340,13 +348,25 @@ func crewshipBody(req pipeline.CrewshipRequest) map[string]any {
 	// states the rule where the next field is added: these keys are not the
 	// author's to supply, and a conditional anywhere in this loop would turn
 	// "the run's identity wins" into "the author's does".
-	for _, k := range crewshipInjected {
-		delete(body, k)
+	for key := range body {
+		for _, reserved := range crewshipInjected {
+			if strings.EqualFold(key, reserved) {
+				delete(body, key)
+				break
+			}
+		}
 	}
 	body["workspace_id"] = req.WorkspaceID
 	body["crew_id"] = req.CrewID
 	body["author_agent_id"] = req.AgentID
 	body["author_run_id"] = req.RunID
+	if req.ChatOriginID != "" {
+		body["operation_key"] = req.OperationKey
+	} else if key, present := req.Args["operation_key"]; present {
+		// Legacy autonomous callers may explicitly choose a stable key. Only
+		// its canonical spelling survives; folded aliases cannot replace it.
+		body["operation_key"] = key
+	}
 	// The same acting agent under the two names the internal routes read it by.
 	// Set unconditionally, including when empty: a conditional here would let an
 	// authored value survive for a routine with no author agent, which is

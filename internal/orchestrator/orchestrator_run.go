@@ -18,10 +18,12 @@ import (
 	"unicode/utf8"
 
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
+	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 	"github.com/crewship-ai/crewship/internal/telemetry"
 	"github.com/crewship-ai/crewship/internal/tokenutil"
@@ -311,6 +313,8 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		CrewID:      req.CrewID,
 		AgentID:     req.AgentID,
 		Tool:        "agent_run",
+		MissionID:   req.MissionID,
+		Correlation: approvalRunCorrelation(ctx, req),
 		// Args is the reward-fingerprint key (harbormaster.HashArgs hashes
 		// it verbatim, key AND value) as well as the rule-evaluator input,
 		// so it may only carry values that are the same across repeated,
@@ -360,14 +364,13 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 			},
 		})
 	}
-	// Only proceed when the gate explicitly says so. Denied, Pending,
-	// and "Required but not Approved" must all halt the run — a
-	// pending approval still means a human hasn't said yes yet, and
-	// falling through in that state would defeat the point of HITL.
+	// Async is a nonblocking review. Only the gate's actual effective
+	// mode can permit Pending to continue: configuration may be auto-tuned.
+	// Missing mode stays conservative for legacy/custom adapters.
 	if gateDecision.Denied {
 		return fmt.Errorf("run denied by approval: %s", gateDecision.Reason)
 	}
-	if gateDecision.Required && !gateDecision.Approved {
+	if gateDecision.Required && !gateDecision.Approved && !(gateDecision.Pending && gateDecision.EffectiveMode == "async") {
 		state := "pending"
 		if gateDecision.Pending {
 			state = "pending"
@@ -1117,6 +1120,9 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 			transferHostHold(result.ExecID)
 			return fmt.Errorf("%w: protected CLI terminal semantics require reconciliation", ErrHostCaptureUnconfirmed)
 		}
+		if req.CapturedExit != nil && snapshot.Result.CompletedAt != "" {
+			req.CapturedExit(snapshot.Result.CompletedAt)
+		}
 		exitCode = snapshot.Result.ExitCode
 	} else {
 		running, exitCode, inspErr = o.awaitExecTerminal(ctx, result.ExecID)
@@ -1620,10 +1626,11 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 		var memoryCfg *SidecarMemoryConfig
 		if req.MemoryEnabled {
 			memoryCfg = &SidecarMemoryConfig{
-				Enabled:   true,
-				BasePath:  path.Join("/crew", "agents", req.AgentSlug, ".memory"),
-				AgentSlug: req.AgentSlug,
-				AgentRole: strings.ToLower(req.AgentRole),
+				TrustedStorageRoot: "/crew",
+				Enabled:            true,
+				BasePath:           path.Join("/crew", "agents", req.AgentSlug, ".memory"),
+				AgentSlug:          req.AgentSlug,
+				AgentRole:          strings.ToLower(req.AgentRole),
 			}
 			// Lead agents own the crew shared memory FTS5 index
 			if req.CrewID != "" {
@@ -2434,4 +2441,18 @@ func sortedKeys(m map[string]string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// approvalRunCorrelation uses host-issued provenance. ChatID alone can name a
+// bootstrap or parent chat and must never make an approval appear in that chat.
+func approvalRunCorrelation(ctx context.Context, req AgentRunRequest) map[string]any {
+	c := map[string]any{"run_id": req.RunID}
+	r := chataudience.ReceiptFromContext(ctx)
+	trigger := runauthority.TriggerMessageFromContext(ctx)
+	if r != nil && r.Kind == "" && r.ChatID != "" && r.ChatID == req.ChatID && r.WorkspaceID == req.WorkspaceID && r.AgentID == req.AgentID && trigger != "" {
+		c["chat_id"] = r.ChatID
+		c["trigger_message_id"] = trigger
+		c["trigger_type"] = "human_chat"
+	}
+	return c
 }

@@ -104,6 +104,13 @@ func TestRecurringIssueDispatcher_OccurrenceDedupBehaviour(t *testing.T) {
 
 			d := NewRecurringIssueDispatcher(h.db, nil, newTestLogger())
 			for _, f := range tt.fires {
+				// Model a due database occurrence, rather than passing a
+				// fabricated bucket that the persisted schedule never had.
+				dueBucket := f.bucket
+				if dueBucket == "" {
+					dueBucket = bucketA
+				}
+				execOrFatal(t, h.db, `UPDATE recurring_issues SET next_run=? WHERE id=?`, dueBucket, f.id)
 				d.fireOne(ctx, recurringDueRow{
 					id:            f.id,
 					workspaceID:   wsID,

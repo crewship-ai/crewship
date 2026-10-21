@@ -20,6 +20,9 @@ func draftStore(t *testing.T) *Store {
 	if _, err = db.Exec(string(sql)); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = db.Exec(`ALTER TABLE pipeline_drafts ADD COLUMN chat_origin_id TEXT`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err = db.Exec(scheduleSchemaSQL); err != nil {
 		t.Fatal(err)
 	}
@@ -248,5 +251,30 @@ func TestDraftUpdateCannotRewriteBaseMetadata(t *testing.T) {
 	}
 	if saved.BasePipelineID != original.BasePipelineID || saved.BaseRevision != original.BaseRevision || saved.CreatedAt != original.CreatedAt {
 		t.Fatalf("immutable metadata overwritten: %+v", saved)
+	}
+}
+
+func TestDraftDoesNotInheritDeletedRecipeOrigin(t *testing.T) {
+	s := draftStore(t)
+	ctx := t.Context()
+	saved, err := s.Save(ctx, validSaveInput("deleted-origin-recipe"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.db.Exec(`UPDATE pipelines SET deleted_at='2026-10-14T09:00:00Z',chat_origin_id='historical-origin' WHERE id=?`, saved.ID); err != nil {
+		t.Fatal(err)
+	}
+	draft, err := s.GetDraft(ctx, "ws_test", saved.Slug)
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft.UpdatedBy = "user_test"
+	draft.Document = json.RawMessage(`{"slug":"deleted-origin-recipe","definition":{"name":"Fresh","steps":[]}}`)
+	draft, err = s.SaveDraft(ctx, *draft)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if draft.ChatOriginID != "" {
+		t.Fatalf("fresh draft inherited deleted authority: %q", draft.ChatOriginID)
 	}
 }

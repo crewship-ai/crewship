@@ -12,7 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 )
 
 // maxExecBodyBytes caps the JSON request body on the pipeline exec
@@ -328,6 +330,7 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 
 	exec := h.newExecutor()
 	input := pipeline.RunInput{
+		ChatOriginID:          runauthority.OriginIDFromContext(r.Context()),
 		PinnedVersion:         body.PinnedVersion,
 		UseReviewedDefinition: body.ExpectedDefinitionHash != "",
 		PipelineID:            p.ID,
@@ -459,7 +462,7 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "Failed to start pipeline run")
 		return
 	}
-	writeJSON(w, http.StatusOK, res)
+	writeCostAwareJSON(w, r, http.StatusOK, res)
 }
 
 // A retry after an uncertain response must recover the original run even if
@@ -483,6 +486,7 @@ func (h *PipelineHandler) existingIdempotentRun(ctx context.Context, workspaceID
 // run. Workspace + invoker identity are injected by the sidecar from its IPC
 // config (never the model), mirroring the save flow's trust boundary.
 type internalRunRequest struct {
+	SourceRunID     string         `json:"source_run_id"`
 	WorkspaceID     string         `json:"workspace_id"`
 	Slug            string         `json:"slug"`
 	Inputs          map[string]any `json:"inputs"`
@@ -542,6 +546,18 @@ func (h *PipelineHandler) InternalRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Missing proof retains the legacy invocation path. An explicitly supplied
+	// credential must bind this exact workspace, agent and active source run.
+	verifiedInvocation := false
+	if proof := r.Header.Get("X-Crewship-Run-Token"); proof != "" {
+		key := internaltoken.DeriveAgentRunKey(h.runTokenSecret, body.WorkspaceID, body.InvokingCrewID)
+		ws, agent, run, valid := internaltoken.ValidateAgentRunToken(key, proof)
+		if h.runTokenSecret == "" || !valid || ws != body.WorkspaceID || agent != body.InvokingAgentID || run != body.SourceRunID {
+			writeChatIssueError(w, runauthority.ErrIdentityMismatch)
+			return
+		}
+		verifiedInvocation = true
+	}
 	p, err := h.store.GetBySlug(r.Context(), body.WorkspaceID, body.Slug)
 	if errors.Is(err, pipeline.ErrNotFound) {
 		replyError(w, http.StatusNotFound, "routine not found")
@@ -575,17 +591,49 @@ func (h *PipelineHandler) InternalRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	originID, invocationSource := "", ""
+	if body.SourceRunID != "" {
+		tx, e := h.db.BeginTx(r.Context(), nil)
+		if e != nil {
+			writeChatIssueError(w, e)
+			return
+		}
+		origin, e := runauthority.CaptureOrigin(r.Context(), tx, body.SourceRunID, body.InvokingAgentID, body.WorkspaceID)
+		if e != nil {
+			_ = tx.Rollback()
+			writeChatIssueError(w, e)
+			return
+		}
+		if verifiedInvocation {
+			invocationSource, e = pipelineInvocationSource(r.Context(), tx, body.SourceRunID, body.InvokingAgentID, body.WorkspaceID)
+			if e != nil {
+				_ = tx.Rollback()
+				writeChatIssueError(w, e)
+				return
+			}
+		}
+		if e = tx.Commit(); e != nil {
+			writeChatIssueError(w, e)
+			return
+		}
+		originID = origin.ID
+	}
 	exec := h.newExecutor()
 	res, err := exec.Run(r.Context(), pipeline.RunInput{
-		PipelineID:      p.ID,
-		WorkspaceID:     body.WorkspaceID,
-		InvokingCrewID:  body.InvokingCrewID,
-		InvokingAgentID: body.InvokingAgentID,
-		Inputs:          body.Inputs,
-		Mode:            pipeline.ModeRun,
-		TriggeredVia:    pipeline.TriggeredViaCallPipeline,
+		PipelineID:            p.ID,
+		ChatOriginID:          originID,
+		InvocationSourceRunID: invocationSource,
+		WorkspaceID:           body.WorkspaceID,
+		InvokingCrewID:        body.InvokingCrewID,
+		InvokingAgentID:       body.InvokingAgentID,
+		Inputs:                body.Inputs,
+		Mode:                  pipeline.ModeRun,
+		TriggeredVia:          pipeline.TriggeredViaCallPipeline,
 	})
 	if err != nil {
+		if writeRoutineOriginError(w, err) {
+			return
+		}
 		if errors.Is(err, pipeline.ErrConcurrencyLimitReached) {
 			w.Header().Set("Retry-After", "5")
 			writeJSON(w, http.StatusTooManyRequests, map[string]string{
@@ -651,7 +699,7 @@ func (h *PipelineHandler) DryRun(w http.ResponseWriter, r *http.Request) {
 	// so the UI can still render "this routine's definition no longer parses".
 	if perr != nil {
 		h.logger.Warn("pipeline dry_run: stored definition unparseable", "slug", slug, "error", perr)
-		writeJSON(w, http.StatusOK, dryRunResponse{
+		writeCostAwareJSON(w, r, http.StatusOK, dryRunResponse{
 			RunResult: &pipeline.RunResult{
 				PipelineID:   p.ID,
 				PipelineSlug: p.Slug,
@@ -676,7 +724,7 @@ func (h *PipelineHandler) DryRun(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "Failed to dry-run pipeline")
 		return
 	}
-	writeJSON(w, http.StatusOK, dryRunResponse{RunResult: res, Manifest: manifest})
+	writeCostAwareJSON(w, r, http.StatusOK, dryRunResponse{RunResult: res, Manifest: manifest})
 }
 
 // TestRun is the PUBLIC, JWT-authed draft-validation gate behind the UI's
@@ -778,11 +826,23 @@ func (h *PipelineHandler) TestRun(w http.ResponseWriter, r *http.Request) {
 		defHash := definitionHashHex(body.Definition)
 		saveToken = signSaveToken(h.saveTokenSecret, workspaceID, defHash, userID, time.Now())
 	}
+	// Keep the outcome against the tested definition, so the draft and the
+	// versions holding it can say "Test run passed" truthfully (ODCH-RT-13).
+	if res != nil {
+		testedBy := ""
+		if user := UserFromContext(r.Context()); user != nil {
+			testedBy = user.ID
+		}
+		passed := res.Status == "DRY_RUN_OK" || res.Status == "COMPLETED"
+		if err := h.store.RecordTestResult(r.Context(), workspaceID, definitionHashHex(body.Definition), passed, res.Status, testedBy); err != nil {
+			h.logger.Warn("pipeline test_run: record result", "error", err)
+		}
+	}
 	type testRunResponse struct {
 		*pipeline.RunResult
 		SaveToken string `json:"save_token,omitempty"`
 	}
-	writeJSON(w, http.StatusOK, testRunResponse{RunResult: res, SaveToken: saveToken})
+	writeCostAwareJSON(w, r, http.StatusOK, testRunResponse{RunResult: res, SaveToken: saveToken})
 }
 
 // InternalTestRun is the X-Internal-Token save gate used by the sidecar
@@ -1043,7 +1103,7 @@ func (h *PipelineHandler) ListRunRecords(w http.ResponseWriter, r *http.Request)
 		}
 		out = append(out, dto)
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeCostAwareJSON(w, r, http.StatusOK, out)
 }
 
 // ListRuns returns the journal entries for the named pipeline,
@@ -1154,7 +1214,7 @@ LIMIT ?`, workspaceID, entryFilter, p.ID, limit)
 	if err := rows.Err(); err != nil {
 		h.logger.Warn("pipeline list runs: rows iteration", "error", err)
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeCostAwareJSON(w, r, http.StatusOK, out)
 }
 
 // ApproveWaitpoint completes a pending wait-step approval. POST

@@ -1,0 +1,36 @@
+---
+title: "Operation"
+description: "Inspect authorized metadata for a durable agent operation."
+icon: "receipt"
+stability: experimental
+tag: Experimental
+---
+
+# crewship operation
+
+Inspect durable Issue operations without exposing internal authority, request
+keys or stored mutation payloads. Requires authentication and a selected
+workspace. Defined in `cmd/crewship/cmd_chat_entity_refs.go`.
+
+## `crewship operation get`
+
+```bash
+crewship operation get <operation-id>
+crewship operation get <operation-id> --format yaml
+```
+
+Calls `GET /api/v1/operations/{operationId}` and returns `id`, `status`, `kind`,
+`verb`, `entity`, `provenance` and `revision_at_action`. The default output is
+JSON; the global `--format` flag also supports YAML and NDJSON. Global
+`--filter` applies a jq expression to the JSON response.
+
+The current viewer must be allowed to read the issue and a source chat in the
+selected workspace. Missing and inaccessible operations both fail with `404`.
+Restricted sessions are unsupported. The command is read-only and does not
+replay a mutation, confirm a proposal or start work.
+
+Use the operation ID from a successful mutation response; an event ID from
+`crewship chat refs` identifies a reference and is not an operation ID.
+
+See [Chat entity references](/specs/chat-entity-references) for the response
+contract and [Chat](/cli/chat) for the card list.

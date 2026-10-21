@@ -67,10 +67,16 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	// E0 run lifecycle. handleRunEnd resolves the acting identity itself and
 	// ends only the run its OWN token binds, so there is no "end that other
 	// run" verb here to guard against in the first place.
-	"POST /agent/run/end": guardHandlerIdentity,
-	"POST /query":         guardHandlerIdentity,
-	"POST /escalate":      guardHandlerIdentity,
-	"POST /issue/create":  guardHandlerIdentity,
+	"POST /agent/run/end":           guardHandlerIdentity,
+	"POST /api/v1/documents/create": guardHandlerIdentity,
+	"GET /api/v1/documents/draft":   guardHandlerIdentity,
+	"POST /api/v1/documents/draft":  guardHandlerIdentity,
+	// Proposals require a verified token-bound live run in both handlers.
+	"POST /chat/proposal/create": guardHandlerIdentity,
+	"POST /chat/proposal/ /edit": guardHandlerIdentity,
+	"POST /query":                guardHandlerIdentity,
+	"POST /escalate":             guardHandlerIdentity,
+	"POST /issue/create":         guardHandlerIdentity,
 	// The rest of the issue surface (issue_verbs.go). READS are on this list
 	// deliberately: the board is crew data, and a sibling that omits its
 	// header must not fall back to the boot agent's identity to read it.
@@ -78,6 +84,7 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	"GET /issue/":           guardHandlerIdentity,
 	"PATCH /issue/":         guardHandlerIdentity,
 	"POST /issue/ /comment": guardHandlerIdentity,
+	"POST /issue/ /show":    guardHandlerIdentity,
 	"POST /issue/ /work":    guardHandlerIdentity,
 	"GET /issue/ /comments": guardHandlerIdentity,
 	"POST /issue/ /link":    guardHandlerIdentity,
@@ -99,6 +106,7 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	// which keys on the ACTING agent — so this route must resolve identity or
 	// the grant model means nothing.
 	"POST /mcp/notify":            guardHandlerIdentity,
+	"POST /mcp/issues":            guardHandlerIdentity,
 	"POST /pipelines/save":        guardHandlerIdentity,
 	"POST /pipelines/ /run":       guardHandlerIdentity,
 	"POST /connections/ /message": guardHandlerIdentity,
@@ -126,7 +134,7 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	// existing (unchanged) trust boundary, not something this table papers
 	// over. Note it explicitly so a future reader does not read guardNone as
 	// "checked and safe for per-agent isolation".
-	"POST /mission/ /start":       guardNone,
+	"POST /mission/ /start":       guardHandlerIdentity,
 	"POST /pipelines/ /dry_run":   guardNone,
 	"GET /connections/ /messages": guardNone,
 	"GET /connections/ /files":    guardNone,
@@ -147,7 +155,7 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	"PATCH /manifest":                 guardNone,
 	"GET /pipelines":                  guardNone,
 	"GET /pipelines/":                 guardNone,
-	"POST /routines/schedules/create": guardNone,
+	"POST /routines/schedules/create": guardHandlerIdentity,
 	"POST /skills/generate":           guardNone,
 	"POST /skills/author":             guardNone,
 	"POST /credentials/create":        guardNone,
@@ -340,6 +348,8 @@ func packageHandlerBodies(t *testing.T) map[string]string {
 // identityHelpers are the calls that resolve (and fail closed on) the acting
 // agent behind a sidecar request.
 var identityHelpers = []string{
+	// Document creation requires the original run-bound capability.
+	"identityForRunTokenCtx(r.Context(), token)",
 	"actingAgentID(r)",
 	"actingIdentity(r)",
 	// E0. actingRunIdentity is the resolver the other two now delegate to; it

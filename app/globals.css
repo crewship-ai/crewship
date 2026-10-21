@@ -2,6 +2,8 @@
 @import "tw-animate-css";
 /* Brand colours per accent theme — see the header of that file. */
 @import "./styles/accents.css";
+@import "./styles/styles.css";
+@import "./styles/packs.generated.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -27,9 +29,44 @@
  * bar in standalone mode, so a page that subtracts a flat 48px is exactly that
  * inset too tall — visible only once installed, which is where `display:
  * standalone` in app/manifest.ts now puts it. */
-:root { --app-header-h: calc(12 * var(--spacing) + env(safe-area-inset-top)); }
+:root { --app-header-h: calc(48px + env(safe-area-inset-top)); }
+
+/* Harbor 2 control heights: 24 / 28 / 32 px at Compact text size (a 13/14
+ * root), so the same tokens grow with Standard and Large like everything else.
+ * Buttons, inputs and select triggers read them (components/ui). */
+:root {
+  --control-xs: 1.6154rem;
+  --control-sm: 1.8846rem;
+  --control-md: 2.1538rem;
+}
+/* A finger-sized target on a touch device: every control that reads the
+ * tokens (Button xs/sm/default and their icon sizes, inputs, selects,
+ * Segmented) is 44px tall under `pointer: coarse`. In px, not rem, so the
+ * reader's text size cannot take it under the target; a fine pointer keeps
+ * the rem values above. */
+@media (pointer: coarse) {
+  :root {
+    --control-xs: 44px;
+    --control-sm: 44px;
+    --control-md: 44px;
+  }
+}
 :root { --mobile-tab-bar-h: 0px; }
-@media (max-width: 767px) { :root { --mobile-tab-bar-h: calc(3.5rem + env(safe-area-inset-bottom)); } }
+@media (max-width: 767px) { :root { --mobile-tab-bar-h: calc(62px + env(safe-area-inset-bottom)); } }
+/* Phone pilot (MOBIL-DOPORUCENI 2a §5): while a text field has focus on a
+ * phone (data-typing, components/layout/phone-keyboard) the tab bar steps
+ * aside, so it never sits between the field and the keyboard; the save bars
+ * then ride on the keyboard (--keyboard-inset). Toasts sit above whatever
+ * is docked at the bottom: tab bar, keyboard, save bar (--toast-lift). */
+:root { --toast-lift: 0px; }
+@media (max-width: 767px) {
+  :root[data-typing] { --mobile-tab-bar-h: 0px; }
+  :root[data-typing] [data-slot="mobile-tab-bar"] { display: none; }
+  :root { --toast-lift: calc(var(--mobile-tab-bar-h) + var(--keyboard-inset, 0px)); }
+  :root:has([data-slot="page-save-bar"], [data-slot="save-footer"]) {
+    --toast-lift: calc(var(--mobile-tab-bar-h) + var(--keyboard-inset, 0px) + 64px);
+  }
+}
 
 /* Reduced motion, covered once rather than per component.
  *
@@ -84,16 +121,18 @@
 }
 
 :root {
-  /* ── Light surfaces (kept from prior shadcn palette — only Philosophy /
-   *    legal pages render light; main app is dark-first) ── */
-  --background: #F4F7FB;
-  --foreground: #0F1733;
+  /* ── Light surfaces (Harbor 2). The rail and the frame sit on a quiet
+   *    grey ground (--sidebar); content, panels and cards are white and
+   *    separated by hairlines, not shadows. Values pinned in
+   *    lib/__tests__/theme-contrast.test.ts. ── */
+  --background: #FFFFFF;
+  --foreground: #0C111B;
   --scrollbar-thumb: oklch(0.80 0 0);
   --scrollbar-thumb-hover: oklch(0.66 0 0);
   --card: #FFFFFF;
-  --card-foreground: #0F1733;
+  --card-foreground: #0C111B;
   --popover: #FFFFFF;
-  --popover-foreground: #0F1733;
+  --popover-foreground: #0C111B;
 
   /* Brand — #0E6BE8 is the light-mode variant of the marketing site's
    *  #1E7BFE (deeper so it stays legible on white). Same hue family. */
@@ -103,24 +142,26 @@
 
   --secondary: oklch(0.1994 0.0470 270.6494);
   --secondary-foreground: oklch(1.0000 0 0);
-  --muted: #EEF2F7;
-  --muted-foreground: #566079;
-  /* Dimmer-but-AA-compliant second muted level. Replaces the old
-   * text-muted-foreground/40–/70 alpha pattern, which composited to
-   * well under the WCAG AA 4.5:1 minimum for normal-size text.
-   * Light: 5.86:1 on --background, 5.76:1 on --card. */
-  --muted-foreground-soft: #646E87;
-  --accent: #EEF2F7;
-  --accent-foreground: #0F1733;
+  --muted: #F8F9FA;
+  --muted-foreground: #4B5363;
+  /* Dimmer-but-AA-compliant second muted level (Harbor 2 tertiary text).
+   * The design's #757D8C measured 3.4–4.1:1 on its own surfaces; this keeps
+   * its hue at a lower lightness: ≥ 4.66:1 on every surface, hover and
+   * selection (pinned in theme-contrast.test.ts). */
+  --muted-foreground-soft: #616875;
+  /* Fourth grey: icons and dividers only, never text (3:1, WCAG 1.4.11). */
+  --icon-faint: #7E8797;
+  --accent: #F3F4F6;
+  --accent-foreground: #0C111B;
 
   /* Destructive — matches marketing-site --color-error (oklch 0.70 0.19 25,
    *  a tighter red than the previous orange-leaning oklch(0.71 0.19 39)). */
   --destructive: #C0261B;
   --destructive-foreground: oklch(1.0000 0 0);
 
-  --border: #D8E0EB;
-  --input: #D8E0EB;
-  --control-border: #8792AB;
+  --border: #E4E6EA;
+  --input: #E4E6EA;
+  --control-border: #7C879F;
   --ring: var(--brand);
 
   /* Chart palette — light-ground tuning, deliberately distinct from the
@@ -150,14 +191,32 @@
   --chart-3: oklch(0.61 0.104 200);
   --chart-4: oklch(0.45 0.108 55);
   --chart-5: oklch(0.62 0.133 105);
+  /* Chart series (COM-04, PRD TOK-08): eight slots for per-crew and
+   *  per-agent charts. 1-5 are the chart slots above, unchanged, so a series
+   *  keeps its colour; 6 violet, 7 green and 8 coral are new. Every slot is
+   *  ≥ 3:1 on every surface (WCAG 1.4.11) and no two are closer than ΔE 10
+   *  (OKLab ×100); lib/__tests__/theme-contrast.test.ts holds both. The slot
+   *  order is load-bearing, as for the chart slots. */
+  --series-1: #0E6BE8;
+  --series-2: oklch(0.38 0.17 340);
+  --series-3: oklch(0.61 0.104 200);
+  --series-4: oklch(0.45 0.108 55);
+  --series-5: oklch(0.62 0.133 105);
+  --series-6: oklch(0.5 0.2 300);
+  --series-7: oklch(0.56 0.14 150);
+  --series-8: oklch(0.58 0.2 18);
 
-  --sidebar: #E6EEF7;
-  --sidebar-foreground: #0F1733;
+  /* The light rail is white, like the section panels beside it (Pages,
+   * Routines, Settings); the page ground under the content is the only grey.
+   * It was #E6EEF7, a second blue-grey that read as a separate stripe. The
+   * active row is an accent tint rather than white-on-blue. */
+  --sidebar: #F3F4F6;
+  --sidebar-foreground: #0C111B;
   --sidebar-primary: var(--brand);
   --sidebar-primary-foreground: var(--brand-foreground);
-  --sidebar-accent: #FFFFFF;
+  --sidebar-accent: var(--brand-tint);
   --sidebar-accent-foreground: var(--brand-ink);
-  --sidebar-border: #D8E0EB;
+  --sidebar-border: #E4E6EA;
   --sidebar-ring: var(--brand);
 
   /* ── Semantic palette — Day values. The marketing-site lightness (≥ 0.72)
@@ -193,17 +252,21 @@
   --orange: oklch(0.54 0.15 45);
   --azure: oklch(0.50 0.10 225);
 
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", "Helvetica Neue", "Noto Sans", "Liberation Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-inter, "Inter"), -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "Helvetica Neue", "Noto Sans", "Liberation Sans", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Georgia", serif;
   --font-mono: var(--font-jetbrains, "JetBrains Mono"), ui-monospace, "SF Mono", Menlo, monospace;
   /* Shape scale. Controls (rows, inputs, selects, buttons) are rounded-md
-     = 8px, small marks rounded-sm = 6px, cards rounded-card = 16px, chips
-     rounded-full. --radius drives sm/md/lg/xl below; cards have their own
+     = 8px, small marks rounded-sm = 6px, cards rounded-card = 10px (Harbor 2),
+     dialogs rounded-xl = 14px, chips rounded-full. --radius drives sm/md/lg/xl below; cards have their own
      token so a control never inherits a card's roundness. */
   --radius: 0.625rem;
+  /* The rail and list rows (7 px): the sixth corner token, scaled with the
+     five in @theme below. A plain property here, not in @theme, so it exists
+     whether or not a utility uses it. */
+  --radius-row: calc(7px * var(--radius-k, 1));
 
   /* ── Surface tokens (for nested sections & raised elements) ── */
-  --surface-subtle: #FBFCFE;
+  --surface-subtle: #F8F9FA;
   --surface-raised: #FFFFFF;
 
   /* ── Shadows (functional, minimal — orchestration uses borders over shadows) ── */
@@ -223,7 +286,7 @@
      Change these values to globally resize all UI text.
      Tailwind utilities: text-micro, text-label, text-body, text-default,
      text-heading, text-title, text-display                              */
-  --typo-micro: 0.6875rem;          /* 11px – smallest allowed, badges/timestamps */
+  --typo-micro: max(11px, 0.6875rem); /* 11px – smallest allowed, also at Compact text size */
   --typo-micro-lh: 1rem;
   --typo-label: 0.75rem;            /* 12px – labels, captions, metadata */
   --typo-label-lh: 1rem;
@@ -233,8 +296,10 @@
   --typo-default-lh: 1.5rem;
   --typo-heading: 1.125rem;         /* 18px – section headings */
   --typo-heading-lh: 1.75rem;
-  --typo-title: 1.5rem;             /* 24px – page titles */
+  --typo-title: 1.4rem;             /* 21px at Compact, 22px at Standard – page titles (Harbor 2) */
   --typo-title-lh: 2rem;
+  --typo-title-phone: 1.2115rem;    /* 18px at Small – page titles on a phone (owner decision 2026-10-17) */
+  --typo-title-phone-lh: 1.6rem;
   --typo-display: 1.875rem;         /* 30px – hero/stat numbers */
   --typo-display-lh: 2.25rem;
 
@@ -242,8 +307,15 @@
      Light theme uses primary-tinted overlays.
      Consumed via utility classes below (.row-selected, .row-hover, .chip-*).
      Components should NEVER hardcode bg-blue-500/X — use lib/interaction.ts. */
-  --selection-bg: color-mix(in srgb, var(--foreground) 7%, transparent);
-  --selection-bg-hover: color-mix(in srgb, var(--foreground) 9%, transparent);
+  /* Harbor 2: a selected row is the opaque accent tint, as in the design.
+     The old 7–9 % foreground overlay left tertiary and status text at
+     4.1–4.4:1 on the grey ground; every text token clears 4.5:1 on every
+     accent's tint (theme-contrast.test.ts). */
+  /* The current page in the sidebar: a raised surface (Harbor 2). */
+  --nav-selected: #FFFFFF;
+  --shadow-sel: 0 1px 2px rgb(12 17 27 / 0.08), 0 0 0 1px rgb(12 17 27 / 0.05);
+  --selection-bg: var(--brand-tint);
+  --selection-bg-hover: var(--brand-tint);
   --selection-border: var(--brand);
   --row-hover-bg: color-mix(in srgb, var(--foreground) 4%, transparent);
   --chip-active-bg: color-mix(in srgb, var(--brand) 14%, transparent);
@@ -259,7 +331,7 @@
   --primary-strong: var(--brand-strong);
   --primary-strong-hover: var(--brand-strong-hover);
   --primary-glow: var(--brand-glow);
-  --line-strong: #B9C8DE;
+  --line-strong: #D2D6DC;
   --shadow-color: rgb(15 23 51 / 0.35);
   --page-glow: none;
   /* Deep "panel" ground for heroes, terminals and graph canvases. Text on it
@@ -269,12 +341,12 @@
   --panel-muted: #A5B3CB;
   --panel-node: #131E3A;
   /* Status chips — tinted fill + text pairs, every pair ≥ 4.5:1. */
-  --chip-ok-bg: #E2F3E9;     --chip-ok-fg: #136B3C;
-  --chip-warn-bg: #FCEFD9;   --chip-warn-fg: #8A5300;
-  --chip-danger-bg: #FDE7E7; --chip-danger-fg: #B42318;
+  --chip-ok-bg: #E5F4EC;     --chip-ok-fg: #157A45;
+  --chip-warn-bg: #FCF1DC;   --chip-warn-fg: #8A5A00;
+  --chip-danger-bg: #FCEAE8; --chip-danger-fg: #C0261B;
   --chip-neutral-bg: #E9EEF5; --chip-neutral-fg: #3F4A63;
   --chip-info-bg: var(--brand-tint); --chip-info-fg: var(--brand-ink);
-  --chip-violet-bg: #EFE8FC; --chip-violet-fg: #5B35B0;
+  --chip-violet-bg: #F0EBFD; --chip-violet-fg: #6544D6;
   /* Icon tile glyph colours: the tint is the chip's own accent (--ic). */
   --tile-inset: inset 0 1px 0 rgb(255 255 255 / 0.35);
   --tile-text-mix: 78%;
@@ -288,20 +360,20 @@
 
 .dark {
   color-scheme: dark;
-  /* ── Dark surfaces — Unify-style depth from the marketing site:
-   *    bg ≈ #0a0b0e (near-black, cool purple tint), card +6 lightness,
-   *    border at 0.24 lightness. All in hue 285 (cool purple-blue). ── */
-  --background: #0A0B0E;
-  --foreground: #EDEDF2;
+  /* ── Dark surfaces (Harbor 2): the rail ground is the darkest step,
+   *    content one step up, cards and popovers two, muted fills three.
+   *    Values pinned in lib/__tests__/theme-contrast.test.ts. ── */
+  --background: #0F1013;
+  --foreground: #ECEEF2;
   /* Scrollbar thumb. Well above --border (0.24) on purpose: a track hint has
      to be legible against BOTH the background (0.10) and the card (0.155),
      and a border-weight thumb disappeared on the card. */
   --scrollbar-thumb: oklch(0.38 0.010 285);
   --scrollbar-thumb-hover: oklch(0.52 0.012 285);
-  --card: #121318;
-  --card-foreground: #EDEDF2;
-  --popover: #121318;
-  --popover-foreground: #EDEDF2;
+  --card: #181A1F;
+  --card-foreground: #ECEEF2;
+  --popover: #181A1F;
+  --popover-foreground: #ECEEF2;
 
   /* Brand — #1E7BFE (vivid blue from Crewship logo's blue-bg variant).
    *  Hex used directly — OKLCH approximations of vivid blues can drift
@@ -315,22 +387,21 @@
 
   --secondary: oklch(1.0000 0 0);
   --secondary-foreground: oklch(0.10 0.008 285);
-  --muted: #16171D;
-  --muted-foreground: #9295A3;
-  /* Dimmer-but-AA-compliant second muted level (see :root note).
-   * Dark: 4.99:1 on --background, 4.74:1 on --card — both above the
-   * 4.5:1 AA floor, while plain muted-foreground (5.64/5.36) stays
-   * the brighter tier. */
-  --muted-foreground-soft: #7E818F;
-  --accent: #1C1E25;
-  --accent-foreground: #EDEDF2;
+  --muted: #1E2127;
+  --muted-foreground: #A4AAB6;
+  /* Tertiary text (see :root note). The design's #767D8B measured
+   * 3.3–4.2:1 on the lighter dark surfaces; this is ≥ 4.64:1 everywhere. */
+  --muted-foreground-soft: #9096A1;
+  --icon-faint: #6F7683;
+  --accent: #20232A;
+  --accent-foreground: #ECEEF2;
 
   /* Destructive — same red as light mode for brand consistency. */
-  --destructive: oklch(0.70 0.19 25);
+  --destructive: #F2695C;
   --destructive-foreground: oklch(1.0000 0 0);
 
-  --border: #24262E;
-  --input: #2A2C35;
+  --border: #282B33;
+  --input: #282B33;
   /* Operable form boundaries need more contrast than decorative separators.
    * Keep --input as the existing fill; brightening it also lifts backgrounds. */
   --control-border: oklch(0.54 0.010 285);
@@ -371,19 +442,28 @@
   --chart-3: oklch(0.84 0.13 200);
   --chart-4: oklch(0.63 0.145 55);
   --chart-5: oklch(0.82 0.13 105);
+  /* Chart series: see the :root block. */
+  --series-1: #1E7BFE;
+  --series-2: oklch(0.60 0.13 340);
+  --series-3: oklch(0.84 0.13 200);
+  --series-4: oklch(0.63 0.145 55);
+  --series-5: oklch(0.82 0.13 105);
+  --series-6: oklch(0.72 0.16 300);
+  --series-7: oklch(0.75 0.15 150);
+  --series-8: oklch(0.72 0.17 12);
 
-  --sidebar: #0D0E12;
-  --sidebar-foreground: #EDEDF2;
+  --sidebar: #0A0B0D;
+  --sidebar-foreground: #ECEEF2;
   /* sidebar-primary pair must have contrast — previously both white. */
   --sidebar-primary: var(--brand);
   --sidebar-primary-foreground: var(--brand-foreground);
-  --sidebar-accent: #1C1E25;
+  --sidebar-accent: #20232A;
   --sidebar-accent-foreground: var(--brand-ink);
-  --sidebar-border: #24262E;
+  --sidebar-border: #282B33;
   --sidebar-ring: var(--brand);
 
   /* ── Semantic palette (identical to light — brand-consistent across modes) ── */
-  --success: oklch(0.72 0.18 152);
+  --success: #4CC38A;
   --save-bar-bg: #001F0F;
   --save-bar-border: #0B4A27;
   --save-bar-fg: #59F3A6;
@@ -391,7 +471,7 @@
   --save-bar-action-fg: #00170B;
   --info: #5DA1FF;
   --notice: oklch(0.72 0.14 200);
-  --warn: oklch(0.78 0.15 75);
+  --warn: #E5A83B;
   --purple: oklch(0.66 0.22 300);
   /* See the light-theme note. Measured on bg-purple/20 over the dark card:
      5.11:1, up from 4.48:1. Chroma unchanged at 0.22. */
@@ -403,19 +483,19 @@
   --orange: oklch(0.77 0.14 50);
   --azure: oklch(0.79 0.11 220);
 
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", "Helvetica Neue", "Noto Sans", "Liberation Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-inter, "Inter"), -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "Helvetica Neue", "Noto Sans", "Liberation Sans", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Georgia", serif;
   --font-mono: var(--font-jetbrains, "JetBrains Mono"), ui-monospace, "SF Mono", Menlo, monospace;
   /* Shape scale. Controls (rows, inputs, selects, buttons) are rounded-md
-     = 8px, small marks rounded-sm = 6px, cards rounded-card = 16px, chips
-     rounded-full. --radius drives sm/md/lg/xl below; cards have their own
+     = 8px, small marks rounded-sm = 6px, cards rounded-card = 10px (Harbor 2),
+     dialogs rounded-xl = 14px, chips rounded-full. --radius drives sm/md/lg/xl below; cards have their own
      token so a control never inherits a card's roundness. */
   --radius: 0.625rem;
 
   /* ── Surface tokens (dark theme: nested section + raised popover/drawer)
    *    Hue 285 now matches background family. ── */
-  --surface-subtle: #0F1014;
-  --surface-raised: #16171D;
+  --surface-subtle: #0F1013;
+  --surface-raised: #1E2127;
 
   /* ── Shadows (dark theme — same functional values, lower visibility) ── */
   --shadow-xs: 0 1px 2px 0 oklch(0 0 0 / 0.20);
@@ -428,8 +508,14 @@
   --shadow-2xs: 0 1px 1px 0 oklch(0 0 0 / 0.18);
 
   /* ── Interaction tokens (dark theme overrides) ── */
-  --selection-bg: color-mix(in srgb, var(--foreground) 7%, transparent);
-  --selection-bg-hover: color-mix(in srgb, var(--foreground) 9%, transparent);
+  /* Harbor 2: a selected row is the opaque accent tint, as in the design.
+     The old 7–9 % foreground overlay left tertiary and status text at
+     4.1–4.4:1 on the grey ground; every text token clears 4.5:1 on every
+     accent's tint (theme-contrast.test.ts). */
+  --nav-selected: #20232A;
+  --shadow-sel: 0 0 0 1px rgb(255 255 255 / 0.06);
+  --selection-bg: var(--brand-tint);
+  --selection-bg-hover: var(--brand-tint);
   --selection-border: var(--brand);
   --row-hover-bg: color-mix(in srgb, var(--foreground) 4%, transparent);
   --chip-active-bg: color-mix(in srgb, var(--brand) 14%, transparent);
@@ -440,19 +526,19 @@
   --primary-strong: var(--brand-strong);
   --primary-strong-hover: var(--brand-strong-hover);
   --primary-glow: var(--brand-glow);
-  --line-strong: #3A3D49;
+  --line-strong: #373B45;
   --shadow-color: rgb(0 0 0 / 0.7);
   --page-glow: radial-gradient(60% 40% at 80% 0%, rgb(59 130 246 / 0.07), transparent 70%);
   --panel-bg: radial-gradient(120% 140% at 0% 0%, #1B1F2C 0%, #12141B 55%, #0C0D12 100%);
   --panel-foreground: #E8EEF8;
   --panel-muted: #A5B3CB;
   --panel-node: #121318;
-  --chip-ok-bg: #0F2E22;     --chip-ok-fg: #6FE3B0;
-  --chip-warn-bg: #2E240F;   --chip-warn-fg: #F7C77E;
-  --chip-danger-bg: #3A1417; --chip-danger-fg: #FF9B9B;
+  --chip-ok-bg: #10261C;     --chip-ok-fg: #4CC38A;
+  --chip-warn-bg: #2B2010;   --chip-warn-fg: #E5A83B;
+  --chip-danger-bg: #2E1513; --chip-danger-fg: #F2695C;
   --chip-neutral-bg: #1C1E25; --chip-neutral-fg: #B2B5C2;
   --chip-info-bg: var(--brand-tint); --chip-info-fg: var(--brand-ink);
-  --chip-violet-bg: #211A3D; --chip-violet-fg: #C4A8FF;
+  --chip-violet-bg: #1E1835; --chip-violet-fg: #A28BFA;
   --tile-inset: none;
   --tile-text-mix: 55%;
   --chart-grid: rgb(255 255 255 / 0.06);
@@ -477,6 +563,7 @@
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
   --color-muted-foreground-soft: var(--muted-foreground-soft);
+  --color-icon-faint: var(--icon-faint);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
@@ -490,6 +577,14 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+  --color-series-1: var(--series-1);
+  --color-series-2: var(--series-2);
+  --color-series-3: var(--series-3);
+  --color-series-4: var(--series-4);
+  --color-series-5: var(--series-5);
+  --color-series-6: var(--series-6);
+  --color-series-7: var(--series-7);
+  --color-series-8: var(--series-8);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -546,12 +641,16 @@
   --font-mono: var(--font-mono);
   --font-serif: var(--font-serif);
 
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  /* rounded-card: every card, panel and dialog surface. */
-  --radius-card: 1rem;
+  /* The six corner tokens all scale by --radius-k (1 unless a style or the
+     Corners knob sets it, app/styles/styles.css), so the knob moves them
+     together and keeps their proportions. */
+  --radius-sm: calc((var(--radius) - 4px) * var(--radius-k, 1));
+  --radius-md: calc((var(--radius) - 2px) * var(--radius-k, 1));
+  --radius-lg: calc(var(--radius) * var(--radius-k, 1));
+  --radius-xl: calc((var(--radius) + 4px) * var(--radius-k, 1));
+  /* rounded-card: every card, panel and dialog surface. In px: a radius is
+     drawn, not read, so it stays 10 px at every text size. */
+  --radius-card: calc(10px * var(--radius-k, 1));
 
   --shadow-2xs: var(--shadow-2xs);
   --shadow-xs: var(--shadow-xs);
@@ -593,8 +692,10 @@
   /* Every form control (Input, Textarea, SelectTrigger, native selects):
      the size of the row label beside it, so a field never reads bigger or
      smaller than its label. Touch devices still get 16px (the coarse-pointer
-     floor above), which is what keeps iOS from zooming. */
-  --text-control: 0.8125rem;
+     floor above), which is what keeps iOS from zooming. 13 px at Compact
+     (v67 form fields, row and card titles), the body size: 0.875rem of the
+     14.857 px Compact root, 14 px at Standard. */
+  --text-control: var(--typo-body);
   --text-control--line-height: 1.25rem;
   --text-body: var(--typo-body);
   --text-body--line-height: var(--typo-body-lh);
@@ -604,6 +705,8 @@
   --text-heading--line-height: var(--typo-heading-lh);
   --text-title: var(--typo-title);
   --text-title--line-height: var(--typo-title-lh);
+  --text-title-phone: var(--typo-title-phone);
+  --text-title-phone--line-height: var(--typo-title-phone-lh);
   --text-display: var(--typo-display);
   --text-display--line-height: var(--typo-display-lh);
 }
@@ -621,8 +724,9 @@ body {
     background-image: var(--page-glow);
     background-attachment: fixed;
   }
+  /* v67: -0.005em. The old -0.02em pulled word spaces shut ("Auditlog"). */
   h1, h2, h3 {
-    letter-spacing: -0.02em;
+    letter-spacing: -0.005em;
     text-wrap: balance;
   }
 
@@ -684,7 +788,7 @@ body {
 
        .type-title    24px  page heading
        .type-row      14px  list rows, field values, prose
-       .type-section  13px  UPPERCASE card + section headers, labels
+       .type-section  13px  sentence-case card + section headers, labels
        .type-meta     12px  timestamps, ids, stat captions, badges
 
      Weight, tracking and casing ride along, because "12px" was never
@@ -705,21 +809,34 @@ body {
     font-size: 1.5rem;
     line-height: 2rem;
     font-weight: 600;
-    letter-spacing: -0.03em;
+    letter-spacing: -0.015em;
     text-wrap: balance;
   }
   .type-row {
     font-size: 0.875rem;
     line-height: 1.3rem;
   }
-  /* Harbor eyebrow shape: mono, wide-tracked. Colour stays with the caller. */
+  /* Harbor 2 section / card / panel-group header: sentence-case sans, semibold
+     (v67 card-h). The mono-caps eyebrow is retired. Colour stays with the caller. */
   .type-section {
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
+    font-size: 0.8125rem;
     line-height: 1.2rem;
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+  }
+  /* A dialog's title (v67 .dlg-ht b): 15 px bold. */
+  .type-dialog-title {
+    font-size: 15px;
+    line-height: 1.3;
+    font-weight: 700;
+    letter-spacing: -0.005em;
+  }
+  /* Group header in a list panel (v67 `.pg`): 11.5 px, semibold, soft grey. */
+  .type-group-head {
+    font-size: max(11.5px, 0.72rem);
+    line-height: 1rem;
+    font-weight: 600;
+    letter-spacing: -0.005em;
   }
   .type-meta {
     font-size: 0.75rem;
@@ -736,7 +853,7 @@ body {
      and the portrait finds it faster than the name does. Sized down so the
      row belongs to the face rather than competing with it.
 
-       .type-nav      13px  crew and agent names in a rail
+       .type-nav      13px  crew and agent names in a rail (at Compact)
        .type-nav-sub  11px  the role line, counts, status words
 
      Written here rather than typed into crews-explorer.tsx on purpose. The
@@ -744,7 +861,8 @@ body {
      system, and the next surface copies the number instead of the reason —
      which is how 12 different ways to write "small text" happened. */
   .type-nav {
-    font-size: 0.8125rem;
+    /* 13 px at Compact (v67 nav item and user row), 14 px at Standard. */
+    font-size: 0.875rem;
     line-height: 1.15rem;
   }
   .type-nav-sub {
@@ -949,14 +1067,13 @@ body {
   /* ── Harbor recipes ──────────────────────────────────────────────
      The marketing site's shapes, as utilities the components compose. */
 
-  /* Eyebrow: section labels, table heads, card kickers. */
+  /* Eyebrow: section labels, table heads, card kickers. Sentence-case sans
+     (v67); the name stays so call sites do not churn. */
   .eyebrow {
-    font-family: var(--font-mono);
-    font-size: 0.6875rem;
+    font-size: 0.75rem;
     line-height: 1rem;
-    font-weight: 500;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    font-weight: 600;
+    letter-spacing: 0;
     color: var(--primary-hover);
   }
 
@@ -966,6 +1083,21 @@ body {
     background: var(--panel-bg);
     color: var(--panel-foreground);
     border: 1px solid rgb(255 255 255 / 0.06);
+  }
+
+  /* Hero surface: the deep panel in dark, a light card washed with the accent
+     in light. .panel-surface stays deep in BOTH themes, which is right for a
+     terminal and wrong for a page header — the Admin overview's identity card
+     sat as a navy slab on the light theme, with light-theme muted text on it.
+     Text here uses the normal theme tokens. */
+  .hero-surface {
+    background:
+      radial-gradient(120% 140% at 0% 0%, color-mix(in oklab, var(--brand) 9%, var(--card)) 0%, var(--card) 62%);
+    border: 1px solid var(--border);
+  }
+  .dark .hero-surface {
+    background: var(--panel-bg);
+    border-color: rgb(255 255 255 / 0.06);
   }
 
   /* Card lift for anything clickable that is not a .card-interactive. */
@@ -1001,59 +1133,106 @@ body {
      2rem tile column at a fixed inset — half the difference between the
      rail and the tile — and a label that only fades. The panel widening is
      the whole animation. */
+  /* Harbor 2 sidebar (#3350; round 63, #3784). One axis in both states: an
+     8 px inset, rows 40 × 36 in the 56 px rail and full width open, each with
+     a 28 px lead slot 6 px in, so every icon, the workspace mark, the sail and
+     the avatar are centred on x = 28 whether the rail is open or not. Sizes
+     are px: the rail must not grow with the user's text size. */
   .rail-inset {
-    /* !important: the collapsed sidebar's own group-data padding is a
-       utility and would otherwise move the column 5.5px on open. */
-    padding-inline: calc((var(--sidebar-width-icon) - 2rem) / 2) !important;
+    /* The sidebar's own p-2 is the 8 px inset (v67 rail padding 8, icon at
+       x = 18); a second 8 px here pushed everything 7 px right. */
+    padding-inline: 0 !important;
+  }
+  /* That inset in px: p-2 follows --spacing (0.23rem), which drew it 6.8 px
+     in the built app and put the axis at x = 26.8 instead of 28. */
+  [data-variant="inset"] > [data-slot="sidebar-container"] { padding: 8px !important; }
+  .rail-row {
+    height: 36px !important;
+    padding: 0 6px !important;
+    gap: 8px !important;
+    border-radius: var(--radius-row) !important;
+    justify-content: flex-start !important;
+    overflow: visible !important;
+    color: var(--muted-foreground);
+    background: transparent;
+  }
+  [data-collapsible="icon"] .rail-row {
+    width: 40px !important;
+    height: 36px !important;
+    padding: 0 6px !important;
+  }
+  /* The workspace and the user rows carry a second line when open. */
+  .rail-row[data-size="lg"] { height: 40px !important; }
+  .rail-row:hover {
+    background: var(--row-hover-bg) !important;
+    color: var(--foreground) !important;
+  }
+  .rail-row[data-active="true"] {
+    background: var(--nav-selected) !important;
+    color: var(--foreground) !important;
+    font-weight: 550;
+    box-shadow: var(--shadow-sel);
   }
   .rail-tile {
-    --ic: var(--primary);
     position: relative;
     display: inline-grid;
     place-items: center;
     flex-shrink: 0;
-    width: 2rem;
-    height: 2rem;
-    border-radius: 0.6rem;
-    border: 1px solid transparent;
-    color: var(--muted-foreground);
-    transition: border-color 300ms var(--ease-harbor), background-color 300ms var(--ease-harbor), color 200ms var(--ease-harbor);
+    width: 28px;
+    height: 28px;
+    color: var(--muted-foreground-soft);
   }
-  /* Only the glyph moves on hover; the frame and the badge stay put. */
-  .rail-tile > svg { width: 0.95rem; height: 0.95rem; transition: transform 300ms var(--ease-spring); }
-  .rail-tile[data-active="true"],
-  :hover > .rail-tile {
-    color: color-mix(in oklch, var(--ic) var(--tile-text-mix), var(--foreground));
-    background: radial-gradient(circle at 30% 20%, color-mix(in srgb, var(--ic) 22%, transparent), color-mix(in srgb, var(--ic) 8%, transparent) 70%);
-    border-color: color-mix(in srgb, var(--ic) 34%, transparent);
-    box-shadow: var(--tile-inset);
+  .rail-tile > svg { width: 18px; height: 18px; }
+  .rail-row:hover .rail-tile,
+  .rail-row[data-active="true"] .rail-tile { color: var(--foreground); }
+  /* The workspace mark, the sail and the avatar are the rail's three
+     identities: all 28 px. Workspace and sail are rounded squares, a person
+     is a circle. The workspace wears the style's colour; the sail does not. */
+  .rail-tile.rail-ws { border-radius: 8px; }
+  .rail-tile.rail-ws > img { width: 100%; height: 100%; border-radius: inherit; }
+  /* The Crewship sail at the foot of the rail (owner, 19 Oct): the brand's
+     own blue tile, lit, the same in every style, theme and accent. */
+  .rail-tile.rail-brand,
+  .rail-row:hover .rail-tile.rail-brand {
+    border-radius: 8px;
+    background: linear-gradient(180deg, #1B75FE, #2B90FF);
+    color: #fff;
+    box-shadow: 0 0 0 1px rgb(43 144 255 / 0.45), 0 0 12px 1px rgb(27 117 254 / 0.5);
   }
-  :hover > .rail-tile:not(.rail-tile-static) > svg {
-    transform: scale(1.12) rotate(-8deg);
-  }
-  :hover > .rail-tile:not(.rail-tile-static) {
-    border-color: color-mix(in srgb, var(--ic) 55%, transparent);
-  }
-  .rail-badge {
-    position: absolute;
-    top: -0.2rem;
-    left: 1.2rem;
-    min-width: 1rem;
-    padding: 0 0.25rem;
+  .rail-tile.rail-brand > svg { width: 16px; height: auto; }
+  /* A count: an accent pill at the end of the open row; in the rail, the same
+     pill on the icon's corner. */
+  .rail-count {
+    margin-left: auto;
+    min-width: 18px;
+    padding: 0 6px;
     border-radius: 999px;
-    border: 2px solid var(--sidebar);
-    background: var(--info);
-    color: var(--background);
-    font: 600 0.6rem/0.8rem var(--font-mono);
+    background: var(--primary-strong);
+    color: #fff;
+    font: 650 10.5px/16px var(--font-sans);
     text-align: center;
   }
+  .rail-badge {
+    display: none;
+    position: absolute;
+    top: -2px;
+    right: -5px;
+    min-width: 16px;
+    padding: 0 4px;
+    border-radius: 999px;
+    border: 2px solid var(--sidebar);
+    background: var(--primary-strong);
+    color: #fff;
+    font: 650 10px/12px var(--font-sans);
+    text-align: center;
+  }
+  [data-collapsible="icon"] .rail-badge { display: block; }
   .rail-label {
     opacity: 1;
     transition: opacity 160ms ease 90ms;
   }
-  /* Faded AND zero-width in the rail: the rows no longer clip (the Inbox
-     count overhangs its tile), so a SOON pill or the ⌘B hint would
-     otherwise make the rail scrollable sideways under keyboard focus. */
+  /* Faded AND zero-width in the rail, so nothing in a row (a count, the ⌘B
+     hint) can make the rail scroll sideways under keyboard focus. */
   [data-collapsible="icon"] .rail-label {
     opacity: 0;
     pointer-events: none;
@@ -1066,22 +1245,419 @@ body {
   .rail-group-head {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    height: 1.5rem;
-    margin-top: 0.5rem;
+    height: 28px;
+    padding: 10px 10px 2px;
     white-space: nowrap;
   }
-  .rail-group-rule { display: flex; justify-content: center; width: 2rem; flex-shrink: 0; }
-  .rail-group-rule > i { display: block; width: 1rem; height: 1px; background: var(--border); }
   .rail-group-name {
-    font-family: var(--font-mono);
-    font-size: 0.625rem;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
+    font-size: 11px;
+    font-weight: 600;
     color: var(--muted-foreground-soft);
   }
+  /* In the rail a group is a short hairline on the icon axis. */
+  .rail-group-rule { display: none; }
+  [data-collapsible="icon"] .rail-group-rule { display: flex; justify-content: center; width: 40px; }
+  [data-collapsible="icon"] .rail-group-rule > i { display: block; width: 20px; height: 1px; background: var(--border); }
+  /* Open, a group's head folds the group (remembered); the rail ignores it. */
+  .rail-group-toggle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    border-radius: 6px;
+    text-align: left;
+  }
+  .rail-group-toggle > svg { width: 12px; height: 12px; color: var(--muted-foreground-soft); transition: transform 160ms ease; }
+  .rail-group-toggle[aria-expanded="false"] > svg { transform: rotate(-90deg); }
+  .rail-group-toggle:hover .rail-group-name { color: var(--muted-foreground); }
+  [data-collapsible="icon"] .rail-group-toggle { pointer-events: none; }
+  [data-collapsible="icon"] .rail-group-head { padding: 10px 0 4px; }
+  /* Search under the workspace switcher: opens the ⌘K palette. Open, a
+     filled field with no border; in the rail, an icon like any other row. */
+  .rail-search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    height: 32px;
+    padding: 0 6px;
+    border-radius: var(--radius-row);
+    background: var(--row-hover-bg);
+    color: var(--muted-foreground-soft);
+    font-size: 12.5px;
+  }
+  .rail-search:hover { color: var(--muted-foreground); background: var(--nav-selected); }
+  .rail-search > .rail-tile { width: 28px; height: 20px; }
+  .rail-search > .rail-tile > svg { width: 16px; height: 16px; }
+  [data-collapsible="icon"] .rail-search { width: 40px; height: 36px; background: transparent; }
+  [data-collapsible="icon"] .rail-search > .rail-tile { height: 28px; }
+  [data-collapsible="icon"] .rail-search > .rail-tile > svg { width: 18px; height: 18px; }
+  [data-collapsible="icon"] .rail-search:hover { background: var(--row-hover-bg); }
+  /* The app band between the fixed top (workspace, search) and the fixed foot
+     (sail, settings, you) scrolls; a fade marks more above or below. */
+  .rail-band { scrollbar-width: none; }
+  .rail-band::-webkit-scrollbar { display: none; }
+  .rail-band[data-more-above] { mask-image: linear-gradient(transparent, #000 20px); }
+  .rail-band[data-more-below] { mask-image: linear-gradient(#000 calc(100% - 20px), transparent); }
+  .rail-band[data-more-above][data-more-below] { mask-image: linear-gradient(transparent, #000 20px, #000 calc(100% - 20px), transparent); }
+  /* The signed-in person, last row of the footer. */
+  .rail-user {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 6px;
+    border-radius: 9px;
+    color: var(--muted-foreground);
+    text-align: left;
+  }
+  .rail-user:hover, .rail-user[data-state="open"] { background: var(--row-hover-bg); }
+  /* SecondaryPanel (Harbor 2 M3): the second column. */
+  .secondary-panel {
+    display: flex;
+    flex-direction: column;
+    flex: none;
+    width: 272px;
+    min-height: 0;
+    border-right: 1px solid var(--border);
+    background: var(--background);
+  }
+  .secondary-panel[data-collapsed="true"] { width: 44px; }
+  /* Tablet (768–1279, COM-05): the panel floats over the content, under the
+     48 px top bar and beside the 56 px rail, from the top-bar panel button. */
+  .secondary-panel-float {
+    position: fixed; top: 48px; bottom: 0; left: 56px; z-index: 40;
+    background: var(--card); box-shadow: var(--shadow-xl);
+  }
+  .secondary-panel-scrim {
+    position: fixed; top: 48px; right: 0; bottom: 0; left: 56px; z-index: 39;
+    background: color-mix(in srgb, var(--foreground) 6%, transparent);
+  }
+  /* v67 phone detail (core.js:331): one bar with the way back first and the
+     item's name; the area's name gives way while a page puts a back control
+     in the bar (SubBar `leading`, marked data-phone-back). */
+  header:has([data-phone-back]) [data-slot="area-crumb"] { display: none; }
+  .secondary-panel-phone { display: flex; flex-direction: column; flex: 1; min-height: 0; width: 100%; background: var(--background); }
+  .secondary-panel-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+    height: 48px;
+    padding: 0 8px 0 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .secondary-panel-rail {
+    display: flex;
+    justify-content: center;
+    padding-top: 10px;
+  }
+  .secondary-panel-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 4px 6px 14px;
+  }
+  /* Content that brings its own kit toolbar (existing explorers). */
+  .secondary-panel-content {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+  .secondary-panel-footer {
+    position: sticky;
+    bottom: 0;
+    flex: none;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px;
+    border-top: 1px solid var(--border);
+    background: var(--card);
+  }
+  .secondary-panel-toggle {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    color: var(--muted-foreground);
+  }
+  .secondary-panel-toggle:hover { background: var(--row-hover-bg); color: var(--foreground); }
+  .secondary-panel-toggle > svg { width: 16px; height: 16px; }
+  /* Page states (Harbor 2 kit, components/layout/page-state.tsx). */
+  .page-state { width: 100%; max-width: 640px; margin: 0 auto; padding: 32px 16px; }
+  .page-state-wide { max-width: none; padding: 20px 24px; }
+  .page-tile {
+    display: inline-grid; place-items: center; flex: none;
+    width: 48px; height: 48px; border-radius: 28%;
+    color: var(--brand-ink);
+    background: color-mix(in srgb, var(--brand) 13%, transparent);
+    border: 1px solid color-mix(in srgb, var(--brand) 26%, transparent);
+  }
+  .page-tile > svg { width: 22px; height: 22px; }
+  .page-tile-40 { width: 40px; height: 40px; }
+  .page-tile-40 > svg { width: 18px; height: 18px; }
+  .page-tile-danger {
+    color: var(--destructive);
+    background: color-mix(in srgb, var(--destructive) 12%, transparent);
+    border-color: color-mix(in srgb, var(--destructive) 26%, transparent);
+  }
+  .page-es {
+    display: grid; justify-items: center; gap: 10px; text-align: center;
+    padding: 48px 20px; border: 1px dashed var(--line-strong); border-radius: 16px; background: var(--card);
+  }
+  .page-es h2 { margin: 4px 0 0; font-size: var(--typo-heading); font-weight: 650; letter-spacing: -0.01em; color: var(--foreground); }
+  .page-es p { margin: 0; max-width: 46ch; color: var(--muted-foreground); }
+  .page-es-filtered { border-style: solid; padding: 32px 20px; }
+  .page-es-glyph { width: 22px; height: 22px; color: var(--muted-foreground-soft); }
+  .page-es-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 6px; }
+  .page-es-cli { font-size: var(--typo-label); color: var(--muted-foreground-soft); }
+  .page-es-cli code { font-family: var(--font-mono); color: var(--muted-foreground); }
+  .page-ee {
+    border: 1px solid color-mix(in srgb, var(--destructive) 35%, var(--border));
+    border-radius: 14px; background: var(--card); overflow: hidden;
+  }
+  .page-ee header { display: flex; align-items: center; gap: 12px; padding: 16px; }
+  .page-ee b { display: block; font-weight: 600; color: var(--foreground); }
+  .page-ee p { margin: 4px 0 0; color: var(--muted-foreground); }
+  .page-ee footer {
+    display: flex; align-items: center; gap: 8px; padding: 8px 16px;
+    border-top: 1px solid var(--border); background: var(--muted);
+    font-size: var(--typo-label); color: var(--muted-foreground);
+  }
+  .page-banner {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+    padding: 8px 14px; border-radius: 10px; font-size: var(--typo-body); color: var(--foreground);
+  }
+  .page-banner-warn { background: var(--chip-warn-bg); }
+  .page-banner-warn > svg { color: var(--chip-warn-fg); }
+  /* Banner tones (components/layout/app-banners.tsx). The sentence stays in
+     --foreground on every tint; only the icon carries the tone. */
+  .page-banner-ok { background: var(--chip-ok-bg); }
+  .page-banner-ok > svg { color: var(--chip-ok-fg); }
+  .page-banner-info { background: var(--chip-info-bg); }
+  .page-banner-info > svg { color: var(--chip-info-fg); }
+  /* neutral: the app is coping, nothing to act on yet (Reconnecting…). */
+  .page-banner-neutral { background: var(--chip-neutral-bg); }
+  .page-banner-neutral > svg { color: var(--chip-neutral-fg); }
+  /* bad: something failed and the page is incomplete (COM-03). */
+  .page-banner-bad { background: var(--chip-danger-bg); }
+  .page-banner-bad > svg { color: var(--chip-danger-fg); }
+  .page-banner-text { min-width: 0; }
+  .page-banner-spacer { flex: 1; }
+  .page-banner-dismiss { margin: -4px -6px -4px 0; color: var(--muted-foreground); }
+  @media (pointer: coarse) {
+    .page-banner .page-banner-action, .page-banner .page-banner-dismiss { min-height: 44px; min-width: 44px; }
+  }
+  @media (max-width: 767px) {
+    .page-banner-text { flex: 1 1 calc(100% - 60px); }
+    .page-banner-spacer { display: none; }
+  }
+  /* App banners sit under the top bar, inset like v67's .rt-banner. */
+  .app-banner-slot { padding: 12px 16px 0; }
+  .page-es-solid { border-style: solid; }
+  .page-ee footer { flex-wrap: wrap; }
+  .page-ee-actions { display: inline-flex; flex-wrap: wrap; gap: 12px; margin-left: auto; }
+  .page-link-btn {
+    padding: 0; border: 0; background: none; font: inherit; color: var(--brand-ink, var(--brand));
+    cursor: pointer; text-underline-offset: 2px;
+  }
+  .page-link-btn:hover { text-decoration: underline; }
+  @media (pointer: coarse) { .page-link-btn { min-height: 44px; } }
+  /* The app frame while the session or the workspaces load (app-frame.tsx):
+     the rail, top bar and phone tab bar drawn as skeletons, content empty. */
+  .app-frame { display: flex; min-height: 100dvh; background: var(--background); }
+  .app-frame-side {
+    display: flex; flex: none; flex-direction: column; gap: 6px; width: 240px; padding: 12px 10px;
+    border-right: 1px solid var(--border); background: var(--sidebar, var(--background));
+  }
+  .app-frame-ws { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .app-frame-tile { width: 34px; height: 34px; border-radius: 10px; flex: none; }
+  .app-frame-label { width: 60%; height: 12px; }
+  .app-frame-row { height: 30px; border-radius: 8px; }
+  .app-frame-main { display: flex; flex: 1; min-width: 0; flex-direction: column; }
+  .app-frame-top {
+    display: flex; flex: none; align-items: center; gap: 12px; height: 48px; padding: 0 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .app-frame-crumb { width: 22%; height: 14px; }
+  .app-frame-body { flex: 1; min-height: 0; overflow: auto; }
+  .app-frame-tabs { display: none; }
+  @media (min-width: 768px) and (max-width: 1279px) {
+    .app-frame-side { width: 56px; padding: 12px 8px; align-items: center; }
+    .app-frame-label { display: none; }
+    .app-frame-ws { margin-bottom: 10px; }
+    .app-frame-row { width: 36px; height: 36px; }
+  }
+  @media (max-width: 767px) {
+    .app-frame { flex-direction: column; }
+    .app-frame-side { display: none; }
+    .app-frame-top { height: 52px; }
+    .app-frame-crumb { width: 40%; }
+    .app-frame-tabs {
+      display: flex; flex: none; align-items: center; justify-content: space-around; height: 62px;
+      border-top: 1px solid var(--border); padding-bottom: env(safe-area-inset-bottom);
+    }
+    .app-frame-tab { width: 28px; height: 28px; border-radius: 8px; }
+  }
+  /* Outside the app frame (404 signed out, a crashed root): the bare ground
+     with the lockup above the state card. */
+  .bare-state { display: grid; grid-template-columns: min(640px, 100%); place-content: center; gap: 20px; min-height: 100dvh; padding: 24px 16px; background: var(--background); }
+  .bare-state-lockup { display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-weight: 650; color: var(--foreground); }
+  .bare-state > .page-state { padding: 0; }
+  /* Signed-out and restarting screens (components/branding/signed-out-screen.tsx,
+     #3787): the sail breathes while the app waits for the server, and only
+     where the person allows motion. */
+  @keyframes signed-out-pulse { 50% { transform: scale(0.94); opacity: 0.75; } }
+  @media (prefers-reduced-motion: no-preference) {
+    .signed-out-pulse { display: block; animation: signed-out-pulse 2.2s ease-in-out infinite; }
+  }
+  .page-stale { opacity: 0.55; filter: saturate(0.6); pointer-events: none; }
+  .page-cf {
+    border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
+    border-radius: 14px; background: var(--card); overflow: hidden;
+  }
+  .page-cf header { display: flex; gap: 10px; padding: 14px 16px; }
+  .page-cf b { display: block; font-weight: 600; color: var(--foreground); }
+  .page-cf p { margin: 3px 0 0; color: var(--muted-foreground); }
+  .page-cf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border); border-block: 1px solid var(--border); }
+  .page-cf-grid > div { padding: 12px 16px; background: var(--card); font-size: var(--typo-body); }
+  .page-cf-grid small { display: block; margin-bottom: 4px; font-size: var(--typo-micro); font-weight: 600; color: var(--muted-foreground-soft); }
+  .page-cf footer { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; }
+  @media (max-width: 767px) { .page-cf-grid { grid-template-columns: 1fr; } }
+  .page-sk {
+    display: block; border-radius: 6px;
+    background: linear-gradient(90deg, var(--muted), color-mix(in srgb, var(--foreground) 7%, var(--muted)), var(--muted));
+    background-size: 200% 100%;
+    animation: page-sk 1.4s linear infinite;
+  }
+  @keyframes page-sk { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+  .page-sk-h { width: 220px; height: 20px; margin-bottom: 8px; }
+  .page-sk-p { width: 360px; max-width: 80%; height: 12px; margin-bottom: 18px; }
+  .page-sk-list { border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
+  .page-sk-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  .page-sk-row:last-child { border-bottom: 0; }
+  .page-sk-av { width: 22px; height: 22px; border-radius: 999px; flex: none; }
+  .page-sk-t { display: grid; flex: 1; gap: 6px; }
+  .page-sk-l { height: 10px; }
+  .page-sk-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+  .page-sk-card { height: 120px; border-radius: 10px; }
+  .page-sk-note { display: flex; align-items: center; gap: 6px; min-height: 20px; margin-top: 10px; font-size: var(--typo-label); color: var(--muted-foreground-soft); }
+  @media (prefers-reduced-motion: reduce) { .page-sk { animation: none; } }
+  :root[data-motion="reduce"] .page-sk { animation: none; }
+  /* Wizard step bar (components/ui/wizard-steps.tsx). */
+  .wizard-steps {
+    display: flex; align-items: center; gap: 6px; padding: 10px 20px;
+    border-bottom: 1px solid var(--border); background: var(--muted); overflow-x: auto; scrollbar-width: none;
+  }
+  .wizard-steps ol { display: flex; align-items: center; gap: 6px; margin: 0; padding: 0; list-style: none; }
+  .wizard-steps li { display: flex; align-items: center; gap: 6px; flex: none; }
+  .wizard-steps-rule { width: 18px; height: 1.5px; background: var(--line-strong); }
+  .wizard-steps li[data-state="done"] + li .wizard-steps-rule,
+  .wizard-steps li[data-state="done"] .wizard-steps-rule { background: var(--success); }
+  .wizard-steps-item {
+    display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px 4px 4px; border-radius: 999px;
+    font-size: var(--typo-body); color: var(--muted-foreground-soft); white-space: nowrap;
+  }
+  button.wizard-steps-item:hover { background: var(--row-hover-bg); color: var(--foreground); }
+  .wizard-steps-n {
+    display: grid; place-items: center; width: 22px; height: 22px; border-radius: 999px;
+    border: 1.5px solid var(--line-strong); background: var(--card);
+    font-size: var(--typo-micro); font-weight: 650; color: var(--muted-foreground);
+  }
+  .wizard-steps-n > svg { width: 12px; height: 12px; }
+  li[data-state="done"] .wizard-steps-item { color: var(--muted-foreground); }
+  li[data-state="done"] .wizard-steps-n { background: var(--success); border-color: var(--success); color: #fff; }
+  li[data-state="current"] .wizard-steps-item { color: var(--foreground); font-weight: 600; background: var(--card); box-shadow: var(--shadow-sel); }
+  li[data-state="current"] .wizard-steps-n { background: var(--primary-strong); border-color: var(--primary-strong); color: #fff; }
+  .wizard-steps-count { display: none; margin-left: auto; font-size: var(--typo-body); color: var(--muted-foreground); }
+  @media (max-width: 767px) {
+    .wizard-steps li:not([data-state="current"]) { display: none; }
+    .wizard-steps li[data-state="current"] .wizard-steps-rule { display: none; }
+    .wizard-steps-count { display: block; }
+  }
+  /* The area's tile at the start of the top bar's breadcrumbs. */
+  .area-tile {
+    display: inline-grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    border-radius: 28%;
+    color: var(--brand-ink);
+    background: color-mix(in srgb, var(--brand) 13%, transparent);
+    border: 1px solid color-mix(in srgb, var(--brand) 26%, transparent);
+  }
+  .area-tile > svg { width: 13px; height: 13px; }
+  [data-collapsible="icon"] .rail-user { width: 40px; padding: 6px; }
   @media (prefers-reduced-motion: reduce) {
-    .rail-tile, .rail-tile > svg, :hover > .rail-tile > svg, .rail-label { transition: none; transform: none; }
+    .rail-label { transition: none; }
+  }
+
+  /* The phone More sheet (v67 pop-more): a four-column grid of tiles, then
+     two rows. Every target is at least 3rem tall. */
+  .more-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.25rem 0.5rem;
+    padding: 0.75rem 0.75rem 0.5rem;
+    list-style: none;
+  }
+  .more-it {
+    position: relative;
+    display: flex;
+    min-height: 3.5rem;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.5rem 0.25rem;
+    border-radius: var(--radius-lg);
+    color: var(--muted-foreground);
+    font-size: var(--text-micro, 0.6875rem);
+    text-align: center;
+  }
+  .more-it:hover, .more-it-on { background: var(--row-hover-bg); color: var(--foreground); }
+  .more-count {
+    position: absolute;
+    top: 0.25rem;
+    right: calc(50% - 1.75rem);
+    min-width: 1.125rem;
+    padding: 0 0.3125rem;
+    border-radius: 999px;
+    background: var(--primary-strong, var(--primary));
+    color: var(--primary-foreground);
+    font-size: var(--text-micro, 0.6875rem);
+    font-weight: 650;
+    line-height: 1.125rem;
+    text-align: center;
+  }
+  .more-rows {
+    display: grid;
+    margin: 0.25rem 0.75rem 0;
+    padding: 0.5rem 0 max(0.75rem, env(safe-area-inset-bottom));
+    border-top: 1px solid var(--border);
+  }
+  .more-row, .more-rows .rail-user {
+    display: flex;
+    min-height: 3rem;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 0 0.5rem;
+    border-radius: var(--radius-lg);
+    color: var(--foreground);
+    font-size: var(--text-label, 0.8125rem);
+  }
+  .more-row:hover { background: var(--row-hover-bg); }
+  .more-live {
+    width: 0.5rem;
+    height: 0.5rem;
+    margin: 0 0.375rem;
+    border-radius: 999px;
+    background: var(--success);
   }
 }
 
@@ -1238,46 +1814,10 @@ body {
 }
 
 /*
- * Onboarding preview pane.
- *
- * A raised surface, not a hole: one pixel of light along the top edge and
- * the ground falling away beneath it. That is the entire treatment — no
- * colour, no texture, nothing that moves.
- *
- * It replaced a pair of drifting blue radial glows, which is worth saying
- * out loud because the glow is the default reach here and it was wrong:
- * a large soft brand-coloured blob is what every AI product has shipped
- * since 2024, and it read as unserious next to a form people are meant to
- * fill in carefully. What makes a split read as two panes is depth, and
- * depth is an inset highlight plus a falloff.
- *
- * The bottom inset is deliberately huge and heavily negative-spread so it
- * is a gradient falloff rather than a visible shadow edge.
- */
-.onboarding-pane {
-  background: linear-gradient(180deg, #12141b 0%, #0b0c11 58%, #090a0e 100%);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.07),
-    inset 0 -80px 90px -70px rgb(0 0 0 / 0.9);
-}
-
-/*
- * Stacked under lg the pane sits ABOVE the form rather than beside it, so
- * the light belongs on the edge the two share — otherwise the highlight
- * runs along the top of the viewport where there is no seam to describe.
- */
-@media (max-width: 1023px) {
-  .onboarding-pane {
-    background: linear-gradient(180deg, #0b0c11 0%, #12141b 100%);
-    box-shadow: inset 0 -1px 0 rgb(255 255 255 / 0.07);
-  }
-}
-
-/*
  * .surface-pane — the onboarding pane's treatment, restated so it can be
  * worn by any surface in the product instead of only by /onboarding.
  *
- * Same idea, different arithmetic. `.onboarding-pane` above is three literal
+ * Same idea, different arithmetic. The onboarding pane it came from was three literal
  * dark hex stops, which is exactly right for a screen that only ever renders
  * dark and wrong for anything reused. Converting those stops to OKLCH shows
  * what they actually are: the middle one (#0b0c11) IS dark `--card`, and the
@@ -1308,7 +1848,7 @@ body {
  *
  * ABOVE it rather than straddling it: every stop is lifted, so the foot of
  * the pane is still lighter than the frame. Straddling — the first cut, taken
- * straight from `.onboarding-pane`, whose middle stop IS card — meant the
+ * straight from the original onboarding pane, whose middle stop IS card — meant the
  * centre of the conversation matched the column exactly, and the two ran
  * together across the middle third of the screen where most of the reading
  * happens.
@@ -1448,6 +1988,54 @@ body {
   .kit-tap {
     min-height: 44px;
   }
+
+  /* Button `tap` (phone pilot): the button box is the 44 × 44 target and the
+     drawn inner keeps 32 px, so neighbours cannot overlap. */
+  button[data-tap] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  button[data-tap] > [data-slot="button-inner"] {
+    height: calc(var(--spacing) * 8);
+  }
+  button[data-tap][data-size^="icon"] > [data-slot="button-inner"] {
+    width: calc(var(--spacing) * 8);
+  }
+
+  /* Harbor 2: every control is a finger-sized target on a touch device, at
+     any width (#3333). Zero-specificity :where() so a component that already
+     sizes itself for touch is not fought; min-height/min-width only ever
+     grow a box. Checkboxes, radios and switches keep their drawn size and
+     get an invisible 44px hit area instead (switch: components/ui/switch).
+     Links count too: min-height has no effect on an inline text link, so only
+     links laid out as boxes — card links, list rows — grow. */
+  :where(
+    a[href],
+    button,
+    [role="button"],
+    [role="tab"],
+    [role="menuitem"],
+    [role="option"],
+    [role="combobox"],
+    select,
+    input:not([type="hidden"], [type="checkbox"], [type="radio"], [type="range"], [type="color"])
+  ):not([role="checkbox"], [role="radio"], [role="switch"]) {
+    min-height: 44px;
+  }
+  :where(button, [role="button"], [role="tab"]):not([role="checkbox"], [role="radio"], [role="switch"]) {
+    min-width: 44px;
+  }
+  :where([role="checkbox"], [role="radio"], input[type="checkbox"], input[type="radio"]) {
+    position: relative;
+  }
+  :where([role="checkbox"], [role="radio"], input[type="checkbox"], input[type="radio"])::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 44px; height: 44px;
+    transform: translate(-50%, -50%);
+  }
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -1563,12 +2151,106 @@ body {
 }
 
 /* Preserve the state and loading label without requiring motion to read it.
- * Covers CSS spinners and Radix enter/exit animations, including pseudo-elements. */
+ * Covers CSS spinners and Radix enter/exit animations, including pseudo-elements.
+ *
+ * Settings › Appearance › Reduce motion (lib/theme/appearance.ts) drives the
+ * same rule from the app: On sets data-motion="reduce" on <html> and applies
+ * it whatever the OS says; Off sets data-motion="full", which lifts this
+ * catch-all for a user who wants motion here although their OS asks for less.
+ * The handful of per-component reduce rules above stay on the OS query — they
+ * only still a pulse or a slide, and the catch-all already covers them for On. */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  :root:not([data-motion="full"]) *,
+  :root:not([data-motion="full"]) *::before,
+  :root:not([data-motion="full"]) *::after {
     animation: none !important;
     transition-duration: 0s !important;
     transition-delay: 0s !important;
     scroll-behavior: auto !important;
   }
+}
+:root[data-motion="reduce"] *,
+:root[data-motion="reduce"] *::before,
+:root[data-motion="reduce"] *::after {
+  animation: none !important;
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+  scroll-behavior: auto !important;
+}
+
+/* Text size — Settings › Appearance › Text size (data-text-size on <html>,
+ * lib/theme/appearance.ts). Every size and most spacing in the app are rem,
+ * so moving the root size scales the interface as one, like browser zoom but
+ * kept with the account. Standard (14 px body text) is the absence of the
+ * attribute; Compact is 13 px body text (13/14 of the root) and is what a new
+ * device starts at (Harbor 2); Large is 112.5 %. */
+:root[data-text-size="small"] { font-size: 92.857%; }
+:root[data-text-size="large"] { font-size: 112.5%; }
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Compact density — Settings › Appearance › Density (data-density="compact"
+ * on <html>, lib/theme/appearance.ts).
+ *
+ * Deliberately a short list of SHARED row shapes, not a second size for every
+ * component: tightening the kits moves every surface built on them, and a
+ * surface that spelled out its own padding keeps it. Only vertical padding
+ * changes — text sizes, control heights and touch targets stay as they are,
+ * so nothing gets harder to read or to hit; coarse pointers are excluded
+ * outright, because there the row height IS the touch target (.kit-tap).
+ *
+ *   - Sidebar kit rows (SidebarRow: `.kit-tap.type-nav`) — every rail list.
+ *   - Settings card rows and settings tables (SettingsRow and settingsTd are
+ *     `px-4 py-2.5` inside a [data-slot=settings-card]).
+ *   - shadcn table cells ([data-slot=table-cell]).
+ *
+ * Unlayered on purpose: it then outranks the Tailwind utilities it adjusts
+ * without !important. */
+@media (pointer: fine) {
+  :root[data-density="compact"] .kit-tap.type-nav {
+    padding-block: 0.125rem;
+  }
+  :root[data-density="compact"] [data-slot="settings-card"] .px-4.py-2\.5 {
+    padding-block: 0.375rem;
+  }
+  :root[data-density="compact"] [data-slot="table-cell"] {
+    padding-block: 0.25rem;
+  }
+}
+
+/* Harbor 2 content frame (#3350): the page sits in a 12 px frame inset 8 px
+ * from the grey ground, hairline instead of a shadow. Desktop and tablet only;
+ * on a phone the page is full-bleed. */
+@media (min-width: 768px) {
+  .peer[data-variant="inset"] ~ [data-slot="sidebar-inset"] {
+    margin: 8px 8px 8px 0;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    box-shadow: none;
+    overflow: hidden;
+    /* Pages size themselves as 100dvh − top bar − --mobile-tab-bar-h. A
+       desktop has no tab bar, but the frame takes 2 × 8 px of margin and
+       2 × 1 px of border; without this every page overflows by 18 px and
+       its bottom (the crews dock, panel footers) is cut off. */
+    --app-frame-y: 18px;
+    --mobile-tab-bar-h: var(--app-frame-y);
+  }
+}
+
+/* Auth screens (#3583): the sail panel beside the form. The ground is the
+   logo file's own tile gradient (#1B75FE → #2B90FF) deepened toward the top so
+   it does not glare next to a dark form; the shade only darkens the corner the
+   copy sits in, so the lower half of the mark stays white. A CSS gradient, not
+   canvas: without a 2D context the panel is still the brand colour. */
+.auth-panel {
+  background: linear-gradient(160deg, #062a86 0%, #1257c8 45%, #1e7bfe 80%, #2b90ff 100%);
+}
+.auth-panel-shade {
+  background: linear-gradient(to bottom right, transparent 55%, rgb(3 20 60 / 0.3) 100%);
+}
+
+/* A search result's target message: outline only, so it never touches React-owned classes. */
+[data-search-target="true"] {
+  outline: 2px solid color-mix(in oklab, var(--primary, currentColor) 60%, transparent);
+  outline-offset: 2px;
+  border-radius: 0.375rem;
 }

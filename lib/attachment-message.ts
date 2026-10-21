@@ -56,9 +56,11 @@ export interface OutgoingAttachment {
   /** `attachments/<chatId>/<filename>`, from the upload response. */
   path?: string
   /** Only `"ready"` can be named in a message — see `sendableAttachments`. */
-  status?: "uploading" | "ready" | "error"
+  status?: "validating" | "uploading" | "ready" | "error" | "cancelled"
   /** The form field this upload answers, if any. See `AttachmentOwner`. */
   owner?: AttachmentOwner
+  /** Short sanitized reason class of a failed upload (never server text). */
+  failureLabel?: string
 }
 
 /** Control characters (C0 + DEL) are stripped from a path before it is named.
@@ -100,12 +102,21 @@ export function sendableAttachments(attachments: OutgoingAttachment[]): Outgoing
   return attachments.filter((a) => isSendableAttachment(a) && !a.owner)
 }
 
+/** Chips that failed or were cancelled: not on the agent, and the reason Send
+ *  stays blocked until the user retries or removes them. Same `owner` filter
+ *  as `sendableAttachments` — a form field's chip is the sheet's to explain. */
+export function unattachedAttachments(attachments: OutgoingAttachment[]): OutgoingAttachment[] {
+  return attachments.filter(
+    (a) => !a.owner && (a.status === "error" || a.status === "cancelled"),
+  )
+}
+
 /** True while at least one upload is still running. The composer refuses to
  *  send in that window rather than sending a message that names some of the
  *  files the user attached — which is the same defect this module fixes,
  *  just narrower. */
 export function hasPendingUploads(attachments: OutgoingAttachment[]): boolean {
-  return attachments.some((a) => a.status === "uploading")
+  return attachments.some((a) => a.status === "uploading" || a.status === "validating")
 }
 
 /**

@@ -44,7 +44,7 @@ func issueIdentFromPath(w http.ResponseWriter, path, suffix string) (string, boo
 	if suffix != "" {
 		ident = strings.TrimSuffix(ident, suffix)
 	}
-	if ident == "" || strings.ContainsAny(ident, issueIdentInjectionChars) {
+	if ident == "" || ident == "." || ident == ".." || strings.ContainsAny(ident, issueIdentInjectionChars) {
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "issue identifier required"})
 		return "", false
 	}
@@ -66,6 +66,9 @@ func (s *Server) issueScopeQuery() string {
 func (s *Server) issueActor(w http.ResponseWriter, r *http.Request) (string, bool) {
 	if s.ipc == nil {
 		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
+		return "", false
+	}
+	if s.refuseUnauthorizedIssueMutation(w, r) {
 		return "", false
 	}
 	// #812: a forged/stale token is a 403, and once the crew has tokens an
@@ -140,7 +143,8 @@ func (s *Server) handleIssueComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Body string `json:"body"`
+		OperationKey string `json:"operation_key"`
+		Body         string `json:"body"`
 		// SECURITY: parsed and ignored. A crew shares one container and one
 		// sidecar, so a request-supplied author would let any member post as
 		// any other — the exact impersonation the per-agent token exists to
@@ -152,15 +156,21 @@ func (s *Server) handleIssueComment(w http.ResponseWriter, r *http.Request) {
 	if !decodeCappedJSON(w, r, &req) {
 		return
 	}
+	runID, operationKey, ok := s.issueOperationOrigin(w, r, req.OperationKey)
+	if !ok {
+		return
+	}
 	if strings.TrimSpace(req.Body) == "" {
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "body is required"})
 		return
 	}
 
 	payload, err := json.Marshal(map[string]interface{}{
-		"workspace_id": s.ipc.WorkspaceID,
-		"agent_id":     agentID,
-		"body":         req.Body,
+		"workspace_id":  s.ipc.WorkspaceID,
+		"agent_id":      agentID,
+		"body":          req.Body,
+		"author_run_id": runID,
+		"operation_key": operationKey,
 	})
 	if err != nil {
 		writeJSONResponse(w, http.StatusInternalServerError, map[string]string{"error": "failed to serialize request"})
@@ -209,6 +219,7 @@ func (s *Server) handleIssueUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
+		OperationKey string    `json:"operation_key"`
 		Status       string    `json:"status"`
 		Priority     string    `json:"priority"`
 		AssigneeType *string   `json:"assignee_type"`
@@ -222,6 +233,10 @@ func (s *Server) handleIssueUpdate(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID string `json:"workspace_id"`
 	}
 	if !decodeCappedJSON(w, r, &req) {
+		return
+	}
+	runID, operationKey, ok := s.issueOperationOrigin(w, r, req.OperationKey)
+	if !ok {
 		return
 	}
 
@@ -258,6 +273,12 @@ func (s *Server) handleIssueUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if runID != "" {
+		body["author_run_id"] = runID
+	}
+	if operationKey != "" {
+		body["operation_key"] = operationKey
+	}
 	payload, err := json.Marshal(body)
 	if err != nil {
 		writeJSONResponse(w, http.StatusInternalServerError, map[string]string{"error": "failed to serialize request"})

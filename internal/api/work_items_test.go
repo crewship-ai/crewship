@@ -235,8 +235,21 @@ func TestWorkItemGet_CarriesAttemptsAndHistoryAndNoPayload(t *testing.T) {
 	if detail.ID != "wk-detail" || detail.State != "running" || detail.SessionID != "sess-1" {
 		t.Fatalf("detail: %+v", detail)
 	}
-	if len(detail.Attempts) != 1 || detail.Attempts[0].RunID != "run-1" || detail.Attempts[0].CostUSD != 0.25 {
+	if len(detail.Attempts) != 1 || detail.Attempts[0].RunID != "run-1" {
 		t.Fatalf("attempts: %+v", detail.Attempts)
+	}
+	// #3590: a VIEWER gets the attempt without its cost; OWNER gets it.
+	if strings.Contains(rr.Body.String(), "cost_usd") {
+		t.Fatalf("VIEWER received cost_usd: %s", rr.Body.String())
+	}
+	ownerReq := workReq(t, "GET", "/work-items/wk-detail", "", user, ws, "OWNER")
+	ownerReq.SetPathValue("workItemId", "wk-detail")
+	ownerRR := httptest.NewRecorder()
+	h.Get(ownerRR, ownerReq)
+	var ownerDetail workItemDetailView
+	decodeJSON(t, ownerRR, &ownerDetail)
+	if len(ownerDetail.Attempts) != 1 || ownerDetail.Attempts[0].CostUSD != 0.25 {
+		t.Fatalf("OWNER attempts: %+v", ownerDetail.Attempts)
 	}
 	if len(detail.Events) != 1 || detail.Events[0].ToState != "queued" {
 		t.Fatalf("events: %+v", detail.Events)
@@ -815,12 +828,15 @@ func TestWorkItems_PrivateMetadataRequiresCurrentTrustedOperator(t *testing.T) {
 	if rr.Code != 404 {
 		t.Fatalf("stale owner metadata survived role loss: %d %s", rr.Code, rr.Body.String())
 	}
-	if _, err := db.Exec(`UPDATE workspace_members SET role='OWNER',access_mode='restricted' WHERE id='op'`); err != nil {
+	if _, err := db.Exec(`UPDATE workspace_members SET role='OWNER',access_mode='restricted' WHERE id='op'`); err == nil {
+		t.Fatal("database allowed a restricted owner")
+	}
+	if _, err := db.Exec(`UPDATE workspace_members SET access_mode='restricted' WHERE id='op'`); err != nil {
 		t.Fatal(err)
 	}
 	rr = httptest.NewRecorder()
 	h.Get(rr, req)
 	if rr.Code != 404 {
-		t.Fatalf("restricted owner reached operator metadata: %d %s", rr.Code, rr.Body.String())
+		t.Fatalf("Guest with a stale owner session reached operator metadata: %d %s", rr.Code, rr.Body.String())
 	}
 }

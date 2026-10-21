@@ -13,6 +13,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 )
 
 // scheduleResponse is the wire shape for pipeline_schedules. We
@@ -351,6 +352,7 @@ func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 		maxFailures = *body.MaxConsecutiveFailures
 	}
 	in := pipeline.SaveScheduleInput{
+		ChatOriginID:           runauthority.OriginIDFromContext(r.Context()),
 		WorkspaceID:            workspaceID,
 		Name:                   defaultIfBlank(body.Name, slug),
 		TargetPipelineID:       pipelineID,
@@ -680,6 +682,7 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		maxFailures = *body.MaxConsecutiveFailures
 	}
 	in := pipeline.SaveScheduleInput{
+		ChatOriginID:           runauthority.OriginIDFromContext(r.Context()),
 		ID:                     scheduleID,
 		WorkspaceID:            workspaceID,
 		Name:                   defaultIfBlank(body.Name, existing.Name),
@@ -848,10 +851,28 @@ const schedulePreviewDefaultCount = 5
 // GET /api/v1/workspaces/{workspaceId}/pipeline-schedules/preview
 //
 //	?cron_expr=...&timezone=...&count=...
+//	?phrase=every+weekday+at+8:30&timezone=...&count=...   (ODCH-RT-15)
+//
+// phrase is the "When, in words" form: it is turned into a cron by
+// pipeline.ParseNaturalCron and the response carries the derived cron_expr
+// next to the phrase. Exactly one of cron_expr and phrase.
 func (h *PipelineHandler) PreviewSchedule(w http.ResponseWriter, r *http.Request) {
 	cronExpr := strings.TrimSpace(r.URL.Query().Get("cron_expr"))
+	phrase := strings.TrimSpace(r.URL.Query().Get("phrase"))
+	if cronExpr != "" && phrase != "" {
+		replyError(w, http.StatusBadRequest, "pass cron_expr or phrase, not both")
+		return
+	}
+	if phrase != "" {
+		derived, perr := pipeline.ParseNaturalCron(phrase)
+		if perr != nil {
+			replyError(w, http.StatusBadRequest, perr.Error())
+			return
+		}
+		cronExpr = derived
+	}
 	if cronExpr == "" {
-		replyError(w, http.StatusBadRequest, "cron_expr required")
+		replyError(w, http.StatusBadRequest, "cron_expr or phrase required")
 		return
 	}
 	timezone := r.URL.Query().Get("timezone")
@@ -879,11 +900,15 @@ func (h *PipelineHandler) PreviewSchedule(w http.ResponseWriter, r *http.Request
 	for i, t := range occurrences {
 		out[i] = t.Format(time.RFC3339)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"cron_expr":   cronExpr,
 		"timezone":    timezone,
 		"occurrences": out,
-	})
+	}
+	if phrase != "" {
+		resp["phrase"] = phrase
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // resolveSchedulePipelineID figures out which pipeline the schedule
@@ -959,6 +984,11 @@ func (h *PipelineHandler) RunSchedule(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
+	user := UserFromContext(r.Context())
+	if user == nil {
+		replyError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
 	scheduleID := r.PathValue("scheduleId")
 	if scheduleID == "" {
 		replyError(w, http.StatusBadRequest, "scheduleId required")
@@ -1011,7 +1041,12 @@ func (h *PipelineHandler) RunSchedule(w http.ResponseWriter, r *http.Request) {
 
 	exec := h.newExecutor()
 	res, err := exec.Run(r.Context(), pipeline.RunInput{
-		PipelineID: p.ID,
+		PipelineID:   p.ID,
+		ChatOriginID: sched.ChatOriginID,
+		// Manual force-fire retains the authenticated operator. Its create-tier
+		// floor matches batch execution, not an autonomous scheduler trigger.
+		InvokingUserID:      user.ID,
+		InvocationAuthority: pipeline.HumanInvocationAuthority(user.ID, pipeline.RoutineBatchAuthority),
 		// Force-fire honours the schedule's version pin exactly like the
 		// cron path — `schedules now` exists to smoke-test what the cron
 		// will do, so it must execute the same definition.
@@ -1023,6 +1058,13 @@ func (h *PipelineHandler) RunSchedule(w http.ResponseWriter, r *http.Request) {
 		TriggeredByID: sched.ID,
 	})
 	if err != nil {
+		if writeRoutineOriginError(w, err) {
+			return
+		}
+		if errors.Is(err, pipeline.ErrInvocationAuthorityRevoked) || errors.Is(err, pipeline.ErrInvokingUserNotMember) {
+			replyError(w, http.StatusForbidden, "Scheduled run is not available with your access")
+			return
+		}
 		if errors.Is(err, pipeline.ErrConcurrencyLimitReached) {
 			w.Header().Set("Retry-After", "5")
 			replyError(w, http.StatusTooManyRequests,

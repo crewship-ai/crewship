@@ -39,7 +39,7 @@ class Stub:
 def provisioning_answers(mode="trusted", invite=200, signup=202):
     access = f"/api/v1/workspaces/{WS}/members/m1/access"
     return {
-        ("POST", f"/api/v1/workspaces/{WS}/invitations?workspace_id={WS}"): (invite, {}),
+        ("POST", f"/api/v1/workspaces/{WS}/invitations?workspace_id={WS}"): (invite, {"token": "synthetic-invitation-proof"}),
         ("POST", "/api/v1/auth/signup"): (signup, {}),
         ("GET", f"/api/v1/admin/users?workspace_id={WS}"): (200, [{"id": "u1", "email": restricted_fixture.EMAIL}]),
         ("GET", f"/api/v1/workspaces/{WS}/members"): (200, [{"id": "m1", "user_id": "u1"}]),
@@ -55,6 +55,12 @@ class Provision(unittest.TestCase):
         self.assertEqual(path, f"/api/v1/workspaces/{WS}/members/m1/access")
         invite = next(c for c in stub.calls if "invitations" in c[1])
         self.assertEqual(invite[2]["role"], "MANAGER")  # manualPolicy needs OWNER/ADMIN/MANAGER
+
+    def test_signup_presents_issuer_proof(self):
+        stub = Stub(provisioning_answers())
+        restricted_fixture.provision(stub, WS)
+        signup = next(c for c in stub.calls if c[1] == "/api/v1/auth/signup")
+        self.assertEqual(signup[2].get("invitation_token"), "synthetic-invitation-proof")
 
     def test_existing_invitation_409_is_fine(self):
         restricted_fixture.provision(Stub(provisioning_answers(invite=409)), WS)

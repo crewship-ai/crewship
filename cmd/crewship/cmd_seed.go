@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,6 +48,7 @@ All data is created through the REST API, ensuring business logic
 func init() {
 	seedCmd.Flags().Bool("offline-demo", false, "Create UI/control-plane fixtures without provider credentials or automatic model execution")
 	seedCmd.Flags().Bool("nuke", false, "Delete all workspace contents before seeding")
+	seedCmd.Flags().Bool("ui-tour", false, "Add the UI tour on top of an already seeded demo workspace: scheduled routines in folders with run history (completed, waiting for a person, failed), a longer issue board and the inbox items they produce. Additive and idempotent; needs no provider credentials")
 	seedCmd.Flags().Bool("yes", false, "Skip the --nuke confirmation prompt (for CI/scripts). Without it, an interactive nuke requires typing the workspace slug.")
 	seedCmd.Flags().Bool("skip-issues", false, "Skip issue/project/label seeding")
 	seedCmd.Flags().Bool("with-evals", false, "Also seed model-regression routines (kept out of the normal product demo)")
@@ -59,8 +61,8 @@ func init() {
 	seedCmd.Flags().Bool("with-memory", false, "Initialize demo memory on the target server; preserves existing memory files")
 	seedCmd.Flags().Bool("with-team-chat", false, "Add six fictional colleagues with real roles, local avatars and human Chat examples; signup is not required")
 	seedCmd.Flags().String("state-dir", "", "Private team-chat credential directory outside Git (isolated per server/workspace)")
-	seedCmd.AddCommand(newSeedTeamChatCmd())
-	seedCmd.Flags().Bool("with-users", false, "Add four extra users (ADMIN, MANAGER, MEMBER, VIEWER) to the workspace for RBAC matrix testing; uses authenticated member provisioning (signup may remain disabled)")
+	seedCmd.AddCommand(newSeedTeamChatCmd(), newSeedRBACMatrixCmd())
+	seedCmd.Flags().Bool("with-users", false, "Add role accounts and named single-capability/full variants (ADMIN, MANAGER, MEMBER, VIEWER) to the workspace for RBAC matrix testing; uses authenticated member provisioning (signup may remain disabled)")
 	seedCmd.Flags().String("codex-auth-file", "", "Absolute path to a private Codex auth.json (0600, outside the repo) that switches the demo agents to Codex CLI; overrides "+seedCodexAuthFileEnv)
 }
 
@@ -192,6 +194,28 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// The UI tour is its own additive profile: it builds on the default demo
+	// (seeded earlier, e.g. by `crew reset --yes`) and runs none of the phases
+	// below. Flag combinations were refused in preflight, before bootstrap.
+	if uiTour, _ := cmd.Flags().GetBool("ui-tour"); uiTour {
+		stats, err := seedUITour(ctx, client)
+		if err != nil {
+			return fmt.Errorf("--ui-tour: %w", err)
+		}
+		fmt.Fprintln(os.Stderr, "")
+		cli.PrintSuccess(fmt.Sprintf("UI tour complete: %d routines, %d schedules, %d folders (%d routines filed), %d tags, %d runs, %d projects, %d labels, %d issues, %d comments added",
+			stats.Routines, stats.Schedules, stats.Folders, stats.Filed, stats.Tags, stats.Runs, stats.Projects, stats.Labels, stats.Issues, stats.Comments))
+		return nil
+	}
+
+	// The requested roster includes ADMIN profiles. Refuse a non-owner
+	// before optional cleanup, as well as before the first account write.
+	if withUsers {
+		if err := requireSeedRBACOwner(client); err != nil {
+			return fmt.Errorf("--with-users: %w", err)
+		}
+	}
+
 	// ── Phase 0: Nuke (after auth, before seed) ──
 	if nuke {
 		if err := ctx.Err(); err != nil {
@@ -221,9 +245,12 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		// one and did not get it must not be told the seed succeeded: that is
 		// how the nightly harness matrix ran for the whole life of the flag
 		// against workspaces with exactly one user (#1829). Partial fixtures
-		// still return nil — see seedRBACUsers.
+		// fail the seed — see seedRBACUsers.
 		if err := seedRBACUsers(ctx, client); err != nil {
 			return fmt.Errorf("--with-users: %w", err)
+		}
+		if err := seedUserRoster(ctx, client, demoCapabilityUsers()); err != nil {
+			return fmt.Errorf("--with-users capability matrix: %w", err)
 		}
 	}
 
@@ -541,6 +568,27 @@ func seedTargetServer() string {
 	return cli.EffectiveServer(flagServer, flagProfile, cliCfg)
 }
 
+// seedWorkspaceName is what the demo workspace is called. Bootstrap names the
+// first workspace after its owner ("Demo User's Workspace"), which reads like
+// the personal account sign-up makes; the demo data is a company's.
+const seedWorkspaceName = "Acme Company"
+
+// nameSeedWorkspace renames the workspace a fresh bootstrap just made. Only
+// then: on a re-run the name is the operator's. A failure only warns, the
+// demo data does not depend on the name.
+func nameSeedWorkspace(client *cli.Client, workspaceID string) {
+	resp, err := client.Patch("/api/v1/workspaces/"+url.PathEscape(workspaceID), map[string]string{"name": seedWorkspaceName})
+	if err == nil {
+		err = cli.CheckError(resp)
+		resp.Body.Close()
+	}
+	if err != nil {
+		cli.PrintWarning("could not name the demo workspace " + seedWorkspaceName + ": " + err.Error())
+		return
+	}
+	fmt.Fprintf(os.Stderr, "  Named it %s\n", seedWorkspaceName)
+}
+
 func seedBootstrap(ctx context.Context, password string) (*cli.Client, string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, "", err
@@ -605,7 +653,9 @@ func seedBootstrap(ctx context.Context, password string) (*cli.Client, string, e
 
 		fmt.Fprintf(os.Stderr, "  Bootstrapped admin: demo@crewship.ai\n")
 		fmt.Fprintf(os.Stderr, "  Workspace: %s\n", result.WorkspaceID)
-		return cli.NewClient(server, result.CLIToken, result.WorkspaceID).WithContext(ctx), result.UserID, nil
+		client := cli.NewClient(server, result.CLIToken, result.WorkspaceID).WithContext(ctx)
+		nameSeedWorkspace(client, result.WorkspaceID)
+		return client, result.UserID, nil
 	}
 	// Fall through to auth for 409 (already initialized) or any other status
 	// whose body mentions the "already initialized" sentinel. Server currently

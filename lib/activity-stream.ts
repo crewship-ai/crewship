@@ -142,6 +142,9 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "approval.denied",
       "approval.timeout",
       "approval.cancelled",
+      // Backend-hidden privacy evidence, never a new human request.
+      "approval.source_retired",
+      "escalation.source_classified",
       // A trust grant is a standing decision — "approve this gate for me from
       // now on" — so it belongs with the one-off approvals rather than in a
       // group of its own. Reading them together is the point: a filter that
@@ -163,6 +166,17 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "audit.entity_updated",
       "audit.entity_deleted",
       "audit.entity_restored",
+      "invitation.created",
+      "invitation.reissued",
+      "invitation.revoked",
+      "invitation.accepted",
+    "member.access_changed",
+    "member.owner_created",
+    "member.capabilities_changed",
+    "member.added",
+    "crew.member_changed",
+    "member.role_changed",
+    "member.removed",
     ],
   },
   {
@@ -196,6 +210,8 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "skill.unassigned",
       "skill.imported",
       "skill.deleted",
+      "skill.archived",
+      "skill.restored",
     ],
   },
   {

@@ -49,7 +49,7 @@ export function ActivityWorkPage({ workspaceId, chain, onOpenNode }: ActivityWor
       <Appear order={0}>
         <header className="flex flex-col gap-1.5">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-1 rounded border border-foreground/[0.08] px-1.5 py-px font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+            <span className="inline-flex items-center gap-1 rounded border border-foreground/[0.08] px-1.5 py-px text-micro font-semibold text-muted-foreground">
               <Bot className="h-3 w-3" /> Agent work
             </span>
             <span className={cn("inline-flex items-center gap-1.5 text-xs font-medium", RUN_TONE_CLASS[tone])}>

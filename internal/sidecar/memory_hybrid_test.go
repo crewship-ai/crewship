@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/memory"
@@ -25,9 +26,10 @@ func TestHandleMemorySearch_Hybrid_NoIPC_FallsBackToFTS(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = eng.Close() })
 	s := &Server{
-		memoryEngine:    eng,
-		agentMemoryBase: base,
-		logger:          silent,
+		memoryEngine:      eng,
+		agentMemoryBase:   base,
+		memoryStorageRoot: filepath.Dir(t.TempDir()),
+		logger:            silent,
 		// ipc intentionally nil
 	}
 
@@ -58,9 +60,10 @@ func TestHandleMemorySearch_NonHybrid_NoFallbackHeader(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = eng.Close() })
 	s := &Server{
-		memoryEngine:    eng,
-		agentMemoryBase: base,
-		logger:          silent,
+		memoryEngine:      eng,
+		agentMemoryBase:   base,
+		memoryStorageRoot: filepath.Dir(t.TempDir()),
+		logger:            silent,
 	}
 
 	body, _ := json.Marshal(map[string]any{"query": "x"}) // hybrid omitted (false)

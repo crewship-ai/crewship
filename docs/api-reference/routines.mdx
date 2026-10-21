@@ -149,7 +149,7 @@ preview (`{}` when empty); historical `run` events omit it. Planned presets
 are not run results or a guarantee of success. Preview maps retain safe primitives;
 credential, file and recognized secret values become `{type: "credential"}`,
 `{type: "file"}` or `{type: "redacted"}`. Other objects/arrays become empty
-containers, preserving field counts without exposing contents. Never replay a preview as inputs. `truncated` is true when the window held more than the endpoint
+containers, preserving field counts without exposing contents. Never replay a preview as inputs. Every event also carries `agents` (`[{id, slug, name}]`, omitted when empty): the live agents named by the `agent_run` steps of the routine's current definition, each once, in slug order; a slug that names no live agent is left out. The Calendar's Agents view and agent filter read it. `truncated` is true when the window held more than the endpoint
 will return, in which case narrow `from`/`to` rather than paging.
 
 | Method | Path | Auth | Request | Response | Status |
@@ -157,6 +157,7 @@ will return, in which case narrow `from`/`to` rather than paging.
 | GET | `/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/executions` | member (`read`) | No body; optional `?execution_id=`, `?after=` | `{ rows[], next_cursor }`, or `{ id, output }` for one execution | `200`, `400`, `403`, `404`, `500` |
 | GET | `/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/artifacts` | member (`read`) | No body; optional `?artifact_id=`, `?download=`, `?after=` | `{ artifacts[], truncated, next_cursor }`, `{ id, content }` for one artifact, or the raw bytes for a download | `200`, `400`, `403`, `404`, `500` |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/calendar` | member (`read`) | No body; `?from=` and `?to=` are required RFC3339 instants spanning at most 32 days | `{ events[], truncated }` | `200`, `400`, `403`, `500` |
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines/calendar.ics` | member (`read`) | Same `?from=` / `?to=` window as the calendar | The same events as an iCalendar file (`text/calendar`, one `VEVENT` per event, 15 minutes long, UID `<event id>@crewship`) | `200`, `400`, `403`, `500` |
 
 A run outside `{workspaceId}` is `404`, as is a named execution or artifact
 that does not belong to the run. A malformed cursor, a missing or unparseable
@@ -174,7 +175,12 @@ that does not belong to the run. A malformed cursor, a missing or unparseable
 
 The public dispatch token is the authentication mechanism. When a signing
 secret is configured, the request must also carry a valid HMAC signature.
-Dispatch is asynchronous and returns `202`; an inactive routine returns `409`.
+Dispatch is asynchronous and returns `202` only after the receipt and queued
+start are committed. The returned `run_id` is the planned durable identity, not
+confirmation that execution has started. A queued webhook start expires after
+24 hours if it cannot start; expiration remains visible in the pending-start
+record. Other capacity-queued sources retain their one-hour TTL. An inactive
+routine returns `409`.
 
 ### Editing a webhook in place (F21)
 
@@ -212,3 +218,24 @@ response only when `rotate_secret: true` was sent; an ordinary edit returns
 show-once contract.
 
 CLI: `crewship routine webhooks update <webhook_id> [--name ...] [--rate-limit N] [--inputs-template '{"...":"..."}'] [--enabled[=false]] [--rotate-secret]`.
+
+## Chat authority binding recovery
+
+`GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/origin-binding` returns
+`{pipeline_id, origin_id, draft, schedules}`; origin IDs are nullable.
+`draft` is null or `{id, revision, origin_id}`. Schedule entries include
+`{id, origin_id, pinned_version, version_origin_id}`; both pin fields are nullable.
+This operator surface requires OWNER/ADMIN with a user session or unscoped user
+CLI token. Scoped tokens, restricted users and agent/internal callers are denied.
+
+`POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/origin-binding` accepts
+`{action: "clear", reason, expected_origin_id, schedules?: [{id, expected_origin_id}], draft?: {id, expected_revision, expected_origin_id}}`.
+Every expected binding is required and may be explicit null. It clears the
+head, an explicitly reviewed bound draft and selected schedules atomically with
+the audit record. A bound draft requires its exact draft CAS; omitting it returns
+409 `draft_binding_review_required`. Clearing a selected pinned schedule whose
+immutable version retains authority returns 409 `pinned_version_authority_immutable`.
+Cleared draft revisions increment, invalidating stale publication requests. Stale
+bindings return 409, missing resources 404, malformed input 400 and denied
+callers 403. Success returns the same shape as GET. Immutable versions and
+pending/running work remain bound. See [binding semantics](/specs/routine-origin-binding).

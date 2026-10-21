@@ -33,11 +33,24 @@ import (
 type EntryType string
 
 const (
+	EntryMemberOwnerCreated        EntryType = "member.owner_created"
+	EntryMemberAccessChanged       EntryType = "member.access_changed"
+	EntryMemberCapabilitiesChanged EntryType = "member.capabilities_changed"
+	EntryMemberRemoved             EntryType = "member.removed"
+	EntryMemberAdded               EntryType = "member.added"
+	EntryCrewMemberChanged         EntryType = "crew.member_changed"
+	EntryMemberRoleChanged         EntryType = "member.role_changed"
+
+	EntryInvitationCreated  EntryType = "invitation.created"
+	EntryInvitationReissued EntryType = "invitation.reissued"
+	EntryInvitationRevoked  EntryType = "invitation.revoked"
+	EntryInvitationAccepted EntryType = "invitation.accepted"
 	// Communication
-	EntryPeerConversation EntryType = "peer.conversation"
-	EntryPeerEscalation   EntryType = "peer.escalation"
-	EntryMessageBroadcast EntryType = "message.broadcast"
-	EntryAgentMentioned   EntryType = "agent.mentioned"
+	EntryPeerConversation           EntryType = "peer.conversation"
+	EntryPeerEscalation             EntryType = "peer.escalation"
+	EntryEscalationSourceClassified EntryType = "escalation.source_classified"
+	EntryMessageBroadcast           EntryType = "message.broadcast"
+	EntryAgentMentioned             EntryType = "agent.mentioned"
 
 	// EntryConversationCompacted is emitted when an agent's prior session
 	// history overflows the context budget and the orchestrator either
@@ -80,15 +93,16 @@ const (
 	EntryRunTimeout       EntryType = "run.timeout"
 
 	// Security
-	EntryKeeperRequest     EntryType = "keeper.request"
-	EntryKeeperDecision    EntryType = "keeper.decision"
-	EntryGuardrailInput    EntryType = "guardrail.input_blocked"
-	EntryGuardrailOutput   EntryType = "guardrail.output_blocked"
-	EntryApprovalRequest   EntryType = "approval.requested"
-	EntryApprovalGranted   EntryType = "approval.granted"
-	EntryApprovalDenied    EntryType = "approval.denied"
-	EntryApprovalTimeout   EntryType = "approval.timeout"
-	EntryApprovalCancelled EntryType = "approval.cancelled"
+	EntryKeeperRequest         EntryType = "keeper.request"
+	EntryKeeperDecision        EntryType = "keeper.decision"
+	EntryGuardrailInput        EntryType = "guardrail.input_blocked"
+	EntryGuardrailOutput       EntryType = "guardrail.output_blocked"
+	EntryApprovalRequest       EntryType = "approval.requested"
+	EntryApprovalGranted       EntryType = "approval.granted"
+	EntryApprovalDenied        EntryType = "approval.denied"
+	EntryApprovalTimeout       EntryType = "approval.timeout"
+	EntryApprovalCancelled     EntryType = "approval.cancelled"
+	EntryApprovalSourceRetired EntryType = "approval.source_retired"
 
 	// Standing approval grants — a routine's wait:approval gate being
 	// disarmed for one step of one routine body
@@ -538,6 +552,11 @@ const (
 	EntrySkillDeleted    EntryType = "skill.deleted"
 	EntrySkillAssigned   EntryType = "skill.assigned"
 	EntrySkillUnassigned EntryType = "skill.unassigned"
+	// EntrySkillArchived / EntrySkillRestored fire when a person moves a
+	// skill into or out of the Archived view by hand (the keeper sweep
+	// archives unused skills on its own and does not emit these).
+	EntrySkillArchived EntryType = "skill.archived"
+	EntrySkillRestored EntryType = "skill.restored"
 	// EntrySkillInvoked fires when an agent actually calls one of its
 	// assigned skills (matched on the orchestrator tool-call hot path).
 	// Payload carries `skill_id`, `skill_slug`, `agent_id`, `tool_name`,

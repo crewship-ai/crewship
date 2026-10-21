@@ -20,7 +20,7 @@ func TestCatalogFiltersUnadmittedGraphsAndPrivateDefinitionFields(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = store.Replace(t.Context(), "owner", "h1", "w", "restricted", member, []access.Right{{Kind: "agent", ID: "agent", Operation: "run"}}); err != nil {
+	if _, err = store.Replace(t.Context(), "owner", "h1", "w", "restricted", member, []access.Right{{Kind: "routine", ID: "simple", Operation: "run"}, {Kind: "agent", ID: "agent", Operation: "run"}}); err != nil {
 		t.Fatal(err)
 	}
 	list, err := s.Catalog(t.Context(), "h1", "w")
@@ -42,8 +42,8 @@ func TestCatalogFiltersUnadmittedGraphsAndPrivateDefinitionFields(t *testing.T) 
 	if _, err = s.db.ExecContext(t.Context(), `UPDATE workspace_members SET capabilities='[]' WHERE user_id='h1'`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.Catalog(t.Context(), "h1", "w"); err == nil {
-		t.Fatal("routine capability revoked but directory available")
+	if list, err = s.Catalog(t.Context(), "h1", "w"); err != nil || len(list) != 1 {
+		t.Fatal("exact routine grant wrongly required workspace-wide routine capability", list, err)
 	}
 }
 

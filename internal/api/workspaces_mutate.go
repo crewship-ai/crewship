@@ -9,11 +9,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/crewship-ai/crewship/internal/keeper/governance"
 	"net/http"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/harbormaster"
+	"github.com/crewship-ai/crewship/internal/keeper/governance"
 	"github.com/crewship-ai/crewship/internal/retention"
 )
 
@@ -78,6 +78,19 @@ func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
+	// Creating one's own workspace keeps its existing route contract, but
+	// stale authenticated context cannot bypass current account restrictions.
+	var activeTrusted bool
+	if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM users u WHERE u.id=? AND u.suspended_at IS NULL
+ AND NOT EXISTS(SELECT 1 FROM workspace_members m WHERE m.user_id=u.id AND m.access_mode='restricted'))`, user.ID).Scan(&activeTrusted); err != nil {
+		replyInternalError(w, h.logger, "check workspace creator", err)
+		return
+	}
+	if !activeTrusted {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
+
 	_, err = tx.ExecContext(r.Context(),
 		"INSERT INTO workspaces (id, name, slug, preferred_language, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
 		wsID, req.Name, req.Slug, req.PreferredLanguage, now, now)
@@ -96,11 +109,17 @@ func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = tx.ExecContext(r.Context(),
+	memberResult, err := tx.ExecContext(r.Context(),
 		"INSERT INTO workspace_members (id, workspace_id, user_id, role, created_at, updated_at) VALUES (?, ?, ?, 'OWNER', ?, ?)",
 		memberID, wsID, user.ID, now, now)
 	if err != nil {
 		replyInternalError(w, h.logger, "insert workspace member", err)
+		return
+	}
+
+	notify, err := appendWorkspaceOwnerAudit(r.Context(), tx, h.policyJournal, memberResult, wsID, memberID, user.ID, "workspace_create")
+	if err != nil {
+		replyInternalError(w, h.logger, "audit initial workspace owner", err)
 		return
 	}
 
@@ -109,11 +128,17 @@ func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if notify != nil {
+		notify()
+	}
+
 	writeJSON(w, http.StatusCreated, workspaceResponse{
 		ID:                wsID,
 		PagesTheme:        json.RawMessage(`{}`),
+		AppearanceDefault: json.RawMessage(`{}`),
 		Name:              req.Name,
 		Slug:              req.Slug,
+		Kind:              "team",
 		PreferredLanguage: req.PreferredLanguage,
 		CreatedAt:         now,
 		UpdatedAt:         now,
@@ -124,7 +149,9 @@ func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 // GET /api/v1/workspaces/{workspaceId}
 
 type updateWorkspaceRequest struct {
-	PagesTheme        json.RawMessage `json:"pages_theme"`
+	PagesTheme json.RawMessage `json:"pages_theme"`
+	// AppearanceDefault (WSD-01) is the workspace default look; `{}` resets it.
+	AppearanceDefault json.RawMessage `json:"appearance_default"`
 	Name              *string         `json:"name"`
 	Slug              *string         `json:"slug"`
 	PreferredLanguage *string         `json:"preferred_language"`
@@ -175,6 +202,15 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var req updateWorkspaceRequest
 	if err := readJSON(r, &req); err != nil {
 		replyError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+
+	// This flag also authorizes privileged container configurations, whose
+	// authority reaches beyond a workspace. A workspace administrator may
+	// disable the opt-in, but only an instance administrator may enable it.
+	if req.AllowPrivilegedCredentials != nil && *req.AllowPrivilegedCredentials &&
+		(!isInstanceAdmin(r, h.db) || !canScope(r.Context(), scopeInstanceAdmin)) {
+		replyError(w, http.StatusForbidden, "Only an instance administrator can enable privileged runtime access")
 		return
 	}
 
@@ -246,7 +282,16 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if req.AppearanceDefault != nil {
+		if err := validateWorkspaceAppearanceDefault(req.AppearanceDefault); err != nil {
+			replyError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	ub := newUpdate()
+	if req.AppearanceDefault != nil {
+		ub.Set("appearance_default", string(req.AppearanceDefault))
+	}
 	if req.PagesTheme != nil {
 		ub.Set("pages_theme", string(req.PagesTheme))
 	}
@@ -327,6 +372,9 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.PagesTheme != nil {
 		changed = append(changed, "pages_theme")
 	}
+	if req.AppearanceDefault != nil {
+		changed = append(changed, "appearance_default")
+	}
 	if req.Name != nil {
 		changed = append(changed, "name")
 	}
@@ -377,19 +425,19 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 func (h *WorkspaceHandler) workspaceByID(ctx context.Context, workspaceID string) (workspaceResponse, error) {
 	var ws workspaceResponse
 	err := h.db.QueryRowContext(ctx, `
-		SELECT w.id, w.name, w.slug, w.logo_url, w.preferred_language, w.created_at, w.updated_at,
+		SELECT w.id, w.name, w.slug, w.kind, `+personalOwnerSQL+`, w.logo_url, w.preferred_language, w.created_at, w.updated_at,
 			w.allow_privileged_credentials, w.run_retention_days,
 			w.credential_audit_retention_days, w.audit_log_retention_days,
-			w.approvals_retention_days, w.pages_theme,
+			w.approvals_retention_days, w.pages_theme, w.appearance_default,
 			(SELECT COUNT(*) FROM crews WHERE workspace_id = w.id AND deleted_at IS NULL) AS crew_count,
 			(SELECT COUNT(*) FROM agents WHERE workspace_id = w.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM workspace_members WHERE workspace_id = w.id) AS member_count
 		FROM workspaces w
 		WHERE w.id = ? AND w.deleted_at IS NULL
-	`, workspaceID).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.LogoURL, &ws.PreferredLanguage,
+	`, workspaceID).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.Kind, &ws.PersonalOwnerID, &ws.LogoURL, &ws.PreferredLanguage,
 		&ws.CreatedAt, &ws.UpdatedAt, &ws.AllowPrivilegedCredentials, &ws.RunRetentionDays,
 		&ws.CredentialAuditRetentionDays, &ws.AuditLogRetentionDays,
-		&ws.ApprovalsRetentionDays, &ws.pagesThemeJSON,
+		&ws.ApprovalsRetentionDays, &ws.pagesThemeJSON, &ws.appearanceDefaultJSON,
 		&ws.CrewCount, &ws.AgentCount, &ws.MemberCount)
 	if err != nil {
 		return ws, err

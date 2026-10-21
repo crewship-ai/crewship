@@ -23,6 +23,8 @@ import (
 // stub in tests) so the handler can be wired and tested before the
 // real orchestrator integration lands.
 type PipelineHandler struct {
+	// runTokenSecret authenticates optional fresh invocation provenance.
+	runTokenSecret string
 	// queuedKeys serialises same-key manual starts around capacity queuing.
 	queuedKeys         queuedKeyLocks
 	restrictedWorkflow func() *restrictedworkflow.Service
@@ -362,6 +364,8 @@ func (h *PipelineHandler) DrainVerdicts(timeout time.Duration) bool {
 // flatten + camelCase the persistent struct here so the on-disk
 // schema can evolve without breaking the API.
 type pipelineResponse struct {
+	// FolderID is the routine folder it is filed in (ODCH-RT-01); list only.
+	FolderID             string  `json:"folder_id,omitempty"`
 	StepCount            *int    `json:"step_count,omitempty"`
 	HeadVersion          *int    `json:"head_version,omitempty"`
 	LastRecordedRunID    string  `json:"last_recorded_run_id,omitempty"`
@@ -460,6 +464,9 @@ type pipelineDraftRef struct {
 	Revision  int    `json:"revision"`
 	UpdatedAt string `json:"updated_at"`
 	UpdatedBy string `json:"updated_by"`
+	// TestResult is the latest Test run of exactly the definition the draft
+	// holds (ODCH-RT-13); absent when it was not tested.
+	TestResult *pipeline.TestResult `json:"test_result,omitempty"`
 }
 
 // enrichPipelineDrafts attaches the pending draft (if any) to each row from
@@ -470,7 +477,7 @@ func enrichPipelineDrafts(ctx context.Context, db *sql.DB, logger *slog.Logger, 
 	if len(rows) == 0 || db == nil {
 		return
 	}
-	q := `SELECT slug, id, revision, updated_at, updated_by FROM pipeline_drafts WHERE workspace_id = ?`
+	q := `SELECT slug, id, revision, updated_at, updated_by, document_json FROM pipeline_drafts WHERE workspace_id = ?`
 	args := []any{workspaceID}
 	if len(rows) == 1 {
 		q += ` AND slug = ?`
@@ -483,21 +490,37 @@ func enrichPipelineDrafts(ctx context.Context, db *sql.DB, logger *slog.Logger, 
 	}
 	defer res.Close()
 	bySlug := map[string]pipelineDraftRef{}
+	hashOf := map[string]string{}
 	for res.Next() {
-		var slug string
+		var slug, document string
 		var d pipelineDraftRef
-		if err := res.Scan(&slug, &d.ID, &d.Revision, &d.UpdatedAt, &d.UpdatedBy); err != nil {
+		if err := res.Scan(&slug, &d.ID, &d.Revision, &d.UpdatedAt, &d.UpdatedBy, &document); err != nil {
 			logger.Warn("pipeline drafts lookup: scan", "error", err)
 			continue
 		}
 		bySlug[slug] = d
+		var doc struct {
+			Definition json.RawMessage `json:"definition"`
+		}
+		if json.Unmarshal([]byte(document), &doc) == nil && len(doc.Definition) > 0 {
+			hashOf[slug] = definitionHashHex(doc.Definition)
+		}
 	}
 	if err := res.Err(); err != nil {
 		logger.Warn("pipeline drafts lookup: rows", "error", err)
 	}
+	hashes := make([]string, 0, len(hashOf))
+	for _, h := range hashOf {
+		hashes = append(hashes, h)
+	}
+	tested, terr := pipeline.NewStore(db).TestResults(ctx, workspaceID, hashes)
+	if terr != nil {
+		logger.Warn("pipeline drafts lookup: test results", "error", terr)
+	}
 	for i := range rows {
 		if d, ok := bySlug[rows[i].Slug]; ok {
 			ref := d
+			ref.TestResult = tested[hashOf[rows[i].Slug]]
 			rows[i].Draft = &ref
 		}
 	}

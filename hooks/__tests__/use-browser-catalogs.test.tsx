@@ -43,6 +43,10 @@ describe("browser accent", () => {
       act(() => window.dispatchEvent(event))
       expect(result.current[0]).toBe("blue")
     }
+    // A real cross-tab event arrives after the other tab wrote storage, and
+    // the shared appearance store re-reads storage rather than trusting the
+    // event payload — so the write comes first here too.
+    localStorage.setItem(ACCENT_STORAGE_KEY, "graphite")
     act(() => window.dispatchEvent(new StorageEvent("storage", { key: ACCENT_STORAGE_KEY, newValue: "graphite" })))
     expect(result.current[0]).toBe("graphite")
     expect(document.documentElement.dataset.accent).toBe("graphite")

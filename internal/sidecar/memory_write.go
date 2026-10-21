@@ -288,7 +288,7 @@ func (s *Server) handleMemoryWrite(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid scope: use agent or crew"})
 		return
 	}
-	if engine == nil || basePath == "" {
+	if basePath == "" {
 		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": req.Scope + " memory engine not available"})
 		return
 	}
@@ -487,6 +487,10 @@ func (s *Server) handleMemoryWrite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.memoryStorageRoot == "" {
+		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "trusted memory storage root unavailable"})
+		return
+	}
 	cfg := memory.WriteConfig{
 		MaxBytes:     cap,
 		Scrubber:     s.memoryScrubber(),
@@ -512,7 +516,7 @@ func (s *Server) handleMemoryWrite(w http.ResponseWriter, r *http.Request) {
 	// database. Revisions, operation-id idempotency and crash recovery are
 	// therefore NOT in force on this path. See the ledgerless section of
 	// internal/memory/mutate.go.
-	res, err := memory.Mutate(r.Context(), nil, memory.MutateRequest{
+	res, err := memory.MutateRooted(r.Context(), nil, memory.MutateRequest{
 		// Legacy, declared rather than defaulted. The sidecar runs inside the
 		// agent container and has no handle on the host ledger, so it cannot
 		// offer revisions, operation-id idempotency, crash recovery or
@@ -520,6 +524,7 @@ func (s *Server) handleMemoryWrite(w http.ResponseWriter, r *http.Request) {
 		// here needs a host mutation endpoint to call; until that exists this
 		// says what it is, and every response carries revision_checked: false.
 		Profile:        memory.ProfileLegacy,
+		StorageRoot:    s.memoryStorageRoot,
 		OperationID:    operationID,
 		ActorType:      "agent",
 		ActorID:        s.memoryAgentSlug,
@@ -632,8 +637,10 @@ func (s *Server) finishMemoryWrite(w http.ResponseWriter, r *http.Request, engin
 		// Only the file that just changed is re-chunked (finding P2): the
 		// old full-corpus ReindexContext here cost O(corpus) per write, so N
 		// writes against a growing corpus amplified to O(N x corpus).
-		if _, err := engine.ReindexPath(ctx, file); err != nil {
-			s.logger.Warn("post-write reindex failed", "error", err, "scope", scope)
+		if engine != nil {
+			if _, err := engine.ReindexPath(ctx, file); err != nil {
+				s.logger.Warn("post-write reindex failed", "error", err, "scope", scope)
+			}
 		}
 
 		// memory.updated is emitted only on the agent-initiated write
@@ -659,8 +666,10 @@ func (s *Server) finishMemoryWrite(w http.ResponseWriter, r *http.Request, engin
 		// journal don't silently diverge from disk on this path. This
 		// runs on the request goroutine but only when the off-thread
 		// path is unavailable, so the common case stays non-blocking.
-		if _, err := engine.ReindexPath(r.Context(), file); err != nil {
-			s.logger.Warn("post-write reindex failed (sync fallback)", "error", err, "scope", scope)
+		if engine != nil {
+			if _, err := engine.ReindexPath(r.Context(), file); err != nil {
+				s.logger.Warn("post-write reindex failed (sync fallback)", "error", err, "scope", scope)
+			}
 		}
 		s.emitJournal(r.Context(), "memory.updated",
 			"agent wrote "+file,
@@ -850,8 +859,8 @@ func safeJoinUnder(base, rel string) (string, error) {
 	if err != nil {
 		// On first write the parent may not exist; fall back to
 		// returning the (already prefix-checked) cleaned path. The
-		// downstream MkdirAll will create it inside base, so the
-		// symlink-escape window is closed for the create case.
+		// actual local mutation uses StorageRoot and pins parents before
+		// creating anything; this pathname check alone is not a race fence.
 		if os.IsNotExist(err) {
 			return cleaned, nil
 		}
@@ -1214,6 +1223,10 @@ type memoryHostResponse struct {
 // only the internal token, and a mutation the host cannot attribute to an
 // agent is one it must refuse.
 func (s *Server) memoryHostRequest(r *http.Request, method, path string, body []byte) (*memoryHostResponse, error) {
+	return s.boundedHostRequest(r, method, path, body, 10*1024*1024)
+}
+
+func (s *Server) boundedHostRequest(r *http.Request, method, path string, body []byte, responseLimit int64) (*memoryHostResponse, error) {
 	// The three pre-send failures. Each is tagged sent:false because each
 	// happens before anything is dialled, let alone written.
 	if s.ipc == nil {
@@ -1271,12 +1284,15 @@ func (s *Server) memoryHostRequest(r *http.Request, method, path string, body []
 	defer resp.Body.Close()
 	// Bounded like every other IPC read here: these payloads are small
 	// structured JSON, and the cap stops a runaway peer.
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, responseLimit+1))
 	if err != nil {
 		// The request was certainly sent — the host was already answering.
 		// Truncating here says nothing about what it did before the body
 		// stopped arriving.
 		return nil, &memoryHostTransportError{err: fmt.Errorf("read response: %w", err), sent: true}
+	}
+	if int64(len(raw)) > responseLimit {
+		return nil, &memoryHostTransportError{err: errors.New("host response exceeds limit"), sent: true}
 	}
 	return &memoryHostResponse{status: resp.StatusCode, body: raw}, nil
 }
@@ -1318,4 +1334,20 @@ func memoryHostRequestReachedHost(err error) bool {
 		return te.sent
 	}
 	return true
+}
+
+func (s *Server) memoryEngineConfig() memory.Config {
+	cfg := memory.DefaultConfig()
+	cfg.StorageRoot = s.memoryStorageRoot
+	return cfg
+}
+
+func (s *Server) newMemoryEngine(base string) (*memory.Engine, error) {
+	if s.memoryStorageRoot == "" {
+		return nil, fmt.Errorf("trusted memory storage root unavailable")
+	}
+	if err := memory.EnsureDirNoFollow(s.memoryStorageRoot, base); err != nil {
+		return nil, err
+	}
+	return memory.New(base, s.memoryEngineConfig())
 }

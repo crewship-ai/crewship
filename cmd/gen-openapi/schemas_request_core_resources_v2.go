@@ -38,7 +38,7 @@ func coreResourceRequestSchemaCatalogV2() (map[string]DomainSchema, map[string]a
 		"name": str(), "slug": str(), "preferred_language": nullable(str()),
 	}, "name", "slug"))
 	request("CoreWorkspaceUpdateRequestV2", object(map[string]any{
-		"name": nullable(str()), "slug": nullable(str()), "preferred_language": nullable(str()), "pages_theme": pagesThemeSchema(),
+		"name": nullable(str()), "slug": nullable(str()), "preferred_language": nullable(str()), "pages_theme": pagesThemeSchema(), "appearance_default": appearanceDefaultSchema(),
 		"allow_privileged_credentials": nullable(boolean()), "run_retention_days": nullable(integer()),
 		"credential_audit_retention_days": nullable(integer()), "audit_log_retention_days": nullable(integer()),
 		// #2233 — approvals_queue sweep window; 0 is keep-forever, as for
@@ -94,12 +94,13 @@ func coreResourceRequestSchemaCatalogV2() (map[string]DomainSchema, map[string]a
 
 	stringArray := array(str())
 	request("CoreIssueCreateRequestV2", object(map[string]any{
-		"title": str(), "description": nullable(str()), "status": enum("BACKLOG", "TODO", "IN_PROGRESS", "CANCELLED", "DUPLICATE"), "priority": str(), "assignee_type": nullable(enum("user", "agent")), "assignee_id": nullable(str()), "due_date": nullable(str()),
+		"title": str(), "description": nullable(str()), "status": enum("BACKLOG", "TODO", "IN_PROGRESS", "CANCELLED", "DUPLICATE"), "priority": str(), "assignee_type": nullable(enum("user", "agent")), "assignee_id": nullable(str()), "owner_user_id": nullable(str()), "delegate_agent_id": nullable(str()), "due_date": nullable(str()),
 		"project_id": nullable(str()), "estimate": nullable(integer()), "parent_issue_id": nullable(str()), "milestone_id": nullable(str()), "labels": stringArray,
 		"routine_id": nullable(str()), "routine_inputs": freeObject(),
 	}, "title"))
 	request("CoreIssueUpdateRequestV2", object(map[string]any{
-		"title": nullable(str()), "description": nullable(str()), "status": nullable(enum("BACKLOG", "TODO", "IN_PROGRESS", "REVIEW", "DONE", "CANCELLED", "DUPLICATE", "FAILED")), "priority": nullable(str()),
+		"expected_revision": map[string]any{"type": "integer", "minimum": 1, "description": "Optional compare-and-set revision; stale values return 409 revision_conflict. Required by chat card editors."},
+		"title":             nullable(str()), "description": nullable(str()), "status": nullable(enum("BACKLOG", "TODO", "IN_PROGRESS", "REVIEW", "DONE", "CANCELLED", "DUPLICATE", "FAILED")), "priority": nullable(str()),
 		"assignee_type": nullable(enum("user", "agent")), "assignee_id": nullable(str()), "due_date": nullable(str()), "project_id": nullable(str()), "estimate": nullable(integer()), "parent_issue_id": nullable(str()), "milestone_id": nullable(str()), "sort_order": nullable(number()), "labels": nullable(stringArray),
 		"routine_id": nullable(str()), "routine_inputs": nullable(freeObject()),
 	}))

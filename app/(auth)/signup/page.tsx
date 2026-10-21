@@ -1,12 +1,15 @@
 "use client"
 
-import { useState, type FormEvent } from "react"
+import { useEffect, useState, type FormEvent } from "react"
 import { useRouter } from "next/navigation"
-import { AuthSplitShell } from "@/components/branding/auth-split-shell"
+import { Info, UserPlus } from "lucide-react"
+import { AUTH_BUTTON, AUTH_INPUT, AuthBanner, AuthCard, AuthLink, AuthPasswordInput, AuthScreen } from "@/components/branding/auth-card"
+import { CreateSurfaceField, CreateSurfaceNotice } from "@/components/layout/create-surface"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { Spinner } from "@/components/ui/spinner"
 import { serverFetch } from "@/lib/server-base"
+import { captureInvitationProof } from "@/lib/invitation-proof"
 
 export default function SignupPage() {
   const [fullName, setFullName] = useState("")
@@ -14,15 +17,42 @@ export default function SignupPage() {
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   const [error, setError] = useState<string | null>(null)
+  // A wrong value belongs under its field; `error` is what the server refused.
+  const [confirmError, setConfirmError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  // The server refused because sign-up is off. Its message is for the
+  // operator (an env var); the visitor gets the way in that exists.
+  const [closed, setClosed] = useState(false)
   const router = useRouter()
+  // setup-status already says whether sign-up is on; don't draw a form the
+  // server will refuse. A failed probe leaves the form — the 403 path above
+  // still catches it.
+  useEffect(() => {
+    let cancelled = false
+    Promise.resolve(serverFetch("/api/v1/system/setup-status"))
+      .then((r) => (r?.ok ? r.json() : null))
+      .then((d: { allow_signup?: boolean } | null) => {
+        if (!cancelled && d?.allow_signup === false) setClosed(true)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+ const [invitationToken,setInvitationToken]=useState("")
+ useEffect(()=>{setInvitationToken(captureInvitationProof())},[])
+ const joinPath = invitationToken ? "/join" : ""
+ const loginPath = joinPath ? `/login?redirect=${encodeURIComponent(joinPath)}` : "/login"
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setError(null)
+    setConfirmError(null)
 
     if (password !== confirmPassword) {
-      setError("Passwords do not match")
+      setConfirmError("Passwords do not match")
+      // The error sits under the field; focus goes there with it.
+      document.getElementById("confirm_password")?.focus()
       return
     }
 
@@ -31,10 +61,14 @@ export default function SignupPage() {
       const res = await serverFetch("/api/v1/auth/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ full_name: fullName, email, password }),
+        body: JSON.stringify({ full_name: fullName, email, password, ...(invitationToken ? { invitation_token:invitationToken } : {}) }),
       })
 
       if (!res.ok) {
+        if (res.status === 403) {
+          setClosed(true)
+          return
+        }
         const data = await res.json().catch(() => null)
         if (data?.error?.fieldErrors) {
           const messages = Object.values(data.error.fieldErrors).flat()
@@ -50,7 +84,7 @@ export default function SignupPage() {
       // this form "already registered" (the old 409) or logging it straight
       // in would give away who has an account here. So: no auto-login, and
       // a banner on /login that promises no more than the API did.
-      router.push("/login?signup=submitted")
+      router.push(joinPath ? `/login?signup=submitted&redirect=${encodeURIComponent(joinPath)}` : "/login?signup=submitted")
     } catch {
       setError("Network error. Please try again.")
     } finally {
@@ -58,82 +92,107 @@ export default function SignupPage() {
     }
   }
 
+  if (closed) {
+    return (
+      <AuthScreen panel="signup">
+        <AuthCard
+          icon={UserPlus}
+          title="Sign-up is closed"
+          description="This Crewship server only adds people by invitation."
+          banner={
+            <AuthBanner tone="info">
+              Ask an administrator for an invitation. Its email has a link that brings you back here.
+            </AuthBanner>
+          }
+          links={
+            <span className="text-muted-foreground">
+              Already have an account? <AuthLink href={loginPath}>Sign in</AuthLink>
+            </span>
+          }
+        />
+      </AuthScreen>
+    )
+  }
+
   return (
-    <AuthSplitShell
-      eyebrow="Self-hosted"
-      headline="Bring your own hardware."
-      blurb="Every agent runs in its own container, on machines you own."
-    >
-      <div>
-        <p className="font-mono text-[11px] uppercase tracking-[0.11em] text-muted-foreground">
-          Join
-        </p>
-        <h1 className="mt-3 text-balance text-[clamp(24px,2.2vw,30px)] font-extrabold leading-[1.14] tracking-[-0.028em]">
-          Create your account
-        </h1>
-        <p className="mt-2 max-w-[44ch] text-sm text-muted-foreground">
-          One account, then pick the crew you want running.
-        </p>
-        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
-            {error && (
-              <p role="alert" className="text-sm text-destructive text-center">{error}</p>
-            )}
-            <div className="space-y-2">
-              <Label htmlFor="full_name">Full Name</Label>
-              <Input
-                id="full_name"
-                type="text"
-                placeholder="John Doe"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                required
-                minLength={2}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="you@company.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                minLength={8}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="confirm_password">Confirm Password</Label>
-              <Input
-                id="confirm_password"
-                type="password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                required
-                minLength={8}
-              />
-            </div>
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Creating account..." : "Sign Up"}
-            </Button>
-            <p className="text-center text-xs text-muted-foreground">
-              Already have an account?{" "}
-              <a href="/login" className="text-primary hover:underline">
-                Sign in
-              </a>
-            </p>
-        </form>
-      </div>
-    </AuthSplitShell>
+    <AuthScreen panel="signup">
+      <AuthCard
+        icon={UserPlus}
+        title="Create your account"
+        description="One account, then pick the crew you want running."
+        onSubmit={handleSubmit}
+        refusal={error}
+        banner={
+          invitationToken ? (
+            <CreateSurfaceNotice tone="info" icon={Info}>
+              You&apos;re accepting an invitation. Use the address it was sent to.
+            </CreateSurfaceNotice>
+          ) : undefined
+        }
+        links={
+          <span className="text-muted-foreground">
+            Already have an account? <AuthLink href={loginPath}>Sign in</AuthLink>
+          </span>
+        }
+        actions={
+          <Button type="submit" disabled={loading} className={AUTH_BUTTON}>
+            {loading && <Spinner className="size-3.5" />}
+            {loading ? "Creating account…" : "Create account"}
+          </Button>
+        }
+      >
+        <CreateSurfaceField label="Full name" htmlFor="full_name">
+          <Input
+            id="full_name"
+            type="text"
+            autoComplete="name"
+            placeholder="John Doe"
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+            required
+            minLength={2}
+            className={AUTH_INPUT}
+          />
+        </CreateSurfaceField>
+        <CreateSurfaceField label="Email" htmlFor="email">
+          <Input
+            id="email"
+            type="email"
+            autoComplete="email"
+            placeholder="you@company.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            className={AUTH_INPUT}
+          />
+        </CreateSurfaceField>
+        <CreateSurfaceField label="Password" htmlFor="password">
+          <AuthPasswordInput
+            id="password"
+            autoComplete="new-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            minLength={8}
+            rule
+          />
+        </CreateSurfaceField>
+        <CreateSurfaceField label="Confirm password" htmlFor="confirm_password" error={confirmError}>
+          <AuthPasswordInput
+            id="confirm_password"
+            autoComplete="new-password"
+            value={confirmPassword}
+            onChange={(e) => {
+              setConfirmPassword(e.target.value)
+              setConfirmError(null)
+            }}
+            required
+            minLength={8}
+            aria-invalid={confirmError ? true : undefined}
+            aria-describedby={confirmError ? "confirm_password-error" : undefined}
+          />
+        </CreateSurfaceField>
+      </AuthCard>
+    </AuthScreen>
   )
 }

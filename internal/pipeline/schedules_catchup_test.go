@@ -94,7 +94,10 @@ func TestPipelineScheduler_Catchup_Skip(t *testing.T) {
 	runner := &stubAgentRunner{}
 	exec := newScheduleExecutor(pipelineStore, resolver, runner, db)
 
-	dueAt := time.Now().UTC().Add(-5 * time.Minute).Truncate(time.Minute)
+	// Freeze the tick near a cron boundary: executor work may finish after
+	// the wall clock crosses it, but next_run_at is relative to this tick.
+	tickAt := time.Now().UTC().Truncate(time.Minute).Add(59 * time.Second)
+	dueAt := tickAt.Add(-5 * time.Minute).Truncate(time.Minute)
 	now := time.Now().UTC().Format(time.RFC3339Nano) // tsformat:allow: schedule created_at/updated_at are not ordered/compared in SQL; next_run_at (the compared column) uses tsformatForTest
 	_, err = db.ExecContext(context.Background(), `
 INSERT INTO pipeline_schedules
@@ -106,6 +109,7 @@ VALUES ('psched_skip', 'ws_test', 'skip', 'pipe_1', '* * * * *', 'UTC', '{}', 1,
 	}
 
 	scheduler := NewPipelineScheduler(scheduleStore, pipelineStore, exec, nil)
+	scheduler.nowFn = func() time.Time { return tickAt }
 	scheduler.tick(context.Background())
 
 	if got := runner.calls.Load(); got != 0 {
@@ -118,8 +122,9 @@ VALUES ('psched_skip', 'ws_test', 'skip', 'pipe_1', '* * * * *', 'UTC', '{}', 1,
 	if sc.LastMissedCount < 4 {
 		t.Errorf("catchup=skip: expected last_missed_count >= 4 (whole backlog dropped), got %d", sc.LastMissedCount)
 	}
-	if sc.NextRunAt == nil || !sc.NextRunAt.After(time.Now()) {
-		t.Errorf("catchup=skip: expected next_run_at advanced past now, got %v", sc.NextRunAt)
+	wantNext := tickAt.Truncate(time.Minute).Add(time.Minute)
+	if sc.NextRunAt == nil || !sc.NextRunAt.Equal(wantNext) {
+		t.Errorf("catchup=skip: expected next cron occurrence %v after tick %v, got %v", wantNext, tickAt, sc.NextRunAt)
 	}
 	if sc.LastRunID != "" {
 		t.Errorf("catchup=skip: expected no run id recorded, got %q", sc.LastRunID)
@@ -145,7 +150,10 @@ func TestPipelineScheduler_Catchup_All(t *testing.T) {
 	runner := &stubAgentRunner{}
 	exec := newScheduleExecutor(pipelineStore, resolver, runner, db)
 
-	dueAt := time.Now().UTC().Add(-5 * time.Minute).Truncate(time.Minute)
+	// Freeze the tick near a cron boundary: executor work may finish after
+	// the wall clock crosses it, but next_run_at is relative to this tick.
+	tickAt := time.Now().UTC().Truncate(time.Minute).Add(59 * time.Second)
+	dueAt := tickAt.Add(-5 * time.Minute).Truncate(time.Minute)
 	now := time.Now().UTC().Format(time.RFC3339Nano) // tsformat:allow: schedule created_at/updated_at are not ordered/compared in SQL; next_run_at (the compared column) uses tsformatForTest
 	_, err = db.ExecContext(context.Background(), `
 INSERT INTO pipeline_schedules
@@ -157,6 +165,7 @@ VALUES ('psched_all', 'ws_test', 'all', 'pipe_1', '* * * * *', 'UTC', '{}', 1, ?
 	}
 
 	scheduler := NewPipelineScheduler(scheduleStore, pipelineStore, exec, nil)
+	scheduler.nowFn = func() time.Time { return tickAt }
 	scheduler.tick(context.Background())
 
 	if got := runner.calls.Load(); got < 4 {
@@ -172,8 +181,9 @@ VALUES ('psched_all', 'ws_test', 'all', 'pipe_1', '* * * * *', 'UTC', '{}', 1, ?
 	if sc.LastStatus != "COMPLETED" {
 		t.Errorf("catchup=all: expected last_status COMPLETED, got %q", sc.LastStatus)
 	}
-	if sc.NextRunAt == nil || !sc.NextRunAt.After(time.Now()) {
-		t.Errorf("catchup=all: expected next_run_at advanced past now, got %v", sc.NextRunAt)
+	wantNext := tickAt.Truncate(time.Minute).Add(time.Minute)
+	if sc.NextRunAt == nil || !sc.NextRunAt.Equal(wantNext) {
+		t.Errorf("catchup=all: expected next cron occurrence %v after tick %v, got %v", wantNext, tickAt, sc.NextRunAt)
 	}
 }
 

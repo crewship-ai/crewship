@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
@@ -66,7 +68,7 @@ func (h *JournalHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"entries":     serializeEntries(entries),
+		"entries":     costAwareEntries(r.Context(), entries),
 		"next_cursor": next,
 		"count":       len(entries),
 	})
@@ -85,6 +87,10 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
 		replyError(w, http.StatusUnauthorized, "workspace required")
+		return
+	}
+	if !h.streamAuthorityCurrent(r, workspaceID) {
+		replyError(w, http.StatusForbidden, "Journal stream unavailable with your access")
 		return
 	}
 	q, err := h.journalQuery(r, workspaceID)
@@ -129,12 +135,19 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		hasWatermark bool
 	)
 	if resumeID != "" {
-		if resumed, err := journal.Get(r.Context(), h.db, workspaceID, resumeID); err == nil && resumed != nil {
-			lastSeenTime = resumed.TS.UTC()
-			lastSeenID = resumed.ID
-			hasWatermark = true
-		} else if err != nil {
-			h.logger.Warn("journal stream resume lookup failed", "err", err, "resume_id", resumeID)
+		viewerID := ""
+		if user := UserFromContext(r.Context()); user != nil {
+			viewerID = user.ID
+		}
+		allowed, accessErr := chataudience.CanReadDecisionJournal(r.Context(), h.db, workspaceID, resumeID, viewerID)
+		if accessErr == nil && allowed {
+			if resumed, lookupErr := journal.Get(r.Context(), h.db, workspaceID, resumeID); lookupErr == nil && resumed != nil {
+				lastSeenTime = resumed.TS.UTC()
+				lastSeenID = resumed.ID
+				hasWatermark = true
+			} else if lookupErr != nil {
+				h.logger.Warn("journal stream resume lookup failed", "err", lookupErr)
+			}
 		}
 	}
 
@@ -219,7 +232,13 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 		}
-		writeSSEEvent(w, "entry", e)
+		if !h.streamAuthorityCurrent(r, workspaceID) {
+			return
+		}
+		if !auth.StreamCredentialCurrent(r.Context()) {
+			return
+		}
+		writeSSEEvent(r.Context(), w, "entry", e)
 		lastSeenTime = ts
 		lastSeenID = e.ID
 		hasWatermark = true
@@ -261,7 +280,10 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
 
-	poll := func() {
+	poll := func() bool {
+		if !h.streamAuthorityCurrent(r, workspaceID) {
+			return false
+		}
 		pq := q
 		pq.Since = lastSeenTime
 		pq.Cursor = ""
@@ -269,7 +291,7 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		rows, _, err := journal.List(r.Context(), h.db, pq)
 		if err != nil {
 			h.logger.Warn("journal stream poll failed", "err", err)
-			return
+			return true
 		}
 		// Emit oldest first so the client timeline appends in order.
 		for i := len(rows) - 1; i >= 0; i-- {
@@ -285,11 +307,18 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			if ts.Before(lastSeenTime) || (ts.Equal(lastSeenTime) && e.ID <= lastSeenID) {
 				continue
 			}
-			writeSSEEvent(w, "entry", e)
+			if !h.streamAuthorityCurrent(r, workspaceID) {
+				return false
+			}
+			if !auth.StreamCredentialCurrent(r.Context()) {
+				return false
+			}
+			writeSSEEvent(r.Context(), w, "entry", e)
 			lastSeenTime = ts
 			lastSeenID = e.ID
 		}
 		flusher.Flush()
+		return true
 	}
 
 	for {
@@ -297,15 +326,25 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-heartbeat.C:
+			if !h.streamAuthorityCurrent(r, workspaceID) {
+				return
+			}
+			if !auth.StreamCredentialCurrent(r.Context()) {
+				return
+			}
 			_, _ = fmt.Fprintf(w, ": heartbeat\n\n")
 			flusher.Flush()
 		case <-notifyCh:
-			poll()
+			if !poll() {
+				return
+			}
 			if n, ok := h.journal.(flushNotifier); ok {
 				notifyCh = n.Notify() // single-use channel — re-subscribe
 			}
 		case <-fallback.C:
-			poll()
+			if !poll() {
+				return
+			}
 		}
 	}
 }
@@ -461,6 +500,12 @@ func (h *JournalHandler) journalQuery(r *http.Request, workspaceID string) (jour
 	if err != nil {
 		return q, err
 	}
+	q.SourceAudienceSQL = chataudience.DecisionJournalReadSQL
+	viewerID := ""
+	if user := UserFromContext(r.Context()); user != nil {
+		viewerID = user.ID
+	}
+	q.SourceAudienceArgs = chataudience.DecisionJournalReadArgs(viewerID)
 	h.resolveJournalRefs(r.Context(), &q)
 	return q, nil
 }
@@ -610,6 +655,19 @@ func (h *JournalHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	viewerID := ""
+	if user := UserFromContext(r.Context()); user != nil {
+		viewerID = user.ID
+	}
+	allowed, accessErr := chataudience.CanReadDecisionJournal(r.Context(), h.db, workspaceID, entryID, viewerID)
+	if accessErr != nil {
+		replyError(w, 500, "journal get failed")
+		return
+	}
+	if !allowed {
+		replyError(w, 404, "entry not found")
+		return
+	}
 	entry, err := journal.Get(r.Context(), h.db, workspaceID, entryID)
 	if err != nil {
 		h.logger.Error("journal get failed", "err", err, "entry_id", entryID)
@@ -623,7 +681,7 @@ func (h *JournalHandler) Get(w http.ResponseWriter, r *http.Request) {
 	// Reuse the list serializer so single-entry shape stays identical to
 	// the array form a client just paged through. The slice form is the
 	// only one that survived as the canonical serialiser.
-	writeJSON(w, http.StatusOK, serializeEntries([]journal.Entry{*entry})[0])
+	writeJSON(w, http.StatusOK, costAwareEntries(r.Context(), []journal.Entry{*entry})[0])
 }
 
 // Count serves GET /api/v1/journal/count. Returns the total number of
@@ -671,6 +729,7 @@ func (h *JournalHandler) Count(w http.ResponseWriter, r *http.Request) {
 }
 
 // Spend serves GET /api/v1/journal/spend — the #1404 cost rollup.
+// OWNER/ADMIN only (#3590).
 // Query params:
 //
 //	window=24h|7d|30d — default 24h
@@ -679,6 +738,9 @@ func (h *JournalHandler) Spend(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
 		replyError(w, http.StatusUnauthorized, "workspace required")
+		return
+	}
+	if !requireSpendReader(w, r) {
 		return
 	}
 
@@ -939,8 +1001,28 @@ func serializeEntries(entries []journal.Entry) []map[string]any {
 // writeSSEEvent frames one journal entry as an SSE message. Uses the
 // entry's ID as the SSE event ID so the client's automatic Last-Event-ID
 // handling lets reconnects skip already-seen rows.
-func writeSSEEvent(w http.ResponseWriter, eventType string, e journal.Entry) {
-	payload := serializeEntries([]journal.Entry{e})[0]
+func writeSSEEvent(ctx context.Context, w http.ResponseWriter, eventType string, e journal.Entry) {
+	payload := costAwareEntries(ctx, []journal.Entry{e})[0]
 	data, _ := json.Marshal(payload)
 	_, _ = fmt.Fprintf(w, "id: %s\nevent: %s\ndata: %s\n\n", e.ID, eventType, data)
+}
+
+// The opening middleware authenticates the credential; every emitted batch and
+// entry still needs current account, workspace and account-wide Guest authority.
+func (h *JournalHandler) streamAuthorityCurrent(r *http.Request, workspace string) bool {
+	if !auth.StreamCredentialCurrent(r.Context()) {
+		return false
+	}
+	user := UserFromContext(r.Context())
+	if user == nil {
+		return false
+	}
+	var allowed bool
+	err := h.db.QueryRowContext(r.Context(), `SELECT EXISTS(
+ SELECT 1 FROM workspace_members m
+ JOIN users u ON u.id=m.user_id AND u.suspended_at IS NULL
+ JOIN workspaces w ON w.id=m.workspace_id AND w.deleted_at IS NULL
+ WHERE m.workspace_id=? AND m.user_id=? AND m.access_mode='trusted'
+ AND NOT EXISTS(SELECT 1 FROM workspace_members other WHERE other.user_id=m.user_id AND other.access_mode='restricted'))`, workspace, user.ID).Scan(&allowed)
+	return err == nil && allowed
 }

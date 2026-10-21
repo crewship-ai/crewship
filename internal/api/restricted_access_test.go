@@ -13,6 +13,12 @@ import (
 )
 
 func TestRestrictedAuthorityAcrossAuthenticatedRoutes(t *testing.T) {
+	for _, role := range []string{"VIEWER", "MEMBER"} {
+		t.Run(role, func(t *testing.T) { testRestrictedReadAuthority(t, role) })
+	}
+}
+
+func testRestrictedReadAuthority(t *testing.T, role string) {
 	db := setupTestDB(t)
 	owner := seedTestUser(t, db)
 	workspace := seedTestWorkspace(t, db, owner)
@@ -28,13 +34,13 @@ func TestRestrictedAuthorityAcrossAuthenticatedRoutes(t *testing.T) {
 	}
 	for _, user := range []string{"access-h1", "access-h2"} {
 		execOrFatal(t, db, `INSERT INTO users(id,email) VALUES (?,?)`, user, user+"@access.test")
-		execOrFatal(t, db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES (?,?,?,'MEMBER')`, user, workspace, user)
+		execOrFatal(t, db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES (?,?,?,?)`, user, workspace, user, role)
 		execOrFatal(t, db, `INSERT INTO chats(id,workspace_id,agent_id,created_by,visibility,title,status) VALUES (?,?,'access-a',?,'private',?,'ACTIVE')`, user+"-chat", workspace, user, user+"-private-canary")
 		member, e := store.Membership(t.Context(), user, workspace)
 		if e != nil {
 			t.Fatal(e)
 		}
-		if _, e = store.Replace(t.Context(), owner, user, workspace, "restricted", member, []access.Right{{Kind: "agent", ID: "access-a", Operation: "chat"}}); e != nil {
+		if _, e = store.Replace(t.Context(), owner, user, workspace, "restricted", member, []access.Right{{Kind: "agent", ID: "access-a", Operation: "chat"}, {Kind: "agent", ID: "access-a", Operation: "discover"}}); e != nil {
 			t.Fatal(e)
 		}
 		session, e := sessions.NewDBStore(db).Create(t.Context(), user, "test", "127.0.0.1", auth.RefreshTokenTTL)
@@ -50,6 +56,7 @@ func TestRestrictedAuthorityAcrossAuthenticatedRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(router.Shutdown)
 	request := func(user, method, path string) *httptest.ResponseRecorder {
 		t.Helper()
 		req := httptest.NewRequest(method, path, nil)
@@ -57,12 +64,22 @@ func TestRestrictedAuthorityAcrossAuthenticatedRoutes(t *testing.T) {
 		req.Header.Set("X-Workspace-ID", workspace)
 		rr := httptest.NewRecorder()
 		router.ServeHTTP(rr, req)
+		if method == "GET" && req.Pattern == "" {
+			t.Fatalf("test used an unregistered route: %s %s", method, path)
+		}
 		return rr
 	}
 	for _, user := range []string{"access-h1", "access-h2"} {
 		other := "access-h1"
 		if user == other {
 			other = "access-h2"
+		}
+		directory := request(user, "GET", "/api/v1/agents")
+		if directory.Code != 200 || !strings.Contains(directory.Body.String(), `"id":"access-a"`) || strings.Contains(directory.Body.String(), `"id":"access-b"`) || directory.Header().Get("X-Total-Count") != "1" {
+			t.Fatalf("agent visibility: %d %s", directory.Code, directory.Body.String())
+		}
+		if denied := request(user, "GET", "/api/v1/agents/access-b"); denied.Code != 404 {
+			t.Fatalf("ungranted agent detail: %d %s", denied.Code, denied.Body.String())
 		}
 		rr := request(user, "GET", "/api/v1/agents/access-a/chats?counts=1")
 		if rr.Code != 200 || !strings.Contains(rr.Body.String(), user+"-private-canary") || strings.Contains(rr.Body.String(), other+"-private-canary") || rr.Header().Get("X-Total-Count") != "1" {
@@ -74,6 +91,15 @@ func TestRestrictedAuthorityAcrossAuthenticatedRoutes(t *testing.T) {
 			"/api/v1/crews/access-crew/files", "/api/v1/agents/access-a/credentials",
 			"/api/v1/chats/" + other + "-chat/messages", "/api/v1/ws-token",
 			"/api/v1/projects", "/api/v1/journal",
+			// Every broad list and direct-object route must remain closed,
+			// even with a real agent/chat grant in this same workspace.
+			"/api/v1/issues", "/api/v1/issues/HIDDEN-1",
+			"/api/v1/crews/access-crew/issues/HIDDEN-1",
+			"/api/v1/workspaces/" + workspace + "/pipelines",
+			"/api/v1/workspaces/" + workspace + "/pipelines/hidden-routine",
+			"/api/v1/pages", "/api/v1/pages/hidden-page",
+			"/api/v1/credentials", "/api/v1/credentials/hidden-credential",
+			"/api/v1/crews", "/api/v1/agents/access-a/memory",
 		} {
 			rr = request(user, "GET", path)
 			if rr.Code != http.StatusNotFound {

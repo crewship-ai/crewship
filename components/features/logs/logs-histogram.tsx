@@ -25,6 +25,8 @@ interface LogsHistogramProps {
    */
   onSelect?: (range: BucketRange | null) => void
   height?: number
+  /** The label over the bars; Backups › Runs says what it counts. */
+  title?: string
 }
 
 /** Minimum X-axis pixel travel between mousedown and mouseup to count as a drag. */
@@ -60,6 +62,7 @@ export function LogsHistogram({
   selected,
   onSelect,
   height = 64,
+  title = "Events · stacked by severity",
 }: LogsHistogramProps) {
   const { data, fromMs: windowFrom, toMs: windowTo } = useMemo(
     () => computeBuckets(entries, timeRange, customRange),
@@ -243,7 +246,7 @@ export function LogsHistogram({
     <div className="px-3 py-2 border-b border-border/50 bg-card/40">
       <div className="flex items-end justify-between mb-1 gap-3 flex-wrap">
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-          Events · stacked by severity
+          {title}
           {totalEvents > 0 && (
             <span className="ml-2 normal-case opacity-70">{totalEvents.toLocaleString()} in window</span>
           )}

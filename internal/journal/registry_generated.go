@@ -20,11 +20,12 @@ var AllEntryTypes = []EntryType{
 	EntryAgentError,
 	EntryAgentMentioned,
 	EntryAgentStatus,
-	EntryType("approval.auto_tuning_reset"), // journalApprovalAutoTuningReset, internal/api/approvals_handler.go:27:7
+	EntryType("approval.auto_tuning_reset"), // journalApprovalAutoTuningReset, internal/api/approvals_handler.go:28:7
 	EntryApprovalCancelled,
 	EntryApprovalDenied,
 	EntryApprovalGranted,
 	EntryApprovalRequest,
+	EntryApprovalSourceRetired,
 	EntryApprovalTimeout,
 	EntryTrustGranted,
 	EntryTrustRevoked,
@@ -59,6 +60,8 @@ var AllEntryTypes = []EntryType{
 	EntryCredentialRevealed,
 	EntryCredentialSensitivityLowered,
 	EntryCrewAction,
+	EntryCrewMemberChanged,
+	EntryEscalationSourceClassified,
 	EntryEvalMetric,
 	EntryEvalRegression,
 	EntryEvalRunStarted,
@@ -72,11 +75,21 @@ var AllEntryTypes = []EntryType{
 	EntryHookDispatchError,
 	EntryHookFired,
 	EntryImageStale,
+	EntryInvitationAccepted,
+	EntryInvitationCreated,
+	EntryInvitationReissued,
+	EntryInvitationRevoked,
 	EntryKeeperDecision,
 	EntryKeeperRequest,
 	EntryType("keeper.rule_auto_tuned"), // internal/harbormaster/reward.go:226:16
 	EntryLLMCacheHit,
 	EntryLLMCall,
+	EntryMemberAccessChanged,
+	EntryMemberAdded,
+	EntryMemberCapabilitiesChanged,
+	EntryMemberOwnerCreated,
+	EntryMemberRemoved,
+	EntryMemberRoleChanged,
 	EntryMemoryConfigUpdated,
 	EntryMemoryConsolidated,
 	EntryMemoryConsolidationProposed,
@@ -107,14 +120,14 @@ var AllEntryTypes = []EntryType{
 	EntryType("page.folder_membership_changed"), // entryPageFolderMembershipChanged, internal/api/pages_folders.go:79:2
 	EntryPageGrantAdded,
 	EntryPageGrantRemoved,
-	EntryType("page.link_revoked"),      // journalPageLinkRevoked, internal/api/pages_public_tokens.go:793:2
-	EntryType("page.owner_transferred"), // entryPageOwnerTransferred, internal/api/pages_transfer_owner.go:53:7
+	EntryType("page.link_revoked"),      // journalPageLinkRevoked, internal/api/pages_public_tokens.go:797:2
+	EntryType("page.owner_transferred"), // entryPageOwnerTransferred, internal/api/pages_transfer_owner.go:57:7
 	EntryPagePanelRecovered,
 	EntryPagePanelStale,
 	EntryPagePanelUpdated,
 	EntryPageProduceDenied,
-	EntryType("page.public_view"), // journalPagePublicView, internal/api/pages_public_tokens.go:796:2
-	EntryType("page.published"),   // journalPagePublished, internal/api/pages_public_tokens.go:792:2
+	EntryType("page.public_view"), // journalPagePublicView, internal/api/pages_public_tokens.go:800:2
+	EntryType("page.published"),   // journalPagePublished, internal/api/pages_public_tokens.go:796:2
 	EntryPageSpecChanged,
 	EntryPageWakeFired,
 	EntryType("page.webhook_issued"),  // journalPageWebhookIssued, internal/api/pages_webhooks.go:451:2
@@ -144,7 +157,7 @@ var AllEntryTypes = []EntryType{
 	EntryProvisioningFailed,
 	EntryProvisioningQueued,
 	EntryProvisioningStep,
-	EntryType("queue.sweeper_pumped"), // internal/api/assignments_stuck_sweeper.go:141:15
+	EntryType("queue.sweeper_pumped"), // internal/api/assignments_stuck_sweeper.go:142:15
 	EntryRunAgentSpan,
 	EntryRunCancelled,
 	EntryRunCompleted,
@@ -154,10 +167,12 @@ var AllEntryTypes = []EntryType{
 	EntryRunStarted,
 	EntryRunTimeout,
 	EntrySidecarStale,
+	EntrySkillArchived,
 	EntrySkillAssigned,
 	EntrySkillDeleted,
 	EntrySkillImported,
 	EntrySkillInvoked,
+	EntrySkillRestored,
 	EntrySkillUnassigned,
 	EntrySummaryGenerated,
 	EntrySystemCompaction,

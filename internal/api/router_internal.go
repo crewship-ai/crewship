@@ -43,6 +43,7 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 		internal.SetComposioDefaultConnector(r.composioConfig.DefaultConnector, r.composioConfig.BaseURL)
 	}
 	internal.SetJournal(r.Journal())
+	internal.documentCreationEnabled = r.pages != nil && r.pages.documentCall != nil
 	// Derive approval_mode from the crew autonomy policy in the resolve
 	// response so the request-builder can revive the harbormaster HITL gate
 	// on every dispatch path (#810). Shares the Router's cached resolver.
@@ -65,7 +66,10 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	// in-flight post-run verdict goroutines before the journal closes
 	// (Router.DrainVerdicts). Otherwise `internal` is local to this func.
 	r.internalHandler = internal
-	internalAuth := internal.requireInternal
+	internalAuth := func(next http.Handler) http.Handler { return internal.requireInternal(withHostChatOrigin(next)) }
+	r.mux.Handle("POST /api/v1/internal/documents/create", internalAuth(http.HandlerFunc(r.pages.CreateDocumentAgent)))
+	r.mux.Handle("GET /api/v1/internal/documents/draft", internalAuth(http.HandlerFunc(r.pages.GetDocumentDraftAgent)))
+	r.mux.Handle("POST /api/v1/internal/documents/draft", internalAuth(http.HandlerFunc(r.pages.MutateDocumentDraftAgent)))
 	// Pipeline save — sidecar→main forward. Trust comes from
 	// X-Internal-Token (sidecar attaches it via proxyIPCJSON);
 	// regular JWT-authed users hit the public surface instead.
@@ -125,6 +129,7 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	// the parent handler skip the mirror entirely.
 	if pipes != nil {
 		routineAdapter := NewRoutineInternalAdapter(pipes)
+		routineAdapter.SetRunTokenSecret(r.internalToken)
 		// #1768: the autonomy gate. Without this the adapter falls back to
 		// the conservative guided default (every schedule staged disabled),
 		// which is safe but not what an operator on trusted/full configured.
@@ -254,7 +259,11 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	}
 	r.mux.Handle("GET /api/v1/internal/issues", internalAuth(http.HandlerFunc(internalIssues.List)))
 	r.mux.Handle("GET /api/v1/internal/issues/{identifier}", internalAuth(http.HandlerFunc(internalIssues.Get)))
+	r.mux.Handle("PATCH /api/v1/internal/chat-proposals/{sourceId}", internalAuth(http.HandlerFunc(r.internalProposalEdit)))
+	r.mux.Handle("POST /api/v1/internal/chat-proposals", internalAuth(http.HandlerFunc(r.internalProposalCreate)))
 	r.mux.Handle("POST /api/v1/internal/issues", internalAuth(http.HandlerFunc(internalIssues.Create)))
+	r.mux.Handle("POST /api/v1/internal/issues/authority", internalAuth(http.HandlerFunc(internalIssues.ClassifyRun)))
+	r.mux.Handle("POST /api/v1/internal/issues/{identifier}/show", internalAuth(http.HandlerFunc(internalIssues.Show)))
 	r.mux.Handle("PATCH /api/v1/internal/issues/{identifier}", internalAuth(http.HandlerFunc(internalIssues.UpdateStatus)))
 	r.mux.Handle("POST /api/v1/internal/issues/{identifier}/work", internalAuth(http.HandlerFunc(internalIssues.Work)))
 	r.mux.Handle("POST /api/v1/internal/issues/{identifier}/comments", internalAuth(http.HandlerFunc(internalIssues.CreateComment)))

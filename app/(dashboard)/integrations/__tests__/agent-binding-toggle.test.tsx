@@ -106,7 +106,7 @@ describe("agent↔integration binding toggle", () => {
     fireEvent.click(await openAgentChip())
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith("crew is not linked to this integration")
+      expect(toast.error).toHaveBeenCalledWith("crew is not linked to this integration", { duration: Infinity })
     })
     expect(toast.success).not.toHaveBeenCalled()
   })
@@ -116,7 +116,7 @@ describe("agent↔integration binding toggle", () => {
     fireEvent.click(await openAgentChip())
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/access/i))
+      expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/access/i), { duration: Infinity })
     })
   })
 

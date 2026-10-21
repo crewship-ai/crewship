@@ -66,12 +66,13 @@ func (h *CrewPolicyHandler) SetJournal(j journal.Emitter) {
 // crewPolicyResponse is the wire shape returned by GET and the
 // success envelope of PUT.
 type crewPolicyResponse struct {
-	CrewID        string `json:"crew_id"`
-	AutonomyLevel string `json:"autonomy_level"`
-	BehaviorMode  string `json:"behavior_mode"`
-	SetByUserID   string `json:"set_by_user_id,omitempty"`
-	SetAt         string `json:"set_at,omitempty"`
-	Reason        string `json:"reason,omitempty"`
+	WholeRunApproval bool   `json:"whole_run_approval"`
+	CrewID           string `json:"crew_id"`
+	AutonomyLevel    string `json:"autonomy_level"`
+	BehaviorMode     string `json:"behavior_mode"`
+	SetByUserID      string `json:"set_by_user_id,omitempty"`
+	SetAt            string `json:"set_at,omitempty"`
+	Reason           string `json:"reason,omitempty"`
 }
 
 // crewPolicyUpdateBody is the wire shape accepted by PUT. Reason is
@@ -79,13 +80,13 @@ type crewPolicyResponse struct {
 // move to autonomy_level=full (enforced at validation, not
 // signature).
 type crewPolicyUpdateBody struct {
-	AutonomyLevel string `json:"autonomy_level"`
-	BehaviorMode  string `json:"behavior_mode"`
-	Reason        string `json:"reason"`
+	WholeRunApproval *bool  `json:"whole_run_approval"`
+	AutonomyLevel    string `json:"autonomy_level"`
+	BehaviorMode     string `json:"behavior_mode"`
+	Reason           string `json:"reason"`
 }
 
-// Get returns the current policy for a crew. Defaults (guided/warn)
-// are baked into the DB by v98, so this is always a single SELECT.
+// Get returns the current policy for a crew, including its live whole-run opt-in.
 func (h *CrewPolicyHandler) Get(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 	if crewID == "" {
@@ -109,7 +110,12 @@ func (h *CrewPolicyHandler) Get(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "resolve policy")
 		return
 	}
-	writeJSON(w, http.StatusOK, marshalPolicy(p))
+	resp := marshalPolicy(p)
+	if err := h.db.QueryRowContext(r.Context(), `SELECT whole_run_approval FROM crews WHERE id=? AND workspace_id=? AND deleted_at IS NULL`, crewID, workspaceID).Scan(&resp.WholeRunApproval); err != nil {
+		replyError(w, http.StatusInternalServerError, "resolve whole-run approval policy")
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // Put updates the policy for a crew. Validation is the same closed-
@@ -166,27 +172,29 @@ func (h *CrewPolicyHandler) Put(w http.ResponseWriter, r *http.Request) {
 
 	// Scope the UPDATE itself to workspace + deleted_at IS NULL so a
 	// row deleted (or never owned by this workspace) between a prior
-	// check and the write cannot slip through. RowsAffected == 0 is
-	// the canonical "no such crew in this workspace" signal.
-	res, err := h.db.ExecContext(r.Context(),
+	// check and the write cannot slip through. RETURNING binds the opt-in
+	// response and audit value to this exact update, including omitted fields.
+	var wholeRunApproval bool
+	err := h.db.QueryRowContext(r.Context(),
 		`UPDATE crews
 		    SET autonomy_level = ?,
 		        behavior_mode = ?,
 		        autonomy_set_by_user_id = ?,
 		        autonomy_set_at = ?,
-		        autonomy_reason = ?
-		  WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		        autonomy_reason = ?,
+		        whole_run_approval = COALESCE(?, whole_run_approval)
+		  WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL RETURNING whole_run_approval`,
 		body.AutonomyLevel, body.BehaviorMode,
-		nullIfEmpty(userID), now, nullIfEmpty(body.Reason),
+		nullIfEmpty(userID), now, nullIfEmpty(body.Reason), body.WholeRunApproval,
 		crewID, workspaceID,
-	)
+	).Scan(&wholeRunApproval)
+	if errors.Is(err, sql.ErrNoRows) {
+		replyError(w, http.StatusNotFound, "crew not found")
+		return
+	}
 	if err != nil {
 		h.logger.Error("policy.Put: update", "crew_id", crewID, "error", err)
 		replyError(w, http.StatusInternalServerError, "update policy")
-		return
-	}
-	if rows, _ := res.RowsAffected(); rows == 0 {
-		replyError(w, http.StatusNotFound, "crew not found")
 		return
 	}
 
@@ -204,10 +212,11 @@ func (h *CrewPolicyHandler) Put(w http.ResponseWriter, r *http.Request) {
 		ActorID:     userID,
 		Summary:     "crew policy updated: " + body.AutonomyLevel + "/" + body.BehaviorMode,
 		Payload: map[string]any{
-			"crew_id":        crewID,
-			"autonomy_level": body.AutonomyLevel,
-			"behavior_mode":  body.BehaviorMode,
-			"reason":         body.Reason,
+			"whole_run_approval": wholeRunApproval,
+			"crew_id":            crewID,
+			"autonomy_level":     body.AutonomyLevel,
+			"behavior_mode":      body.BehaviorMode,
+			"reason":             body.Reason,
 		},
 		Refs: map[string]any{"crew_id": crewID},
 	}); jerr != nil {
@@ -215,12 +224,13 @@ func (h *CrewPolicyHandler) Put(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := crewPolicyResponse{
-		CrewID:        crewID,
-		AutonomyLevel: body.AutonomyLevel,
-		BehaviorMode:  body.BehaviorMode,
-		SetByUserID:   userID,
-		SetAt:         now,
-		Reason:        body.Reason,
+		WholeRunApproval: wholeRunApproval,
+		CrewID:           crewID,
+		AutonomyLevel:    body.AutonomyLevel,
+		BehaviorMode:     body.BehaviorMode,
+		SetByUserID:      userID,
+		SetAt:            now,
+		Reason:           body.Reason,
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -230,7 +240,7 @@ func (h *CrewPolicyHandler) Put(w http.ResponseWriter, r *http.Request) {
 func (h *CrewPolicyHandler) List(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT id, autonomy_level, behavior_mode,
+		SELECT id, autonomy_level, behavior_mode, whole_run_approval,
 		       autonomy_set_by_user_id, autonomy_set_at, autonomy_reason
 		FROM crews
 		WHERE workspace_id = ? AND deleted_at IS NULL
@@ -247,21 +257,23 @@ func (h *CrewPolicyHandler) List(w http.ResponseWriter, r *http.Request) {
 	out := []crewPolicyResponse{}
 	for rows.Next() {
 		var (
+			wholeRunApproval     bool
 			id, lvl, mode        string
 			setBy, setAt, reason sql.NullString
 		)
-		if err := rows.Scan(&id, &lvl, &mode, &setBy, &setAt, &reason); err != nil {
+		if err := rows.Scan(&id, &lvl, &mode, &wholeRunApproval, &setBy, &setAt, &reason); err != nil {
 			h.logger.Error("policy.List: scan", "error", err)
 			replyError(w, http.StatusInternalServerError, "list policies")
 			return
 		}
 		out = append(out, crewPolicyResponse{
-			CrewID:        id,
-			AutonomyLevel: lvl,
-			BehaviorMode:  mode,
-			SetByUserID:   setBy.String,
-			SetAt:         setAt.String,
-			Reason:        reason.String,
+			WholeRunApproval: wholeRunApproval,
+			CrewID:           id,
+			AutonomyLevel:    lvl,
+			BehaviorMode:     mode,
+			SetByUserID:      setBy.String,
+			SetAt:            setAt.String,
+			Reason:           reason.String,
 		})
 	}
 	if err := rows.Err(); err != nil {

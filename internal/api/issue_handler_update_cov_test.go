@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -95,35 +94,44 @@ func TestCovIHU_Update_ExecError_500(t *testing.T) {
 	}
 }
 
-// TestCovIHU_Update_LabelWriteFailures_NonFatal — label replacement is
-// best-effort: blocked DELETE/INSERT on mission_labels only log, the
-// PATCH still answers 200 with the issue body.
-func TestCovIHU_Update_LabelWriteFailures_NonFatal(t *testing.T) {
-	db := setupTestDB(t)
-	userID, wsID, crewID, leadID, _ := seedIssueFixtures(t, db)
-	h := NewIssueHandler(db, nil, nil, newTestLogger())
-	missionID := seedIssue(t, db, wsID, crewID, leadID, "ENG-1", "BACKLOG")
-	execOrFatal(t, db, `INSERT INTO labels (id, workspace_id, name, color, created_at)
-		VALUES ('covihu-l1', ?, 'bug', '#f00', datetime('now'))`, wsID)
-	execOrFatal(t, db, `INSERT INTO labels (id, workspace_id, name, color, created_at)
-		VALUES ('covihu-l2', ?, 'infra', '#0f0', datetime('now'))`, wsID)
-	execOrFatal(t, db, `INSERT INTO mission_labels (mission_id, label_id) VALUES (?, 'covihu-l1')`, missionID)
-	execOrFatal(t, db, `CREATE TRIGGER covihu_block_ml_del BEFORE DELETE ON mission_labels
-		BEGIN SELECT RAISE(ABORT, 'covihu forced'); END`)
-	execOrFatal(t, db, `CREATE TRIGGER covihu_block_ml_ins BEFORE INSERT ON mission_labels
-		BEGIN SELECT RAISE(ABORT, 'covihu forced'); END`)
-
-	rr := covIHUPatch(h, userID, wsID, crewID, "ENG-1", map[string]any{"labels": []string{"covihu-l2"}})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (label writes are best-effort); body=%s",
-			rr.Code, rr.Body.String())
-	}
-	var resp map[string]any
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if resp["identifier"] != "ENG-1" {
-		t.Errorf("resp identifier = %v, want ENG-1", resp["identifier"])
+// A failed label replacement must roll back the whole PATCH, including fields
+// already written and their revision counters. Exercise DELETE and INSERT
+// failures separately so a successful removal cannot hide a failed insertion.
+func TestCovIHU_Update_LabelWriteFailures_Rollback(t *testing.T) {
+	for _, operation := range []string{"DELETE", "INSERT"} {
+		t.Run(operation, func(t *testing.T) {
+			db := setupTestDB(t)
+			userID, wsID, crewID, leadID, _ := seedIssueFixtures(t, db)
+			h := NewIssueHandler(db, nil, nil, newTestLogger())
+			missionID := seedIssue(t, db, wsID, crewID, leadID, "ENG-1", "BACKLOG")
+			execOrFatal(t, db, `INSERT INTO labels(id,workspace_id,name,color,created_at) VALUES('covihu-l1',?,'bug','#f00',datetime('now')),('covihu-l2',?,'infra','#0f0',datetime('now'))`, wsID, wsID)
+			execOrFatal(t, db, `INSERT INTO mission_labels(mission_id,label_id) VALUES(?,'covihu-l1')`, missionID)
+			var originalTitle string
+			var originalRevision, originalAggregate int64
+			if err := db.QueryRow(`SELECT title,revision,aggregate_revision FROM missions WHERE id=?`, missionID).Scan(&originalTitle, &originalRevision, &originalAggregate); err != nil {
+				t.Fatal(err)
+			}
+			execOrFatal(t, db, `CREATE TRIGGER covihu_block_labels BEFORE `+operation+` ON mission_labels BEGIN SELECT RAISE(ABORT,'covihu forced'); END`)
+			rr := covIHUPatch(h, userID, wsID, crewID, "ENG-1", map[string]any{"title": "Must roll back with labels", "labels": []string{"covihu-l2"}})
+			if rr.Code != http.StatusInternalServerError {
+				t.Fatalf("status=%d want500; body=%s", rr.Code, rr.Body.String())
+			}
+			var title, label string
+			var revision, aggregate int64
+			if err := db.QueryRow(`SELECT title,revision,aggregate_revision FROM missions WHERE id=?`, missionID).Scan(&title, &revision, &aggregate); err != nil {
+				t.Fatal(err)
+			}
+			if title != originalTitle || revision != originalRevision || aggregate != originalAggregate {
+				t.Fatalf("failed PATCH changed issue: title=%q revision=%d aggregate=%d; before=%q/%d/%d", title, revision, aggregate, originalTitle, originalRevision, originalAggregate)
+			}
+			var labels int
+			if err := db.QueryRow(`SELECT COUNT(*),COALESCE(MAX(label_id),'') FROM mission_labels WHERE mission_id=?`, missionID).Scan(&labels, &label); err != nil {
+				t.Fatal(err)
+			}
+			if labels != 1 || label != "covihu-l1" {
+				t.Fatalf("failed replacement changed labels: count=%d label=%s", labels, label)
+			}
+		})
 	}
 }
 

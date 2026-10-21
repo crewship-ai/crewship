@@ -12,7 +12,6 @@ import (
 
 func TestPipelineClarityRejectsInputBeforeAgent(t *testing.T) {
 	db := openSmokeDB(t)
-	defer db.Close()
 	seedSmokePipeline(t, db, "demo")
 	var definition string
 	if err := db.QueryRowContext(t.Context(), `SELECT definition_json FROM pipelines WHERE slug='demo'`).Scan(&definition); err != nil {

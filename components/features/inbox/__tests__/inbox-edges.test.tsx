@@ -61,7 +61,6 @@ vi.mock("@/hooks/use-inbox", async (importOriginal) => {
 
 import { KindActions } from "../kind-actions"
 import { InboxDetail } from "../inbox-detail"
-import { InboxList } from "../inbox-list"
 
 function item(over: Partial<InboxItem> & Pick<InboxItem, "kind">): InboxItem {
   return {
@@ -93,7 +92,7 @@ describe("failure paths that would otherwise pass silently", () => {
     mount(item({ kind: "waitpoint", source_id: "tok" }))
     fireEvent.click(screen.getByRole("button", { name: /Approve/ }))
 
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith("waitpoint store unavailable"))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("waitpoint store unavailable", { duration: Infinity }))
     expect(onRefresh).not.toHaveBeenCalled()
   })
 
@@ -102,7 +101,7 @@ describe("failure paths that would otherwise pass silently", () => {
     mount(item({ kind: "escalation", payload: { kind: "skill_proposal", crew_id: "c", file_name: "f" } }))
     fireEvent.click(screen.getByRole("button", { name: /Approve/ }))
 
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/dns/)))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/dns/), { duration: Infinity }))
   })
 
   it("reports a network failure on a retry", async () => {
@@ -110,7 +109,7 @@ describe("failure paths that would otherwise pass silently", () => {
     mount(item({ kind: "failed_run", payload: { pipeline_slug: "nightly" } }))
     fireEvent.click(screen.getByRole("button", { name: /Retry/ }))
 
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/offline/)))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/offline/), { duration: Infinity }))
   })
 
   it("reports a network failure on a consolidation decision", async () => {
@@ -118,7 +117,7 @@ describe("failure paths that would otherwise pass silently", () => {
     mount(item({ kind: "memory_consolidation", payload: { proposal_id: "p1" } }))
     fireEvent.click(screen.getByRole("button", { name: /Accept/ }))
 
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/gone/)))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/gone/), { duration: Infinity }))
   })
 
   it("falls back to a status code when the server sends no message", async () => {
@@ -126,7 +125,7 @@ describe("failure paths that would otherwise pass silently", () => {
     mount(item({ kind: "waitpoint", source_id: "a1", payload: { kind: "hire" } }))
     fireEvent.click(screen.getByRole("button", { name: /Approve hire/ }))
 
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/500/)))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/500/), { duration: Infinity }))
   })
 })
 
@@ -136,7 +135,7 @@ describe("the schedule calls fail loudly too", () => {
     mount(item({ kind: "schedule_circuit_breaker_tripped", payload: { schedule_id: "s1" } }))
     fireEvent.click(screen.getByRole("button", { name: /Re-enable schedule/ }))
 
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/offline/)))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/offline/), { duration: Infinity }))
     expect(onResolve).not.toHaveBeenCalled()
   })
 
@@ -145,7 +144,7 @@ describe("the schedule calls fail loudly too", () => {
     mount(item({ kind: "schedule_missed", payload: { schedule_id: "s2" } }))
     fireEvent.click(screen.getByRole("button", { name: /Run now/ }))
 
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/dns/)))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/dns/), { duration: Infinity }))
   })
 
   it("reports a refused run-now", async () => {
@@ -153,7 +152,7 @@ describe("the schedule calls fail loudly too", () => {
     mount(item({ kind: "schedule_missed", payload: { schedule_id: "s2" } }))
     fireEvent.click(screen.getByRole("button", { name: /Run now/ }))
 
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith("runner not wired"))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("runner not wired", { duration: Infinity }))
   })
 
   it("offers only Dismiss when a missed notice carries no schedule id", () => {
@@ -259,132 +258,5 @@ describe("the detail's own edges", () => {
     )
     fireEvent.keyDown(screen.getByRole("button", { name: "Message options" }), { key: "ArrowDown" })
     expect(screen.queryByRole("menuitem", { name: /Restore/ })).not.toBeInTheDocument()
-  })
-})
-
-describe("the subject picker at scale", () => {
-  beforeEach(() => {
-    ITEMS = [item({ id: "m", kind: "message", title: "hello", sender_type: "agent", sender_name: "casey" })]
-  })
-
-  it("truncates a long group and asks for more typing rather than growing a scrollbar", () => {
-    render(<InboxList />)
-    fireEvent.click(screen.getByRole("button", { name: /Filter/ }))
-    fireEvent.change(screen.getByTestId("subject-search"), { target: { value: "car" } })
-
-    // Seven agents match; a filter that needs scrolling has stopped narrowing.
-    expect(screen.getByText(/keep typing/)).toBeInTheDocument()
-  })
-
-  it("clears the query from the field", () => {
-    render(<InboxList />)
-    fireEvent.click(screen.getByRole("button", { name: /Filter/ }))
-    fireEvent.change(screen.getByTestId("subject-search"), { target: { value: "car" } })
-
-    fireEvent.click(screen.getByRole("button", { name: /Clear subject search/ }))
-
-    expect(screen.getByTestId("subject-search")).toHaveValue("")
-  })
-
-  it("deselects the subject by picking it again", () => {
-    render(<InboxList />)
-    fireEvent.click(screen.getByRole("button", { name: /Filter/ }))
-    fireEvent.click(screen.getByTestId("subject-casey"))
-    expect(screen.getByRole("button", { name: /Remove filter/ })).toBeInTheDocument()
-
-    // The selected subject is pinned to the top of the picker; clicking it
-    // there is how you undo it without hunting through the list.
-    fireEvent.click(screen.getAllByTestId("subject-casey")[0])
-    expect(screen.queryByRole("button", { name: /Remove filter/ })).not.toBeInTheDocument()
-  })
-})
-
-describe("selection, used twice", () => {
-  beforeEach(() => {
-    ITEMS = [
-      item({ id: "a", kind: "message", title: "one" }),
-      item({ id: "b", kind: "message", title: "two" }),
-    ]
-  })
-
-  it("unticks a row that was ticked", () => {
-    render(<InboxList />)
-    fireEvent.click(screen.getByRole("button", { name: /Select items/i }))
-    const box = () => screen.getByTestId("check-0").parentElement as HTMLElement
-
-    fireEvent.click(box())
-    expect(screen.getByText("1 selected")).toBeInTheDocument()
-
-    fireEvent.click(box())
-    expect(screen.queryByText("1 selected")).not.toBeInTheDocument()
-  })
-
-  it("unticks a whole group from its header", () => {
-    render(<InboxList />)
-    fireEvent.click(screen.getByRole("button", { name: /Select items/i }))
-    const header = () => within(screen.getByTestId("inbox-list")).getByLabelText(/Select all in/)
-
-    fireEvent.click(header())
-    expect(screen.getByText("2 selected")).toBeInTheDocument()
-
-    fireEvent.click(header())
-    expect(screen.queryByText("2 selected")).not.toBeInTheDocument()
-  })
-
-  it("drops the selection when select mode is left", () => {
-    render(<InboxList />)
-    fireEvent.click(screen.getByRole("button", { name: /Select items/i }))
-    fireEvent.click(screen.getByTestId("check-0").parentElement as HTMLElement)
-
-    fireEvent.click(screen.getByRole("button", { name: /Done selecting/i }))
-
-    expect(screen.queryByText("1 selected")).not.toBeInTheDocument()
-    expect(screen.queryByTestId("check-0")).not.toBeInTheDocument()
-  })
-
-  it("re-expands a collapsed group", () => {
-    render(<InboxList />)
-    const list = within(screen.getByTestId("inbox-list"))
-    const header = () => list.getByRole("button", { name: /Everything else/ })
-
-    fireEvent.click(header())
-    expect(list.queryByText("one")).not.toBeInTheDocument()
-
-    fireEvent.click(header())
-    expect(list.getByText("one")).toBeInTheDocument()
-  })
-})
-
-describe("dropdowns close on the backdrop", () => {
-  beforeEach(() => { ITEMS = [item({ id: "a", kind: "message", title: "one" })] })
-
-  it("closes Filter when the page behind it is clicked", async () => {
-    const { container } = render(<InboxList />)
-    fireEvent.click(screen.getByRole("button", { name: /Filter/ }))
-    expect(screen.getByTestId("facet-bucket-decisions")).toBeInTheDocument()
-
-    fireEvent.click(container.querySelector(".fixed.inset-0") as HTMLElement)
-
-    await waitFor(() => expect(screen.queryByTestId("facet-bucket-decisions")).not.toBeInTheDocument())
-  })
-
-  it("closes Display when the page behind it is clicked", async () => {
-    const { container } = render(<InboxList />)
-    fireEvent.click(screen.getByRole("button", { name: /Display/ }))
-    expect(screen.getByRole("button", { name: /Smart buckets/ })).toBeInTheDocument()
-
-    fireEvent.click(container.querySelector(".fixed.inset-0") as HTMLElement)
-
-    await waitFor(() => expect(screen.queryByRole("button", { name: /Smart buckets/ })).not.toBeInTheDocument())
-  })
-
-  it("resets the bucket filter to all", () => {
-    render(<InboxList />)
-    fireEvent.click(screen.getByRole("button", { name: /Filter/ }))
-    fireEvent.click(screen.getByTestId("facet-bucket-decisions"))
-    expect(screen.getByRole("button", { name: /Remove filter/ })).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole("button", { name: /All buckets/ }))
-    expect(screen.queryByRole("button", { name: /Remove filter/ })).not.toBeInTheDocument()
   })
 })

@@ -55,6 +55,9 @@ type instanceWorkspaceRef struct {
 	ID   string `json:"workspace_id"`
 	Name string `json:"workspace_name"`
 	Slug string `json:"workspace_slug"`
+	// LogoURL is the workspace's uploaded logo (#3005), so a console row
+	// shows the workspace as its people know it. Absent without one.
+	LogoURL *string `json:"workspace_logo_url,omitempty"`
 }
 
 // workspaces lists every live workspace by name. There is no cap: the matrix
@@ -68,7 +71,7 @@ func (h *InstanceKeeperHandler) workspaces(ctx context.Context) ([]instanceWorks
 // that sets something for one, several or all of them.
 func instanceWorkspaces(ctx context.Context, db *sql.DB) ([]instanceWorkspaceRef, error) {
 	rows, err := db.QueryContext(ctx, `
-		SELECT id, name, slug FROM workspaces WHERE deleted_at IS NULL
+		SELECT id, name, slug, logo_url FROM workspaces WHERE deleted_at IS NULL
 		ORDER BY name COLLATE NOCASE, id`)
 	if err != nil {
 		return nil, err
@@ -77,8 +80,12 @@ func instanceWorkspaces(ctx context.Context, db *sql.DB) ([]instanceWorkspaceRef
 	var out []instanceWorkspaceRef
 	for rows.Next() {
 		var w instanceWorkspaceRef
-		if err := rows.Scan(&w.ID, &w.Name, &w.Slug); err != nil {
+		var logo sql.NullString
+		if err := rows.Scan(&w.ID, &w.Name, &w.Slug, &logo); err != nil {
 			return nil, err
+		}
+		if logo.Valid && logo.String != "" {
+			w.LogoURL = &logo.String
 		}
 		out = append(out, w)
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/dispatch"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 	"github.com/crewship-ai/crewship/internal/work"
 )
 
@@ -135,7 +136,7 @@ func (rt *agentWorkRuntime) Forget(locator string) {
 // Owned execution needs a durable start record before projection can depend on
 // its identity. Queued telemetry alone cannot acknowledge this boundary.
 func (h *AssignmentHandler) emitAssignmentRunStarted(ctx context.Context, entry journal.Entry) (string, error) {
-	if ownedAssignmentExecution(ctx) != nil {
+	if ownedAssignmentExecution(ctx) != nil || runauthority.OriginIDFromContext(ctx) != "" {
 		syncWriter, ok := h.journal.(journal.SyncEmitter)
 		if !ok {
 			return "", errors.New("assignment runtime requires synchronous start journal")

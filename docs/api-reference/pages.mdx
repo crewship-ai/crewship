@@ -169,6 +169,13 @@ not supply one).
 ]
 ```
 
+`can_move` and `can_remove_from_folder` are caller-specific booleans on every
+index row. Moving requires page ownership (including membership of its owning
+crew) or workspace ADMIN/OWNER. Removing also accepts a live folder *can edit*
+share. A move still requires the destination folder to accept the caller.
+These flags describe authority; mutation endpoints recheck it and the version
+fences.
+
 `panel_count` counts **every** panel including sealed ones, because the grid
 draws a placeholder for those and a count that skipped them would disagree with
 what the reader sees. `last_produced_at` is the newest arrival across visible
@@ -816,6 +823,12 @@ GET /api/v1/page-folders
 
 **Response 200:** the folders the caller may read, by name.
 
+Each folder carries caller-specific `can_rename`, `can_share`, `can_delete` and
+`can_accept_pages` booleans. Rename and acceptance include live folder *can edit*
+shares; share and delete require ADMIN/OWNER or a manager of the owning crew.
+Deletion still requires an empty folder. The same flags appear on show, create
+and update responses; they reveal no other member or hidden page count.
+
 ```json
 {
   "folders": [
@@ -830,6 +843,10 @@ GET /api/v1/page-folders
       "page_count": 3,
       "shared": "none",
       "acl_version": 0,
+      "can_rename": true,
+      "can_share": true,
+      "can_delete": true,
+      "can_accept_pages": true,
       "created_at": "2026-09-13T06:00:00Z",
       "updated_at": "2026-09-13T06:00:00Z"
     }
@@ -2325,3 +2342,168 @@ archived source digest, without the archived panel definition.
 authority, `404` Page or revision missing, `409` unsupported legacy revision,
 `500` archive/integrity error, `503` project storage unavailable.
 The response is `no-store`.
+
+## Native document availability
+
+`GET /api/v1/documents/status`
+
+Authentication: a current human session or CLI credential and workspace
+membership. Response: `{ "enabled": false }` until the instance is configured
+for documents. Statuses: 200 availability; 400 missing workspace; 401 invalid
+credential; 403 workspace boundary; 500 unavailable storage. Responses are not
+cached. CLI: `crewship doc status`.
+
+## Read a native document
+
+`GET /api/v1/pages/{slug}/document`
+
+Authentication: a current human credential with current document read access;
+scoped CLI credentials need `pages:read`. Response: the confirmed content tree,
+outline, revision, opaque editing epoch and current write capability. Comment
+and resolve capabilities are disabled. The request does not accept a `block_id`
+or `revision` selector in this release. Any supplied `revision` query, including
+an empty or repeated value, returns 400 before contacting the document engine;
+it never falls forward to the current head. Malformed query encoding also
+returns 400 without reading content. Read a retained checkpoint through
+the checkpoint endpoint below instead. Statuses: 200 document; 400 unsupported selector;
+401 invalid credential; 403 missing access/scope; 404 unavailable Page/document;
+409 incompatible content; 413 oversized content; 500 storage failure;
+502 invalid engine response; 503 disabled or unavailable service. Responses use
+`Cache-Control: no-store`. CLI: `crewship doc read` and `crewship doc outline`.
+
+## List saved document checkpoints
+
+`GET /api/v1/pages/{slug}/document/checkpoints`
+
+Authentication: a current human credential with current Page and document read
+access; scoped CLI credentials need `pages:read`. Agent run credentials are
+refused. Request: the Page slug or immutable `@PageID` and current workspace;
+no request body. Response: `checkpoints`, an array of at most 1000 entries with
+`id`, `rev`, `schema`, `actor` and `created_at`. This does not create a checkpoint.
+Statuses: 200 list; 400 invalid selector; 401 invalid or revoked credential;
+403 missing scope or human credential; 404 unavailable Page or document;
+409 incompatible state; 429 capacity limit; 500 storage failure;
+502 malformed engine response; 503 disabled or unavailable service.
+Responses use `Cache-Control: no-store`.
+CLI: `crewship doc checkpoints <page-slug>`.
+
+## Read one saved document checkpoint
+
+`GET /api/v1/pages/{slug}/document/checkpoints/{checkpoint}`
+
+Authentication: the same current human read access, checked again on each read.
+A historical checkpoint never restores earlier permissions. Request: a Page
+selector and checkpoint ID of 1–128 ASCII letters, digits, underscores or hyphens;
+no request body. Response: exactly `page_id`, `id`, `rev`, `schema` and the
+retained document `content`. No editing epoch, binary snapshot or write
+capability is returned. Unsupported schemas return 409 without content.
+Statuses: 200 checkpoint; 400 invalid identity; 401 invalid or revoked credential;
+403 missing scope or human credential; 404 unavailable Page, document or checkpoint;
+409 incompatible schema; 429 capacity limit; 500 storage failure;
+502 malformed engine response; 503 disabled or unavailable service.
+Responses use `Cache-Control: no-store`.
+CLI: `crewship doc checkpoint <page-slug> <checkpoint-id>`.
+
+## Restore a saved document checkpoint
+
+`POST /api/v1/pages/{slug}/document/restore`
+
+Authentication: a current human credential with current Page and document write
+access; scoped CLI credentials need `pages:write`. Agent run credentials are
+refused. Reading somebody else's private document as workspace OWNER requires
+an audit entry before disclosure; earlier checkpoint permissions are not reused.
+
+Request: one JSON object of at most 4096 bytes, with exactly `page_id`, `id`,
+`schema` (2 or 3), `epoch`, `ifRev` and `checkpoint`. Use the immutable Page ID,
+the current editing epoch and revision, a retained checkpoint ID and a new
+mutation ID. Page, mutation and checkpoint IDs contain 1–128 ASCII letters,
+digits, underscores or hyphens. A changed Page identity, revision or epoch
+refuses the operation; the server does not select a replacement checkpoint.
+
+Response 200: `page_id`, `id`, `rev`, a new `epoch`, `kind: "restore"` and
+optional `schema` and `duplicate`. Restoration creates a new revision, preserving
+the retained checkpoint. After an uncertain confirmation, retry the original
+packet with the same mutation ID and preconditions; an exact authorized retry
+returns the original receipt without another restoration. A lost confirmation
+is not evidence that the write failed.
+
+Statuses: 200 confirmed receipt; 400 invalid or oversized packet or Page identity;
+401 invalid or revoked credential; 403 missing write scope or human credential;
+404 unavailable Page, document or checkpoint; 409 stale or incompatible state;
+413 engine size limit; 422 rejected content; 429 capacity limit; 500 audit failure;
+502 invalid receipt; 503 disabled service or unavailable confirmation.
+Responses use `Cache-Control: no-store`.
+CLI: `crewship doc restore <page-slug> --file <request.json>`.
+
+## Initialize a native document
+
+`POST /api/v1/pages/{slug}/document/initialize`
+
+Authentication: a current human credential owning an empty Page, with current
+write permission; scoped CLI credentials need both `pages:read` and `pages:write`.
+Request body: one JSON object of at most 2 MiB containing `id`, `schema` (2 or 3)
+and `body`. Schema 3 also requires the original `page_id`. Stage a Page through
+`POST /api/v1/pages` with `panels: []` and `allow_empty: true`; this is an explicit
+human-only opt-in and cannot assign crew ownership. Existing panel Pages retain
+normal validation. Response: first durable initialization state, or the original
+receipt on an exact retry. Always read the document before preparing an edit.
+Statuses: 200 confirmed initialization; 400 invalid request; 401 invalid
+credential; 403 wrong owner/access/scope; 404 unavailable Page; 409 incompatible
+or conflicting initialization; 413 oversized request; 422 invalid content;
+429 capacity limit; 500 storage failure; 502 invalid engine response;
+503 disabled or unavailable service. Responses use `Cache-Control: no-store`.
+CLI: `crewship doc initialize <page-slug> --file <request.json>`.
+
+## Update a native document
+
+`POST /api/v1/pages/{slug}/document/patch`
+
+Authentication: a current human credential with current document write access;
+scoped CLI credentials need both `pages:read` and `pages:write`. Request body:
+one JSON object of at most 2 MiB. Semantic replacement requires `id`, `schema`,
+`epoch`, `target`, `text`, `ifRev` and `ifHash`. The editor's incremental form
+uses `kind: "human"` and base64 `update`; schema 3 requires the original
+`page_id`. The service rechecks the exact credential and permission within the
+storage transaction. Response: a receipt for the confirmed revision. Repeating
+the original operation after a lost confirmation returns its receipt without
+another write; revocation still refuses the retry. A stale request is never
+automatically rebased. Statuses: 200 confirmed receipt; 400 invalid request;
+401 invalid credential; 403 missing access/scope; 404 unavailable document;
+409 stale revision/hash/epoch or conflicting operation ID; 413 oversized
+request; 422 invalid content; 429 temporary operation limit; 500 storage failure;
+502 invalid engine response; 503 disabled or unavailable service. Responses use
+`Cache-Control: no-store`. CLI: `crewship doc patch <page-slug> --file <request.json>`.
+
+Page read and list responses include `has_document`, which identifies saved native
+document content. Page creation accepts `allow_empty: true` to stage a human-owned
+Page without panels; combining this flag with panels or a crew owner is refused.
+
+## Saved documents from a chat
+
+`GET /api/v1/chats/{chatId}/document-results` returns a `results` array of up to
+20 saved Document links, newest first. Each result includes `page_id`,
+`type: "document"`, `page_slug`, `title`, the creation `revision`, `created_at`,
+`agent_id`, `agent_name`, `run_id` and `on_behalf_of_user_id`. The creation
+revision is zero; it does not claim to be the document's current revision.
+
+This is a human read. Scoped CLI credentials require `pages:read`, and both chat
+access and the current Page ACL apply. Hidden results are omitted without a
+hidden count. Results contain no document contents, transcript or execution
+credentials. A missing or inaccessible chat returns 404; invalid credentials
+return 401, missing CLI scope returns 403, and disabled Documents return 503.
+Completed and recovered runs retain their saved links for authorized readers.
+
+Saved Document chat previews clear their displayed content and result titles on `page.deleted`. A failed refresh cannot restore that deleted result from the earlier cached or pending response.
+
+
+## Personal Documents view
+
+When Documents are enabled, **My space** in Artifacts shows the current user's private Documents within the existing workspace. It does not create another workspace. Custody access to another user's private output belongs to the workspace OWNER and remains a separate audited access path.
+
+Authorized Page index rows include the read-only boolean `private_audience`. A personal view requires both `private_audience: true` and the current user's `owner` reference; an unfiled Page or an ownership reference alone does not establish privacy. Existing `crewship page list --format json` output exposes this classification. Missing audience information is unknown, rather than permission to infer that a Page is public.
+
+The index accepts `audience=personal` for explicitly private Pages owned by the current human, or `audience=all` for the existing authorized catalog. OWNER custody of other people’s private Pages is excluded from the personal view. Unknown audience values return 400. `X-Total-Count` counts only authorized rows matching the audience. Catalog responses use `Cache-Control: no-store`; foreign private metadata requires the existing OWNER audit before its release, and an unavailable audit refuses the response.
+
+Optional `limit` and `offset` apply after authorization and audience filtering. The default limit is 100 when either paging parameter is present, the maximum is 500, and negative offsets become zero. With neither paging parameter the existing unpaged JSON array is preserved. `crewship api request GET /api/v1/pages --query audience=personal --query limit=20 --format json` requests a personal catalog page.
+
+The private-chat document composer shows the target personal space and its audience before submission. This view and label do not publish a Document, change its audience, enable shared-chat creation, or provide a work-folder sharing operation.

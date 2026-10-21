@@ -2,9 +2,12 @@
 
 import { RAIL_ROW } from "@/components/layout/rail"
 import { useEffect, useState } from "react"
-import { Check, ChevronDown, Plus } from "lucide-react"
-import { toast } from "sonner"
+import Link from "next/link"
+import { Check, ChevronDown, ChevronsUpDown, Plus, Settings, UserPlus } from "lucide-react"
+import { toast } from "@/lib/toast"
 import { useWorkspace, type WorkspaceData } from "@/hooks/use-workspace"
+import { deriveAccessMode } from "@/hooks/use-access-mode"
+import { useSessionSafe } from "@/hooks/use-auth"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,19 +17,17 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceField,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar"
-import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
+import { isAdminTier } from "@/lib/permissions/tiers"
 
 const ROLE_LABEL: Record<string, string> = {
   OWNER: "Owner",
@@ -55,6 +56,24 @@ export function WorkspaceMark({ name, logoUrl, className }: { name: string; logo
   return <span className={className} aria-hidden>{avatarLetter(name)}</span>
 }
 
+/**
+ * The caller's own personal account: the workspace sign-up made for them
+ * alone. It is listed as them, not as a workspace, so "Workspaces" means only
+ * the places people share. Someone else's — joined later, even as an owner —
+ * is not theirs: the server names whose it is.
+ */
+export function isOwnPersonal(ws: Pick<WorkspaceData, "kind" | "personal_owner_id"> | null | undefined, userId: string | undefined): boolean {
+  return ws?.kind === "personal" && Boolean(userId) && ws.personal_owner_id === userId
+}
+
+/** What the switcher calls a workspace: the person's name for their personal account. */
+function useSwitcherLabel(ws: WorkspaceData | null, role: string | null): { label: string | null; sub: string; logo: string | null } {
+  const { data } = useSessionSafe()
+  if (!ws) return { label: null, sub: "", logo: null }
+  if (isOwnPersonal(ws, data?.user.id)) return { label: data?.user.name || ws.name, sub: "Personal account", logo: ws.logo_url || data?.user.avatar_url || null }
+  return { label: ws.name, sub: ROLE_LABEL[role ?? ""] ?? role ?? "", logo: ws.logo_url ?? null }
+}
+
 function slugify(name: string): string {
   return name
     .toLowerCase()
@@ -65,11 +84,12 @@ function slugify(name: string): string {
 }
 
 export function WorkspaceSwitcher() {
-  const { workspace, workspaces, role, loading, setWorkspaceId, refresh } = useWorkspace()
+  const { workspace, role, loading, setWorkspaceId, refresh } = useWorkspace()
   const [createOpen, setCreateOpen] = useState(false)
+  const shown = useSwitcherLabel(workspace, role)
 
-  const triggerLabel = workspace?.name ?? (loading ? "Loading…" : "No workspace")
-  const triggerSub = workspace ? ROLE_LABEL[role ?? ""] ?? role ?? "" : ""
+  const triggerLabel = shown.label ?? (loading ? "Loading…" : "No workspace")
+  const triggerSub = shown.sub
 
   return (
     <>
@@ -79,53 +99,28 @@ export function WorkspaceSwitcher() {
             <DropdownMenuTrigger asChild>
               <SidebarMenuButton
                 size="lg"
-                tooltip={triggerLabel}
+                tooltip={triggerSub ? `${triggerLabel} · ${triggerSub}` : triggerLabel}
                 aria-label={`Current workspace: ${triggerLabel}`}
                 className={RAIL_ROW}
               >
                 {workspace ? (
-                  <WorkspaceMark name={workspace.name} logoUrl={workspace.logo_url}
-                    className="rail-tile rail-tile-static bg-primary! text-[13px] font-bold text-primary-foreground! shadow-[inset_0_1px_0_rgb(255_255_255/.18)]" />
+                  <WorkspaceMark name={triggerLabel} logoUrl={shown.logo}
+                    className="rail-tile rail-ws bg-primary! text-[13px] font-bold text-primary-foreground! shadow-[inset_0_1px_0_rgb(255_255_255/.18)]" />
                 ) : (
-                  <span className="rail-tile rail-tile-static bg-primary! text-[13px] font-bold text-primary-foreground! shadow-[inset_0_1px_0_rgb(255_255_255/.18)]" aria-hidden>·</span>
+                  <span className="rail-tile rail-ws bg-primary! text-[13px] font-bold text-primary-foreground! shadow-[inset_0_1px_0_rgb(255_255_255/.18)]" aria-hidden>·</span>
                 )}
+                {/* Open, a card: the name on one line, the role under it, ⇕ at
+                    the end (round 63). In the rail only the mark shows, so
+                    nothing beside it pushes it off the axis. */}
                 <span className="rail-label grid min-w-0 flex-1 text-left leading-tight">
-                  <span className="truncate font-semibold text-[13px]">{triggerLabel}</span>
-                  {triggerSub && (
-                    <span className="truncate text-[10px] text-muted-foreground">{triggerSub}</span>
-                  )}
+                  <span className="truncate text-[12.5px] font-semibold">{triggerLabel}</span>
+                  {triggerSub && <span className="truncate text-micro text-muted-foreground-soft">{triggerSub}</span>}
                 </span>
-                <ChevronDown className="rail-label mr-2 h-3 w-3 shrink-0 text-muted-foreground" />
+                <ChevronsUpDown className="rail-label h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" />
               </SidebarMenuButton>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" side="bottom" className="w-72">
-              <DropdownMenuLabel className="text-micro uppercase tracking-wider text-muted-foreground font-medium">
-                Workspaces
-              </DropdownMenuLabel>
-              {workspaces.length === 0 && (
-                <div className="px-2 py-2 text-xs text-muted-foreground">
-                  {loading ? "Loading workspaces…" : "No workspaces yet"}
-                </div>
-              )}
-              {workspaces.map((ws) => (
-                <WorkspaceRow
-                  key={ws.id}
-                  ws={ws}
-                  active={ws.id === workspace?.id}
-                  onSelect={() => setWorkspaceId(ws.id)}
-                />
-              ))}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                className="text-xs gap-2"
-                onSelect={(e) => {
-                  e.preventDefault()
-                  setCreateOpen(true)
-                }}
-              >
-                <Plus className="h-3.5 w-3.5" />
-                Create workspace
-              </DropdownMenuItem>
+              <WorkspaceMenuItems onCreate={() => setCreateOpen(true)} />
             </DropdownMenuContent>
           </DropdownMenu>
         </SidebarMenuItem>
@@ -143,14 +138,149 @@ export function WorkspaceSwitcher() {
   )
 }
 
+/**
+ * The switcher's menu body, shared by the rail (desktop) and the phone
+ * navigation sheet, which has no rail and used to print a hardcoded
+ * placeholder workspace in that slot instead.
+ *
+ * Beyond the list it carries the two places people go "for the workspace":
+ * its settings and its people. Both are rows in Settings already, but from
+ * here they are one click from the name they belong to rather than a trip
+ * through the profile menu, which is about the person, not the workspace.
+ */
+function WorkspaceMenuItems({ onCreate, onNavigate }: { onCreate: () => void; onNavigate?: () => void }) {
+  const { workspace, workspaces, role, loading, error, setWorkspaceId } = useWorkspace()
+  const trusted = deriveAccessMode(workspaces, loading, error) === "trusted"
+  const { data } = useSessionSafe()
+  const mine = (ws: WorkspaceData) => isOwnPersonal(ws, data?.user.id)
+  const own = workspaces.filter(mine)
+  const shared = workspaces.filter((ws) => !mine(ws))
+  const sectionLabel = "text-micro text-muted-foreground font-semibold"
+  return (
+    <>
+      {/* The personal account first, the way the person is "themselves"
+          before any team; then the workspaces people share. */}
+      {own.length > 0 && (
+        <>
+          <DropdownMenuLabel className={sectionLabel}>Personal account</DropdownMenuLabel>
+          {own.map((ws) => (
+            <WorkspaceRow key={ws.id} ws={ws} active={ws.id === workspace?.id} onSelect={() => setWorkspaceId(ws.id)}
+              label={data?.user.name || ws.name} sub="Personal account" logoUrl={ws.logo_url || data?.user.avatar_url || null} />
+          ))}
+        </>
+      )}
+      <DropdownMenuLabel className={sectionLabel}>Workspaces</DropdownMenuLabel>
+      {shared.length === 0 && (
+        <div className="px-2 py-2 text-xs text-muted-foreground">
+          {loading ? "Loading workspaces…" : "No workspaces yet"}
+        </div>
+      )}
+      {shared.map((ws) => (
+        <WorkspaceRow
+          key={ws.id}
+          ws={ws}
+          active={ws.id === workspace?.id}
+          onSelect={() => setWorkspaceId(ws.id)}
+          sub={ws.kind === "personal" ? `Personal account · ${ROLE_LABEL[ws.currentUserRole ?? ""] ?? ws.currentUserRole ?? ""}` : undefined}
+        />
+      ))}
+      <DropdownMenuSeparator />
+      {workspace && trusted && (
+        <>
+          <DropdownMenuItem asChild className="text-xs gap-2">
+            <Link href="/settings?tab=general" onClick={onNavigate}>
+              <Settings className="h-3.5 w-3.5" />
+              {mine(workspace) ? "Account settings" : "Workspace settings"}
+            </Link>
+          </DropdownMenuItem>
+          {/* The roster is readable at every role; inviting is ADMIN+ there
+              (the Members page's isAdmin), so the label only promises it to
+              those who can. */}
+          <DropdownMenuItem asChild className="text-xs gap-2">
+            <Link href="/settings/members" onClick={onNavigate}>
+              <UserPlus className="h-3.5 w-3.5" />
+              {isAdminTier(role) ? "Invite members" : "Members"}
+            </Link>
+          </DropdownMenuItem>
+        </>
+      )}
+      {trusted && <DropdownMenuItem
+        className="text-xs gap-2"
+        onSelect={(e) => {
+          e.preventDefault()
+          onCreate()
+        }}
+      >
+        <Plus className="h-3.5 w-3.5" />
+        Create workspace
+      </DropdownMenuItem>}
+    </>
+  )
+}
+
+/**
+ * The phone navigation sheet's header: the same switcher, drawn without the
+ * rail's sidebar primitives (the sheet is not inside a sidebar).
+ */
+export function MobileWorkspaceSwitcher({ onNavigate }: { onNavigate?: () => void }) {
+  const { workspace, role, loading, refresh, setWorkspaceId } = useWorkspace()
+  const [createOpen, setCreateOpen] = useState(false)
+  const shown = useSwitcherLabel(workspace, role)
+  const label = shown.label ?? (loading ? "Loading…" : "No workspace")
+  const sub = shown.sub
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label={`Current workspace: ${label}`}
+            className="flex min-h-12 coarse:min-h-[44px] min-w-0 flex-1 items-center gap-2 rounded-md px-1 text-left hover:bg-accent"
+          >
+            {workspace ? (
+              <WorkspaceMark name={label} logoUrl={shown.logo}
+                className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground" />
+            ) : (
+              <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground" aria-hidden>·</span>
+            )}
+            <span className="grid min-w-0 flex-1 leading-tight">
+              <span className="truncate text-sm font-semibold">{label}</span>
+              {sub && <span className="truncate text-micro text-muted-foreground">{sub}</span>}
+            </span>
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" side="bottom" className="w-72">
+          <WorkspaceMenuItems onCreate={() => setCreateOpen(true)} onNavigate={onNavigate} />
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <CreateWorkspaceDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onCreated={async (id) => {
+          await refresh()
+          setWorkspaceId(id)
+        }}
+      />
+    </>
+  )
+}
+
 function WorkspaceRow({
   ws,
   active,
   onSelect,
+  label = ws.name,
+  sub,
+  logoUrl = ws.logo_url,
 }: {
   ws: WorkspaceData
   active: boolean
   onSelect: () => void
+  label?: string
+  sub?: string
+  /** The person's photo stands in for a personal account without a logo. */
+  logoUrl?: string | null
 }) {
   return (
     <DropdownMenuItem
@@ -160,12 +290,12 @@ function WorkspaceRow({
       }}
       className={cn("flex items-center gap-3 py-2", active && "bg-primary/5")}
     >
-      <WorkspaceMark name={ws.name} logoUrl={ws.logo_url}
+      <WorkspaceMark name={label} logoUrl={logoUrl}
         className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary text-micro font-bold text-primary-foreground shrink-0" />
       <div className="min-w-0 flex-1">
-        <div className="text-xs font-medium truncate">{ws.name}</div>
+        <div className="text-xs font-medium truncate">{label}</div>
         <div className="text-micro text-muted-foreground truncate">
-          {ROLE_LABEL[ws.currentUserRole ?? ""] ?? ws.currentUserRole ?? ws.slug}
+          {sub ?? ROLE_LABEL[ws.currentUserRole ?? ""] ?? ws.currentUserRole ?? ws.slug}
         </div>
       </div>
       {active && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
@@ -186,38 +316,44 @@ export function CreateWorkspaceDialog({
   const [slug, setSlug] = useState("")
   const [slugTouched, setSlugTouched] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  // A refusal belongs to its field (v67 `newws`, G13): a slug conflict under
+  // Slug, anything else under Name. Not a toast that leaves with the reason.
+  const [fieldError, setFieldError] = useState<{ field: "name" | "slug"; message: string } | null>(null)
 
   function reset() {
     setName("")
     setSlug("")
     setSlugTouched(false)
     setSubmitting(false)
+    setFieldError(null)
   }
 
   // Clear form when the dialog closes from any source — Cancel button,
-  // Escape, or overlay click. The Dialog's own onOpenChange handles
-  // Esc/overlay, but Cancel calls the parent setter directly, which
-  // would otherwise leak stale name/slug into the next open.
+  // Escape, or overlay click — so stale name/slug never leak into the next
+  // open.
   useEffect(() => {
     if (!open && !submitting) reset()
   }, [open, submitting])
 
   function handleNameChange(v: string) {
     setName(v)
+    if (fieldError?.field === "name" || (!slugTouched && fieldError?.field === "slug")) setFieldError(null)
     if (!slugTouched) setSlug(slugify(v))
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  const canSubmit = !submitting && name.trim().length >= 2 && slug.length >= 2
+
+  async function submit() {
     if (name.trim().length < 2) {
-      toast.error("Name must be at least 2 characters")
+      setFieldError({ field: "name", message: "Name must be at least 2 characters" })
       return
     }
     if (slug.length < 2) {
-      toast.error("Slug must be at least 2 characters")
+      setFieldError({ field: "slug", message: "Slug must be at least 2 characters" })
       return
     }
     setSubmitting(true)
+    setFieldError(null)
     try {
       const res = await apiFetch("/api/v1/workspaces", {
         method: "POST",
@@ -227,13 +363,17 @@ export function CreateWorkspaceDialog({
       if (!res.ok) {
         const text = await res.text().catch(() => "")
         let message = "Failed to create workspace"
+        let field: string | undefined
         try {
           const json = JSON.parse(text)
           message = json.error ?? json.message ?? message
+          field = json.field
         } catch {
           if (text) message = text
         }
-        toast.error(message)
+        // The server answers a taken slug with 409 "Workspace slug already taken".
+        const onSlug = field === "slug" || res.status === 409 || /\bslug\b/i.test(message)
+        setFieldError({ field: onSlug ? "slug" : "name", message })
         return
       }
       const data = (await res.json()) as { id: string; name: string }
@@ -242,73 +382,75 @@ export function CreateWorkspaceDialog({
       reset()
       onOpenChange(false)
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to create workspace")
+      setFieldError({ field: "name", message: err instanceof Error ? err.message : "Failed to create workspace" })
     } finally {
       setSubmitting(false)
     }
   }
 
+  const nameError = fieldError?.field === "name" ? fieldError.message : undefined
+  const slugError = fieldError?.field === "slug" ? fieldError.message : undefined
+
   return (
-    <Dialog
+    <CreateSurface
       open={open}
       onOpenChange={(v) => {
         if (!submitting) onOpenChange(v)
       }}
+      size="sm"
+      onSubmit={() => {
+        if (canSubmit) void submit()
+      }}
     >
-      <DialogContent className="max-w-md">
-        <form onSubmit={handleSubmit}>
-          <DialogHeader>
-            <DialogTitle>Create workspace</DialogTitle>
-            <DialogDescription>
-              Workspaces are isolated tenants — crews, credentials, and runs live inside one workspace.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="ws-name">Name</Label>
-              <Input
-                id="ws-name"
-                autoFocus
-                value={name}
-                onChange={(e) => handleNameChange(e.target.value)}
-                placeholder="Acme Engineering"
-                maxLength={100}
-                disabled={submitting}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="ws-slug">Slug</Label>
-              <Input
-                id="ws-slug"
-                value={slug}
-                onChange={(e) => {
-                  setSlugTouched(true)
-                  setSlug(slugify(e.target.value))
-                }}
-                placeholder="acme"
-                maxLength={50}
-                disabled={submitting}
-              />
-              <p className="text-micro text-muted-foreground">
-                Lowercase, used in URLs and API calls. Auto-generated from the name.
-              </p>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => onOpenChange(false)}
-              disabled={submitting}
-            >
-              Cancel
-            </Button>
-            <Button type="submit" disabled={submitting || name.trim().length < 2 || slug.length < 2}>
-              {submitting ? "Creating…" : "Create workspace"}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+      <CreateSurfaceHeader
+        title="Create workspace"
+        description="Workspaces are isolated tenants — crews, credentials, and runs live inside one workspace."
+        onClose={() => onOpenChange(false)}
+      />
+      <CreateSurfaceBody className="flex flex-col gap-4">
+        <CreateSurfaceField label="Name" htmlFor="ws-name" error={nameError}>
+          <Input
+            id="ws-name"
+            autoFocus
+            value={name}
+            onChange={(e) => handleNameChange(e.target.value)}
+            placeholder="Acme Engineering"
+            maxLength={100}
+            disabled={submitting}
+            aria-invalid={nameError ? true : undefined}
+            aria-describedby={nameError ? "ws-name-error" : undefined}
+          />
+        </CreateSurfaceField>
+        <CreateSurfaceField
+          label="Slug"
+          htmlFor="ws-slug"
+          error={slugError}
+          hint="Lowercase, used in URLs and API calls. Auto-generated from the name."
+        >
+          <Input
+            id="ws-slug"
+            value={slug}
+            onChange={(e) => {
+              setSlugTouched(true)
+              if (fieldError?.field === "slug") setFieldError(null)
+              setSlug(slugify(e.target.value))
+            }}
+            placeholder="acme"
+            maxLength={50}
+            disabled={submitting}
+            aria-invalid={slugError ? true : undefined}
+            aria-describedby={slugError ? "ws-slug-error" : undefined}
+          />
+        </CreateSurfaceField>
+      </CreateSurfaceBody>
+      <CreateSurfaceFooter
+        hint={null}
+        onCancel={() => onOpenChange(false)}
+        primaryLabel={submitting ? "Creating…" : "Create workspace"}
+        onPrimary={() => void submit()}
+        primaryDisabled={!canSubmit}
+        busy={submitting}
+      />
+    </CreateSurface>
   )
 }

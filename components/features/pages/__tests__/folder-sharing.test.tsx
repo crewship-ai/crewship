@@ -14,6 +14,8 @@ import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen, fireEvent, cleanup, waitFor, within, act } from "@testing-library/react"
 
+vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "u1" } }, status: "authenticated" }) }))
+
 const push = vi.fn()
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push, replace: vi.fn(), prefetch: vi.fn(), back: vi.fn() }),
@@ -37,6 +39,7 @@ vi.mock("@/components/features/pages/editor/section-history", () => ({
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
 vi.mock("sonner", () => ({ toast }))
 
+import { _resetWorkspaceStoreForTests, refreshWorkspaceSettings } from "@/hooks/use-workspace"
 import { PagesLayout } from "@/components/features/pages/pages-layout"
 import type { WirePage } from "@/hooks/use-pages"
 import type { WirePageFolder, WireFolderAclEntry } from "@/hooks/use-page-folders"
@@ -44,14 +47,15 @@ import { FOLDER_ACL_SENTENCE } from "@/lib/pages/folder-sharing"
 
 const NOW = new Date("2026-09-13T12:00:00Z")
 const WS = "workspace_id=ws-1"
+const DIRECTORY = [{ id: "ws-1", name: "Test workspace", slug: "test-workspace", currentUserRole: "OWNER", currentUserCapabilities: [] }]
 
 const OPS_REF = { slug: "ops", name: "Ops", icon: "rocket", color: "amber" }
-const FLEET: WirePage = { id: "p1", slug: "fleet-201", name: "Flotila .201", owner: "crew/lookout", folder: OPS_REF, pages_version: 3, panels: [] }
-const NOTES: WirePage = { id: "p2", slug: "my-notes", name: "My notes", owner: "user/u1", folder: null, pages_version: 0, panels: [] }
-const DRAFT: WirePage = { id: "p3", slug: "draft", name: "Draft", owner: "user/u1", folder: null, pages_version: 2, panels: [] }
+const FLEET: WirePage = { id: "p1", slug: "fleet-201", name: "Flotila .201", owner: "crew/lookout", can_move: true, can_remove_from_folder: true, folder: OPS_REF, pages_version: 3, panels: [] }
+const NOTES: WirePage = { id: "p2", slug: "my-notes", name: "My notes", owner: "user/u1", can_move: true, can_remove_from_folder: false, folder: null, pages_version: 0, panels: [] }
+const DRAFT: WirePage = { id: "p3", slug: "draft", name: "Draft", owner: "user/u1", can_move: true, can_remove_from_folder: false, folder: null, pages_version: 2, panels: [] }
 
-const OPS: WirePageFolder = { id: "f1", slug: "ops", name: "Ops", icon: "rocket", color: "amber", owner: "crew/lookout", owner_crew_name: "Lookout", page_count: 1, acl_version: 5, shared: "crews" }
-const ARCHIVE: WirePageFolder = { id: "f2", slug: "archive", name: "Archive", icon: null, color: null, owner: "crew/finance", owner_crew_name: "Finance", page_count: 0, acl_version: 1, shared: "workspace" }
+const OPS: WirePageFolder = { id: "f1", slug: "ops", name: "Ops", icon: "rocket", color: "amber", owner: "crew/lookout", owner_crew_name: "Lookout", can_rename: true, can_share: true, can_delete: true, can_accept_pages: true, page_count: 1, acl_version: 5, shared: "crews" }
+const ARCHIVE: WirePageFolder = { id: "f2", slug: "archive", name: "Archive", icon: null, color: null, owner: "crew/finance", owner_crew_name: "Finance", can_rename: true, can_share: true, can_delete: true, can_accept_pages: true, page_count: 0, acl_version: 1, shared: "workspace" }
 
 const LONG = "a-very-long-crew-display-name-that-goes-on-and-on-and-on-past-any-reasonable-column"
 const SUPPORT: WireFolderAclEntry = { subject_type: "crew", subject_id: "c-support", label: "Support", can_read: true, can_write: false, set_by: "ada@example.com", set_at: "2026-09-13T10:00:00Z" }
@@ -92,6 +96,7 @@ function mount(harness: Harness = {}, slug?: string) {
   const mockFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     const method = (init?.method ?? "GET").toUpperCase()
+    if (method === "GET" && url === "/api/v1/workspaces") return json(200, DIRECTORY)
     const call: Call = { method, url, body: init?.body ? JSON.parse(String(init.body)) : null }
     calls.push(call)
     const answered = harness.answer?.(call)
@@ -139,14 +144,23 @@ function chooseFromRowMenu(row: HTMLElement, item: RegExp) {
   fireEvent.keyDown(screen.getByRole("menuitem", { name: item }), { key: "Enter" })
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   cleanup()
+  _resetWorkspaceStoreForTests()
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) =>
+    String(input) === "/api/v1/workspaces" ? json(200, DIRECTORY) : json(404, { error: "unrouted bootstrap request" }),
+  ))
+  await refreshWorkspaceSettings()
   push.mockReset()
   toast.success.mockReset()
   toast.error.mockReset()
   window.history.replaceState(null, "", "/pages")
 })
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  cleanup()
+  _resetWorkspaceStoreForTests()
+  vi.unstubAllGlobals()
+})
 
 describe("Folder → Sharing, for a manager (U1)", () => {
   it("draws the sentence, the owning crew as its managers' fixed row, each entry with a two-state control, and Everyone off", async () => {

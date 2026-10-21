@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { apiFetch } from "@/lib/api-fetch"
+import { encodeApiPathSegment } from "@/lib/api-path-segment"
 import { fetchAllRoutinePages } from "@/lib/routine-list"
 
 // Pipeline mirrors the wire shape returned by GET
@@ -34,6 +35,8 @@ export interface Pipeline {
   // OWNER/ADMIN). Absent on older payloads → treated as "active".
   status?: "active" | "proposed" | "disabled"
   author_crew_id?: string
+  // Routine folder it is filed in (ODCH-RT-01); absent when unfiled.
+  folder_id?: string
   author_agent_id?: string
   // author_agent_name is denormalized server-side from the agents
   // table so the routines list can render a human label without a
@@ -63,6 +66,16 @@ export interface PipelineDraftSummary {
   revision: number
   updated_at: string
   updated_by?: string
+  /** The latest Test run of exactly this draft's content; absent when untested (ODCH-RT-13). */
+  test_result?: RoutineTestResult
+}
+
+/** Outcome of a Test run, kept per definition (GET draft, versions). */
+export interface RoutineTestResult {
+  passed: boolean
+  status: string
+  tested_at: string
+  tested_by?: string
 }
 
 // PipelineRunSummary is the shape ListRuns returns — a journal entry
@@ -169,13 +182,20 @@ export function usePipelineRuns(workspaceId: string | null | undefined, slug: st
     setLoading(true)
     setError(null)
     try {
+      const workspaceSegment = encodeApiPathSegment(workspaceId)
+      const routineSegment = encodeApiPathSegment(slug)
+      if (!workspaceSegment || !routineSegment) {
+        setRuns([])
+        setError("Routine history unavailable: invalid identifier")
+        return
+      }
       // include_steps=1 widens the response to include pipeline.step.*
       // events alongside pipeline.run.* — the Runs sub-tab uses the
       // step entries to render the waterfall timeline when a run is
       // expanded. Server caps the LIMIT regardless so payload stays
       // bounded (50 entries ≈ 5 runs × 11-event lifecycle).
       const res = await apiFetch(
-        `/api/v1/workspaces/${workspaceId}/pipelines/${slug}/runs?limit=50&include_steps=1`,
+        `/api/v1/workspaces/${workspaceSegment}/pipelines/${routineSegment}/runs?limit=50&include_steps=1`,
         { signal: controller.signal },
       )
       if (controller.signal.aborted) return

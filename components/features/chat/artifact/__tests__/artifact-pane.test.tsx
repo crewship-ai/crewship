@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { ConfirmHost } from "@/components/ui/confirm-host"
 import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-library/react"
 
 // =============================================================================
@@ -16,6 +17,13 @@ import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-libra
 //   · a save writes the edited bytes to the path that was actually read.
 // =============================================================================
 
+// These tests exercise authenticated IO and refresh. Worker/table behavior has its own suite.
+vi.mock("../table-preview", () => ({ TablePreview: ({ bytes }: { bytes: Uint8Array }) => <div aria-label="Spreadsheet preview">{new TextDecoder().decode(bytes)}</div> }))
+const workbookPreview = vi.hoisted(() => vi.fn())
+vi.mock("../xlsx-preview", () => ({ XlsxPreview: () => { workbookPreview(); return <div aria-label="Workbook preview">Saved worksheet values</div> } }))
+
+let viewer = "user-a"
+vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: viewer } } }) }))
 let workspaceId: string | null = "ws-1"
 let workspaceRole = "OWNER"
 vi.mock("@/hooks/use-workspace", () => ({
@@ -107,8 +115,10 @@ function openTab(id: string, path: string) {
 }
 
 beforeEach(() => {
+  viewer = "user-a"
   workspaceId = "ws-1"
   workspaceRole = "OWNER"
+  workbookPreview.mockClear()
   apiFetch.mockReset()
   toastError.mockReset()
   toastSuccess.mockReset()
@@ -206,7 +216,7 @@ describe("ArtifactPane — saving", () => {
     // (and offering to save) the first tab's bytes under the second's path.
     apiFetch.mockImplementationOnce(() => new Promise<Response>(() => {}))
 
-    render(<ArtifactPane agentId="agent-1" />)
+    render(<><ArtifactPane agentId="agent-1" /><ConfirmHost /></>)
     openTab("t1", "workspace/one.md")
     fireEvent.click(await screen.findByRole("button", { name: "Editor" }))
     await screen.findByTestId("editor-code")
@@ -223,6 +233,33 @@ describe("ArtifactPane — saving", () => {
 })
 
 describe("ArtifactPane — live revisions", () => {
+  it("removes bytes and tab metadata immediately when the viewer changes", async () => {
+    apiFetch.mockImplementation(() => response({ body: "secret,123", contentType: "application/octet-stream" }))
+    const view = render(<ArtifactPane agentId="agent-1" />)
+    openTab("secret", "reports/private.csv")
+    await screen.findByLabelText("Spreadsheet preview")
+    apiFetch.mockImplementation(() => new Promise(() => {}))
+    viewer = "user-b"
+    view.rerender(<ArtifactPane agentId="agent-1" />)
+    expect(screen.queryByLabelText("Spreadsheet preview")).not.toBeInTheDocument()
+    expect(screen.queryByText("private.csv")).not.toBeInTheDocument()
+    expect(useArtifactStore.getState().tabs).toEqual([])
+    expect(useArtifactStore.getState().activeId).toBeNull()
+  })
+
+  it.each([401, 403, 404])("clears displayed bytes after refresh is refused with %s", async status => {
+    apiFetch.mockImplementation(() => response({ body: "private,123", contentType: "application/octet-stream" }))
+    render(<ArtifactPane agentId="agent-1" />)
+    openTab("private", "reports/private.csv")
+    await screen.findByLabelText("Spreadsheet preview")
+    fireEvent.click(screen.getByRole("button", { name: "Pause live updates" }))
+    apiFetch.mockImplementation(() => response({ ok: false, status, body: "{}", contentType: "application/json" }))
+    fireEvent.click(screen.getByRole("button", { name: "Follow live updates" }))
+    await waitFor(() => expect(screen.queryByLabelText("Spreadsheet preview")).not.toBeInTheDocument())
+    expect(screen.getByRole("alert")).toHaveTextContent("Artifact unavailable")
+    expect(screen.queryByRole("link", { name: "Download artifact" })).not.toBeInTheDocument()
+  })
+
   it("increments only when scoped file bytes change and Pause stops fetching", async () => {
     let body = "name,value\nfirst,1\n"
     apiFetch.mockImplementation(() => response({ body, contentType: "application/octet-stream" }))
@@ -250,6 +287,29 @@ describe("ArtifactPane — live revisions", () => {
 })
 
 describe("ArtifactPane — document and table editing", () => {
+  it("previews XLSX read-only and keeps legacy/macro-enabled formats download-only", async () => {
+    apiFetch.mockReturnValue(response({ body: "workbook bytes", contentType: "application/octet-stream" }))
+    render(<ArtifactPane agentId="agent-1" />)
+    openTab("xlsx", "reports/budget.xlsx")
+    expect(await screen.findByLabelText("Workbook preview")).toHaveTextContent("Saved worksheet")
+    expect(screen.queryByRole("button", { name: "Editor" })).toBeNull()
+    for (const extension of ["xls", "xlsm"]) {
+      openTab(extension, `reports/budget.${extension}`)
+      expect(await screen.findByText(/Legacy and macro-enabled workbooks/)).toBeInTheDocument()
+      expect(screen.queryByTestId("editor-code")).toBeNull()
+    }
+  })
+  it("keeps discovered macro-enabled run outputs out of the worksheet worker", async () => {
+    apiFetch.mockReturnValue(response({ body: "macro-enabled workbook bytes", contentType: "application/octet-stream" }))
+    render(<ArtifactPane agentId="agent-1" />)
+    openTab("macro", "runs/run_3/budget.xlsm")
+
+    expect(await screen.findByText(/Legacy and macro-enabled workbooks/)).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Download this workbook" })).toBeInTheDocument()
+    expect(workbookPreview).not.toHaveBeenCalled()
+    expect(screen.queryByLabelText("Workbook preview")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Editor" })).toBeNull()
+  })
   it("previews a Markdown document as a page and opens its source for editing", async () => {
     apiFetch.mockReturnValue(response({ body: "# Copy site\n\nA draft.\n", contentType: "application/octet-stream" }))
     render(<ArtifactPane agentId="agent-1" />)
@@ -311,18 +371,20 @@ describe("ArtifactPane — document and table editing", () => {
 })
 
 describe("ArtifactPane — unsaved edits survive navigation attempts", () => {
-  const confirmMock = vi.fn()
-  beforeEach(() => {
-    window.confirm = confirmMock as unknown as typeof window.confirm
-    confirmMock.mockReset()
-  })
+  // The question is the in-page dialog; answer it by its buttons.
+  const discardDialog = () => screen.findByRole("alertdialog", { name: "Discard unsaved artifact changes?" })
+  const answer = async (label: "Discard" | "Keep editing") => {
+    await discardDialog()
+    fireEvent.click(screen.getByRole("button", { name: label }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+  }
   const openEditorWithEdits = async () => {
     apiFetch.mockImplementation((url: string) =>
       String(url).includes("/files/download")
         ? response({ body: "draft\n", contentType: "application/octet-stream" })
         : response({ body: "{}", contentType: "application/json" }),
     )
-    render(<ArtifactPane agentId="agent-1" />)
+    render(<><ArtifactPane agentId="agent-1" /><ConfirmHost /></>)
     openTab("t1", "workspace/one.md")
     openTab("t2", "workspace/two.md")
     useArtifactStore.setState({ activeId: "t1" })
@@ -339,40 +401,38 @@ describe("ArtifactPane — unsaved edits survive navigation attempts", () => {
 
   it("keeps the current tab when a dirty switch is refused", async () => {
     await openEditorWithEdits()
-    confirmMock.mockReturnValue(false)
 
     fireEvent.click(screen.getByRole("button", { name: "two.md" }))
+    await answer("Keep editing")
 
-    expect(confirmMock).toHaveBeenCalledWith("Discard unsaved artifact changes?")
     expect(useArtifactStore.getState().activeId).toBe("t1")
     expect(screen.getByTestId("editor-code")).toHaveTextContent("draft")
   })
 
   it("switches tabs once the discard is confirmed", async () => {
     await openEditorWithEdits()
-    confirmMock.mockReturnValue(true)
 
     fireEvent.click(screen.getByRole("button", { name: "two.md" }))
+    await answer("Discard")
 
-    expect(useArtifactStore.getState().activeId).toBe("t2")
+    await waitFor(() => expect(useArtifactStore.getState().activeId).toBe("t2"))
   })
 
   it("keeps a dirty tab open when its close is refused", async () => {
     await openEditorWithEdits()
-    confirmMock.mockReturnValue(false)
 
     fireEvent.click(screen.getByRole("button", { name: "Close one.md" }))
+    await answer("Keep editing")
 
     expect(useArtifactStore.getState().tabs.map((t) => t.id)).toContain("t1")
   })
 
   it("asks before hiding the pane with unsaved changes", async () => {
     await openEditorWithEdits()
-    confirmMock.mockReturnValue(false)
 
     fireEvent.click(screen.getByRole("button", { name: "Back to artifacts" }))
+    await answer("Keep editing")
 
-    expect(confirmMock).toHaveBeenCalledWith("Discard unsaved artifact changes?")
     expect(useArtifactStore.getState().open).toBe(true)
   })
 })

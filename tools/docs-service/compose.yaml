@@ -1,0 +1,26 @@
+# Optional sidecar only. The Go authority must already share these private
+# socket directories and run as DOCS_UID:DOCS_GID. No database mount is allowed.
+services:
+  docs-service:
+    profiles: [docs]
+    image: "${DOCS_IMAGE:?set qualified immutable image reference}"
+    restart: unless-stopped
+    user: "${DOCS_UID:?set matching Go authority UID}:${DOCS_GID:?set matching Go authority GID}"
+    network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 64
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      CREWSHIP_DOCS_SOCKET: /run/docs/service.sock
+      CREWSHIP_DOCS_AUTHORITY_SOCKET: /run/authority/authority.sock
+      CREWSHIP_DOCS_SERVICE_TOKEN_FILE: /run/secrets/service-token
+    volumes:
+      - ${DOCS_SERVICE_SOCKET_DIR:?set private directory}:/run/docs
+      - ${DOCS_AUTHORITY_SOCKET_DIR:?set private directory}:/run/authority
+      - ${DOCS_SERVICE_TOKEN_FILE:?set regular 0600 secret file}:/run/secrets/service-token:ro
+    stop_grace_period: 35s

@@ -55,6 +55,15 @@ type DSL struct {
 	// ConcurrencyKey. Defaults to 1 when ConcurrencyKey is set
 	// (serialised execution per key), ignored when key is empty.
 	MaxConcurrent int `json:"max_concurrent,omitempty"`
+	// ConcurrencyPolicy says what a start does when the routine's
+	// concurrency_key is already at max_concurrent (ODCH-RT-25):
+	//   ""/"queue" — as before: a manual run or webhook is refused with 429, a
+	//                deferred start waits for capacity;
+	//   "skip"     — a scheduled fire or a webhook delivery is dropped on
+	//                purpose: the schedule records SKIPPED (no failure, no
+	//                alert, no breaker tick) and the webhook answers 200
+	//                {"status":"SKIPPED"}. Needs a concurrency_key.
+	ConcurrencyPolicy string `json:"concurrency_policy,omitempty"`
 	// MaxCostUSD is a hard guardrail on the run's accumulated cost.
 	// The executor checks this between steps; the first step whose
 	// completion pushes the running total above the cap triggers a
@@ -940,11 +949,14 @@ type AuthorMeta struct {
 // to Store.Save. The store enforces author metadata, hash, and the
 // test-run gate; the caller owns the raw DSL JSON + parsed slug.
 type SaveInput struct {
-	Publication *DraftPublication
-	WorkspaceID string
-	Slug        string
-	Name        string
-	Description string
+	SourceAgentID string
+	SourceRunID   string // Token-bound active authoring run, never model-authored.
+	ChatOriginID  string `json:"-"` // Server-owned inherited chat authority; never authored metadata.
+	Publication   *DraftPublication
+	WorkspaceID   string
+	Slug          string
+	Name          string
+	Description   string
 	// PreserveDescription makes an update PATCH-like: keep the existing
 	// description rather than treating an omitted request field as a clear.
 	// Inserts still use Description, because there is no prior value to keep.
@@ -1111,6 +1123,7 @@ type AgentRunner interface {
 // row in the author crew (this is where author-crew-context
 // execution actually takes effect).
 type AgentStepRequest struct {
+	ChatOriginID string `json:"-"` // Server-owned inherited chat authority; never authored metadata.
 	WorkspaceID  string
 	AuthorCrewID string
 	AgentSlug    string

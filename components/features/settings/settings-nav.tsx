@@ -1,12 +1,11 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo, useState, type Ref } from "react"
 import {
-  User, Building, Users, Volume2,
-  Link2, Activity, Shield, KeyRound, Webhook, ChevronRight,
+  User, Building, Users, Volume2, Palette, MonitorSmartphone,
+  Link2, Activity, Shield, KeyRound, ChevronRight,
 } from "lucide-react"
 import { useRouter } from "next/navigation"
-import { cn } from "@/lib/utils"
 import { isAdminTier, isManagerTier } from "@/lib/permissions/tiers"
 import type { LucideIcon } from "lucide-react"
 import {
@@ -14,8 +13,9 @@ import {
   SidebarSearch,
   SidebarSection,
   SidebarRow,
-  SIDEBAR_WIDTH,
 } from "@/components/layout/sidebar-kit"
+import { SecondaryPanel } from "@/components/layout/secondary-panel"
+import { SidebarRowTile } from "@/components/layout/row-tile"
 import { usePageSaveGuard } from "@/components/ui/page-save-bar"
 
 interface NavItem {
@@ -61,7 +61,15 @@ const sections: NavSection[] = [
     label: "Account",
     items: [
       { key: "profile", label: "Profile", icon: User },
+      // Theme, accent, density and motion. The top-bar user menu offers the
+      // two quick ones inline and links here for the rest.
+      { key: "appearance", label: "Appearance", icon: Palette },
       { key: "sounds", label: "Notification sounds", icon: Volume2 },
+      // Browser sessions and CLI tokens: everything that can act as you.
+      // Its own row (it used to be the last card on Profile) so "where do I
+      // revoke that token" has an answer in the nav and a deep link
+      // (/settings?tab=sessions) the user menu can point at.
+      { key: "sessions", label: "Sessions & tokens", icon: MonitorSmartphone },
       // Hidden until peer-card extraction actually exists. The routine runs
       // daily and the endpoints are real, but the extractor wired in
       // production is consolidate.NoopExtractor (cmd/crewship/cmd_start.go)
@@ -101,8 +109,9 @@ const sections: NavSection[] = [
       // instance is wired into.
       { key: "connections", label: "Crew links", icon: Link2, href: "/settings/crew-links" },
       // The roster is readable by every role; the invite/role controls inside
-      // are gated separately.
-      { key: "members", label: "Members", icon: Users },
+      // are gated separately. A nested page (/settings/members) like Crew
+      // links: filtering people by role and capability needs its own panel.
+      { key: "members", label: "Members", icon: Users, href: "/settings/members" },
       // Workspace-wide secret policy (PRD-CREDENTIALS-V2-2026 §2.6). MANAGER
       // reads it — they have to know the rules they work under — and the
       // controls inside go read-only for them and for ADMIN, because the
@@ -110,14 +119,8 @@ const sections: NavSection[] = [
       // read the policy at all (GET is MANAGER+), so the row is hidden
       // rather than rendered over a 403.
       { key: "access-secrets", label: "Access & Secrets", icon: KeyRound, visibleTo: isManagerTier },
-      // Ungated on purpose. GET /api/v1/hooks is `authed(wsCtx(...))` — every
-      // workspace member may read the registry, and a member debugging "why
-      // did my agent's tool call get refused" needs exactly this list. The
-      // enable/disable switch inside is roleManage and renders only for
-      // ADMIN+, matching the read-only-beats-hidden rule at the top of this
-      // file: a shell hook running on the host is information a member is
-      // entitled to, and the switch is the part they are not.
-      { key: "hooks", label: "Lifecycle hooks", icon: Webhook },
+      // Lifecycle hooks are paused (internal/hooks/paused.go) and not listed.
+      // /settings/hooks still answers, with the notice, for old links.
       // GET /api/v1/audit is ADMIN+ (router_admin.go authedAdmin, audit.go
       // canRole("manage")); below that the pane could only show a 403 — the
       // one section where hiding beats read-only.
@@ -166,15 +169,26 @@ interface SettingsNavProps {
   /** Caller's workspace role. The nav owns the per-section rule; the layout
    *  passes the raw role rather than one boolean per gated section. */
   role?: string | null
+  /** Phone, nothing open yet: the list is the page (list → detail → back). */
+  phoneInline?: boolean
+  /** The search the list comes back with (phone pilot: kept while a section is open). */
+  initialQuery?: string
+  onQueryChange?: (query: string) => void
+  /** The sections list's scroller, so the page can keep its position. */
+  scrollRef?: Ref<HTMLElement>
 }
 
-export function SettingsNav({ activeTab, onTabChange, workspaceName, role }: SettingsNavProps) {
+export function SettingsNav({ activeTab, onTabChange, workspaceName, role, phoneInline = false, initialQuery = "", onQueryChange, scrollRef }: SettingsNavProps) {
   const router = useRouter()
   // Switching section unmounts the cards; with edits pending, ask first.
   const guard = usePageSaveGuard()
   // Universal search doubles as a command-finder here — type "audit" to jump
   // straight to Audit Log. Filters the nav live; Enter opens the first match.
-  const [query, setQuery] = useState("")
+  const [query, setQueryState] = useState(initialQuery)
+  const setQuery = (q: string) => {
+    setQueryState(q)
+    onQueryChange?.(q)
+  }
   const q = query.trim().toLowerCase()
 
   const filtered = useMemo(
@@ -194,7 +208,9 @@ export function SettingsNav({ activeTab, onTabChange, workspaceName, role }: Set
   const firstMatch = filtered[0]?.items[0]?.key
 
   return (
-    <aside className={cn(SIDEBAR_WIDTH, "shrink-0 bg-sidebar border-r border-sidebar-border flex flex-col")}>
+    // The one secondary panel (Harbor 2): a 272 px column with a remembered
+    // collapse, and a bottom sheet from the top bar's panel button on a phone.
+    <SecondaryPanel kind="list" id="settings" label="Settings navigation" phoneInline={phoneInline}>
       <SidebarToolbar>
         <SidebarSearch
           value={query}
@@ -208,18 +224,13 @@ export function SettingsNav({ activeTab, onTabChange, workspaceName, role }: Set
         />
       </SidebarToolbar>
 
-      <nav className="flex-1 overflow-y-auto pb-4" aria-label="Settings sections">
+      <nav ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto pb-4" aria-label="Settings sections">
         {filtered.map((section) => (
           <SidebarSection
             key={section.label}
-            label={section.label}
-            actions={
-              section.label === "Workspace" && workspaceName ? (
-                <span className="ml-1 truncate font-mono text-micro normal-case tracking-normal text-sidebar-foreground/70">
-                  {workspaceName}
-                </span>
-              ) : undefined
-            }
+            // The workspace group is named after the workspace (Harbor 2), so
+            // the panel says WHICH workspace these settings change.
+            label={section.label === "Workspace" && workspaceName ? workspaceName : section.label}
           >
             {section.items.map((item) => {
               const isActive = item.key === activeTab
@@ -229,15 +240,18 @@ export function SettingsNav({ activeTab, onTabChange, workspaceName, role }: Set
                   selected={isActive}
                   onSelect={() => guard(() => (item.href ? router.push(item.href) : onTabChange(item.key)))}
                   aria-label={item.label}
+                  // v67 `.pr.set`: a 34 px row (2.2885rem at the 14.857 px root of
+                  // the Small text size) with a 24 px tile and a 13 px label.
+                  className="h-[2.2885rem] py-0"
                 >
-                  <item.icon className={cn("h-3.5 w-3.5 shrink-0", isActive ? "opacity-100" : "opacity-60")} />
-                  <span className="truncate flex-1">{item.label}</span>
+                  <SidebarRowTile icon={item.icon} active={isActive} />
+                  <span className="flex-1 truncate text-control">{item.label}</span>
                   {item.badge === "P2" && (
-                    <span className="ml-auto shrink-0 font-mono text-micro text-sidebar-foreground/40">P2</span>
+                    <span className="ml-auto shrink-0 text-micro tabular-nums text-sidebar-foreground/40">P2</span>
                   )}
                   {item.href && <ChevronRight className="ml-auto h-3.5 w-3.5 shrink-0 opacity-50" aria-hidden />}
                   {item.badge === "OWNER" && (
-                    <span className="ml-auto shrink-0 font-mono text-micro text-sidebar-foreground/60">Owner</span>
+                    <span className="ml-auto shrink-0 text-micro text-sidebar-foreground/60">Owner</span>
                   )}
                 </SidebarRow>
               )
@@ -245,6 +259,6 @@ export function SettingsNav({ activeTab, onTabChange, workspaceName, role }: Set
           </SidebarSection>
         ))}
       </nav>
-    </aside>
+    </SecondaryPanel>
   )
 }

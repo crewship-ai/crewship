@@ -428,6 +428,7 @@ func covSeedStub(t *testing.T) *clitest.StubServer {
 	t.Helper()
 	s := clitest.NewStubServer()
 	t.Cleanup(s.Close)
+	s.OnGet("/api/v1/workspaces", clitest.JSONResponse(200, []map[string]string{{"id": covSeedWSID, "name": "Demo", "slug": "demo", "currentUserRole": "OWNER"}}))
 	s.OnPost("/api/v1/bootstrap", clitest.JSONResponse(201, map[string]string{
 		"user_id":      covSeedUserID,
 		"workspace_id": covSeedWSID,

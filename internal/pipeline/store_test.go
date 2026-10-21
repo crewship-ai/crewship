@@ -18,7 +18,7 @@ import (
 // importing the full database package — keeps pipeline_test.go
 // dependency-free and fast.
 const schemaSQL = `
-CREATE TABLE users (id TEXT PRIMARY KEY);
+CREATE TABLE users (id TEXT PRIMARY KEY, suspended_at TEXT);
 INSERT INTO users (id) VALUES ('user_test');
 
 CREATE TABLE workspaces (
@@ -34,6 +34,7 @@ CREATE TABLE agents (id TEXT PRIMARY KEY, crew_id TEXT NOT NULL);
 INSERT INTO agents (id, crew_id) VALUES ('agent_lead', 'crew_a'), ('agent_b_lead', 'crew_b');
 
 CREATE TABLE pipelines (
+chat_origin_id TEXT,
     id                       TEXT PRIMARY KEY,
     workspace_id             TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     slug                     TEXT NOT NULL,

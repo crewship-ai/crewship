@@ -31,7 +31,7 @@ type AdminObservabilityHandler struct {
 }
 
 func NewAdminObservabilityHandler(db *sql.DB, logger *slog.Logger) *AdminObservabilityHandler {
-	return &AdminObservabilityHandler{
+	h := &AdminObservabilityHandler{
 		logger:    logger,
 		db:        db,
 		startedAt: time.Now(),
@@ -44,6 +44,22 @@ func NewAdminObservabilityHandler(db *sql.DB, logger *slog.Logger) *AdminObserva
 			return d.Root, nil
 		},
 	}
+	// A timed override that runs out is a change too: on record in the log
+	// and the instance audit, by the server rather than a person.
+	logging.OnAutoRevert(func(from, to string) {
+		logging.Always(logger, "log level reverted to baseline", "from", from, "to", to)
+		if db == nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := auditInstance(ctx, nil, db, "instance.log_level_reverted", "log_level", "log-level", "", map[string]any{
+			"from": from, "to": to,
+		}); err != nil {
+			logger.Error("audit log level revert", "error", err)
+		}
+	})
+	return h
 }
 
 // logLevelResponse is the wire shape for GET/PUT /api/v1/admin/log-level.
@@ -109,13 +125,23 @@ func (h *AdminObservabilityHandler) SetLogLevel(w http.ResponseWriter, r *http.R
 	if u := UserFromContext(r.Context()); u != nil {
 		actor = u.ID
 	}
-	// Log the change at WARN so it lands even when the instance was just
-	// quieted to warn/error — an operator flipping verbosity is an event
-	// worth an audit line regardless of the level they set.
-	h.logger.Warn("log level changed via admin API",
-		"new_level", body.Level, "previous", prev,
+	// On record whatever the new level is: logging.Always writes past the
+	// level that was just set (a plain WARN would vanish under "error"), and
+	// the instance audit says who changed it, from what, for how long.
+	state := currentLogLevel()
+	logging.Always(h.logger, "log level changed via admin API",
+		"new_level", state.Level, "previous", prev,
 		"ttl_seconds", int(ttl.Seconds()), "actor", actor)
-	writeJSON(w, http.StatusOK, currentLogLevel())
+	meta := map[string]any{"from": prev, "to": state.Level, "baseline": state.Baseline, "ttl_seconds": int(ttl.Seconds())}
+	if state.ExpiresAt != nil {
+		meta["expires_at"] = *state.ExpiresAt
+	}
+	if h.db != nil {
+		if err := auditInstance(r.Context(), r, h.db, "instance.log_level_changed", "log_level", "log-level", "", meta); err != nil {
+			h.logger.Error("audit log level change", "error", err)
+		}
+	}
+	writeJSON(w, http.StatusOK, state)
 }
 
 // Health reports process uptime, the current log level, and disk headroom for

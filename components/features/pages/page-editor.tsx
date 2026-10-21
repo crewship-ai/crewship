@@ -1,5 +1,9 @@
 "use client"
 
+import { useUnsavedNavigationGuard } from "@/hooks/use-unsaved-navigation-guard"
+import { useWorkspace } from "@/hooks/use-workspace"
+import { usePageCreationAccess } from "@/hooks/use-page-creation-access"
+
 /**
  * The in-app page editor — PRD `docs/specs/pages.md` §10b.1.
  *
@@ -54,7 +58,7 @@
 
 import * as React from "react"
 import { AlertCircle, Loader2, Save } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { linter, type Diagnostic } from "@codemirror/lint"
 import type { Extension } from "@codemirror/state"
 import type { EditorView } from "@codemirror/view"
@@ -792,6 +796,9 @@ export function PageEditor({
   onClose,
   onSaved,
 }: PageEditorProps) {
+  const { workspaceUnavailable } = useWorkspace()
+  const canCreatePage = usePageCreationAccess(workspaceId)
+  const creationDenied = mode === "create" && !canCreatePage
   const sealed = sealedPanelCount(page)
 
   const initial = React.useMemo(() => {
@@ -908,6 +915,7 @@ export function PageEditor({
   // the shell now guards Esc and the overlay too, which are the two a per-page
   // guard structurally cannot reach.
   const guardedDirty = dirty || save.isPending
+  useUnsavedNavigationGuard(guardedDirty, "Discard your unsaved Page draft and leave this workspace?")
 
   const handleDocChange = (next: string) => {
     bufferRef.current = next
@@ -925,7 +933,7 @@ export function PageEditor({
     // editor, so the two conditions that disable the button have to hold here
     // too. The shell's contract: "No-op when the form is not submittable —
     // guard inside the handler."
-    if (save.isPending || sealed > 0) return
+    if (save.isPending || sealed > 0 || creationDenied || workspaceUnavailable) return
     // Pull the latest doc out of CodeMirror first: FileEditor only hands its
     // buffer back through onSave, and reading React state here would send the
     // value from before the last keystroke.
@@ -1104,6 +1112,7 @@ export function PageEditor({
           the editor, and the only thing that changed is which side of the
           buffer it is on. No `onDismiss`, because it already clears itself the
           moment the buffer changes. */}
+      {creationDenied && <CreateSurfaceRefusal message="You do not currently have permission to create Pages in this workspace. Your draft is preserved." />}
       {refusal && (
         <div data-testid="page-editor-refusal">
           <CreateSurfaceRefusal message={<span className="font-mono">{refusal}</span>} />
@@ -1128,7 +1137,7 @@ export function PageEditor({
         // clickable during a save is the whole reason `guardedDirty` includes
         // `save.isPending`. So the spinner rides in the label instead.
         primaryIcon={save.isPending ? undefined : Save}
-        primaryDisabled={save.isPending || sealed > 0}
+        primaryDisabled={save.isPending || sealed > 0 || creationDenied || workspaceUnavailable}
         onPrimary={handleSave}
       />
     </CreateSurface>

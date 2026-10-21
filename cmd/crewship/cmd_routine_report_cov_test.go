@@ -14,7 +14,7 @@ const covReportEventsPath = "/api/v1/workspaces/" + covWorkspaceIDCli10 + "/pipe
 func stubReportRun(s *clitest.StubServer) {
 	s.OnGet(covReportRunPath, clitest.JSONResponse(200, cli.PipelineRunDetail{
 		ID: "run_r", PipelineSlug: "acct-routine", PipelineName: "Acct Routine",
-		Status: "completed", Output: "Reconciled 42 rows.", CostUSD: 0.003, DurationMs: 2000,
+		Status: "completed", Output: "Reconciled 42 rows.", CostUSD: usdPtr(0.003), DurationMs: 2000,
 		Inputs:      map[string]any{"month": "June"},
 		StepOutputs: map[string]any{"parse": "42 rows", "verify": "balanced"},
 	}))
@@ -71,7 +71,7 @@ func TestRoutineResultRunE_ClientView(t *testing.T) {
 	defer s.Close()
 	s.OnGet("/api/v1/workspaces/"+covWorkspaceIDCli10+"/pipeline-runs/run_c", clitest.JSONResponse(200, cli.PipelineRunDetail{
 		ID: "run_c", PipelineName: "Acct", Status: "completed", Output: "The report is ready.",
-		CostUSD: 0.5, DurationMs: 9000,
+		CostUSD: usdPtr(0.5), DurationMs: 9000,
 	}))
 	covSetupCli10(t, s.URL())
 	resultClient = true

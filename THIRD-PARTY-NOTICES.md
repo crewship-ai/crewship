@@ -66,6 +66,24 @@ Aggregate license breakdown as of the latest release (informational):
 Apache-2.0, MIT, ISC, BSD-2-Clause, BSD-3-Clause, MPL-2.0, LGPL-3.0-or-later,
 CC-BY-4.0, Unlicense. All compatible with Apache-2.0 redistribution.
 
+### Agent avatar artwork — DiceBear
+
+Agent avatars are drawn in the browser by [DiceBear](https://www.dicebear.com).
+The library code is MIT (`@dicebear/core` 9.4.3, and 10.7.0 under the npm alias
+`@dicebear/core-v10`). Each avatar **style** carries its own artwork licence,
+and every generated SVG repeats it in its `<metadata>` block (creator, source
+and licence), so a saved avatar keeps its attribution.
+
+- **Voxel Bot** and **Voxel Art** (`voxel-bot`, `voxel-art`), the default since
+  #3789, come from `@dicebear/styles` 10.6.0 (npm alias `@dicebear/styles-v10`).
+  Both are by DiceBear and dedicated to the public domain under
+  [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/). No attribution
+  is required; it is given here anyway. That package's `LICENSE.md` lists the
+  licence of every style it contains; only these two are used.
+- The other 25 styles come from the per-style `@dicebear/*` 9.4.2 packages,
+  each under the licence its own package declares: MIT (8 styles),
+  MIT AND CC-BY-4.0 (13), or the terms in the package's own LICENSE file (4).
+
 ### LGPL-3.0 exception note — `@img/sharp-libvips-*`
 
 Crewship transitively depends on `@img/sharp-libvips-<platform>-<arch>`

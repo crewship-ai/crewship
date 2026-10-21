@@ -28,6 +28,7 @@ func TestInvokingUserAuthority(t *testing.T) {
 		t.Run(scenario, func(t *testing.T) {
 			db := openFactoryTestDB(t)
 			defer db.Close()
+			mustExec(t, db, `INSERT INTO users(id) VALUES('human')`)
 			mustExec(t, db, `CREATE TABLE workspace_members (workspace_id TEXT, user_id TEXT, access_mode TEXT NOT NULL DEFAULT 'trusted')`)
 			mustExec(t, db, `INSERT INTO workspace_members(workspace_id,user_id) VALUES ('ws_test','human')`)
 			mock := newMockRunner()
@@ -110,6 +111,7 @@ func TestInvokingUserRevokedAfterReservationReleasesIdempotencyKey(t *testing.T)
 func TestInvokingUserAuthorityResumedRun(t *testing.T) {
 	db := openFactoryTestDB(t)
 	defer db.Close()
+	mustExec(t, db, `INSERT INTO users(id) VALUES('removed-human')`)
 	mustExec(t, db, `CREATE TABLE workspace_members (workspace_id TEXT, user_id TEXT, access_mode TEXT NOT NULL DEFAULT 'trusted')`)
 	runner := newMockRunner()
 	deps := fullExecutorDeps(t, db, runner)

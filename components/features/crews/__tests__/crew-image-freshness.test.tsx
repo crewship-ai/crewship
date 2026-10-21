@@ -104,6 +104,18 @@ describe("CrewImageFreshness", () => {
     expect(screen.queryByTestId("crew-image-refresh")).not.toBeInTheDocument()
   })
 
+  // "Current" alone does not say current against what. The card names the
+  // comparison: the container's build against what the tag points at today.
+  it("says what current means, and names the digests in plain words", async () => {
+    apiFetch.mockResolvedValue(status({ behind: false, reason: "", running_digest: RESOLVED }))
+    render(<CrewImageFreshness crewId="crew_1" workspaceId="ws_1" canEdit />)
+
+    await settledVerdict()
+    expect(screen.getByTestId("crew-image-freshness-current")).toHaveTextContent(/same build the tag points at now/i)
+    expect(screen.getByText("Container runs")).toBeInTheDocument()
+    expect(screen.getByText("Tag points at")).toBeInTheDocument()
+  })
+
   it("posts the refresh and reports what changed", async () => {
     apiFetch
       .mockResolvedValueOnce(status())

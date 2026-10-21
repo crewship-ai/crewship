@@ -14,12 +14,13 @@ func (s *Server) handleIssueCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Title       string `json:"title"`
-		Description string `json:"description"`
-		CrewID      string `json:"crew_id"` // SECURITY: ignored — the trusted IPC crew identity is always used.
-		Priority    string `json:"priority"`
-		ProjectID   string `json:"project_id"`
-		AssigneeID  string `json:"assignee_id"`
+		Title        string `json:"title"`
+		OperationKey string `json:"operation_key"`
+		Description  string `json:"description"`
+		CrewID       string `json:"crew_id"` // SECURITY: ignored — the trusted IPC crew identity is always used.
+		Priority     string `json:"priority"`
+		ProjectID    string `json:"project_id"`
+		AssigneeID   string `json:"assignee_id"`
 	}
 	if !decodeCappedJSON(w, r, &req) {
 		return
@@ -41,12 +42,15 @@ func (s *Server) handleIssueCreate(w http.ResponseWriter, r *http.Request) {
 
 	// #812: attribute authorship to the ACTING agent from its per-agent bearer
 	// token, not the boot agent that started the shared sidecar. Forged token → 403.
-	authorAgentID, ok := s.actingAgentID(r)
+	authorAgentID, ok := s.issueActor(w, r)
 	if !ok {
-		writeJSONResponse(w, http.StatusForbidden, map[string]string{"error": "unrecognized agent token"})
 		return
 	}
 
+	runID, operationKey, ok := s.issueOperationOrigin(w, r, req.OperationKey)
+	if !ok {
+		return
+	}
 	body := map[string]interface{}{
 		"workspace_id":    s.ipc.WorkspaceID,
 		"crew_id":         crewID,
@@ -54,11 +58,15 @@ func (s *Server) handleIssueCreate(w http.ResponseWriter, r *http.Request) {
 		"assignee_type":   "agent",
 		"author_agent_id": authorAgentID,
 	}
-	// Provenance (v108/v129): the chat this agent container is bound to.
-	// A run id is not part of the IPC identity today, so only the chat is
-	// forwarded; crewshipd stamps authored_via='agent_tool_call' itself.
-	if chatID := s.requestChatID(r); chatID != "" {
+	// Run identity is verified per request. crewshipd resolves its chat and
+	// initiating human from durable host records, never the boot chat.
+	if runID != "" {
+		body["author_run_id"] = runID
+	} else if chatID := s.requestChatID(r); chatID != "" {
 		body["author_chat_id"] = chatID
+	}
+	if operationKey != "" {
+		body["operation_key"] = operationKey
 	}
 	if req.Description != "" {
 		body["description"] = req.Description

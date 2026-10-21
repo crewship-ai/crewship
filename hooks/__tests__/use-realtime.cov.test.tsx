@@ -11,7 +11,7 @@ let wsStatus = "disconnected"
 let capturedOpts: {
   url: string
   getToken: () => Promise<string | null>
-  onMessage: (msg: { type: string; payload?: unknown }) => void
+  onMessage: (msg: { type: string; channel?: string; payload?: unknown }) => void
 } | null = null
 
 vi.mock("@/hooks/use-websocket", () => ({
@@ -112,11 +112,12 @@ describe("RealtimeProvider — message dispatch", () => {
       result.current.subscribe("run.started", cb)
     })
     act(() => {
-      capturedOpts!.onMessage({ type: "run.started", payload: { run_id: "r1" } })
+      capturedOpts!.onMessage({ type: "run.started", channel: "session:chat-1", payload: { run_id: "r1" } })
     })
     expect(cb).toHaveBeenCalledTimes(1)
     const event = cb.mock.calls[0][0]
     expect(event.type).toBe("run.started")
+    expect(event.channel).toBe("session:chat-1")
     expect(event.payload).toEqual({ run_id: "r1" })
     expect(event.timestamp).toBeInstanceOf(Date)
   })

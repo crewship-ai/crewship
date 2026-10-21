@@ -12,6 +12,7 @@ import (
 // these tests fast.
 const versioningSchemaSQL = `
 CREATE TABLE IF NOT EXISTS pipeline_versions (
+chat_origin_id TEXT,
     id              TEXT PRIMARY KEY,
     pipeline_id     TEXT NOT NULL,
     version         INTEGER NOT NULL,

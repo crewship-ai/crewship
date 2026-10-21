@@ -419,6 +419,7 @@ var routineSchedulesCreateCmd = &cobra.Command{
 // (internal/api/pipeline_schedules.go PreviewSchedule).
 type schedulePreviewResult struct {
 	CronExpr    string   `json:"cron_expr" yaml:"cron_expr"`
+	Phrase      string   `json:"phrase,omitempty" yaml:"phrase,omitempty"`
 	Timezone    string   `json:"timezone" yaml:"timezone"`
 	Occurrences []string `json:"occurrences" yaml:"occurrences"`
 }
@@ -434,13 +435,20 @@ schedule that is still being drafted.
 
 Example, checked across a DST boundary:
 
-  crewship routine schedules preview --cron "30 2 * * *" --timezone Europe/Prague --count 5`,
+  crewship routine schedules preview --cron "30 2 * * *" --timezone Europe/Prague --count 5
+
+--when takes a phrase instead of a cron ("every weekday at 8:30"); the server
+derives the cron and prints it with the next starts.`,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		cronExpr, _ := cmd.Flags().GetString("cron")
+		when, _ := cmd.Flags().GetString("when")
 		timezone, _ := cmd.Flags().GetString("timezone")
 		count, _ := cmd.Flags().GetInt("count")
-		if cronExpr == "" {
-			return fmt.Errorf("--cron is required")
+		if cronExpr != "" && when != "" {
+			return fmt.Errorf("--cron and --when are mutually exclusive — pass one or the other")
+		}
+		if cronExpr == "" && when == "" {
+			return fmt.Errorf("--cron or --when is required")
 		}
 		if timezone == "" {
 			timezone = "UTC"
@@ -454,7 +462,11 @@ Example, checked across a DST boundary:
 		client := newAPIClient()
 		ws := client.GetWorkspaceID()
 		q := url.Values{}
-		q.Set("cron_expr", cronExpr)
+		if when != "" {
+			q.Set("phrase", when)
+		} else {
+			q.Set("cron_expr", cronExpr)
+		}
 		q.Set("timezone", timezone)
 		if count > 0 {
 			q.Set("count", strconv.Itoa(count))
@@ -472,6 +484,9 @@ Example, checked across a DST boundary:
 			return fmt.Errorf("decode preview response: %w", err)
 		}
 		return resolvedFormatter(cmd).AutoHuman(out, func() {
+			if out.Phrase != "" {
+				fmt.Printf("%q means cron %q.\n", out.Phrase, out.CronExpr)
+			}
 			fmt.Printf("Next %d fire times for %q (%s):\n", len(out.Occurrences), out.CronExpr, out.Timezone)
 			for _, o := range out.Occurrences {
 				fmt.Printf("  - %s\n", formatTimestamp(o))
@@ -860,7 +875,8 @@ func init() {
 
 	routineSchedulesDeleteCmd.Flags().Bool("yes", false, "skip the interactive confirmation prompt")
 
-	routineSchedulesPreviewCmd.Flags().String("cron", "", "5-field cron expression to preview (REQUIRED)")
+	routineSchedulesPreviewCmd.Flags().String("cron", "", "5-field cron expression to preview (this or --when)")
+	routineSchedulesPreviewCmd.Flags().String("when", "", "the schedule in words, e.g. \"every weekday at 8:30\" (this or --cron)")
 	routineSchedulesPreviewCmd.Flags().String("timezone", "", "IANA timezone (default: UTC)")
 	routineSchedulesPreviewCmd.Flags().Int("count", 5, "how many fire times to show (default 5, capped at 20)")
 

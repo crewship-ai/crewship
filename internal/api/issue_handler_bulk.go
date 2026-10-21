@@ -46,130 +46,163 @@ func (h *IssueHandler) BulkUpdate(w http.ResponseWriter, r *http.Request) {
 	updated := 0
 
 	for _, issueID := range req.IDs {
-		// Verify issue belongs to workspace
-		var currentStatus string
-		err := h.db.QueryRowContext(r.Context(),
-			`SELECT status FROM missions WHERE id = ? AND workspace_id = ?`,
-			issueID, wsID).Scan(&currentStatus)
-		if err != nil {
-			continue // skip missing issues
-		}
-
-		ub := newUpdate()
-
-		if req.Updates.Status != nil {
-			newStatus := *req.Updates.Status
-			if !h.validateStatusTransition(currentStatus, newStatus) {
-				continue // skip invalid transitions
+		if func() bool {
+			tx, err := h.db.BeginTx(r.Context(), nil)
+			if err != nil {
+				h.logger.Error("bulk begin issue update", "error", err)
+				return false
 			}
-			ub.Set("status", newStatus)
-			if newStatus == "DONE" || newStatus == "CANCELLED" || newStatus == "DUPLICATE" {
-				ub.Set("completed_at", now)
+			defer tx.Rollback()
+
+			// Verify issue belongs to workspace
+			var currentStatus string
+			err = tx.QueryRowContext(r.Context(),
+				`SELECT status FROM missions WHERE id = ? AND workspace_id = ?`,
+				issueID, wsID).Scan(&currentStatus)
+			if err != nil {
+				return false // skip missing issues
 			}
-		}
-		if req.Updates.Priority != nil {
-			ub.Set("priority", *req.Updates.Priority)
-		}
-		// assigneeTypeSet tracks whether the assignee_id branch below already
-		// queued an assignee_type SET clause, so the plain pass-through
-		// further down doesn't also queue one — see issue_handler_update.go's
-		// Update for the same guard and the reason it's needed
-		// (updateBuilder.Set has no dedup).
-		assigneeTypeSet := false
-		if req.Updates.AssigneeID != nil && *req.Updates.AssigneeID != "" {
-			// Same workspace-scoping as Create/Update (issue_handler_create.go,
-			// issue_handler_update.go): pre-fix this went straight into the
-			// UPDATE, so a bulk request could assign issues to a guessed or
-			// enumerated cross-workspace user/agent ID.
-			var assigneeType string
-			if req.Updates.AssigneeType != nil {
-				assigneeType = *req.Updates.AssigneeType
-				if assigneeType != "user" && assigneeType != "agent" {
-					continue // skip: invalid/unrecognized assignee_type, same as any other bad per-item field
+
+			ub := newUpdate()
+
+			if req.Updates.Status != nil {
+				newStatus := *req.Updates.Status
+				if !h.validateStatusTransition(currentStatus, newStatus) {
+					return false // skip invalid transitions
 				}
-				ok, vErr := validateAssigneeWorkspace(r.Context(), h.db, assigneeType, *req.Updates.AssigneeID, wsID)
-				if vErr != nil {
-					h.logger.Error("bulk validate assignee_id", "error", vErr, "issue_id", issueID)
-					continue
-				}
-				if !ok {
-					continue // skip: cross-workspace assignee_id, consistent with the invalid-transition skip above
-				}
-			} else {
-				// assignee_type omitted: resolve it instead of trusting the
-				// row's stale type — see issue_handler_update.go's Update for
-				// the false-reject this used to cause (same shape, same
-				// fix). In bulk, the old behavior didn't just misreport the
-				// error: it silently skipped the ENTIRE item (assignee,
-				// status, everything) via this same `continue`, and the
-				// caller only ever saw the aggregate `{"updated": N}` count
-				// — no way to tell a wrong-table miss apart from a real
-				// cross-workspace rejection.
-				var ok bool
-				var rErr error
-				assigneeType, ok, rErr = resolveAssigneeType(r.Context(), h.db, *req.Updates.AssigneeID, wsID)
-				if rErr != nil {
-					h.logger.Error("bulk resolve assignee_type", "error", rErr, "issue_id", issueID)
-					continue
-				}
-				if !ok {
-					continue // skip: assignee_id doesn't exist in this workspace under either type
+				ub.Set("status", newStatus)
+				if newStatus == "DONE" || newStatus == "CANCELLED" || newStatus == "DUPLICATE" {
+					ub.Set("completed_at", now)
 				}
 			}
-			ub.Set("assignee_type", assigneeType)
-			assigneeTypeSet = true
-			// A10 (I5): route the write to the typed owner or delegate
-			// column alongside the legacy pair above.
-			setOwnerOrDelegate(ub, assigneeType, *req.Updates.AssigneeID)
-		}
-		if req.Updates.AssigneeType != nil && !assigneeTypeSet {
-			ub.Set("assignee_type", *req.Updates.AssigneeType)
-		}
-		if req.Updates.AssigneeID != nil {
-			ub.Set("assignee_id", *req.Updates.AssigneeID)
-		}
-		if req.Updates.ProjectID != nil {
-			if *req.Updates.ProjectID == "" {
-				ub.SetNull("project_id")
-			} else {
-				ub.Set("project_id", *req.Updates.ProjectID)
+			if req.Updates.Priority != nil {
+				ub.Set("priority", *req.Updates.Priority)
 			}
-		}
-
-		if ub.Empty() {
-			continue
-		}
-
-		query, args := ub.Build("missions", "id = ? AND workspace_id = ?", issueID, wsID)
-		if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
-			h.logger.Error("bulk update issue", "error", err, "issue_id", issueID)
-			continue
-		}
-
-		// Update labels if provided
-		if req.Updates.Labels != nil {
-			if _, err := h.db.ExecContext(r.Context(), `DELETE FROM mission_labels WHERE mission_id = ?`, issueID); err != nil {
-				h.logger.Error("bulk delete issue labels", "error", err, "issue_id", issueID)
+			// assigneeTypeSet tracks whether the assignee_id branch below already
+			// queued an assignee_type SET clause, so the plain pass-through
+			// further down doesn't also queue one — see issue_handler_update.go's
+			// Update for the same guard and the reason it's needed
+			// (updateBuilder.Set has no dedup).
+			assigneeTypeSet := false
+			if req.Updates.AssigneeID != nil && *req.Updates.AssigneeID != "" {
+				// Same workspace-scoping as Create/Update (issue_handler_create.go,
+				// issue_handler_update.go): pre-fix this went straight into the
+				// UPDATE, so a bulk request could assign issues to a guessed or
+				// enumerated cross-workspace user/agent ID.
+				var assigneeType string
+				if req.Updates.AssigneeType != nil {
+					assigneeType = *req.Updates.AssigneeType
+					if assigneeType != "user" && assigneeType != "agent" {
+						return false // skip: invalid/unrecognized assignee_type, same as any other bad per-item field
+					}
+					ok, vErr := validateAssigneeWorkspace(r.Context(), tx, assigneeType, *req.Updates.AssigneeID, wsID)
+					if vErr != nil {
+						h.logger.Error("bulk validate assignee_id", "error", vErr, "issue_id", issueID)
+						return false
+					}
+					if !ok {
+						return false // skip: cross-workspace assignee_id, consistent with the invalid-transition skip above
+					}
+				} else {
+					// assignee_type omitted: resolve it instead of trusting the
+					// row's stale type — see issue_handler_update.go's Update for
+					// the false-reject this used to cause (same shape, same
+					// fix). In bulk, the old behavior didn't just misreport the
+					// error: it silently skipped the ENTIRE item (assignee,
+					// status, everything) via this same `return false`, and the
+					// caller only ever saw the aggregate `{"updated": N}` count
+					// — no way to tell a wrong-table miss apart from a real
+					// cross-workspace rejection.
+					var ok bool
+					var rErr error
+					assigneeType, ok, rErr = resolveAssigneeType(r.Context(), tx, *req.Updates.AssigneeID, wsID)
+					if rErr != nil {
+						h.logger.Error("bulk resolve assignee_type", "error", rErr, "issue_id", issueID)
+						return false
+					}
+					if !ok {
+						return false // skip: assignee_id doesn't exist in this workspace under either type
+					}
+				}
+				ub.Set("assignee_type", assigneeType)
+				assigneeTypeSet = true
+				// A10 (I5): route the write to the typed owner or delegate
+				// column alongside the legacy pair above.
+				setOwnerOrDelegate(ub, assigneeType, *req.Updates.AssigneeID)
 			}
-			for _, labelID := range *req.Updates.Labels {
-				if _, err := h.db.ExecContext(r.Context(),
-					`INSERT OR IGNORE INTO mission_labels (mission_id, label_id) VALUES (?, ?)`,
-					issueID, labelID); err != nil {
-					h.logger.Error("bulk insert issue label", "error", err, "issue_id", issueID, "label_id", labelID)
+			if req.Updates.AssigneeType != nil && !assigneeTypeSet {
+				ub.Set("assignee_type", *req.Updates.AssigneeType)
+			}
+			if req.Updates.AssigneeID != nil {
+				ub.Set("assignee_id", *req.Updates.AssigneeID)
+			}
+			if req.Updates.ProjectID != nil {
+				if *req.Updates.ProjectID == "" {
+					ub.SetNull("project_id")
+				} else {
+					ub.Set("project_id", *req.Updates.ProjectID)
 				}
 			}
-		}
 
-		// Activity log
-		if req.Updates.Status != nil {
-			h.logActivity(r.Context(), issueID, "user", user.ID, "status_changed",
-				fmt.Sprintf("%s -> %s (bulk)", currentStatus, *req.Updates.Status))
-		}
+			if ub.Empty() && req.Updates.Labels == nil {
+				return false
+			}
 
-		updated++
+			if req.Updates.ProjectID != nil && *req.Updates.ProjectID != "" {
+				var exists bool
+				if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM projects WHERE id=? AND workspace_id=?)`, *req.Updates.ProjectID, wsID).Scan(&exists); err != nil || !exists {
+					return false
+				}
+			}
+			if req.Updates.Labels != nil {
+				for _, label := range *req.Updates.Labels {
+					var exists bool
+					if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM labels WHERE id=? AND workspace_id=?)`, label, wsID).Scan(&exists); err != nil || !exists {
+						return false
+					}
+				}
+			}
+			if !ub.Empty() {
+				query, args := ub.Build("missions", "id = ? AND workspace_id = ?", issueID, wsID)
+				if _, err := tx.ExecContext(r.Context(), query, args...); err != nil {
+					h.logger.Error("bulk update issue", "error", err, "issue_id", issueID)
+					return false
+				}
+			}
+			if req.Updates.Labels != nil {
+				if err := replaceIssueLabelsTx(r.Context(), tx, issueID, *req.Updates.Labels); err != nil {
+					return false
+				}
+			}
+			var evs []issueEvent
+			if req.Updates.Status != nil && currentStatus != *req.Updates.Status {
+				evs = append(evs, issueEvent{MissionID: issueID, ActorType: "user", ActorID: user.ID, Action: actionStatusChanged, Details: fmt.Sprintf("%s -> %s (bulk)", currentStatus, *req.Updates.Status), From: currentStatus, To: *req.Updates.Status})
+			}
+			if req.Updates.Priority != nil {
+				evs = append(evs, issueEvent{MissionID: issueID, ActorType: "user", ActorID: user.ID, Action: actionPriorityChanged, Details: *req.Updates.Priority})
+			}
+			if req.Updates.AssigneeID != nil {
+				evs = append(evs, issueEvent{MissionID: issueID, ActorType: "user", ActorID: user.ID, Action: actionAssigneeChanged, Details: "assignee_id: " + *req.Updates.AssigneeID})
+			}
+			for _, ev := range evs {
+				if _, err := persistIssueActivityTx(r.Context(), tx, ev); err != nil {
+					h.logger.Error("bulk persist issue activity", "error", err)
+					return false
+				}
+			}
+			if err := tx.Commit(); err != nil {
+				h.logger.Error("bulk commit issue", "error", err)
+				return false
+			}
+			return true
+
+		}() {
+			updated++
+		}
 	}
 
 	if updated > 0 {
+		h.drainCommittedIssueMutation(wsID)
 		h.broadcastIssueEvent(wsID, "issues.bulk_updated", map[string]string{"count": fmt.Sprintf("%d", updated)})
 	}
 

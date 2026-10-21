@@ -107,15 +107,22 @@ func TestDecide_InputValidation(t *testing.T) {
 	}
 }
 
-func TestDecide_UpdateErrorOnClosedDB(t *testing.T) {
+func TestDecide_ClosedDBFailsBeforeDecisionEffects(t *testing.T) {
 	db := openTestDB(t)
-	db.Close()
-	err := Decide(context.Background(), db, nil, "ws_test", "some-id", StatusApproved, "alice", "")
-	if err == nil {
-		t.Fatal("expected exec error")
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "update decision") {
-		t.Errorf("error %q should wrap update decision", err)
+	_, beginErr := db.BeginTx(context.Background(), nil)
+	emitted := &recorderEmitter{}
+	err := Decide(context.Background(), db, emitted, "ws_test", "some-id", StatusApproved, "alice", "")
+	// The canonical wrapper now starts its transaction before any source read
+	// or update. Preserve the underlying database admission failure, rather
+	// than expecting the former update-phase context on a closed database.
+	if beginErr == nil || err == nil || !errors.Is(err, beginErr) || !strings.Contains(err.Error(), "database is closed") {
+		t.Fatalf("expected underlying closed-DB transaction error, got %v (native %v)", err, beginErr)
+	}
+	if len(emitted.entries) != 0 {
+		t.Fatalf("failed transaction emitted decision effects: %+v", emitted.entries)
 	}
 }
 

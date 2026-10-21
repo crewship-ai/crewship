@@ -84,7 +84,9 @@ func crewWorkspaceGETSchemaCatalogV1() (map[string]map[string]DomainSchema, map[
 	// that used to sit here were unreachable (#1849).
 	add("/api/v1/crews/{crewId}/missions/{missionId}", "CrewMissionResponseV1", object(map[string]any{"id": str(), "title": str(), "description": str(), "status": str(), "tasks": array(anyObject()), "created_at": str(), "updated_at": str()}))
 	add("/api/v1/crews/{crewId}/persona", "CrewPersonaResponseV1", object(map[string]any{"crew_id": str(), "content": str(), "version": integer(), "created_at": str(), "updated_at": str()}))
-	add("/api/v1/crews/{crewId}/policy", "CrewPolicyResponseV1", object(map[string]any{"crew_id": str(), "autonomy": str(), "execution": str(), "approval_required": boolean(), "updated_at": str()}))
+	crewPolicy := object(map[string]any{"crew_id": str(), "autonomy_level": str(), "behavior_mode": str(), "whole_run_approval": boolean(), "set_by_user_id": str(), "set_at": str(), "reason": str()})
+	crewPolicy["required"] = []string{"crew_id", "autonomy_level", "behavior_mode", "whole_run_approval"}
+	add("/api/v1/crews/{crewId}/policy", "CrewPolicyResponseV1", crewPolicy)
 	add("/api/v1/crews/{crewId}/peer-conversations", "CrewPeerConversationsResponseV1", object(map[string]any{"conversations": array(anyObject()), "count": integer()}))
 	add("/api/v1/crews/{crewId}/standup", "CrewStandupResponseV1", object(map[string]any{"crew_id": str(), "date": str(), "summary": str(), "items": array(anyObject())}))
 	add("/api/v1/crews/{crewId}/port-expose", "CrewPortExposeResponseV1", object(map[string]any{"ports": array(object(map[string]any{"id": str(), "port": integer(), "host": str(), "status": str(), "created_at": str()}))}))
@@ -106,11 +108,11 @@ func crewWorkspaceGETSchemaCatalogV1() (map[string]map[string]DomainSchema, map[
 	pending := object(map[string]any{
 		"id": str(), "pipeline_slug": str(), "pinned_version": nullable("integer"), "debounce_key": str(),
 		"priority": integer(), "fire_at": str(), "expires_at": nullable("string"), "next_attempt_at": nullable("string"),
-		"status": map[string]any{"type": "string", "enum": []string{"pending", "fired", "failed", "expired", "cancelled"}},
-		"run_id": str(), "dispatch_attempts": integer(), "last_error": str(), "can_cancel": boolean(),
+		"status":      map[string]any{"type": "string", "enum": []string{"pending", "fired", "failed", "expired", "cancelled"}},
+		"reason_code": str(), "run_id": str(), "dispatch_attempts": integer(), "last_error": str(), "can_cancel": boolean(),
 		"inputs": map[string]any{"type": "object", "additionalProperties": true, "description": "Read-only preset projection: safe primitives, type markers for credential/file/redacted values, empty containers for structured values. Not replay inputs."},
 	})
-	pending["required"] = []string{"inputs", "pinned_version", "id", "pipeline_slug", "priority", "fire_at", "expires_at", "next_attempt_at", "status", "run_id", "dispatch_attempts", "last_error", "can_cancel"}
+	pending["required"] = []string{"inputs", "pinned_version", "id", "pipeline_slug", "priority", "fire_at", "expires_at", "next_attempt_at", "status", "run_id", "dispatch_attempts", "last_error", "can_cancel", "reason_code"}
 	addList("/api/v1/workspaces/{workspaceId}/pipelines/pending", "WorkspacePendingRunsResponseV1", pending)
 	add("/api/v1/workspaces/{workspaceId}/pipeline-pending/{pendingId}", "WorkspacePendingRunResponseV1", pending)
 	addList("/api/v1/workspaces/{workspaceId}/pipeline-webhooks", "WorkspacePipelineWebhooksResponseV1", object(map[string]any{

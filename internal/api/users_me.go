@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -23,6 +24,7 @@ type UserProfileHandler struct {
 	db       *sql.DB
 	logger   *slog.Logger
 	sessions sessions.Store
+	streams  *auth.StreamCredentials
 	// avatarRoot is the storage base for uploaded avatars (the router's
 	// storagePath). Empty when storage isn't configured — avatar upload/serve
 	// then fail closed rather than writing to an unintended location. Set via
@@ -105,6 +107,10 @@ func (h *UserProfileHandler) writeProfile(w http.ResponseWriter, r *http.Request
 type changePasswordRequest struct {
 	CurrentPassword string `json:"current_password"`
 	NewPassword     string `json:"new_password"`
+	// RevokeCLITokens also revokes every live CLI token of the user —
+	// including the one making the request, when it is a CLI caller.
+	// Opt-in: a password rotation must not silently break scripts.
+	RevokeCLITokens bool `json:"revoke_cli_tokens"`
 }
 
 // ChangePassword rotates the caller's password.
@@ -114,7 +120,8 @@ type changePasswordRequest struct {
 // revokes every OTHER active session for the user (reason
 // "password_change") — the caller's current session is preserved so they
 // are not logged out of the tab they just used. CLI-token callers have no
-// current browser session, so all browser sessions are revoked.
+// current browser session, so all browser sessions are revoked. With
+// `revoke_cli_tokens: true` every live CLI token is revoked as well.
 //
 // The current-password check is a credential-verification oracle: it
 // answers differently for a right and a wrong guess (#1513). Holding a
@@ -228,9 +235,40 @@ func (h *UserProfileHandler) ChangePassword(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Browser sessions are always cut; CLI tokens only on request. Like the
+	// session revocation, a failure here must fail the request — the caller
+	// asked for their tokens to be dead and would otherwise believe they are.
+	tokensRevoked := int64(0)
+	if req.RevokeCLITokens {
+		tx, err := h.db.BeginTx(r.Context(), nil)
+		if err != nil {
+			replyInternalError(w, h.logger, "revoke cli tokens: begin", err)
+			return
+		}
+		defer tx.Rollback() //nolint:errcheck
+		ids, err := revokeCLITokensAuditedTx(r.Context(), tx, user.ID, user.ID, now)
+		if err != nil {
+			replyInternalError(w, h.logger, "revoke cli tokens: audit", err)
+			return
+		}
+		tokensRevoked = int64(len(ids))
+		if err := ackCLITokenRevocationsTx(r.Context(), tx, ids, user.ID, now); err != nil {
+			replyInternalError(w, h.logger, "revoke cli tokens: acknowledge", err)
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			replyInternalError(w, h.logger, "revoke cli tokens: commit", err)
+			return
+		}
+		if h.streams != nil {
+			h.streams.NotifyTokensRevoked(user.ID)
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"success":          true,
-		"sessions_revoked": revoked,
+		"success":            true,
+		"sessions_revoked":   revoked,
+		"cli_tokens_revoked": tokensRevoked,
 	})
 }
 

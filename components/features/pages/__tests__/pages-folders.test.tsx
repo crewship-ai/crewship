@@ -13,6 +13,8 @@ import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen, fireEvent, cleanup, waitFor, within, act } from "@testing-library/react"
 
+vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "pages-test-human" } }, status: "authenticated" }) }))
+
 const push = vi.fn()
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push, replace: vi.fn(), prefetch: vi.fn(), back: vi.fn() }),
@@ -36,21 +38,23 @@ vi.mock("@/components/features/pages/editor/section-history", () => ({
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
 vi.mock("sonner", () => ({ toast }))
 
+import { _resetWorkspaceStoreForTests, refreshWorkspaceSettings } from "@/hooks/use-workspace"
 import { PagesLayout } from "@/components/features/pages/pages-layout"
 import type { WirePage } from "@/hooks/use-pages"
 import type { WirePageFolder } from "@/hooks/use-page-folders"
 
 const NOW = new Date("2026-09-13T12:00:00Z")
 const WS = "workspace_id=ws-1"
+const DIRECTORY = [{ id: "ws-1", name: "Test workspace", slug: "test-workspace", currentUserRole: "OWNER", currentUserCapabilities: [] }]
 
 const OPS_REF = { slug: "ops", name: "Ops", icon: "rocket", color: "amber" }
 
-const FLEET: WirePage = { id: "p1", slug: "fleet-201", name: "Flotila .201", owner: "crew/lookout", folder: OPS_REF, pages_version: 3, panels: [] }
-const NOTES: WirePage = { id: "p2", slug: "my-notes", name: "My notes", owner: "user/u1", folder: null, pages_version: 0, panels: [] }
+const FLEET: WirePage = { id: "p1", slug: "fleet-201", name: "Flotila .201", owner: "crew/lookout", can_move: true, can_remove_from_folder: true, folder: OPS_REF, pages_version: 3, panels: [] }
+const NOTES: WirePage = { id: "p2", slug: "my-notes", name: "My notes", owner: "user/u1", can_move: true, can_remove_from_folder: false, folder: null, pages_version: 0, panels: [] }
 
-const OPS: WirePageFolder = { id: "f1", slug: "ops", name: "Ops", icon: "rocket", color: "amber", owner: "crew/lookout", owner_crew_name: "Lookout", page_count: 1, acl_version: 5 }
-const ARCHIVE: WirePageFolder = { id: "f2", slug: "archive", name: "Archive", icon: null, color: null, owner: "crew/finance", owner_crew_name: "Finance", page_count: 0, acl_version: 1 }
-const BUSY: WirePageFolder = { id: "f3", slug: "busy", name: "Busy", icon: null, color: null, owner: "crew/finance", owner_crew_name: "Finance", page_count: 2, acl_version: 1 }
+const OPS: WirePageFolder = { id: "f1", slug: "ops", name: "Ops", icon: "rocket", color: "amber", owner: "crew/lookout", owner_crew_name: "Lookout", can_rename: true, can_share: true, can_delete: true, can_accept_pages: true, page_count: 1, acl_version: 5 }
+const ARCHIVE: WirePageFolder = { id: "f2", slug: "archive", name: "Archive", icon: null, color: null, owner: "crew/finance", owner_crew_name: "Finance", can_rename: true, can_share: true, can_delete: true, can_accept_pages: true, page_count: 0, acl_version: 1 }
+const BUSY: WirePageFolder = { id: "f3", slug: "busy", name: "Busy", icon: null, color: null, owner: "crew/finance", owner_crew_name: "Finance", can_rename: true, can_share: true, can_delete: true, can_accept_pages: true, page_count: 2, acl_version: 1 }
 
 function json(status: number, body: unknown): Response {
   return {
@@ -82,6 +86,7 @@ function mount(harness: Harness = {}, slug?: string) {
   const mockFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     const method = (init?.method ?? "GET").toUpperCase()
+    if (method === "GET" && url === "/api/v1/workspaces") return json(200, DIRECTORY)
     const call: Call = { method, url, body: init?.body ? JSON.parse(String(init.body)) : null }
     calls.push(call)
     const answered = harness.answer?.(call)
@@ -117,14 +122,23 @@ function chooseFromRowMenu(row: HTMLElement, item: RegExp) {
   fireEvent.keyDown(entry, { key: "Enter" })
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   cleanup()
+  _resetWorkspaceStoreForTests()
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) =>
+    String(input) === "/api/v1/workspaces" ? json(200, DIRECTORY) : json(404, { error: "unrouted bootstrap request" }),
+  ))
+  await refreshWorkspaceSettings()
   push.mockReset()
   toast.success.mockReset()
   toast.error.mockReset()
   window.history.replaceState(null, "", "/pages")
 })
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  cleanup()
+  _resetWorkspaceStoreForTests()
+  vi.unstubAllGlobals()
+})
 
 describe("the rail is grouped by folder from the folder route", () => {
   it("draws every readable folder with its count, then Unfiled", async () => {
