@@ -89,7 +89,7 @@ func (r DockerRunner) Run(ctx context.Context, input []byte, c Command) (result 
 }
 
 type boundedOutput struct {
-	bytes.Buffer
+	buffer    bytes.Buffer
 	remaining int
 }
 
@@ -97,7 +97,9 @@ func (b *boundedOutput) Write(p []byte) (int, error) {
 	if len(p) > b.remaining {
 		return 0, errors.New("engine output limit exceeded")
 	}
-	n, err := b.Buffer.Write(p)
+	n, err := b.buffer.Write(p)
 	b.remaining -= n
 	return n, err
 }
+
+func (b *boundedOutput) Bytes() []byte { return b.buffer.Bytes() }

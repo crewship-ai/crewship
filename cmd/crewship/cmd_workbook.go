@@ -53,30 +53,19 @@ func newWorkbookCommandWithTransport(transport http.RoundTripper) *cobra.Command
 			if os.Getenv("CREWSHIP_AGENT_TOKEN") != "" {
 				return errors.New("human workbook operations require a human credential; use workbook agent for an admitted run")
 			}
-			path := "/api/v1/pages/" + pagePathEscape(args[0]) + "/workbook"
-			method := http.MethodGet
+			basePath := "/api/v1/pages/" + pagePathEscape(args[0]) + "/workbook"
 			var body []byte
 			var err error
-			switch operation {
-			case "status":
-				path += "/operations/" + url.PathEscape(args[1])
-			case "revoke":
-				path += "/mandates/" + url.PathEscape(args[1])
-				method = http.MethodDelete
-			case "import", "admit":
+			if operation == "import" || operation == "admit" {
 				body, err = workbookInput(cmd)
 				if err != nil {
 					return err
 				}
-				method = http.MethodPost
 				if operation == "import" {
-					path += "/operations"
 					var req mooring.Request
 					if mooring.DecodeStrict(body, &req) != nil || req.Command.Kind != "import" {
 						return errors.New("native workbook import packet required")
 					}
-				} else {
-					path += "/mandates"
 				}
 			}
 			client, err := pageClient()
@@ -84,13 +73,17 @@ func newWorkbookCommandWithTransport(transport http.RoundTripper) *cobra.Command
 				return err
 			}
 			var response *http.Response
-			switch method {
-			case http.MethodGet:
-				response, err = client.Get(path)
-			case http.MethodPost:
-				response, err = client.Post(path, json.RawMessage(body))
-			case http.MethodDelete:
-				response, err = client.Delete(path)
+			switch operation {
+			case "read":
+				response, err = client.Get(basePath)
+			case "status":
+				response, err = client.Get(basePath + "/operations/" + url.PathEscape(args[1]))
+			case "revoke":
+				response, err = client.Delete(basePath + "/mandates/" + url.PathEscape(args[1]))
+			case "import":
+				response, err = client.Post(basePath+"/operations", json.RawMessage(body))
+			case "admit":
+				response, err = client.Post(basePath+"/mandates", json.RawMessage(body))
 			}
 			if err != nil {
 				return err

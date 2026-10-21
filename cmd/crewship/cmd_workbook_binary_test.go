@@ -82,5 +82,21 @@ func TestWorkbookHumanBinary(t *testing.T) {
 	}
 	run("", "workbook", "read", "@workbook-binary-page")
 	run("", "workbook", "status", "@workbook-binary-page", "binary-import")
-	run("", "workbook", "revoke", "@workbook-binary-page", "absent")
+	// Seed the existing signed-run authority substrate, not a workbook ACL.
+	for _, q := range []string{
+		`INSERT INTO crews(id,workspace_id,name,slug) VALUES('workbook-crew','cworkbookworkspace000000001','Workbook crew','workbook-crew')`,
+		`INSERT INTO agents(id,workspace_id,crew_id,name,slug,agent_role,status,cli_adapter,tool_profile,timeout_seconds,memory_enabled) VALUES('workbook-agent','cworkbookworkspace000000001','workbook-crew','Agent','workbook-agent','AGENT','IDLE','CLAUDE_CODE','CODING',1800,0)`,
+		`INSERT INTO chats(id,workspace_id,agent_id,created_by,visibility) VALUES('workbook-chat','cworkbookworkspace000000001','workbook-agent','workbook-human','private')`,
+		`INSERT INTO conversation_messages(id,session_id,agent_id,role,content,ts,author_user_id) VALUES('workbook-message','workbook-chat','workbook-agent','user','Set B2 to 42','2026-01-01T00:00:00Z','workbook-human')`,
+		`INSERT INTO artifact_run_principals(run_id,workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at) SELECT 'workbook-run',m.workspace_id,'workbook-agent','workbook-crew',m.user_id,c.id,'workbook-message',m.id,m.access_revision,c.authority_generation,c.authority_revision,'2999-01-01T00:00:00Z' FROM workspace_members m JOIN chats c ON c.workspace_id=m.workspace_id AND c.created_by=m.user_id WHERE m.id='workbook-member' AND c.id='workbook-chat'`,
+		`INSERT INTO journal_entries(id,workspace_id,crew_id,agent_id,entry_type,actor_type,summary,trace_id) VALUES('workbook-start','cworkbookworkspace000000001','workbook-crew','workbook-agent','run.started','system','test','workbook-run')`,
+		`INSERT INTO workspace_artifact_creation_policy(workspace_id,enabled,version,updated_at) VALUES('cworkbookworkspace000000001',1,1,'2026-01-01T00:00:00Z')`,
+		`INSERT INTO workspace_artifact_creation_crews(workspace_id,crew_id) VALUES('cworkbookworkspace000000001','workbook-crew')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run(`{"mandate_id":"binary-mandate","run_id":"workbook-run","base_rev":1,"generation":1,"targets":["Sheet1!B2"]}`, "workbook", "admit", "@workbook-binary-page", "--file", "-")
+	run("", "workbook", "revoke", "@workbook-binary-page", "binary-mandate")
 }

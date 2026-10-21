@@ -110,6 +110,15 @@ func TestGridCraftAgentRequiresRetainedMandateAndRevokesDuringCandidate(t *testi
 	wantCode(t, call(packet), 404, "revoked replay")
 	read := `{"action":"read","artifact_id":"grid-agent-page","mandate_id":"cell-edit"}`
 	wantCode(t, call(read), 404, "revoked read")
+	thirdGrant := httptest.NewRecorder()
+	thirdBody := strings.Replace(strings.Replace(grantBody, "cell-edit", "policy-bound", 1), `"base_rev":1`, `"base_rev":2`, 1)
+	h.mandate(thirdGrant, humanRequest("POST", "/", thirdBody))
+	wantCode(t, thirdGrant, 200, "policy-bound mandate")
+	mustExec(t, f.rig.db, `UPDATE workspace_artifact_creation_policy SET version=version+1 WHERE workspace_id=?`, f.a.WorkspaceID)
+	engine.before = func() { t.Fatal("old policy mandate restarted a candidate") }
+	thirdPacket := strings.ReplaceAll(strings.Replace(packet, `"base_rev":1`, `"base_rev":2`, 1), "cell-edit", "policy-bound")
+	wantCode(t, call(thirdPacket), 404, "policy regrant cannot revive old intent")
+
 }
 
 type gridcraftBlockingEngine struct{ before func() }
@@ -130,4 +139,26 @@ func (e *gridcraftBlockingEngine) Prepare(_ context.Context, b mooring.Binding, 
 
 func registerGridCraftTestRoutes(r *Router) {
 	r.RegisterGridCraft(mooring.Options{Enabled: true}, gridcraftFixtureEngine{})
+}
+
+func TestGridCraftOwnerReadAuditsOtherPrivateWorkbook(t *testing.T) {
+	f := newInstanceFixture(t)
+	f.db.SetMaxOpenConns(1)
+	mustExec(t, f.db, `PRAGMA synchronous=FULL`)
+	wmSeedPage(t, f.db, "ws-old", "workbook-admin-private", "admin-workbook", "Private workbook", "wsadmin", "")
+	mustExec(t, f.db, `UPDATE pages SET private_audience=1 WHERE id='workbook-admin-private'`)
+	f.r.RegisterGridCraft(mooring.Options{Enabled: true}, gridcraftFixtureEngine{})
+	body := `{"mutation_id":"private-import","mandate_id":"human-import","base_rev":0,"generation":0,"command":{"kind":"import","snapshot":{"sheets":[{}]}}}`
+	base := "/api/v1/pages/admin-workbook/workbook"
+	wantCode(t, f.do(f.wsAdmin, "POST", base+"/operations?workspace_id=ws-old", body), 200, "human custodian import")
+	wantCode(t, f.do(f.boss, "GET", base+"?workspace_id=ws-old", ""), 200, "workspace owner audited read")
+	var count int
+	if err := f.db.QueryRow(`SELECT count(*) FROM audit_logs WHERE action='artifact.private_owner_accessed' AND entity_id='workbook-admin-private'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("audit=%d err=%v", count, err)
+	}
+	mustExec(t, f.db, `CREATE TRIGGER deny_workbook_audit BEFORE INSERT ON audit_logs WHEN NEW.action='artifact.private_owner_accessed' BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
+	response := f.do(f.boss, "GET", base+"?workspace_id=ws-old", "")
+	if response.Code == 200 || strings.Contains(response.Body.String(), `"sheets"`) {
+		t.Fatalf("private bytes released without audit: %d %s", response.Code, response.Body.String())
+	}
 }
