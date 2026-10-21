@@ -45,6 +45,7 @@ import { cn } from "@/lib/utils"
 import { visibleAgentText } from "@/lib/chat-text"
 import { formatCost } from "@/lib/utils/format"
 import { formatDurationMillis } from "@/lib/time"
+import { turnEndText } from "./turn-end"
 
 interface AssistantTurnProps {
   turn: ChatTurn
@@ -612,16 +613,9 @@ function ThinkingBlock({ part }: { part: TurnPart }) {
   )
 }
 
-const TURN_END: Partial<Record<NonNullable<ChatTurn["turnState"]>, [partial: string, empty: string]>> = {
-  cancelled: ["Stopped. The reply above is partial.", "Stopped before any reply."],
-  interrupted: ["Interrupted. The reply above is partial.", "Interrupted before any reply."],
-  failed: ["The run failed. The reply above may be incomplete.", "The run failed before any reply."],
-}
-
 /** Says how a turn ended when it did not complete, and that Stop is pending until the server confirms it. */
 function TurnEndNote({ turn, empty }: { turn: ChatTurn; empty: boolean }) {
-  const ended = !turn.isStreaming && turn.turnState ? TURN_END[turn.turnState] : undefined
-  const text = turn.isStreaming ? (turn.cancelRequested ? "Stopping…" : undefined) : ended?.[empty ? 1 : 0]
+  const text = turn.isStreaming ? (turn.cancelRequested ? "Stopping…" : undefined) : turnEndText(turn, empty)
   if (!text) return null
   return <p role="status" className="text-label text-muted-foreground">{text}</p>
 }
