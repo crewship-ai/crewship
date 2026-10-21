@@ -46,6 +46,12 @@ export async function documentRequest<T>(workspace: string, slug: string, path =
 
 /** Acknowledged updates are removed only after the API confirms them. Remote
  * updates merge into the same CRDT, never replace a locally edited JSON body. */
+// Access loss also drops the unsent edits (they may quote the document), so
+// say they were lost instead of only that access is gone.
+const deniedStatus = (unsent: boolean) => unsent
+  ? "Your latest edits were not saved: access to this document was removed."
+  : "Document access is unavailable."
+
 export function usePageDocument(workspace: string, slug: string, pageId: string, allowWrites = true) {
   const client = useQueryClient()
   const session = useSessionSafe()
@@ -79,7 +85,7 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
   const authorizationLost=useRef(false)
   // Deletes this Page's journal rows once any write in flight has settled; set by the active effect.
   const purgeJournal = useRef<() => void>(() => {})
-  const deny=useCallback(()=>{authorizationLost.current=true;purgeJournal.current();setConfirmed(undefined);hold([]);setUnverified([]);setDenied(true);setRecovery(save.pending>0);setStatus("Document access is unavailable.")},[save.pending, hold])
+  const deny=useCallback(()=>{authorizationLost.current=true;purgeJournal.current();setConfirmed(undefined);hold([]);setUnverified([]);setDenied(true);setRecovery(save.pending>0);setStatus(deniedStatus(save.pending>0))},[save.pending, hold])
   useEffect(() => {
     setActiveIdentity(identity)
     setConfirmed(undefined)
@@ -300,7 +306,7 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
         // Authority decides first: a denial must not be masked by a storage failure, whatever the journal state.
         if (authorizationLost.current || failure.kind === "denied") {
           authorizationLost.current=true;purgeJournal.current();setConfirmed(undefined);hold([]);setUnverified([]);unverifiedStaged=undefined;restored=[];client.removeQueries({queryKey,exact:true})
-          blocked = blockedOther = true; setDenied(true); setRecovery(queue.size > 0); setStatus("Document access is unavailable.")
+          blocked = blockedOther = true; setDenied(true); setRecovery(queue.size > 0); setStatus(deniedStatus(queue.size > 0))
         } else if (cause instanceof DocumentStorageError || journalBroken) {
           blocked = blockedOther = true;dispatch({ type: "storage-unavailable", failed: true });setRecovery(queue.size>0);setStatus(requiredRev && !queue.size ? "Update confirmed · private storage cleanup failed" : "Private document storage is unavailable · changes are unsaved")
         } else if (failure.kind === "unconfirmed") {

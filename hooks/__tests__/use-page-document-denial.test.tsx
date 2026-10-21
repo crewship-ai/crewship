@@ -51,7 +51,7 @@ it.each([401, 403, 404])("a %i from a read already in flight wins over a journal
     act(() => resolveRead!())
     await waitFor(() => expect(result.current.denied).toBe(true))
     expect(result.current.state).toBeUndefined()
-    expect(result.current.status).toBe("Document access is unavailable.")
+    expect(result.current.status).toBe("Your latest edits were not saved: access to this document was removed.")
     expect(result.current.recoveredDrafts).toHaveLength(0)
   } finally { unmount(); server.destroy() }
 })
@@ -80,7 +80,7 @@ it("a journal write failing after the denial does not reopen the document status
     act(() => release!())
     await new Promise(resolve => setTimeout(resolve, 50))
     expect(result.current.state).toBeUndefined()
-    expect(result.current.status).toBe("Document access is unavailable.")
+    expect(result.current.status).toBe("Your latest edits were not saved: access to this document was removed.")
     expect(result.current.denied).toBe(true)
   } finally { unmount(); server.destroy() }
 })
@@ -118,7 +118,7 @@ it("keeps checking authority after the journal broke: a later 404 clears the con
     deny = true
     await waitFor(() => expect(result.current.denied).toBe(true), { timeout: 3000 })
     expect(result.current.state).toBeUndefined()
-    expect(result.current.status).toBe("Document access is unavailable.")
+    expect(result.current.status).toBe("Your latest edits were not saved: access to this document was removed.")
   } finally { unmount(); server.destroy() }
 })
 
@@ -214,5 +214,32 @@ it("the purge waits for a journal write already in flight and no write follows t
     act(() => text(result.current.doc).insert(7, " y"))
     await new Promise(resolve => setTimeout(resolve, 400))
     expect(journal.put).toHaveBeenCalledTimes(1)
+  } finally { unmount(); server.destroy() }
+})
+
+it("a refused write says the latest edits were not saved and keeps no copy of them", async () => {
+  const server = model()
+  fetchMock.mockImplementation((_u: string, init?: RequestInit) => init?.method === "POST" ? response({ error: "forbidden" }, 403) : response(head(server)))
+  const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"))
+  try {
+    await waitFor(() => expect(result.current.editable).toBe(true))
+    act(() => text(result.current.doc).insert(7, " quoted"))
+    await waitFor(() => expect(result.current.denied).toBe(true), { timeout: 3000 })
+    expect(result.current.status).toBe("Your latest edits were not saved: access to this document was removed.")
+    expect(result.current.state).toBeUndefined()
+    expect(result.current.recoveredDrafts).toHaveLength(0)
+    await waitFor(() => expect(journal.purge).toHaveBeenCalledWith("human", "w", "page"))
+  } finally { unmount(); server.destroy() }
+})
+
+it("a denial with nothing unsent keeps the plain access message", async () => {
+  const server = model()
+  fetchMock.mockImplementation((_u: string, init?: RequestInit) => init?.method === "POST" ? response({}, 500) : response(head(server)))
+  const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"))
+  try {
+    await waitFor(() => expect(result.current.editable).toBe(true))
+    act(() => result.current.deny())
+    await waitFor(() => expect(result.current.denied).toBe(true))
+    expect(result.current.status).toBe("Document access is unavailable.")
   } finally { unmount(); server.destroy() }
 })
