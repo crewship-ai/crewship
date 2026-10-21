@@ -5,7 +5,7 @@ import type { SlideDeck } from "@/lib/slides/model"
 import { SlideCanvas } from "./slide-canvas"
 import { isNativeSlideDeck } from "./native-model"
 
-const control = "min-h-9 coarse:min-h-12 rounded border px-3"
+const control = "min-h-9 coarse:min-h-[44px] rounded border px-3"
 
 /** Presentation is a modal native view, not an export or durable write. */
 export function SlidePresent({ deck, initialSlideId, onClose }: { deck: unknown; initialSlideId: string; onClose: () => void }) {

@@ -173,7 +173,7 @@ describe("useProjectDetail — ?project= is written, not just read", () => {
     expect(url()).toBe("/issues")
   })
 
-  it("clears a selection whose project has left the list — but not before it loads", () => {
+  it("reports a project that has left the list as not found — but not before it loads", () => {
     window.history.replaceState(null, "", "/issues?project=p1")
     const { result, rerender } = renderHook(
       ({ projects }: { projects: Project[] }) => useProjectDetail({ projects }),
@@ -181,7 +181,10 @@ describe("useProjectDetail — ?project= is written, not just read", () => {
     )
     // An empty list is "not loaded yet", not "deleted".
     expect(result.current.selectedProjectId).toBe("p1")
+    expect(result.current.projectNotFound).toBe(false)
     rerender({ projects: [project({ id: "p2" })] })
-    expect(result.current.selectedProjectId).toBeNull()
+    // The link is kept so the page can say the project is gone.
+    expect(result.current.selectedProjectId).toBe("p1")
+    expect(result.current.projectNotFound).toBe(true)
   })
 })

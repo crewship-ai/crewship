@@ -173,7 +173,9 @@ func (m *AuthMiddleware) restrictedRequest(w http.ResponseWriter, r *http.Reques
 		return true
 	}
 	if errors.Is(err, access.ErrDenied) || errors.Is(err, sql.ErrNoRows) {
-		if rule.denyStatus == http.StatusForbidden {
+		if r.Pattern == "POST /api/v1/workspaces" {
+			replyError(w, http.StatusForbidden, "Restricted accounts cannot create workspaces")
+		} else if rule.denyStatus == http.StatusForbidden {
 			replyError(w, http.StatusForbidden, "A browser session is required")
 		} else {
 			replyError(w, http.StatusNotFound, "Resource not found")

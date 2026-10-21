@@ -27,7 +27,7 @@ def digest(policy):
     return hashlib.sha256(json.dumps(policy, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
-def validate(policy):
+def validate(policy, require_inventory=False):
     if policy['target'] != 'branch' or policy['enforcement'] != 'active':
         raise ValueError('expected an active branch ruleset')
     if policy['conditions'] != {'ref_name': {'include': ['refs/heads/main'], 'exclude': []}}:
@@ -41,7 +41,7 @@ def validate(policy):
     if checks.get('strict_required_status_checks_policy') is not True:
         raise ValueError('strict required checks must remain enabled')
     configured = checks.get('required_status_checks', [])
-    for name in CHECKS:
+    for name in CHECKS | ({'CI Inventory Guard'} if require_inventory else set()):
         matches = [c for c in configured if c.get('context') == name]
         if len(matches) != 1 or matches[0].get('integration_id') != 15368:
             raise ValueError(f'missing or unexpected GitHub Actions required check: {name}')
@@ -67,7 +67,7 @@ def validate(policy):
 
 def proposed(before, code_scanning_only=False):
     result = shape(before)
-    by_type = validate(result)
+    by_type = validate(result, require_inventory=not code_scanning_only)
     if code_scanning_only:
         pass  # Independent security policy leaves any existing queue untouched.
     elif 'merge_queue' in by_type:
@@ -161,7 +161,7 @@ def apply_plan(plan, documentation_commit, analysis_commit, api=gh_api):
     endpoint = f'repos/{repo}/rulesets/{ruleset_id}'
     current = api(endpoint)
     identity(current, repo, ruleset_id)
-    validate(shape(current))
+    validate(shape(current), require_inventory=not security_only)
     if digest(shape(current)) != plan['expected_sha256']:
         raise ValueError('live policy changed since planning; regenerate and review the plan')
     if shape(current) == plan['proposed']:

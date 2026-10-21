@@ -2,7 +2,7 @@
 
 import { useGuardedRouter as useRouter } from "@/hooks/use-navigation-guard"
 
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { useInbox } from "@/hooks/use-inbox"
 import { useWorkspace } from "@/hooks/use-workspace"

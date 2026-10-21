@@ -148,6 +148,10 @@ is the busiest table in the schema. There is no "return everything" mode.
 | `chains[].agents[].id` / `slug` / `name` | string | The agent. `name` is user-written; escape before rendering. |
 | `chains[].agents[].assignments` | integer | Pieces of work that agent took **in this chain** — what separates "asked Ada once" from "handed Ada the whole thing in six parts". |
 | `chains[].agent_count` | integer | Total distinct agents, **uncapped**. Same "+N more" rule as `issue_count`. |
+| `chains[].skills[]` | array | Skills this chain's agents called while on its work, **capped at 24**, most used first. Absent when none. Matched on the agent and the assignment's window (`skill_invocations` carries no run id), so an agent working two chains at once is credited to both. |
+| `chains[].skills[].id` / `slug` / `name` | string | The skill. |
+| `chains[].skills[].uses` | integer | Calls inside this chain's assignment windows. |
+| `chains[].skill_count` | integer | Total distinct skills, **uncapped**. |
 | `count` | integer | Rows in this page. |
 | `limit` / `offset` | integer | The bounds actually applied, after clamping. |
 | `has_more` | boolean | Another page exists. Computed by reading one row past the page, so it is a fact rather than an inference from a full page. |

@@ -9,6 +9,7 @@ import type { Pipeline } from "@/hooks/use-pipelines"
 // than something this reaches for.
 
 import { isAwaitingApproval } from "@/hooks/use-active-routine-runs"
+import type { RoutineTriggerKind } from "@/lib/routine-panel-index"
 
 export type RoutineStatusFilter =
   | "all"
@@ -25,7 +26,16 @@ export interface RoutineFilterState {
   showEphemeral: boolean
   /** Release-verification fixtures (`test-*` slugs) are hidden unless asked for. */
   showTestRoutines?: boolean
+  /** The routine's own state: live, has changes not live, proposed, turned off. */
+  lifecycle?: RoutineLifecycleFilter
+  /** The owning crew (`author_crew_id`); the panel groups by it. */
+  crewId?: string | null
+  /** How it starts: schedule, webhook, issue start, chat command
+   *  (lib/routine-panel-index composes it). */
+  trigger?: RoutineTriggerKind | null
 }
+
+export type RoutineLifecycleFilter = "all" | "active" | "draft" | "proposed" | "disabled"
 
 /** The routine fields the filter reads — a narrow view, not the row. */
 export interface RoutineFilterInput {
@@ -39,6 +49,13 @@ export interface RoutineFilterInput {
   /** A run can complete and still fail its result check (`FAILED`). */
   lastOutcome?: string | null
   ephemeral?: boolean
+  /** `status` on the row: active | proposed | disabled. Absent reads as active. */
+  lifecycle?: string | null
+  /** A saved draft newer than the published version exists. */
+  hasDraft?: boolean
+  crewId?: string | null
+  /** The ways it starts; absent when the panel index is not known. */
+  triggers?: readonly string[]
 }
 
 /** Live runs keyed by pipeline slug — only `status` is read. */
@@ -49,6 +66,8 @@ export function matchesRoutineFilters(
   filters: RoutineFilterState,
   live: LiveRuns,
   search = "",
+  /** Slugs the server matched by the text of their steps (GET /pipelines?q=). */
+  stepMatches?: ReadonlySet<string> | null,
 ): boolean {
   if (search) {
     const q = search.toLowerCase()
@@ -60,7 +79,7 @@ export function matchesRoutineFilters(
     ]
       .join(" ")
       .toLowerCase()
-    if (!haystack.includes(q)) return false
+    if (!haystack.includes(q) && !stepMatches?.has(routine.slug)) return false
   }
 
   if (!filters.showEphemeral && routine.ephemeral) return false
@@ -71,6 +90,20 @@ export function matchesRoutineFilters(
   if (filters.authorAgentId !== null && routine.authorAgentId !== filters.authorAgentId) {
     return false
   }
+
+  switch (filters.lifecycle ?? "all") {
+    case "all":
+      break
+    case "draft":
+      if (!routine.hasDraft) return false
+      break
+    default:
+      if ((routine.lifecycle || "active") !== filters.lifecycle) return false
+  }
+
+  if (filters.crewId && routine.crewId !== filters.crewId) return false
+
+  if (filters.trigger && !routine.triggers?.includes(filters.trigger)) return false
 
   switch (filters.status) {
     case "all":
@@ -102,7 +135,7 @@ export function isRoutineTestFixture(slug: string): boolean {
   return slug.startsWith("test-routines-") || slug.startsWith("test-issue-")
 }
 
-export function routineFilterInput(p: Pipeline): RoutineFilterInput {
+export function routineFilterInput(p: Pipeline, triggers?: readonly string[]): RoutineFilterInput {
   return {
     slug: p.slug,
     name: p.name,
@@ -113,5 +146,9 @@ export function routineFilterInput(p: Pipeline): RoutineFilterInput {
     lastStatus: p.last_invocation_status,
     lastOutcome: p.last_run_outcome,
     ephemeral: p.ephemeral,
+    lifecycle: p.status,
+    hasDraft: !!p.draft,
+    crewId: p.author_crew_id ?? null,
+    triggers,
   }
 }

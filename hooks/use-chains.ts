@@ -83,6 +83,22 @@ export interface ChainSummary {
   /** The agents this chain put to work. Same cap and same total rule as `issues`. */
   agents?: ChainAgentRef[]
   agent_count: number
+  /**
+   * Skills this chain's agents called while on its work (a join on agent and
+   * assignment window, not a recorded link). Capped server-side (24);
+   * `skill_count` is the full total. Absent on a server without the field.
+   */
+  skills?: ChainSkillRef[]
+  skill_count?: number
+}
+
+/** One skill a chain used. Mirrors internal/api.ChainSkillRef. */
+export interface ChainSkillRef {
+  id: string
+  slug: string
+  name: string
+  /** Calls inside the chain's assignment windows. */
+  uses: number
 }
 
 /** One issue a chain touched. Mirrors internal/api.ChainIssueRef. */

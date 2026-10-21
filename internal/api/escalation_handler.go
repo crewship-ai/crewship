@@ -1217,7 +1217,7 @@ func (h *QueryHandler) refuseCredentialSelfApproval(w http.ResponseWriter, r *ht
 		if in.credentialID.Valid && in.credentialID.String != "" {
 			var lvl int
 			if err := h.db.QueryRowContext(r.Context(),
-				`SELECT COALESCE(security_level, 1) FROM credentials WHERE id = ? AND workspace_id = ?`,
+				`SELECT `+credentialEffectiveLevelSQL("c")+` FROM credentials c WHERE c.id = ? AND c.workspace_id = ?`,
 				in.credentialID.String, in.workspaceID).Scan(&lvl); err == nil {
 				tierForces = keeper.SecurityLevel(lvl).Tier().SecondApprover
 			} else if !errors.Is(err, sql.ErrNoRows) {

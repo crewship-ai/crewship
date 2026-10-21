@@ -48,6 +48,7 @@ All data is created through the REST API, ensuring business logic
 func init() {
 	seedCmd.Flags().Bool("offline-demo", false, "Create UI/control-plane fixtures without provider credentials or automatic model execution")
 	seedCmd.Flags().Bool("nuke", false, "Delete all workspace contents before seeding")
+	seedCmd.Flags().Bool("ui-tour", false, "Add the UI tour on top of an already seeded demo workspace: scheduled routines in folders with run history (completed, waiting for a person, failed), a longer issue board and the inbox items they produce. Additive and idempotent; needs no provider credentials")
 	seedCmd.Flags().Bool("yes", false, "Skip the --nuke confirmation prompt (for CI/scripts). Without it, an interactive nuke requires typing the workspace slug.")
 	seedCmd.Flags().Bool("skip-issues", false, "Skip issue/project/label seeding")
 	seedCmd.Flags().Bool("with-evals", false, "Also seed model-regression routines (kept out of the normal product demo)")
@@ -191,6 +192,20 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	client, userID, err := seedBootstrap(ctx, password)
 	if err != nil {
 		return err
+	}
+
+	// The UI tour is its own additive profile: it builds on the default demo
+	// (seeded earlier, e.g. by `crew reset --yes`) and runs none of the phases
+	// below. Flag combinations were refused in preflight, before bootstrap.
+	if uiTour, _ := cmd.Flags().GetBool("ui-tour"); uiTour {
+		stats, err := seedUITour(ctx, client)
+		if err != nil {
+			return fmt.Errorf("--ui-tour: %w", err)
+		}
+		fmt.Fprintln(os.Stderr, "")
+		cli.PrintSuccess(fmt.Sprintf("UI tour complete: %d routines, %d schedules, %d folders (%d routines filed), %d tags, %d runs, %d projects, %d labels, %d issues, %d comments added",
+			stats.Routines, stats.Schedules, stats.Folders, stats.Filed, stats.Tags, stats.Runs, stats.Projects, stats.Labels, stats.Issues, stats.Comments))
+		return nil
 	}
 
 	// The requested roster includes ADMIN profiles. Refuse a non-owner

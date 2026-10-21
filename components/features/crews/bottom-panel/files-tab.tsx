@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import dynamic from "next/dynamic"
 import { ChevronDown, File, Folder, Pencil, Save } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 
 import { getEditorLanguage } from "@/components/features/chat/chat-tree-row"

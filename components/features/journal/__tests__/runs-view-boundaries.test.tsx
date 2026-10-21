@@ -104,7 +104,7 @@ describe("RunsView request and interaction boundaries", () => {
     fireEvent.keyDown(root, { key: "Enter" })
     fireEvent.keyDown(root, { key: " " })
     expect(mocks.push).toHaveBeenCalledTimes(3)
-    expect(mocks.push).toHaveBeenLastCalledWith("/journal?tab=timeline&trace_id=Detailed%20run")
+    expect(mocks.push).toHaveBeenLastCalledWith("/activity?section=log&trace_id=Detailed%20run")
   })
 
   it.each(["table", "insights", "live"])("does not show an abandoned workspace's %s response", async feed => {
@@ -196,7 +196,7 @@ describe("RunsView request and interaction boundaries", () => {
     fireEvent.keyDown(live, { key: "Escape" }); expect(mocks.push).not.toHaveBeenCalled()
     fireEvent.keyDown(live, { key: "Enter" }); fireEvent.keyDown(live, { key: " " }); fireEvent.click(live)
     expect(mocks.push).toHaveBeenCalledTimes(3)
-    expect(mocks.push).toHaveBeenLastCalledWith("/journal?tab=timeline&trace_id=Live%20run")
+    expect(mocks.push).toHaveBeenLastCalledWith("/activity?section=log&trace_id=Live%20run")
     view.unmount()
     expect(vi.getTimerCount()).toBe(0)
   })

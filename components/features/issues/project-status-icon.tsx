@@ -35,14 +35,3 @@ export function ProjectStatusIcon({ status, className }: { status: ProjectStatus
   }
 }
 
-/** Colored text badge displaying project health (at-risk, off-track, or no updates). */
-export function HealthBadge({ health }: { health: string }) {
-  switch (health) {
-    case "at_risk":
-      return <span className="text-[11px] text-warn">At risk</span>
-    case "off_track":
-      return <span className="text-[11px] text-destructive">Off track</span>
-    default:
-      return <span className="text-[11px] text-muted-foreground/40">No updates</span>
-  }
-}

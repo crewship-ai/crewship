@@ -197,7 +197,9 @@ func ScanVaultEnvelopes(ctx context.Context, db rowQuerier) (VaultScan, error) {
 }
 
 // BuildRecoveryKit resolves the key for every version the scan found (and
-// the current mint version), exactly as Decrypt would on this server. A
+// the current mint version), exactly as Decrypt would on this server. The
+// configured v1 root is retained even with no v1 envelopes: journal and
+// instance-audit MACs still depend on its exact string. A
 // version with envelopes and no resolvable key comes back in missing, with
 // its envelope count, so the bundle records it as incomplete.
 func BuildRecoveryKit(scan VaultScan, now time.Time) (*RecoveryKit, map[string]int, error) {
@@ -209,6 +211,13 @@ func BuildRecoveryKit(scan VaultScan, now time.Time) (*RecoveryKit, map[string]i
 	}
 	kit.CurrentVersion = cur
 	want := map[string]bool{cur: true}
+	keepV1 := false
+	for _, version := range encryption.ConfiguredKeyVersions() {
+		if version == "v1" {
+			keepV1 = true
+			want[version] = true
+		}
+	}
 	for v, n := range scan.Versions {
 		if n > 0 {
 			want[v] = true
@@ -222,6 +231,9 @@ func BuildRecoveryKit(scan VaultScan, now time.Time) (*RecoveryKit, map[string]i
 	for _, v := range versions {
 		rk, err := encryption.ResolveKey(v)
 		if err != nil {
+			if v == "v1" && keepV1 {
+				return nil, nil, fmt.Errorf("backup: configured v1 journal key: %w", err)
+			}
 			if n := scan.Versions[v]; n > 0 {
 				missing[v] = n
 			}

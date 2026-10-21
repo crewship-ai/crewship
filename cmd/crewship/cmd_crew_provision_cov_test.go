@@ -483,3 +483,60 @@ func TestWatchProvision_MalformedStatus(t *testing.T) {
 		t.Errorf("expected decode error; got %v", err)
 	}
 }
+
+func TestCrewProvisionSummaryRunE(t *testing.T) {
+	tests := []struct {
+		name   string
+		format string
+		body   map[string]any
+		want   []string
+	}{
+		{
+			name:   "json carries both lists",
+			format: "json",
+			body: map[string]any{
+				"failed":          []map[string]any{{"id": "c1", "slug": "bad", "name": "Bad", "error": "boom"}},
+				"needs_provision": []map[string]any{{"id": "c2", "slug": "fresh", "name": "Fresh"}},
+				"total":           2,
+			},
+			want: []string{`"needs_provision"`, `"slug": "bad"`, `"slug": "fresh"`},
+		},
+		{
+			name:   "table names each crew with its state",
+			format: "table",
+			body: map[string]any{
+				"failed":          []map[string]any{{"id": "c1", "slug": "bad", "name": "Bad", "error": "boom"}},
+				"needs_provision": []map[string]any{{"id": "c2", "slug": "fresh", "name": "Fresh"}},
+				"total":           2,
+			},
+			want: []string{"bad", "failed", "boom", "fresh", "needs_provision"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := covSetupCli5(t)
+			flagFormat = tc.format
+			stub.OnGet("/api/v1/crews/provisioning-summary", clitest.JSONResponse(200, tc.body))
+			var err error
+			out := covCaptureStdoutCli5(t, func() {
+				err = crewProvisionSummaryCmd.RunE(crewProvisionSummaryCmd, nil)
+			})
+			if err != nil {
+				t.Fatalf("RunE: %v", err)
+			}
+			for _, w := range tc.want {
+				if !strings.Contains(out, w) {
+					t.Errorf("output missing %q; got:\n%s", w, out)
+				}
+			}
+		})
+	}
+}
+
+func TestCrewProvisionSummaryRunE_APIError(t *testing.T) {
+	stub := covSetupCli5(t)
+	stub.OnGet("/api/v1/crews/provisioning-summary", clitest.ErrorResponse(500, "boom"))
+	if err := crewProvisionSummaryCmd.RunE(crewProvisionSummaryCmd, nil); err == nil {
+		t.Fatal("expected the API error to surface")
+	}
+}

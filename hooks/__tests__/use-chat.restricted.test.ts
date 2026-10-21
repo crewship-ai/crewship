@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 const { send, request } = vi.hoisted(() => ({send:vi.fn(),request:vi.fn()}))
 vi.mock("@/hooks/use-websocket",()=>({useWebSocket:()=>({status:"connected",send,disconnect:vi.fn(),reconnect:vi.fn()})}))
-vi.mock("@/lib/api-fetch",()=>({apiFetch:request}))
+vi.mock("@/lib/api-fetch",()=>({apiFetch:request,AUTH_EVENT:"auth:session-expired"}))
 import { useChat } from "@/hooks/use-chat"
 
 beforeEach(()=>{vi.clearAllMocks();vi.stubGlobal("requestAnimationFrame",()=>1);vi.stubGlobal("cancelAnimationFrame",()=>{})})

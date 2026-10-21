@@ -125,18 +125,7 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
                           }}
                         >
                           <TableCell>
-                            <StatusIconBadge
-                              entry={config}
-                              gap="gap-1.5"
-                              icon={
-                                c.status === "RUNNING" ? (
-                                  <span className="relative flex h-2 w-2 shrink-0">
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
-                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
-                                  </span>
-                                ) : undefined
-                              }
-                            />
+                            <StatusIconBadge entry={config} live={c.status === "RUNNING"} />
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">

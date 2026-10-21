@@ -13,8 +13,8 @@ import * as React from "react"
 
 import { DetailCard, type DetailCardProps } from "@/components/ui/detail"
 
-export { EmptyState, FieldLabel, Pill } from "@/components/ui/detail"
-export type { EmptyStateProps, FieldLabelProps, PillProps } from "@/components/ui/detail"
+export { FieldLabel, Pill } from "@/components/ui/detail"
+export type { FieldLabelProps, PillProps } from "@/components/ui/detail"
 
 export function Card(props: Omit<DetailCardProps, "bare">) {
   return <DetailCard bare {...props} />

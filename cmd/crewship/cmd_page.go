@@ -309,11 +309,32 @@ var pageListCmd = &cobra.Command{
 	Short: "List the pages in this workspace",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
+		query := url.Values{}
+		audience, _ := cmd.Flags().GetString("audience")
+		if audience != "" {
+			if audience != "all" && audience != "personal" {
+				return errors.New("audience must be all or personal")
+			}
+			query.Set("audience", audience)
+		}
+		for _, flag := range []string{"limit", "offset"} {
+			if cmd.Flags().Changed(flag) {
+				value, _ := cmd.Flags().GetInt(flag)
+				if value < 0 || (flag == "limit" && (value == 0 || value > 500)) {
+					return fmt.Errorf("invalid %s", flag)
+				}
+				query.Set(flag, fmt.Sprint(value))
+			}
+		}
 		client, err := pageClient()
 		if err != nil {
 			return err
 		}
-		resp, err := client.Get("/api/v1/pages")
+		path := "/api/v1/pages"
+		if len(query) > 0 {
+			path += "?" + query.Encode()
+		}
+		resp, err := client.Get(path)
 		if err != nil {
 			return err
 		}
@@ -957,6 +978,9 @@ func init() {
 	pageSetCmd.Flags().String("data", "-", `Payload: "-" for stdin, "@path" for a file, or a literal JSON document`)
 	pageSetCmd.Flags().String("state", "", `The producer's own verdict: "ok" (default) or "failed"`)
 
+	pageListCmd.Flags().String("audience", "", "List all accessible Pages or only your explicitly private Pages (all|personal)")
+	pageListCmd.Flags().Int("limit", 100, "Maximum rows after authorization and audience filtering (1-500; unpaged when omitted)")
+	pageListCmd.Flags().Int("offset", 0, "Rows to skip after authorization and audience filtering")
 	pageCmd.AddCommand(pageListCmd)
 	pageCmd.AddCommand(pageGetCmd)
 	pageCmd.AddCommand(pageCreateCmd)

@@ -25,25 +25,25 @@ import (
 // workspaceRunRow is one row of `routine runs-all`. Field set mirrors
 // PipelineHandler.ListWorkspaceRuns's response map exactly.
 type workspaceRunRow struct {
-	ID              string  `json:"id" yaml:"id"`
-	PipelineID      string  `json:"pipeline_id" yaml:"pipeline_id"`
-	PipelineSlug    string  `json:"pipeline_slug" yaml:"pipeline_slug"`
-	PipelineName    string  `json:"pipeline_name" yaml:"pipeline_name"`
-	Status          string  `json:"status" yaml:"status"`
-	Mode            string  `json:"mode" yaml:"mode"`
-	StartedAt       string  `json:"started_at" yaml:"started_at"`
-	EndedAt         string  `json:"ended_at" yaml:"ended_at"`
-	CurrentStepID   string  `json:"current_step_id" yaml:"current_step_id"`
-	CostUSD         float64 `json:"cost_usd" yaml:"cost_usd"`
-	DurationMs      int64   `json:"duration_ms" yaml:"duration_ms"`
-	TriggeredVia    string  `json:"triggered_via" yaml:"triggered_via"`
-	TriggeredByID   string  `json:"triggered_by_id" yaml:"triggered_by_id"`
-	InvokingCrewID  string  `json:"invoking_crew_id" yaml:"invoking_crew_id"`
-	InvokingAgentID string  `json:"invoking_agent_id" yaml:"invoking_agent_id"`
-	InvokingUserID  string  `json:"invoking_user_id" yaml:"invoking_user_id"`
-	ErrorMessage    string  `json:"error_message" yaml:"error_message"`
-	FailedAtStep    string  `json:"failed_at_step" yaml:"failed_at_step"`
-	IssueIdentifier string  `json:"issue_identifier" yaml:"issue_identifier"`
+	ID              string   `json:"id" yaml:"id"`
+	PipelineID      string   `json:"pipeline_id" yaml:"pipeline_id"`
+	PipelineSlug    string   `json:"pipeline_slug" yaml:"pipeline_slug"`
+	PipelineName    string   `json:"pipeline_name" yaml:"pipeline_name"`
+	Status          string   `json:"status" yaml:"status"`
+	Mode            string   `json:"mode" yaml:"mode"`
+	StartedAt       string   `json:"started_at" yaml:"started_at"`
+	EndedAt         string   `json:"ended_at" yaml:"ended_at"`
+	CurrentStepID   string   `json:"current_step_id" yaml:"current_step_id"`
+	CostUSD         *float64 `json:"cost_usd" yaml:"cost_usd"` // nil below ADMIN (#3590)
+	DurationMs      int64    `json:"duration_ms" yaml:"duration_ms"`
+	TriggeredVia    string   `json:"triggered_via" yaml:"triggered_via"`
+	TriggeredByID   string   `json:"triggered_by_id" yaml:"triggered_by_id"`
+	InvokingCrewID  string   `json:"invoking_crew_id" yaml:"invoking_crew_id"`
+	InvokingAgentID string   `json:"invoking_agent_id" yaml:"invoking_agent_id"`
+	InvokingUserID  string   `json:"invoking_user_id" yaml:"invoking_user_id"`
+	ErrorMessage    string   `json:"error_message" yaml:"error_message"`
+	FailedAtStep    string   `json:"failed_at_step" yaml:"failed_at_step"`
+	IssueIdentifier string   `json:"issue_identifier" yaml:"issue_identifier"`
 }
 
 var routineRunsAllCmd = &cobra.Command{
@@ -110,7 +110,7 @@ Examples:
 			for _, r := range body.Rows {
 				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 					truncIDForCLI(r.ID, 24), r.PipelineSlug, r.Status, r.Mode, r.StartedAt,
-					formatRunDuration(r.DurationMs), formatRunCost(r.CostUSD), r.TriggeredVia)
+					formatRunDuration(r.DurationMs), formatRunCostPtr(r.CostUSD), r.TriggeredVia)
 			}
 			flush.of(w)
 		}); err != nil {
@@ -140,6 +140,23 @@ func formatRunDuration(ms int64) string {
 // cost_usd is what the agent CLIs reported, priced at list rates — not a
 // billed amount (subscription calls are not charged per call, #2193). The
 // column says REPORTED USAGE and the value is marked approximate.
+// formatRunCostPtr is formatRunCost for a field the server may withhold
+// (#3590: cost figures are OWNER/ADMIN only). Withheld renders as "—".
+func formatRunCostPtr(usd *float64) string {
+	if usd == nil {
+		return "—"
+	}
+	return formatRunCost(*usd)
+}
+
+// usdOrDash renders a withholdable amount with format, or "—" when withheld.
+func usdOrDash(format string, usd *float64) string {
+	if usd == nil {
+		return "—"
+	}
+	return fmt.Sprintf(format, *usd)
+}
+
 func formatRunCost(usd float64) string {
 	if usd <= 0 {
 		return "—"

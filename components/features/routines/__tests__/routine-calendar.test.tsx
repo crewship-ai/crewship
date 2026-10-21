@@ -55,3 +55,10 @@ it.each([
   const start=within(screen.getByRole("region", {name:"Day agenda"})).queryByRole("button", {name:/Schedule a start/})
   expect(!!start).toBe(allowed)
 })
+
+it("links to the workspace Calendar on the same day and the nearest view", async () => {
+  fetcher.mockResolvedValue({ ok: true, json: async () => ({ events: [], truncated: false }) })
+  render(<RoutineCalendar workspaceId="ws" routines={[]} />)
+  expect(screen.getByRole("link", { name: "Open in Calendar" })).toHaveAttribute("href", "/calendar?view=month&date=2028-01-01&layers=routine")
+  await waitFor(() => expect(fetcher).toHaveBeenCalled())
+})

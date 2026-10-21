@@ -63,7 +63,9 @@ spec:
 Open **Artifacts** to find Docs alongside panel Pages. **New Doc** is available
 when Documents are enabled and your workspace access permits Page creation.
 Choose **New Doc**, enter a name and Page address, then select **Create Doc**.
-The new Doc is private and owned by you.
+The new Doc is owned by you. You and the workspace owners and admins can open
+it; others can open it only after you share it. It is not listed in **My space**,
+which holds only Documents whose audience is you alone.
 
 Write in the document editor and wait for **Saved** before closing the tab.
 Reload the Page to reopen its saved content. Its existing Page address stays
@@ -976,6 +978,12 @@ the refusal names who can, and *Can edit* alone never lets you take somebody
 else's page; removing a page from a folder is the page owner's, an admin's,
 or anyone with *Can edit* on the folder; deleting a folder is allowed only
 when it is empty, counting pages you cannot see, and the refusal says so.
+
+## Filter My space
+
+My space lists your private Documents. The filter bar narrows them by type, scope (private, in a folder, audience unknown), owner and state (fresh, stale, failed, no data yet; these are the states of the panels in a Document). A group that cannot vary on the current list is not shown. Counts come only from the items you can see; items you may not read are never counted or previewed. The Recent view is not part of this list yet.
+
+Moving a Document into a working folder and Duplicate are built but not enabled in released builds: they need server routes that do not exist yet. Once enabled, the move dialog will say who gains the content and history before you confirm, that the item keeps its ID, and that a copy is made only with Duplicate, and moving several items will report a result for each.
 
 ## Permission model
 

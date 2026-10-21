@@ -245,3 +245,37 @@ func TestSkills_UsageAndCredentialReadiness(t *testing.T) {
 		}
 	})
 }
+
+// v67's Library shows a 30-day figure next to the 7-day one (ODCH-SK-06).
+func TestSkills_Usage30d(t *testing.T) {
+	f := newSkillScopeFixture(t)
+	// inv-3 sits on the 30-day boundary; replace it with unambiguous rows.
+	execOrFatal(t, f.db, `DELETE FROM skill_invocations WHERE id = 'inv-3'`)
+	execOrFatal(t, f.db, `INSERT INTO skill_invocations (id, skill_id, agent_id, workspace_id, invoked_at, exit_code) VALUES
+		('inv-20d', 'sk-scope', ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-20 days'), 0),
+		('inv-45d', 'sk-scope', ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-45 days'), 0)`,
+		f.agentA, f.wsA, f.agentA, f.wsA)
+	tests := []struct {
+		name       string
+		ws         string
+		want7d     int
+		want30d    int
+		wantErr30d int
+		wantTotal  int
+	}{
+		{"workspace A", f.wsA, 2, 3, 1, 4},
+		{"workspace B", f.wsB, 1, 1, 0, 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			for label, u := range map[string]skillUsage{
+				"list":   f.list(t, tc.ws, "")[f.skillID].Usage,
+				"detail": f.get(t, tc.ws, f.skillID).Usage,
+			} {
+				if u.Uses7d != tc.want7d || u.Uses30d != tc.want30d || u.Errors30d != tc.wantErr30d || u.UsesTotal != tc.wantTotal {
+					t.Errorf("%s usage = %+v, want 7d=%d 30d=%d errors30d=%d total=%d", label, u, tc.want7d, tc.want30d, tc.wantErr30d, tc.wantTotal)
+				}
+			}
+		})
+	}
+}

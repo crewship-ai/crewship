@@ -2,9 +2,17 @@ import { readFileSync } from "node:fs"
 import path from "node:path"
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react"
 import { _resetWorkspaceStoreForTests, refreshWorkspaceSettings } from "@/hooks/use-workspace"
 import { CreateAgentDialog } from "../create-agent-dialog"
+
+/** New agent is a wizard: Create agent lives on its last step. */
+function createButton() {
+  const jump = screen.queryByRole("button", { name: "Step 4: Instructions" })
+  if (jump) fireEvent.click(jump)
+  return screen.getByRole("button", { name: /create agent/i })
+}
+
 
 // These standalone dialogs normally run under the dashboard workspace loader.
 // Load the real store rather than disabling the transport availability gate.
@@ -98,9 +106,9 @@ describe("CreateAgentDialog", () => {
     }
     const utils = render(<CreateAgentDialog {...props} />)
     if (!props.agent && chooseProvider) {
-      fireEvent.click(screen.getByRole("button", { name: "Model and execution" }))
+      fireEvent.click(screen.getByRole("button", { name: "Step 2: Model" }))
       fireEvent.click(screen.getByRole("radio", { name: "Anthropic" }))
-      fireEvent.click(screen.getByRole("button", { name: "Identity" }))
+      fireEvent.click(screen.getByRole("button", { name: "Step 1: Who" }))
     }
     return { ...utils, props }
   }
@@ -109,21 +117,23 @@ describe("CreateAgentDialog", () => {
     const spy = stubFetch(() => new Response(JSON.stringify({ id: "a1", name: "Test", slug: "test" }), { status: 201 }))
     renderDialog({}, false)
     fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Test" } })
-    fireEvent.click(screen.getByRole("button", { name: "Choose provider" }))
-    expect(screen.queryAllByRole("radio", { checked: true })).toHaveLength(0)
+    // On the last step without a provider: Create is disabled, and the
+    // shortcut sends the person back to Model instead of creating.
+    expect(createButton()).toBeDisabled()
     fireEvent.keyDown(document.querySelector('[data-slot="dialog-content"]')!, { key: "Enter", ctrlKey: true })
     expect(agentsPost(spy)).toBeUndefined()
+    expect(screen.queryAllByRole("radio", { checked: true }).filter((r) => ["Anthropic", "OpenAI", "Google"].includes(r.getAttribute("aria-label") ?? r.textContent ?? ""))).toHaveLength(0)
     fireEvent.click(screen.getByRole("radio", { name: "OpenAI" }))
     expect(screen.getByRole("radio", { name: /Codex/ })).toHaveAttribute("aria-checked", "true")
-    fireEvent.click(screen.getByRole("button", { name: "Create agent" }))
+    fireEvent.click(createButton())
     await waitFor(() => expect(agentsPost(spy)).toBeDefined())
     expect(JSON.parse(agentsPost(spy)![1]!.body as string)).toMatchObject({ llm_provider: "OPENAI", cli_adapter: "CODEX_CLI" })
   })
 
   it("renders header + footer with disabled Create when name is empty", () => {
     renderDialog()
-    expect(screen.getByText("New agent")).toBeInTheDocument()
-    const createBtn = screen.getByRole("button", { name: /create agent/i })
+    expect(screen.getByText("New agent in Engineering")).toBeInTheDocument()
+    const createBtn = createButton()
     expect(createBtn).toBeDisabled()
   })
 
@@ -144,7 +154,7 @@ describe("CreateAgentDialog", () => {
   // It now mounts components/layout/create-surface.tsx like every other
   // create door, so the assertions below are about the SHELL, not about
   // anything this dialog draws itself.
-  it("mounts the shared CreateSurface shell at size xl", () => {
+  it("mounts the shared CreateSurface shell at size md (New agent is M 640)", () => {
     renderDialog()
     const content = document.querySelector('[data-slot="dialog-content"]')
     expect(content).not.toBeNull()
@@ -152,7 +162,7 @@ describe("CreateAgentDialog", () => {
     // The shell's own geometry: the surface group, the fixed lg width,
     // and the bottom-sheet breakpoint it brings for free.
     expect(cls).toContain("group/surface")
-    expect(cls).toContain("sm:max-w-[960px]")
+    expect(cls).toContain("sm:max-w-[640px]")
     expect(cls).toContain("max-sm:rounded-t-2xl")
   })
 
@@ -168,7 +178,7 @@ describe("CreateAgentDialog", () => {
     // The primary lives in the shell's footer now, outside the scrollport.
     const content = document.querySelector('[data-slot="dialog-content"]')!
     fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Filip" } })
-    const createBtn = screen.getByRole("button", { name: /create agent/i })
+    const createBtn = createButton()
     expect(content.contains(createBtn)).toBe(true)
     fireEvent.click(createBtn)
 
@@ -182,7 +192,7 @@ describe("CreateAgentDialog", () => {
     stubFetch(() => new Response("slug taken", { status: 409 }))
     renderDialog()
     fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Filip" } })
-    fireEvent.click(screen.getByRole("button", { name: /create agent/i }))
+    fireEvent.click(createButton())
 
     // The band sits between the body and the footer, so it cannot be
     // scrolled past the way the old toast could be missed entirely.
@@ -199,7 +209,7 @@ describe("CreateAgentDialog", () => {
     }), { status: 409 }))
     const { props } = renderDialog()
     fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Filip" } })
-    fireEvent.click(screen.getByRole("button", { name: /create agent/i }))
+    fireEvent.click(createButton())
 
     const slug = screen.getByLabelText("Slug")
     await waitFor(() => expect(slug).toHaveAttribute("aria-invalid", "true"))
@@ -221,7 +231,7 @@ describe("CreateAgentDialog", () => {
     }), { status: 409 }))
     renderDialog()
     fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Filip" } })
-    fireEvent.click(screen.getByRole("button", { name: /create agent/i }))
+    fireEvent.click(createButton())
     expect(await screen.findByText("Crew already has a lead agent")).toBeInTheDocument()
   })
 
@@ -276,7 +286,7 @@ describe("CreateAgentDialog", () => {
     fireEvent.change(nameInput, { target: { value: "Filip" } })
 
     // Submit.
-    const createBtn = screen.getByRole("button", { name: /create agent/i })
+    const createBtn = createButton()
     expect(createBtn).not.toBeDisabled()
     fireEvent.click(createBtn)
 
@@ -329,7 +339,7 @@ describe("CreateAgentDialog", () => {
     renderDialog({ crews: [], defaultCrewSlug: null })
 
     fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Solo" } })
-    const createBtn = screen.getByRole("button", { name: /create agent/i })
+    const createBtn = createButton()
     expect(createBtn).toBeEnabled()
     fireEvent.click(createBtn)
 
@@ -346,7 +356,7 @@ describe("CreateAgentDialog", () => {
     fireEvent.click(await screen.findByRole("radio", { name: /^Lead/ }))
     fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Lead" } })
 
-    expect(screen.getByRole("button", { name: /create agent/i })).toBeDisabled()
+    expect(createButton()).toBeDisabled()
     expect(screen.getByText(/create a crew first — leads need one/i)).toBeInTheDocument()
   })
 
@@ -355,7 +365,7 @@ describe("CreateAgentDialog", () => {
     renderDialog()
     const nameInput = screen.getByPlaceholderText("Filip") as HTMLInputElement
     fireEvent.change(nameInput, { target: { value: "X" } })
-    const createBtn = screen.getByRole("button", { name: /create agent/i })
+    const createBtn = createButton()
     expect(createBtn).toBeDisabled()
     fireEvent.click(createBtn)
     // The catalogue reads fire on mount regardless; what must not happen is
@@ -368,7 +378,7 @@ describe("CreateAgentDialog", () => {
     const { props } = renderDialog()
     const nameInput = screen.getByPlaceholderText("Filip") as HTMLInputElement
     fireEvent.change(nameInput, { target: { value: "Filip" } })
-    fireEvent.click(screen.getByRole("button", { name: /create agent/i }))
+    fireEvent.click(createButton())
     await waitFor(() => {
       expect(props.onCreated).not.toHaveBeenCalled()
       expect(props.onOpenChange).not.toHaveBeenCalled()
@@ -386,9 +396,9 @@ describe("CreateAgentDialog", () => {
   describe("the Role control", () => {
     it("offers both roles as visible options rather than a dropdown", async () => {
       renderDialog()
-      await waitFor(() => expect(screen.getByRole("radio", { name: /^Agent/ })).toBeInTheDocument())
+      await waitFor(() => expect(screen.getByRole("radio", { name: /^Agent$/ })).toBeInTheDocument())
 
-      expect(screen.getByRole("radio", { name: /^Agent/ })).toHaveAttribute("aria-checked", "true")
+      expect(screen.getByRole("radio", { name: /^Agent$/ })).toHaveAttribute("aria-checked", "true")
       expect(screen.getByRole("radio", { name: /^Lead/ })).toHaveAttribute("aria-checked", "false")
       // The <select> it replaces.
       expect(document.querySelector("#agent-role")).toBeNull()
@@ -427,16 +437,16 @@ describe("CreateAgentDialog", () => {
     const spy = stubFetch(() => new Response(JSON.stringify({ id: "a1", name: "Ada", slug: "ada" })))
     renderDialog()
     fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Ada" } })
-    fireEvent.click(screen.getByRole("button", { name: "Model and execution" }))
+    fireEvent.click(screen.getByRole("button", { name: "Step 2: Model" }))
     fireEvent.click(screen.getByRole("radio", { name: /^Codex CLI/ }))
     fireEvent.change(screen.getByLabelText("Maximum run duration"), { target: { value: "15" } })
-    fireEvent.click(screen.getByRole("button", { name: "Instructions and persona" }))
+    fireEvent.click(screen.getByRole("button", { name: "Step 4: Instructions" }))
     fireEvent.change(screen.getByRole("textbox", { name: "Agent system prompt" }), { target: { value: "Review documents carefully." } })
-    fireEvent.click(screen.getByRole("button", { name: "Model and execution" }))
+    fireEvent.click(screen.getByRole("button", { name: "Step 2: Model" }))
     expect(screen.getByRole("radio", { name: /^Codex CLI/ })).toHaveAttribute("aria-checked", "true")
     expect(screen.getByLabelText("Maximum run duration")).toHaveValue(15)
     expect(agentsPost(spy)).toBeUndefined()
-    fireEvent.click(screen.getByRole("button", { name: "Create agent" }))
+    fireEvent.click(createButton())
     await waitFor(() => expect(agentsPost(spy)).toBeDefined())
     expect(JSON.parse(String((agentsPost(spy)![1] as RequestInit).body))).toMatchObject({ cli_adapter: "CODEX_CLI", llm_provider: "OPENAI", timeout_seconds: 900, system_prompt: "Review documents carefully." })
   })
@@ -542,8 +552,8 @@ describe("CreateAgentDialog", () => {
   describe("role copy matches what the Role control actually offers", () => {
     /** The roles the Role control actually lets you pick, read from the DOM. */
     async function offeredRoles(): Promise<string[]> {
-      await waitFor(() => expect(screen.getByRole("radio", { name: /^Agent/ })).toBeInTheDocument())
-      return screen.getAllByRole("radio").map((r) => r.textContent!.trim())
+      await waitFor(() => expect(screen.getByRole("radio", { name: /^Agent$/ })).toBeInTheDocument())
+      return within(screen.getByRole("radiogroup", { name: "Agent role" })).getAllByRole("radio").map((r) => r.textContent!.trim())
     }
 
     const notOffered = (offered: string[]) =>
@@ -640,11 +650,11 @@ describe("stored avatar render", () => {
       return catalogueResponse(String(url)) ?? new Response("{}")
     })
     render(<CreateAgentDialog workspaceId="ws-1" open onOpenChange={vi.fn()} defaultCrewSlug="engineering" crews={CREWS} onCreated={onCreated} />)
-    fireEvent.click(screen.getByRole("button", { name: "Model and execution" }))
+    fireEvent.click(screen.getByRole("button", { name: "Step 2: Model" }))
     fireEvent.click(screen.getByRole("radio", { name: "Anthropic" }))
-    fireEvent.click(screen.getByRole("button", { name: "Identity" }))
+    fireEvent.click(screen.getByRole("button", { name: "Step 1: Who" }))
     fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Filip" } })
-    fireEvent.click(screen.getByRole("button", { name: /create agent/i }))
+    fireEvent.click(createButton())
 
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith("filip"))
     const puts = avatarPuts(spy)

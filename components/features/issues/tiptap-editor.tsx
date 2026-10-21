@@ -120,6 +120,7 @@ import {
   ToolbarButton,
 } from "./tiptap-editor-toolbar"
 import { createSlashCommandsExtension } from "./tiptap-editor-slash"
+import { TiptapUrlDialog, type UrlDialogKind, type UrlDialogRequest } from "./tiptap-url-dialog"
 
 interface TiptapEditorProps {
   content: string
@@ -207,6 +208,12 @@ export function TiptapEditor({
   const [floatingMenuVisible, setFloatingMenuVisible] = useState(false)
   const [floatingMenuPos, setFloatingMenuPos] = useState({ top: 0, left: 0 })
 
+  // Link / image URL dialog. The slash extension is built once, inside
+  // useEditor, so it reaches the current opener through a ref.
+  const [urlDialog, setUrlDialog] = useState<UrlDialogRequest | null>(null)
+  const urlDialogSeq = useRef(0)
+  const requestImageUrlRef = useRef<() => void>(() => {})
+
   // Cleanup save timeout
   useEffect(() => {
     return () => {
@@ -263,7 +270,9 @@ export function TiptapEditor({
       TextAlign.configure({
         types: ["heading", "paragraph"],
       }),
-      createSlashCommandsExtension(),
+      createSlashCommandsExtension({
+        requestImageUrl: () => requestImageUrlRef.current(),
+      }),
     ],
     content: markdownToHtml(content),
     editable,
@@ -363,29 +372,65 @@ export function TiptapEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally omit editor to avoid infinite loops on editor state changes
   }, [content])
 
+  const openUrlDialog = useCallback(
+    (kind: UrlDialogKind, initialUrl: string) => {
+      if (!editor) return
+      // Focus the editor BEFORE the dialog opens: the dialog hands focus back
+      // to whatever held it at opening, and a toolbar button would otherwise
+      // be that element. ProseMirror restores its selection on focus.
+      editor.commands.focus(null, { scrollIntoView: false })
+      urlDialogSeq.current += 1
+      setUrlDialog({ id: urlDialogSeq.current, kind, initialUrl })
+    },
+    [editor],
+  )
+
   const handleInsertLink = useCallback(() => {
     if (!editor) return
-    const previousUrl = editor.getAttributes("link").href || ""
-    const url = window.prompt("URL:", previousUrl)
-    if (url === null) return
-    if (url === "") {
-      editor.chain().focus().extendMarkRange("link").unsetLink().run()
-      return
-    }
-    editor
-      .chain()
-      .focus()
-      .extendMarkRange("link")
-      .setLink({ href: url })
-      .run()
-  }, [editor])
+    openUrlDialog("link", editor.getAttributes("link").href || "")
+  }, [editor, openUrlDialog])
 
   const handleInsertImage = useCallback(() => {
-    if (!editor) return
-    const url = window.prompt("Image URL:")
-    if (!url) return
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(editor.chain().focus() as any).setImage({ src: url }).run()
+    openUrlDialog("image", "")
+  }, [openUrlDialog])
+
+  useEffect(() => {
+    requestImageUrlRef.current = handleInsertImage
+  }, [handleInsertImage])
+
+  const handleUrlSubmit = useCallback(
+    (url: string, kind: UrlDialogKind) => {
+      setUrlDialog(null)
+      if (!editor) return
+      if (kind === "image") {
+        editor.chain().focus().setImage({ src: url }).run()
+        return
+      }
+      if (url === "") {
+        editor.chain().focus().extendMarkRange("link").unsetLink().run()
+        return
+      }
+      const { empty } = editor.state.selection
+      if (empty && !editor.isActive("link")) {
+        // Nothing selected and no link under the caret: setLink would only
+        // arm a stored mark, so insert the URL itself as the link text.
+        editor
+          .chain()
+          .focus()
+          .insertContent({ type: "text", text: url, marks: [{ type: "link", attrs: { href: url } }] })
+          .run()
+        return
+      }
+      editor.chain().focus().extendMarkRange("link").setLink({ href: url }).run()
+    },
+    [editor],
+  )
+
+  // Refocus explicitly, as submit does. The dialog's opener restore alone was
+  // not enough: a test caught Esc leaving focus on <body>.
+  const handleUrlCancel = useCallback(() => {
+    setUrlDialog(null)
+    editor?.commands.focus(null, { scrollIntoView: false })
   }, [editor])
 
   if (!editor) return null
@@ -804,6 +849,8 @@ export function TiptapEditor({
 
       {/* Editor content */}
       <EditorContent editor={editor} />
+
+      <TiptapUrlDialog request={urlDialog} onSubmit={handleUrlSubmit} onCancel={handleUrlCancel} />
     </div>
   )
 }

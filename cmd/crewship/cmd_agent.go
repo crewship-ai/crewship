@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/crewship-ai/crewship/internal/askforms"
+	"github.com/crewship-ai/crewship/internal/avatarstyle"
 	"github.com/crewship-ai/crewship/internal/cli"
 )
 
@@ -254,7 +255,7 @@ func init() {
 	agentCreateCmd.Flags().String("lead-mode", "", "Lead mode: active|passive")
 	agentCreateCmd.Flags().Int("timeout", 0, "Timeout in seconds")
 	agentCreateCmd.Flags().String("avatar-seed", "", "Avatar seed (defaults to agent name)")
-	agentCreateCmd.Flags().String("avatar-style", "", "Avatar style: bottts-neutral|adventurer|fun-emoji|pixel-art|micah|notionists|thumbs|lorelei|big-smile|avataaars")
+	agentCreateCmd.Flags().String("avatar-style", "", "Avatar style (default: the crew's, else "+avatarstyle.Default+"): "+avatarstyle.List())
 
 	agentUpdateCmd.Flags().String("name", "", "Agent name")
 	agentUpdateCmd.Flags().String("role", "", "Agent role")
@@ -278,7 +279,7 @@ func init() {
 	agentUpdateCmd.Flags().Bool("schedule-enabled", false, "Enable/disable the agent's cron schedule")
 	agentUpdateCmd.Flags().Bool("webhook-require-timestamp", false, "Require inbound webhooks to use the timestamped signature scheme (rejects replayable body-only/plaintext deliveries)")
 	agentUpdateCmd.Flags().String("avatar-seed", "", "Avatar seed")
-	agentUpdateCmd.Flags().String("avatar-style", "", "Avatar style")
+	agentUpdateCmd.Flags().String("avatar-style", "", "Avatar style; \"\" follows the crew: "+avatarstyle.List())
 
 	agentDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
 

@@ -197,7 +197,7 @@ export function DetailCard({
               <span className="type-section text-primary-hover">{title}</span>
             </span>
           )}
-          {subtitle && <span className="type-meta font-mono text-muted-foreground">{subtitle}</span>}
+          {subtitle && <span className="type-meta text-muted-foreground">{subtitle}</span>}
           {action && <span className="ml-auto">{action}</span>}
         </div>
       )}
@@ -353,7 +353,7 @@ export function TickRow({ icon: Icon, label, detail, note, status, meta }: TickR
         </div>
         {note && <div className="type-meta mt-0.5 text-muted-foreground">{note}</div>}
       </div>
-      {meta && <span className="type-meta shrink-0 font-mono text-muted-foreground-soft">{meta}</span>}
+      {meta && <span className="type-meta shrink-0 text-muted-foreground-soft">{meta}</span>}
       {tick && <span className={cn("type-row shrink-0 leading-none", tick.className)}>{tick.glyph}</span>}
     </div>
   )

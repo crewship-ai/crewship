@@ -192,9 +192,14 @@ func (s *Store) Snapshot(ctx context.Context, workspaceID, poolID string) (Polic
 	return policy, candidates, nil
 }
 
+// Retired credentials cannot be selected. Their erased mode uses pool metadata
+// only so known-owner consent remains checked. Anonymous retired tombstones
+// have no remaining account identity and are omitted; ordinary inactive rows
+// still undergo every identity, billing-mode and consent check in Select.
 func loadCandidates(ctx context.Context, tx *sql.Tx, workspaceID, poolID string) ([]Candidate, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT c.id, COALESCE(c.created_by, ''), c.provider,
-		COALESCE(mode.value, ''), m.priority, m.last_selected_seq,
+		CASE WHEN c.deleted_at IS NOT NULL THEN COALESCE(NULLIF(mode.value, ''), p.mode)
+			ELSE COALESCE(mode.value, '') END, m.priority, m.last_selected_seq,
 		(c.status = 'ACTIVE' AND c.deleted_at IS NULL),
 		(COALESCE(r.status, '') = 'needs_relogin' OR a.blocked_reason IS NOT NULL),
 		COALESCE(NULLIF(exp.value, ''), c.token_expires_at, ''), COALESCE(a.cooldown_until, ''), c.type,
@@ -206,7 +211,8 @@ func loadCandidates(ctx context.Context, tx *sql.Tx, workspaceID, poolID string)
 		LEFT JOIN credential_fields exp ON exp.credential_id = c.id AND exp.key = 'expires_at' AND exp.is_secret = 0
 		LEFT JOIN provider_login_refresh r ON r.credential_id = c.id
 		LEFT JOIN provider_login_availability a ON a.credential_id = c.id
-		WHERE p.id = ? AND p.workspace_id = ? ORDER BY m.credential_id`, poolID, workspaceID)
+		WHERE p.id = ? AND p.workspace_id = ?
+		AND (c.deleted_at IS NULL OR c.created_by IS NOT NULL) ORDER BY m.credential_id`, poolID, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("query provider pool members: %w", err)
 	}

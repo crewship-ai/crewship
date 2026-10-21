@@ -41,6 +41,7 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -318,7 +319,9 @@ type pageWire struct {
 // whose data last arrived a week ago would read as "updated today" if the two
 // were conflated. They answer different questions.
 type pageListWire struct {
-	HasDocument bool `json:"has_document"`
+	// Explicit audience classification; unfiled human ownership is not privacy.
+	PrivateAudience bool `json:"private_audience"`
+	HasDocument     bool `json:"has_document"`
 	// See pageWire.HasProject: source that exists versus source that is live.
 	HasProject         bool   `json:"has_project"`
 	HasApplication     bool   `json:"has_application"`
@@ -473,6 +476,7 @@ func (p *panelRecord) ownerRef() string    { return "crew/" + p.OwnerCrew }
 // viewer will never be shown is a leak of that panel's existence and its
 // health.
 func (h *PageHandler) List(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	user := UserFromContext(r.Context())
 	if user == nil {
 		replyError(w, http.StatusUnauthorized, "Unauthorized")
@@ -490,10 +494,19 @@ func (h *PageHandler) List(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "list pages", err)
 		return
 	}
-	out := make([]pageListWire, 0, len(index.rows))
-	for i := range index.rows {
-		out = append(out, h.pageListRow(&index.rows[i], index.folders, viewer))
+	rows, total, err := pageCatalogRows(r, index, user.ID)
+	if err != nil {
+		replyError(w, http.StatusBadRequest, err.Error())
+		return
 	}
+	out := make([]pageListWire, 0, len(rows))
+	for i := range rows {
+		if !h.auditPrivateOwnerAccess(w, r, &rows[i].rec) {
+			return
+		}
+		out = append(out, h.pageListRow(&rows[i], index.folders, viewer))
+	}
+	w.Header().Set("X-Total-Count", strconv.Itoa(total))
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -529,7 +542,7 @@ type pageIndexRow struct {
 
 func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pageViewer, scope pageScope) (*pageIndex, error) {
 	args := append([]any{wsID}, scope.args...)
-	rows, err := h.db.QueryContext(ctx, `
+	rows, err := h.pageAuthReader(ctx).QueryContext(ctx, `
 		SELECT p.id, p.slug, p.name, COALESCE(p.description, ''),
 		       COALESCE(p.owner_user_id, ''), COALESCE(p.owner_crew_id, ''),
 		       COALESCE(p.folder_id, ''), p.pages_version,
@@ -654,7 +667,8 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 func (h *PageHandler) pageListRow(row *pageIndexRow, folders map[string]*pageFolderRecord, viewer *pageViewer) pageListWire {
 	rec := &row.rec
 	out := pageListWire{
-		HasDocument: rec.HasDocument, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
+		PrivateAudience: rec.PrivateAudience,
+		HasDocument:     rec.HasDocument, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 		ID:                  rec.ID,
 		Slug:                rec.Slug,
 		Name:                rec.Name,
@@ -725,6 +739,12 @@ func (h *PageHandler) Get(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
+	r, read, ready := h.beginPageMetadataRead(w, r)
+	if !ready {
+		return
+	}
+	defer read.tx.Rollback()
+
 	wsID := WorkspaceIDFromContext(r.Context())
 	slug := r.PathValue("slug")
 
@@ -771,7 +791,11 @@ func (h *PageHandler) Get(w http.ResponseWriter, r *http.Request) {
 	// document the editor renders is the whole page rather than a copy that
 	// loses its gates on save.
 	authored := h.mayEditSpec(r.Context(), wsID, user.ID, RoleFromContext(r.Context()), rec)
-	writeJSON(w, http.StatusOK, h.pageDocumentFor(r.Context(), rec, panels, viewer, authored))
+	out := h.pageDocumentFor(r.Context(), rec, panels, viewer, authored)
+	if !h.finishMetadataRead(w, r, read) {
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // ── 3. Create — POST /api/v1/pages ─────────────────────────────────────────
@@ -1459,7 +1483,7 @@ func pagesInFolder(folderID string) pageScope {
 // is a list somebody stops refreshing.
 func (h *PageHandler) loadPanelsIn(ctx context.Context, wsID string, scope pageScope) (map[string][]*panelRecord, error) {
 	args := append([]any{wsID, wsID}, scope.args...)
-	rows, err := h.db.QueryContext(ctx, `
+	rows, err := h.pageAuthReader(ctx).QueryContext(ctx, `
 		SELECT pp.page_id, pp.id, pp.panel_id, pp.schema, COALESCE(pp.title, ''),
 		       pp.owner_crew_id, c.slug, c.name, c.deleted_at IS NOT NULL,
 		       pp.producer_kind, pp.producer_ref, pp.sla_seconds, pp.span,
@@ -1521,7 +1545,7 @@ func (h *PageHandler) loadPanelsIn(ctx context.Context, wsID string, scope pageS
 	// Newest payload per panel, in one statement for the whole scope rather
 	// than one per panel or per page: the page read is the hot path, a page
 	// carries up to 24 panels, and the index reads every page at once.
-	dataRows, err := h.db.QueryContext(ctx, `
+	dataRows, err := h.pageAuthReader(ctx).QueryContext(ctx, `
 		SELECT d.panel_id, d.seq, d.payload_json, d.produced_at,
 		       COALESCE(d.producer_run_id, ''), d.state
 		FROM page_panel_data d
@@ -1564,7 +1588,7 @@ func (h *PageHandler) loadPanelsIn(ctx context.Context, wsID string, scope pageS
 	// not parse orders nothing and the whole page falls into that tail, which
 	// is what a per-page read used to do too.
 	specs := map[string]pages.Document{}
-	specRows, err := h.db.QueryContext(ctx, `SELECT p.id, p.spec_json FROM pages p WHERE `+scope.where, scope.args...)
+	specRows, err := h.pageAuthReader(ctx).QueryContext(ctx, `SELECT p.id, p.spec_json FROM pages p WHERE `+scope.where, scope.args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1629,7 +1653,7 @@ func (h *PageHandler) loadPanelsIn(ctx context.Context, wsID string, scope pageS
 // included — a page owned by a soft-deleted crew still renders `crew/<slug>`,
 // exactly as ownerRef renders it one page at a time.
 func (h *PageHandler) loadCrewSlugs(ctx context.Context, wsID string) (map[string]string, error) {
-	rows, err := h.db.QueryContext(ctx, `SELECT id, slug FROM crews WHERE workspace_id = ?`, wsID)
+	rows, err := h.pageAuthReader(ctx).QueryContext(ctx, `SELECT id, slug FROM crews WHERE workspace_id = ?`, wsID)
 	if err != nil {
 		return nil, err
 	}
@@ -1858,7 +1882,7 @@ func (h *PageHandler) attachAuthoredHalf(ctx context.Context, pageID, panelID st
 func (h *PageHandler) ownerRef(ctx context.Context, rec *pageRecord) string {
 	if rec.OwnerCrewID != "" {
 		var slug string
-		if err := h.db.QueryRowContext(ctx, `SELECT slug FROM crews WHERE id = ?`, rec.OwnerCrewID).Scan(&slug); err == nil {
+		if err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT slug FROM crews WHERE id = ?`, rec.OwnerCrewID).Scan(&slug); err == nil {
 			return "crew/" + slug
 		}
 		return "crew/" + rec.OwnerCrewID
@@ -2005,7 +2029,7 @@ func (h *PageHandler) currentDocument(ctx context.Context, w http.ResponseWriter
 // Return the exact bytes alongside the parsed document for atomic replacement.
 func (h *PageHandler) currentDocumentSnapshot(ctx context.Context, w http.ResponseWriter, rec *pageRecord) (*pages.Document, string, bool) {
 	var specJSON string
-	if err := h.db.QueryRowContext(ctx, `SELECT spec_json FROM pages WHERE id = ?`, rec.ID).Scan(&specJSON); err != nil {
+	if err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT spec_json FROM pages WHERE id = ?`, rec.ID).Scan(&specJSON); err != nil {
 		replyInternalError(w, h.logger, "read stored page spec", err)
 		return nil, "", false
 	}
@@ -2127,7 +2151,7 @@ func (h *PageHandler) resolvePanelReferences(ctx context.Context, wsID string, d
 			return nil, newPageReferenceError(p, "panel %q: %v", p.ID, err)
 		}
 		var crewID string
-		err = h.db.QueryRowContext(ctx,
+		err = h.pageAuthReader(ctx).QueryRowContext(ctx,
 			`SELECT id FROM crews WHERE workspace_id = ? AND slug = ? AND deleted_at IS NULL`, wsID, crewSlug).Scan(&crewID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, newPageReferenceError(p,
@@ -2145,7 +2169,7 @@ func (h *PageHandler) resolvePanelReferences(ctx context.Context, wsID string, d
 		switch kind {
 		case pages.ProducerRoutine:
 			var one int
-			err := h.db.QueryRowContext(ctx,
+			err := h.pageAuthReader(ctx).QueryRowContext(ctx,
 				`SELECT 1 FROM pipelines WHERE workspace_id = ? AND slug = ? AND deleted_at IS NULL`, wsID, ref).Scan(&one)
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil, newPageReferenceError(p,
@@ -2156,7 +2180,7 @@ func (h *PageHandler) resolvePanelReferences(ctx context.Context, wsID string, d
 			}
 		case pages.ProducerAgent:
 			var one int
-			err := h.db.QueryRowContext(ctx,
+			err := h.pageAuthReader(ctx).QueryRowContext(ctx,
 				`SELECT 1 FROM agents WHERE workspace_id = ? AND slug = ? AND deleted_at IS NULL`, wsID, ref).Scan(&one)
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil, newPageReferenceError(p,

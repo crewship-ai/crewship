@@ -33,7 +33,7 @@ export default function ActivityPage() {
       <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col gap-3 p-4">
         <Skeleton className="h-9 w-full" />
         <div className="flex flex-1 gap-3">
-          <Skeleton className="h-full w-[280px]" />
+          <Skeleton className="hidden h-full w-[272px] md:block" />
           <Skeleton className="h-full flex-1" />
         </div>
       </div>

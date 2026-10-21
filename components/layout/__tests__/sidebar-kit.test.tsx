@@ -10,6 +10,7 @@ import {
   SidebarActiveChip,
   SidebarCollapseButton,
 } from "../sidebar-kit"
+import { SecondaryPanelContext } from "../secondary-panel"
 
 describe("sidebar-kit", () => {
   beforeEach(() => cleanup())
@@ -42,6 +43,17 @@ describe("sidebar-kit", () => {
     render(<SidebarFilterButton activeCount={0} />)
     const btn = screen.getByRole("button", { name: /filter/i })
     expect(btn.className).toContain("border-foreground/[0.08]")
+  })
+
+  it("SidebarFilterButton keeps its \"Filter\" label inside a 272 px panel, with the active count beside it (PAR-155)", () => {
+    render(
+      <SecondaryPanelContext.Provider value={{ toggle: null, claim: () => () => undefined }}>
+        <SidebarFilterButton activeCount={1} />
+      </SecondaryPanelContext.Provider>,
+    )
+    const btn = screen.getByRole("button", { name: /filter/i })
+    expect(btn.querySelector(".sr-only")).toBeNull()
+    expect(btn.textContent).toBe("Filter1")
   })
 
   it("SidebarViewButton renders an accessible view control", () => {
@@ -83,6 +95,19 @@ describe("sidebar-kit", () => {
     expect(onSelect).toHaveBeenCalled()
   })
 
+  it("SidebarRow puts title and aria-keyshortcuts on the interactive row itself, not on a label inside it (COM-15)", () => {
+    render(
+      <SidebarRow onSelect={() => {}} title="Library · press 1" aria-keyshortcuts="1" data-testid="row">
+        <span>Library</span>
+      </SidebarRow>,
+    )
+    const row = screen.getByRole("button", { name: /library/i })
+    expect(row).toBe(screen.getByTestId("row"))
+    expect(row).toHaveAttribute("aria-keyshortcuts", "1")
+    expect(row).toHaveAttribute("title", "Library · press 1")
+    expect(screen.getByText("Library")).not.toHaveAttribute("aria-keyshortcuts")
+  })
+
   it("SidebarCollapseButton toggles and reflects collapsed state in its label", () => {
     const onToggle = vi.fn()
     const { rerender } = render(<SidebarCollapseButton collapsed={false} onToggle={onToggle} />)
@@ -98,5 +123,34 @@ describe("sidebar-kit", () => {
     expect(screen.getByText("Source: Manual")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: /remove filter/i }))
     expect(onRemove).toHaveBeenCalled()
+  })
+
+  it("SidebarActiveChip names the filter it removes, so two chips are told apart", () => {
+    render(
+      <>
+        <SidebarActiveChip onRemove={vi.fn()}>Status: Todo</SidebarActiveChip>
+        <SidebarActiveChip onRemove={vi.fn()} label="Crew Operations">
+          <b>Crew</b> Operations
+        </SidebarActiveChip>
+      </>,
+    )
+    expect(screen.getByRole("button", { name: "Remove filter Status: Todo" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Remove filter Crew Operations" })).toBeTruthy()
+  })
+
+  it("SidebarRow centres its icon and text, so a 44 px touch row does not leave the icon at the top", () => {
+    render(<SidebarRow onSelect={vi.fn()}><span>Needs you</span></SidebarRow>)
+    expect(screen.getByRole("button", { name: "Needs you" }).className).toMatch(/\bitems-center\b/)
+  })
+
+  it("SidebarRow passes a tooltip title and aria-current through to the row", () => {
+    render(
+      <ul>
+        <SidebarRow selected onSelect={vi.fn()} title="Quarterly research digest for Ops" aria-current="page">Quarterly…</SidebarRow>
+      </ul>,
+    )
+    const row = screen.getByRole("button", { name: "Quarterly…" })
+    expect(row).toHaveAttribute("title", "Quarterly research digest for Ops")
+    expect(row).toHaveAttribute("aria-current", "page")
   })
 })

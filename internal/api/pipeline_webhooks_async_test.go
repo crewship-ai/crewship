@@ -24,6 +24,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -556,5 +557,80 @@ func TestPipelineWebhooks_Fire_InactiveRoutine_409Synchronous(t *testing.T) {
 	waitPendingWebhookDispatches(t, h)
 	if n := runner.callCount(); n != 0 {
 		t.Errorf("runner invoked %d times for an inactive routine, want 0", n)
+	}
+}
+
+// A webhook is accepted durably before capacity is dispatched. Even a legacy
+// skip policy must not discard acknowledged work: keep its receipt and run ID,
+// hold it behind the active run, then execute once when capacity is free.
+func TestPipelineWebhooks_Fire_ConcurrencyPolicySkip_PreservesAcceptedWork(t *testing.T) {
+	runner := newBlockingRunner()
+	h, db, _, wsID := webhookHandlerRig(t)
+	h.SetRunner(runner)
+	h.SetRunRegistry(pipeline.NewRunRegistry())
+	seedConcurrencyGatedPipeline(t, db, wsID, "pln_skip", "skip-target")
+	if _, err := db.Exec(`UPDATE pipelines SET definition_json = ? WHERE id = 'pln_skip'`,
+		`{"name":"skip-target","concurrency_key":"serial","concurrency_policy":"skip","steps":[{"id":"a","type":"agent_run","agent_slug":"agent_lead","prompt":"hi"}]}`); err != nil {
+		t.Fatal(err)
+	}
+	wh := seedWebhookRow(t, db, wsID, "pln_skip", "skip-secret", true)
+
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(runner.release) }) }
+	t.Cleanup(release)
+
+	fire := func(body, idemKey string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("POST", "/api/v1/webhooks/"+wh.Token, strings.NewReader(body))
+		req.SetPathValue("token", wh.Token)
+		req.Header.Set("X-Crewship-Signature", covPSWSign("skip-secret", body))
+		req.Header.Set("Idempotency-Key", idemKey)
+		rr := httptest.NewRecorder()
+		h.FireWebhook(rr, req)
+		return rr
+	}
+	if rr := fire(`{"n":1}`, "evt-1"); rr.Code != 202 {
+		t.Fatalf("first fire = %d: %s", rr.Code, rr.Body.String())
+	}
+	select {
+	case <-runner.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first run never started")
+	}
+
+	rr := fire(`{"n":2}`, "evt-2")
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("capacity must retain accepted work: %d; body=%s", rr.Code, rr.Body.String())
+	}
+	var accepted map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &accepted); err != nil || accepted["status"] != "PENDING" {
+		t.Fatalf("accepted body = %v (%v)", accepted, err)
+	}
+	runID, ok := accepted["run_id"].(string)
+	if !ok || runID == "" {
+		t.Fatal("accepted delivery has no stable run identity")
+	}
+	var pending int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pending_runs WHERE run_id=?`, runID).Scan(&pending); err != nil || pending != 1 {
+		t.Fatalf("acknowledged delivery was not retained durably: %d %v", pending, err)
+	}
+	if rr.Header().Get("Retry-After") != "" {
+		t.Error("accepted work must not ask the sender to retry")
+	}
+	if n := runner.callCount(); n != 1 {
+		t.Errorf("capacity exceeded: runner called %d times, want 1", n)
+	}
+
+	release()
+	waitPendingWebhookDispatches(t, h)
+	if n := runner.callCount(); n != 2 {
+		t.Fatalf("legacy skip policy dropped accepted delivery: %d calls, want 2", n)
+	}
+	retry := fire(`{"n":2}`, "evt-2")
+	var repeated map[string]any
+	if err := json.Unmarshal(retry.Body.Bytes(), &repeated); err != nil || retry.Code != http.StatusAccepted || repeated["run_id"] != runID || repeated["deduped"] != true {
+		t.Fatalf("sender retry changed accepted identity: %d %v (%v)", retry.Code, repeated, err)
+	}
+	if n := runner.callCount(); n != 2 {
+		t.Fatalf("sender retry executed a second copy: %d calls, want 2", n)
 	}
 }

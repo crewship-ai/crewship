@@ -23,15 +23,21 @@ import * as React from "react"
 import Link from "next/link"
 
 import { Button } from "@/components/ui/button"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { IssueFilesCard } from "./issue-files-card"
-import { IssueWorkPanel } from "./issue-work-panel"
+import { IssueSessionCard } from "./issue-session-card"
+import { IssueCheckpointCard } from "./issue-checkpoint-card"
+import { IssueWorkCard } from "./issue-work-card"
+import { IssueWorkDialogs } from "./issue-work-dialogs"
+import { sessionState } from "./issue-session"
+import { useIssueWork, type IssueWork, type IssueWorkflowAction } from "@/hooks/use-issue-work"
 import { apiFetch } from "@/lib/api-fetch"
 import { LABEL_PRESET_COLORS } from "@/lib/colors"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 import { useIssueEventGapResync } from "@/hooks/use-issue-event-gap-resync"
 import { usePipelines } from "@/hooks/use-pipelines"
+import { useIssuePeople } from "@/hooks/use-issue-people"
 import { useAutomations } from "@/hooks/use-automations"
 import { usePipelineRunRecords } from "@/hooks/use-pipeline-run-records"
 import { RoutineRunInputsDialog } from "@/components/features/routines/routine-run-inputs-dialog"
@@ -43,11 +49,7 @@ import { automationsForIssue } from "@/lib/automations"
 import { statusLabel } from "@/components/features/issues/status-icon"
 import { RunActivityTimeline, RUN_WORK_ENTRY_TYPES } from "@/components/features/activity/run-activity-timeline"
 import { IssueCardDetail, type IssueRun } from "@/components/features/issues/issue-card-detail"
-import {
-  IssueWorkflowActions,
-  type IssueCardEdit,
-  type WorkflowAction,
-} from "@/components/features/issues/issue-card-editors"
+import type { IssueCardEdit } from "@/components/features/issues/issue-card-editors"
 import type {
   CodeLinkAttachResult,
   CodeLinkEdit,
@@ -95,10 +97,16 @@ interface Props {
   feedback?: React.ReactNode
   /** Initial for the comment composer's author bubble. */
   viewerInitial?: string
+  /** The signed-in user's id, so the work block can say "You". */
+  viewerId?: string | null
   /** The host's list needs to know when a write landed. */
   onChanged?: () => void
   /** Called once when the identifier resolves to nothing. */
   onNotFound?: () => void
+  /** A change made outside the surface (the page's ⋯ menu): reload on change. */
+  reloadKey?: number
+  /** The issue as loaded, for the page's ⋯ menu. */
+  onLoaded?: (issue: Mission | null) => void
 }
 
 /** The workspace lists the pickers choose from. Fetched once per workspace. */
@@ -116,8 +124,11 @@ export function IssueDetailSurface({
   editable = true,
   actions, executionActions = true, authorizationKey, rechecking, onUnauthorized, write, feedback,
   viewerInitial,
+  viewerId = null,
   onChanged,
   onNotFound,
+  reloadKey,
+  onLoaded,
 }: Props) {
   const [issue, setIssue] = React.useState<Mission | null>(null)
   const [loading, setLoading] = React.useState(true)
@@ -129,6 +140,9 @@ export function IssueDetailSurface({
 
   const allowed = React.useMemo(() => actions ? actions.filter((a) => issue?.allowed_actions?.includes(a)) : undefined, [actions, issue?.allowed_actions])
   const can = React.useCallback((action: IssueAction) => allowed ? allowed.includes(action) : editable, [allowed, editable])
+  // Embedded hosts (chat) keep work execution on the canonical issue page.
+  const workCan = React.useCallback((action: string) => executionActions && can(action as IssueAction), [executionActions, can])
+  const meId = viewerId
 
   const [commentsHasMore, setCommentsHasMore] = React.useState(false)
   const [olderBusy, setOlderBusy] = React.useState(false)
@@ -164,6 +178,9 @@ export function IssueDetailSurface({
   const routineRunRequest = React.useRef(0)
 
   const { pipelines } = usePipelines(workspaceId)
+  // Owner picker (ISS-06): the issue page only — an embed with its own
+  // write contract (chat) keeps Owner as text.
+  const { people } = useIssuePeople(workspaceId, editable && !write)
   // The workspace's rules, narrowed to this issue inside the card — the
   // predicate belongs next to the type it reads, not here.
   const { automations } = useAutomations(workspaceId)
@@ -368,18 +385,25 @@ export function IssueDetailSurface({
   // our own writes refetch directly, which is why clicking in the UI always
   // looked fine and only somebody else's change went missing.
   const realtimeTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  // The timer calls whatever the fetchers are when it fires. A re-render in
+  // the 100 ms window (new callbacks, the crew resolving) must not cancel a
+  // refresh already owed; only unmounting does.
+  const refreshNow = React.useRef<() => void>(() => {})
+  refreshNow.current = () => {
+    void fetchIssue()
+    void fetchSubResources()
+  }
   const scheduleRefresh = React.useCallback(() => {
     if (realtimeTimer.current) return
     realtimeTimer.current = setTimeout(() => {
       realtimeTimer.current = null
-      void fetchIssue()
-      void fetchSubResources()
+      refreshNow.current()
     }, 100)
-  }, [fetchIssue, fetchSubResources])
+  }, [])
   React.useEffect(() => () => {
     if (realtimeTimer.current) clearTimeout(realtimeTimer.current)
     realtimeTimer.current = null
-  }, [scheduleRefresh])
+  }, [])
 
   const onIssueEvent = React.useCallback(
     (event: RealtimeEvent) => {
@@ -443,6 +467,10 @@ export function IssueDetailSurface({
     ),
   })
 
+  React.useEffect(() => {
+    onLoaded?.(issue)
+  }, [issue, onLoaded])
+
   /* ---------------------------------------------------------------- *
    *  Writes                                                           *
    * ---------------------------------------------------------------- */
@@ -452,6 +480,13 @@ export function IssueDetailSurface({
     await fetchSubResources()
     onChanged?.()
   }, [fetchIssue, fetchSubResources, onChanged])
+
+  React.useEffect(() => {
+    if (!reloadKey) return
+    void refresh()
+    // Only a new key from the host reloads.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reloadKey])
 
   const loadOlderComments = async () => {
     if (!base || olderBusy || !comments[0]) return
@@ -537,16 +572,27 @@ export function IssueDetailSurface({
       if (!await patch(body)) throw new Error("The change has not been saved. Your draft is kept.")
       return
     }
+    // The owner is not a PATCH field of its own: assignee_type "user" routes
+    // to owner_user_id and leaves the delegate alone, but one PATCH carries
+    // one assignee pair. So a staged owner goes as its own write, after the
+    // rest (which may carry the delegate).
+    const { owner_user_id: ownerId, owner_name: _ownerName, ...rest } = body
+    void _ownerName
+    const writes: Record<string, unknown>[] = []
+    if (Object.keys(rest).length > 0) writes.push(rest)
+    if (typeof ownerId === "string" && ownerId) writes.push({ assignee_type: "user", assignee_id: ownerId })
     setBusy(true)
     try {
-      const res = await apiFetch(`${base}?${qs}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      })
-      if (!res.ok) {
-        const b = await res.json().catch(() => null)
-        throw new Error(b?.detail ?? "The server refused the change.")
+      for (const w of writes) {
+        const res = await apiFetch(`${base}?${qs}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(w),
+        })
+        if (!res.ok) {
+          const b = await res.json().catch(() => null)
+          throw new Error(b?.detail ?? "The server refused the change.")
+        }
       }
       setDraft({})
       await refresh()
@@ -571,7 +617,7 @@ export function IssueDetailSurface({
   const confirmRun = React.useRef<(() => Promise<void>) | null>(null)
 
   const canSaveDraft = Object.keys(draft).every((key) => can(issueFieldAction(key)))
-  const draftCount = Object.keys(draft).filter((k) => k !== "assignee_type").length
+  const draftCount = Object.keys(draft).filter((k) => k !== "assignee_type" && k !== "owner_name").length
   const inPage = usePageSave({
     label: `Issue ${identifier}`,
     count: write ? 0 : draftCount,
@@ -667,6 +713,19 @@ export function IssueDetailSurface({
       }
     },
     [base, qs, fetchSubResources],
+  )
+
+  // Add relation's issue picker: the workspace search, minus this issue.
+  const searchIssues = React.useCallback(
+    async (q: string) => {
+      const res = await apiFetch(`/api/v1/issues?${qs}&limit=8&q=${encodeURIComponent(q)}`)
+      if (!res.ok) return []
+      const rows = (await res.json()) as Mission[]
+      return rows
+        .filter((r) => r.id !== issue?.id && r.identifier)
+        .map((r) => ({ identifier: r.identifier as string, title: r.title, status: r.status }))
+    },
+    [qs, issue?.id],
   )
 
   const removeRelation = React.useCallback(
@@ -825,16 +884,24 @@ export function IssueDetailSurface({
   }, [base, qs, routineRunForm, identifier, issue?.routine_slug, refresh])
 
   const runWorkflow = React.useCallback(
-    async (action: WorkflowAction, comment?: string) => {
-      if (!base) return
+    async (action: IssueWorkflowAction, comment?: string): Promise<boolean> => {
+      if (!base) return false
       // Reopen is a status change, not a verb the server exposes — it was
       // implemented as a PATCH in the inline detail and has no endpoint.
-      if (action === "reopen") {
-        await patch({ status: "BACKLOG" })
-        return
+      // A failed issue reopens to Todo (one step back to work); a closed one
+      // to Backlog.
+      if (action === "reopen" || action === "reopen_todo") {
+        await patch({ status: action === "reopen_todo" ? "TODO" : "BACKLOG" })
+        return true
       }
       const review = action === "approve" || action === "request_changes"
-      const url = review ? `${base}/review?${qs}` : `${base}/${action}?${qs}`
+      // Stop is cooperative (after the current step); stop_now also signals
+      // the running processes (?hard=true).
+      const url = review
+        ? `${base}/review?${qs}`
+        : action === "stop_now"
+          ? `${base}/stop?hard=true&${qs}`
+          : `${base}/${action}?${qs}`
       setBusy(true)
       try {
         const res = await apiFetch(url, {
@@ -851,21 +918,25 @@ export function IssueDetailSurface({
         })
         if (!res.ok) {
           const b = await res.json().catch(() => null)
-          toast.error(b?.detail ?? `Failed to ${action.replace("_", " ")} issue`)
-          return
+          toast.error(b?.detail ?? `Failed to ${action === "stop_now" ? "stop" : action.replace("_", " ")} issue`)
+          return false
         }
         toast.success(
           action === "start"
             ? "Issue started"
             : action === "stop"
-              ? "Issue stopped"
-              : action === "approve"
-                ? "Issue approved"
-                : "Changes requested",
+              ? "Stop requested · the agent finishes its current step"
+              : action === "stop_now"
+                ? "Issue stopped"
+                : action === "approve"
+                  ? "Issue approved"
+                  : "Changes requested",
         )
         await refresh()
+        return true
       } catch {
-        toast.error(`Failed to ${action.replace("_", " ")} issue`)
+        toast.error(`Failed to ${action === "stop_now" ? "stop" : action.replace("_", " ")} issue`)
+        return false
       } finally {
         setBusy(false)
       }
@@ -894,6 +965,8 @@ export function IssueDetailSurface({
       onTitleDraft: write ? (title) => { void stage({ title }) } : undefined,
       createLabel: can("edit_fields") ? createLabel : undefined,
       addRelation,
+      searchIssues,
+      people: !write && people.length > 0 ? people : undefined,
       removeRelation,
       runRoutine: executionActions && can("start_work") && issue.routine_slug ? runRoutine : undefined,
       busy: busy || routineRunBusy,
@@ -913,6 +986,8 @@ export function IssueDetailSurface({
     write,
     createLabel,
     addRelation,
+    searchIssues,
+    people,
     removeRelation,
     runRoutine,
     busy,
@@ -960,7 +1035,7 @@ export function IssueDetailSurface({
     {rechecking && <p role="status" className="px-4 pt-3 text-xs text-muted-foreground">Checking current access…</p>}
     {feedback && <div className="px-4 pt-3">{feedback}</div>}
     {(write?.conflict || write?.resetKey) && draftCount > 0 ? <div className="border-b p-3 text-xs" aria-label="Current server values"><p>Current server values (your draft is kept below)</p>{Object.keys(draft).map((field) => <p key={field}>{field}: {String(issue[field as keyof Mission] ?? "Unassigned")}</p>)}</div> : null}
-    {write && draftCount > 0 && <div className="flex items-center gap-2 border-b p-3 text-xs"><span className="flex-1">{!write.blocked && !canSaveDraft ? "Draft kept. Current access does not allow saving these changes." : "Unsaved changes"}</span><Button size="sm" className="coarse:min-h-12" disabled={write.blocked || rechecking || !canSaveDraft} onClick={() => void patch(draft)}>Save changes</Button><Button size="sm" variant="ghost" className="coarse:min-h-12" disabled={write.blocked} onClick={() => { setDraft({}); draftBaseRevision.current = undefined }}>Discard</Button></div>}
+    {write && draftCount > 0 && <div className="flex items-center gap-2 border-b p-3 text-xs"><span className="flex-1">{!write.blocked && !canSaveDraft ? "Draft kept. Current access does not allow saving these changes." : "Unsaved changes"}</span><Button size="sm" className="coarse:min-h-[44px]" disabled={write.blocked || rechecking || !canSaveDraft} onClick={() => void patch(draft)}>Save changes</Button><Button size="sm" variant="ghost" className="coarse:min-h-[44px]" disabled={write.blocked} onClick={() => { setDraft({}); draftBaseRevision.current = undefined }}>Discard</Button></div>}
     {authorizationKey && <p className="px-4 pt-3 text-xs text-muted-foreground">Detail fetched {detailFetchedAt ? new Date(detailFetchedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "not verified"} · Related data {subFetchedAt ? `fetched ${new Date(subFetchedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "not verified"} · Automation data fetched separately</p>}
     {subFailed.length > 0 && (
       <div
@@ -976,10 +1051,21 @@ export function IssueDetailSurface({
       </div>
     )}
     <fieldset disabled={write?.blocked} className="min-w-0">
+    <IssueWorkBinding issue={issue} agents={roster.agents} onChanged={refresh} runWorkflow={runWorkflow}>
+    {(work) => (
     <IssueCardDetail
       issue={shown}
       filesPanel={<IssueFilesCard key={issue.id} issue={issue} editable={can("attach_files")} />}
-      workPanel={<IssueWorkPanel key={issue.id} issue={issue} agents={roster.agents} editable={executionActions && editable} allowedActions={executionActions ? allowed : []} onChanged={refresh} latestOutcome={runs[0]?.outcome} />}
+      session={<><IssueSessionCard issue={issue} state={sessionState(issue, { latestOutcome: runs[0]?.outcome })} work={work} can={workCan} meId={meId} /><IssueCheckpointCard issue={issue} workspaceId={workspaceId} className="mt-3" /></>}
+      workPanel={
+        <IssueWorkCard
+          issue={issue}
+          work={work}
+          can={workCan}
+          meId={meId}
+          routine={<span className="text-body">{shown.routine_name ?? "None"}</span>}
+        />
+      }
       unavailable={subFailed}
       comments={comments}
       olderComments={commentsHasMore ? <Button size="sm" variant="outline" disabled={olderBusy} onClick={() => void loadOlderComments()}>{olderBusy ? "Loading…" : "Load older comments"}</Button> : undefined}
@@ -998,11 +1084,6 @@ export function IssueDetailSurface({
       onCommentDraft={write ? setCommentDraft : undefined}
       viewerInitial={viewerInitial}
       edit={edit}
-      actions={
-        executionActions && (editable || !!allowed?.length) ? (
-          <IssueWorkflowActions issue={issue} onAction={runWorkflow} busy={busy} allowedActions={allowed} />
-        ) : undefined
-      }
       runActivity={
         <RunActivityTimeline
           workspaceId={workspaceId}
@@ -1019,6 +1100,8 @@ export function IssueDetailSurface({
         />
       }
     />
+    )}
+    </IssueWorkBinding>
     </fieldset>
     {confirm && (
       <ConfirmDialog
@@ -1105,6 +1188,10 @@ function withoutUnchanged(body: Record<string, unknown>, issue: Mission): Record
     delete out.assignee_id
     delete out.assignee_type
   }
+  if ("owner_user_id" in out && out.owner_user_id === (issue.owner?.id ?? null)) {
+    delete out.owner_user_id
+    delete out.owner_name
+  }
   return out
 }
 
@@ -1129,6 +1216,9 @@ function withDraft(
     next.assignee_id = id
     next.assignee_type = id ? (draft.assignee_type as "agent" | "user") : null
     next.assignee_name = id ? roster.agents.find((a) => a.id === id)?.name ?? issue.assignee_name ?? null : null
+  }
+  if (typeof draft.owner_user_id === "string" && draft.owner_user_id) {
+    next.owner = { id: draft.owner_user_id, name: (draft.owner_name as string | undefined) ?? undefined }
   }
   if ("labels" in draft) {
     const byId = new Map([...roster.labels, ...(issue.labels ?? [])].map((l) => [l.id, l]))
@@ -1172,5 +1262,32 @@ function consequencesOf(
 }
 
 function issueFieldAction(key: string): IssueAction {
-  return key === "status" ? "change_status" : key.startsWith("assignee_") ? "assign" : key.startsWith("routine_") ? "change_workflow" : "edit_fields"
+  return key === "status" ? "change_status" : key.startsWith("assignee_") || key.startsWith("owner_") ? "assign" : key.startsWith("routine_") ? "change_workflow" : "edit_fields"
+}
+
+/**
+ * One set of work actions per issue, shared by the session block and the
+ * Work & control card, plus the dialogs they open. Keyed by the issue so a
+ * different issue never inherits an open dialog or a refusal.
+ */
+function IssueWorkBinding({
+  issue,
+  agents,
+  onChanged,
+  runWorkflow,
+  children,
+}: {
+  issue: Mission
+  agents: readonly MentionAgent[]
+  onChanged: () => Promise<void>
+  runWorkflow: (action: IssueWorkflowAction, comment?: string) => Promise<boolean>
+  children: (work: IssueWork) => React.ReactNode
+}) {
+  const work = useIssueWork({ issue, onChanged, runWorkflow })
+  return (
+    <>
+      {children(work)}
+      <IssueWorkDialogs issue={issue} agents={agents} work={work} />
+    </>
+  )
 }

@@ -38,7 +38,7 @@ export function CredentialTierBadge({ level, serverLabel, className }: Credentia
       <Badge
         variant="outline"
         className={cn(
-          "h-4 shrink-0 border-dashed border-foreground/15 px-1 font-mono text-[9px] text-muted-foreground-soft",
+          "h-4 shrink-0 border-dashed border-foreground/15 px-1 font-sans text-[9px] font-semibold text-muted-foreground-soft",
           className,
         )}
         title="This server did not report a Keeper tier for this credential."
@@ -52,7 +52,9 @@ export function CredentialTierBadge({ level, serverLabel, className }: Credentia
   return (
     <Badge
       variant="outline"
-      className={cn("h-4 shrink-0 px-1 font-mono text-[9px]", tier.badgeClass, className)}
+      // v67: L1 and L2 are one quiet grey chip; the colour is kept for L3 and L4,
+      // where the tier changes how a read behaves.
+      className={cn("h-4 shrink-0 px-1 font-sans text-[9px] font-semibold tabular-nums", level <= 2 ? "border-foreground/15 text-muted-foreground" : tier.badgeClass, className)}
       title={`${serverLabel || tier.label} — ${tier.consequence}`}
     >
       {tier.short}

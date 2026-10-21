@@ -8,6 +8,7 @@ import { usePageDocument } from "../use-page-document"
 
 const account = vi.hoisted(() => ({ user: "human-A" as string | null, status: "authenticated" }))
 const fetchMock = vi.hoisted(() => vi.fn())
+vi.mock("@/lib/document-queue", async importOriginal => ({...await importOriginal<typeof import("@/lib/document-queue")>(),openDocumentDrafts:async()=>({load:async()=>[],put:async()=>{},remove:async()=>{},close: () => {}, exclusive: true})}))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: fetchMock }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: account.status, data: account.user ? { user: { id: account.user } } : null }) }))
 afterEach(() => { fetchMock.mockReset(); account.user = "human-A"; account.status = "authenticated" })

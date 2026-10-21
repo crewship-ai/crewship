@@ -23,7 +23,7 @@
 // this off here" look identical without it.
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { adminFetch } from "@/lib/admin-api"
 import {
@@ -78,7 +78,7 @@ function ProvenanceChip({ source }: { source: ConfigSource }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center h-[18px] px-1.5 rounded text-micro font-medium uppercase tracking-wide border",
+        "inline-flex items-center h-[18px] px-1.5 rounded text-micro font-medium border",
         source === "instance"
           ? "text-primary/90 border-primary/30 bg-primary/[0.08]"
           : "text-muted-foreground border-border/60 bg-muted/30",

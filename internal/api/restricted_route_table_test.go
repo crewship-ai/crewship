@@ -203,8 +203,13 @@ func TestRestrictedRouteTableSnapshot(t *testing.T) {
 			allowed = append(allowed, p)
 			continue
 		}
-		if code != http.StatusNotFound {
-			t.Errorf("denied %q answered %d, want 404 (deny must not disclose)", p, code)
+		want := http.StatusNotFound
+		if p == "POST /api/v1/workspaces" {
+			// The global creation route explicitly denies Guest workspace creation.
+			want = http.StatusForbidden
+		}
+		if code != want {
+			t.Errorf("denied %q answered %d, want %d", p, code, want)
 		}
 	}
 	sort.Strings(allowed)

@@ -2361,7 +2361,11 @@ Authentication: a current human credential with current document read access;
 scoped CLI credentials need `pages:read`. Response: the confirmed content tree,
 outline, revision, opaque editing epoch and current write capability. Comment
 and resolve capabilities are disabled. The request does not accept a `block_id`
-selector in this release. Statuses: 200 document; 400 unsupported selector;
+or `revision` selector in this release. Any supplied `revision` query, including
+an empty or repeated value, returns 400 before contacting the document engine;
+it never falls forward to the current head. Malformed query encoding also
+returns 400 without reading content. Read a retained checkpoint through
+the checkpoint endpoint below instead. Statuses: 200 document; 400 unsupported selector;
 401 invalid credential; 403 missing access/scope; 404 unavailable Page/document;
 409 incompatible content; 413 oversized content; 500 storage failure;
 502 invalid engine response; 503 disabled or unavailable service. Responses use
@@ -2399,6 +2403,37 @@ Statuses: 200 checkpoint; 400 invalid identity; 401 invalid or revoked credentia
 502 malformed engine response; 503 disabled or unavailable service.
 Responses use `Cache-Control: no-store`.
 CLI: `crewship doc checkpoint <page-slug> <checkpoint-id>`.
+
+## Restore a saved document checkpoint
+
+`POST /api/v1/pages/{slug}/document/restore`
+
+Authentication: a current human credential with current Page and document write
+access; scoped CLI credentials need `pages:write`. Agent run credentials are
+refused. Reading somebody else's private document as workspace OWNER requires
+an audit entry before disclosure; earlier checkpoint permissions are not reused.
+
+Request: one JSON object of at most 4096 bytes, with exactly `page_id`, `id`,
+`schema` (2 or 3), `epoch`, `ifRev` and `checkpoint`. Use the immutable Page ID,
+the current editing epoch and revision, a retained checkpoint ID and a new
+mutation ID. Page, mutation and checkpoint IDs contain 1–128 ASCII letters,
+digits, underscores or hyphens. A changed Page identity, revision or epoch
+refuses the operation; the server does not select a replacement checkpoint.
+
+Response 200: `page_id`, `id`, `rev`, a new `epoch`, `kind: "restore"` and
+optional `schema` and `duplicate`. Restoration creates a new revision, preserving
+the retained checkpoint. After an uncertain confirmation, retry the original
+packet with the same mutation ID and preconditions; an exact authorized retry
+returns the original receipt without another restoration. A lost confirmation
+is not evidence that the write failed.
+
+Statuses: 200 confirmed receipt; 400 invalid or oversized packet or Page identity;
+401 invalid or revoked credential; 403 missing write scope or human credential;
+404 unavailable Page, document or checkpoint; 409 stale or incompatible state;
+413 engine size limit; 422 rejected content; 429 capacity limit; 500 audit failure;
+502 invalid receipt; 503 disabled service or unavailable confirmation.
+Responses use `Cache-Control: no-store`.
+CLI: `crewship doc restore <page-slug> --file <request.json>`.
 
 ## Initialize a native document
 
@@ -2459,3 +2494,16 @@ return 401, missing CLI scope returns 403, and disabled Documents return 503.
 Completed and recovered runs retain their saved links for authorized readers.
 
 Saved Document chat previews clear their displayed content and result titles on `page.deleted`. A failed refresh cannot restore that deleted result from the earlier cached or pending response.
+
+
+## Personal Documents view
+
+When Documents are enabled, **My space** in Artifacts shows the current user's private Documents within the existing workspace. It does not create another workspace. Custody access to another user's private output belongs to the workspace OWNER and remains a separate audited access path.
+
+Authorized Page index rows include the read-only boolean `private_audience`. A personal view requires both `private_audience: true` and the current user's `owner` reference; an unfiled Page or an ownership reference alone does not establish privacy. Existing `crewship page list --format json` output exposes this classification. Missing audience information is unknown, rather than permission to infer that a Page is public.
+
+The index accepts `audience=personal` for explicitly private Pages owned by the current human, or `audience=all` for the existing authorized catalog. OWNER custody of other people’s private Pages is excluded from the personal view. Unknown audience values return 400. `X-Total-Count` counts only authorized rows matching the audience. Catalog responses use `Cache-Control: no-store`; foreign private metadata requires the existing OWNER audit before its release, and an unavailable audit refuses the response.
+
+Optional `limit` and `offset` apply after authorization and audience filtering. The default limit is 100 when either paging parameter is present, the maximum is 500, and negative offsets become zero. With neither paging parameter the existing unpaged JSON array is preserved. `crewship api request GET /api/v1/pages --query audience=personal --query limit=20 --format json` requests a personal catalog page.
+
+The private-chat document composer shows the target personal space and its audience before submission. This view and label do not publish a Document, change its audience, enable shared-chat creation, or provide a work-folder sharing operation.

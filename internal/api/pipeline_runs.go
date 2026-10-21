@@ -397,7 +397,7 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 	resp["step_outputs_available"] = outputsAvailable
 	dsl := h.enrichRunDefinition(r.Context(), workspaceID, runID, resp)
 	h.enrichRunFailure(r.Context(), runID, status, outcome.String, errorMessage.String, failedAtStep.String, currentStepID.String, dsl, stepOutputs, resp)
-	writeJSON(w, http.StatusOK, resp)
+	writeCostAwareJSON(w, r, http.StatusOK, resp)
 }
 
 // getAcceptedRun exposes the planned identity before its pipeline_runs row
@@ -798,7 +798,7 @@ func (h *PipelineHandler) ListWorkspaceRuns(w http.ResponseWriter, r *http.Reque
 			"outcome": outcome.String,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeCostAwareJSON(w, r, http.StatusOK, map[string]interface{}{
 		"rows":  out,
 		"count": len(out),
 	})

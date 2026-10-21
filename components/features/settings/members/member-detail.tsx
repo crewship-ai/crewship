@@ -21,7 +21,7 @@ import {
   ACCESS_PROFILES, AREAS, ASSIGNABLE_ROLES, CAPABILITY_HINT, CAPABILITY_SHORT, ROLE_LABEL, ROLE_SUMMARY_BY_ROLE,
   aboveRole, accessProfile, exceptionCount, roleChoices, type Member,
 } from "./members-model"
-import { AREA_ICON, CAPABILITY_ICON, MemberDialogIcon, RestrictedPill, RolePill } from "./member-bits"
+import { AREA_ICON, CAPABILITY_ICON, ConfirmWhen, MemberDialogIcon, RestrictedPill, RolePill } from "./member-bits"
 import { joinedDate } from "./people-table"
 
 export { RolePill } from "./member-bits"
@@ -53,6 +53,7 @@ export function MemberDetail({
   onRevoke,
   revealEnabled = null,
   onAccessSaved,
+  inPeek = false,
 }: {
   member: Member
   workspaceId: string
@@ -74,6 +75,9 @@ export function MemberDetail({
   revealEnabled?: boolean | null
   /** A saved access mode changes the roster's Restricted marker; reload it. */
   onAccessSaved?: () => void
+  /** Inside the Peek, whose header already names the person: keep the
+   *  pills, drop the avatar and name. */
+  inPeek?: boolean
 }) {
   const label = personLabel(member.user.full_name, member.user.email)
   const isSelf = currentUserId === member.user.id
@@ -88,6 +92,13 @@ export function MemberDetail({
 
   return (
     <div className="space-y-4" data-slot="member-detail" aria-label={`Member details: ${label}`} role="region">
+      {inPeek ? (
+        <p className="flex flex-wrap items-center gap-1.5" data-slot="member-profile">
+          <RolePill role={member.role} />
+          <RestrictedPill mode={member.access_mode} />
+          <span className="inline-flex h-[22px] items-center rounded-md bg-surface-subtle px-2 text-micro tabular-nums text-muted-foreground">joined {joinedDate(member.created_at)}</span>
+        </p>
+      ) : (
       <div className="flex items-start gap-3.5 pr-8" data-slot="member-profile">
         <UserAvatar name={member.user.full_name} email={member.user.email} src={member.user.avatar_url} className="h-11 w-11" textClassName="text-sm" />
         <div className="min-w-0 flex-1">
@@ -95,14 +106,15 @@ export function MemberDetail({
             <span className="truncate">{label}</span>
             {isSelf && <span className="text-xs font-normal text-muted-foreground">you</span>}
           </p>
-          {member.user.full_name?.trim() && <p className="truncate font-mono text-micro text-muted-foreground">{member.user.email}</p>}
+          {member.user.full_name?.trim() && <p className="truncate text-micro text-muted-foreground">{member.user.email}</p>}
           <p className="mt-2 flex flex-wrap items-center gap-1.5">
             <RolePill role={member.role} />
             <RestrictedPill mode={member.access_mode} />
-            <span className="inline-flex h-[22px] items-center rounded-md bg-surface-subtle px-2 font-mono text-micro text-muted-foreground">joined {joinedDate(member.created_at)}</span>
+            <span className="inline-flex h-[22px] items-center rounded-md bg-surface-subtle px-2 text-micro tabular-nums text-muted-foreground">joined {joinedDate(member.created_at)}</span>
           </p>
         </div>
       </div>
+      )}
 
       {above.length > 0 && !locked && (
         <div role="status" data-slot="member-above-role" className="flex items-start gap-2.5 rounded-xl border border-warn/40 bg-warn/[0.07] px-3.5 py-3">
@@ -113,11 +125,11 @@ export function MemberDetail({
               {above.map((c) => CAPABILITY_LABELS[c].en).join(", ")}. Raise the role, or turn {above.length === 1 ? "it" : "them"} off.
             </p>
             <div className="mt-2.5 flex flex-wrap gap-1.5">
-              <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" disabled={busy} onClick={() => onRevoke(member, above)}>
+              <Button variant="outline" size="sm" className="px-2.5 text-xs" disabled={busy} onClick={() => onRevoke(member, above)}>
                 Turn {above.length === 1 ? CAPABILITY_SHORT[above[0]] ?? "it" : "them"} off
               </Button>
               {choices.includes("MANAGER") && (
-                <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={() => setPendingRole("MANAGER")}>Make Manager</Button>
+                <Button variant="outline" size="sm" className="px-2.5 text-xs" onClick={() => setPendingRole("MANAGER")}>Make Manager</Button>
               )}
             </div>
           </div>
@@ -153,7 +165,7 @@ export function MemberDetail({
                 })}
               </div>
               {diff > 0 && (
-                <span className="ml-auto font-mono text-micro text-warn" data-slot="member-exceptions" title="What differs from the preset">
+                <span className="ml-auto text-micro text-warn" data-slot="member-exceptions" title="What differs from the preset">
                   {[...profile.added.map((c) => `+${CAPABILITY_SHORT[c] ?? c}`), ...profile.removed.map((c) => `−${CAPABILITY_SHORT[c] ?? c}`)].join(" ")}
                 </span>
               )}
@@ -164,10 +176,10 @@ export function MemberDetail({
             const held = a.caps.filter((c) => granted.includes(c.cap)).length
             return (
               <div key={a.key} role="group" aria-label={a.label}>
-                <p className={cn("flex items-center gap-1.5 border-b border-border/60 px-4 py-1.5 font-mono text-micro uppercase tracking-[0.08em]",
+                <p className={cn("flex items-center gap-1.5 border-b border-border/60 px-4 py-1.5 text-micro font-semibold",
                   a.danger ? "bg-destructive/[0.06] text-destructive" : "bg-surface-subtle text-muted-foreground")}>
                   <AreaIcon className="h-3 w-3" aria-hidden />{a.label}
-                  <span className="ml-auto normal-case tracking-normal">{held} of {a.caps.length}</span>
+                  <span className="ml-auto font-normal tabular-nums">{held} of {a.caps.length}</span>
                 </p>
                 {a.key === "secrets" && revealEnabled !== null && (
                   <p className="flex items-center gap-2 border-b border-border/60 px-4 py-2 text-label text-muted-foreground" data-slot="member-reveal-policy">
@@ -194,7 +206,7 @@ export function MemberDetail({
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center gap-1.5 text-control">
                           {CAPABILITY_LABELS[cap].en}
-                          {unsaved && <span className="font-mono text-micro text-[var(--save-bar-fg)]">unsaved</span>}
+                          {unsaved && <span className="text-micro text-[var(--save-bar-fg)]">unsaved</span>}
                         </span>
                         <span className="block text-label text-muted-foreground">{CAPABILITY_HINT[cap]}</span>
                       </span>
@@ -305,6 +317,7 @@ function RoleControl({ member, choices, isSelf, label, onChangeRole, pendingRole
               <span className="font-medium">{ROLE_LABEL[member.role] ?? member.role}</span> to <span className="font-medium">{pendingRole ? ROLE_LABEL[pendingRole] ?? pendingRole : ""}</span>?
               {" "}What they can do stays as it is.
             </AlertDialogDescription>
+            <ConfirmWhen when="now" />
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel className="h-7 text-xs" disabled={saving}>Cancel</AlertDialogCancel>
@@ -339,7 +352,7 @@ function RemoveMember({ member, label, onConfirm }: { member: Member; label: str
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
-        <Button variant="outline" size="sm" className="h-7 gap-1.5 border-destructive/40 px-2.5 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={removing}>
+        <Button variant="outline" size="sm" className="gap-1.5 border-destructive/40 px-2.5 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={removing}>
           <Trash2 className="h-3 w-3" />
           Remove member
         </Button>
@@ -359,7 +372,7 @@ function RemoveMember({ member, label, onConfirm }: { member: Member; label: str
           <UserAvatar name={member.user.full_name} email={member.user.email} src={member.user.avatar_url} className="h-8 w-8" textClassName="text-micro" />
           <span className="w-0 min-w-0 flex-1">
             <span className="block truncate text-control">{label}</span>
-            <span className="block truncate font-mono text-micro text-muted-foreground">{member.user.email}</span>
+            <span className="block truncate text-micro text-muted-foreground">{member.user.email}</span>
           </span>
           <RolePill role={member.role} />
         </div>

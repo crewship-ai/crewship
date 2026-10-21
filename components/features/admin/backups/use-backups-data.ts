@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { apiFetch } from "@/lib/api-fetch"
 import { apiErrorMessage } from "@/lib/api-error"
@@ -141,6 +141,27 @@ export async function perform<T>(demo: boolean, fn: () => Promise<SendResult<T>>
   if (r.unavailable) toast.message(`${fallback}: not available on this server yet`)
   else toast.error(`${fallback}: ${r.error}`)
   return null
+}
+
+/**
+ * perform() for a ConfirmDialog's onConfirm: true when it went through (the
+ * dialog closes), false in demo (nothing was sent, the dialog closes), and a
+ * rejection after the error toast when the server refused — ConfirmDialog
+ * then stays open, so the person is where they were (POP-02).
+ */
+export async function performConfirm<T>(demo: boolean, fn: () => Promise<SendResult<T>>, done: string, fallback: string): Promise<boolean> {
+  if (demo) {
+    toast.message("Demo data · nothing was sent")
+    return false
+  }
+  const r = await fn()
+  if (r.ok) {
+    if (done) toast.success(done)
+    return true
+  }
+  if (r.unavailable) toast.message(`${fallback}: not available on this server yet`)
+  else toast.error(`${fallback}: ${r.error}`)
+  throw new Error(r.unavailable ? fallback : r.error)
 }
 
 /**

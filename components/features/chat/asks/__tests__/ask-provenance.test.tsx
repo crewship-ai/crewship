@@ -73,7 +73,7 @@ function renderTurn(turn: ChatTurn, sessionId = SESSION) {
     <TurnRenderer
       turn={turn}
       chatId={sessionId}
-      onCopy={() => {}}
+      onCopy={async () => true}
       onFileClick={() => {}}
       resolveAskProvenance={(content) => lookupAskProvenance(sessionId, content)}
     />,

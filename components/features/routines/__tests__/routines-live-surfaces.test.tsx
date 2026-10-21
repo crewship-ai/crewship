@@ -53,6 +53,11 @@ vi.mock("@/hooks/use-active-routine-runs", async (importOriginal) => {
 vi.mock("@/hooks/use-realtime", () => ({
   useRealtimeEvent: () => {},
 }))
+// The panel's group/sort choice is a synced preference; keep it local here.
+vi.mock("@/hooks/use-user-preference", async () => {
+  const { useState } = await import("react")
+  return { useUserPreference: <T,>(_key: string, value: T) => [...useState(value), { ready: true }] }
+})
 
 function pipeline(overrides: Partial<Pipeline>): Pipeline {
   return {
@@ -111,6 +116,10 @@ const EXPLORER_PROPS = {
     showEphemeral: false,
   },
   onChange: vi.fn(),
+  view: "overview" as const,
+  onViewChange: vi.fn(),
+  counts: { needs: null, live: null, drafts: null },
+  crews: new Map(),
 }
 
 beforeEach(() => {

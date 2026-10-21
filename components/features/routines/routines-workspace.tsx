@@ -1,25 +1,29 @@
 "use client"
 
 import { useMemo } from "react"
-import Link from "next/link"
-import { ArrowUpRight, Workflow } from "lucide-react"
+import { Workflow } from "lucide-react"
 
-import { useUrlSelection } from "@/hooks/use-issue-detail"
 import { usePipelineRuns } from "@/hooks/use-pipeline-runs"
 import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
 import { usePendingStarts } from "@/hooks/use-pending-starts"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import { useActiveRoutineRuns, isAwaitingApproval } from "@/hooks/use-active-routine-runs"
-import { InlineEmpty } from "@/components/ui/inline-empty"
+import { PageEmpty, PageError } from "@/components/layout/page-state"
 import {
   matchesRoutineFilters,
   routineFilterInput,
   type RoutineFilterState,
 } from "@/lib/routine-filters"
-import { cn } from "@/lib/utils"
 import { routineRunPresentation } from "@/lib/routine-run-presentation"
-import { RoutineCalendar } from "./routine-calendar"
-import { RoutinesDashboard, windowCoverage } from "./routines-dashboard"
+import { useRoutineHealth } from "@/hooks/use-routine-health"
+import { RoutinesDashboard, outcomeKpis, windowCoverage } from "./routines-dashboard"
+import { RoutinesOverviewBoard } from "./routines-overview-board"
+import { useAbilities } from "@/hooks/use-abilities"
+import { useWorkspaceWaitpoints } from "@/hooks/use-workspace-waitpoints"
+import { useBudgetSummary } from "@/hooks/use-routine-budget"
+import { apiFetch } from "@/lib/api-fetch"
+import { toast } from "@/lib/toast"
+import { RoutinesIntro } from "./routines-intro"
 
 // The server caps a run list at 200 rows.
 const DASHBOARD_RUN_LIMIT = 200
@@ -55,9 +59,6 @@ export function routineRunLabel(run: { status?: string; outcome?: string }) {
 // then lists what each routine does, how it starts and how it went last time
 // (docs/ux/routines-operator-console-2026-09-15.md §3, screen 1).
 
-type ListTab = "routines" | "calendar"
-const TABS: readonly ListTab[] = ["routines", "calendar"]
-
 /** The list row's `draft` field (operator console contract, "Pipeline list
  * item"): present only when an unpublished draft exists for the routine. */
 export interface RoutineDraftSummary {
@@ -77,6 +78,14 @@ interface RoutinesWorkspaceProps {
   /** Search and filters belong to the explorer sidebar; the list only applies them. */
   search?: string
   filters?: RoutineFilterState
+  /** Slugs matched by the text of their steps, added to the name match. */
+  stepMatches?: ReadonlySet<string> | null
+  /** Load the list again after an error. */
+  onRetry?: () => void
+  /** Open a run page (from Needs you and Running now). */
+  onOpenRun?: (slug: string, runId: string) => void
+  /** Open New routine; absent when the person cannot create one. */
+  onNew?: () => void
 }
 
 /** The word and tone for a routine's last run, from the row plus the live feed. */
@@ -110,8 +119,6 @@ export function routineLastState(
 }
 
 export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
-  const [selectedTab, setTab] = useUrlSelection("tab")
-  const tab: ListTab = TABS.includes(selectedTab as ListTab) ? (selectedTab as ListTab) : "routines"
   const { bySlug, runs: activeRuns } = useActiveRoutineRuns()
   const { schedules } = usePipelineSchedules(props.workspaceId)
   const { starts: pendingStarts } = usePendingStarts(props.workspaceId)
@@ -127,59 +134,82 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
 
   const visible = props.routines as ListRoutine[]
   const displayed = visible.filter(
-    (routine) => !filters || matchesRoutineFilters(routineFilterInput(routine), filters, bySlug, search),
+    (routine) => !filters || matchesRoutineFilters(routineFilterInput(routine), filters, bySlug, search, props.stepMatches),
   )
+  const { role } = useAbilities()
+  const { waitpoints, decide } = useWorkspaceWaitpoints(props.workspaceId)
+  const { summary: spend } = useBudgetSummary(props.workspaceId)
+  const health = useRoutineHealth(props.workspaceId)
+  // The 7-day figure counts the history rows of the routines on screen; an
+  // older active run is not part of "the newest N runs" (routines-dashboard).
+  const boardKpis = useMemo(() => {
+    const from = coveredSince ? Date.parse(coveredSince) : NaN
+    const rows = recordedRuns.filter(
+      (r) => displayed.some((p) => p.slug === r.pipeline_slug) && (!Number.isFinite(from) || Date.parse(r.started_at) >= from),
+    )
+    const k = outcomeKpis(rows)
+    return { total: k.total, successPct: k.successPct }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recordedRuns, coveredSince, displayed.map((p) => p.slug).join(",")])
 
   // What needs me, first: the newest run parked on a decision for one of
   // these routines, the newest routine that could not finish, and the next
   // planned start. Each tile opens the concrete run or plan, not a list.
   return (
     <div className="flex h-full min-w-0 flex-col">
-      <nav aria-label="Routines views" className="flex shrink-0 gap-4 border-b border-border px-6">
-        {TABS.map((view) => (
-          <button
-            key={view}
-            type="button"
-            aria-pressed={tab === view}
-            onClick={() => setTab(view === "routines" ? null : view)}
-            className={cn(
-              "border-b-2 px-1 py-3 text-xs transition-colors",
-              tab === view
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {view === "routines" ? "Overview" : view[0].toUpperCase() + view.slice(1)}
-          </button>
-        ))}
-        {/* Runs are not a third tab: Activity already lists every routine run
-            with its steps and files, so the tab was a second, poorer copy. */}
-        <Link
-          href="/activity?lens=routines"
-          className="ml-auto inline-flex items-center gap-1 border-b-2 border-transparent px-1 py-3 text-xs text-muted-foreground hover:text-foreground"
-        >
-          Runs in Activity <ArrowUpRight className="h-3 w-3" />
-        </Link>
-      </nav>
       <div className="min-h-0 flex-1 overflow-auto">
-        {tab === "routines" && (
           <section aria-label="Routines overview" className="p-4 md:p-6">
             {props.error && (
-              <p role="alert" className="mb-3 text-sm text-destructive">
-                Routines could not be loaded.
-              </p>
+              <PageError
+                className="mb-3"
+                title="Routines could not load"
+                description="The filters stay as they are. Try again in a moment."
+                onRetry={props.onRetry}
+              />
             )}
 
-            {/* The catalog lives in the sidebar; this pane is the week at a
+            {/* The catalog lives in the panel; this pane is the week at a
                 glance. An empty workspace still needs the way in. */}
             {!visible.length && !props.loading && !props.error ? (
-              <div className="rounded-xl border border-border/60 bg-card p-3">
-                <InlineEmpty
+              <>
+                <PageEmpty
                   icon={Workflow}
-                  text="No routines yet. Create one with New routine, or import a bundle."
+                  title="No routines yet"
+                  description="Describe a job once; a crew runs it on a schedule or a trigger."
+                  primary={props.onNew ? { label: "New routine", onClick: props.onNew } : undefined}
+                  cli="crewship routine init"
                 />
-              </div>
+                {/* RT-INTRO as the empty state's guide (no templates, no figures). */}
+                <RoutinesIntro compact />
+              </>
             ) : (
+              <div className="flex flex-col gap-4">
+              {/* RT-OV: figures, Needs you, Running now, Next 24 hours. */}
+              <RoutinesOverviewBoard
+                routines={displayed}
+                activeRuns={activeRuns.filter((r) => displayed.some((p) => p.slug === r.pipeline_slug))}
+                waitpoints={waitpoints}
+                schedules={schedules}
+                pendingStarts={pendingStarts}
+                kpis={boardKpis}
+                coveredSince={coveredSince}
+                spend={spend}
+                role={role}
+                onDecide={async (runId, approved) => {
+                  const ok = await decide(runId, approved)
+                  if (ok) toast.success(approved ? "Approved · the run continues" : "Rejected")
+                  else toast.error("The decision was not accepted", { description: "It may have been answered already. Open the run to see." })
+                  return ok
+                }}
+                onStop={async (runId) => {
+                  const res = await apiFetch(`/api/v1/workspaces/${encodeURIComponent(props.workspaceId)}/pipelines/runs/${encodeURIComponent(runId)}/cancel`, { method: "POST" })
+                  if (!res.ok) toast.error("Could not stop this run. It may already have finished.")
+                  else toast.success("Stop requested")
+                  return res.ok
+                }}
+                onOpenRun={(slug, runId) => props.onOpenRun?.(slug, runId)}
+                onSelect={props.onSelect}
+              />
               <RoutinesDashboard
                 routines={displayed}
                 runs={dashboardRuns}
@@ -187,16 +217,13 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
                 coveredSince={coveredSince}
                 pendingStarts={pendingStarts}
                 schedules={schedules}
+                spend={spend}
+                health={health}
                 onSelect={props.onSelect}
               />
+              </div>
             )}
           </section>
-        )}
-        {tab === "calendar" && (
-          <div className="p-4 md:p-6">
-            <RoutineCalendar workspaceId={props.workspaceId} routines={props.routines} />
-          </div>
-        )}
       </div>
     </div>
   )

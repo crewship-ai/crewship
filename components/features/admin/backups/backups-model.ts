@@ -411,7 +411,7 @@ export interface BackupIncident {
 export interface RestoreChecks {
   space: { ok: boolean; need_bytes: number; free_bytes: number }
   format: { ok: boolean; version: number; converter: boolean }
-  runtime: { ok: boolean; detail: string; warnings: string[] }
+  runtime: { ok: boolean; detail: string; warnings: string[]; images_checked?: number; images_older?: number }
   /** Settings restored switched off: "Docker socket mount on ops". */
   unsafe: string[]
   conflicts: { ok: boolean; detail: string }

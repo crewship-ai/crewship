@@ -33,7 +33,8 @@ A screen that cannot answer 1 says so in one line, not with an empty pane.
 | Card | `DashboardCard` | 11px uppercase title, mono hint, `→` action link |
 | Empty state inside a card | `InlineEmpty` (`components/ui/inline-empty`) | ONE line, an icon, an action. Never a 150px centred block |
 | Empty page | `EmptyState` (`components/layout/empty-state`) | says what will appear here and the CLI/UI action that creates it |
-| Status | `StatusPill` (`components/ui/status-pill`) + `formatStatus` (`lib/format-status`) | tones: success / blue / warn / danger / muted / purple. Never a colour alone: dot + word. No local pill maps |
+| Status | `StatusPill` (`components/ui/status-pill`) + `formatStatus` (`lib/format-status`) | the ONLY component that shows a status or a severity. Tones: success / blue / warn / danger / muted / purple (chip tokens ok / info / warn / danger / neutral / violet). Never a colour alone: dot + word, or a glyph via `icon`. A feature's tone word (destructive, bad, high, emerald …) goes through `toStatusTone` (`lib/status-tone`); a raw enum through `statusTone`. No local pill maps: `components/__tests__/status-pill-guard.test.ts` fails on a new `*Pill` / `*StatusBadge` outside `components/ui` |
+| Count, neutral label | `Badge` (`components/ui/badge`) | counts and labels that carry no state; never coloured by status |
 | Crew | `CrewIcon` + name + colour dot | colour may be a palette id OR a hex — use `crewColor` / `crewColorHex` |
 | Agent | `AgentAvatar` with status dot | RUNNING blue with halo, ERROR red, idle green |
 | Model | `getModelLabel` | ids come from `config/models.json`, never typed in a component |
@@ -43,6 +44,14 @@ A screen that cannot answer 1 says so in one line, not with an empty pane.
 | Long list | `usePagedList` (`hooks/use-paged-list`) | `?limit&offset` + `X-Total-Count`; show `N of TOTAL` and a Show-more |
 | Disabled primary button | a one-line reason beside it | onboarding's `blocking reason` pattern |
 | Irreversible action | `AlertDialog` that says what is lost and where to recover | Skip setup, delete, nuke |
+| Filters in a secondary panel | `useSidebarFacets` + `SidebarFacetBlock` + `SidebarInlineFacet` (`components/layout/sidebar-facets`) | the Filter button opens the facets INSIDE the panel under its toolbar (never a floating popover); each facet folds, names its choice and clears alone; at most 6 values, the rest behind "All N…" (searchable); counts over the whole space. While the block is closed, active facets show as `SidebarActiveChip`s named "Facet: Value". `SidebarFilterPopover` is only for surfaces without a panel |
+| Two to five views of one thing | `Segmented` (`components/ui/segmented`) | one radio group (arrows, Home / End, one tab stop); `count` after a label, `title` for the reason a segment is disabled. No local segmented copies |
+| Pick one of many in a dialog | `Combobox` (`components/ui/combobox`) | a button naming the choice and a searchable list (labels, descriptions, keywords); `modal` inside a CreateSurface. No native `<select>` or local picker in dialogs |
+| Note beside a field or choice | `Note` (`components/ui/note`) | quiet grey for information, `tone="warn"` tinted; a banner is for a page's state, a note explains what is next to it |
+| Option that needs a sentence | `ChoiceTile` (`components/ui/choice-tile`) | `aria-pressed` tile with glyph, title, one line; short equal options use `Segmented` |
+| What a decision loses or keeps | `ConsequenceList` (`components/ui/confirm-dialog`) | lost / warn / kept lines, the tone said in words for screen readers; `ConfirmDialog` draws it, other surfaces asking the same question use it directly |
+| Page actions from below the layout | `SubBarActions` (`components/layout/sub-bar`) | a page under its layout's SubBar puts its actions in the bar through this, never a portal target handed down |
+| Chart series by crew or agent | `--series-1..8` (`bg-series-N`, `text-series-N`) | 1–5 equal `--chart-1..5`; every slot ≥ 3:1 on every surface in both schemes, ΔE ≥ 10 apart; assign from slot 1, never reorder |
 | Saving typed-in values | `PageSaveProvider` + `PageSaveBar` (`components/ui/page-save-bar`); cards register through `useDirtyForm` + `SaveFooter`, `SettingsSaveBar` or `usePageSave` | see "Saving" below |
 
 ### Saving
@@ -108,18 +117,22 @@ Controls and tables in Settings and Admin come from
 
 ### Harbor: where the look lives
 
-The design language is Harbor (the marketing site's), expressed only through
-tokens and a handful of utilities, so it can be changed in one place.
+The design language is Harbor (the marketing site's; revision Harbor 2 since
+October 2026), expressed only through tokens and a handful of utilities, so it
+can be changed in one place.
 
 | What | Where | Rule |
 |---|---|---|
-| Light / dark palettes | `app/globals.css` (`:root`, `.dark`) | dark is the default; both are held to AA by `lib/__tests__/theme-contrast.test.ts` |
+| Light / dark palettes | `app/globals.css` (`:root`, `.dark`) | Harbor 2 values; every text token is held to AA (4.5:1) on every surface, its hover and every accent's selection by `lib/__tests__/theme-contrast.test.ts` |
+| Text greys | `foreground`, `muted-foreground`, `muted-foreground-soft` | three text tiers; `icon-faint` is a fourth grey for icons and dividers only (3:1), never text |
+| Fonts | `public/fonts/inter`, `public/fonts/jetbrains-mono`, `app/layout.tsx` | Inter for the interface, JetBrains Mono for ids and code; both bundled, never fetched from a font service |
 | Accent (brand) colour | `app/styles/accents.css` + `lib/theme/accents.ts` | one light and one dark block per accent; components never name an accent colour, they use `primary` / `primary-hover` / `primary-strong` |
+| Style (surfaces, corners, colours) | `app/styles/styles.css` + `lib/theme/appearance-style.ts` | a style is a registry row plus one token block per scheme under `[data-style="<id>"]`; components never read `data-style` (a test greps for it). Picked in Settings › Appearance › Style, kept in the `appearance.style` preference with the Corners, Cards and Lines knobs |
 | Theme + accent pickers | `components/layout/theme-switcher.tsx` (profile menu) | per browser; accent painted before first paint by `ACCENT_BOOT_SCRIPT` |
-| Selected row | `.row-selected` (via `ListRow` / `SidebarRow`, `lib/interaction.ts`) | tint + hairline + straight 3px bar; never a `border-left` on a rounded row |
+| Selected row | `.row-selected` (via `ListRow` / `SidebarRow`, `lib/interaction.ts`) | opaque accent tint (`--selection-bg` = `--brand-tint`) + hairline + straight 3px bar; never a translucent grey, never a `border-left` on a rounded row |
 | Status chip | `StatusPill` and the `--chip-*-bg/fg` tokens | the only place a row shows severity |
 | Icon in a box | `icon-tile` utility (`ConceptIcon variant="chip"`) | tint via `--ic`; neutral unless the icon itself is the status |
-| Cards | `rounded-[20px] border bg-card`, hover `lift` | no resting shadow |
+| Cards | `rounded-card` (10px) `border bg-card`, hover `lift` | no resting shadow; shadows only on layers above the page (popovers, dialogs) |
 | Deep panel | `panel-surface` | heroes, terminals, graph canvases |
 | Nested page | `DrillPage` (`components/layout/drill-page`) | a big sub-area (Settings › Crew links, › Audit log) gets its own route; its side panel REPLACES the parent's and starts with "← Parent", then the sidebar-kit toolbar (search, Filter, collapse) and collapsible `DrillNavSection`s whose values carry counts. Never a third column, never a nested page inside a nested page; on a phone the panel becomes a bottom sheet behind a "Filters" button, and view tabs stay on the page |
 
@@ -134,6 +147,13 @@ what waits on a person (paused, needs a tool, approval).
 **Adding an accent:** a light and a dark block in `accents.css`, a row in
 `ACCENTS`. Never a status hue (green, red, amber). The tests fail if the two
 files disagree or any pair drops below AA.
+
+**Adding a style:** a registry row in `STYLES` (neutral name, never a product's), a
+light and a dark block and a shape block in `styles.css` (one block for a
+single-scheme style). `lib/__tests__/theme-style-contrast.test.ts` holds it to
+the same AA gate as Harbor with every accent; a style that fails does not
+ship. A style sets tokens only: no font (Inter and JetBrains Mono are the only
+families), no rule about a component.
 
 ### Admin › Backups
 

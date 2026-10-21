@@ -23,6 +23,7 @@ Auth: every subcommand requires `crewship login` plus an active workspace. The i
 | `inbox list` | List inbox items (default: unread only). |
 | `inbox get <id>` | Show a single item with its full body + structured payload. |
 | `inbox count` | Print the bell-badge unread count (cheaper than `list` for polling). |
+| `inbox counts` | Print totals per space (to handle / updates / history) and per kind, in one request. |
 | `inbox read <id>` | Mark an item as read **for you** — read state is per user, so another recipient of a role-targeted item still sees it unread. |
 | `inbox unread <id>` | Flip an item back to unread for you (clears only your own read marker; restores an archived item for everyone). |
 | `inbox resolve <id>` | Mark resolved, optionally recording the action taken. Resolved is workspace-shared. Refused (`409`) on a live waitpoint or escalation — see [`inbox resolve`](#inbox-resolve). |
@@ -40,8 +41,32 @@ Auth: every subcommand requires `crewship login` plus an active workspace. The i
 | `--state <enum>` | `unread` | Filter by state. One of `unread`, `read`, `resolved`, `all`. |
 | `--kind <enum>` | (unset) | Filter by kind. One of `waitpoint`, `escalation`, `failed_run`, `message`, `memory_consolidation`, `schedule_missed`, `schedule_circuit_breaker_tripped`, `webhook_fire_failed`, `automation_enqueue_failed`, `run_needs_human` (a run's [outcome](/api-reference/issues#outcome) resolved to `NEEDS_HUMAN`, work package B6). |
 | `--limit <n>` | `50` | Max rows. Server caps at 500. |
-| `--offset <n>` | `0` | Skip this many rows (server-side offset pagination). |
-| `--all` | `false` | Keep requesting pages until the server reports `has_more: false`. Exact only on a quiet workspace: a row that leaves the filter mid-walk shifts the window and is never returned. |
+| `--offset <n>` | `0` | Skip this many rows (server-side offset pagination; not stable on a changing feed, prefer `--cursor`). |
+| `--cursor <c>` | (unset) | Resume after a page. A page that has more prints `more items: resume with --cursor <c>` on stderr (so `--format json` stays the rows alone). Cannot be combined with `--offset`. |
+| `--all` | `false` | Keep requesting pages, following the server's `next_cursor`, until `has_more` is false. Keyset paging, so a row added or resolved mid-walk does not shift the window. |
+| `-q, --query <text>` | (unset) | Search title, body, sender, kind and the crew/agent names, on the server. |
+| `--space <enum>` | (unset) | `action`, `updates` or `history`. |
+| `--unread` | `false` | Only items unread for you. |
+| `--attention <enum>` | (unset) | Active items of one class: `decision`, `input`, `review`, `repair`. |
+| `--deadline <enum>` | (unset) | `hour`, `today`, `soon` or `none`. |
+| `--crew <id>` | (unset) | Items about one crew. |
+| `--agent <ref>` | (unset) | Items about one agent (id, slug or name). |
+
+### `inbox counts`
+
+Print totals per space and kind for the authenticated workspace. Filters select
+the same rows as `inbox list`; this command does not mark items read.
+
+| Flag | Default | Effect |
+|---|---|---|
+| `--agent` | (unset) | Agent ID, slug or name. |
+| `--attention` | (unset) | Active attention class: `decision`, `input`, `review` or `repair`. |
+| `--crew` | (unset) | Crew ID. |
+| `--deadline` | (unset) | `hour`, `today`, `soon` or `none`. |
+| `--kind` | (unset) | One inbox item kind. |
+| `-q, --query` | (unset) | Search title, body, sender, kind and crew/agent names. |
+| `--space` | (unset) | `action`, `updates` or `history`. |
+| `--unread` | `false` | Only items unread for you. |
 
 ### `inbox resolve`
 
@@ -124,6 +149,15 @@ done
 ```
 
 `inbox count` hits `GET /api/v1/inbox/count` (the bell-badge endpoint) — much cheaper than `inbox list` when you only need the integer.
+
+### Totals per space and kind
+
+```bash
+crewship inbox counts
+crewship inbox counts --format json
+```
+
+`inbox counts` hits `GET /api/v1/inbox/counts`: items you can see, split into *to handle* (a real action behind it), *updates* and *history* (resolved), overall and per kind, plus `by_attention` and `by_deadline` facet counts. It counts inbox items only; approvals-queue rows and issue tasks that the web page merges in are not included.
 
 ### Mark an item
 

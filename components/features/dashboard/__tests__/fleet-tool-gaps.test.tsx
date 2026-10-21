@@ -12,7 +12,7 @@ afterEach(cleanup)
 const services = { total: 0, running: 0, degraded: 0, checked: false }
 const card = (name: string, status: string, tone: FleetHealthRow["tone"]): FleetCard => ({
   row: { crew: { id: name, name, slug: name, color: "blue", icon: "code" } as CrewSummary, status, detail: "", tone, agents: 1, runningAgents: 0, services },
-  agents: [], spendUsd: null, runSeries: [], runsTotal: 0,
+  agents: [], runSeries: [], runsTotal: 0,
 })
 
 // dev3 showed the same orange "Needs tool" on four of five crews. One missing
@@ -26,15 +26,15 @@ describe("crews waiting on a tool", () => {
 
   it("folds two or more into one call to action and quiets the rows", () => {
     render(<FleetBoard cards={[card("Coolify", "Needs tool", "warn"), card("Engineering", "Needs tool", "warn"), card("Ops", "Ready", "success")]} />)
-    const banner = screen.getByRole("link", { name: /2 crews need a tool/ })
-    expect(banner.getAttribute("href")).toBe("/credentials")
+    expect(screen.getByText("2 crews need a tool")).toBeTruthy()
+    expect(screen.getByRole("link", { name: "Connect" }).getAttribute("href")).toBe("/credentials")
     const coolify = screen.getAllByTestId("dashboard-fleet-card")[0]
-    expect(within(coolify).getByText("Needs tool").closest("[data-tone]")!.getAttribute("data-tone")).toBe("muted")
+    expect(within(coolify).getByText("Needs tool").closest("[data-tone]")!.getAttribute("data-tone")).toBe("mut")
   })
 
   it("keeps a single waiting crew as a normal warning row", () => {
     render(<FleetBoard cards={[card("Coolify", "Needs tool", "warn"), card("Ops", "Ready", "success")]} />)
-    expect(screen.queryByRole("link", { name: /need a tool/ })).toBeNull()
+    expect(screen.queryByText(/need a tool/)).toBeNull()
     expect(screen.getByText("Needs tool").closest("[data-tone]")!.getAttribute("data-tone")).toBe("warn")
   })
 })

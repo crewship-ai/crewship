@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/avatarstyle"
 	"github.com/crewship-ai/crewship/internal/scheduler"
 )
 
@@ -52,6 +53,11 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var body map[string]interface{}
 	if err := readJSON(r, &body); err != nil {
 		replyError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	// null clears the style; a string must be one the web app can draw.
+	if s, ok := body["avatar_style"].(string); ok && !avatarstyle.Valid(s) {
+		replyError(w, http.StatusBadRequest, avatarstyle.Problem(s))
 		return
 	}
 

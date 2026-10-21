@@ -38,3 +38,10 @@ it.each(["access","availability"])("blocks creation without confirmed %s",mode=>
   if(mode==="access")mocks.allowed=false;else mocks.enabled=false
   const {client}=mount();expect(screen.getByRole("button",{name:"Create Doc"})).toBeDisabled();expect(mocks.fetch).not.toHaveBeenCalled();client.clear()
 })
+it("states the real audience: workspace owners and admins can open a new Doc, so it is not called private",()=>{
+  const {client}=mount()
+  expect(screen.queryByText(/private/i)).toBeNull()
+  expect(screen.getByText("Who can open it")).toBeInTheDocument()
+  expect(screen.getByText("You, and workspace owners and admins. Others only after you share it.")).toBeInTheDocument()
+  client.clear()
+})

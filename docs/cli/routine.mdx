@@ -28,11 +28,15 @@ See [Routines guide](/guides/routines) for the conceptual overview.
 | Core | `run <slug>` | Invoke a routine against the live execution tier |
 | Core | `dry-run <slug>` | Preview what a routine would do without invoking agents |
 | Core | `delete <slug>` | Soft-delete a routine |
+| Core | `folders list/create/update/delete/move` | Organise routines into folders |
 | Governance | `approve <slug>` | Approve a proposed routine (MANAGER+) — flips it live |
 | Governance | `reject <slug>` | Reject a proposed routine (MANAGER+) — removes it |
 | Governance | `disable <slug>` | Disable a routine (OWNER/ADMIN) — cancels in-flight runs, refuses new ones |
 | Governance | `enable <slug>` | Re-enable a disabled routine (OWNER/ADMIN) |
 | Diagnostics | `doctor <slug>` | Preflight checklist — catches blind alleys before `run` |
+| Diagnostics | `checkup <slug>` | The server's checklist: agents, credentials, cost cap, failures in a row, schedule breaker, untested changes |
+| Diagnostics | `health [--days N]` | Per routine: last 20 outcomes, success rate, runs and spend in a window |
+| Core | `templates list/get/create/use/delete` | Keep routine definitions as templates; `use` saves a draft |
 | Diagnostics | `bench <slug>` | Variance characterisation — N runs, pass-rate + cost/latency stats |
 | Diagnostics | `backtest <slug> --against <version>` | Replay recent successful runs against a candidate version and diff outputs (live execution) |
 | Diagnostics | `budget get/set/summary` | Monthly spend cap vs actual — budget-vs-actual view, not an enforcement gate |
@@ -96,10 +100,98 @@ crewship routine list --order name
 | `--order` | `popularity` | Sort: `popularity` (invocation_count DESC), `recent` (updated_at DESC), `name` (alpha) |
 | `--status` | (unset) | Filter by governance status: `active`, `proposed`, `disabled` |
 | `--tag` | (unset) | Filter routines by definition tag (cross-crew discovery) |
+| `--search` | (unset) | Words that must all appear in the name, slug, description or the text of a step (ids, names, agents, prompts, commands); case-insensitive |
 
 **Output columns:** SLUG, INVOC, LAST STATUS, AUTHOR CREW, DESCRIPTION
 
 ---
+
+## `crewship routine health`
+
+```bash
+crewship routine health              # last 30 days
+crewship routine health --days 7 -f json
+```
+
+For every routine that has run: its last 20 outcomes oldest first
+(`+` completed, `x` failed, `-` stopped, `?` waiting for a person, `~`
+running), the success rate over the finished ones, and the runs and spend of
+the window. Test and dry runs are not counted. This is the table the
+Routines overview shows. Spend is printed for workspace OWNER and ADMIN;
+every other role sees `—`.
+
+## `crewship routine checkup <slug>`
+
+The server's checklist for one routine, the same the routine page's Checkup
+card draws: it is turned on and approved, its agents exist in the crew, the
+credentials it declares are active, it has a cost cap, how many runs in a row
+failed, whether a schedule's circuit breaker turned it off, and whether the
+changes that are not live passed a test. Worst first. Exits non-zero while a
+check is `bad`. `routine doctor` stays the preflight that also looks at the
+crew's container and the egress list.
+
+## `crewship routine templates`
+
+```bash
+crewship routine templates create "Daily digest" --from-routine daily-digest --category ops
+crewship routine templates create "From a file" --file definition.json
+crewship routine templates list
+crewship routine templates get <template_id>
+crewship routine templates use <template_id> --slug morning-digest --crew-id <crew>
+crewship routine templates delete <template_id>
+```
+
+A template is a name and a routine definition the workspace keeps. `use`
+saves a **draft** (nothing is published): test it and publish it from the
+routine page. A definition that could not be saved as a routine is refused at
+`create`. Names are unique per workspace, ignoring case.
+
+### `crewship routine templates create`
+
+Save a workspace template from `--from-routine <slug>` or `--file <definition.json>`.
+`--description` sets its one-line purpose and `--category` its grouping label.
+This creates a template, without running a routine.
+
+### `crewship routine templates use`
+
+Create a draft from a template ID. `--slug` is required; `--name` overrides the
+display name (otherwise the template name is used). `--crew-id` selects the
+owning crew. This does not publish or execute the draft.
+
+## `crewship routine folders`
+
+Folders organise the Routines panel (Group by Folder). They grant no access.
+
+```bash
+crewship routine folders create "Market intel" --color teal
+crewship routine folders list
+crewship routine folders move weekly-scan daily-news --folder <folder_id>
+crewship routine folders move weekly-scan --none      # take it out of its folder
+crewship routine folders update <folder_id> --name "Intel"
+crewship routine folders create "Daily" --parent <folder_id> --icon rocket   # a subfolder
+crewship routine folders update <folder_id> --icon briefcase   # --icon "" clears it
+crewship routine folders update <folder_id> --parent <other_id> # move the folder
+crewship routine folders update <folder_id> --parent ""         # back to the top level
+crewship routine folders delete <folder_id>           # routines are kept, unfiled; subfolders move up
+```
+
+`create` and `update` refuse a name another folder already has (ignoring case).
+`--icon` takes a name from the crew icon registry (the same set as page
+folders); any other is refused with the list's shape. Folders nest at most
+three levels deep, and a folder cannot go inside itself or one of its
+subfolders. `list` shows each folder as its path (`Ops / Daily`).
+`move` is all-or-nothing and takes up to 200 routines. Creating, renaming and
+moving need MANAGER or above.
+
+---
+
+### `crewship routine folders update`
+
+Update the supplied fields of a folder ID. `--name` changes its name; `--color`
+changes its palette colour (an empty string clears it); `--icon` changes its
+registry icon (an empty string clears it). `--parent` moves it under another
+folder, or to the top level when given an empty string. Folder placement does
+not grant access to routines.
 
 ## `crewship routine get <slug>`
 
@@ -1543,17 +1635,19 @@ never yesterday's cron extrapolated backwards.
 crewship routine calendar                                     # the coming week
 crewship routine calendar --from 2026-10-01T00:00:00Z --to 2026-10-08T00:00:00Z
 crewship routine calendar --to 2026-09-20T00:00:00Z -f json
+crewship routine calendar --ics > crewship.ics               # import into a calendar app
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--from` | RFC3339 start of the window (default: now). Sent as `?from=` |
 | `--to` | RFC3339 end of the window, at most 32 days after `--from` (default: `--from` + 7 days). Sent as `?to=` |
+| `--ics` | Write the window as an iCalendar file to stdout (`GET .../pipelines/calendar.ics`) instead of a table |
 
 **Output columns:** AT, KIND, ROUTINE, RESULT (`status/outcome` for `run` rows), VERSION (pinned recipe for `pending` rows and pinned plans), INPUTS (the read-only preset preview, `—` for runs), ID (`schedule_id:instant` for planned, `pending_id`, or `run_id`).
 
 The table is sorted by time; `-f json` is the endpoint's body `{ events[],
-truncated }` in the server's order (planned, pending, run). Planned and pending
+truncated }` in the server's order (planned, pending, run); each event also lists its `agents` (id, slug, name of the agents its routine's steps run). Planned and pending
 events carry an `inputs` preview that keeps safe primitives and replaces
 credential, file and secret-looking values with `{type: "credential"|"file"|"redacted"}`
 — it cannot replay a run. A window holding more than the server returns
@@ -1718,7 +1812,8 @@ crewship routine schedules preview --cron "30 2 * * *" --timezone Europe/Prague 
 
 | Flag | Required | Description |
 |------|:---:|-------------|
-| `--cron` | ✓ | Five-field cron expression to preview. |
+| `--cron` | one of | Five-field cron expression to preview. |
+| `--when` | one of | The schedule in words, e.g. `"every weekday at 8:30"`. The server derives the cron (`GET .../preview?phrase=`) and the output shows it. Not with `--cron`. |
 | `--timezone` | | IANA timezone (default `UTC`). |
 | `--count` | | How many fire times to show (default `5`, capped at `20`). |
 
@@ -1907,6 +2002,7 @@ crewship routine webhooks update wh_abc123 \
 | `--inputs-template` | Replace the JSON template merged with the request body. |
 | `--enabled` / `--enabled=false` | Set enabled state — presence required, same convention as `schedules update`. |
 | `--pin-version` | Pin (or re-pin) the webhook to a specific routine version; fires execute that immutable version instead of head. |
+| `--grace` | With `--rotate-secret`: keep the replaced secret valid for `none` (default), `1h`, `24h` or `7d`, so a sender can be switched over without a window of 401s. Refused without `--rotate-secret`. |
 | `--unpin` | Remove the version pin (fires track head again). Mutually exclusive with `--pin-version`; mentioning neither keeps the existing pin. |
 | `--rotate-secret` | Mint a new HMAC signing secret, shown once in the response — same show-once contract as `create`. **The URL/token is never rotated by this command, with or without this flag.** |
 
@@ -1958,6 +2054,22 @@ crewship routine webhooks delete wh_abc123 --yes
 <Warning>
 Existing senders using the deleted token will start getting 404s. `--yes` skips the confirmation prompt.
 </Warning>
+
+### `webhooks test <id>`
+
+Check a webhook's mapping without running anything. Give a sample of the JSON a sender would POST; the server builds the routine's inputs exactly as a real delivery would (request data under `event`, `raw` and `headers`, your inputs template layered on top), checks them against the routine's declared inputs and answers with the inputs and whether the routine would accept them. No run starts, no signature is needed and the secret is never shown.
+
+```bash
+crewship routine webhooks test wh_abc123 --sample '{"action":"opened"}'
+crewship routine webhooks test wh_abc123 --sample @pull_request.json --header X-GitHub-Event=pull_request
+```
+
+| Flag | Required | Description |
+|------|:---:|-------------|
+| `--sample` | ✓ | The JSON a sender would POST: inline, `@file`, or `-` for stdin |
+| `--header` | | A request header the mapping reads, `NAME=value`; repeatable |
+
+Template keys that collide with `event`, `raw` or `headers` are dropped on a real call too, and are listed as ignored.
 
 ### `webhooks fire`
 

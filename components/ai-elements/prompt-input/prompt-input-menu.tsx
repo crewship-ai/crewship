@@ -174,6 +174,8 @@ export const PromptInputActionAddAttachments = ({
 export type PromptInputSubmitProps = ComponentProps<typeof InputGroupButton> & {
   status?: ChatStatus;
   onStop?: () => void;
+  /** Stop was sent and is not confirmed yet: the button says so and does nothing. */
+  stopping?: boolean;
 };
 
 export const PromptInputSubmit = memo(({
@@ -182,6 +184,7 @@ export const PromptInputSubmit = memo(({
   size = "icon-sm",
   status,
   onStop,
+  stopping = false,
   onClick,
   children,
   ...props
@@ -190,7 +193,7 @@ export const PromptInputSubmit = memo(({
 
   let Icon = <CornerDownLeftIcon className="size-4" />;
 
-  if (status === "submitted") {
+  if (status === "submitted" || (isGenerating && stopping)) {
     Icon = <Spinner />;
   } else if (status === "streaming") {
     Icon = <SquareIcon className="size-4" />;
@@ -202,23 +205,25 @@ export const PromptInputSubmit = memo(({
     (e: React.MouseEvent<HTMLButtonElement>) => {
       if (isGenerating && onStop) {
         e.preventDefault();
-        onStop();
+        if (!stopping) onStop();
         return;
       }
       onClick?.(e);
     },
-    [isGenerating, onStop, onClick]
+    [isGenerating, onStop, stopping, onClick]
   );
 
   return (
     <InputGroupButton
-      aria-label={isGenerating ? "Stop" : "Submit"}
+      aria-label={isGenerating ? (stopping ? "Stopping…" : "Stop") : "Submit"}
       className={cn(className)}
       onClick={handleClick}
       size={size}
       type={isGenerating && onStop ? "button" : "submit"}
       variant={variant}
       {...props}
+      // A blocked send describes Submit, never Stop: Stop is unavailable only while one is pending.
+      {...(isGenerating && onStop ? { "aria-disabled": stopping ? true : undefined, "aria-describedby": undefined } : {})}
     >
       {children ?? Icon}
     </InputGroupButton>

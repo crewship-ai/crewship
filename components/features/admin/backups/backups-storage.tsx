@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { Gauge, HardDrive, Info, Server } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -16,8 +16,8 @@ import { Gate, Unavailable } from "./backups-kit"
 import { formatSize, formatWhen, verifiedByText, type BackupSettings, type NewOffsiteDestination, type OffsiteDestination, type SpaceInfo } from "./backups-model"
 import { addDestination, removeDestination, saveBackupSettings, testDestination, useBackupSettings, useDestinations } from "./use-backup-settings"
 import { useBackupsOverview } from "./use-backups-overview"
-import { perform, performSave } from "./use-backups-data"
-import type { SectionCtx } from "./backups-console"
+import { perform, performConfirm, performSave } from "./use-backups-data"
+import type { SectionCtx } from "./backups-scope"
 
 /**
  * Backups › Storage (instance setting): where copies are kept — this server
@@ -69,7 +69,7 @@ export function InfoTip({ label, children }: { label: string; children: React.Re
   )
 }
 
-const rowButton = "h-7 px-2.5 text-xs coarse:h-[2.75rem]"
+const rowButton = "h-7 px-2.5 text-xs coarse:h-[44px]"
 
 export function StorageBody({ settings, destinations = [], destinationsReady = true, space, ctx, reload }: {
   settings: BackupSettings
@@ -172,7 +172,7 @@ export function StorageBody({ settings, destinations = [], destinationsReady = t
         ]}
         confirmLabel="Remove" onConfirm={async () => {
           if (!removing) return
-          if (await perform(ctx.demo, () => removeDestination(removing.id), "Destination removed", "The destination could not be removed")) reload?.()
+          if (await performConfirm(ctx.demo, () => removeDestination(removing.id), "Destination removed", "The destination could not be removed")) reload?.()
         }} />
     </>
   )

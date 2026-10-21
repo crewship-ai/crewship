@@ -32,7 +32,7 @@ export function McpEndpointsTab({
 
   return (
     <section className="space-y-3">
-      <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+      <h2 className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
         <Link2 className="h-3.5 w-3.5" /> MCP endpoints
         <span className="font-normal normal-case tracking-normal text-muted-foreground/70">
           · generated per agent, scoped by user_id

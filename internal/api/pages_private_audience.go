@@ -6,10 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"time"
 
 	"github.com/crewship-ai/crewship/internal/chataudience"
-	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // Private artifacts have an explicit audience; role, folder, crew and ordinary
@@ -38,8 +36,8 @@ WHERE m.workspace_id=? AND m.user_id=?`, workspace, user).Scan(&role)
 }
 
 // Audit before releasing another human's private metadata or content. Use the
-// public request boundary, outside the engine's read/transaction callbacks, so
-// a rollback or a busy SQLite writer cannot discard or deadlock the audit.
+// metadata batch or the public document response boundary, outside engine
+// callbacks. Document callers retain their captured actual-read custodian.
 func (h *PageHandler) auditPrivateOwnerAccess(w http.ResponseWriter, r *http.Request, rec *pageRecord) bool {
 	if !rec.PrivateAudience {
 		return true
@@ -54,15 +52,43 @@ func (h *PageHandler) auditPrivateOwnerAccess(w http.ResponseWriter, r *http.Req
 		return true
 	}
 	role, err := h.liveContentHumanRole(r.Context(), WorkspaceIDFromContext(r.Context()), user.ID)
-	if err != nil || role != "OWNER" {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		replyInternalError(w, h.logger, "authorize private artifact audit", err)
+		return false
+	}
+	if role != "OWNER" {
 		replyError(w, 404, "page not found")
 		return false
 	}
 	metadata, _ := json.Marshal(map[string]string{"owner_user_id": rec.OwnerUserID})
-	_, err = h.db.ExecContext(r.Context(), `INSERT INTO audit_logs(id,workspace_id,user_id,action,entity_type,entity_id,metadata,created_at) VALUES(?,?,?,?,?,?,?,?)`, generateCUID(), WorkspaceIDFromContext(r.Context()), user.ID, "artifact.private_owner_accessed", "page", rec.ID, string(metadata), tsformat.Format(time.Now()))
-	if err != nil {
+	b, _ := r.Context().Value(privateMetadataReadKey{}).(*privateMetadataRead)
+	standalone := b == nil
+	if standalone {
+		// Document operations supply the custodian captured by their actual fenced
+		// read. Never replace that identity with a later owner lookup.
+		var err error
+		r, b, err = h.startMetadataRead(r, true)
+		if err != nil {
+			replyInternalError(w, h.logger, "begin private artifact audit", err)
+			return false
+		}
+		defer b.tx.Rollback()
+		role, err = h.liveContentHumanRole(r.Context(), WorkspaceIDFromContext(r.Context()), user.ID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			replyInternalError(w, h.logger, "authorize private artifact audit", err)
+			return false
+		}
+		if role != "OWNER" {
+			replyError(w, 404, "page not found")
+			return false
+		}
+	}
+	if err := h.appendPrivateReadAudit(r, b, rec, string(metadata)); err != nil {
 		replyInternalError(w, h.logger, "audit private artifact access", err)
 		return false
+	}
+	if standalone {
+		return h.finishMetadataRead(w, r, b)
 	}
 	return true
 }

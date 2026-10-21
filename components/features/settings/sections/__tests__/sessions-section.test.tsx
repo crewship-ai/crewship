@@ -95,6 +95,45 @@ describe("SessionsSection — revoking a CLI token", () => {
     fireEvent.click(await openRevokeDialog())
     await waitFor(() => expect(toastError).toHaveBeenCalled())
   })
+
+  it("revoke waits for the server and keeps the dialog open on error", async () => {
+    mockTokens(403)
+    fireEvent.click(await openRevokeDialog())
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    // The person is still in the confirmation, able to retry or cancel.
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /^revoke$/i })).not.toBeDisabled()
+  })
+
+  it("closes the dialog once the server has revoked the token", async () => {
+    mockTokens(200)
+    fireEvent.click(await openRevokeDialog())
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+  })
+})
+
+// Harbor 2: two cards, one per kind of access, as the mockup draws them.
+describe("SessionsSection — layout", () => {
+  it("shows Browsers & devices and CLI tokens as two cards", async () => {
+    apiFetch.mockImplementation(async (url: string) => {
+      if (url.includes("/api/v1/auth/cli-tokens")) return jsonResponse({ data: [] })
+      if (url.includes("/api/v1/auth/sessions")) return jsonResponse([])
+      return jsonResponse({})
+    })
+    render(<SessionsSection />)
+    expect(await screen.findByRole("region", { name: "Browsers & devices" })).toBeInTheDocument()
+    expect(screen.getByRole("region", { name: "CLI tokens" })).toBeInTheDocument()
+  })
+
+  it("says what a token is for when there is none", async () => {
+    apiFetch.mockImplementation(async (url: string) => {
+      if (url.includes("/api/v1/auth/cli-tokens")) return jsonResponse({ data: [] })
+      if (url.includes("/api/v1/auth/sessions")) return jsonResponse([])
+      return jsonResponse({})
+    })
+    render(<SessionsSection />)
+    expect(await screen.findByText("No CLI tokens. Create one for the crewship CLI, scripts or CI.")).toBeInTheDocument()
+  })
 })
 
 // The card promises "everything that can sign in as you right now". A

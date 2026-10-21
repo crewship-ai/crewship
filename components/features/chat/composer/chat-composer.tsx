@@ -1,8 +1,9 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
-import { FilePlus2 } from "lucide-react"
+import { useCallback, useEffect, useId, useRef, useState } from "react"
+import { AlertTriangle, FilePlus2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 
 import {
   PromptInput,
@@ -11,12 +12,15 @@ import {
   PromptInputSubmit,
 } from "@/components/ai-elements/prompt-input"
 import { useComposerStore, type ComposerAttachment } from "@/stores/composer-store"
+import { noteUnsentDraft } from "@/lib/signed-out"
+import { useAttachmentScope } from "@/hooks/use-attachment-scope"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { useIsMobile } from "@/hooks/use-mobile"
 import {
   composeMessageWithAttachments,
   hasPendingUploads,
   sendableAttachments,
+  unattachedAttachments,
 } from "@/lib/attachment-message"
 import { useMessageSubmit, type SubmittedMessage } from "../hooks/use-message-submit"
 import { MentionAutocomplete, type CrewMember } from "./mention-autocomplete"
@@ -48,6 +52,8 @@ interface ChatComposerProps {
    *  Send is offered although the socket is not open. */
   draftSendable?: boolean
   stopGeneration: () => void
+  /** Stop was sent and the server has not confirmed it yet. */
+  stopping?: boolean
   /** Make sure this session's `chats` row exists, and report whether it does.
    *  `false` means the message must not go out — see useMessageSubmit.
    *
@@ -58,6 +64,11 @@ interface ChatComposerProps {
    *  converse, so it creates the row exactly as the first message does — one
    *  creation path, idempotent per session. */
   ensureSession: () => Promise<boolean>
+  /** Row-only variant for uploads. The send path's `ensureSession` also waits
+   *  for the connection and refuses once the person has left this chat, which is
+   *  wrong for an upload that finishes in the background. Defaults to
+   *  `ensureSession`. */
+  ensureSessionForUpload?: () => Promise<boolean>
   /** useChat's send. The second argument is metadata that rides WITH the
    *  message rather than inside it (the ask-form submission envelope today);
    *  `text` is identical whether or not it is present.
@@ -113,6 +124,15 @@ const NO_ATTACHMENTS: ComposerAttachment[] = []
  * The border and radius live on the input group the prompt input renders,
  * so the form reaches it by its data-slot instead of drawing a second box.
  */
+/** At most two names, then a count: a long list would bury the instruction. */
+function summarizeNames(names: string[]): string {
+  if (names.length <= 2) return names.join(", ")
+  return `${names.slice(0, 2).join(", ")} and ${names.length - 2} more`
+}
+
+/** How long a wait must last before it is announced (a blink is not). */
+const WAIT_ANNOUNCE_DELAY_MS = 800
+
 const COMPOSER_SHELL = [
   "[&_[data-slot=input-group]]:rounded-2xl [&_[data-slot=input-group]]:border-border [&_[data-slot=input-group]]:bg-card [&_[data-slot=input-group]]:shadow-none dark:[&_[data-slot=input-group]]:bg-card",
   "[&_[data-slot=input-group]]:transition-[border-color,box-shadow]",
@@ -129,7 +149,9 @@ export function ChatComposer({
   connectionStatus,
   draftSendable = false,
   stopGeneration,
+  stopping = false,
   ensureSession,
+  ensureSessionForUpload,
   sendMessage,
   onSend,
   onSent,
@@ -172,6 +194,12 @@ export function ChatComposer({
     setInput(text)
     if (draftKey) setDraft(draftKey, text)
   }, [draftKey, setDraft, setInput])
+  // If the session ends while this is unsent, the signed-out screen says the
+  // message to this agent is kept (#3787, lib/signed-out.ts). The draft itself
+  // stays where it is — persisted per user and session above.
+  useEffect(() => {
+    if (draftKey) noteUnsentDraft(draftKey, agentName, input)
+  }, [draftKey, agentName, input])
 
   const appliedContext = useRef<string | null>(null)
   useEffect(() => {
@@ -204,7 +232,8 @@ export function ChatComposer({
   // also see them — attaching a file must enable Send on an empty draft.
   // Falls back to a shared constant so an empty list keeps a stable identity
   // and does not re-create the submit callback on every render.
-  const sessionAttachments = useComposerStore((s) => s.attachments[sessionId]) ?? NO_ATTACHMENTS
+  const { key: attachmentKey, waitingForSignIn, waitingReason } = useAttachmentScope(sessionId)
+  const sessionAttachments = useComposerStore((s) => s.attachments[attachmentKey]) ?? NO_ATTACHMENTS
 
   const mentionTextareaRef = useRef<HTMLTextAreaElement>(null)
   const handleMentionPick = useCallback((member: CrewMember, atIndex: number) => {
@@ -226,6 +255,67 @@ export function ChatComposer({
   // retry — and the typed path must not clear the box for the same reason.
   const sentRef = useRef(false)
 
+  const unattached = unattachedAttachments(sessionAttachments)
+  const sendBlocked = !isStreaming && (waitingForSignIn || unattached.length > 0)
+  const blockReasonId = `${useId()}-send-block`
+  const shown = unattached.slice(0, 2)
+  const reasons = shown.filter((a) => a.failureLabel).map((a) => `${a.name}: ${a.failureLabel}`)
+  const blockReasonText = !sendBlocked
+    ? ""
+    : waitingForSignIn
+      ? waitingReason === "workspace"
+        ? "Loading this chat… Send is off until it is ready."
+        : "Waiting for sign-in… Send is off until your session is confirmed."
+      : `Send is off: ${summarizeNames(unattached.map((a) => a.name))} ${
+          unattached.length === 1 ? "is" : "are"
+        } not attached${reasons.length ? ` (${reasons.join("; ")})` : ""}. Use Retry or Remove on ${
+          unattached.length === 1 ? "it" : "each"
+        }, then send.`
+  const [announcement, setAnnouncement] = useState("")
+  const announceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const blockTextRef = useRef(blockReasonText)
+  blockTextRef.current = blockReasonText
+  const cancelAnnounce = useCallback(() => {
+    if (announceTimer.current) clearTimeout(announceTimer.current)
+    announceTimer.current = null
+  }, [])
+  // On a blocked attempt (click or Enter): clear first so a repeat is heard
+  // again, then set. The text is read when the timer fires, and nothing is
+  // announced if the block ended in between.
+  const announceBlocked = useCallback(() => {
+    cancelAnnounce()
+    setAnnouncement("")
+    announceTimer.current = setTimeout(() => {
+      announceTimer.current = null
+      setAnnouncement(blockTextRef.current)
+    }, 50)
+  }, [cancelAnnounce])
+  // Announce when a block STARTS after mount (an upload failed, or a retry
+  // failed again); not on mount when the store already holds failed chips, so
+  // opening a conversation stays quiet. The region is cleared when it ends.
+  const wasBlocked = useRef(sendBlocked)
+  useEffect(() => {
+    // A wait for sign-in or a workspace load is announced from its own effect
+    // below, after a delay, so a blink is not announced at all.
+    if (sendBlocked && !wasBlocked.current && !waitingForSignIn) setAnnouncement(blockReasonText)
+    if (!sendBlocked) {
+      cancelAnnounce()
+      setAnnouncement("")
+    }
+    wasBlocked.current = sendBlocked
+  }, [sendBlocked, blockReasonText, cancelAnnounce, waitingForSignIn])
+  // Announce a wait once, and only if it lasts: ~1s of continuous waiting.
+  const waitText = waitingForSignIn ? blockReasonText : ""
+  useEffect(() => {
+    if (!waitText) return
+    const t = setTimeout(() => setAnnouncement(waitText), WAIT_ANNOUNCE_DELAY_MS)
+    return () => {
+      clearTimeout(t)
+      setAnnouncement("")
+    }
+  }, [waitText])
+  useEffect(() => cancelAnnounce, [cancelAnnounce])
+
   // Only fires when the message actually went out — a size-guard rejection
   // must leave the draft intact so the user can trim and resend.
   //
@@ -235,9 +325,9 @@ export function ChatComposer({
   // The typed text belongs to the typed path alone — see handleTypedSubmit.
   const handleSent = useCallback(() => {
     sentRef.current = true
-    clearAttachments(sessionId)
+    clearAttachments(attachmentKey)
     onSent?.()
-  }, [clearAttachments, sessionId, onSent])
+  }, [clearAttachments, attachmentKey, onSent])
 
   const handleSubmit = useMessageSubmit({
     sessionId,
@@ -265,6 +355,13 @@ export function ChatComposer({
   const handleTypedSubmit = useCallback(
     async (message: SubmittedMessage) => {
       sentRef.current = false
+      // Enter in the textarea lands here; answer it instead of returning silently.
+      // Rejecting makes PromptInput skip its own clearing of the text; a
+      // plain return would be treated as a completed send and empty the box.
+      if (sendBlocked) {
+        announceBlocked()
+        throw new Error("send blocked: attachment not attached")
+      }
       let outgoing = message
       if (createDocument) {
         const content = composeMessageWithAttachments(message.text, sessionAttachments)
@@ -282,7 +379,7 @@ export function ChatComposer({
       setInput("")
       if (draftKey) clearDraft(draftKey)
     },
-    [handleSubmit, clearDraft, draftKey, setInput, createDocument, creationScope, sessionAttachments],
+    [handleSubmit, clearDraft, draftKey, setInput, createDocument, creationScope, sessionAttachments, sendBlocked, announceBlocked],
   )
 
   /** Submitting a form is submitting a message. Same hook, same guards, same
@@ -299,6 +396,10 @@ export function ChatComposer({
   const handleAskSubmit = useCallback(
     async (form: AskForm, text: string, envelope: AskSubmissionEnvelope): Promise<boolean> => {
       sentRef.current = false
+      if (waitingForSignIn) {
+        announceBlocked()
+        return false
+      }
       // The legacy content-keyed provenance map, still recorded because the
       // turn-renderer falls back to it for anything that reaches it without an
       // envelope. Keyed by the content that will actually be on the turn,
@@ -319,7 +420,7 @@ export function ChatComposer({
       })
       return sentRef.current
     },
-    [handleSubmit, sessionId, sessionAttachments],
+    [handleSubmit, sessionId, sessionAttachments, waitingForSignIn, announceBlocked],
   )
 
   const noopCloseAskForm = useCallback(() => {}, [])
@@ -376,8 +477,48 @@ export function ChatComposer({
     !!input.trim() ||
     sendableAttachments(sessionAttachments).length > 0 ||
     hasPendingUploads(sessionAttachments)
-  const submitDisabled = !isStreaming && (!hasContent || !canSend)
+  // Owner decision: a failed or cancelled attachment keeps Send off until the
+  // user retries or removes it. The reason is on screen (not only a toast).
+  // Send uses aria-disabled rather than disabled: it stays focusable, so the
+  // reason linked by aria-describedby reaches keyboard users, and an attempt
+  // (click or Enter) is answered through an always-mounted live region.
+  // While waiting for sign-in the button is aria-disabled, not disabled, so it
+  // stays focusable and can say why (the text box is empty for an unknown
+  // identity, which would otherwise disable it silently).
+  // Same when the only content is a failed or cancelled chip with no caption:
+  // `sendBlocked` keeps the button aria-disabled and focusable, with the reason.
+  const submitDisabled = !isStreaming && !sendBlocked && (!hasContent || !canSend)
+  const blockReason = (
+    <>
+      {sendBlocked && (
+        <Alert id={blockReasonId} role="note" variant={waitingForSignIn ? "default" : "destructive"} className="mt-2 py-2">
+          <AlertTriangle aria-hidden="true" />
+          <AlertDescription>
+            <p>{blockReasonText}</p>
+          </AlertDescription>
+        </Alert>
+      )}
+      <div role="status" aria-live="polite" className="sr-only">
+        {announcement}
+      </div>
+    </>
+  )
+  const submitBlockProps = sendBlocked
+    ? {
+        "aria-disabled": true as const,
+        // Button styles only `disabled:`; mirror it for aria-disabled and
+        // neutralise the default variant's hover lift and colour.
+        className:
+          "aria-disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:shadow-none aria-disabled:hover:translate-y-0 aria-disabled:hover:bg-primary-strong aria-disabled:active:translate-y-0",
+        "aria-describedby": blockReasonId,
+        onClick: (e: React.MouseEvent) => {
+          e.preventDefault()
+          announceBlocked()
+        },
+      }
+    : {}
   const creationControl = canCreateDocument ? (
+    <>
     <Button
       type="button"
       variant={createDocument ? "secondary" : "ghost"}
@@ -386,7 +527,7 @@ export function ChatComposer({
       aria-pressed={createDocument}
       title="Create document / Vytvořit dokument"
       disabled={isStreaming || !canSend}
-      className="coarse:min-h-12"
+      className="coarse:min-h-[44px]"
       onClick={() => {
         setCreationSelection(createDocument ? null : creationScope)
         creationPacket.current = null
@@ -395,6 +536,8 @@ export function ChatComposer({
       <FilePlus2 className="size-4" aria-hidden="true" />
       Create document
     </Button>
+    {createDocument && <span role="status" className="text-xs text-muted-foreground">My space · You and workspace OWNER (audited access)</span>}
+    </>
   ) : null
 
   if (variant === "mobile") {
@@ -405,7 +548,7 @@ export function ChatComposer({
     // an upload is visible rather than a black hole) and puts a camera next to
     // the paperclip. The same mention picker also supports touch selection.
     return (
-      <EnsureChatSessionProvider ensureSession={ensureSession}>
+      <EnsureChatSessionProvider ensureSession={ensureSessionForUpload ?? ensureSession}>
       {askSheet}
       <div className="p-3 shrink-0">
         <AttachmentZone agentId={agentId} sessionId={sessionId} showChips={!sheetOwnsChips}>
@@ -429,17 +572,18 @@ export function ChatComposer({
                 <AttachmentButton agentId={agentId} sessionId={sessionId} />
                 {creationControl}
               </div>
-              <PromptInputSubmit disabled={submitDisabled} status={chatStatus} onStop={stopGeneration} />
+              <PromptInputSubmit disabled={submitDisabled} {...submitBlockProps} status={chatStatus} stopping={stopping} onStop={stopGeneration} />
             </PromptInputFooter>
           </PromptInput>
         </AttachmentZone>
+        {blockReason}
       </div>
       </EnsureChatSessionProvider>
     )
   }
 
   return (
-    <EnsureChatSessionProvider ensureSession={ensureSession}>
+    <EnsureChatSessionProvider ensureSession={ensureSessionForUpload ?? ensureSession}>
     {askSheet}
     <div className="mx-auto w-full max-w-3xl p-3 md:px-6 shrink-0">
       <AttachmentZone agentId={agentId} sessionId={sessionId} showChips={!sheetOwnsChips}>
@@ -462,10 +606,11 @@ export function ChatComposer({
               <AttachmentButton agentId={agentId} sessionId={sessionId} />
               {creationControl}
             </div>
-            <PromptInputSubmit disabled={submitDisabled} status={chatStatus} onStop={stopGeneration} />
+            <PromptInputSubmit disabled={submitDisabled} {...submitBlockProps} status={chatStatus} stopping={stopping} onStop={stopGeneration} />
           </PromptInputFooter>
         </PromptInput>
       </AttachmentZone>
+      {blockReason}
     </div>
     </EnsureChatSessionProvider>
   )
