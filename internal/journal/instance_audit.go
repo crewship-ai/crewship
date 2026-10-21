@@ -19,7 +19,11 @@ type InstanceAuditFields struct {
 // subkey/domain. It is a row MAC, not a proof against whole-database rollback or
 // tail truncation. Plaintext dev mode has the journal's documented weak key.
 func InstanceAuditMAC(seq int64, prev string, f InstanceAuditFields) string {
-	derive := hmac.New(sha256.New, ChainKeyFromEnv())
+	return instanceAuditMACWithKey(ChainKeyFromEnv(), seq, prev, f)
+}
+
+func instanceAuditMACWithKey(key []byte, seq int64, prev string, f InstanceAuditFields) string {
+	derive := hmac.New(sha256.New, key)
 	writeFramed(derive, "crewship instance audit v1")
 	mac := hmac.New(sha256.New, derive.Sum(nil))
 	for _, v := range []string{strconv.FormatInt(seq, 10), prev, f.ID, f.Action, f.EntityType, f.CreatedAt} {

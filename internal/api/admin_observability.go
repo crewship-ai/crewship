@@ -9,6 +9,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/diskusage"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/logging"
 	"github.com/crewship-ai/crewship/internal/secrets"
 )
@@ -30,7 +31,17 @@ type AdminObservabilityHandler struct {
 	dataDir   func() (string, error)
 }
 
-func NewAdminObservabilityHandler(db *sql.DB, logger *slog.Logger) *AdminObservabilityHandler {
+func NewAdminObservabilityHandler(db *sql.DB, logger *slog.Logger, snapshot ...*journal.SigningKeys) *AdminObservabilityHandler {
+	var keys *journal.SigningKeys
+	var keyErr error
+	if len(snapshot) > 0 {
+		keys = snapshot[0]
+		if keys == nil {
+			keyErr = journal.ErrSigningKeyUnavailable
+		}
+	} else {
+		keys, keyErr = journal.LoadSigningKeysFromEnv()
+	}
 	h := &AdminObservabilityHandler{
 		logger:    logger,
 		db:        db,
@@ -51,7 +62,11 @@ func NewAdminObservabilityHandler(db *sql.DB, logger *slog.Logger) *AdminObserva
 		if db == nil {
 			return
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if keyErr != nil {
+			logger.Error("audit log level revert signing keys unavailable", "error", keyErr)
+			return
+		}
+		ctx, cancel := context.WithTimeout(journal.WithSigningKeys(context.Background(), keys), 5*time.Second)
 		defer cancel()
 		if err := auditInstance(ctx, nil, db, "instance.log_level_reverted", "log_level", "log-level", "", map[string]any{
 			"from": from, "to": to,

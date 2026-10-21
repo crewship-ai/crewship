@@ -567,6 +567,11 @@ func runAdminResetPassword(cmd *cobra.Command, _ []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	ctx, err = localAuditSigningContext(ctx)
+	if err != nil {
+		return fmt.Errorf("load local audit signing authority: %w", err)
+	}
+
 	var userID, fullName string
 	err = db.QueryRowContext(ctx,
 		"SELECT id, COALESCE(full_name, '') FROM users WHERE email = ?", email).Scan(&userID, &fullName)

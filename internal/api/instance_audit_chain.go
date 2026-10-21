@@ -13,18 +13,27 @@ import (
 )
 
 const instanceAuditColumns = `a.id,a.user_id,a.action,a.entity_type,a.entity_id,a.target_workspace_id,a.metadata,a.ip_address,a.user_agent,a.created_at`
-const instanceAuditChainColumns = `a.chain_seq,a.prev_hash,a.entry_hash,p.chain_seq,p.entry_hash`
+const instanceAuditChainColumns = `a.chain_seq,a.prev_hash,a.entry_hash,p.chain_seq,p.entry_hash,a.chain_key_id,a.chain_mac_version`
 const instanceAuditPredecessor = ` LEFT JOIN instance_audit_logs p ON p.chain_seq=a.chain_seq-1 `
 
 type instanceAuditProof struct {
 	seq, predecessor            sql.NullInt64
 	prev, hash, predecessorHash sql.NullString
+	keyID                       sql.NullString
+	macVersion                  sql.NullInt64
 }
 
 func (p *instanceAuditProof) scanArgs(f *journal.InstanceAuditFields) []any {
-	return []any{&f.ID, &f.UserID, &f.Action, &f.EntityType, &f.EntityID, &f.TargetWorkspaceID, &f.Metadata, &f.IPAddress, &f.UserAgent, &f.CreatedAt, &p.seq, &p.prev, &p.hash, &p.predecessor, &p.predecessorHash}
+	return []any{&f.ID, &f.UserID, &f.Action, &f.EntityType, &f.EntityID, &f.TargetWorkspaceID, &f.Metadata, &f.IPAddress, &f.UserAgent, &f.CreatedAt, &p.seq, &p.prev, &p.hash, &p.predecessor, &p.predecessorHash, &p.keyID, &p.macVersion}
 }
 func (p instanceAuditProof) integrity(f journal.InstanceAuditFields) string {
+	keys, err := journal.LoadSigningKeysFromEnv()
+	if err != nil {
+		return "key_unavailable"
+	}
+	return p.integrityWithKeys(keys, f)
+}
+func (p instanceAuditProof) integrityWithKeys(keys *journal.SigningKeys, f journal.InstanceAuditFields) string {
 	if !p.seq.Valid && !p.prev.Valid && !p.hash.Valid {
 		return "legacy_unverified"
 	}
@@ -38,7 +47,11 @@ func (p instanceAuditProof) integrity(f journal.InstanceAuditFields) string {
 	} else if !p.predecessor.Valid || p.predecessor.Int64 != p.seq.Int64-1 || !p.predecessorHash.Valid || p.prev.String != p.predecessorHash.String {
 		return "invalid"
 	}
-	if !hmac.Equal([]byte(journal.InstanceAuditMAC(p.seq.Int64, p.prev.String, f)), []byte(p.hash.String)) {
+	expected, err := journal.InstanceAuditMACForKeys(keys, p.keyID, p.macVersion, p.seq.Int64, p.prev.String, f)
+	if errors.Is(err, journal.ErrSigningKeyUnavailable) {
+		return "key_unavailable"
+	}
+	if err != nil || !hmac.Equal([]byte(expected), []byte(p.hash.String)) {
 		return "invalid"
 	}
 	return "entry_verified"
@@ -47,22 +60,49 @@ func (p instanceAuditProof) integrity(f journal.InstanceAuditFields) string {
 // appendInstanceAuditTx shares the mutation transaction. Production connections
 // serialize SQLite writers; do not acquire a separate mutex or run callbacks.
 func appendInstanceAuditTx(ctx context.Context, tx *sql.Tx, f journal.InstanceAuditFields) error {
+	return appendInstanceAuditTxMode(ctx, tx, f, false)
+}
+
+func appendInstanceAuditTxMode(ctx context.Context, tx *sql.Tx, f journal.InstanceAuditFields, checkpoint bool) error {
+	keys, err := journal.SigningKeysForContext(ctx)
+	if err != nil {
+		return err
+	}
 	var tail journal.InstanceAuditFields
 	var proof instanceAuditProof
-	err := tx.QueryRowContext(ctx, `SELECT `+instanceAuditColumns+`,`+instanceAuditChainColumns+` FROM instance_audit_logs a`+instanceAuditPredecessor+` WHERE a.chain_seq IS NOT NULL ORDER BY a.chain_seq DESC LIMIT 1`).Scan(proof.scanArgs(&tail)...)
+	err = tx.QueryRowContext(ctx, `SELECT `+instanceAuditColumns+`,`+instanceAuditChainColumns+` FROM instance_audit_logs a`+instanceAuditPredecessor+` WHERE a.chain_seq IS NOT NULL ORDER BY a.chain_seq DESC LIMIT 1`).Scan(proof.scanArgs(&tail)...)
 	seq := int64(1)
 	prev := ""
 	if err == nil {
-		if proof.integrity(tail) != "entry_verified" || proof.seq.Int64 == math.MaxInt64 {
-			return errors.New("instance audit: invalid chain tail")
+		if !checkpoint {
+			integrity := proof.integrityWithKeys(keys, tail)
+			if integrity == "key_unavailable" {
+				return journal.ErrSigningKeyUnavailable
+			}
+			if integrity != "entry_verified" {
+				return journal.ErrChainIntegrity
+			}
+		}
+		if proof.seq.Int64 == math.MaxInt64 {
+			return journal.ErrChainIntegrity
 		}
 		seq = proof.seq.Int64 + 1
 		prev = proof.hash.String
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	hash := journal.InstanceAuditMAC(seq, prev, f)
-	res, err := tx.ExecContext(ctx, `INSERT INTO instance_audit_logs(id,user_id,action,entity_type,entity_id,target_workspace_id,metadata,ip_address,user_agent,created_at,chain_seq,prev_hash,entry_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, f.ID, f.UserID, f.Action, f.EntityType, f.EntityID, f.TargetWorkspaceID, f.Metadata, f.IPAddress, f.UserAgent, f.CreatedAt, seq, prev, hash)
+	keyID, version := journal.ActiveSigningIdentity(keys)
+	if checkpoint {
+		row := journal.CheckpointRow{ID: f.ID, Scope: "instance", ActorID: f.UserID.String, CreatedAt: f.CreatedAt, Seq: seq, PrevHash: prev, Payload: f.Metadata.String, KeyID: keyID, Version: version}
+		if _, valid := journal.ValidateResealRow(keys, row); !valid || f.Action != "audit.resealed" || !f.UserID.Valid {
+			return journal.ErrCheckpointConflict
+		}
+	}
+	hash, err := journal.InstanceAuditMACForKeys(keys, keyID, version, seq, prev, f)
+	if err != nil {
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `INSERT INTO instance_audit_logs(id,user_id,action,entity_type,entity_id,target_workspace_id,metadata,ip_address,user_agent,created_at,chain_seq,prev_hash,entry_hash,chain_key_id,chain_mac_version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, f.ID, f.UserID, f.Action, f.EntityType, f.EntityID, f.TargetWorkspaceID, f.Metadata, f.IPAddress, f.UserAgent, f.CreatedAt, seq, prev, hash, keyID, version)
 	if err != nil {
 		return err
 	}
@@ -78,10 +118,14 @@ func appendInstanceAuditTx(ctx context.Context, tx *sql.Tx, f journal.InstanceAu
 	if err := tx.QueryRowContext(ctx, `SELECT `+instanceAuditColumns+`,`+instanceAuditChainColumns+` FROM instance_audit_logs a`+instanceAuditPredecessor+` WHERE a.id=?`, f.ID).Scan(ack.scanArgs(&stored)...); err != nil {
 		return err
 	}
-	if stored != f || !ack.seq.Valid || ack.seq.Int64 != seq || ack.prev.String != prev || ack.hash.String != hash || ack.integrity(stored) != "entry_verified" {
+	if stored != f || !ack.seq.Valid || ack.seq.Int64 != seq || ack.prev.String != prev || ack.hash.String != hash || ack.keyID != keyID || ack.macVersion != version || ack.integrityWithKeys(keys, stored) != "entry_verified" {
 		return errors.New("instance audit: persisted row changed")
 	}
-	return nil
+	result, err := journal.VerifyInstanceAuditWithKeys(ctx, tx, keys)
+	if err != nil {
+		return err
+	}
+	return result.AppendError()
 }
 
 func appendInstanceAudit(ctx context.Context, target instanceAuditExecer, f journal.InstanceAuditFields) error {

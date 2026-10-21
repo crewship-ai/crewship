@@ -91,11 +91,25 @@ BEGIN UPDATE users SET hashed_password=(SELECT hash FROM local_reset_expected) W
 			var f journal.InstanceAuditFields
 			var seq int64
 			var previous, mac string
-			if err := db.QueryRow(`SELECT id,user_id,action,entity_type,entity_id,target_workspace_id,metadata,ip_address,user_agent,created_at,chain_seq,prev_hash,entry_hash FROM instance_audit_logs WHERE action='auth.password_reset'`).Scan(&f.ID, &f.UserID, &f.Action, &f.EntityType, &f.EntityID, &f.TargetWorkspaceID, &f.Metadata, &f.IPAddress, &f.UserAgent, &f.CreatedAt, &seq, &previous, &mac); err != nil {
+			var keyID sql.NullString
+			var version sql.NullInt64
+			if err := db.QueryRow(`SELECT id,user_id,action,entity_type,entity_id,target_workspace_id,metadata,ip_address,user_agent,created_at,chain_seq,prev_hash,entry_hash,chain_key_id,chain_mac_version FROM instance_audit_logs WHERE action='auth.password_reset'`).Scan(&f.ID, &f.UserID, &f.Action, &f.EntityType, &f.EntityID, &f.TargetWorkspaceID, &f.Metadata, &f.IPAddress, &f.UserAgent, &f.CreatedAt, &seq, &previous, &mac, &keyID, &version); err != nil {
 				t.Fatal(err)
 			}
+			ctx, err := localAuditSigningContext(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			keys, err := journal.SigningKeysForContext(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wanted, err := journal.InstanceAuditMACForKeys(keys, keyID, version, seq, previous, f)
+			if err != nil || !keyID.Valid || !version.Valid || version.Int64 != 2 {
+				t.Fatalf("local audit key identity: %v", err)
+			}
 			var metadata map[string]any
-			if json.Unmarshal([]byte(f.Metadata.String), &metadata) != nil || len(metadata) != 3 || metadata["source"] != "local_recovery" || metadata["sessions_revoked"] != float64(1) || metadata["cli_tokens_revoked"] != float64(0) || f.UserID.Valid || f.EntityType != "user" || f.EntityID.String != "local-reset-user" || f.TargetWorkspaceID.Valid || f.IPAddress.Valid || f.UserAgent.Valid || seq != 1 || previous != "" || mac != journal.InstanceAuditMAC(seq, previous, f) {
+			if json.Unmarshal([]byte(f.Metadata.String), &metadata) != nil || len(metadata) != 3 || metadata["source"] != "local_recovery" || metadata["sessions_revoked"] != float64(1) || metadata["cli_tokens_revoked"] != float64(0) || f.UserID.Valid || f.EntityType != "user" || f.EntityID.String != "local-reset-user" || f.TargetWorkspaceID.Valid || f.IPAddress.Valid || f.UserAgent.Valid || seq != 1 || previous != "" || mac != wanted {
 				t.Error("local reset lost system attribution, nonsecret counts or configured chain integrity")
 			}
 		})

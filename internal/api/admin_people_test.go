@@ -11,6 +11,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"github.com/crewship-ai/crewship/internal/backup"
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 // Admin › Workspaces and Admin › Users: who sees what, what each row
@@ -48,15 +49,22 @@ func newPeopleFixture(t *testing.T) *peopleFixture {
 		('inv1', 'ws-a', 'new@a.test', 'MEMBER', 'u-owner', 't1', ?),
 		('inv2', 'ws-a', 'old@a.test', 'MEMBER', 'u-owner', 't2', ?)`, future, past)
 	now := time.Now().UTC()
-	for i, tr := range []string{"tr1", "tr2", "tr3"} {
-		exec(`INSERT INTO journal_entries (id, workspace_id, entry_type, severity, actor_type, summary, trace_id, ts)
-			VALUES (?, 'ws-a', 'run.started', 'info', 'system', 'run', ?, ?)`, "je"+tr, tr, now.Add(-time.Duration(i)*time.Minute).Format(time.RFC3339Nano))
+	// Security mutations use this history too: seed it through the actual
+	// writer so audit admission checks real MACs instead of unsigned rows.
+	writer := journal.NewWriter(db, newTestLogger(), journal.WriterOptions{})
+	defer writer.Close()
+	writeRun := func(id, trace string, stamp time.Time) {
+		t.Helper()
+		if _, err := writer.EmitSync(t.Context(), journal.Entry{ID: id, WorkspaceID: "ws-a", Type: journal.EntryRunStarted, ActorType: journal.ActorSystem, Summary: "run", TraceID: trace, TS: stamp}); err != nil {
+			t.Fatal(err)
+		}
 	}
-	// A second journal row on the same trace must not count twice, and a
-	// run older than a week not at all.
-	exec(`INSERT INTO journal_entries (id, workspace_id, entry_type, severity, actor_type, summary, trace_id, ts)
-		VALUES ('je-dup', 'ws-a', 'run.started', 'info', 'system', 'run', 'tr1', ?), ('je-old', 'ws-a', 'run.started', 'info', 'system', 'run', 'tr-old', ?)`,
-		now.Format(time.RFC3339Nano), now.Add(-10*24*time.Hour).Format(time.RFC3339Nano))
+	for i, tr := range []string{"tr1", "tr2", "tr3"} {
+		writeRun("je"+tr, tr, now.Add(-time.Duration(i)*time.Minute))
+	}
+	// One trace still counts once; a run older than a week is excluded.
+	writeRun("je-dup", "tr1", now)
+	writeRun("je-old", "tr-old", now.Add(-10*24*time.Hour))
 	exec(`UPDATE users SET failed_login_count = 5, locked_until = ? WHERE id = 'u-member'`, future)
 	exec(`INSERT INTO cli_tokens (id, user_id, name, token_hash, scopes) VALUES ('tok1', 'u-member', 'laptop', 'h1', '["agents:read"]'), ('tok2', 'u-member', 'gone', 'h2', NULL)`)
 	exec(`UPDATE cli_tokens SET revoked_at = ? WHERE id = 'tok2'`, past)

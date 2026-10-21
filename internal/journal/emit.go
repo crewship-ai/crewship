@@ -59,11 +59,11 @@ type Writer struct {
 	// chain append well-defined without relying on SQLite lock timing.
 	writeMu sync.Mutex
 
-	// chainKey is the HMAC key for the tamper-evident hash-chain. It is
-	// derived once from the persisted ENCRYPTION_KEY (never stored in the DB)
-	// so a DB-write attacker cannot forge entry_hash values. Verify + the
-	// migration backfill derive the same key from the same seed.
-	chainKey []byte
+	// chainKey retains raw-key fixture compatibility. Production writers use
+	// the immutable signingKeys snapshot, never signing keys stored in the DB.
+	chainKey        []byte
+	signingKeys     *SigningKeys
+	signingKeyError error
 
 	// notifyMu guards notifyCh, the flush-broadcast channel for Notify (see
 	// below). Separate from writeMu: readers must never block on a DB write.
@@ -233,10 +233,10 @@ type WriterOptions struct {
 	FlushSize     int           // write when this many pending (default 64)
 	FlushInterval time.Duration // write at least this often (default 100ms)
 	// ChainKey overrides the HMAC key for the hash-chain. Nil (the
-	// production default) derives it from the process ENCRYPTION_KEY via
-	// ChainKeyFromEnv, matching the verify path and the migration backfill.
-	// Set explicitly only in tests that need a known key.
-	ChainKey []byte
+	// production default) uses SigningKeys or the configured keyring.
+	// Set explicitly only in legacy-format tests that need a known key.
+	ChainKey    []byte
+	SigningKeys *SigningKeys
 }
 
 // NewWriter builds a Writer bound to db. Callers MUST call Close before
@@ -254,24 +254,38 @@ func NewWriter(db *sql.DB, logger *slog.Logger, opts WriterOptions) *Writer {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	chainKey := opts.ChainKey
-	if chainKey == nil {
-		chainKey = ChainKeyFromEnv()
+	keys := opts.SigningKeys
+	var keyErr error
+	if keys == nil {
+		if opts.ChainKey != nil {
+			keys = LegacySigningKeys(opts.ChainKey)
+		} else {
+			keys, keyErr = LoadSigningKeysFromEnv()
+		}
+	}
+	var chainKey []byte
+	if keyErr == nil {
+		_, _, chainKey, keyErr = keys.active()
 	}
 	w := &Writer{
-		db:       db,
-		logger:   logger,
-		queue:    make(chan Entry, opts.QueueSize),
-		flushN:   opts.FlushSize,
-		flushDur: opts.FlushInterval,
-		closed:   make(chan struct{}),
-		chainKey: chainKey,
-		notifyCh: make(chan struct{}),
+		db:              db,
+		logger:          logger,
+		queue:           make(chan Entry, opts.QueueSize),
+		flushN:          opts.FlushSize,
+		flushDur:        opts.FlushInterval,
+		closed:          make(chan struct{}),
+		chainKey:        chainKey,
+		signingKeys:     keys,
+		signingKeyError: keyErr,
+		notifyCh:        make(chan struct{}),
 	}
 	w.wg.Add(1)
 	go w.run()
 	return w
 }
+
+// SigningKeySnapshot supplies the same immutable boot keys to request audits.
+func (w *Writer) SigningKeySnapshot() (*SigningKeys, error) { return w.signingKeys, w.signingKeyError }
 
 // Emit queues the entry for asynchronous write and returns the generated
 // ID. Validation errors come back synchronously. If the queue is saturated
@@ -589,7 +603,7 @@ func isPermanentDBError(err error) bool {
 		return false
 	}
 	s := err.Error()
-	return errors.Is(err, ErrRecoveredStopConflict) || strings.Contains(s, "constraint failed") ||
+	return errors.Is(err, ErrRecoveredStopConflict) || errors.Is(err, ErrChainIntegrity) || errors.Is(err, ErrSigningKeyUnavailable) || strings.Contains(s, "constraint failed") ||
 		strings.Contains(s, "journal: marshal")
 }
 
@@ -651,7 +665,30 @@ func (w *Writer) persistBatch(ctx context.Context, batch []Entry) error {
 
 // persistBatchTx extends the chain inside the caller's write transaction.
 func (w *Writer) persistBatchTx(ctx context.Context, tx *sql.Tx, batch []Entry, checked bool) error {
-	stmt, err := tx.PrepareContext(ctx, insertSQL)
+	if w.signingKeyError != nil {
+		return w.signingKeyError
+	}
+	keys := w.signingKeys
+	if keys == nil {
+		keys = LegacySigningKeys(w.chainKey)
+	}
+	keyID, macVersion, _, err := keys.active()
+	if err != nil {
+		return err
+	}
+	versioned, err := keyColumns(ctx, tx, "journal_entries")
+	if err != nil {
+		return err
+	}
+	query := insertSQL
+	if macVersion == 2 {
+		if !versioned {
+			return errors.New("journal: versioned audit migration required")
+		}
+		query = strings.Replace(insertSQL, "priority_at_emit)", "priority_at_emit,chain_key_id,chain_mac_version)", 1)
+		query = strings.Replace(query, "?, ?, ?, ?, ?)", "?, ?, ?, ?, ?, ?, ?)", 1)
+	}
+	stmt, err := tx.PrepareContext(ctx, query)
 	if err != nil {
 		return fmt.Errorf("journal: prepare: %w", err)
 	}
@@ -682,7 +719,12 @@ func (w *Writer) persistBatchTx(ctx context.Context, tx *sql.Tx, batch []Entry, 
 		}
 
 		if e.replay {
-			fingerprint, err := w.replayFingerprint(e, payload, refs, expiresStr)
+			receiptID, receiptVersion := ActiveSigningIdentity(keys)
+			_, _, receiptKey, err := keys.active()
+			if err != nil {
+				return err
+			}
+			fingerprint, err := replayFingerprintForKey(receiptKey, receiptID, receiptVersion, e, payload, refs, expiresStr)
 			if err != nil {
 				return err
 			}
@@ -690,14 +732,24 @@ func (w *Writer) persistBatchTx(ctx context.Context, tx *sql.Tx, batch []Entry, 
 			if err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO journal_replay_receipts(id,fingerprint,workspace_id,agent_id,trace_id,entry_type,terminal_exit_code) VALUES(?,?,?,?,?,?,?)`, e.ID, fingerprint, e.WorkspaceID, e.AgentID, e.TraceID, string(e.Type), exitCode); err != nil {
+			receiptQuery := `INSERT INTO journal_replay_receipts(id,fingerprint,workspace_id,agent_id,trace_id,entry_type,terminal_exit_code) VALUES(?,?,?,?,?,?,?)`
+			receiptArgs := []any{e.ID, fingerprint, e.WorkspaceID, e.AgentID, e.TraceID, string(e.Type), exitCode}
+			if receiptID.Valid {
+				receiptQuery = `INSERT INTO journal_replay_receipts(id,fingerprint,workspace_id,agent_id,trace_id,entry_type,terminal_exit_code,chain_key_id,chain_mac_version) VALUES(?,?,?,?,?,?,?,?,?)`
+				receiptArgs = append(receiptArgs, receiptID, receiptVersion)
+			}
+			if _, err := tx.ExecContext(ctx, receiptQuery, receiptArgs...); err != nil {
 				return fmt.Errorf("journal: insert replay receipt: %w", err)
 			}
 		}
 
 		head, ok := heads[e.WorkspaceID]
 		if !ok {
-			head, err = loadChainHead(ctx, tx, e.WorkspaceID)
+			if e.reseal {
+				head, err = loadChainHead(ctx, tx, e.WorkspaceID)
+			} else {
+				head, err = loadChainHeadWithKeys(ctx, tx, e.WorkspaceID, keys)
+			}
 			if err != nil {
 				return err
 			}
@@ -706,7 +758,7 @@ func (w *Writer) persistBatchTx(ctx context.Context, tx *sql.Tx, batch []Entry, 
 
 		seq := head.seq + 1
 		prevHash := head.prevHash
-		entryHash := ChainHashKeyed(w.chainKey, prevHash, ChainFields{
+		fields := ChainFields{
 			Seq:       seq,
 			ID:        e.ID,
 			Workspace: e.WorkspaceID,
@@ -725,7 +777,15 @@ func (w *Writer) persistBatchTx(ctx context.Context, tx *sql.Tx, batch []Entry, 
 			TraceID:   e.TraceID,
 			SpanID:    e.SpanID,
 			ExpiresAt: expiresStr,
-		})
+		}
+		if macVersion == 2 {
+			fields.KeyID = sql.NullString{String: keyID, Valid: true}
+			fields.MACVersion = sql.NullInt64{Int64: 2, Valid: true}
+		}
+		entryHash, err := chainHashForKeys(keys, prevHash, fields)
+		if err != nil {
+			return err
+		}
 
 		insertArgs := []any{
 			e.ID,
@@ -751,6 +811,9 @@ func (w *Writer) persistBatchTx(ctx context.Context, tx *sql.Tx, batch []Entry, 
 			// priority_at_emit — the same value the hash above committed to.
 			priorityOrNormal(e.Priority),
 		}
+		if macVersion == 2 {
+			insertArgs = append(insertArgs, keyID, int64(2))
+		}
 		insertResult, err := stmt.ExecContext(ctx, insertArgs...)
 		if err != nil {
 			return fmt.Errorf("journal: insert %s: %w", e.Type, err)
@@ -771,6 +834,17 @@ func (w *Writer) persistBatchTx(ctx context.Context, tx *sql.Tx, batch []Entry, 
 
 		head.seq = seq
 		head.prevHash = entryHash
+	}
+	// Check the complete chain in this same writer snapshot, after native
+	// insert triggers. Once per workspace/batch, not once per inserted row.
+	for workspace := range heads {
+		result, err := VerifyChainWithKeys(ctx, tx, workspace, keys)
+		if err != nil {
+			return err
+		}
+		if err := result.AppendError(); err != nil {
+			return err
+		}
 	}
 	return nil
 }

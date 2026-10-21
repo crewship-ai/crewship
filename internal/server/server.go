@@ -475,7 +475,7 @@ func (s *Server) mountAPIRouter(
 	// batched writer owns a goroutine and a buffered channel, so we
 	// stash it on Server so Shutdown can Close it and flush pending
 	// entries before the process exits.
-	s.journalWriter = journal.NewWriter(deps.DB, logger, journal.WriterOptions{})
+	s.journalWriter = journal.NewWriter(deps.DB, logger, journal.WriterOptions{SigningKeys: cfg.Audit.Keys})
 	opts = append(opts, goapi.WithJournal(s.journalWriter))
 
 	// Bridge the journal onto the WebSocket hub: every feed-relevant entry that
@@ -768,7 +768,7 @@ func (s *Server) mountAPIRouter(
 	// leaking past process teardown (and past t.TempDir() cleanup
 	// in tests).
 	if s.bgCtx == nil {
-		s.bgCtx, s.bgCancel = context.WithCancel(context.Background())
+		s.bgCtx, s.bgCancel = context.WithCancel(journal.WithSigningKeys(context.Background(), cfg.Audit.Keys))
 	}
 	startCatalogRefresh(s.bgCtx, &s.bgWg, catalogFetcher, runtimeFetcher, logger)
 

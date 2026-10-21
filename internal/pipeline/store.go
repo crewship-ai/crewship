@@ -95,9 +95,12 @@ func purgeJournalForPipeline(ctx context.Context, tx *sql.Tx, pipelineID string)
 		return fmt.Errorf("pipeline: purge stale journal on resurrect: %w", err)
 	}
 
-	key := journal.ChainKeyFromEnv()
+	keys, err := journal.SigningKeysForContext(ctx)
+	if err != nil {
+		return err
+	}
 	for ws, removed := range perWS {
-		if err := journal.WriteChainCheckpoint(ctx, tx, key, ws, removed); err != nil {
+		if err := journal.WriteChainCheckpointWithKeys(ctx, tx, keys, ws, removed); err != nil {
 			return fmt.Errorf("pipeline: checkpoint stale journal purge: %w", err)
 		}
 	}

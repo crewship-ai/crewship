@@ -97,7 +97,33 @@ func remainingAdminSystemSchemaCatalogV2() map[string]DomainSchema {
 	}))})
 	setup := obj(map[string]any{"needs_bootstrap": boolean(), "allow_signup": boolean()})
 	telemetry := obj(map[string]any{"enabled": boolean(), "install_id": str()})
-	integrity := obj(map[string]any{"intact": boolean(), "checked": integer(), "broken_at": nullableStr(), "error": nullableStr()})
+	integrity := obj(map[string]any{
+		"workspace_id": str(), "ok": boolean(), "count": integer(), "checkpoints": integer(),
+		"broken_seq": integer(), "broken_id": str(), "reason": str(),
+		"continuation_verified": boolean(), "historical_status": str(),
+		"break_count": integer(), "breaks_truncated": boolean(),
+		"breaks":           array(obj(map[string]any{"seq": integer(), "id": str(), "kind": str(), "reason": str()}, "seq", "id", "kind", "reason")),
+		"repairable_count": integer(), "repairable_truncated": boolean(),
+		"repairable": array(obj(map[string]any{"seq": integer(), "id": str(), "stored_priority": str(), "emit_priority": str()}, "seq", "id", "stored_priority", "emit_priority")),
+	}, "workspace_id", "ok", "count", "continuation_verified")
+	auditScope := func() map[string]any {
+		return map[string]any{"type": "string", "enum": []string{"workspace", "instance"}}
+	}
+	auditSequence := func() map[string]any { return map[string]any{"type": "integer", "format": "int64", "minimum": 0} }
+	auditHead := obj(map[string]any{"tail_seq": auditSequence(), "tail_hash": str()}, "tail_seq", "tail_hash")
+	auditResealRequest := obj(map[string]any{
+		"scope": auditScope(), "workspace_id": str(),
+		"expected_tail_seq":  auditSequence(),
+		"expected_tail_hash": map[string]any{"type": "string", "maxLength": 128, "description": "Exact reviewed hash, nonempty for a positive tail sequence."},
+		"reason":             map[string]any{"type": "string", "description": "Trimmed explanation, 8–512 UTF-8 bytes. The complete JSON body is limited to 4096 bytes."},
+	}, "scope", "expected_tail_seq", "expected_tail_hash", "reason")
+	auditResealRequest["additionalProperties"] = false
+	auditResealRequest["description"] = "Workspace scope requires workspace_id; instance scope requires it to be empty or omitted. Tail sequence/hash are compared before any checkpoint is written."
+	auditReseal := obj(map[string]any{
+		"scope": auditScope(), "workspace_id": str(), "checkpoint_id": str(),
+		"tail_seq": auditSequence(), "tail_hash": str(), "continuation_verified": boolean(),
+		"historical_status": map[string]any{"type": "string", "enum": []string{"verified", "historical_unverified", "historical_invalid"}},
+	}, "scope", "workspace_id", "checkpoint_id", "tail_seq", "tail_hash", "continuation_verified", "historical_status")
 	prune := obj(map[string]any{"removed": array(str()), "count": integer(), "error": str()})
 	reap := obj(map[string]any{
 		"orphans": array(obj(map[string]any{"crew_id": str(), "slug": str(), "container_id": str(), "reaped": boolean()})),
@@ -124,6 +150,8 @@ func remainingAdminSystemSchemaCatalogV2() map[string]DomainSchema {
 		"POST /api/v1/admin/keeper/findings/test":     {Request: json(map[string]any{"workspace_id": str(), "crew_id": str(), "reason": str()}), Response: obj(map[string]any{"inbox_item_id": str(), "recipients": array(obj(map[string]any{"user_id": str(), "email": str(), "name": str(), "role": str()}))})},
 		"POST /api/v1/admin/keeper/review/{slot}/run": {Request: json(map[string]any{"workspace_id": str(), "crew_id": str(), "agent_id": str(), "skill_id": str(), "tool_name": str(), "tool_args_snippet": str(), "recent_tool_calls": array(str()), "trigger": str(), "failure_snippet": str(), "prior_lesson": str()}), Response: obj(map[string]any{"slot": str(), "decision": str(), "reason": str(), "lesson": str(), "error": str(), "data": free()})},
 		"GET /api/v1/admin/journal/verify":            {Response: integrity},
+		"GET /api/v1/admin/audit/head":                {Response: auditHead},
+		"POST /api/v1/admin/audit/reseal":             {Request: auditResealRequest, Response: auditReseal},
 		"GET /api/v1/admin/legacy-resources":          {Response: obj(map[string]any{"present": boolean()})},
 		"POST /api/v1/admin/prune-legacy-resources":   {Response: prune},
 		"POST /api/v1/admin/prune-crew-runtimes":      {Response: prune},

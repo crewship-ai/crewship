@@ -653,6 +653,45 @@ A storage failure or conservative stream-admission race rejects the upgrade with
 a generic error; it does not claim the session was revoked. Operational errors
 retain their class for server-side handling and logging.
 
+## Audit signing authority and recovery
+
+New workspace journal and instance audit rows identify a v2 signing key. The
+immutable boot keyring retains old verification keys; NULL-key historical rows
+keep the legacy MAC algorithm. Normal server boot creates a private random
+active key once in its data directory, independent of vault-key rotation.
+An explicit `CREWSHIP_AUDIT_KEYRING_PATH` or YAML `audit.keyring_path` is loaded
+without rewriting the supplied file. Keyring changes require a restart.
+
+The age-encrypted instance recovery kit carries the signing keyring, including
+retained keys that no credential envelope references. Normal instance recovery
+preserves old MACs; workspace/crew forks retain their explicit new-genesis
+contract and never export keys. Unverifiable source compaction checkpoints
+cannot become authenticated just because a fork remaps their IDs.
+
+An audited append verifies the chain in its writer transaction after insert
+triggers. A missing verification key or invalid current segment refuses commit;
+no new quarantine state or fork protocol is introduced.
+Verification reports historical integrity failures without changing the database.
+Missing signing keys, database contention and cancellation are not proof of tampering. `GET /api/v1/admin/audit/head`, exposed by `crewship audit head`,
+returns the stored tail sequence/hash for explicit inspection and does not
+claim integrity. `POST /api/v1/admin/audit/reseal`, exposed by `crewship audit reseal`,
+requires the live configured instance OWNER with `instance:admin`, or a live
+trusted workspace OWNER with `workspace:admin`. Suspension and the account-wide
+restricted ceiling still apply; instance ADMIN alone cannot reseal. The body
+selects exactly one scope, supplies the reviewed old tail sequence/hash and an
+8–512 byte reason, rejects unknown fields and is bounded to 4096 bytes.
+The transaction rechecks authority, compares the tail, appends a purpose-bound
+OWNER checkpoint naming the reviewed old tail and reason. A stale tail
+returns 409; a failed append, final readback or commit rolls back the operation.
+
+An explicit checkpoint never rewrites old history or upgrades its proof status.
+`continuation_verified` qualifies the new segment; `historical_unverified` and
+`historical_invalid` remain distinct from whole-history verification. Legacy
+unchained rows remain unverified; they never bridge a chained sequence gap.
+They do not prevent appending to an otherwise authenticated current segment. Workspace
+verification and the CLI preserve a non-success verdict for unverified history.
+This does not add MFA/step-up or anchor an audit tail outside the database.
+
 ## Capability and membership audit
 
 Adding an existing account to a workspace or provisioning a new or existing account

@@ -10,6 +10,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/backup"
 	"github.com/crewship-ai/crewship/internal/backupplan"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/mailer"
 	"github.com/crewship-ai/crewship/internal/notify"
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -21,6 +22,13 @@ import (
 // audit is grouped here because the audit_logs surface is a
 // workspace admin tool, not part of any feature domain.
 func (r *Router) registerAdminRoutes() {
+	// OWNER scope is selected and rechecked from the closed body inside the
+	// checkpoint transaction; neither instance ADMIN nor context role bypasses it.
+	// openapi: responses 200,400,401,403,404,409,500
+	r.authedSelfMut("POST", "/api/v1/admin/audit/reseal", r.resealAudit)
+	// Actual OWNER authority is checked inside the read-only snapshot.
+	// openapi: query scope:string workspace_id:string; responses 200,400,401,403,404,500
+	r.authedAdminAny("GET", "/api/v1/admin/audit/head", r.auditHead)
 	// Every admin READ route flows through authedAdmin (ADMIN+ floor, #865);
 	// every admin MUTATION through authedMut (roleManage). Neither the raw
 	// authed/wsCtx chain nor an inline-only role check is used here anymore —
@@ -198,7 +206,18 @@ func (r *Router) registerAdminRoutes() {
 	r.authedInstance("POST", "/api/v1/admin/instance/holds/resume", ib.ResumeHold)
 
 	// Admin observability: runtime log-level toggle + disk/health read.
-	obs := NewAdminObservabilityHandler(r.db, r.logger)
+	var obs *AdminObservabilityHandler
+	if provider, ok := r.journal.(interface {
+		SigningKeySnapshot() (*journal.SigningKeys, error)
+	}); ok {
+		keys, err := provider.SigningKeySnapshot()
+		if err != nil {
+			keys = nil
+		}
+		obs = NewAdminObservabilityHandler(r.db, r.logger, keys)
+	} else {
+		obs = NewAdminObservabilityHandler(r.db, r.logger)
+	}
 	r.authedAdminAny("GET", "/api/v1/admin/log-level", obs.GetLogLevel)
 	r.authedInstanceMut("PUT", "/api/v1/admin/log-level", obs.SetLogLevel)
 	r.authedAdminAny("GET", "/api/v1/admin/health", obs.Health)

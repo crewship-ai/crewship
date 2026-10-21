@@ -18,8 +18,9 @@ func TestOnboardingCrewMembershipAuditAtomic(t *testing.T) {
 			// Calibrate real native audit storage separately. The existing service
 			// constructor has no configured-emitter option; this is not router wiring
 			// or custom-key continuity evidence for Setup.
-			key := journal.ChainKeyFromEnv()
-			writer := journal.NewWriter(db.DB, svc.logger, journal.WriterOptions{ChainKey: key})
+			keys := journal.BootstrapSigningKeys(journal.ChainKeyFromEnv())
+			ctx := journal.WithSigningKeys(t.Context(), keys)
+			writer := journal.NewWriter(db.DB, svc.logger, journal.WriterOptions{SigningKeys: keys})
 			t.Cleanup(func() { _ = writer.Close() })
 			tx, err := db.BeginTx(t.Context(), nil)
 			if err != nil {
@@ -34,7 +35,7 @@ func TestOnboardingCrewMembershipAuditAtomic(t *testing.T) {
 				t.Fatal(err)
 			}
 			notify()
-			chain, err := journal.VerifyChainWithKey(t.Context(), db.DB, workspace, key)
+			chain, err := journal.VerifyChainWithKeys(ctx, db.DB, workspace, keys)
 			if err != nil || !chain.OK {
 				t.Fatal("audit calibration failed", err)
 			}
@@ -47,7 +48,7 @@ func TestOnboardingCrewMembershipAuditAtomic(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			result, err := svc.Setup(t.Context(), SetupParams{UserID: user, WorkspaceID: workspace, CrewName: "Blank owned crew", CrewSlug: "blank-owned-crew", AgentName: "Inert agent", AgentSlug: "inert-agent", CliAdapter: "CLAUDE_CODE", LLMProvider: "OLLAMA", Now: time.Now().UTC().Format(time.RFC3339)})
+			result, err := svc.Setup(ctx, SetupParams{UserID: user, WorkspaceID: workspace, CrewName: "Blank owned crew", CrewSlug: "blank-owned-crew", AgentName: "Inert agent", AgentSlug: "inert-agent", CliAdapter: "CLAUDE_CODE", LLMProvider: "OLLAMA", Now: time.Now().UTC().Format(time.RFC3339)})
 			var completed, crews, members, agents, events int
 			if e := db.QueryRow(`SELECT onboarding_completed FROM users WHERE id=?`, user).Scan(&completed); e != nil {
 				t.Fatal(e)
@@ -97,7 +98,7 @@ func TestOnboardingCrewMembershipAuditAtomic(t *testing.T) {
 			if actor != user || crew != result.CrewID || p["member_id"] != memberID || p["subject_user_id"] != user || p["action"] != "added" || !hasPrevious || previous != nil || !ok || !hasRole || role != nil {
 				t.Error("canonical membership audit lost actor, identity or NULL-role semantics")
 			}
-			chain, err = journal.VerifyChainWithKey(t.Context(), db.DB, workspace, key)
+			chain, err = journal.VerifyChainWithKeys(ctx, db.DB, workspace, keys)
 			if err != nil || !chain.OK {
 				t.Fatal("membership audit chain invalid", err)
 			}

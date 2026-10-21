@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -93,24 +94,26 @@ func ChainKeyFromEnv() []byte {
 // or every recomputed hash mismatches — so all nullable columns are
 // normalized to "" on both sides.
 type ChainFields struct {
-	Seq       int64
-	ID        string
-	Workspace string
-	CrewID    string
-	AgentID   string
-	MissionID string
-	TS        string
-	EntryType string
-	Severity  string
-	Priority  string
-	ActorType string
-	ActorID   string
-	Summary   string
-	Payload   string
-	Refs      string
-	TraceID   string
-	SpanID    string
-	ExpiresAt string
+	KeyID      sql.NullString
+	MACVersion sql.NullInt64
+	Seq        int64
+	ID         string
+	Workspace  string
+	CrewID     string
+	AgentID    string
+	MissionID  string
+	TS         string
+	EntryType  string
+	Severity   string
+	Priority   string
+	ActorType  string
+	ActorID    string
+	Summary    string
+	Payload    string
+	Refs       string
+	TraceID    string
+	SpanID     string
+	ExpiresAt  string
 }
 
 // writeFramed appends a length-framed field to h: an 8-byte big-endian length
@@ -226,55 +229,25 @@ func WriteChainCheckpoint(ctx context.Context, tx *sql.Tx, key []byte, workspace
 	return nil
 }
 
-// loadCheckpointedRemovals returns the union of (seq -> entry_hash) over every
-// checkpoint for the workspace whose MAC VALIDATES under key. A checkpoint with
-// a bad MAC (forged or corrupted) contributes NOTHING, so any gap it tried to
-// cover is left uncovered and VerifyChain flags it — an attacker gains no cover
-// by fabricating checkpoints. Returns the count of valid checkpoints applied.
-func loadCheckpointedRemovals(ctx context.Context, db *sql.DB, key []byte, workspaceID string) (map[int64]string, int, error) {
-	rows, err := db.QueryContext(ctx,
-		`SELECT removed_json, mac FROM journal_chain_checkpoints WHERE workspace_id = ?`, workspaceID)
-	if err != nil {
-		return nil, 0, fmt.Errorf("journal: load checkpoints: %w", err)
-	}
-	defer rows.Close()
-
-	out := make(map[int64]string)
-	applied := 0
-	for rows.Next() {
-		var blob, mac string
-		if err := rows.Scan(&blob, &mac); err != nil {
-			return nil, 0, fmt.Errorf("journal: scan checkpoint: %w", err)
-		}
-		var removed []RemovedEntry
-		if err := json.Unmarshal([]byte(blob), &removed); err != nil {
-			// Unparseable checkpoint body: treat as no cover (skip).
-			continue
-		}
-		if !hmac.Equal([]byte(CheckpointMAC(key, workspaceID, removed)), []byte(mac)) {
-			// Bad MAC → no cover.
-			continue
-		}
-		for _, r := range removed {
-			out[r.Seq] = r.Hash
-		}
-		applied++
-	}
-	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("journal: iterate checkpoints: %w", err)
-	}
-	return out, applied, nil
+// chainReader keeps verification in either a read-only DB or writer TX snapshot.
+type chainReader interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
 // VerifyResult reports the outcome of walking one workspace's chain.
 type VerifyResult struct {
-	WorkspaceID string `json:"workspace_id"`
-	OK          bool   `json:"ok"`
-	Count       int    `json:"count"`                 // live entries walked
-	Checkpoints int    `json:"checkpoints,omitempty"` // valid compaction checkpoints applied
-	BrokenSeq   int64  `json:"broken_seq,omitempty"`  // seq of first bad entry (0 when OK)
-	BrokenID    string `json:"broken_id,omitempty"`   // id of first bad entry
-	Reason      string `json:"reason,omitempty"`      // human-readable failure cause
+	keyUnavailable       bool
+	ContinuationVerified bool   `json:"continuation_verified"`
+	HistoricalStatus     string `json:"historical_status,omitempty"`
+	provenFailure        bool
+	WorkspaceID          string `json:"workspace_id"`
+	OK                   bool   `json:"ok"`
+	Count                int    `json:"count"`                 // live entries walked
+	Checkpoints          int    `json:"checkpoints,omitempty"` // valid compaction checkpoints applied
+	BrokenSeq            int64  `json:"broken_seq,omitempty"`  // seq of first bad entry (0 when OK)
+	BrokenID             string `json:"broken_id,omitempty"`   // id of first bad entry
+	Reason               string `json:"reason,omitempty"`      // human-readable failure cause
 
 	// Breaks lists EVERY per-row integrity failure found, not just the first.
 	//
@@ -429,7 +402,9 @@ WHERE workspace_id = ? AND id IN (%s)`
 // column. It gates the backfill recovery: only when the hash is taken over a
 // column the operator-facing pin cannot touch is a content mismatch guaranteed
 // not to be a live priority flip.
-func hashedPriorityExpr(ctx context.Context, db *sql.DB) (string, bool, error) {
+func hashedPriorityExpr(ctx context.Context, db interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}) (string, bool, error) {
 	var present int
 	if err := db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM pragma_table_info('journal_entries') WHERE name = 'priority_at_emit'`,
@@ -443,26 +418,38 @@ func hashedPriorityExpr(ctx context.Context, db *sql.DB) (string, bool, error) {
 }
 
 // verifySelectFor returns the full-chain query for the schema on disk.
-func verifySelectFor(ctx context.Context, db *sql.DB) (string, bool, error) {
+func verifySelectFor(ctx context.Context, db interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}) (string, bool, error) {
 	expr, hasEmitColumn, err := hashedPriorityExpr(ctx, db)
 	if err != nil {
 		return "", false, err
 	}
-	return fmt.Sprintf(verifySelect, expr), hasEmitColumn, nil
+	query := fmt.Sprintf(verifySelect, expr)
+	query, err = versionedVerifyQuery(ctx, db, query)
+	return query, hasEmitColumn, err
 }
 
 // scanChainRow reads one row of the verifyColumns projection. Both the chain
 // walk and the deletion fence go through it, so the column order lives in
 // exactly one place.
 func scanChainRow(rows *sql.Rows) (f ChainFields, prevHash, entryHash, livePriority string, err error) {
-	err = rows.Scan(
+	dest := []any{
 		&f.Seq, &f.ID, &f.Workspace,
 		&f.CrewID, &f.AgentID, &f.MissionID,
 		&f.TS, &f.EntryType, &f.Severity, &f.Priority, &f.ActorType,
 		&f.ActorID, &f.Summary, &f.Payload, &f.Refs,
 		&f.TraceID, &f.SpanID, &f.ExpiresAt,
 		&prevHash, &entryHash, &livePriority,
-	)
+	}
+	columns, probeErr := rows.Columns()
+	if probeErr != nil {
+		return f, "", "", "", probeErr
+	}
+	if len(columns) == 23 {
+		dest = append(dest, &f.KeyID, &f.MACVersion)
+	}
+	err = rows.Scan(dest...)
 	return f, prevHash, entryHash, livePriority, err
 }
 
@@ -491,7 +478,7 @@ type priorityEdit struct {
 // actually computed over), and reconciliation trivially holds. Verification must
 // keep working across an upgrade boundary rather than erroring out — a verifier
 // that refuses to run is a verifier nobody trusts.
-func loadPriorityLedger(ctx context.Context, db *sql.DB, workspaceID string) (map[string][]priorityEdit, error) {
+func loadPriorityLedger(ctx context.Context, db chainReader, workspaceID string) (map[string][]priorityEdit, error) {
 	var present int
 	if err := db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='journal_entry_priorities'`,
@@ -566,16 +553,40 @@ func reconcilePriority(atEmit, livePriority string, edits []priorityEdit) bool {
 // clean while a DB-write attacker who lacks the key cannot forge either an
 // entry_hash or a checkpoint.
 func VerifyChain(ctx context.Context, db *sql.DB, workspaceID string) (*VerifyResult, error) {
-	return VerifyChainWithKey(ctx, db, workspaceID, ChainKeyFromEnv())
+	keys, err := SigningKeysForContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return VerifyChainWithKeys(ctx, db, workspaceID, keys)
 }
 
 // VerifyChainWithKey is VerifyChain with an explicit chain key — for a backup
 // drill that verifies a restored database with the recovery kit's
 // ENCRYPTION_KEY (DeriveChainKey of it) rather than this process's.
 func VerifyChainWithKey(ctx context.Context, db *sql.DB, workspaceID string, key []byte) (*VerifyResult, error) {
-	res := &VerifyResult{WorkspaceID: workspaceID, OK: true}
+	return VerifyChainWithKeys(ctx, db, workspaceID, LegacySigningKeys(key))
+}
 
-	removed, applied, err := loadCheckpointedRemovals(ctx, db, key, workspaceID)
+func VerifyChainWithKeys(ctx context.Context, db chainReader, workspaceID string, keys *SigningKeys) (*VerifyResult, error) {
+	var key []byte
+	if keys != nil {
+		key = keys.keys[LegacySigningKeyID]
+	}
+	res := &VerifyResult{WorkspaceID: workspaceID, OK: true}
+	anchor, anchorErr := latestWorkspaceCheckpoint(ctx, db, workspaceID, keys)
+	if anchorErr != nil {
+		return nil, anchorErr
+	}
+	anchorSeq := int64(0)
+	if anchor != nil {
+		anchorSeq = anchor.OldTailSeq + 1
+		res.HistoricalStatus = anchor.HistoricalStatus
+	}
+	segmentBreakStart := 0
+	anchorSeen := anchor == nil
+	legacyCount := 0
+
+	removed, applied, checkpointKeysUnavailable, err := loadCheckpointedRemovalsWithKeys(ctx, db, keys, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -608,6 +619,26 @@ func VerifyChainWithKey(ctx context.Context, db *sql.DB, workspaceID string, key
 			return nil, fmt.Errorf("journal: verify scan: %w", err)
 		}
 
+		// Older imports can contain unsigned rows. They never cover gaps or
+		// authenticate history; admission still checks every chained row.
+		if f.Seq == 0 && prevHash == "" && entryHash == "" && !f.KeyID.Valid && !f.MACVersion.Valid {
+			legacyCount++
+			res.Count++
+			res.OK = false
+			if res.HistoricalStatus == "" || res.HistoricalStatus == "verified" {
+				res.HistoricalStatus = "legacy_unverified"
+			}
+			continue
+		}
+		historical := anchor != nil && f.Seq < anchorSeq
+		if anchor != nil && f.Seq == anchorSeq && f.ID == anchor.ID {
+			anchorSeen = true
+			expectedSeq, expectedPrev = f.Seq, prevHash
+			res.provenFailure = false
+			res.keyUnavailable = false
+			segmentBreakStart = res.BreakCount
+		}
+
 		// A row whose seq is BELOW what we expect (duplicate or reorder that
 		// slipped past the unique index) is unambiguous tampering.
 		if f.Seq < expectedSeq {
@@ -615,7 +646,12 @@ func VerifyChainWithKey(ctx context.Context, db *sql.DB, workspaceID string, key
 			res.BrokenSeq = f.Seq
 			res.BrokenID = f.ID
 			res.Reason = fmt.Sprintf("sequence disorder at seq %d: expected seq >= %d", f.Seq, expectedSeq)
-			return res, nil
+			if !historical {
+				res.provenFailure = true
+				return res, nil
+			}
+			res.HistoricalStatus = "historical_invalid"
+			expectedSeq = f.Seq
 		}
 
 		// Bridge any gap between expectedSeq and this row using signed
@@ -630,7 +666,14 @@ func VerifyChainWithKey(ctx context.Context, db *sql.DB, workspaceID string, key
 				res.BrokenSeq = f.Seq
 				res.BrokenID = f.ID
 				res.Reason = fmt.Sprintf("sequence gap: expected seq %d, found %d (no signed compaction checkpoint covers the missing row)", expectedSeq, f.Seq)
-				return res, nil
+				if !historical {
+					res.provenFailure = !checkpointKeysUnavailable
+					res.keyUnavailable = checkpointKeysUnavailable
+					return res, nil
+				}
+				res.HistoricalStatus = "historical_invalid"
+				expectedSeq, expectedPrev = f.Seq, prevHash
+				break
 			}
 			expectedPrev = h
 			expectedSeq++
@@ -645,17 +688,24 @@ func VerifyChainWithKey(ctx context.Context, db *sql.DB, workspaceID string, key
 			res.BrokenSeq = f.Seq
 			res.BrokenID = f.ID
 			res.Reason = fmt.Sprintf("broken chain link at seq %d: prev_hash does not match preceding entry", f.Seq)
-			return res, nil
+			if !historical {
+				res.provenFailure = true
+				return res, nil
+			}
+			res.HistoricalStatus = "historical_invalid"
 		}
 
 		// Content integrity: recompute the KEYED hash and compare.
 		// A content mismatch is a fact about THIS row. Rows after it chain onto
 		// its STORED hash, which is unaffected, so the walk continues and later
 		// tampering stays reachable.
-		want := ChainHashKeyed(key, prevHash, f)
+		want, hashErr := chainHashForKeys(keys, prevHash, f)
+		if hashErr != nil {
+			want = ""
+		}
 		hashedPriority := f.Priority
 		recovered := ""
-		if want != entryHash {
+		if hashErr != nil || want != entryHash {
 			// Before calling it tampering, try the one benign explanation we
 			// know of: the v166 backfill overwrote priority_at_emit with an
 			// already-edited value. If some candidate priority reproduces the
@@ -683,7 +733,7 @@ func VerifyChainWithKey(ctx context.Context, db *sql.DB, workspaceID string, key
 			// attacker who writes both columns reproduces it byte for byte — so
 			// it can no longer suppress the live-priority check below. It buys
 			// one thing: the recovered emit-time value.
-			if hasEmitColumn && f.Priority == livePriority {
+			if hashErr == nil && !f.KeyID.Valid && hasEmitColumn && f.Priority == livePriority {
 				recovered = recoverEmitPriority(key, prevHash, f, entryHash)
 			}
 			if recovered != "" {
@@ -697,8 +747,20 @@ func VerifyChainWithKey(ctx context.Context, db *sql.DB, workspaceID string, key
 				}
 				hashedPriority = recovered
 			} else {
-				res.note(f.Seq, f.ID, "content",
-					fmt.Sprintf("content hash mismatch at seq %d: entry was modified after write (or the chain key differs)", f.Seq))
+				if (hashErr == nil || errors.Is(hashErr, ErrChainIntegrity)) && !historical {
+					res.provenFailure = true
+				}
+				if historical && (hashErr == nil || errors.Is(hashErr, ErrChainIntegrity)) {
+					res.HistoricalStatus = "historical_invalid"
+				}
+				if errors.Is(hashErr, ErrSigningKeyUnavailable) {
+					if !historical {
+						res.keyUnavailable = true
+					}
+					res.note(f.Seq, f.ID, "key_unavailable", fmt.Sprintf("verification key unavailable at seq %d; historical MAC is unverified", f.Seq))
+				} else {
+					res.note(f.Seq, f.ID, "content", fmt.Sprintf("content hash mismatch at seq %d: entry was modified after write (or the chain key differs)", f.Seq))
+				}
 			}
 		}
 
@@ -745,6 +807,24 @@ func VerifyChainWithKey(ctx context.Context, db *sql.DB, workspaceID string, key
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("journal: verify iterate: %w", err)
 	}
+	res.ContinuationVerified = anchorSeen && res.BreakCount == segmentBreakStart && !res.provenFailure
+	if anchor == nil {
+		res.ContinuationVerified = res.BreakCount == 0 && !res.provenFailure
+	}
+	if legacyCount > 0 {
+		res.OK = false
+		if res.Count == legacyCount {
+			res.ContinuationVerified = false
+		}
+	}
+	if anchor != nil && res.HistoricalStatus != "verified" {
+		res.OK = false
+	}
+	if !anchorSeen {
+		res.OK = false
+		res.provenFailure = true
+		res.Reason = "accepted checkpoint missing from current history"
+	}
 	return res, nil
 }
 
@@ -790,7 +870,10 @@ func UnresolvedIntegrity(ctx context.Context, db *sql.DB, workspaceID string, id
 		return blocked, nil
 	}
 
-	key := ChainKeyFromEnv()
+	keys, keyErr := SigningKeysForContext(ctx)
+	if keyErr != nil {
+		return nil, keyErr
+	}
 	priorityEdits, err := loadPriorityLedger(ctx, db, workspaceID)
 	if err != nil {
 		return nil, err
@@ -816,7 +899,11 @@ func UnresolvedIntegrity(ctx context.Context, db *sql.DB, workspaceID string, id
 			args = append(args, id)
 		}
 
-		rows, err := db.QueryContext(ctx, fmt.Sprintf(verifySelectByID, expr, placeholders), args...)
+		query, err := versionedVerifyQuery(ctx, db, fmt.Sprintf(verifySelectByID, expr, placeholders))
+		if err != nil {
+			return nil, err
+		}
+		rows, err := db.QueryContext(ctx, query, args...)
 		if err != nil {
 			return nil, fmt.Errorf("journal: integrity fence query: %w", err)
 		}
@@ -827,9 +914,21 @@ func UnresolvedIntegrity(ctx context.Context, db *sql.DB, workspaceID string, id
 				if err != nil {
 					return fmt.Errorf("journal: integrity fence scan: %w", err)
 				}
-				if reason := unresolvedReason(
-					key, hasEmitColumn, f, prevHash, entryHash, livePriority, priorityEdits[f.ID],
-				); reason != "" {
+				key, keyErr := keys.verification(f.KeyID, f.MACVersion)
+				reason := ""
+				if keyErr != nil {
+					reason = "audit verification key unavailable"
+				} else if f.KeyID.Valid {
+					expected, err := chainHashForKeys(keys, prevHash, f)
+					if err != nil || expected != entryHash {
+						reason = "content hash mismatch"
+					} else if f.Priority == "permanent" || !reconcilePriority(f.Priority, livePriority, priorityEdits[f.ID]) {
+						reason = "permanent or unresolved priority"
+					}
+				} else {
+					reason = unresolvedReason(key, hasEmitColumn, f, prevHash, entryHash, livePriority, priorityEdits[f.ID])
+				}
+				if reason != "" {
 					blocked[f.ID] = reason
 				}
 			}
@@ -888,4 +987,16 @@ func unresolvedReason(
 			"(unauthenticated) priority ledger does not authorise deleting it"
 	}
 	return ""
+}
+
+// AppendError admits an authenticated current chain, including a continuation
+// explicitly accepted by OWNER. It never calls missing keys proven corruption.
+func (r *VerifyResult) AppendError() error {
+	if r.OK || r.ContinuationVerified {
+		return nil
+	}
+	if r.keyUnavailable {
+		return ErrSigningKeyUnavailable
+	}
+	return ErrChainIntegrity
 }

@@ -16,7 +16,7 @@ import (
 // fresh in-memory DB and applies this directly instead of pulling in the
 // whole migrate package — keeps the unit test fast and self-contained.
 const schemaSQL = `
-CREATE TABLE journal_replay_receipts (id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, workspace_id TEXT NOT NULL, agent_id TEXT NOT NULL, trace_id TEXT NOT NULL, entry_type TEXT NOT NULL, terminal_exit_code INTEGER);
+CREATE TABLE journal_replay_receipts (id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, workspace_id TEXT NOT NULL, agent_id TEXT NOT NULL, trace_id TEXT NOT NULL, entry_type TEXT NOT NULL, terminal_exit_code INTEGER,chain_key_id TEXT,chain_mac_version INTEGER);
 CREATE TABLE workspaces (id TEXT PRIMARY KEY);
 INSERT INTO workspaces (id) VALUES ('ws_test');
 
@@ -51,7 +51,9 @@ CREATE TABLE journal_entries (
     -- v166: the IMMUTABLE priority the hash-chain commits to. The priority
     -- column above stays mutable for readers and the operator pin control; this
     -- one is written once at emit so an authorised edit cannot break verification.
-    priority_at_emit TEXT
+    priority_at_emit TEXT,
+ chain_key_id TEXT,
+ chain_mac_version INTEGER
 );
 CREATE INDEX idx_journal_ws_ts ON journal_entries(workspace_id, ts DESC);
 CREATE UNIQUE INDEX idx_journal_ws_seq ON journal_entries(workspace_id, seq) WHERE seq > 0;
@@ -61,7 +63,9 @@ CREATE TABLE journal_chain_checkpoints (
     workspace_id TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     removed_json TEXT NOT NULL,
-    mac TEXT NOT NULL
+    mac TEXT NOT NULL,
+ chain_key_id TEXT,
+ chain_mac_version INTEGER
 );
 
 -- v166: append-only ledger of operator priority edits. Verification reconciles
@@ -81,7 +85,7 @@ CREATE TABLE journal_entry_priorities (
 );
 `
 
-func openTestDB(t *testing.T) *sql.DB {
+func openTestDB(t testing.TB) *sql.DB {
 	t.Helper()
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -570,6 +574,7 @@ CREATE UNIQUE INDEX idx_journal_ws_seq ON journal_entries(workspace_id, seq) WHE
 		t.Fatalf("schema: %v", err)
 	}
 
+	addAuditSigningFixture(t, db)
 	w := NewWriter(db, quietLogger(), WriterOptions{FlushSize: 1})
 	defer w.Close()
 
