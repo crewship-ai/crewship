@@ -110,6 +110,22 @@ func fakePipeline(t *testing.T, slug, definitionJSON, authorCrew, authorAgent st
 	}
 }
 
+// materializeFakePipeline makes the resolver fixture's selected recipe explicit
+// before execution. Plain INSERT refuses duplicate IDs/slugs instead of hiding
+// a different stored selection. HEAD0 is legacy storage, not an archive receipt.
+func materializeFakePipeline(ctx context.Context, store *Store, p *Pipeline) error {
+	status := p.Status
+	if status == "" {
+		// The fake's historical empty status means active in the executor;
+		// native storage's status CHECK spells that same state explicitly.
+		status = "active"
+	}
+	_, err := store.db.ExecContext(ctx, `INSERT INTO pipelines
+(id,workspace_id,slug,name,dsl_version,definition_json,definition_hash,status,head_version,author_crew_id,author_agent_id,authored_via)
+VALUES(?,?,?,?,?,?,?,?,0,?,?,?)`, p.ID, p.WorkspaceID, p.Slug, p.Name, p.DSLVersion, p.DefinitionJSON, p.DefinitionHash, status, nullStr(p.AuthorCrewID), nullStr(p.AuthorAgentID), p.AuthoredVia)
+	return err
+}
+
 func openExecutorTestDB(t *testing.T) (*Store, *Resolver, func()) {
 	t.Helper()
 	db := openStoreTestDB(t)
@@ -451,6 +467,9 @@ func TestExecutor_CallPipeline_Composition(t *testing.T) {
 
 	innerJSON := `{"name":"inner","steps":[{"id":"x","type":"agent_run","agent_slug":"agent_lead","prompt":"do x"}]}`
 	innerPipe := fakePipeline(t, "inner", innerJSON, "crew_a", "agent_lead")
+	if err := materializeFakePipeline(t.Context(), store, innerPipe); err != nil {
+		t.Fatal(err)
+	}
 
 	pipes := pipeResolverFn(func(_ context.Context, _, slug string) (*Pipeline, error) {
 		if slug == "inner" {

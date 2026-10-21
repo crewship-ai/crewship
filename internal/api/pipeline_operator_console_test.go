@@ -421,6 +421,7 @@ func TestScheduleEffectiveVersion_OnListAndCreate(t *testing.T) {
 	// validation mean an unresolvable target can only be a deleted
 	// routine — there is no "never existed" shape to keep visible.
 	seedPipelineRow(t, db, ws, "pl_gone", "gone")
+	archiveLegacyFixtureHead(t, db, "pl_s")
 	store := pipeline.NewScheduleStore(db)
 	ctx := context.Background()
 	pinned := 2

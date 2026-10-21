@@ -29,7 +29,7 @@ func graphFixture(t *testing.T) (*Service, *restricteddispatch.TextRunner) {
 	exec(`INSERT INTO agents(id,workspace_id,crew_id,name,slug,agent_role,llm_provider,llm_model,restricted_execution_profile) VALUES('other','w','crew','Other','other','AGENT','OPENAI','fixture-model','responses_text')`)
 	exec(`INSERT INTO credentials(id,workspace_id,name,encrypted_value,type,provider,created_by) VALUES('other-key','w','Other',?,'API_KEY','OPENAI','owner')`, cipher)
 	exec(`INSERT INTO agent_credentials(id,agent_id,credential_id,env_var_name) VALUES('other-grant','other','other-key','OPENAI_API_KEY')`)
-	exec(`INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash,author_crew_id,status) VALUES('nested','w','nested-work','Nested',?,?,'crew','active')`, nestedRecipe, hash(nestedRecipe))
+	exec(`INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash,author_crew_id,status,head_version) VALUES('nested','w','nested-work','Nested',?,?,'crew','active',0)`, nestedRecipe, hash(nestedRecipe))
 	exec(`UPDATE pipelines SET definition_json=?,definition_hash=? WHERE id='routine'`, graphRecipeJSON, hash(graphRecipeJSON))
 	store := access.Store{DB: s.db}
 	for _, user := range []string{"h1", "h2"} {

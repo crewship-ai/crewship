@@ -215,6 +215,11 @@ func TestUpdateWebhook_RetargetAndVersionPin(t *testing.T) {
 	seedWebhookPipeline(t, db, wsID, origPipelineID, "retarget-orig")
 	newPipelineID := "pw-retarget-new"
 	seedWebhookPipeline(t, db, wsID, newPipelineID, "retarget-new")
+	// Pin 3 must name a real legacy archive before the retarget is accepted.
+	if _, err := db.Exec(`INSERT INTO pipeline_versions(id,pipeline_id,version,definition_json,definition_hash,author_type,author_id)
+SELECT 'webhook-retarget-v3',id,3,definition_json,definition_hash,'user','u_test' FROM pipelines WHERE id=?`, newPipelineID); err != nil {
+		t.Fatal(err)
+	}
 	wh := seedWebhookRow(t, db, wsID, origPipelineID, "s", true)
 	originalTokenHash := wh.TokenHash
 

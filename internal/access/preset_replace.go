@@ -17,6 +17,15 @@ func (s Store) ReplacePresetIn(ctx context.Context, tx *sql.Tx, actor, user, wor
 	if err != nil {
 		return Membership{}, err
 	}
+	// Preserve unrelated unavailable grants, but never persist Publish without
+	// Edit after replacing this preset's managed subset.
+	rights := make(map[Right]bool, len(plan.AfterRights))
+	for _, right := range plan.AfterRights {
+		rights[right] = true
+	}
+	if err := publicationDependencies(rights); err != nil {
+		return Membership{}, err
+	}
 	for _, change := range plan.Changes {
 		r := change.Right
 		if change.Action == "remove" || change.Action == "reissue" {

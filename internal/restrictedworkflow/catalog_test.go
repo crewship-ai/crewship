@@ -12,7 +12,7 @@ import (
 
 func TestCatalogFiltersUnadmittedGraphsAndPrivateDefinitionFields(t *testing.T) {
 	s, _ := graphFixture(t)
-	if _, err := s.db.ExecContext(t.Context(), `INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash,author_crew_id,status) VALUES('simple','w','simple','Allowed',?,?,'crew','active')`, routine, hash(routine)); err != nil {
+	if _, err := s.db.ExecContext(t.Context(), `INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash,author_crew_id,status,head_version) VALUES('simple','w','simple','Allowed',?,?,'crew','active',0)`, routine, hash(routine)); err != nil {
 		t.Fatal(err)
 	}
 	store := access.Store{DB: s.db}

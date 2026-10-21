@@ -769,6 +769,16 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("executor: load pipeline: %w", err)
 	}
+	if in.Mode == ModeRun {
+		// Classify once before hooks, reservations or execution. Numeric pins
+		// retain their own archive authority instead of inheriting HEAD.
+		if err := checkGenericPublication(ctx, e.store.db, p.ID, in.WorkspaceID, in.PinnedVersion); err != nil {
+			if errors.Is(err, ErrPinnedVersionNotFound) && in.PinnedVersion != nil {
+				return nil, fmt.Errorf("%w: routine %q has no version %d (was it deleted? update or unpin the trigger)", ErrPinnedVersionNotFound, p.Slug, *in.PinnedVersion)
+			}
+			return nil, err
+		}
+	}
 	// Governance airbag — top-level chokepoint. Every real-run dispatch path
 	// that starts at Run() (HTTP Run/InternalRun/RunBatch, the cron scheduler,
 	// webhook dispatch, and the deferred-run dispatcher) funnels through here,
@@ -2369,6 +2379,11 @@ func (e *Executor) runCallPipelineStep(ctx context.Context, step Step, parent Ru
 			return "", 0, 0, fmt.Errorf("call_pipeline: %w (slug=%q)", ErrPipelineNotFound, step.PipelineSlug)
 		}
 		return "", 0, 0, fmt.Errorf("call_pipeline: lookup: %w", err)
+	}
+	if parent.Mode == ModeRun {
+		if err := e.store.CheckGenericRun(ctx, target, nil); err != nil {
+			return "", 0, 0, fmt.Errorf("call_pipeline %q: %w", step.PipelineSlug, err)
+		}
 	}
 	// Governance gate (#1417, belt-and-suspenders). runDSL enforces this
 	// too, but reject here as well so the sentinel wraps cleanly for

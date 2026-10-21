@@ -148,8 +148,18 @@ func TestPipelineWebhooks_Fire_PinnedVersionMissing_FailsLegibly(t *testing.T) {
 	h.SetRunner(&stubRunner{output: "ok"})
 	h.SetRunStore(pipeline.NewRunStore(db))
 	seedVersionedPipeline(t, db, wsID, "pln_pin_ghost", "pin-ghost")
+	// Store a valid pin first, then remove its selected archive to exercise
+	// loss at FIRE time rather than invalid trigger creation.
+	missingRaw := pinnedV2DSL + "\n"
+	if _, err := db.Exec(`INSERT INTO pipeline_versions(id,pipeline_id,version,definition_json,definition_hash,author_type,author_id)
+VALUES('webhook-missing-v99','pln_pin_ghost',99,?,?,'user','u_test')`, missingRaw, definitionHashHex([]byte(missingRaw))); err != nil {
+		t.Fatal(err)
+	}
 	ninetyNine := 99
 	wh := seedPinnedWebhook(t, db, wsID, "pln_pin_ghost", &ninetyNine)
+	if _, err := db.Exec(`DELETE FROM pipeline_versions WHERE id='webhook-missing-v99'`); err != nil {
+		t.Fatal(err)
+	}
 
 	rr := fireSignedWebhook(t, h, wh.Token, `{"e":1}`)
 	if rr.Code != http.StatusConflict {
@@ -192,8 +202,8 @@ func TestPipelineWebhooks_Fire_WaitingRun_RecordsWaiting(t *testing.T) {
 		`{"id":"t","type":"transform","transform":{"input":"x","expression":"."}},` +
 		`{"id":"gate","type":"wait","wait":{"kind":"approval","approval_prompt":"ok?"},"timeout_seconds":3600}]}`
 	if _, err := db.Exec(`
-		INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, created_at, updated_at, last_test_run_at)
-		VALUES ('pln_waithook', ?, 'wait-hook', 'wait-hook', ?, 'hw', ?, ?, ?)`,
+		INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, created_at, updated_at, last_test_run_at, head_version)
+		VALUES ('pln_waithook', ?, 'wait-hook', 'wait-hook', ?, 'hw', ?, ?, ?, 0)`,
 		wsID, waitDSL, now, now, now); err != nil {
 		t.Fatalf("seed pipeline: %v", err)
 	}

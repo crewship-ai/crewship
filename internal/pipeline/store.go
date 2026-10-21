@@ -201,6 +201,9 @@ func (s *Store) save(ctx context.Context, in SaveInput, trigger *TriggerInput) (
 		if err := bindSaveOrigin(ctx, tx, &in, existingID); err != nil {
 			return nil, nil, err
 		}
+		if err := checkPublicationCalls(ctx, tx, in.WorkspaceID, in.DefinitionJSON); err != nil {
+			return nil, nil, err
+		}
 		// Read inside the tx so the "did the recipe change" question and the
 		// write that answers it cannot straddle another writer.
 		var existingDefinition string
@@ -344,6 +347,9 @@ WHERE id = ?`,
 	if err := bindSaveOrigin(ctx, tx, &in, ""); err != nil {
 		return nil, nil, err
 	}
+	if err := checkPublicationCalls(ctx, tx, in.WorkspaceID, in.DefinitionJSON); err != nil {
+		return nil, nil, err
+	}
 	if err := s.consumeDraftTx(ctx, tx, in); err != nil {
 		return nil, nil, err
 	}
@@ -470,6 +476,9 @@ func (s *Store) createTriggerTx(ctx context.Context, tx *sql.Tx, in SaveInput, p
 		if pinnedVersion < 1 {
 			return nil, fmt.Errorf("%w: publish an archived version before scheduling", ErrInvalidTrigger)
 		}
+		if err := checkGenericTrigger(ctx, tx, in.WorkspaceID, pipelineID, &pinnedVersion); err != nil {
+			return nil, err
+		}
 		id := "pnd_once_" + pipelineID
 		// Stable authoring identity makes a repeated save update one pending
 		// start. A consumed/cancelled start is never rearmed by editing a
@@ -509,7 +518,16 @@ func (s *Store) createTriggerTx(ctx context.Context, tx *sql.Tx, in SaveInput, p
 		MaxConsecutiveFailures: trigger.MaxConsecutiveFailures,
 		Activation:             trigger.Activation,
 	}
-	return upsertTriggerSchedule(ctx, tx, schedIn)
+	schedule, err := upsertTriggerSchedule(ctx, tx, schedIn)
+	if err != nil {
+		return nil, err
+	}
+	// Upsert retains an existing numeric pin and wake target. Validate those
+	// actual stored selections, rather than the unpinned authoring input.
+	if err := CheckGenericScheduleIn(ctx, tx, in.WorkspaceID, schedule.ID); err != nil {
+		return nil, err
+	}
+	return schedule, nil
 }
 
 // saveVersionTx is the in-transaction variant of SaveVersion used by
@@ -527,7 +545,7 @@ func (s *Store) saveVersionTx(ctx context.Context, tx *sql.Tx, pipelineID string
 	// surface (versions UI/CLI, pinned-run bookkeeping) would lie.
 	var existingVersion int
 	if err := tx.QueryRowContext(ctx,
-		`SELECT version FROM pipeline_versions WHERE pipeline_id = ? AND definition_hash = ? LIMIT 1`,
+		`SELECT version FROM pipeline_versions WHERE pipeline_id = ? AND definition_hash = ? AND authority_fingerprint = 'legacy-trusted:v1' LIMIT 1`,
 		pipelineID, hash,
 	).Scan(&existingVersion); err == nil {
 		if _, err := tx.ExecContext(ctx,

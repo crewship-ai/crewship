@@ -60,11 +60,14 @@ func TestSaveVersion_ExplicitParentAndDefaultAuthorType(t *testing.T) {
 	}
 }
 
-// TestVersions_MissingTable_ErrorPaths uses the base store schema
-// (no pipeline_versions table) so the hash-lookup / list / get queries
+// TestVersions_MissingTable_ErrorPaths removes the version table so the
+// hash-lookup / list / get queries
 // fail with a non-ErrNoRows error and the wrapped messages surface.
 func TestVersions_MissingTable_ErrorPaths(t *testing.T) {
-	db := openStoreTestDB(t) // intentionally no versioning schema
+	db := openStoreTestDB(t)
+	if _, err := db.Exec(`DROP TABLE pipeline_versions`); err != nil {
+		t.Fatal(err)
+	}
 	defer db.Close()
 	store := NewStore(db)
 	ctx := context.Background()

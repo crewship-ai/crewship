@@ -20,7 +20,7 @@ var AllEntryTypes = []EntryType{
 	EntryAgentError,
 	EntryAgentMentioned,
 	EntryAgentStatus,
-	EntryType("approval.auto_tuning_reset"), // journalApprovalAutoTuningReset, internal/api/approvals_handler.go:28:7
+	EntryType("approval.auto_tuning_reset"), // journalApprovalAutoTuningReset, internal/api/approvals_handler.go:29:7
 	EntryApprovalCancelled,
 	EntryApprovalDenied,
 	EntryApprovalGranted,

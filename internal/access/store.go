@@ -18,6 +18,7 @@ import (
 var ErrDenied = errors.New("resource authority denied")
 var ErrIssuerDenied = fmt.Errorf("grant issuer authority unavailable: %w", ErrDenied)
 var ErrConflict = errors.New("resource authority revision changed")
+var ErrPublishRequiresEdit = fmt.Errorf("Publish requires Edit on the same routine: %w", ErrDenied)
 
 type Store struct{ DB *sql.DB }
 type Right struct {
@@ -53,7 +54,7 @@ func validRight(r Right) bool {
 			return true
 		}
 	case "routine":
-		return r.Operation == "run" || r.Operation == "view" || r.Operation == "edit" || r.Operation == "results"
+		return r.Operation == "run" || r.Operation == "view" || r.Operation == "edit" || r.Operation == "results" || r.Operation == "publish"
 	case "project":
 		switch r.Operation {
 		case "list", "read", "write", "delete", "contribute", "manage", "delete_issues":
@@ -119,6 +120,24 @@ func check(ctx context.Context, q queryer, user, workspace string, r Right) (Mem
 	}
 	if err = resourceExists(ctx, q, workspace, r); err != nil {
 		return m, err
+	}
+	if r.Kind == "routine" && r.Operation == "publish" {
+		if m.Mode != "restricted" {
+			return m, ErrDenied
+		}
+		var allowed bool
+		err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM live_access_grants p
+JOIN live_access_grants e ON e.member_id=p.member_id AND e.resource_kind='routine' AND e.routine_id=p.routine_id AND e.operation='edit'
+JOIN live_access_grants v ON v.member_id=p.member_id AND v.resource_kind='routine' AND v.routine_id=p.routine_id AND v.operation='view'
+JOIN users u ON u.id=? AND u.suspended_at IS NULL
+WHERE p.member_id=? AND p.resource_kind='routine' AND p.routine_id=? AND p.operation='publish')`, user, m.ID, r.ID).Scan(&allowed)
+		if err != nil {
+			return m, err
+		}
+		if !allowed {
+			return m, ErrDenied
+		}
+		return m, nil
 	}
 	if m.Mode == "trusted" {
 		return m, nil
@@ -248,6 +267,9 @@ func (s Store) ReplaceIn(ctx context.Context, tx *sql.Tx, actor, user, workspace
 			return m, err
 		}
 	}
+	if err := publicationDependencies(seen); err != nil {
+		return m, err
+	}
 	renew := map[Right]bool{}
 	for _, r := range reissue {
 		if !seen[r] || renew[r] {
@@ -328,6 +350,15 @@ func ValidateRights(ctx context.Context, q queryer, workspace string, rights []R
 		seen[right] = true
 		if err := resourceExists(ctx, q, workspace, right); err != nil {
 			return err
+		}
+	}
+	return publicationDependencies(seen)
+}
+
+func publicationDependencies(rights map[Right]bool) error {
+	for right := range rights {
+		if right.Kind == "routine" && right.Operation == "publish" && !rights[Right{Kind: "routine", ID: right.ID, Operation: "edit"}] {
+			return ErrPublishRequiresEdit
 		}
 	}
 	return nil

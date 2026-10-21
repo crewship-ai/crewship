@@ -117,6 +117,22 @@ func compileTyped(raw string, graph bool) (definition, error) {
 	d.DSL = parsed
 	return d, nil
 }
+
+// ValidatePublicationDefinition admits only the bounded agent-run language.
+// It performs no provider lookup, dispatch or paid test run.
+func ValidatePublicationDefinition(raw string) error {
+	d, err := compileTyped(raw, true)
+	if err != nil {
+		return err
+	}
+	for _, step := range d.DSL.Steps {
+		if step.Type != pipeline.StepAgentRun {
+			return ErrUnsupported
+		}
+	}
+	return nil
+}
+
 func normalizeInputs(d definition, supplied map[string]any) (map[string]any, error) {
 	result := map[string]any{}
 	declared := map[string]pipeline.InputSpec{}

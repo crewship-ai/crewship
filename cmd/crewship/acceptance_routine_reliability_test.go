@@ -38,7 +38,7 @@ import (
 
 const reliabilityAcceptanceWorkspaceID = "creliabilityws00000001"
 
-func startReliabilityAcceptanceServer(t *testing.T) (cfgPath, serverURL string) {
+func startReliabilityAcceptanceServer(t *testing.T, pinThirdVersion ...bool) (cfgPath, serverURL string) {
 	t.Helper()
 
 	// CreateWebhook/UpdateWebhook encrypt the HMAC signing secret at rest
@@ -69,6 +69,21 @@ func startReliabilityAcceptanceServer(t *testing.T) (cfgPath, serverURL string) 
 	mustExec(`INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, created_at, updated_at, last_test_run_at)
 		VALUES ('rel-pipe-2', ?, 'rel-routine-2', 'rel-routine-2', '{"name":"rel-routine-2","steps":[]}', 'hash', ?, ?, ?)`,
 		reliabilityAcceptanceWorkspaceID, now, now, now)
+
+	// Post-migration fixtures need the immutable legacy versions selected by
+	// the real trigger guard; a bare physical HEAD is not an archive.
+	mustExec(`INSERT INTO pipeline_versions(id,pipeline_id,version,definition_json,definition_hash,author_type,author_id,parent_version,change_summary,created_at,chat_origin_id,authority_fingerprint,publication_authority_json)
+		SELECT id||'-v1',id,head_version,definition_json,definition_hash,'system','fixture',NULL,'Fixture legacy version',created_at,chat_origin_id,'legacy-trusted:v1',NULL
+		FROM pipelines WHERE id IN ('rel-pipe','rel-pipe-2')`)
+	if len(pinThirdVersion) > 0 && pinThirdVersion[0] {
+		// Distinct content is required by the real content/authority unique key.
+		const pinnedRaw = `{"name":"rel-routine-2-pinned","steps":[]}`
+		pinnedHash := sha256.Sum256([]byte(pinnedRaw))
+		mustExec(`UPDATE pipelines SET definition_json=?,definition_hash=?,head_version=3 WHERE id='rel-pipe-2'`, pinnedRaw, hex.EncodeToString(pinnedHash[:]))
+		mustExec(`INSERT INTO pipeline_versions(id,pipeline_id,version,definition_json,definition_hash,author_type,author_id,parent_version,change_summary,created_at,chat_origin_id,authority_fingerprint,publication_authority_json)
+			SELECT id||'-v3',id,head_version,definition_json,definition_hash,'system','fixture',1,'Fixture pinned version',created_at,chat_origin_id,'legacy-trusted:v1',NULL
+			FROM pipelines WHERE id='rel-pipe-2'`)
+	}
 
 	// Two finished runs of the first routine, for `routine health`.
 	for i, status := range []string{"completed", "failed"} {
@@ -400,7 +415,7 @@ func TestAcceptance_RoutineWebhooksUpdate_RotateSecretWithGrace(t *testing.T) {
 // retargets, --pin-version actually pins, and --unpin actually clears it —
 // again, none of it touching the URL.
 func TestAcceptance_RoutineWebhooksUpdate_SlugAndVersionPin(t *testing.T) {
-	cfgPath, serverURL := startReliabilityAcceptanceServer(t)
+	cfgPath, serverURL := startReliabilityAcceptanceServer(t, true)
 
 	createOut, err := runReliabilityCLI(t, cfgPath, "-f", "json", "routine", "webhooks", "create",
 		"--slug", "rel-routine", "--name", "retarget-me", "--base-url", serverURL)

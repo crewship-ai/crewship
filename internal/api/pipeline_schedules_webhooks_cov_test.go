@@ -54,6 +54,7 @@ func covPSWSeedPipeline(t *testing.T, db *sql.DB, wsID, id, slug string) {
 		id, wsID, slug, slug); err != nil {
 		t.Fatalf("seed pipeline: %v", err)
 	}
+	archiveLegacyFixtureHead(t, db, id)
 }
 
 // covPSWSeedSchedule saves a schedule row via the store and returns it.

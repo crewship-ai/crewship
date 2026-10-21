@@ -59,6 +59,10 @@ func TestAcceptance_DemoRBACMatrix(t *testing.T) {
 	execSQL(`INSERT INTO agents(id,workspace_id,crew_id,name,slug,agent_role) VALUES('matrix-agent','matrix-ws','matrix-crew','Probe','probe','LEAD')`)
 	const def = `{"dsl_version":"1.0","name":"matrix-probe","agentless":true,"steps":[{"id":"t","type":"transform","transform":{"input":"true","expression":"."}}]}`
 	execSQL(`INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash,status,last_test_run_at) VALUES('matrix-pipeline','matrix-ws','matrix-probe','Probe',?,'hash','active',datetime('now'))`, def)
+	execSQL(`INSERT INTO pipeline_versions(id,pipeline_id,version,definition_json,definition_hash,author_type,author_id,parent_version,change_summary,created_at,chat_origin_id,authority_fingerprint,publication_authority_json)
+		SELECT id||'-v1',id,head_version,definition_json,definition_hash,'system','fixture',NULL,'Fixture legacy version',created_at,chat_origin_id,'legacy-trusted:v1',NULL
+		FROM pipelines WHERE id='matrix-pipeline'`)
+
 	enc, err := encryption.Encrypt("matrix-secret")
 	if err != nil {
 		t.Fatal(err)

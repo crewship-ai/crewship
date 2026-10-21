@@ -93,6 +93,9 @@ func TestExecutorCallPipelineTypedInputsBeforeDispatch(t *testing.T) {
 		store, resolver, cleanup := openExecutorTestDB(t)
 		runner := newMockRunner()
 		child := fakePipeline(t, "inner", `{"name":"inner","inputs":[{"name":"count","type":"integer","widget":"number","required":true},{"name":"enabled","type":"boolean","widget":"boolean","required":true}],"steps":[{"id":"x","type":"agent_run","agent_slug":"agent_lead","prompt":"count={{ inputs.count }} enabled={{ inputs.enabled }}"}]}`, "crew_a", "agent_lead")
+		if err := materializeFakePipeline(t.Context(), store, child); err != nil {
+			t.Fatal(err)
+		}
 		exec := NewExecutor(store, resolver, runner, &captureEmitter{}).WithPipelineResolver(pipeResolverFn(func(context.Context, string, string) (*Pipeline, error) { return child, nil }))
 		var count any = float64(0)
 		if !valid {

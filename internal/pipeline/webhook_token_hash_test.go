@@ -46,6 +46,12 @@ func openHashedWebhookTestDB(t *testing.T) *sql.DB {
 	if _, err := db.ExecContext(context.Background(), hashedWebhookSchemaSQL); err != nil {
 		t.Fatalf("webhook schema: %v", err)
 	}
+	// Save now validates its actual target inside the writer transaction.
+	// Both writer tests below intentionally use this same legacy fixture.
+	if _, err := db.Exec(`INSERT INTO workspaces(id) VALUES('ws_1');
+INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash) VALUES('pl_1','ws_1','target','target',?,?)`, `{}`, definitionHash(`{}`)); err != nil {
+		t.Fatalf("webhook target: %v", err)
+	}
 	return db
 }
 

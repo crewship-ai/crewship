@@ -26,9 +26,7 @@ func TestPipelineClarityRejectsInputBeforeAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.ExecContext(t.Context(), `UPDATE pipelines SET definition_json=? WHERE slug='demo'`, string(raw)); err != nil {
-		t.Fatal(err)
-	}
+	seedSmokePipelineDef(t, db, "demo", string(raw))
 	runner := &stubRunner{output: "should not execute"}
 	h := NewPipelineHandler(db, slog.Default(), runner, nil)
 	for _, body := range []string{`{"inputs":{"coverage":70,"dir":"/crew/shared"}}`, `{"inputs":{"coverage":0.7,"dir":"../private"}}`} {

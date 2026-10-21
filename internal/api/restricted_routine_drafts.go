@@ -31,6 +31,11 @@ type guestRoutineDraft struct {
 }
 
 func guestRoutineDraftError(w http.ResponseWriter, err error) {
+	var coded interface{ Code() int }
+	if errors.As(err, &coded) && (coded.Code()&0xff == 5 || coded.Code()&0xff == 6) {
+		replyError(w, http.StatusConflict, "Routine storage is busy. Retry the reviewed draft snapshot.")
+		return
+	}
 	if errors.Is(err, pipeline.ErrDraftConflict) {
 		replyError(w, 409, "Routine draft or published version changed. Reload and review before saving.")
 		return

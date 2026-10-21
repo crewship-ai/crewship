@@ -62,6 +62,25 @@ func (s *ScheduleStore) ActivateValidated(ctx context.Context, id string) (*Sche
 }
 
 func validateEnabledSchedule(ctx context.Context, x sqlExecQuerier, before, after *Schedule) error {
+	// Removing execution capacity must remain possible for a broken or newly
+	// bounded recipe. Only an existing unchanged selection may take this path;
+	// disabled creates and retargets still pass the authority checks below.
+	if before != nil && !after.Enabled && before.WorkspaceID == after.WorkspaceID &&
+		before.TargetPipelineID == after.TargetPipelineID &&
+		reflect.DeepEqual(before.TargetPipelineVersion, after.TargetPipelineVersion) &&
+		before.WakePipelineID == after.WakePipelineID {
+		return nil
+	}
+	// Keep the authority check inside this writer transaction, including draft
+	// creates. Publication checks existing triggers under the same write lock.
+	if err := checkGenericTrigger(ctx, x, after.WorkspaceID, after.TargetPipelineID, after.TargetPipelineVersion); err != nil {
+		return err
+	}
+	if after.WakePipelineID != "" {
+		if err := checkGenericTrigger(ctx, x, after.WorkspaceID, after.WakePipelineID, nil); err != nil {
+			return err
+		}
+	}
 	if !after.Enabled {
 		return nil
 	}

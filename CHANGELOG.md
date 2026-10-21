@@ -237,6 +237,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- Add server validation and publication of an explicitly shared routine draft with exact revision checks, live View/Edit/Publish and agent authority, and atomic audit. Published history retains immutable nonsecret metadata through backup. The CLI validates structure or publishes an exact reviewed reference without automatic retry. Busy writers return 409, existing triggers return 422, and nullable descriptions are preserved. Published execution, UI publication and the Edit + Publish preset remain separate; generic execution and automatic triggers refuse the new authority.
+
 - **Replay captured routine runs with corrected inputs, tags and metadata.** Omitted values inherit the source; empty objects and arrays clear inherited values. Changed inputs are validated against the selected routine version. (#3592)
 
 - Prepare scoped native Slides initialization with atomic receipts and caller-owned transactions; API and editor activation follow separately.

@@ -2580,8 +2580,49 @@ all current editors of that routine.
 Statuses: 200 snapshot/saved draft; 400 malformed body; 401 authentication;
 403 workspace/token scope; 404 unavailable routine, View/Edit authority or local
 Guest membership; 409 changed draft or published base; 500 unavailable storage or
-audit. Conflicts are not retried. Trusted review/testing/publication remain
-required after a Guest saves changes.
+audit. Conflicts are not retried. Saving alone does not publish; direct
+publication requires the separate authority and endpoint below.
+
+
+## Validate and publish a shared routine draft
+
+```http
+POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/validate
+POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/publish
+```
+
+**Authentication:** an authenticated current local Guest with explicit live
+routine View and Edit. Publish additionally requires explicit Publish, current
+issuers and the referenced agents' execution/delegation shares and provider
+declarations. Scoped CLI tokens require `workspace:admin`; scope grants no
+resource rights. Publish is independent of Run and cannot be stored without
+Edit. Version-1 presets are unchanged.
+
+**Request body:** both endpoints accept only the exact persisted draft snapshot:
+
+```json
+{"draft_id":"drf_example","revision":2,"base_revision":3}
+```
+
+All three fields are required; revisions must be positive integers. Unknown
+fields, trailing JSON and invalid snapshots are rejected. Validate checks the
+stored structure without starting an agent or issuing an execution receipt.
+Publish repeats current authority and draft/base checks under its writer lock.
+Only agent-run steps on `responses_text` and `native_api_key` qualify. Existing
+attached schedules/webhooks prevent publication; published selections cannot be
+created, retargeted or enabled through the legacy trigger paths.
+
+**Response:** validate returns `{"valid":true,"scope":"structure_only","draft_id":"drf_example","revision":2,"base_revision":3}`. It checks structure with View/Edit only; Publish, dependency grants, profiles and attached triggers are checked when publishing.
+Publish returns the routine `id`, archived numeric `version` and new
+`publication_revision`. It consumes the exact draft and commits the immutable
+version, historical authority metadata and audit together, preserving authors
+and origin. Notifications follow commit. Both responses use `Cache-Control: no-store`.
+
+**Statuses:** `200` validated/published; `400` malformed or oversized request;
+`401` authentication; `403` workspace/credential scope; `404` unavailable
+routine, local membership or required authority; `409` changed draft/base or busy writer; `422` unsupported structure/profile or attached execution trigger; `500`
+operational storage or audit failure. No automatic retry or authority refresh.
+This authoring API and its `routine draft validate|publish` CLI do not enable bounded execution or UI publication. Schedules, webhooks, nested execution and resume for published selections remain unsupported.
 
 
 ## Guest shared routine run history and outputs

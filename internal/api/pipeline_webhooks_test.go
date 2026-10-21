@@ -58,15 +58,14 @@ func webhookHandlerRigWithDispatcher(t *testing.T, start bool) (*PipelineHandler
 	return h, db, userID, wsID
 }
 
-// seedWebhookPipeline mirrors seedPipelineRow from
-// pipeline_schedules_test.go — the webhook only consults id/slug/
-// workspace_id from the pipelines join, so a minimal row is enough.
+// seedWebhookPipeline creates an explicitly unarchived legacy HEAD0 target.
+// Tests of numeric pins add their real archive separately before saving a hook.
 func seedWebhookPipeline(t *testing.T, db *sql.DB, wsID, id, slug string) {
 	t.Helper()
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := db.Exec(`
-		INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, created_at, updated_at, last_test_run_at)
-		VALUES (?, ?, ?, ?, '{"name":"x","steps":[]}', 'hash', ?, ?, ?)`,
+		INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, created_at, updated_at, last_test_run_at, head_version)
+		VALUES (?, ?, ?, ?, '{"name":"x","steps":[]}', 'hash', ?, ?, ?, 0)`,
 		id, wsID, slug, slug, now, now, now); err != nil {
 		t.Fatalf("seed pipeline: %v", err)
 	}

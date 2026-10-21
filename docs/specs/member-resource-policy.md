@@ -162,7 +162,7 @@ Supported operations:
 | Resource | Operations | Current scope |
 | --- | --- | --- |
 | Agent | discover, chat, run, delegate | Discovery is separate from conversation and execution authority. |
-| Routine | view, results, run, edit | Explicit root-routine grant **and** run on every resolved agent; cross-agent delegation additionally needs delegate. Nested definitions are frozen dependencies. View exposes the stored definition; Edit with View allows collaborative draft changes, with trusted testing/review before publication. |
+| Routine | view, results, run, edit, publish | Explicit root-routine grant **and** run on every resolved agent; cross-agent delegation additionally needs delegate. Nested definitions are frozen dependencies. View exposes the stored definition; Edit with View allows collaborative drafts; direct publication additionally requires explicit Publish and the server checks below. |
 | Project | list, read, contribute, manage, delete_issues, write, delete | List exposes issue metadata; Read exposes shared issue details/comments and project source files. Contribute with Read permits configured intake requests, shared comments and arranging intake work. Manage with Read explicitly shares editable project details and milestones. Delete issues additionally requires Read/Manage and reviewed disposable work. Write/delete apply to project source files with their existing role floor. |
 
 Routine grants replace the workspace-wide `routine.run` requirement for Guests.
@@ -256,7 +256,7 @@ A confirmed creation shows its identifier and, when readable, a detail link even
 if the current filter hides the new row. An unconfirmed or other-project response
 retains the draft for a retry under the same operation key.
 
-Crews, credentials, direct routine publication, private restricted-output audiences, full Issues Manage, explicit
+Crews, credentials, bounded published execution, private restricted-output audiences, full Issues Manage, explicit
 Page-action selection and a Pages grant migration remain separate work. This
 contract does not claim complete resource-access PRD or release-1.0 acceptance.
 
@@ -398,7 +398,7 @@ Run keeps the existing root-routine plus every agent/provider dependency checks.
 | Run automatically implies definition View | Changed for existing operations | Existing Run shares deliberately exposed only a minimal invocation contract. Automatically revealing prompts/defaults would expand their disclosure without administrator review; View is explicit. |
 | Regular routine run history and outputs | Kept through deliberate Results with View | Existing definition-only and invocation-only shares are not widened. The new share exposes past/future regular results while retaining every inherited private conversation audience. |
 | View includes other participants’ private outputs | Deferred to an explicit result-audience contract | A routine share must not grant access to another client’s private execution/chat. Existing private run receipts keep their current actor and execution fences. |
-| Edit and version publication | Draft editing delivered; direct Guest publication deferred | The collaborative draft shares current View/Edit authority. Trusted publication retains testing, exact revision review, author provenance and unattended execution protections. |
+| Edit and version publication | Draft editing, server publication and CLI delivered; UI and bounded execution pending | The collaborative draft uses current View/Edit; server publication additionally checks Publish, exact revisions and dependencies atomically. Trusted publication keeps its separate testing/review controls. |
 
 `GET /workspaces/{workspaceId}/restricted-routine-library` returns only live
 routine View/Run shares, with `can_view`, `can_results` eligibility, current graph `can_run`, and runtime
@@ -492,9 +492,8 @@ save checks the exact draft ID/revision and publication base. A stale editor or
 changed published base receives 409 without automatic refresh or retry; an audit
 failure rolls back the edit. Saving does not change executable bytes or version
 history, create a trigger, run a test or approve risk. Server-owned draft metadata
-and origin remain intact. The trusted authoring workflow must review and test the
-exact revision before publishing. Direct Guest publication and full Routine Edit
-acceptance remain unfinished PRD work.
+and origin remain intact. Saving a draft does not manufacture a passing model
+test or waive the trusted authoring workflow's existing test requirements.
 
 The Guest definition view offers **Edit shared draft** only with current View,
 Edit and mutation scope. Transient errors/conflicts retain local work; hard
@@ -503,6 +502,42 @@ access loss clears the editor. The CLI reads the same JSON snapshot with
 `crewship routine shared-draft save ROUTINE --file draft.json` (or `--file -`).
 Read-only `can_edit` is removed before PUT; the CLI performs no hidden GET or
 conflict retry.
+
+### Server publication of an explicit shared draft
+
+The restricted library exposes
+`POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/validate`
+and `POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/publish`. Each accepts only `draft_id`, `revision`
+and `base_revision` for the current persisted draft. Unknown or trailing JSON
+is rejected. Validate checks the stored structure without starting an agent,
+creating an execution receipt or returning a transferable authorization token.
+Its response explicitly reports `scope: "structure_only"`: it checks structure with current View/Edit, not Publish, dependency grants, profiles or attached triggers. Publish checks those separately under the writer lock.
+
+Publish requires current explicit View, Edit and Publish on that routine,
+live grant issuers, and the execution shares and provider declaration for every
+referenced agent. Publish is independent of Run and cannot be stored without
+Edit on the same routine; neither operation implies View. Existing v1 presets
+remain unchanged, and a preset downgrade that would retain Publish without Edit
+is rejected. The server selects identities from stored state, accepts only
+`agent_run` steps, and fixes supported profiles to `responses_text` and
+`native_api_key`, independently of executor plugins.
+
+Publication consumes the exact draft, preserves stored authors and origin,
+appends the immutable version and nonsecret authority manifest, and writes its
+audit in one transaction. Identical content and authority reuse their archived
+version. A stale draft/base returns 409, unavailable authority returns 404,
+unsupported structure or existing attached triggers return 422. SQLite write contention returns 409; other operational database errors remain 500. Nullable descriptions remain nullable.
+An audit failure rolls back publication. Notifications follow commit. The
+manifest is historical metadata, never an execution receipt; it remains byte
+preserved through backup and fork, whose typed parent IDs are remapped without
+rewriting the embedded historical identity. Explicit shares are retained.
+
+This server slice does not enable published execution. The generic executor entry,
+nested-call entry and older restricted runner refuse a published selection;
+numeric legacy pins retain their own identity. Creating, retargeting or enabling
+a schedule or webhook against a published selection is refused in its writer
+transaction. Publication also refuses existing attached triggers, preventing
+them from silently acquiring a new authority. The CLI exposes `routine draft validate|publish <routine>` with explicit `--draft-id`, `--revision` and `--base-revision`; it sends one reviewed reference without a hidden draft GET or retry. Legacy `routine draft publish <file>` retains its validation-receipt flow. UI publication, the v2 Edit + Publish preset, bounded runtime and live profile acceptance remain separate work.
 
 
 ### Explicit routine history and outputs
@@ -530,8 +565,10 @@ needed for an ordinary shared history read.
 
 Private restricted-runtime receipts retain their separate actor/attempt/proof
 ceiling and existing own-result surface; they are not read from raw output
-storage through the history projection. Generalizing those result audiences,
-full ordered View/Run/Edit presets and direct Guest publication remain open.
+storage through the history projection. Generalizing those result audiences
+remains open. Ordered View/Run/Edit presets are available through Preview and Apply.
+Server-side direct Guest publication and CLI are described above; its UI and
+bounded runtime acceptance remain open.
 UI hard 401/403/404 responses remove result data, while transient refresh errors
 retain the last successful authorized projection with a notice.
 
@@ -569,7 +606,8 @@ The internal recorder accepts only a caller-owned transaction, a live trusted ad
 
 ### Read-only preset preview transport
 
-The administrative POST `/workspaces/{workspaceId}/members/{memberId}/access/presets/preview` and `workspace member access preset preview MEMBER --file selection.json` expose the transaction-scoped planner. They retain the existing administrative GET credential boundary, require current trusted OWNER/ADMIN authority and an existing restricted membership, reject unknown/trailing/oversized JSON and return no-store responses. Explicit membership incarnation/revision and deliberate reissue rights are never silently refreshed. Complete before/after provenance, saved choice, independent consequences and the confirmation digest are read-only; no apply endpoint is enabled by this slice.
+The administrative POST `/workspaces/{workspaceId}/members/{memberId}/access/presets/preview` and `workspace member access preset preview MEMBER --file selection.json` expose the transaction-scoped planner. They retain the existing administrative GET credential boundary, require current trusted OWNER/ADMIN authority and an existing restricted membership, reject unknown/trailing/oversized JSON and return no-store responses. Explicit membership incarnation/revision and deliberate reissue rights are never silently refreshed. Complete before/after provenance, saved choice, independent consequences and the confirmation digest are read-only. Applying the reviewed digest is a separate
+operation, described below.
 
 The reusable OpenAPI `MemberAccessPolicy` names the same complete administrative policy envelope used by existing GET and PUT. This documentation refactor preserves closed fields, required incarnation/revision/mode/rights and all grant/provenance constraints; it introduces no endpoint or permission change.
 

@@ -71,7 +71,18 @@ func TestExecutor_QueryStep_EndToEnd(t *testing.T) {
 			 "notify": {"to": "workspace", "title": "Workspace digest", "body": "{{ steps.summary.output }}"}}
 		]
 	}`
-	p := saveResumePipeline(t, deps.Store, "workspace-digest", def)
+	// The stored recipe and its query share the same workspace. A run must
+	// not borrow the ws_test recipe to read ws_e2e history.
+	if _, err := db.Exec(`INSERT INTO workspaces(id) VALUES('ws_e2e')`); err != nil {
+		t.Fatal(err)
+	}
+	in := validSaveInput("workspace-digest")
+	in.WorkspaceID, in.DefinitionJSON = "ws_e2e", def
+	in.Author = AuthorMeta{Via: AuthoredViaUser, UserID: "user_test"}
+	p, err := deps.Store.Save(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	res, err := exec.Run(context.Background(), RunInput{
 		PipelineID:  p.ID,

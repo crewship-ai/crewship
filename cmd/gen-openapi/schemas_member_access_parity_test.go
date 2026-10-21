@@ -33,12 +33,12 @@ func memberAccessTestRightVariants() []any {
 }
 
 func TestMemberAccessNamedSchemasPreserveContract(t *testing.T) {
-	// Independent copy of the prior inline contract. Expanded refs must preserve
-	// every field, operation and constraint, including orthogonal destructive rights.
+	// Independent expected contract, including the explicit publication right.
+	// Expanded refs must preserve every field and replacement constraint.
 	prior := func(kind string, operations []string) map[string]any {
 		return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"kind", "id", "operation"}, "properties": map[string]any{"kind": map[string]any{"type": "string", "enum": []string{kind}}, "id": map[string]any{"type": "string", "minLength": 1}, "operation": map[string]any{"type": "string", "enum": operations}}}
 	}
-	expected := map[string]any{"oneOf": []any{prior("agent", []string{"discover", "chat", "run", "delegate"}), prior("project", []string{"list", "read", "write", "delete", "contribute", "manage", "delete_issues"}), prior("routine", []string{"view", "results", "run", "edit"})}}
+	expected := map[string]any{"oneOf": []any{prior("agent", []string{"discover", "chat", "run", "delegate"}), prior("project", []string{"list", "read", "write", "delete", "contribute", "manage", "delete_issues"}), prior("routine", []string{"view", "results", "run", "edit", "publish"})}}
 	props := memberAccessPolicySchema()["properties"].(map[string]any)
 	for _, key := range []string{"rights", "reissue"} {
 		shape := props[key].(map[string]any)

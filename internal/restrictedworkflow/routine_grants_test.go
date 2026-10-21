@@ -18,7 +18,7 @@ func TestRoutineGrantsSelectThreeOfTenAndFenceRevocation(t *testing.T) {
 	}
 	for i := 0; i < 10; i++ {
 		id := fmt.Sprintf("selected-%d", i)
-		if _, err := s.db.Exec(`INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash,author_crew_id,status) VALUES(?,'w',?,?,?,?,'crew','active')`, id, id, id, routine, hash(routine)); err != nil {
+		if _, err := s.db.Exec(`INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash,author_crew_id,status,head_version) VALUES(?,'w',?,?,?,?,'crew','active',0)`, id, id, id, routine, hash(routine)); err != nil {
 			t.Fatal(err)
 		}
 	}

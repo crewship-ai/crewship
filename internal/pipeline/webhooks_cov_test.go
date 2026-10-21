@@ -35,6 +35,11 @@ func TestWebhookStore_Save_CreateMintsTokenAndDefaults(t *testing.T) {
 	t.Setenv("ENCRYPTION_KEY", testEncryptionKey)
 	db := openWebhookTestDB(t)
 	defer db.Close()
+	seedWebhookTarget(t, db, "ws_test", "pln_1")
+	// The existing numeric-pin assertion selects a real legacy archive.
+	if _, err := db.Exec(`INSERT INTO pipeline_versions(id,pipeline_id,version,definition_json,definition_hash,author_type,author_id) SELECT 'webhook-target-v3',id,3,definition_json,definition_hash,'user','user_test' FROM pipelines WHERE id='pln_1'; UPDATE pipelines SET head_version=3 WHERE id='pln_1'`); err != nil {
+		t.Fatal(err)
+	}
 	store := NewWebhookStore(db)
 	ctx := context.Background()
 
@@ -80,6 +85,8 @@ func TestWebhookStore_Save_CreateMintsTokenAndDefaults(t *testing.T) {
 func TestWebhookStore_Save_UpdatePreservesToken(t *testing.T) {
 	db := openWebhookTestDB(t)
 	defer db.Close()
+	seedWebhookTarget(t, db, "ws_test", "pln_1")
+	seedWebhookTarget(t, db, "ws_test", "pln_2")
 	store := NewWebhookStore(db)
 	ctx := context.Background()
 
@@ -209,6 +216,7 @@ func TestWebhook_ValidateSignature(t *testing.T) {
 func TestScanWebhook_DeletedAtBranch(t *testing.T) {
 	db := openWebhookTestDB(t)
 	defer db.Close()
+	seedWebhookTarget(t, db, "ws_test", "pln_1")
 	store := NewWebhookStore(db)
 	ctx := context.Background()
 

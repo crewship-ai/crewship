@@ -23,8 +23,8 @@ func seedPipelineRowDef(t *testing.T, db *sql.DB, wsID, id, slug, definitionJSON
 	t.Helper()
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := db.Exec(`
-		INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, created_at, updated_at, last_test_run_at)
-		VALUES (?, ?, ?, ?, ?, 'hash', ?, ?, ?)`,
+		INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, created_at, updated_at, last_test_run_at, head_version)
+		VALUES (?, ?, ?, ?, ?, 'hash', ?, ?, ?, 0)`,
 		id, wsID, slug, slug, definitionJSON, now, now, now); err != nil {
 		t.Fatalf("seed pipeline %s: %v", slug, err)
 	}

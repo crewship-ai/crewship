@@ -87,6 +87,10 @@ func fixture(t *testing.T) (*Service, *executor) {
 	definition := `{"dsl_version":"1.0","name":"issue-work","inputs":[{"name":"task","type":"string","required":true}],"steps":[{"id":"first","type":"agent_run","agent_slug":"worker","prompt":"{{ inputs.task }}"}]}`
 	h := sha256.Sum256([]byte(definition))
 	exec(`INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash,author_crew_id,status) VALUES('routine','w','issue-work','Issue work',?,?,'crew','active')`, definition, hex.EncodeToString(h[:]))
+	exec(`INSERT INTO pipeline_versions(id,pipeline_id,version,definition_json,definition_hash,author_type,author_id,parent_version,change_summary,created_at,chat_origin_id,authority_fingerprint,publication_authority_json)
+		SELECT id||'-v1',id,head_version,definition_json,definition_hash,'system','fixture',NULL,'Fixture legacy version',created_at,chat_origin_id,'legacy-trusted:v1',NULL
+		FROM pipelines WHERE id='routine'`)
+
 	exec(`INSERT INTO projects(id,workspace_id,name,slug) VALUES('p1','w','One','one'),('p2','w','Two','two')`)
 	for _, v := range []struct{ id, project, brief string }{{"i1", "p1", "H1 private canary"}, {"i2", "p2", "H2 private canary"}, {"projectless", "", "projectless canary"}} {
 		var project any = v.project
