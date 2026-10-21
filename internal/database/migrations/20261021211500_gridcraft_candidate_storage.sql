@@ -111,6 +111,7 @@ CREATE TABLE gridcraft_intents (
  PRIMARY KEY(workspace_id,page_id,mandate_id),
  FOREIGN KEY(workspace_id,page_id) REFERENCES gridcraft_heads(workspace_id,page_id) ON DELETE CASCADE
 );
+CREATE INDEX gridcraft_intents_human ON gridcraft_intents(human_user_id);
 CREATE TRIGGER gridcraft_intent_identity_immutable BEFORE UPDATE OF workspace_id,page_id,mandate_id,human_user_id,run_id,base_rev,generation,page_version,policy_version,targets_json,payload_hash ON gridcraft_intents
 BEGIN SELECT RAISE(ABORT,'Workbook mandate identity is immutable'); END;
 CREATE TRIGGER gridcraft_intent_revocation_terminal BEFORE UPDATE OF revoked_at ON gridcraft_intents

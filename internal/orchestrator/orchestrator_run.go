@@ -1560,12 +1560,9 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 		runToken := agentRunAuthToken(runKey, req.WorkspaceID, req.AgentID, req.RunID, o.logger)
 		routeKey := internaltoken.DeriveLLMRouteKey(ipcToken, req.WorkspaceID, req.CrewID)
 		llmRouteToken := internaltoken.DeriveLLMRunRouteToken(routeKey, req.AgentID, req.RunID)
-		configFingerprint := sidecarConfigFingerprint(ipcToken, req.Credentials)
+		configFingerprint := gridcraftSidecarFingerprint(ipcToken, req.Credentials, o.gridCraftEnabled)
 		if credentialIsolationFailedOpen(configFingerprint, req.Credentials) {
 			o.warnCredentialIsolationFailOpenOnce(req.AgentID)
-		}
-		if o.gridCraftEnabled {
-			configFingerprint += ":gridcraft-v1"
 		}
 		env = BuildEnvVarsSidecar(*req, keeperEnabled)
 		// #812: hand THIS agent its own per-agent bearer token. The agent

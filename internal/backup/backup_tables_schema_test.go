@@ -43,6 +43,7 @@ import (
 // either add it to BackupTables (FK-safe order, plus BackupTableIntent) or
 // write its reason here. "It is not important" is not a reason; see #1437.
 var workspaceTablesNotBundled = map[string]string{
+	"gridcraft_intents":                 "run-bound human instructions require fresh admission after restore",
 	"document_iteration_intents":        "targeted human-message authority requires fresh admission after recovery",
 	"document_creation_consents":        "one-use human creation permission is bound to the original installation and run",
 	"artifact_run_principals":           "live human-chat admissions require fresh authority after restore; portable bundles must not replay them",

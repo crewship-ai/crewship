@@ -37,13 +37,16 @@ func (r *Router) RegisterGridCraft(options mooring.Options, engine mooring.Engin
 		return
 	}
 	h := &gridcraftHTTP{pages: r.pages, store: store, engine: engine, operations: operations}
-	authed, ws := r.authMw.RequireAuth, r.authMw.RequireWorkspace
+	authed, wsCtx := r.authMw.RequireAuth, r.authMw.RequireWorkspace
+	internalAuth := func(next http.Handler) http.Handler {
+		return r.internalHandler.requireInternal(withHostChatOrigin(next))
+	}
 	// openapi: responses 200,400,401,403,404,409,429,500,503
-	r.mux.Handle("GET /api/v1/pages/{slug}/workbook", authed(ws(http.HandlerFunc(h.read))))
+	r.mux.Handle("GET /api/v1/pages/{slug}/workbook", authed(wsCtx(http.HandlerFunc(h.read))))
 	// openapi: responses 200,400,401,403,404,409,429,500,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/workbook/operations", roleInline, h.importFile)
 	// openapi: responses 200,400,401,403,404,409,429,500,503
-	r.mux.Handle("GET /api/v1/pages/{slug}/workbook/operations/{mutation}", authed(ws(http.HandlerFunc(h.status))))
+	r.mux.Handle("GET /api/v1/pages/{slug}/workbook/operations/{mutation}", authed(wsCtx(http.HandlerFunc(h.status))))
 	// openapi: responses 200,400,401,403,404,409,429,500,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/workbook/mandates", roleInline, h.mandate)
 	// openapi: responses 200,400,401,403,404,409,429,500,503
@@ -51,7 +54,7 @@ func (r *Router) RegisterGridCraft(options mooring.Options, engine mooring.Engin
 	// The crew IPC authenticates transport; the original signed run bearer is
 	// independently verified by artifactAgentRequest and checked again in SQL.
 	// openapi: responses 200,400,403,404,409,429,500,503
-	r.mux.Handle("POST /api/v1/internal/gridcraft", r.internalHandler.requireInternal(withHostChatOrigin(http.HandlerFunc(h.agent))))
+	r.mux.Handle("POST /api/v1/internal/gridcraft", internalAuth(http.HandlerFunc(h.agent)))
 }
 func gridcraftError(w http.ResponseWriter, err error) {
 	code, message := 500, "Workbook operation failed"

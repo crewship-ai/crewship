@@ -126,6 +126,9 @@ func (s *Store) reserve(ctx context.Context, k Key, r Request, a Authorize, e En
 				if err = json.Unmarshal(receipt, &value); err != nil {
 					return err
 				}
+				if value.OperationKey.ArtifactID != k.PageID || value.OperationKey.AuthorityID != p.AuthorityID || value.OperationKey.MutationID != r.MutationID {
+					return ErrConflict
+				}
 				res.receipt = &value
 				return nil
 			}
@@ -310,6 +313,9 @@ func (s *Store) Status(ctx context.Context, k Key, mutation string, a Authorize)
 		var receipt Receipt
 		if e := json.Unmarshal(data, &receipt); e != nil {
 			return e
+		}
+		if receipt.OperationKey.ArtifactID != k.PageID || receipt.OperationKey.AuthorityID != p.AuthorityID || receipt.OperationKey.MutationID != mutation {
+			return ErrConflict
 		}
 		out.Receipt = &receipt
 		v, e := readState(ctx, tx, k)

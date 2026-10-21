@@ -344,6 +344,7 @@
               "cli/page",
               "cli/doc",
               "cli/slides",
+              "cli/workbook",
               "cli/pipeline",
               "cli/webhook",
               "cli/waitpoint",
