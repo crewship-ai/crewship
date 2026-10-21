@@ -10,6 +10,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 - Create an explicitly private empty Page with `crewship page create --private --allow-empty` before initializing native Slides. Authorized Page detail and lists now identify saved Slides and their stored schema. Private Pages refuse legacy App operations, panel attachment, ordinary grants and public links.
+- New Documents retain their initial confirmed version in history, so it remains readable after later edits.
 - Build releases with Go 1.27.3 to fix the reachable crypto/x509 certificate verification vulnerability GO-2026-6809.
 - **Chat says Stopping until the stop is confirmed.** After Stop on a live reply, the Stop button reads **Stopping…** and does nothing more until the server reports how the turn ended; pressing it again sends no second cancel. The partial reply stays on screen, and a turn that did not complete ends with one line in words: **Stopped**, **Interrupted** or **The run failed**, each noting that the reply above is partial or may be incomplete (or that it ended before any reply); the line stays after a reload. Applies to chats on the versioned event stream; older streams still return to ready at once.
 - **New Doc states who can open the document.** The dialog no longer calls a new Doc private: it says **Who can open it — you, and workspace owners and admins; others only after you share it**, which is what the server enforces for a Doc created there. The Pages guide says the same and notes that such a Doc is not listed in **My space**, which holds only Documents whose audience is you alone.
@@ -45,6 +46,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Preserve Claude Code tool result text and error details in chat and run traces when the CLI returns structured content blocks.
 - Reject unsupported Document revision selectors instead of silently returning the latest content. Saved checkpoints remain available through their explicit reader.
+- **Edit a chat's saved document without leaving the chat.** The document panel opened from a result card now has **Edit here**: the body becomes the document's own editor, with its save state and recovery, and **Done editing** shows the saved result. Leaving editing or closing the panel with unsent edits asks first; **Open full editor** still opens the Page in a new tab (#3886).
 - **The Document save status separates "saved locally" from "confirmed by server".** While work is unsent the header says whether the browser has kept a copy, is still writing it, or could not store it; only a server receipt shows "Confirmed by server".
 - **Unconfirmed Document edits survive browser reloads.** Pending human edits are retained privately per signed-in user and document before transmission; reopening offers explicit recovery after current access is checked. Unavailable browser storage prevents editing, and restored drafts never replay an old write grant automatically. The browser copy is deleted when access to the document is lost (401, 403, 404) and on sign-out, session expiry or a change of signed-in user, so a shared browser keeps no private text.
 
