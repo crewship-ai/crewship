@@ -192,6 +192,9 @@ func (s Store) PlanPresetIn(ctx context.Context, tx *sql.Tx, actor, user, worksp
 			union[r] = true
 		}
 	}
+	if err := publicationDependencies(desired); err != nil {
+		return PresetPreview{}, err
+	}
 	slices.SortFunc(result.AfterRights, less)
 	keys := []Right{}
 	for r := range union {

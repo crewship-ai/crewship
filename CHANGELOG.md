@@ -9,8 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 - A Document or Slides page with edits the server has not accepted now asks before an in-app link leaves it (Keep editing or Leave anyway); the link used to do nothing and say nothing.
-
 - Replaying a Document creation submission after a lost reply no longer adds a duplicate human message or starts another run.
+- Enter in a Document acts where the caret is shown: after a quick keyboard caret move such as Ctrl+End, it no longer splits the document where the caret was a moment before.
 - Explicitly update an existing personal Document from its private chat with `run --document-target`, retaining the original human purpose and revision through agent drafting.
 - New Documents retain their initial confirmed version in history, so it remains readable after later edits.
 - Build releases with Go 1.27.3 to fix the reachable crypto/x509 certificate verification vulnerability GO-2026-6809.
@@ -27,6 +27,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Access changes and their audit commit together.** Workspace/crew settings, crew deletion and admin session/lockout changes roll back if audit fails. Private membership and invitation snapshots retain old rights without exposing them through public feeds or search; provisioning records non-secret account/setup facts.
 - **First-run Setup records crew membership atomically.** Setup requires current crew-creation authority (MANAGER, ADMIN or OWNER); stale, suspended and globally restricted accounts cannot create a crew through onboarding.
+
+- **Routine Publish is an explicit share.** Member policies, invitations and provisioning accept `publish` only together with `edit` for the same routine; otherwise they return 422 without writes. View and Run stay separate. Preset changes preserve this dependency. Bounded publication archives retain their authority across backup/restore and cannot enter generic runs or triggers.
 - **Harbor 2: the rail on one axis.** Every icon, the workspace mark, Search, the Crewship sail and your avatar are centred on the same line in the folded and the open rail; icons are 18 px, and the workspace, the sail and you are all 28 px. Search is an icon like any other row in the folded rail and a borderless field in the open one. The open workspace card shows your role under the name. The app list scrolls between a fixed top and foot with a fade at the edge, and groups (Work, Build) fold in the open rail and stay folded on this device. The sail stays Crewship blue in every style.
 - **The Crewship sail is always in the rail.** It ends the rail, just above the footer's rule, in its own lit blue tile, and stays when the rail folds to icons; the top of the rail is the workspace switcher and Search. It opens **About Crewship**: what Crewship is, the edition and build, and links to the documentation, what's new and reporting a problem.
 - **Linked issues appear in a new chat without a reload.** After the first message of a new conversation, the chat used to show a bare **Unavailable** line and no linked issue, proposal or decision cards until the page was reloaded; it now checks access as soon as the conversation exists.

@@ -118,7 +118,7 @@ func finalSpecialDomainSchemaCatalog() map[string]DomainSchema {
 		},
 		"GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}": {Response: restrictedIssueSchema(), SuccessStatuses: []string{"200"}},
 		"GET /api/v1/workspaces/{workspaceId}/members/{memberId}/access":   {Response: ref("MemberAccessPolicy")},
-		"PUT /api/v1/workspaces/{workspaceId}/members/{memberId}/access":   {RequestRequired: true, Request: ref("MemberAccessPolicy"), Response: ref("MemberAccessPolicy")},
+		"PUT /api/v1/workspaces/{workspaceId}/members/{memberId}/access":   {RequestRequired: true, Request: ref("MemberAccessPolicy"), Response: ref("MemberAccessPolicy"), ErrorStatuses: []string{"422"}},
 		"GET /api/v1/crews/{crewId}/service-states":                        {Response: serviceStates},
 		"PUT /api/v1/crews/{crewId}/services/{serviceName}/state":          {RequestRequired: true, Request: serviceIntent, Response: serviceResult},
 		"PUT /api/v1/crew-connections/{connectionId}/file-access":          {RequestRequired: true, Request: fileAccessRequest, Response: fileAccessResponse},

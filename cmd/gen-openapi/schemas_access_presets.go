@@ -25,7 +25,7 @@ func accessPresetSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	base := "/api/v1/workspaces/{workspaceId}"
 	return map[string]DomainSchema{
 		"GET " + base + "/access/presets":                             {Response: ref("AccessPresetCatalog"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"400", "401", "403", "404", "500"}, SuccessHeaders: headers},
-		"POST " + base + "/members/{memberId}/access/presets/apply":   {Request: ref("AccessPresetApplyRequest"), RequestRequired: true, Response: ref("MemberAccessPolicy"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"400", "401", "403", "404", "409", "500"}, SuccessHeaders: headers},
-		"POST " + base + "/members/{memberId}/access/presets/preview": {Request: ref("AccessPresetRequest"), RequestRequired: true, Response: ref("AccessPresetPreview"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"400", "401", "403", "404", "409", "500"}, SuccessHeaders: headers},
+		"POST " + base + "/members/{memberId}/access/presets/apply":   {Request: ref("AccessPresetApplyRequest"), RequestRequired: true, Response: ref("MemberAccessPolicy"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"400", "401", "403", "404", "409", "422", "500"}, SuccessHeaders: headers},
+		"POST " + base + "/members/{memberId}/access/presets/preview": {Request: ref("AccessPresetRequest"), RequestRequired: true, Response: ref("AccessPresetPreview"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"400", "401", "403", "404", "409", "422", "500"}, SuccessHeaders: headers},
 	}, components
 }

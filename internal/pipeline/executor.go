@@ -765,7 +765,12 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	if err := e.checkInvokingUser(ctx, in); err != nil {
 		return nil, err
 	}
-	p, err := e.store.GetByID(ctx, in.PipelineID)
+	var p *Pipeline
+	if in.Mode == ModeRun {
+		p, err = e.store.loadGenericSelected(ctx, in.PipelineID, in.WorkspaceID, in.PinnedVersion)
+	} else {
+		p, err = e.store.GetByID(ctx, in.PipelineID)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("executor: load pipeline: %w", err)
 	}
@@ -797,7 +802,7 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 		captured.DefinitionJSON = in.resumeDefinitionJSON
 		captured.DefinitionHash = in.resumeDefinitionHash
 		p = &captured
-	} else if in.PinnedVersion != nil {
+	} else if in.PinnedVersion != nil && in.Mode != ModeRun {
 		v, verr := e.store.GetVersion(ctx, p.ID, *in.PinnedVersion)
 		if verr != nil {
 			if errors.Is(verr, ErrNotFound) {
@@ -2369,6 +2374,12 @@ func (e *Executor) runCallPipelineStep(ctx context.Context, step Step, parent Ru
 			return "", 0, 0, fmt.Errorf("call_pipeline: %w (slug=%q)", ErrPipelineNotFound, step.PipelineSlug)
 		}
 		return "", 0, 0, fmt.Errorf("call_pipeline: lookup: %w", err)
+	}
+	if parent.Mode == ModeRun {
+		target, err = e.store.loadGenericSelected(ctx, target.ID, parent.WorkspaceID, nil)
+		if err != nil {
+			return "", 0, 0, fmt.Errorf("call_pipeline %q: %w", step.PipelineSlug, err)
+		}
 	}
 	// Governance gate (#1417, belt-and-suspenders). runDSL enforces this
 	// too, but reject here as well so the sentinel wraps cleanly for
