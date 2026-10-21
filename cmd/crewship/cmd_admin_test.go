@@ -28,6 +28,8 @@ func newAdminResetCmdForTest() *cobra.Command {
 
 func initTestDB(t *testing.T) string {
 	t.Helper()
+	// Local recovery owns an app keyring as well as a database file.
+	t.Setenv("CREWSHIP_DATA_DIR", t.TempDir())
 	db := testutil.MigratedDB(t)
 	dbURL := "file:" + db.Path()
 	// The command under test opens this URL itself, so hand back a file no

@@ -1002,6 +1002,17 @@ func (r *Router) SetSteerer(s Steerer) {
 // RouterOption is a functional option for configuring a Router.
 
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	// The configured writer owns the boot snapshot. Do not reread environment
+	// or key files between the instance/journal writes of one request.
+	if provider, ok := r.journal.(interface {
+		SigningKeySnapshot() (*journal.SigningKeys, error)
+	}); ok {
+		keys, err := provider.SigningKeySnapshot()
+		if err != nil {
+			keys = nil
+		}
+		req = req.WithContext(journal.WithSigningKeys(req.Context(), keys))
+	}
 	// Order matters: SecurityHeaders runs outermost so headers go on every
 	// response (incl. 403s from the origin check); VersionHeader rides the
 	// same everything-gets-it slot so even error responses let a skewed CLI

@@ -585,6 +585,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	// UNIQUE collision (#2274). Non-empty only on a forked restore.
 	var capabilityTokensReminted map[string]int
 	var checkpointSourceWorkspaces []string
+	var checkpointSourceIDs []string
 	if extracted.DBDump != nil && !opts.FilesOnly {
 		for _, r := range extracted.DBDump.Tables["crews"] {
 			slug, _ := r["slug"].(string)
@@ -600,6 +601,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		for _, r := range extracted.DBDump.Tables[journalCheckpointsTable] {
 			ws, _ := r["workspace_id"].(string)
 			checkpointSourceWorkspaces = append(checkpointSourceWorkspaces, ws)
+			checkpointSourceIDs = append(checkpointSourceIDs, rowString(r, "id"))
 		}
 		if opts.AsWorkspace != "" {
 			rewriteWorkspaceSlug(extracted.DBDump, opts.AsWorkspace)
@@ -675,7 +677,12 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			chainProv.BundleSHA256 = manifest.Checksums.PayloadSHA256
 			chainProv.Actor = opts.Actor
 			chainProv.CheckpointSourceWorkspaces = checkpointSourceWorkspaces
-			chainStats, err := rechainForkedJournal(ctx, db, extracted.DBDump, journal.ChainKeyFromEnv(), chainProv)
+			chainProv.CheckpointSourceIDs = checkpointSourceIDs
+			auditKeys, keyErr := journal.SigningKeysForContext(ctx)
+			if keyErr != nil {
+				return nil, keyErr
+			}
+			chainStats, err := rechainForkedJournalWithKeys(ctx, db, extracted.DBDump, auditKeys, chainProv)
 			if err != nil {
 				return nil, err
 			}

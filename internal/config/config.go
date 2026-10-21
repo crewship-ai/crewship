@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/journal"
 	"gopkg.in/yaml.v3"
 )
 
@@ -57,9 +58,17 @@ type Config struct {
 	Composio  ComposioConfig  `yaml:"composio"`
 	Documents DocumentsConfig `yaml:"documents"`
 	Slides    SlidesConfig    `yaml:"slides"`
+	Audit     AuditConfig     `yaml:"audit"`
 
 	LocalModels  LocalModelsConfig  `yaml:"local_models"`
 	Orchestrator OrchestratorConfig `yaml:"orchestrator"`
+}
+
+// AuditConfig names an immutable external keyring. Normal boot publishes the
+// app-owned default in DataDir; secret keys are never serialized in config.
+type AuditConfig struct {
+	KeyringPath string               `yaml:"keyring_path"`
+	Keys        *journal.SigningKeys `yaml:"-" json:"-"`
 }
 
 // OrchestratorConfig holds settings for the agent-run orchestrator's
@@ -325,6 +334,14 @@ func Load(path string) (*Config, error) {
 	}
 
 	applyEnvOverrides(cfg)
+	if path := os.Getenv(journal.SigningKeysPathEnv); path != "" {
+		cfg.Audit.KeyringPath = path
+	}
+	var auditErr error
+	cfg.Audit.Keys, auditErr = journal.LoadSigningKeys(cfg.Audit.KeyringPath)
+	if auditErr != nil {
+		return nil, fmt.Errorf("audit key configuration: %w", auditErr)
+	}
 	capturePathEnvSources(cfg)
 
 	// Autodetect sidecar binary + entrypoint.sh paths when not explicitly set.

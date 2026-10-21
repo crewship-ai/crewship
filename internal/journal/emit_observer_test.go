@@ -103,6 +103,7 @@ func TestWriter_CommitObserver_PoisonPathOnlyCommitted(t *testing.T) {
 		t.Fatalf("schema: %v", err)
 	}
 
+	addAuditSigningFixture(t, db)
 	w := NewWriter(db, quietLogger(), WriterOptions{
 		QueueSize:     16,
 		FlushSize:     3, // one batch holds all three

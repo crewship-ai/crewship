@@ -34,6 +34,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/inbox"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/leader"
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/logging"
@@ -206,6 +207,16 @@ var startCmd = &cobra.Command{
 		cfg, err := config.Load(configPath)
 		if err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
+		}
+		auditKeys, auditPath, err := journal.EnsureSigningKeys(dataDir.Root, cfg.Audit.KeyringPath)
+		if err != nil {
+			return fmt.Errorf("initialize audit keyring: %w", err)
+		}
+		cfg.Audit.Keys, cfg.Audit.KeyringPath = auditKeys, auditPath
+		// Bootstrap exports the app-owned location once, like secrets.env. Normal
+		// request/background writers still share the immutable boot snapshot.
+		if err := os.Setenv(journal.SigningKeysPathEnv, auditPath); err != nil {
+			return err
 		}
 		debugBuffer := logging.NewRingBuffer(500)
 		innerLogger := logging.New(cfg.Logging.Level, "json", os.Stdout)

@@ -288,19 +288,43 @@ to the database**. A bare hash would give them no trouble: they could edit a
 row, recompute its `entry_hash`, and recompute `prev_hash`/`entry_hash` for
 every following row, producing a perfectly self-consistent forged chain.
 
-Crewship defeats this by keying the chain. `entry_hash` is
-`HMAC-SHA256(chain_key, …)`, where `chain_key` is **derived from the persisted
-`ENCRYPTION_KEY`** (domain-separated, one-way) and **never stored in the
-database**:
+New journal and instance audit rows carry `chain_key_id` and
+`chain_mac_version = 2`. Their MAC binds the key ID, version, purpose and row
+content. The active signing key and retained verification keys live in a
+private keyring outside the database. Normal server boot creates a random
+active key once in `<data-dir>/audit-keyring.json` with mode `0600`; it never
+overwrites an existing or invalid file.
+
+Legacy rows with both key columns NULL retain their original byte layout and
+verification derivation:
 
 ```
 chain_key = HMAC-SHA256(ENCRYPTION_KEY, "crewship journal chain v1\x00")
 ```
 
-An attacker with DB write can still mutate rows, but cannot recompute a valid
-`entry_hash` without the key — so verification fails. The same key derivation is
-used by the write path, the verifier, and the upgrade migration's backfill, so
-they never drift.
+The retained `legacy-v1` key is verification-only. Vault-key rotation does not
+change an existing audit keyring or rewrite historical MACs. An attacker with
+database write access cannot recompute a valid MAC without its signing key.
+
+Operators may configure an external private keyring through
+`CREWSHIP_AUDIT_KEYRING_PATH` or YAML `audit.keyring_path`. It contains an
+`active_key_id` and a `keys` array of `{id, key_b64}` records, with unique IDs
+and 32-byte keys. Rotate by choosing a new active ID and retaining every key
+needed to verify old rows. The process snapshots the keyring at boot; changes
+require a restart. These HMAC verification keys are secrets, not public keys.
+
+A missing historical key is reported as unverified, rather than proven
+tampering. Audit append admission verifies the chain inside the writer transaction,
+after native insert triggers; a missing verification key or invalid chain refuses
+the append. This walks history once per affected workspace in a journal batch;
+instance audit appends also walk their chain. There is no new quarantine state;
+audit-producing writes fail while reads and unrelated chains retain their
+own authority checks. Database contention and cancellation do not establish
+tampering. Investigate before the current OWNER records an explicit
+[`audit reseal`](/cli/audit#crewship-audit-reseal) checkpoint with the reviewed
+old tail and a reason. It starts a separately authenticated segment without
+changing old rows. `continuation_verified` does not change a historical
+`historical_unverified` or `historical_invalid` verdict into a clean history.
 
 ### What the chain detects
 
@@ -443,10 +467,11 @@ claim and are unaffected.
   **Residual gaps (no overclaiming).** Two attacks are *not* fully covered:
   **tail truncation** — deleting the newest N entries leaves a shorter but
   internally-consistent chain (anchoring the tip with a signed high-water
-  checkpoint is the tracked follow-up, issue #1369); and **plaintext dev mode**
-  — when no `ENCRYPTION_KEY` is configured the chain key is derived from an
-  empty seed and is therefore reproducible, so keying degrades to detecting only
-  key-unaware edits. Production installs always have a persisted `ENCRYPTION_KEY`.
+  checkpoint is the tracked follow-up, issue #1369); and **legacy plaintext
+  dev history** — old NULL-key rows written with an empty encryption seed use
+  a reproducible key. While that known key is retained, a database writer can
+  forge legacy-framed rows, including a downgrade to that framing. A random
+  active key protects v2 MACs but cannot strengthen a known retained key.
 </Note>
 
 #### A forked restore starts a new chain

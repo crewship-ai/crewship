@@ -21391,6 +21391,390 @@
         "x-crewship-read-only": true
       }
     },
+    "/api/v1/admin/audit/head": {
+      "get": {
+        "description": "Get admin audit head (GET /api/v1/admin/audit/head).",
+        "operationId": "get_api_v1_admin_audit_head",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "tail_hash": {
+                      "type": "string"
+                    },
+                    "tail_seq": {
+                      "format": "int64",
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "tail_seq",
+                    "tail_hash"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get admin audit head",
+        "tags": [
+          "admin"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/admin/audit/reseal": {
+      "post": {
+        "description": "Submit admin audit reseal (POST /api/v1/admin/audit/reseal).",
+        "operationId": "post_api_v1_admin_audit_reseal",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "Workspace scope requires workspace_id; instance scope requires it to be empty or omitted. Tail sequence/hash are compared before any checkpoint is written.",
+                "properties": {
+                  "expected_tail_hash": {
+                    "description": "Exact reviewed hash, nonempty for a positive tail sequence.",
+                    "maxLength": 128,
+                    "type": "string"
+                  },
+                  "expected_tail_seq": {
+                    "format": "int64",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "reason": {
+                    "description": "Trimmed explanation, 8–512 UTF-8 bytes. The complete JSON body is limited to 4096 bytes.",
+                    "type": "string"
+                  },
+                  "scope": {
+                    "enum": [
+                      "workspace",
+                      "instance"
+                    ],
+                    "type": "string"
+                  },
+                  "workspace_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "scope",
+                  "expected_tail_seq",
+                  "expected_tail_hash",
+                  "reason"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "checkpoint_id": {
+                      "type": "string"
+                    },
+                    "continuation_verified": {
+                      "type": "boolean"
+                    },
+                    "historical_status": {
+                      "enum": [
+                        "verified",
+                        "historical_unverified",
+                        "historical_invalid"
+                      ],
+                      "type": "string"
+                    },
+                    "scope": {
+                      "enum": [
+                        "workspace",
+                        "instance"
+                      ],
+                      "type": "string"
+                    },
+                    "tail_hash": {
+                      "type": "string"
+                    },
+                    "tail_seq": {
+                      "format": "int64",
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "workspace_id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "scope",
+                    "workspace_id",
+                    "checkpoint_id",
+                    "tail_seq",
+                    "tail_hash",
+                    "continuation_verified",
+                    "historical_status"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit admin audit reseal",
+        "tags": [
+          "admin"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
     "/api/v1/admin/backups": {
       "delete": {
         "description": "Delete admin backups (DELETE /api/v1/admin/backups).",
@@ -37435,21 +37819,104 @@
               "application/json": {
                 "schema": {
                   "properties": {
-                    "broken_at": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "checked": {
+                    "break_count": {
                       "type": "integer"
                     },
-                    "error": {
-                      "nullable": true,
+                    "breaks": {
+                      "items": {
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "seq": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "seq",
+                          "id",
+                          "kind",
+                          "reason"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "breaks_truncated": {
+                      "type": "boolean"
+                    },
+                    "broken_id": {
                       "type": "string"
                     },
-                    "intact": {
+                    "broken_seq": {
+                      "type": "integer"
+                    },
+                    "checkpoints": {
+                      "type": "integer"
+                    },
+                    "continuation_verified": {
                       "type": "boolean"
+                    },
+                    "count": {
+                      "type": "integer"
+                    },
+                    "historical_status": {
+                      "type": "string"
+                    },
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "repairable": {
+                      "items": {
+                        "properties": {
+                          "emit_priority": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "seq": {
+                            "type": "integer"
+                          },
+                          "stored_priority": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "seq",
+                          "id",
+                          "stored_priority",
+                          "emit_priority"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "repairable_count": {
+                      "type": "integer"
+                    },
+                    "repairable_truncated": {
+                      "type": "boolean"
+                    },
+                    "workspace_id": {
+                      "type": "string"
                     }
                   },
+                  "required": [
+                    "workspace_id",
+                    "ok",
+                    "count",
+                    "continuation_verified"
+                  ],
                   "type": "object"
                 }
               }
@@ -42186,24 +42653,6 @@
               }
             },
             "description": "OK"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Bad Request"
           },
           "401": {
             "content": {

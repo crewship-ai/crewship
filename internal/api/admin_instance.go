@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/hmac"
 	"database/sql"
 	"errors"
 	"github.com/crewship-ai/crewship/internal/keeper/governance"
@@ -1093,6 +1094,21 @@ type instanceAuditRow struct {
 // max 500) and ?entity_id= narrow it to one person or workspace.
 // GET /api/v1/admin/instance/audit
 func (h *InstanceAdminHandler) AuditLog(w http.ResponseWriter, r *http.Request) {
+	keys, keyErr := journal.SigningKeysForContext(r.Context())
+	if keyErr != nil {
+		replyInternalError(w, h.logger, "load audit verification keys", keyErr)
+		return
+	}
+	anchor, err := latestInstanceAuditCheckpoint(r.Context(), h.db, keys)
+	if err != nil {
+		replyInternalError(w, h.logger, "read audit checkpoint", err)
+		return
+	}
+	checkpointSeq := int64(0)
+	if anchor != nil {
+		checkpointSeq = anchor.OldTailSeq + 1
+	}
+	provenFailure := false
 	limit := 100
 	if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && v > 0 {
 		limit = min(v, 500)
@@ -1138,12 +1154,28 @@ func (h *InstanceAdminHandler) AuditLog(w http.ResponseWriter, r *http.Request) 
 		if fields.Metadata.Valid {
 			a.Metadata = fields.Metadata.String
 		}
-		a.Integrity = proof.integrity(fields)
+		a.Integrity = proof.integrityWithKeys(keys, fields)
+		if anchor != nil && anchor.HistoricalStatus != "verified" && proof.seq.Valid && proof.seq.Int64 < checkpointSeq && a.Integrity != "entry_verified" {
+			a.Integrity = anchor.HistoricalStatus
+		}
+		if (anchor == nil || proof.seq.Int64 >= checkpointSeq) && a.Integrity == "invalid" {
+			expected, macErr := journal.InstanceAuditMACForKeys(keys, proof.keyID, proof.macVersion, proof.seq.Int64, proof.prev.String, fields)
+			if macErr == nil && !hmac.Equal([]byte(expected), []byte(proof.hash.String)) {
+				provenFailure = true
+			}
+		}
 		out = append(out, a)
 	}
 	if err := rows.Err(); err != nil {
 		replyInternalError(w, h.logger, "instance audit: rows", err)
 		return
+	}
+	if err := rows.Close(); err != nil {
+		replyInternalError(w, h.logger, "close audit verification", err)
+		return
+	}
+	if provenFailure {
+		h.logger.Error("instance audit chain integrity failure; inspect audit history before explicit OWNER reseal")
 	}
 	writeJSON(w, http.StatusOK, out)
 }

@@ -24,6 +24,7 @@ import (
 	"filippo.io/age"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/quiesce"
 	"github.com/crewship-ai/crewship/internal/safepath"
 	"github.com/crewship-ai/crewship/internal/tsformat"
@@ -660,6 +661,17 @@ var runtimeResets = []struct{ table, what string }{
 }
 
 func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *RecoveryKit, dataDir string, logger *slog.Logger, serviceArgs ...instanceServiceRecovery) error {
+	if kit != nil {
+		keys, err := kit.AuditSigningKeys()
+		if err != nil {
+			if !errors.Is(err, journal.ErrSigningKeyUnavailable) {
+				return err
+			}
+			rep.Warnings = append(rep.Warnings, "the older recovery kit has no usable audit keyring: historical MACs remain unverified and affected audit writes require an explicit OWNER checkpoint")
+		} else {
+			ctx = journal.WithSigningKeys(ctx, keys)
+		}
+	}
 	env, err := kitEnv(kit)
 	if err != nil {
 		return err
@@ -842,6 +854,13 @@ func writeRecoveredSecrets(rep *RecoverReport, kit *RecoveryKit, dataDir string)
 				values[k] = v
 			}
 		}
+	}
+	if kit != nil && len(kit.AuditKeyring) > 0 {
+		auditPath, err := journal.RestoreSigningKeys(dataDir, kit.AuditKeyring)
+		if err != nil {
+			return err
+		}
+		kitLines = append(kitLines, journal.SigningKeysPathEnv+"="+auditPath)
 	}
 	if err := writeEnvFile(secretsPath, []string{
 		"# crewship: secrets for a recovered instance, written by `crewship recover`.",
