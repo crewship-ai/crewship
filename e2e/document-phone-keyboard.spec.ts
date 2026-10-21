@@ -17,6 +17,8 @@ import { documentSchema } from "../lib/documents/schema"
 //     edit is unsent (+ "Saving to this browser…" / "Saved locally in this
 //     browser" · "not yet confirmed by server"), then "Saved · Confirmed by
 //     server" once the patch receipt verified;
+//   - every toolbar control, Edit and Done is reachable by Tab and has a name;
+//   - Enter on "Heading 1" turns the paragraph into a heading.
 
 test.use({
   viewport: { width: 390, height: 844 },
