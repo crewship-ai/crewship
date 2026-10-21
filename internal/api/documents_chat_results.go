@@ -26,9 +26,33 @@ type DocumentChatResultsResponse struct {
 	Results []DocumentChatResult `json:"results"`
 }
 
+type ChatDocumentLink struct {
+	LinkID     string `json:"link_id"`
+	Kind       string `json:"kind"`
+	PageID     string `json:"page_id"`
+	Name       string `json:"name"`
+	Accessible bool   `json:"accessible"`
+	Mode       string `json:"mode"`
+}
+
+type ChatDocumentLinksResponse struct {
+	Scope string             `json:"scope"`
+	Links []ChatDocumentLink `json:"links"`
+}
+
 // ListChatDocumentResults returns durable saved Documents recorded by creation,
 // never results inferred from model messages or run completion.
 func (h *PageHandler) ListChatDocumentResults(w http.ResponseWriter, r *http.Request) {
+	h.listChatDocumentResults(w, r, false)
+}
+
+// ListChatDocumentLinks exposes only durable native Document provenance. It
+// deliberately carries no creation revision as a pin to the current head.
+func (h *PageHandler) ListChatDocumentLinks(w http.ResponseWriter, r *http.Request) {
+	h.listChatDocumentResults(w, r, true)
+}
+
+func (h *PageHandler) listChatDocumentResults(w http.ResponseWriter, r *http.Request, links bool) {
 	artifactCommentHeaders(w)
 	user := UserFromContext(r.Context())
 	agent, _ := pageGrantCallerIsAgent(r)
@@ -170,6 +194,14 @@ func (h *PageHandler) ListChatDocumentResults(w http.ResponseWriter, r *http.Req
 		if !h.auditPrivateOwnerAccess(w, r, rec) {
 			return
 		}
+	}
+	if links {
+		items := make([]ChatDocumentLink, 0, len(results))
+		for _, result := range results {
+			items = append(items, ChatDocumentLink{LinkID: "document:" + result.PageID, Kind: "artifact", PageID: result.PageID, Name: result.Title, Accessible: true, Mode: "latest"})
+		}
+		writeJSON(w, 200, ChatDocumentLinksResponse{Scope: "latest_native_documents", Links: items})
+		return
 	}
 	writeJSON(w, 200, DocumentChatResultsResponse{Results: results})
 }

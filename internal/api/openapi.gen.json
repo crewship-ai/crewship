@@ -2097,6 +2097,67 @@
         ],
         "type": "object"
       },
+      "ChatDocumentLinks": {
+        "additionalProperties": false,
+        "properties": {
+          "links": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "accessible": {
+                  "enum": [
+                    true
+                  ],
+                  "type": "boolean"
+                },
+                "kind": {
+                  "enum": [
+                    "artifact"
+                  ],
+                  "type": "string"
+                },
+                "link_id": {
+                  "type": "string"
+                },
+                "mode": {
+                  "enum": [
+                    "latest"
+                  ],
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "page_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "link_id",
+                "kind",
+                "page_id",
+                "name",
+                "accessible",
+                "mode"
+              ],
+              "type": "object"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
+          "scope": {
+            "enum": [
+              "latest_native_documents"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "links"
+        ],
+        "type": "object"
+      },
       "ChatEntityIdentity": {
         "properties": {
           "deleted": {
@@ -61352,6 +61413,177 @@
           }
         ],
         "summary": "Get chat execution profile",
+        "tags": [
+          "chats"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/chats/{chatId}/links": {
+      "get": {
+        "description": "List chat links (GET /api/v1/chats/{chatId}/links).",
+        "operationId": "get_api_v1_chats_chatId_links",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chatId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatDocumentLinks"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "List chat links",
         "tags": [
           "chats"
         ],

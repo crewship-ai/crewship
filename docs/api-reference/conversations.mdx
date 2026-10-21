@@ -938,3 +938,16 @@ a fresh launch-specific check; paid-provider admission still checks the current
 budget after a human wait. The default evaluator does not match ordinary
 `agent_run` calls, so configured sync mode alone does not promise a blocking gate.
 See [the run gate](/guides/harbormaster#where-the-run-level-mode-comes-from).
+
+
+## Saved Document links
+
+`GET /api/v1/chats/{chatId}/links?workspace_id=<workspace-id>` lists up to 20 saved native Documents durably created by that conversation, newest first. It requires a current human credential with `pages:read`, current conversation visibility and read access to each Document. Inaccessible Documents are omitted entirely, without a placeholder or hidden count. Private owner inspection remains audited. Responses use `Cache-Control: no-store`.
+
+```json
+{"scope":"latest_native_documents","links":[{"link_id":"document:page-id","kind":"artifact","page_id":"page-id","name":"Report","accessible":true,"mode":"latest"}]}
+```
+
+Every link opens the explicit latest Document. The response carries no `revision` or `checkpoint_id`: a creation revision does not identify the current saved head. `scope` limits this endpoint to saved native Documents; it is not a complete library of files, tools, work or other artifact types. An empty `links` array says nothing about those other kinds. This read grants no edit or agent permission.
+
+Errors: `401` for a missing or revoked human credential; `403` for insufficient token scope or workspace membership; `404` for an unavailable conversation; `500` for a persistence/read failure; `503` when Documents are disabled, after conversation authorization. A temporary failure does not mean access was revoked. Use `crewship chat artifact-links <chat-id>` for the same projection. The frontend artifact-context flag remains disabled until its other API families are available.

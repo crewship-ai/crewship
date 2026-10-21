@@ -800,3 +800,14 @@ the original accepted outcome and Issue IDs.
 TEXT information requests. Use the reviewed source version and preserve the
 operation key across uncertain retries. These commands share the authoritative
 source with Inbox and cannot approve workflows, credentials or entire runs.
+
+
+## `crewship chat artifact-links <chat-id>`
+
+List durable saved native Documents linked to an accessible conversation. Requires a selected workspace and a current human credential with `pages:read`.
+
+```bash
+crewship chat artifact-links <chat-id> --format json
+```
+
+Calls `GET /api/v1/chats/{chatId}/links`. The response has `scope: "latest_native_documents"` and up to 20 readable links, newest first, each with `mode: "latest"`. It excludes inaccessible items and contains no Document content, revision pins or hidden counts. Files, tools, work and other artifact kinds are outside this scope; an empty list does not claim those kinds are absent. It never creates a grant or starts an agent run. See [Saved Document links](/api-reference/conversations#saved-document-links) for response and error details.

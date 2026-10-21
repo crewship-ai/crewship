@@ -23,6 +23,14 @@ import (
 // bytes are fixtures: result listing must not require an engine data RPC, a live
 // run principal, or a restored consent. Creation/Node qualification is separate.
 func TestAcceptance_DocumentChatResultsBinary(t *testing.T) {
+	testSavedDocumentChatMetadataBinary(t, false)
+}
+
+func TestAcceptance_ChatDocumentLinksBinary(t *testing.T) {
+	testSavedDocumentChatMetadataBinary(t, true)
+}
+
+func testSavedDocumentChatMetadataBinary(t *testing.T, links bool) {
 	db := testutil.MigratedDB(t).DB
 	const workspace = "cdocresultworkspace001"
 	execSQL := func(query string, args ...any) {
@@ -44,6 +52,13 @@ func TestAcceptance_DocumentChatResultsBinary(t *testing.T) {
 		`INSERT INTO document_creations(page_id,workspace_id,run_id,agent_id,human_user_id,source_chat_id,submission_id,mutation_id,request_digest,revision,created_at) VALUES('result-page','cdocresultworkspace001','recovered-ended-run','result-agent','result-owner','result-chat','original-human-message','one-result','0000000000000000000000000000000000000000000000000000000000000000',0,'2026-10-17T00:00:00Z')`,
 	} {
 		execSQL(query)
+	}
+	if links {
+		for _, item := range []struct{ id, source string }{{"second-page", "result-chat"}, {"unlinked-secret-page", ""}} {
+			execSQL(`INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,private_audience,spec_json) VALUES(?,?,?,?,?,1,'{}')`, item.id, workspace, item.id, item.id, "result-owner")
+			execSQL(`INSERT INTO documents(workspace_id,page_id,schema_version,snapshot,projection,head_rev) VALUES(?,?,3,'PRIVATE_SECOND_SNAPSHOT','[]',8)`, workspace, item.id)
+			execSQL(`INSERT INTO document_creations(page_id,workspace_id,run_id,agent_id,human_user_id,source_chat_id,submission_id,mutation_id,request_digest,revision,created_at) VALUES(?,?,?,'result-agent','result-owner',NULLIF(?,''),'second-submit','second-mutation',?,0,'2026-10-18T00:00:00Z')`, item.id, workspace, "run-"+item.id, item.source, strings.Repeat("0", 64))
+		}
 	}
 	var principals int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM artifact_run_principals`).Scan(&principals); err != nil || principals != 0 {
@@ -85,7 +100,11 @@ func TestAcceptance_DocumentChatResultsBinary(t *testing.T) {
 		}
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()
-		command := exec.CommandContext(ctx, binary, "doc", "chat-results", "result-chat")
+		argv := []string{"doc", "chat-results", "result-chat"}
+		if links {
+			argv = []string{"chat", "artifact-links", "result-chat"}
+		}
+		command := exec.CommandContext(ctx, binary, argv...)
 		command.Dir = dir
 		for _, value := range os.Environ() {
 			if !strings.HasPrefix(value, "CREWSHIP_") {
@@ -101,6 +120,24 @@ func TestAcceptance_DocumentChatResultsBinary(t *testing.T) {
 		output, err := run(user)
 		if err != nil {
 			t.Fatalf("actual result command: %v %s", err, output)
+		}
+		if links {
+			var wire struct {
+				Scope string           `json:"scope"`
+				Links []map[string]any `json:"links"`
+			}
+			if err := json.Unmarshal([]byte(output), &wire); err != nil || wire.Scope != "latest_native_documents" || wire.Links == nil {
+				t.Fatalf("truthful links scope: %v %s", err, output)
+			}
+			for _, link := range wire.Links {
+				if len(link) != 6 || (link["page_id"] != "result-page" && link["page_id"] != "second-page") || link["mode"] != "latest" || link["kind"] != "artifact" || link["accessible"] != true {
+					t.Fatalf("unexpected latest link: %+v", link)
+				}
+			}
+			if strings.Contains(output, "PRIVATE_") || strings.Contains(output, "unlinked-secret-page") {
+				t.Fatalf("unlinked/content leak: %s", output)
+			}
+			return len(wire.Links)
 		}
 		var wire struct {
 			Results []struct {
@@ -123,7 +160,11 @@ func TestAcceptance_DocumentChatResultsBinary(t *testing.T) {
 		}
 		return len(wire.Results)
 	}
-	if list("result-owner") != 1 {
+	want := 1
+	if links {
+		want = 2
+	}
+	if list("result-owner") != want {
 		t.Fatal("result author missing")
 	}
 	assertReaderDenied := func() {
@@ -141,6 +182,13 @@ func TestAcceptance_DocumentChatResultsBinary(t *testing.T) {
 		if output, err := run(test.user); err == nil || !strings.Contains(output, test.status) || strings.Contains(output, "Finished report") {
 			t.Fatalf("denied current scope/chat %s: %v %s", test.user, err, output)
 		}
+	}
+	if links {
+		execSQL(`DELETE FROM workspace_members WHERE workspace_id=? AND user_id='result-owner'`, workspace)
+		if output, err := run("result-owner"); err == nil || !strings.Contains(output, "403") || strings.Contains(output, "Finished report") {
+			t.Fatalf("removed current membership: %v %s", err, output)
+		}
+		execSQL(`INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('rm-restored',?,'result-owner','MEMBER')`, workspace)
 	}
 	execSQL(`UPDATE cli_tokens SET revoked_at='2026-01-01T00:00:00Z' WHERE id='token-result-owner'`)
 	if output, err := run("result-owner"); err == nil || !strings.Contains(output, "401") || strings.Contains(output, "Finished report") {

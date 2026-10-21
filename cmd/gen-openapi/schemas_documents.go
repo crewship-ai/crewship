@@ -30,7 +30,12 @@ func documentSchemaComponents() map[string]any {
 	history["additionalProperties"] = false
 	selected := obj(map[string]any{"page_id": str(), "id": checkpointID, "rev": revision, "schema": map[string]any{"type": "integer", "enum": []int{1, 2, 3}}, "content": ref("DocumentNode")}, "page_id", "id", "rev", "schema", "content")
 	selected["additionalProperties"] = false
+	link := obj(map[string]any{"link_id": str(), "kind": map[string]any{"type": "string", "enum": []string{"artifact"}}, "page_id": str(), "name": str(), "accessible": map[string]any{"type": "boolean", "enum": []bool{true}}, "mode": map[string]any{"type": "string", "enum": []string{"latest"}}}, "link_id", "kind", "page_id", "name", "accessible", "mode")
+	link["additionalProperties"] = false
+	links := obj(map[string]any{"scope": map[string]any{"type": "string", "enum": []string{"latest_native_documents"}}, "links": map[string]any{"type": "array", "maxItems": 20, "items": link}}, "scope", "links")
+	links["additionalProperties"] = false
 	return map[string]any{
+		"ChatDocumentLinks":           links,
 		"DocumentRestoreReceipt":      obj(map[string]any{"page_id": str(), "id": checkpointID, "rev": revision, "epoch": str(), "kind": map[string]any{"type": "string", "enum": []string{"restore"}}, "schema": map[string]any{"type": "integer", "enum": []int{1, 2, 3}}, "duplicate": boolean()}, "page_id", "id", "rev", "epoch", "kind"),
 		"DocumentCheckpointList":      history,
 		"DocumentCheckpoint":          selected,
@@ -78,6 +83,7 @@ func documentSchemaCatalog() map[string]DomainSchema {
 		out["GET "+path] = contract
 	}
 	out["GET /api/v1/chats/{chatId}/document-results"] = DomainSchema{Response: ref("DocumentChatResults"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"401", "403", "404", "500", "503"}}
+	out["GET /api/v1/chats/{chatId}/links"] = DomainSchema{Response: ref("ChatDocumentLinks"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"401", "403", "404", "500", "503"}, SuccessHeaders: map[string]any{"Cache-Control": map[string]any{"schema": map[string]any{"type": "string", "enum": []string{"no-store"}}}}}
 	out["GET /api/v1/documents/status"] = DomainSchema{Response: ref("DocumentAvailability"), SuccessStatuses: []string{"200"}}
 	post := func(path string, request map[string]any) {
 		out["POST "+base+path] = DomainSchema{Request: request, RequestRequired: true, Response: ref("DocumentReceipt"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"400", "401", "403", "404", "409", "413", "429", "500", "502", "503"}}

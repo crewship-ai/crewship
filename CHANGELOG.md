@@ -8,6 +8,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 (`0.x.0`); patch releases (`0.x.y`) are backwards-compatible fixes.
 
 ## [Unreleased]
+
+- Read saved native Documents linked to a conversation through the chat links API and `crewship chat artifact-links`, with current access checks and explicit latest-content links.
 - New Documents retain their initial confirmed version in history, so it remains readable after later edits.
 - Build releases with Go 1.27.3 to fix the reachable crypto/x509 certificate verification vulnerability GO-2026-6809.
 - **Chat says Stopping until the stop is confirmed.** After Stop on a live reply, the Stop button reads **Stopping…** and does nothing more until the server reports how the turn ended; pressing it again sends no second cancel. The partial reply stays on screen, and a turn that did not complete ends with one line in words: **Stopped**, **Interrupted** or **The run failed**, each noting that the reply above is partial or may be incomplete (or that it ended before any reply); the line stays after a reload. Applies to chats on the versioned event stream; older streams still return to ready at once.
