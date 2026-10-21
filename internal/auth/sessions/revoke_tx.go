@@ -58,3 +58,37 @@ func (s *DBStore) RevokeOthersTx(ctx context.Context, tx *sql.Tx, userID, keepID
 	}
 	return ids, nil, nil
 }
+
+// SingleTransactionRevoker changes one person's session on the caller's writer
+// transaction. A repeated revoke preserves the original timestamp and reason.
+type SingleTransactionRevoker interface {
+	RevokeSessionTx(context.Context, *sql.Tx, string, string, string) (bool, func(), error)
+}
+
+func (s *DBStore) RevokeSessionTx(ctx context.Context, tx *sql.Tx, user, id, reason string) (bool, func(), error) {
+	var at sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT revoked_at FROM user_sessions WHERE id=? AND user_id=?`, id, user).Scan(&at); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil, ErrNotFound
+		}
+		return false, nil, err
+	}
+	if at.Valid {
+		return false, nil, nil
+	}
+	stamp := s.clock().UTC().Format(time.RFC3339)
+	res, err := tx.ExecContext(ctx, `UPDATE user_sessions SET revoked_at=?,revoked_reason=? WHERE id=? AND user_id=? AND revoked_at IS NULL`, stamp, reason, id, user)
+	if err != nil {
+		return false, nil, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil || n != 1 {
+		return false, nil, errors.Join(err, errors.New("session revoke not retained"))
+	}
+	var stored, why string
+	err = tx.QueryRowContext(ctx, `SELECT revoked_at,revoked_reason FROM user_sessions WHERE id=? AND user_id=?`, id, user).Scan(&stored, &why)
+	if err != nil || stored != stamp || why != reason {
+		return false, nil, errors.Join(err, errors.New("session revoke not acknowledged"))
+	}
+	return true, nil, nil
+}

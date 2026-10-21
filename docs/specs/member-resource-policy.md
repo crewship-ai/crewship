@@ -855,3 +855,32 @@ active session set, selected token revocations and reset-proof consumption are
 checked after the last audit. Folder deletion also compares every audit row it
 created after the final append. Ignored or undone writes roll back without
 observer notifications.
+### Settings, session administration and membership provenance audit
+
+Workspace settings (including privileged credentials), crew settings and crew
+deletion commit their compliance row and configured chained journal entry in
+the same writer transaction. The writer checks current authority and final
+stored values before commit; audit or commit failure rolls back the mutation.
+Privilege and capability edits record explicit previous/current non-secret
+values, without copying runtime environments or complete configuration files.
+
+Administrative single-session revocation, bulk revocation and account unlock
+use the same boundary, with fresh actor/target authority. Instance-wide actions
+use the instance chain. Revocation notifications follow commit only; repeated
+single-session revocation preserves its original timestamp/reason and emits no
+new revocation signal. Canonical device and lockout metadata stays private in
+public projections and full-text List/Count queries.
+
+Member departure retains the previous role, access mode, stored resource rights
+and workspace-scoped crew memberships before deletion. Invitation create,
+reissue, revoke and acceptance retain stored mode/rights without proofs, hashes
+or addresses. Provisioned member events record only booleans for account
+creation and setup-link issuance, never the link or token. These canonical
+policy snapshots are removed from public feeds and payload search; summaries
+remain searchable, and unrelated audit payload search is unchanged.
+
+Blank first-run Setup records its inherited (NULL-role) crew membership in the
+same transaction as onboarding creation, using current crew-creation authority
+and the configured chain key. Audit failure leaves Setup retryable; observers
+run after commit. This boundary covers blank Setup, with proposal/template
+application governed by their existing separate contracts.

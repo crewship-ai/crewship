@@ -185,13 +185,15 @@ func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	// left that could name them — while the operator had just answered a prompt
 	// saying those volumes were being deleted. One read, and no slug means no
 	// delete.
-	crewSlug, found, err := loadCrewForDelete(r.Context(), h.db, crewID, workspaceID)
-	if err != nil {
-		replyInternalError(w, h.logger, "get crew for delete", err)
+	tx, _ := h.beginMemberMutation(w, r, crewID, "manage")
+	if tx == nil {
 		return
 	}
-	if !found {
-		replyError(w, http.StatusNotFound, "Crew not found")
+	defer tx.Rollback()
+	var crewSlug string
+	err := tx.QueryRowContext(r.Context(), `SELECT COALESCE(slug,'') FROM crews WHERE id=? AND workspace_id=? AND deleted_at IS NULL`, crewID, workspaceID).Scan(&crewSlug)
+	if err != nil {
+		replyInternalError(w, h.logger, "get crew for delete", err)
 		return
 	}
 	if crewSlug == "" {
@@ -227,7 +229,7 @@ func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	// crew wholly intact and the operator can retry. Half-deleting a crew and
 	// reporting {"success":true} is what makes the slug namespace drift in the
 	// first place.
-	if _, err := h.db.ExecContext(r.Context(),
+	if _, err := tx.ExecContext(r.Context(),
 		"UPDATE agents SET deleted_at = ? WHERE crew_id = ? AND deleted_at IS NULL",
 		now, crewID); err != nil {
 		replyInternalError(w, h.logger, "cascade soft-delete crew agents", err)
@@ -244,35 +246,89 @@ func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	// the sequence and that collision cannot happen either way. The delete
 	// stays: it is what stops a deleted crew's issues from appearing in the
 	// workspace's lists and searches. Other workspaces were never affected.
-	if _, err := h.db.ExecContext(r.Context(),
+	if _, err := tx.ExecContext(r.Context(),
 		"DELETE FROM mission_tasks WHERE mission_id IN (SELECT id FROM missions WHERE crew_id = ?)", crewID); err != nil {
-		h.logger.Warn("cascade delete mission_tasks", "crew_id", crewID, "error", err)
+		replyInternalError(w, h.logger, "cascade delete mission_tasks", err)
+		return
 	}
-	if _, err := h.db.ExecContext(r.Context(),
+	if _, err := tx.ExecContext(r.Context(),
 		"DELETE FROM missions WHERE crew_id = ?", crewID); err != nil {
-		h.logger.Warn("cascade delete missions", "crew_id", crewID, "error", err)
+		replyInternalError(w, h.logger, "cascade delete missions", err)
+		return
 	}
 	// Also remove crew members — they reference this crew
-	if _, err := h.db.ExecContext(r.Context(),
+	if _, err := tx.ExecContext(r.Context(),
 		"DELETE FROM crew_members WHERE crew_id = ?", crewID); err != nil {
-		h.logger.Warn("cascade delete crew_members", "crew_id", crewID, "error", err)
+		replyInternalError(w, h.logger, "cascade delete crew_members", err)
+		return
 	}
 	// Links to or from this crew mean nothing once it is gone — no dispatch,
 	// message or mission can cross them again. Left behind they outnumber the
 	// live ones within a few reseeds and bury the real graph.
-	if _, err := h.db.ExecContext(r.Context(),
+	if _, err := tx.ExecContext(r.Context(),
 		"DELETE FROM crew_connections WHERE from_crew_id = ? OR to_crew_id = ?", crewID, crewID); err != nil {
-		h.logger.Warn("cascade delete crew_connections", "crew_id", crewID, "error", err)
+		replyInternalError(w, h.logger, "cascade delete crew_connections", err)
+		return
 	}
 
-	_, err = h.db.ExecContext(r.Context(),
-		"UPDATE crews SET deleted_at = ? WHERE id = ?",
-		now, crewID)
+	result, err := tx.ExecContext(r.Context(),
+		"UPDATE crews SET deleted_at = ? WHERE id = ? AND workspace_id=? AND deleted_at IS NULL",
+		now, crewID, workspaceID)
 	if err != nil {
 		replyInternalError(w, h.logger, "soft delete crew", err)
 		return
 	}
 
+	if n, err := result.RowsAffected(); err != nil || n != 1 {
+		replyInternalError(w, h.logger, "acknowledge crew deletion", fmt.Errorf("crew deletion not applied: %v", err))
+		return
+	}
+	var tombstone string
+	if err := tx.QueryRowContext(r.Context(), `SELECT deleted_at FROM crews WHERE id=? AND workspace_id=?`, crewID, workspaceID).Scan(&tombstone); err != nil || tombstone != now {
+		replyInternalError(w, h.logger, "acknowledge crew deletion", fmt.Errorf("crew tombstone not retained: %v", err))
+		return
+	}
+	expected, err := settingsNativeRow(r.Context(), tx, "crews", crewID)
+	if err != nil {
+		replyInternalError(w, h.logger, "read deleted crew", err)
+		return
+	}
+	notify, err := appendSettingsAudit(r, tx, h.policyJournal, "crew.delete", "CREW", crewID, nil)
+	if err != nil {
+		replyInternalError(w, h.logger, "audit crew deletion", err)
+		return
+	}
+	if err := acknowledgeSettingsRow(r.Context(), tx, "crews", crewID, expected); err != nil {
+		replyInternalError(w, h.logger, "acknowledge crew deletion", err)
+		return
+	}
+	var remaining bool
+	err = tx.QueryRowContext(r.Context(), `SELECT
+	 EXISTS(SELECT 1 FROM agents WHERE crew_id=? AND deleted_at IS NULL)
+	 OR EXISTS(SELECT 1 FROM missions WHERE crew_id=?)
+	 OR EXISTS(SELECT 1 FROM crew_members WHERE crew_id=?)
+	 OR EXISTS(SELECT 1 FROM crew_connections WHERE from_crew_id=? OR to_crew_id=?)`, crewID, crewID, crewID, crewID, crewID).Scan(&remaining)
+	if err != nil || remaining {
+		replyInternalError(w, h.logger, "acknowledge crew cascade", fmt.Errorf("crew children survived deletion: %v", err))
+		return
+	}
+	if err := settingsActorIn(r, tx); err != nil {
+		if err == sql.ErrNoRows {
+			replyError(w, http.StatusForbidden, "Forbidden")
+		} else {
+			replyInternalError(w, h.logger, "recheck crew deletion authority", err)
+		}
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "commit crew deletion", err)
+		return
+	}
+	if notify != nil {
+		notify()
+	}
+
+	// External teardown is deliberately after the atomic database/audit commit.
 	teardown := h.removeCrewSidecars(r.Context(), crewID, crewSlug)
 
 	// The sidecars' auto-managed credentials go with them (#2771) — only the
@@ -286,8 +342,6 @@ func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if removedCreds == nil {
 		removedCreds = []string{}
 	}
-
-	auditFromRequest(r, h.db, "crew.delete", "CREW", crewID, nil)
 
 	// The teardown outcome travels with the response. The operator answered a
 	// confirmation that named the volumes this would delete; if it did not

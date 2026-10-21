@@ -680,6 +680,10 @@ func departWorkspaceAuthorized(ctx context.Context, db *sql.DB, j journal.Emitte
 			return err
 		}
 	}
+	previous, err := memberDepartureSnapshot(ctx, tx, workspaceID, memberUserID)
+	if err != nil {
+		return fmt.Errorf("snapshot departing membership: %w", err)
+	}
 
 	// The page transfer runs in the same transaction, first: it reads the
 	// crew rows purged below, and it has to roll back with the rest of the
@@ -733,7 +737,7 @@ func departWorkspaceAuthorized(ctx context.Context, db *sql.DB, j journal.Emitte
 	notify, err := appendAuthorizationAudit(ctx, tx, j, journal.Entry{
 		WorkspaceID: workspaceID, Type: journal.EntryMemberRemoved,
 		ActorType: actorType, ActorID: actorID, Summary: "Workspace member removed",
-		Payload: map[string]any{"subject_user_id": memberUserID, "action": "member_removed"},
+		Payload: map[string]any{"subject_user_id": memberUserID, "action": "member_removed", "previous_membership": previous},
 	})
 	if err != nil {
 		return fmt.Errorf("audit member removal: %w", err)

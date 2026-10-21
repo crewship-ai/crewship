@@ -21,6 +21,11 @@ The active workspace is stored in `~/.crewship/cli-config.yaml` under `workspace
 **Auth:** `list`, `get`, and `create` require `crewship login`. `update`, all `member` operations, and `invite` additionally require an active workspace. `use` writes the local config and validates the slug or ID against the server when you're already logged in. Role gates apply server-side — `OWNER`/`ADMIN` to update or invite, `OWNER` only to `delete`, `MEMBER+` to read.
 </Note>
 
+Workspace settings, member provisioning/removal and invitation changes require
+a durable audit before success. If audit storage or the final commit fails,
+the access change is rolled back. Provisioning audit records whether an account
+and setup link were created; it never includes the setup link itself.
+
 ## Subcommands
 
 | Command | Purpose |
