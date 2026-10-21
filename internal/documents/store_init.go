@@ -75,6 +75,11 @@ func (s *Store) InitRequestTx(ctx context.Context, t *sql.Tx, k Key, id, fingerp
 		if err := s.valid(schema, snap, p); err != nil {
 			return err
 		}
+		// Initialization retains one confirmed revision under the same history
+		// budget as explicit checkpoints. Never backfill on the retry path above.
+		if len(snap)+len(p) > s.opts.MaxHistoryBytes {
+			return ErrQuota
+		}
 		var n int
 		if err := t.QueryRowContext(ctx, "SELECT count(*) FROM documents WHERE workspace_id=?", k.WorkspaceID).Scan(&n); err != nil {
 			return err
@@ -87,6 +92,11 @@ func (s *Store) InitRequestTx(ctx context.Context, t *sql.Tx, k Key, id, fingerp
 			return err
 		}
 		if _, err = t.ExecContext(ctx, "INSERT INTO document_receipts(workspace_id,page_id,id,digest,fingerprint,rev,epoch,actor,kind) VALUES(?,?,?,?,?,0,0,?,'init')", k.WorkspaceID, k.PageID, id, initDigest, fingerprint, actor); err != nil {
+			return err
+		}
+		// The digest already binds the original request and full validated state;
+		// its bounded namespace does not expose the caller's request identifier.
+		if _, err = t.ExecContext(ctx, "INSERT INTO document_checkpoints(workspace_id,page_id,id,rev,schema_version,snapshot,projection,actor) VALUES(?,?,?,0,?,?,?,?)", k.WorkspaceID, k.PageID, "initial-"+initDigest, schema, snap, []byte(p), actor); err != nil {
 			return err
 		}
 		v, err = state(ctx, t, k)
