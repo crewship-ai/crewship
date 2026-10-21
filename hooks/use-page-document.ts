@@ -17,20 +17,24 @@ export type { DocumentState } from "@/lib/documents/contracts"
 export const documentKeys = { all: (workspace: string) => ["page-document",workspace] as const, detail: (workspace: string, pageId: string, human: string) => ["page-document",workspace,pageId,human] as const }
 /** Journal writes of edits that arrive in separate tasks are merged within this window; the barrier before a send never waits for it. */
 const JOURNAL_COALESCE_MS = 200
-class UnconfirmedReceipt extends Error {}
+export class UnconfirmedReceipt extends Error {}
 export function decodeUpdate(value: string): Uint8Array { return Uint8Array.from(atob(value), c => c.charCodeAt(0)) }
 export function encodeUpdate(value: Uint8Array): string { let text = ""; for (const byte of value) text += String.fromCharCode(byte); return btoa(text) }
 /** Where unsent work stands. Only "confirmed" means the server holds everything. */
 export type DocumentDurability = SaveDurability
 export class DocumentAPIError extends Error { constructor(message: string, public status: number, public code?: string) { super(message) } }
-/** The server's answer to a patch, for the shared write queue; the poll loop still words the status. */
-function documentFailure(cause: unknown): SendFailure {
+/**
+ * One reading of a failed request for both the shared write queue and the poll loop, so
+ * the queue halts exactly where the poll blocks. Only a document quota makes a 429 a
+ * rejection; any other 429 (document_rate_limit, the general per-IP limiter) is retried.
+ */
+export function documentFailure(cause: unknown): SendFailure {
   if (cause instanceof UnconfirmedReceipt) return { kind: "unconfirmed" }
   if (!(cause instanceof DocumentAPIError)) return { kind: "offline" }
   if ([401, 403, 404].includes(cause.status)) return { kind: "denied" }
   if (cause.status === 409) return { kind: "conflict" }
-  if (cause.status === 429 && cause.code === "document_rate_limit") return { kind: "rate-limited" }
-  if ([400, 413, 422, 429].includes(cause.status)) return { kind: "rejected" }
+  if ([400, 413, 422].includes(cause.status) || (cause.status === 429 && cause.code === "document_quota")) return { kind: "rejected" }
+  if (cause.status === 429) return { kind: "rate-limited" }
   return { kind: "transient" }
 }
 export async function documentRequest<T>(workspace: string, slug: string, path = "", body?: unknown, signal?: AbortSignal): Promise<T> {
@@ -292,19 +296,20 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
       } catch (cause) {
         if (!active) return
         recount()
+        const failure = documentFailure(cause)
         // Authority decides first: a denial must not be masked by a storage failure, whatever the journal state.
-        if (authorizationLost.current || (cause instanceof DocumentAPIError && [401, 403, 404].includes(cause.status))) {
+        if (authorizationLost.current || failure.kind === "denied") {
           authorizationLost.current=true;purgeJournal.current();setConfirmed(undefined);hold([]);setUnverified([]);unverifiedStaged=undefined;restored=[];client.removeQueries({queryKey,exact:true})
           blocked = blockedOther = true; setDenied(true); setRecovery(queue.size > 0); setStatus("Document access is unavailable.")
         } else if (cause instanceof DocumentStorageError || journalBroken) {
           blocked = blockedOther = true;dispatch({ type: "storage-unavailable", failed: true });setRecovery(queue.size>0);setStatus(requiredRev && !queue.size ? "Update confirmed · private storage cleanup failed" : "Private document storage is unavailable · changes are unsaved")
-        } else if (cause instanceof UnconfirmedReceipt) {
+        } else if (failure.kind === "unconfirmed") {
           blocked = blockedOther = true;setRecovery(true);setStatus("Save confirmation unavailable · changes are unsaved")
-        } else if (cause instanceof DocumentAPIError && ([400, 413, 422].includes(cause.status) || (cause.status === 429 && cause.code === "document_quota"))) {
+        } else if (failure.kind === "rejected") {
           blocked = blockedOther = true; setRecovery(true); setStatus("Document update was rejected. Recover your draft before reopening.")
-        } else if (cause instanceof DocumentAPIError && cause.status === 429 && cause.code === "document_rate_limit") {
+        } else if (failure.kind === "rate-limited" && (cause as DocumentAPIError).code === "document_rate_limit") {
           setStatus("Temporarily rate limited · changes are unsaved")
-        } else if (cause instanceof DocumentAPIError && cause.status === 409) {
+        } else if (failure.kind === "conflict") {
           blocked = blockedOther = true; setRecovery(true); setStatus("Document changed. Recover your draft before reopening.")
         } else setStatus(queue.size ? "Disconnected · changes are unsaved" : "Disconnected")
         setError(cause instanceof Error ? cause.message : "Could not sync document.")

@@ -24,6 +24,8 @@ export interface Pacing {
 }
 export const DEFAULT_PACING: Pacing = { minGapMs: 250, baseDelayMs: 1000, maxDelayMs: 30_000, retryBudgetMs: 120_000, stuckRetryMs: 60_000 }
 /** For callers that pace sends themselves (the Document poll loop). */
+/** Failures after which the queue stops sending until `resume()`. */
+export const haltsQueue = (kind: SendFailure["kind"]): kind is "conflict" | "rejected" | "unconfirmed" | "denied" => kind === "conflict" || kind === "rejected" || kind === "unconfirmed" || kind === "denied"
 export const UNPACED: Pacing = { minGapMs: 0, baseDelayMs: 0, maxDelayMs: 0, retryBudgetMs: Infinity, stuckRetryMs: 0 }
 
 export interface Timers { now(): number; setTimeout(run: () => void, ms: number): unknown; clearTimeout(handle: unknown): void }
@@ -78,7 +80,7 @@ export function createWriteQueue<W extends QueuedWrite>(options: WriteQueueOptio
   function record(cause: unknown) {
     const failure = classify(cause), now = timers.now()
     failures++; failingSince ??= now
-    if (failure.kind !== "transient" && failure.kind !== "rate-limited" && failure.kind !== "offline") { halted = failure.kind; emit({ type: failure.kind }); return }
+    if (haltsQueue(failure.kind)) { halted = failure.kind; emit({ type: failure.kind }); return }
     const stuck = now - failingSince >= pacing.retryBudgetMs
     const backoff = Math.min(pacing.maxDelayMs, pacing.baseDelayMs * 2 ** (failures - 1)) * (0.5 + random() / 2)
     const retryAfterMs = "retryAfterMs" in failure ? failure.retryAfterMs : undefined
