@@ -58,7 +58,8 @@ export function SavedDocumentPanel({ headerExtra, onClose, ...props }: SavedDocu
       {isEditing
         ? <PageDocument workspaceId={document.target.workspaceId} slug={"@" + document.target.pageId} pageId={document.target.pageId}
           name={document.title} onDirtyChange={setDirty} />
-        : <DocumentReadonly schema={document.content.schema} content={document.content.content} accessibleLabel="Saved document body" />}
+        : <DocumentReadonly schema={document.content.schema} content={document.content.content} accessibleLabel="Saved document body"
+          emptyText="This document is empty. Choose Edit here to start writing, or ask the agent in this chat to draft it." />}
     </div>} />
 }
 
