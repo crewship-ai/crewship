@@ -23,7 +23,11 @@ credentials/ACL/run authority are checked before receipt lookup, and again in
 the fenced commit transaction. A confirmed exact retry returns its original
 immutable receipt before checking the current head. Reused IDs with changed
 payload conflict. Unfinished reservations return `in_progress`; lease takeover
-increments a fencing token, so a displaced candidate cannot commit.
+increments a fencing token, so a displaced candidate cannot commit. The service
+also holds physical worker slots until computation and cleanup return; an expired
+lease alone does not free global, workspace or artifact capacity. Orphan workers
+from a previous service incarnation require separate startup reconciliation before
+runtime activation.
 
 The engine computes outside the database transaction. The candidate binds the
 artifact, base revision, generation, command hash, mandate, pinned engine and

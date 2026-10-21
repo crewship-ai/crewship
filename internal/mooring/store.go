@@ -7,14 +7,19 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 type Store struct {
-	db      *sql.DB
-	options Options
+	db               *sql.DB
+	options          Options
+	workersMu        sync.Mutex
+	workers          int
+	workspaceWorkers map[string]int
+	artifactWorkers  map[Key]int
 }
 
 func New(db *sql.DB, o Options) *Store {
@@ -33,7 +38,7 @@ func New(db *sql.DB, o Options) *Store {
 	if o.LeaseDuration <= 0 {
 		o.LeaseDuration = 30 * time.Second
 	}
-	return &Store{db, o}
+	return &Store{db: db, options: o, workspaceWorkers: make(map[string]int), artifactWorkers: make(map[Key]int)}
 }
 func (s *Store) tx(ctx context.Context, k Key, a Authorize, fn func(*sql.Tx, Principal) error) error {
 	if !s.options.Enabled {
@@ -206,6 +211,10 @@ func (s *Store) Execute(ctx context.Context, k Key, r Request, a Authorize, e En
 	// Cleanup is fenced to THIS attempt. A cancelled request must not retain a live
 	// reservation until expiry or delete a newer attempt that already took over.
 	defer s.release(k, r, res)
+	if !s.admitLiveWorker(k) {
+		return Receipt{}, ErrCapacity
+	}
+	defer s.releaseLiveWorker(k)
 	candidateCtx, cancel := context.WithDeadline(ctx, res.until)
 	defer cancel()
 	c, err := e.Prepare(candidateCtx, res.binding, res.state, r.Command)
@@ -358,4 +367,30 @@ func eligibleNewWorkbook(ctx context.Context, tx *sql.Tx, k Key) error {
 		}
 	}
 	return nil
+}
+
+// A lease fences commits, but its expiry does not prove the old process has
+// stopped. Keep physical admission until Prepare (including cleanup) returns.
+// The service owns one Store; restart reconciliation must separately qualify
+// and remove orphan workers before activation in a new service incarnation.
+func (s *Store) admitLiveWorker(k Key) bool {
+	s.workersMu.Lock()
+	defer s.workersMu.Unlock()
+	if s.workers >= s.options.MaxWorkers || s.workspaceWorkers[k.WorkspaceID] >= s.options.MaxWorkspaceWorkers || s.artifactWorkers[k] != 0 {
+		return false
+	}
+	s.workers++
+	s.workspaceWorkers[k.WorkspaceID]++
+	s.artifactWorkers[k]++
+	return true
+}
+func (s *Store) releaseLiveWorker(k Key) {
+	s.workersMu.Lock()
+	defer s.workersMu.Unlock()
+	s.workers--
+	s.workspaceWorkers[k.WorkspaceID]--
+	if s.workspaceWorkers[k.WorkspaceID] == 0 {
+		delete(s.workspaceWorkers, k.WorkspaceID)
+	}
+	delete(s.artifactWorkers, k)
 }

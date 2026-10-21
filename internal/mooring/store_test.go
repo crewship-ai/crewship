@@ -284,7 +284,10 @@ func TestExpiredReservationTakeoverFencesOldCandidate(t *testing.T) {
 	if _, err := db.Exec(`UPDATE gridcraft_operations SET lease_until=0 WHERE mutation_id='edit-1'`); err != nil {
 		t.Fatal(err)
 	}
-	r, err := s.Execute(t.Context(), k, edit(), a, e)
+	// A new service incarnation tests the durable fence independently of the
+	// old Store's physical-worker admission. Real deployment additionally needs
+	// orphan-worker reconciliation, which this synthetic engine does not prove.
+	r, err := New(db.DB, Options{Enabled: true}).Execute(t.Context(), k, edit(), a, e)
 	close(release)
 	if err != nil || r.Rev != 2 {
 		t.Fatalf("takeover=%+v %v", r, err)
@@ -375,6 +378,59 @@ func TestWorkerAdmissionSeparatelyBoundsGlobalWorkspaceAndArtifact(t *testing.T)
 			}
 			if engine.calls.Load() != 1 {
 				t.Fatal("hidden work started past capacity")
+			}
+		})
+	}
+}
+
+func TestExpiredLeaseDoesNotFreeStillRunningWorker(t *testing.T) {
+	for _, scope := range []string{"global", "workspace", "artifact"} {
+		t.Run(scope, func(t *testing.T) {
+			s, db, a, k := fixture(t)
+			e := &fakeEngine{}
+			imported(t, s, a, k, e)
+			other := k
+			if scope != "artifact" {
+				other.PageID = "another-page"
+				if scope == "global" {
+					other.WorkspaceID = "another-ws"
+					if _, err := db.Exec(`INSERT INTO workspaces(id,name,slug) VALUES('another-ws','Another','another-live-worker')`); err != nil {
+						t.Fatal(err)
+					}
+					s.options.MaxWorkers = 1
+				} else {
+					s.options.MaxWorkspaceWorkers = 1
+				}
+				if _, err := db.Exec(`INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,private_audience,spec_json) VALUES(?,?,'another','Another','owner',1,'{}')`, other.PageID, other.WorkspaceID); err != nil {
+					t.Fatal(err)
+				}
+				imported(t, s, a, other, e)
+			}
+			entered, release := make(chan struct{}), make(chan struct{})
+			e.prepare = func(_ context.Context, b Binding, _ State, _ Command) (Candidate, error) {
+				close(entered)
+				<-release // models cleanup that continues after the lease deadline
+				return NewCandidate(b, json.RawMessage(`{"sheets":[]}`), []string{"Sheet1!B2"}), nil
+			}
+			done := make(chan error, 1)
+			go func() { _, err := s.Execute(t.Context(), k, edit(), a, e); done <- err }()
+			<-entered
+			if _, err := db.Exec(`UPDATE gridcraft_operations SET lease_until=0 WHERE state='in_progress'`); err != nil {
+				close(release)
+				<-done
+				t.Fatal(err)
+			}
+			second := edit()
+			second.MutationID = "second-live-worker"
+			unexpected := &fakeEngine{}
+			_, err := s.Execute(t.Context(), other, second, a, unexpected)
+			close(release)
+			<-done
+			if !errors.Is(err, ErrCapacity) || unexpected.calls.Load() != 0 {
+				t.Fatalf("live %s capacity lost: err=%v calls=%d", scope, err, unexpected.calls.Load())
+			}
+			if _, err := s.Execute(t.Context(), other, second, a, unexpected); err != nil || unexpected.calls.Load() != 1 {
+				t.Fatalf("capacity did not return after cleanup: err=%v calls=%d", err, unexpected.calls.Load())
 			}
 		})
 	}
