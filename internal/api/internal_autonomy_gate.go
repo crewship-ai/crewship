@@ -52,6 +52,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/policy"
 )
 
@@ -457,6 +458,9 @@ func applyAutonomyGateDecisionTx(
 				  AND expired_at IS NULL AND deleted_at IS NULL`,
 				now, targetID, workspaceID)
 		case autonomyTargetSchedule:
+			if err := pipeline.CheckGenericScheduleIn(ctx, tx, workspaceID, targetID); err != nil {
+				return err
+			}
 			// Since the #1768 rebalance no autonomy LEVEL holds a schedule —
 			// strict refuses and everything below it notices. Two things
 			// still reach this arm and both matter: the fail-closed

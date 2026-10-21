@@ -2720,3 +2720,17 @@ credential carrying `workspace:admin`. Statuses: 200 saved/read policy; 400 inva
 request or crews; 401 invalid human credential; 403 insufficient current role or
 scope; 404 wrong workspace; 409 stale policy version; 413 body exceeds 64 KiB;
 500 unavailable storage.
+
+
+## Shared draft validation and publication
+
+`POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/validate`
+and `POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/publish`
+accept only `{draft_id, revision, base_revision}` from the
+reviewed shared draft. Validation returns `valid: true, scope: "structure_only"`;
+publication returns `{id, version, publication_revision}`. Both recheck current
+rights and return 409 for a stale snapshot or a busy writer. Publication requires
+Publish with Edit and View, refuses existing triggers with 422, and commits the
+stored recipe, immutable manifest, draft consumption and audit together. Neither
+endpoint creates execution authority for the generic runner. Draft save rejects
+`description: null` with 400. Responses use `Cache-Control: no-store`.

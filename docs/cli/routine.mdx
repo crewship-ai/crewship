@@ -2399,8 +2399,26 @@ requires `--file` containing one complete JSON snapshot; `-` reads stdin.
 fields and incomplete snapshots fail locally. PUT requires the existing
 `workspace:admin` token scope and rechecks current rights, issuers and account.
 A 409 preserves the conflict for review; the CLI performs no hidden GET or retry.
-Saving changes only the collaborative draft. Trusted testing and exact-revision
-review/publication remain required; this command cannot publish or run it.
+Saving changes only the collaborative draft. Publication requires separate
+Publish authority and exact-revision review; this save command cannot publish or run it.
+
+
+### Validate and publish a reviewed shared draft
+
+```bash
+crewship routine draft validate ROUTINE_ID --draft-id ID --revision N --base-revision N
+crewship routine draft publish ROUTINE_ID --draft-id ID --revision N --base-revision N
+```
+
+Both commands send the exact reviewed reference without refreshing or retrying.
+Validate checks structure only; publish additionally requires current View, Edit,
+Publish and the referenced agent execution grants. A stale reference or busy
+writer returns 409; existing triggers return 422 and must be removed explicitly.
+A null description is rejected with 400. Publication stores an immutable authority
+manifest and consumes the draft atomically with its audit event. It does not run
+agents: the generic runner, nested calls and automatic trigger writers refuse the
+published version. Bounded manual execution is a later runtime slice. Existing
+`routine draft publish FILE` keeps its legacy validation flow.
 
 
 ## `crewship routine shared-runs`

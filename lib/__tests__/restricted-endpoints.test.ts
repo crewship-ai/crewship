@@ -46,6 +46,8 @@ describe("RESTRICTED_FE_ENDPOINTS", () => {
     ["GET", "/api/v1/pages/private-page/project/history/rev/source"],
 
     ["GET", "/api/v1/workspaces"],
+    ["POST", "/api/v1/workspaces/ws-1/restricted-routine-library/routine-1/draft/validate"],
+    ["POST", "/api/v1/workspaces/ws-1/restricted-routine-library/routine-1/draft/publish"],
     ["GET", "/api/v1/workspaces/ws-1/restricted-routines"],
     ["GET", "/api/v1/workspaces/ws-1/restricted-routine-runs/run-9?x=1"],
     ["GET", "/api/v1/chats/c-1/messages?workspace_id=ws-1"],

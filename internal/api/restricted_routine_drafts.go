@@ -31,6 +31,12 @@ type guestRoutineDraft struct {
 }
 
 func guestRoutineDraftError(w http.ResponseWriter, err error) {
+	// SQLite's extended codes keep the base result in their low byte.
+	var coded interface{ Code() int }
+	if errors.As(err, &coded) && (coded.Code()&255 == 5 || coded.Code()&255 == 6) {
+		replyError(w, 409, "Routine draft is busy. Retry the reviewed snapshot.")
+		return
+	}
 	if errors.Is(err, pipeline.ErrDraftConflict) {
 		replyError(w, 409, "Routine draft or published version changed. Reload and review before saving.")
 		return

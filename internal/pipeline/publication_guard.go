@@ -138,3 +138,28 @@ func CheckGenericScheduleIn(ctx context.Context, q publicationQuery, workspace, 
 	}
 	return nil
 }
+
+// Saving a caller must reject a currently published target in the same writer.
+func checkSavedPublicationCalls(ctx context.Context, q publicationQuery, workspace, raw string) error {
+	d, err := Parse([]byte(raw))
+	if err != nil {
+		return nil
+	} // Ordinary save validation retains its existing contract.
+	for _, step := range d.Steps {
+		if step.Type != StepCallPipeline {
+			continue
+		}
+		var blocked bool
+		err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pipelines p LEFT JOIN pipeline_versions v ON v.pipeline_id=p.id AND v.version=p.head_version
+WHERE p.workspace_id=? AND p.slug=? AND p.deleted_at IS NULL AND
+(typeof(p.publication_authority_fingerprint)!='text' OR p.publication_authority_fingerprint!='legacy-trusted:v1' OR
+(v.id IS NOT NULL AND (typeof(v.authority_fingerprint)!='text' OR v.authority_fingerprint!='legacy-trusted:v1' OR v.publication_authority_json IS NOT NULL))))`, workspace, step.PipelineSlug).Scan(&blocked)
+		if err != nil {
+			return err
+		}
+		if blocked {
+			return fmt.Errorf("%w: call_pipeline target %q requires bounded execution", ErrInvalidTrigger, step.PipelineSlug)
+		}
+	}
+	return nil
+}

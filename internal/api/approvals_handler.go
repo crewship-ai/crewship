@@ -12,6 +12,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -239,6 +240,10 @@ func (h *ApprovalsHandler) Decide(w http.ResponseWriter, r *http.Request) {
 	if row != nil && row.Kind == harbormaster.KindAutonomyGate {
 		if err := applyAutonomyGateDecisionTx(r.Context(), tx, workspaceID, row,
 			status == harbormaster.StatusApproved, user.ID); err != nil {
+			if errors.Is(err, pipeline.ErrInvalidTrigger) {
+				replyError(w, http.StatusConflict, "schedule selection cannot be enabled")
+				return
+			}
 			h.logger.Error("approvals decide: apply autonomy gate side effect",
 				"err", err, "approval_id", id)
 			replyError(w, http.StatusInternalServerError, "decide failed")

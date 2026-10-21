@@ -31,6 +31,8 @@ var restrictedSurfaces = []restrictedSurface{
 	{Name: "routines", Patterns: []string{
 		"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft",
 		"PUT /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft",
+		"POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/validate",
+		"POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/publish",
 		"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library",
 		"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}",
 		"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/runs",
