@@ -43,7 +43,9 @@ it.each([
 
   expect(await screen.findByRole("alert")).toHaveTextContent("Your latest edits were not saved: access to this document was removed.")
   expect(screen.queryByLabelText("Document editor")).toBeNull()
-  expect(document.body.textContent).not.toMatch(/Private server text|Unsent private edit|notes/)
+  if (deniedMethod === "POST") expect(request).toHaveBeenCalledWith(expect.stringContaining("/document/patch"), expect.objectContaining({ method: "POST" }))
+  expect(document.body.textContent).not.toMatch(/Private server text|Unsent private edit/)
+  expect(screen.queryByRole("heading", { name: "notes" })).toBeNull()
   expect(screen.queryByRole("button", { name: "Download unsaved draft" })).toBeNull()
   await waitFor(() => expect(purge).toHaveBeenCalledWith("author", "w", "page"))
   // Reads use gcTime 0 and a denial removes the entry; the cache must hold nothing either way.
