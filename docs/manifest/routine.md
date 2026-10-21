@@ -643,6 +643,26 @@ steps:
     ...
 ```
 
+#### Replay with edited inputs or metadata
+
+To retry with corrected values, replace what the replay inherits:
+
+```
+crewship routine replay <run_id> --inputs '{"account_id":"acme"}'
+crewship routine replay <run_id> --inputs @fixed-inputs.json --metadata '{"ticket":"OPS-42"}'
+crewship routine replay <run_id> --tags '["prod","retry"]' --version 9
+```
+
+- Omitted fields inherit the source run's values. A supplied field replaces
+  the whole object or array; `{}` (or `[]` for tags) clears it, and `null` is
+  rejected.
+- Changed inputs must satisfy the input-form contract of the routine version
+  the replay runs (head, or `--version N`).
+- The replay executes real work with the current operator's authority.
+
+Editing inputs on replay is available in the API and CLI; the UI does not
+offer it yet. See [`crewship routine replay`](/cli/routine#crewship-routine-replay-<run_id>).
+
 ### Errors view + bulk replay
 
 Failed runs are bucketed by a stable **error fingerprint** (failing step
