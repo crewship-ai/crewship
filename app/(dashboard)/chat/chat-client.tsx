@@ -936,7 +936,9 @@ function ChatClientBody() {
                   The drawer closes through the toolbar's own collapse button
                   instead (wired below to `setDrawerOpen`), which is the same
                   control in the same place as on desktop, plus the backdrop. */}
-              <div className="w-[280px]">{sidebar}</div>
+              {/* Wider than the desktop column: at 280px the search field
+                  kept ~100px beside Search all chats, Filter and Close. */}
+              <div className="w-[min(320px,85vw)]">{sidebar}</div>
             </div>
           </>
         )}
