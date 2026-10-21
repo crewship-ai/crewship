@@ -966,7 +966,7 @@ function ChatClientBody() {
       <aside
         className={cn(
           "shrink-0 overflow-hidden border-r border-foreground/[0.06] transition-all",
-          leftCollapsed ? "w-9" : "w-[280px]",
+          leftCollapsed ? "w-9 coarse:w-[46px]" : "w-[280px]",
         )}
       >
         {leftCollapsed ? (
