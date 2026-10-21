@@ -50,7 +50,8 @@ export type SaveEvent =
   | { type: "recount"; pending: number }
   | { type: "journal"; writes: number }
   | { type: "stored" }
-  | { type: "held"; drafts: number; pending: number }
+  /** Earlier drafts held, not restored (0: discarded); `pending` when the count changed with them. */
+  | { type: "held"; drafts: number; pending?: number }
   | { type: "send" }
   /** A verified receipt; `pending` is what is still queued after it. */
   | { type: "ack"; pending: number }
@@ -78,7 +79,7 @@ function next(state: SaveState, event: SaveEvent): SaveState {
     case "recount": return { ...state, pending: Math.max(0, event.pending), receipt: state.receipt && event.pending <= 0 }
     case "journal": return { ...state, journalWrites: event.writes }
     case "stored": return { ...state, stored: true, busy: false }
-    case "held": return { ...state, held: event.drafts, pending: event.pending, receipt: state.receipt && event.pending <= 0 }
+    case "held": { const pending = event.pending ?? state.pending; return { ...state, held: event.drafts, pending, receipt: state.receipt && pending <= 0 } }
     case "send": return { ...state, sending: true, trouble: undefined, retryAfterMs: undefined }
     case "ack":
     case "duplicate-ack": return { ...state, sending: false, pending: event.pending, receipt: event.pending === 0, trouble: undefined, retryAfterMs: undefined }

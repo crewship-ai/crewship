@@ -14,6 +14,7 @@ describe("durability", () => {
     ["an edit retained by the journal", [opened, { type: "stored" }, { type: "edit", pending: 1 }, { type: "journal", writes: 0 }], "local"],
     ["an edit after the journal failed", [opened, { type: "stored" }, { type: "edit", pending: 1 }, { type: "journal", writes: 1 }, { type: "storage-unavailable", failed: true }], "unsaved"],
     ["an earlier draft held", [opened, { type: "held", drafts: 1, pending: 1 }], "held"],
+    ["held drafts withdrawn, unsent work kept", [opened, { type: "held", drafts: 1, pending: 1 }, { type: "held", drafts: 0 }], "unsaved"],
     ["a held draft discarded", [opened, { type: "held", drafts: 1, pending: 1 }, { type: "held", drafts: 0, pending: 0 }], "confirmed"],
     ["an acknowledged edit", [opened, { type: "stored" }, { type: "edit", pending: 1 }, { type: "send" }, { type: "ack", pending: 0 }], "confirmed"],
   ] as [string, SaveEvent[], string][])("%s → %s", (_name, events, durability) => {

@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react"
 import * as Y from "yjs"
 import { documentSchema } from "@/lib/documents/schema"
 import { apiFetch } from "@/lib/api-fetch"
@@ -9,6 +9,9 @@ import { openDocumentDrafts, DocumentStorageError, DocumentStorageBusy, purgeDoc
 
 import { useQueryClient } from "@tanstack/react-query"
 import { verifyMutationReceipt, type DocumentState } from "@/lib/documents/contracts"
+import { durabilityOf, initialSaveState, saveReducer, type SaveDurability } from "@/lib/editor-lifecycle/save-state"
+import { createWriteQueue, UNPACED, type SendFailure } from "@/lib/editor-lifecycle/write-queue"
+import { useLeaveGuard } from "@/lib/editor-lifecycle/use-leave-guard"
 export type { DocumentState } from "@/lib/documents/contracts"
 
 export const documentKeys = { all: (workspace: string) => ["page-document",workspace] as const, detail: (workspace: string, pageId: string, human: string) => ["page-document",workspace,pageId,human] as const }
@@ -18,13 +21,18 @@ class UnconfirmedReceipt extends Error {}
 export function decodeUpdate(value: string): Uint8Array { return Uint8Array.from(atob(value), c => c.charCodeAt(0)) }
 export function encodeUpdate(value: Uint8Array): string { let text = ""; for (const byte of value) text += String.fromCharCode(byte); return btoa(text) }
 /** Where unsent work stands. Only "confirmed" means the server holds everything. */
-export type DocumentDurability =
-  | "confirmed" // nothing unsent
-  | "writing"   // unsent; the browser journal write has not resolved yet
-  | "local"     // unsent; the journal write resolved, so it survives a reload
-  | "unsaved"   // unsent and not retained by the browser either
-  | "held"      // an earlier unsent draft is held in this browser, not restored
+export type DocumentDurability = SaveDurability
 export class DocumentAPIError extends Error { constructor(message: string, public status: number, public code?: string) { super(message) } }
+/** The server's answer to a patch, for the shared write queue; the poll loop still words the status. */
+function documentFailure(cause: unknown): SendFailure {
+  if (cause instanceof UnconfirmedReceipt) return { kind: "unconfirmed" }
+  if (!(cause instanceof DocumentAPIError)) return { kind: "offline" }
+  if ([401, 403, 404].includes(cause.status)) return { kind: "denied" }
+  if (cause.status === 409) return { kind: "conflict" }
+  if (cause.status === 429 && cause.code === "document_rate_limit") return { kind: "rate-limited" }
+  if ([400, 413, 422, 429].includes(cause.status)) return { kind: "rejected" }
+  return { kind: "transient" }
+}
 export async function documentRequest<T>(workspace: string, slug: string, path = "", body?: unknown, signal?: AbortSignal): Promise<T> {
   const response = await apiFetch(`/api/v1/pages/${encodeURIComponent(slug)}/document${path}?workspace_id=${encodeURIComponent(workspace)}`, body === undefined ? {signal} : { signal, method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
   const value = await response.json().catch(() => null)
@@ -49,10 +57,10 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
   const setState = (value: DocumentState) => setConfirmed({identity,value})
   const [status, setStatus] = useState("Loading document…")
   const [error, setError] = useState<string>()
-  const [pending, setPending] = useState(0)
+  // Pending writes, journal progress and receipts go through the shared save machine.
+  const [save, dispatch] = useReducer(saveReducer, initialSaveState)
   const [recovery, setRecovery] = useState(false)
   const [denied, setDenied] = useState(false)
-  const [storageReady, setStorageReady] = useState(false)
   // Browser storage is unusable (private mode, blocked, quota, hung): the server
   // read still works, edits are held in memory only and reported as unsaved.
   const [storageOff, setStorageOff] = useState(false)
@@ -60,23 +68,22 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
   const [storageLockless, setStorageLockless] = useState(false)
   // Rows found in a journal this tab could not lock: owner unknown, so download-only until explicitly discarded.
   const [unverified, setUnverified] = useState<DocumentDraft[]>([])
-  const [journalWrites, setJournalWrites] = useState(0)
-  const [journalFailed, setJournalFailed] = useState(false)
   const [recoveredDrafts, setRecoveredDrafts] = useState<DocumentDraft[]>([])
+  const hold = useCallback((drafts: DocumentDraft[], pending?: number) => { setRecoveredDrafts(drafts); dispatch({ type: "held", drafts: drafts.length, pending }) }, [])
   const discardRecovery = useRef<() => Promise<void>>(async () => {})
   const discardRecoveredDrafts = useCallback(() => discardRecovery.current(), [])
   const authorizationLost=useRef(false)
   // Deletes this Page's journal rows once any write in flight has settled; set by the active effect.
   const purgeJournal = useRef<() => void>(() => {})
-  const deny=useCallback(()=>{authorizationLost.current=true;purgeJournal.current();setConfirmed(undefined);setRecoveredDrafts([]);setUnverified([]);setDenied(true);setRecovery(pending>0);setStatus("Document access is unavailable.")},[pending])
+  const deny=useCallback(()=>{authorizationLost.current=true;purgeJournal.current();setConfirmed(undefined);hold([]);setUnverified([]);setDenied(true);setRecovery(save.pending>0);setStatus("Document access is unavailable.")},[save.pending, hold])
   useEffect(() => {
     setActiveIdentity(identity)
     setConfirmed(undefined)
-    setStorageReady(false); setStorageOff(false); setStorageBusy(false); setStorageLockless(false); setUnverified([]); setRecoveredDrafts([]); setJournalWrites(0); setJournalFailed(false)
+    dispatch({ type: "reset" }); setStorageOff(false); setStorageBusy(false); setStorageLockless(false); setUnverified([]); setRecoveredDrafts([])
     discardRecovery.current = async () => {};
     purgeJournal.current = () => {}
     authorizationLost.current=false
-    setDenied(false);setRecovery(false);setPending(0);setStatus("Loading document…");setError(undefined)
+    setDenied(false);setRecovery(false);setStatus("Loading document…");setError(undefined)
     if (!human) return () => { doc.destroy() }
     const queryKey = documentKeys.detail(workspace,pageId,human)
     const controller = new AbortController()
@@ -90,8 +97,7 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
     // while a write is in flight coalesce into the next write of the same draft.
     const dirty = new Map<string, DocumentDraft>()
     let flushing: Promise<void> | undefined, inflight = 0
-    const queue: DocumentDraft[] = []
-    const countWrites = () => { if (active) setJournalWrites(dirty.size + inflight) }
+    const countWrites = () => { if (active) dispatch({ type: "journal", writes: dirty.size + inflight }) }
     // One batch per run: a snapshot is encoded once per batch, and edits arriving
     // in separate tasks wait for the next timer, so cost does not scale with keystrokes.
     let flushTimer: ReturnType<typeof setTimeout> | undefined
@@ -112,7 +118,7 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
         dirty.clear()
         // A denial already processed owns the status; a journal failure must not rewrite it.
         if (!active || authorizationLost.current) return
-        journalBroken = true;blocked = blockedOther = true;setStorageReady(false);setJournalFailed(true);setRecovery(true);setStatus("Private document storage failed · changes are unsaved")
+        journalBroken = true;blocked = blockedOther = true;dispatch({ type: "storage-unavailable", failed: true });setRecovery(true);setStatus("Private document storage failed · changes are unsaved")
         setError(cause instanceof Error ? cause.message : "Could not retain draft.")
         throw cause
       } finally { inflight = 0; flushing = undefined; countWrites(); if (dirty.size) schedule() }
@@ -130,14 +136,19 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
       countWrites()
       schedule()
     }
+    // The journal is the queue's persistence hook. The 500 ms poll paces sends and words every failure.
+    const queue = createWriteQueue<DocumentDraft>({
+      pacing: UNPACED,
+      persist: { put: persist, remove: async batch => { if (storage && stored.has(batch.id)) await storage.remove(batch.id) } },
+      classify: documentFailure,
+      duplicate: result => (result as { duplicate?: unknown } | null)?.duplicate === true,
+      onEvent: event => { if (active) dispatch("pending" in event ? { ...event, pending: total() } : event) },
+    })
     const local = (update: Uint8Array, origin: unknown) => {
       if (origin === "remote") return
-      const last = queue.at(-1)
-      if (last && !last.attempted) last.update = encodeUpdate(Y.mergeUpdates([decodeUpdate(last.update), update]))
-      else queue.push({ id: crypto.randomUUID(), update: encodeUpdate(update), attempted: false, schema, epoch: epoch ?? "", snapshot: "" })
-      const draft = queue.at(-1)!
-      persist(draft)
-      setPending(total()); setStatus("Saving…")
+      if (!queue.coalesce(last => { last.update = encodeUpdate(Y.mergeUpdates([decodeUpdate(last.update), update])) }))
+        queue.enqueue({ id: crypto.randomUUID(), update: encodeUpdate(update), attempted: false, schema, epoch: epoch ?? "", snapshot: "" })
+      dispatch({ type: "edit", pending: total() }); setStatus("Saving…")
     }
     purgeJournal.current = () => {
       // After a denial nothing is written (persist and the writer check authorizationLost); the purge runs once
@@ -149,13 +160,14 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
     // Mobile browsers and tab closes may skip beforeunload: write what is queued, best effort.
     const hide = (event: Event) => { if (event.type === "pagehide" || document.visibilityState === "hidden") void flushAll().catch(() => {}) }
     window.addEventListener("pagehide", hide); document.addEventListener("visibilitychange", hide)
-    const total = () => queue.length + restored.length
+    const total = () => queue.size + restored.length
+    const recount = () => dispatch({ type: "recount", pending: total() })
     function accept(next: DocumentState): boolean {
         if (!active || authorizationLost.current) return false
         if (next.rev < requiredRev) throw new Error("The acknowledged revision is not yet available. Your update is confirmed; refreshing saved content.")
-        setPending(total())
+        recount()
         if (!Number.isSafeInteger(next.rev) || next.rev<0 || typeof next.epoch!=="string" || !next.epoch || next.epoch.length>256 || typeof next.snapshot!=="string" || typeof next.can_write!=="boolean" || (next.updates!==undefined && (!Array.isArray(next.updates) || next.updates.some(update=>typeof update!=="string")))) throw new DocumentAPIError("Invalid confirmed document metadata; content preserved.",400)
-        if (![1,2,3].includes(next.schema)) { blocked = blockedOther = true; setRecovery(queue.length > 0); setDenied(true); setStatus("This document needs a newer editor."); return false }
+        if (![1,2,3].includes(next.schema)) { blocked = blockedOther = true; setRecovery(queue.size > 0); setDenied(true); setStatus("This document needs a newer editor."); return false }
         if (next.page_id !== pageId) throw new DocumentAPIError("The original Page identity changed. Recover your draft before reopening.",409)
         let remote: Y.Doc | undefined
         try { const loaded = documentSchema.load(next.snapshot); if (!(loaded instanceof Y.Doc)) throw new Error("Invalid document binary type"); remote=loaded; for (const update of next.updates ?? []) Y.applyUpdate(loaded,decodeUpdate(update)); documentSchema.validate(loaded,next.schema) } catch(cause) { throw new DocumentAPIError(cause instanceof Error ? `Confirmed document content rejected: ${cause.message}` : "Confirmed document content rejected.",400) } finally { remote?.destroy() }
@@ -168,7 +180,8 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
         if (next.snapshot) Y.applyUpdate(doc, decodeUpdate(next.snapshot), "remote")
         for (const update of next.updates ?? []) Y.applyUpdate(doc, decodeUpdate(update), "remote")
         setState(next)
-        if (!next.can_write && queue.length) { blocked = blockedOther = true; setRecovery(true); setStatus("Write access changed. Recover your unsaved draft."); return false }
+        dispatch({ type: "opened", canWrite: next.can_write })
+        if (!next.can_write && queue.size) { blocked = blockedOther = true; setRecovery(true); setStatus("Write access changed. Recover your unsaved draft."); return false }
         return true
     }
     const read = () => client.fetchQuery({queryKey,staleTime:0,gcTime:0,retry:false,queryFn:({signal})=>documentRequest<DocumentState>(workspace,endpoint.current,"",undefined,signal)})
@@ -192,8 +205,8 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
         if (durableOff) {
           durableOff = false; setStorageOff(false); setStorageBusy(false)
           // Edits made while storage was away join the journal next to any held draft.
-          for (const draft of queue) persist(draft)
-          setPending(total())
+          for (const draft of queue.writes()) persist(draft)
+          recount()
         }
       } catch (cause) {
         if (!active) return
@@ -231,25 +244,25 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
           // Read authorization must succeed before exposing any private
           // baseline from this browser. Regrant still never enables replay.
           const drafts = restored
-          setRecoveredDrafts(drafts);setPending(total())
+          hold(drafts, total())
           discardRecovery.current = async () => {
             // Without the Page's lock these rows may belong to a live tab: never delete them.
             if (!active || authorizationLost.current || !storage) return
             await flushAll().catch(() => {})
             for (const draft of drafts) { dirty.delete(draft.id); await storage.remove(draft.id) }
             if (!active) return
-            restored=[];setRecoveredDrafts([]);setPending(queue.length)
+            restored=[];hold([], queue.size)
             // Blocks with another cause (rejection, epoch change, failed journal) stay.
             blocked = blockedOther
-            if (!blockedOther) { setRecovery(false);setStorageReady(true) }
+            if (!blockedOther) { setRecovery(false);dispatch({ type: "stored" }) }
             void poll()
           }
           blocked = true;setRecovery(true);setStatus("Unsaved document draft found · recover before reopening")
           return
         }
-        if (!durableOff) setStorageReady(true)
-        if (queue.length && active && next.can_write && writesAllowed.current) {
-          const batch = queue[0]; batch.attempted = true
+        if (!durableOff) dispatch({ type: "stored" })
+        if (queue.size && active && next.can_write && writesAllowed.current) {
+          const batch = queue.head()!; batch.attempted = true
           try { documentSchema.validate(doc,next.schema) } catch (cause) { throw new DocumentAPIError(cause instanceof Error ? `Local document content rejected: ${cause.message}` : "Local document content rejected.",400) }
           if (!epoch) throw new DocumentAPIError("Confirmed document epoch required.",409)
           batch.baselineRev ??= next.rev
@@ -258,32 +271,33 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
           if (fresh) persist(batch) // a written attempted row is never rewritten
           await flushAll()
           if (!active || authorizationLost.current || blocked) return
-          const result = await documentRequest(workspace,endpoint.current,"/patch",batch.request,controller.signal)
-          try {
-            const receipt = verifyMutationReceipt(result,{...batch.request,baselineRev:batch.baselineRev})
-            requiredRev = Math.max(requiredRev,receipt.rev)
-          } catch (cause) { throw new UnconfirmedReceipt(cause instanceof Error ? cause.message : "Document update could not be confirmed.") }
-          if (!active) return
-          // Retain the receipt fence even if journal cleanup fails: this mount
-          // must never recommit acknowledged content.
-          queue.shift();setPending(total())
-          if (storage && stored.has(batch.id)) await storage.remove(batch.id)
+          const request = batch.request, baselineRev = batch.baselineRev
+          // A retry resends this same request: same id, same body. The receipt fence is
+          // retained even if journal cleanup fails: this mount must never recommit acknowledged content.
+          const acknowledged = await queue.deliver(() => documentRequest(workspace,endpoint.current,"/patch",request,controller.signal), result => {
+            try {
+              const receipt = verifyMutationReceipt(result,{...request,baselineRev})
+              requiredRev = Math.max(requiredRev,receipt.rev)
+            } catch (cause) { throw new UnconfirmedReceipt(cause instanceof Error ? cause.message : "Document update could not be confirmed.") }
+            return active
+          })
+          if (!acknowledged) return
           // The receipt confirms durability, but the pre-write read is stale.
           // Refresh authorized head metadata before enabling checkpoints.
           next = await read()
           if (!accept(next)) return
-          setPending(total())
+          recount()
         }
-        setError(undefined); setStatus(queue.length ? "Saving…" : next.can_write ? "Saved" : "Read only")
+        setError(undefined); setStatus(queue.size ? "Saving…" : next.can_write ? "Saved" : "Read only")
       } catch (cause) {
         if (!active) return
-        setPending(total())
+        recount()
         // Authority decides first: a denial must not be masked by a storage failure, whatever the journal state.
         if (authorizationLost.current || (cause instanceof DocumentAPIError && [401, 403, 404].includes(cause.status))) {
-          authorizationLost.current=true;purgeJournal.current();setConfirmed(undefined);setRecoveredDrafts([]);setUnverified([]);unverifiedStaged=undefined;restored=[];client.removeQueries({queryKey,exact:true})
-          blocked = blockedOther = true; setDenied(true); setRecovery(queue.length > 0); setStatus("Document access is unavailable.")
+          authorizationLost.current=true;purgeJournal.current();setConfirmed(undefined);hold([]);setUnverified([]);unverifiedStaged=undefined;restored=[];client.removeQueries({queryKey,exact:true})
+          blocked = blockedOther = true; setDenied(true); setRecovery(queue.size > 0); setStatus("Document access is unavailable.")
         } else if (cause instanceof DocumentStorageError || journalBroken) {
-          blocked = blockedOther = true;setStorageReady(false);setJournalFailed(true);setRecovery(queue.length>0);setStatus(requiredRev && !queue.length ? "Update confirmed · private storage cleanup failed" : "Private document storage is unavailable · changes are unsaved")
+          blocked = blockedOther = true;dispatch({ type: "storage-unavailable", failed: true });setRecovery(queue.size>0);setStatus(requiredRev && !queue.size ? "Update confirmed · private storage cleanup failed" : "Private document storage is unavailable · changes are unsaved")
         } else if (cause instanceof UnconfirmedReceipt) {
           blocked = blockedOther = true;setRecovery(true);setStatus("Save confirmation unavailable · changes are unsaved")
         } else if (cause instanceof DocumentAPIError && ([400, 413, 422].includes(cause.status) || (cause.status === 429 && cause.code === "document_quota"))) {
@@ -292,7 +306,7 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
           setStatus("Temporarily rate limited · changes are unsaved")
         } else if (cause instanceof DocumentAPIError && cause.status === 409) {
           blocked = blockedOther = true; setRecovery(true); setStatus("Document changed. Recover your draft before reopening.")
-        } else setStatus(queue.length ? "Disconnected · changes are unsaved" : "Disconnected")
+        } else setStatus(queue.size ? "Disconnected · changes are unsaved" : "Disconnected")
         setError(cause instanceof Error ? cause.message : "Could not sync document.")
       } finally { polling = false }
     }
@@ -301,7 +315,7 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
       retired = true; active = false; authorizationLost.current = true
       clearInterval(timer); clearTimeout(flushTimer); flushTimer = undefined
       controller.abort(); dirty.clear()
-      setConfirmed(undefined); setRecoveredDrafts([]); setUnverified([]); setDenied(true)
+      setConfirmed(undefined); hold([]); setUnverified([]); setDenied(true)
       setStatus("Document access is unavailable.")
       // A put already started owns a transaction. Drain it before auth's final
       // purge; neither queued edits nor the later unmount may start another.
@@ -320,14 +334,7 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
   // The queue is scoped to the human and immutable Page identity; the ref follows slug renames.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace, pageId, human, identity, doc, client])
-  useEffect(() => {
-    if (!current || !pending) return
-    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = "" }
-    window.addEventListener("beforeunload", warn)
-    return () => window.removeEventListener("beforeunload", warn)
-  }, [current, pending])
-  let durability: DocumentDurability = "confirmed"
-  if (recoveredDrafts.length) durability = "held"
-  else if (pending > 0) durability = journalFailed || !storageReady ? (journalWrites > 0 && !journalFailed ? "writing" : "unsaved") : journalWrites > 0 ? "writing" : "local"
-  return { durability: current ? durability : "confirmed", doc, state, status: !human ? "Document access is unavailable." : current ? status : "Loading document…", error: current ? error : undefined, pending: current ? pending : 0, recovery: current && recovery, recoveredDrafts: current ? recoveredDrafts : [], discardRecoveredDrafts, denied: !human || (current && denied), deny, storageUnavailable: current && storageOff && !denied, unverifiedDrafts: current ? unverified : [], storageLockless: current && storageOff && storageLockless && !denied, storageBusy: current && storageOff && storageBusy && !denied, editable: Boolean(current && state?.can_write && (storageReady || storageOff) && allowWrites && !recovery && !denied) }
+  useLeaveGuard(current && save.pending > 0)
+  const durability: DocumentDurability = durabilityOf(save)
+  return { durability: current ? durability : "confirmed", doc, state, status: !human ? "Document access is unavailable." : current ? status : "Loading document…", error: current ? error : undefined, pending: current ? save.pending : 0, recovery: current && recovery, recoveredDrafts: current ? recoveredDrafts : [], discardRecoveredDrafts, denied: !human || (current && denied), deny, storageUnavailable: current && storageOff && !denied, unverifiedDrafts: current ? unverified : [], storageLockless: current && storageOff && storageLockless && !denied, storageBusy: current && storageOff && storageBusy && !denied, editable: Boolean(current && state?.can_write && (save.stored || storageOff) && allowWrites && !recovery && !denied) }
 }

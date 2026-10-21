@@ -138,6 +138,7 @@ describe("pacing", () => {
     expect(events.at(-1)).toEqual({ type: kind })
     expect(queue.wait()).toBe(Infinity)
     expect(queue.halted).toBe(kind)
+    expect(await queue.deliver(async () => {})).toBe(false)
     queue.resume()
     await vi.advanceTimersByTimeAsync(pacing.minGapMs)
     expect(queue.wait()).toBe(0)

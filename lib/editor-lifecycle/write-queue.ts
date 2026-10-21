@@ -56,7 +56,7 @@ export interface WriteQueue<W extends QueuedWrite> {
   coalesce(merge: (newest: W) => void): boolean
   /** Milliseconds until the head may be sent; Infinity while one is in flight or the queue is halted. */
   wait(): number
-  /** Sends the head once. True once its receipt is accepted; a failure is recorded and rethrown. */
+  /** Sends the head once, unless one is in flight or the queue is halted. True once its receipt is accepted; a failure is recorded and rethrown. */
   deliver(send: Send<W>, verify?: Verify<W>): Promise<boolean>
   /** Drives `deliver` with the queue's own timers until stopped. */
   start(send: Send<W>, verify?: Verify<W>): void
@@ -115,7 +115,7 @@ export function createWriteQueue<W extends QueuedWrite>(options: WriteQueueOptio
     },
     async deliver(send, verify) {
       const write = writes[0]
-      if (!write || inflight) return false
+      if (!write || inflight || halted) return false
       inflight = true; write.attempted = true; lastSendAt = timers.now()
       emit({ type: "send" })
       let accepted = false, duplicate = false
