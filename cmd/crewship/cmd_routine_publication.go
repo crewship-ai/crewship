@@ -35,7 +35,10 @@ func runRoutinePublication(cmd *cobra.Command, args []string, action string) err
 	if workspace == "" || workspace == "." || workspace == ".." {
 		return fmt.Errorf("invalid workspace identifier")
 	}
-	path := "/api/v1/workspaces/" + url.PathEscape(workspace) + "/restricted-routine-library/" + url.PathEscape(args[0]) + "/draft/" + action
+	path := "/api/v1/workspaces/" + url.PathEscape(workspace) + "/restricted-routine-library/" + url.PathEscape(args[0]) + "/draft/validate"
+	if action == "publish" {
+		path = "/api/v1/workspaces/" + url.PathEscape(workspace) + "/restricted-routine-library/" + url.PathEscape(args[0]) + "/draft/publish"
+	}
 	// No hidden draft GET, refresh or retry: a conflict leaves review with
 	// the human rather than silently selecting a newer draft.
 	response, err := client.Post(path, map[string]any{"draft_id": draft, "revision": revision, "base_revision": base})
