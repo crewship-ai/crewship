@@ -325,9 +325,10 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
     const unregisterWriter = registerDocumentDraftWriter(human, () => {
       retired = true; active = false; authorizationLost.current = true
       clearInterval(timer); clearTimeout(flushTimer); flushTimer = undefined
+      const unsent = dirty.size > 0 || queue.size > 0
       controller.abort(); dirty.clear()
       setConfirmed(undefined); hold([]); setUnverified([]); setDenied(true)
-      setStatus("Document access is unavailable.")
+      setStatus(deniedStatus(unsent))
       // A put already started owns a transaction. Drain it before auth's final
       // purge; neither queued edits nor the later unmount may start another.
       return (flushing ?? Promise.resolve()).catch(() => {})
