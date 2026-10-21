@@ -49,7 +49,7 @@ export function SavedDocumentPanel({ headerExtra, onClose, ...props }: SavedDocu
             <Pencil className="size-4" aria-hidden />Edit here
           </Button>}
         <Button asChild variant="outline" size="sm" className="coarse:min-h-[44px]">
-          <a href={`/pages?${new URLSearchParams({ ref: "@" + document.target.pageId, workspace_id: document.target.workspaceId })}`}
+          <a href={`/pages?${new URLSearchParams({ ref: document.target.pageId, workspace_id: document.target.workspaceId })}`}
             target="_blank" rel="noopener noreferrer">
             Open full editor<ExternalLink className="size-4" aria-hidden />
           </a>
