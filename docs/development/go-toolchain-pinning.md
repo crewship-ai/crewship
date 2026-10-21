@@ -4,14 +4,14 @@
 
 ## Bumping the Go toolchain (never a one-line change)
 
-Thirteen files name the Go version, and they must all name the same one:
+The release image, module and workflows name the Go version and must agree:
 
 | Where | Line |
 |---|---|
-| `go.mod` | `toolchain go1.27.2` — the anchor everything else is checked against |
-| `Dockerfile` | `FROM golang:1.27.2-alpine` — the compiler for the **shipped** binary |
-| ten workflows | `GO_VERSION: "1.27.2"` |
-| `.github/workflows/codeql.yml` | a literal `go-version: "1.27.2"` |
+| `go.mod` | `toolchain go1.27.3` — the anchor everything else is checked against |
+| `Dockerfile` | `FROM golang:1.27.3-alpine` — the compiler for the **shipped** binary |
+| workflows | `GO_VERSION: "1.27.3"` |
+| `.github/workflows/codeql.yml` | a literal `go-version: "1.27.3"` |
 
 `scripts/go-toolchain-pin.sh` parses all of them and fails on disagreement;
 it runs in CI's `Shell` job on every PR. Run it before you push:
@@ -51,3 +51,7 @@ Bumping the toolchain also means **re-checking the analyser pins**.
 `x/tools` older than the standard library it is asked to analyse dies on
 syntax it does not know — 1.26 → 1.27 needed both to move. Their pins carry
 comments saying so; the guard cannot check this one for you.
+
+Go 1.27.3 fixes the reachable `crypto/x509` advisory GO-2026-6809.
+The patch upgrade keeps the Go 1.27 language floor and the vulnerability gate;
+it does not accept or suppress that advisory.
