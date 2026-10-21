@@ -1,9 +1,9 @@
 import { test, expect, type Page } from "@playwright/test"
-import { readFileSync } from "node:fs"
 import { documentSchema } from "../lib/documents/schema"
 
 // ART-06: a Document opened, edited and saved on a phone with the keyboard
-// alone, including the server refusing the write with 409.
+// alone. The forced 409 conflict step is deliberately missing; see the note
+// at the end of the test.
 //
 // Every /api request is answered here, so the spec needs only the static
 // frontend: no Go server, seed or provider. The page is opened by address
@@ -17,13 +17,6 @@ import { documentSchema } from "../lib/documents/schema"
 //     edit is unsent (+ "Saving to this browser…" / "Saved locally in this
 //     browser" · "not yet confirmed by server"), then "Saved · Confirmed by
 //     server" once the patch receipt verified;
-//   - a 409 from POST …/document/patch blocks the session: status "Document
-//     changed. Recover your draft before reopening.", the server's message in
-//     role=alert, the editor read-only, and a recovery alert offering
-//     "Download unsaved draft" and "Reopen saved document". The typed text is
-//     still in the editor, downloadable, and held in this browser's journal
-//     across a reload ("Unsaved document draft found · recover before
-//     reopening") until "Discard recovered drafts and reopen".
 
 test.use({
   viewport: { width: 390, height: 844 },
@@ -40,7 +33,6 @@ const WORKSPACE = "art06-workspace"
 const PAGE_ID = "art06-document"
 const EPOCH = "art06-epoch"
 const TYPED = "Keyboard note from a phone"
-const CONFLICT_MESSAGE = "Document changed on the server."
 
 type PatchRequest = { id: string; update: string; schema: number; epoch: string }
 
@@ -76,7 +68,7 @@ async function tabUntil(page: Page, done: (stop: { label: string; role: string }
   throw new Error(`keyboard focus never reached the target in ${limit} Tab presses; passed: ${stops.map(s => s.label).join(" > ")}`)
 }
 
-test("ART-06 Document on a phone, keyboard only: edit, save state, 409 conflict and recovery", async ({ page }) => {
+test("ART-06 Document on a phone, keyboard only: edit and save state", async ({ page }) => {
   test.setTimeout(90_000)
 
   const documentURL = `/api/v1/pages/_/document`
@@ -85,7 +77,6 @@ test("ART-06 Document on a phone, keyboard only: edit, save state, 409 conflict 
   let rev = 1
   const applied: string[] = []
   const patches: PatchRequest[] = []
-  let refuseWith409 = false
   let releasePatch: () => void = () => {}
   let holdPatch: Promise<void> | undefined
   const unexpected: string[] = []
@@ -109,7 +100,6 @@ test("ART-06 Document on a phone, keyboard only: edit, save state, 409 conflict 
       const body = request.postDataJSON() as PatchRequest
       patches.push(body)
       if (holdPatch) await holdPatch
-      if (refuseWith409) return json({ error: CONFLICT_MESSAGE, code: "conflict" }, 409)
       applied.push(body.update)
       rev += 1
       return json({ id: body.id, epoch: body.epoch, schema: body.schema, rev })
@@ -170,55 +160,14 @@ test("ART-06 Document on a phone, keyboard only: edit, save state, 409 conflict 
   await expect(editor).toBeFocused()
   await expect(status).toHaveText(/^Saved · Confirmed by server$/, { timeout: 15_000 })
 
-  // ── Force a 409 on the next patch ────────────────────────────────────────
-  holdPatch = undefined
-  refuseWith409 = true
-  const sentBefore = patches.length, storedBefore = applied.length
-  const MORE = " and a second line"
-  await page.keyboard.type(MORE)
-  await expect.poll(() => patches.length, { message: "the next edit reaches the server" }).toBeGreaterThan(sentBefore)
-
-  await expect(status).toContainText("Document changed. Recover your draft before reopening.", { timeout: 15_000 })
-  await expect(status).toHaveCount(1)
-  const alerts = page.getByRole("alert")
-  await expect(alerts.filter({ hasText: CONFLICT_MESSAGE })).toHaveCount(1)
-  const recovery = alerts.filter({ hasText: "Your unsaved draft is retained privately in this browser. Download it before discarding it." })
-  await expect(recovery).toBeVisible()
-  await expect(editor).toHaveAttribute("contenteditable", "false")
-  await expect(editor).toContainText(TYPED + MORE)
-  expect(applied, "the refused edit was not stored by the server").toHaveLength(storedBefore)
-  expect(await overflowX(page), "no horizontal scroll with the conflict UI").toBeLessThanOrEqual(390)
-
-  // ── The typed text is not silently lost: download it by keyboard ─────────
-  await tabUntil(page, stop => stop.label === "Download unsaved draft")
-  const download = page.waitForEvent("download")
-  await page.keyboard.press("Enter")
-  const saved = await download
-  expect(saved.suggestedFilename()).toBe("_-recovery.json")
-  const draftPath = await saved.path()
-  expect(JSON.stringify(JSON.parse(readFileSync(draftPath, "utf8")))).toContain(TYPED + MORE)
-
-  // ── Reopen by keyboard: the unsent draft is held, not dropped ────────────
-  await tabUntil(page, stop => stop.label === "Reopen saved document")
-  const reloaded = page.waitForEvent("load")
-  await page.keyboard.press("Enter")
-  await reloaded
-  expect(dialogs, "leaving with unsent work asks first").toContain("beforeunload")
-  refuseWith409 = false
-  await expect(status).toContainText("Unsaved document draft found · recover before reopening", { timeout: 20_000 })
-  await expect(status).toContainText("An earlier unsent draft is held in this browser and was not restored")
-  await expect(status).toHaveCount(1)
-  await expect(page.getByRole("alert").filter({ hasText: "Your unsaved draft is retained privately in this browser." })).toBeVisible()
+  // Missing step (owner decision 2026-10-21): no forced 409. Document edits
+  // merge through Yjs and main never answers a patch with a stale-revision
+  // 409; a "mine vs theirs" conflict belongs to restore and agent proposals
+  // (DX-06, PX-15, COL-02), which the backend does not have yet. Add the
+  // conflict step here once one of those routes exists.
   expect(await overflowX(page)).toBeLessThanOrEqual(390)
 
-  // Only an explicit, keyboard-operated discard clears it and reopens the saved copy.
-  await tabUntil(page, stop => stop.label === "Download unsaved draft")
-  await tabUntil(page, stop => stop.label === "Discard recovered drafts and reopen")
-  await page.keyboard.press("Enter")
-  await expect(status).toHaveText(/^Saved · Confirmed by server$/, { timeout: 20_000 })
-  await expect(page.getByLabel("Document editor")).toHaveAttribute("contenteditable", "true")
-  expect(await overflowX(page)).toBeLessThanOrEqual(390)
-
+  expect(dialogs, "no dialog interrupts a saved document").toEqual([])
   expect(pageErrors).toEqual([])
   expect(unexpected, "no request outside the fixture").toEqual([])
 })
