@@ -459,10 +459,14 @@ jobs:
       # CREWSHIP_RESTRICTED_RUNTIME_IMAGE names an immutable local digest.
       # Those findings measured the fixture, not the product.
       #
-      # The Pages toolchain image is built from THIS checkout so the
-      # compiler and the server under test are the same release — the rule
-      # tools/pages-build/README.md states for operators. Its sha256 image
-      # ID is immutable by construction and serves both settings:
+      # The Pages toolchain image is built by `crewship page enable` from
+      # the binary built above — the operator path (#3108) — so the compiler
+      # carries the server's own profile label and both are the same
+      # release. Its sha256 image ID (enable's only stdout) is immutable by
+      # construction and serves both settings below. The server would also
+      # find the labelled image on its own; the explicit override is kept so
+      # the contract gate guard (scripts/api-contract-gate-test.sh) can tie
+      # both settings to this one step output:
       #
       #   - CREWSHIP_PAGE_BUILD_IMAGE: the offline Page compiler the seed's
       #     app publication path needs (seedPageApp builds + checks +
@@ -482,7 +486,7 @@ jobs:
         timeout-minutes: 10
         run: |
           set -euo pipefail
-          image="$(docker build -q tools/pages-build)"
+          image="$(./crewship page enable)"
           case "$image" in
             sha256:*) ;;
             *) echo "unexpected image reference: $image" >&2; exit 1 ;;

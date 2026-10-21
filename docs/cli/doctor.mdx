@@ -101,6 +101,31 @@ is why this check exists
 ([#1672](https://github.com/crewship-ai/crewship/issues/1672)).
 </Note>
 
+### Pages apps
+
+Reports whether [Pages Apps](/cli/page#crewship-page-enable) are turned on for
+this crewship version: whether the local Docker daemon holds a compiler image
+labelled `ai.crewship.pages.profile` with this binary's profile fingerprint.
+Pages Apps are optional, so a host that never enabled them is healthy. The
+check only lists images; it never builds or starts a container.
+
+- **INFO** — `not enabled (optional)`: no Pages compiler image. Run
+  `crewship page enable` to turn Pages Apps on. Also INFO when Docker is not
+  reachable (the *container runtime* row owns that finding).
+- **WARN** — `outdated`: Pages images exist, but none for this version (the
+  binary was upgraded). The server refuses builds with `page_apps_not_enabled`
+  until `crewship page enable` builds the image for this version; the old one
+  is kept for rollback.
+- **WARN** — enabled, but `page project storage is not configured` (set
+  `CREWSHIP_PAGE_PROJECTS_PATH` to an absolute directory outside
+  `storage.base_path`) or `no Page runtime origin` (set
+  `CREWSHIP_PAGE_RUNTIME_ORIGIN` to a separate site; derived automatically only
+  when Studio is served on `http://localhost`). Doctor reads these from the
+  environment, not from a YAML server configuration.
+- **PASS** — enabled, with the short image ID and the effective runtime origin.
+  When `CREWSHIP_PAGE_BUILD_IMAGE` is set the row names that explicit image
+  instead, since the server uses it in preference to the labelled one.
+
 ### Port binding
 
 Confirms the HTTP port (default `8080` or `CREWSHIP_PORT`) is free.

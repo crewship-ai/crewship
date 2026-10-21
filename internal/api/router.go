@@ -196,6 +196,7 @@ type Router struct {
 	attachmentHandler                *AttachmentHandler
 	pageProjectsPath                 string
 	pageBuildImage                   string
+	pageBuildImageLookup             func(context.Context) ([]string, error)
 	pageRuntimeOrigin                string
 	pageRuntimeDevelopmentSameOrigin bool
 	pageStudioOrigin                 string

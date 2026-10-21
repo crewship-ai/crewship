@@ -524,6 +524,36 @@ ensure_web_build_fresh() {
   ok "Frontend build refreshed -> web/out/ (HEAD $head_now)"
 }
 
+# Pages Apps are opt-in: a server builds Page apps only once a compiler image
+# labelled for its own binary exists, and finds one without a restart (#3108).
+# A dev slot opts in by default so `./dev.sh start` + `crewship seed` publishes
+# the demo apps. `page enable` is idempotent and returns at once when the image
+# exists; the first run builds it and needs the network. Never fatal — Pages
+# are optional. CREWSHIP_DEV_PAGES=0 opts out.
+enable_dev_pages() {
+  local binary="$1"
+  if [[ "${CREWSHIP_DEV_PAGES:-1}" == 0 ]]; then
+    log "Pages Apps not enabled (CREWSHIP_DEV_PAGES=0)"
+    return 0
+  fi
+  if ! command -v docker &>/dev/null; then
+    return 0
+  fi
+  if [[ -n "$TIMEOUT_CMD" ]]; then
+    "$TIMEOUT_CMD" 3 docker info &>/dev/null || return 0
+  else
+    docker info &>/dev/null || return 0
+  fi
+  log "Enabling Pages Apps (the first run builds the compiler image)..."
+  # stdout is only the image ID; progress and hints arrive on stderr.
+  if "$binary" page enable >/dev/null; then
+    ok "Pages Apps enabled"
+  else
+    warn "crewship page enable failed -- Page apps stay disabled; rerun '$binary page enable' or set CREWSHIP_DEV_PAGES=0 to skip"
+  fi
+  return 0
+}
+
 start_go() {
   if pid=$(is_running "$GO_PID_FILE"); then
     ok "crewship already running (pid $pid)"
@@ -587,6 +617,8 @@ start_go() {
   fi
   cp "$PROJECT_DIR/scripts/entrypoint.sh" "${bin_dir}/entrypoint.sh"
   chmod +x "${bin_dir}/entrypoint.sh"
+
+  enable_dev_pages "$binary"
 
   # A dev slot must ALWAYS run the sidecar it just built, co-located with the
   # freshly-built server binary. Otherwise a hardcoded CREWSHIP_SIDECAR_PATH in

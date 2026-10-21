@@ -115,14 +115,18 @@ storage:
   page_projects_path: ""        # Protected host directory for Page sources, Git and
                                 # artifacts; must not overlap base_path. Empty
                                 # disables custom Page projects.
-  page_build_image: ""          # Immutable image ID or repository@sha256:… digest of
-                                # the offline Page compiler. Tags are refused; empty
-                                # disables builds. Requires page_projects_path.
+  page_build_image: ""          # Optional override: immutable image ID or
+                                # repository@sha256:… digest of the offline Page
+                                # compiler. Tags are refused. Empty = use the image
+                                # `crewship page enable` labelled for this release;
+                                # none = builds disabled. Requires page_projects_path.
   page_studio_origin: ""        # Public browser origin allowed to initialize Page
                                 # applications. Empty = auth.nextjs_url.
   page_runtime_origin: ""       # Separate-site public origin that serves published
                                 # Page applications (bootstrap route only). Required
                                 # to preview, publish or serve custom applications.
+                                # Empty with Studio on http://localhost:<port> =
+                                # http://127.0.0.1:<server port>.
   page_runtime_development_same_origin: false
                                 # Reviewed development demos only: lets the runtime
                                 # share the Studio origin. No process isolation.
@@ -263,7 +267,7 @@ plus 64 KiB of metadata; verified terminal captures release unused reserved byte
 Fully acknowledged natural terminal sources are collected after seven days.
 Incomplete or forced output remains available for reconciliation.
 
-The five `page_*` keys configure custom [Page applications](/guides/pages-apps-operations). They are the file-config form of `CREWSHIP_PAGE_PROJECTS_PATH`, `CREWSHIP_PAGE_BUILD_IMAGE`, `CREWSHIP_PAGE_STUDIO_ORIGIN`, `CREWSHIP_PAGE_RUNTIME_ORIGIN` and `CREWSHIP_PAGE_RUNTIME_DEVELOPMENT_SAME_ORIGIN`, and the env var wins when both are set. Validation is the same on both paths: `page_projects_path` must be absolute and must not sit inside (or contain) `base_path`; `page_build_image` needs `page_projects_path` and an immutable `sha256:…` ID or `repository@sha256:…` digest; `page_runtime_origin` must be a different site from the Studio origin unless `page_runtime_development_same_origin` is `true`. See the [Environment Reference](/configuration/environment#storage) for what each one guards.
+The five `page_*` keys configure custom [Page applications](/guides/pages-apps-operations). They are the file-config form of `CREWSHIP_PAGE_PROJECTS_PATH`, `CREWSHIP_PAGE_BUILD_IMAGE`, `CREWSHIP_PAGE_STUDIO_ORIGIN`, `CREWSHIP_PAGE_RUNTIME_ORIGIN` and `CREWSHIP_PAGE_RUNTIME_DEVELOPMENT_SAME_ORIGIN`, and the env var wins when both are set. Validation is the same on both paths: `page_projects_path` must be absolute and must not sit inside (or contain) `base_path`; `page_build_image` needs `page_projects_path` and an immutable `sha256:…` ID or `repository@sha256:…` digest; `page_runtime_origin` must be a different site from the Studio origin unless `page_runtime_development_same_origin` is `true`. Neither image nor origin has to be configured on a local installation: leave `page_build_image` empty and run `crewship page enable`, which installs the compiler image the server finds by its profile label, and an empty `page_runtime_origin` with Studio on `http://localhost:<port>` derives `http://127.0.0.1:<server port>`. Set `page_build_image` only to pin a specific image, and `page_runtime_origin` for remote viewers, HTTPS or a custom domain. See the [Environment Reference](/configuration/environment#storage) for what each one guards.
 
 ### State
 
