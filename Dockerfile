@@ -65,7 +65,7 @@ ARG NEXT_PUBLIC_SENTRY_DSN=""
 ENV NEXT_PUBLIC_CREWSHIP_VERSION=$VERSION
 RUN pnpm build
 
-FROM --platform=$BUILDPLATFORM golang:1.27.2-alpine AS backend
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine AS backend
 ARG TARGETOS
 ARG TARGETARCH
 # This tag is the compiler for the shipped binary, and it is the one Go version
