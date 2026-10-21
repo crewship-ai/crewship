@@ -884,3 +884,15 @@ same transaction as onboarding creation, using current crew-creation authority
 and the configured chain key. Audit failure leaves Setup retryable; observers
 run after commit. This boundary covers blank Setup, with proposal/template
 application governed by their existing separate contracts.
+## Routine Publish right
+
+`routine.publish` is an explicit restricted member share, valid only with Edit
+on the same routine; it implies neither View nor Run. Effective Publish also
+requires live View and active account/issuers. Policy, invitation, provisioning
+and preset preview/apply reject Publish without Edit with 422 before writes.
+The v1 preset catalog is unchanged.
+
+Publication archives retain physical authority across backup/restore. Generic
+Run, nested calls and trigger writers refuse bounded publication authority;
+trusted archives retain their existing behavior. The next slice provides the
+publication endpoint and its restricted manual consumer.

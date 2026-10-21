@@ -602,3 +602,11 @@ Replace the entire administrative policy using the version just reviewed with
 
 A stale version refuses the change. Read the policy again before deciding on a
 replacement. Use `--format json` for machine-readable responses.
+
+
+### Routine Publish dependency
+
+Member access policies and invitation/provisioning rights require `edit` for
+any routine with `publish`; otherwise the server returns 422. Add `view`
+separately for effective publication access. Run remains separate. Preset
+preview/apply reject a policy that retains Publish after removing Edit.

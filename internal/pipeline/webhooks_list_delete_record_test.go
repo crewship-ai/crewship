@@ -17,6 +17,13 @@ import (
 
 func saveWebhookForTest(t *testing.T, store *WebhookStore, wsID, name, pipelineID string) *Webhook {
 	t.Helper()
+	pipelineID += "-" + wsID
+	if _, err := store.db.Exec(`INSERT OR IGNORE INTO workspaces(id) VALUES(?)`, wsID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`INSERT OR IGNORE INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash) VALUES(?,?,?,?,?,?)`, pipelineID, wsID, pipelineID, pipelineID, `{"name":"target","steps":[]}`, "hash"); err != nil {
+		t.Fatal(err)
+	}
 	w, err := store.Save(context.Background(), SaveWebhookInput{
 		WorkspaceID:      wsID,
 		Name:             name,

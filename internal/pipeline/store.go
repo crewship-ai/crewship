@@ -246,6 +246,7 @@ UPDATE pipelines SET
     name = ?,
     description = CASE WHEN ? THEN description ELSE ? END,
     dsl_version = ?, definition_json = ?, definition_hash = ?,
+    publication_authority_fingerprint = 'legacy-trusted:v1',
     author_crew_id = ?,
     -- Empty means "the save did not mention it", not "clear it". The field
     -- became load-bearing with the crewship step kind (it is the agent every
@@ -470,6 +471,9 @@ func (s *Store) createTriggerTx(ctx context.Context, tx *sql.Tx, in SaveInput, p
 		if pinnedVersion < 1 {
 			return nil, fmt.Errorf("%w: publish an archived version before scheduling", ErrInvalidTrigger)
 		}
+		if err := checkGenericTrigger(ctx, tx, in.WorkspaceID, pipelineID, &pinnedVersion); err != nil {
+			return nil, err
+		}
 		id := "pnd_once_" + pipelineID
 		// Stable authoring identity makes a repeated save update one pending
 		// start. A consumed/cancelled start is never rearmed by editing a
@@ -509,7 +513,16 @@ func (s *Store) createTriggerTx(ctx context.Context, tx *sql.Tx, in SaveInput, p
 		MaxConsecutiveFailures: trigger.MaxConsecutiveFailures,
 		Activation:             trigger.Activation,
 	}
-	return upsertTriggerSchedule(ctx, tx, schedIn)
+	schedule, err := upsertTriggerSchedule(ctx, tx, schedIn)
+	if err != nil {
+		return nil, err
+	}
+	// Upsert retains an existing numeric pin and wake target. Validate those
+	// actual stored selections, rather than the unpinned authoring input.
+	if err := CheckGenericScheduleIn(ctx, tx, in.WorkspaceID, schedule.ID); err != nil {
+		return nil, err
+	}
+	return schedule, nil
 }
 
 // saveVersionTx is the in-transaction variant of SaveVersion used by
@@ -527,7 +540,7 @@ func (s *Store) saveVersionTx(ctx context.Context, tx *sql.Tx, pipelineID string
 	// surface (versions UI/CLI, pinned-run bookkeeping) would lie.
 	var existingVersion int
 	if err := tx.QueryRowContext(ctx,
-		`SELECT version FROM pipeline_versions WHERE pipeline_id = ? AND definition_hash = ? LIMIT 1`,
+		`SELECT version FROM pipeline_versions WHERE pipeline_id = ? AND definition_hash = ? AND authority_fingerprint = 'legacy-trusted:v1' LIMIT 1`,
 		pipelineID, hash,
 	).Scan(&existingVersion); err == nil {
 		if _, err := tx.ExecContext(ctx,
@@ -879,7 +892,7 @@ type rowScanner interface {
 // Time fields are parsed via parseTimePtr — SQLite returns RFC3339Nano
 // strings for our datetime('now','subsec') defaults, but tests can
 // surprise us with bare RFC3339 too, so the helper accepts both.
-func scanPipeline(rs rowScanner) (*Pipeline, error) {
+func scanPipeline(rs rowScanner, extra ...any) (*Pipeline, error) {
 	var (
 		p                 Pipeline
 		lastInvoked       sql.NullString
@@ -891,7 +904,7 @@ func scanPipeline(rs rowScanner) (*Pipeline, error) {
 		deletedAt         sql.NullString
 		authoredVia       string
 	)
-	err := rs.Scan(
+	dest := []any{
 		&p.ID, &p.WorkspaceID, &p.Slug, &p.Name, &p.Description, &p.DSLVersion,
 		&p.DefinitionJSON, &p.DefinitionHash,
 		&ephemeral, &vis, &p.InvocationCount,
@@ -905,8 +918,8 @@ func scanPipeline(rs rowScanner) (*Pipeline, error) {
 		&p.Status,
 		&p.MonthlyBudgetUSD,
 		&p.Icon, &p.Color,
-		&createdAt, &updatedAt, &deletedAt,
-	)
+		&createdAt, &updatedAt, &deletedAt}
+	err := rs.Scan(append(dest, extra...)...)
 	if err != nil {
 		return nil, err
 	}

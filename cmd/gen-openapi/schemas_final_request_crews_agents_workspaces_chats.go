@@ -104,7 +104,12 @@ func finalRequestCrewsAgentsWorkspacesChatsSchemaCatalog() (map[string]DomainSch
 	add("POST", "/api/v1/onboarding/complete", "FinalCoreEmptyRequest")
 	add("POST", "/api/v1/workspaces/{workspaceId}/invitations", "FinalCoreInvitationRequest")
 	add("POST", "/api/v1/workspaces/{workspaceId}/members/provision", "FinalCoreProvisionMemberRequest")
+	// Shared member-access validation returns this dependency error before writes.
+	invitation := routes["POST /api/v1/workspaces/{workspaceId}/invitations"]
+	invitation.ErrorStatuses = []string{"422"}
+	routes["POST /api/v1/workspaces/{workspaceId}/invitations"] = invitation
 	provision := routes["POST /api/v1/workspaces/{workspaceId}/members/provision"]
+	provision.ErrorStatuses = []string{"422"}
 	provision.ErrorMedia = []string{"application/json"}
 	provision.ErrorResponse = object(map[string]any{"error": str(), "code": str()}, "error")
 	routes["POST /api/v1/workspaces/{workspaceId}/members/provision"] = provision
