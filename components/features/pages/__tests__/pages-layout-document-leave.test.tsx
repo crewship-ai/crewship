@@ -50,6 +50,11 @@ async function dirtyDocument() {
   await screen.findByRole("button",{name:"Download unsaved draft"},{timeout:3000})
 }
 
+function focusedOnDocument(){
+  const focused=document.activeElement
+  return focused!=null && focused!==document.body && focused.contains(screen.getByLabelText("Document editor"))
+}
+
 function appLink(){
   const link=document.createElement("a");link.href="/chat";link.textContent="Chat";link.dataset.testLink="";document.body.append(link)
   return link
@@ -60,12 +65,22 @@ it("asks before an in-app link leaves a Document with unsent edits, and stays wh
   const link=appLink()
   act(()=>{link.click()})
   const question=await screen.findByRole("alertdialog")
-  expect(question).toHaveTextContent("have not reached the server")
+  expect(question).toHaveTextContent("have not been accepted by the server")
   expect(push).not.toHaveBeenCalled()
   fireEvent.click(screen.getByRole("button",{name:"Keep editing"}))
   await waitFor(()=>expect(screen.queryByRole("alertdialog")).toBeNull())
   expect(screen.getByLabelText("Document editor")).toHaveTextContent("Unsaved local text")
+  // Back in the document view, not on <body>: the dialog has no trigger to return to. A rejected draft leaves the
+  // editor read-only, so the view holding it takes focus.
+  await waitFor(()=>expect(focusedOnDocument()).toBe(true))
   // Asked again on the next attempt, not refused in silence.
+  act(()=>{link.click()})
+  await screen.findByRole("alertdialog")
+  // Escape is Keep editing too.
+  fireEvent.keyDown(screen.getByRole("alertdialog"),{key:"Escape"})
+  await waitFor(()=>expect(screen.queryByRole("alertdialog")).toBeNull())
+  await waitFor(()=>expect(focusedOnDocument()).toBe(true))
+  expect(push).not.toHaveBeenCalled()
   act(()=>{link.click()})
   await screen.findByRole("alertdialog")
   fireEvent.click(screen.getByRole("button",{name:"Leave anyway"}))

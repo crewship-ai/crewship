@@ -296,6 +296,12 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
     wantsFocus.current = false
     node.focus()
   }, [])
+  // Keep editing returns to the editor, where the caret was; the view itself if it has none.
+  const nativeView = React.useRef<HTMLDivElement>(null)
+  const focusNativeView = React.useCallback(() => {
+    const view = nativeView.current
+    ;(view?.querySelector<HTMLElement>('[contenteditable="true"]') ?? view)?.focus()
+  }, [])
   const focusTheView = React.useCallback(() => {
     wantsFocus.current = true
   }, [])
@@ -509,6 +515,8 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
             ) : selectedSlug ? (
               <motion.div
                 key={nativeDocument ? `document-${workspaceId}:${detail.page!.id}` : nativeSlides ? `slides-${workspaceId}:${detail.page!.id}` : `page-${selectedSlug}`}
+                ref={nativeView}
+                tabIndex={nativeDocument || nativeSlides ? -1 : undefined}
                 initial={{ opacity: 0, x: 12 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -12 }}
@@ -519,11 +527,11 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                   detail.accessDenied || !nativePageId ? <p role="alert" className="p-6">{detail.accessDenied ? "Document access is unavailable." : "The original Page identity is unavailable."}</p> : <>
                   {detail.error && <p role="status" className="px-6 py-2 text-sm">Page details are temporarily unavailable. Your document remains open.</p>}
                   <PageDocument key={`${workspaceId}:${nativePageId}`} workspaceId={workspaceId} slug={selectedSlug} pageId={nativePageId} name={detail.page?.name} onDirtyChange={nav.setDirty} />
-                  <UnsentEditsLeaveDialog pending={nav.pending} />
+                  <UnsentEditsLeaveDialog pending={nav.pending} onReturnFocus={focusNativeView} />
                   </>
                 ) : nativeSlides ? (
                   detail.accessDenied || !nativePageId ? <p role="alert" className="p-6">Slides access is unavailable.</p>
-                    : <><PageSlides workspaceId={workspaceId} pageId={nativePageId} name={detail.page?.name} onDirtyChange={nav.setDirty} /><UnsentEditsLeaveDialog pending={nav.pending} /></>
+                    : <><PageSlides workspaceId={workspaceId} pageId={nativePageId} name={detail.page?.name} onDirtyChange={nav.setDirty} /><UnsentEditsLeaveDialog pending={nav.pending} onReturnFocus={focusNativeView} /></>
                 ) : detail.page && !detail.loading && !detail.error ? (
                   <PageApplicationView key={`${workspaceId}:${selectedSlug}`} workspaceId={workspaceId} slug={selectedSlug} page={detail.raw} panels={showPanels} onAvailableChange={setApplicationAvailable} fallback={pageFallback} />
                 ) : pageFallback}
