@@ -39,6 +39,11 @@ confirmed edit can be retried after boot fencing with a new lease. Requests
 without a generation condition preserve their original digest representation.
 
 A checkpoint pins the snapshot and projection at the confirmed revision.
+Initialization atomically retains revision 0 under an `initial-` ID derived from
+the initialization request digest, with the same trusted actor and history byte
+budget. Exact retries retain that one checkpoint without another receipt. Later
+human edits leave the initial version readable; existing documents are not
+backfilled and individual edits do not automatically create checkpoints.
 Restoration creates a new head revision, advances its epoch and generation,
 and clears the writer lease. It replaces the replay log while retaining pinned
 checkpoints and retry receipts. Checkpoint and restore retries bind the original

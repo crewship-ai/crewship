@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -78,7 +79,26 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 	t.Cleanup(func() { _ = node.Process.Kill(); _ = node.Wait() })
 	documentsWaitSocket(t, nodeSocket)
 	documentsWaitReady(t, nodeSocket, secret)
-	host := httptest.NewServer(router)
+	var droppedCreateResponse atomic.Bool
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/internal/documents/create" || !droppedCreateResponse.CompareAndSwap(false, true) {
+			router.ServeHTTP(w, r)
+			return
+		}
+		// Commit through the real Router, Node service and SQLite authority before
+		// dropping the host socket. No response headers or body reach the sidecar.
+		committed := httptest.NewRecorder()
+		router.ServeHTTP(committed, r)
+		if committed.Code != http.StatusCreated {
+			t.Errorf("fault must follow a successful real creation: HTTP%d %s", committed.Code, committed.Body.String())
+		}
+		connection, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Errorf("owned host response drop: %v", err)
+			return
+		}
+		_ = connection.Close()
+	}))
 	t.Cleanup(host.Close)
 	client := &http.Client{Timeout: 20 * time.Second}
 	request := func(base, method, path, token, internal string, body any) ([]byte, int, error) {
@@ -160,12 +180,25 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 	}
 	execute := func(inputFile string) ([]byte, error) { return executeDoc("create", "--file", inputFile) }
 	output, err := execute(file)
+	if err == nil {
+		t.Fatalf("first create must lose the committed network response, not succeed: %s", output)
+	}
+	// The sidecar's transport failure is a plain-text 503; the CLI rejects it
+	// through its existing bounded-JSON guard rather than returning a saved ID.
+	if !droppedCreateResponse.Load() || !bytes.Contains(output, []byte("bounded Docs creation JSON response required")) {
+		t.Fatalf("first create did not report the injected lost host response: %s", output)
+	}
+	var committedPage string
+	if err := h.db.QueryRow(`SELECT c.page_id FROM document_creations c JOIN documents d ON d.page_id=c.page_id WHERE c.run_id=?`, run).Scan(&committedPage); err != nil || committedPage == "" {
+		t.Fatalf("response was lost before the real creation committed: %q %v", committedPage, err)
+	}
+	output, err = execute(file)
 	if err != nil {
-		t.Fatalf("actual protected CLI create: %v %s", err, output)
+		t.Fatalf("actual protected CLI retry after lost response: %v %s", err, output)
 	}
 	var created documentCreationResult
-	if json.Unmarshal(output, &created) != nil || created.PageID == "" || created.Schema != 3 || created.Revision != 0 || created.WorkspaceID != workspace || !strings.Contains(created.URL, "workspace_id=") {
-		t.Fatalf("actual CLI result: %s", output)
+	if json.Unmarshal(output, &created) != nil || created.PageID != committedPage || created.Schema != 3 || created.Revision != 0 || created.WorkspaceID != workspace || !strings.Contains(created.URL, "workspace_id=") {
+		t.Fatalf("actual CLI retry changed the committed creation: %s", output)
 	}
 	retry, err := execute(file)
 	if err != nil {
@@ -238,6 +271,7 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 	// The private document was created through the actual agent CLI for a
 	// MEMBER. Separate authenticated identities exercise production routing,
 	// the real Node service, catalogs and access reports through a real binary.
+	var initialCheckpointID string
 	for _, role := range []string{"OWNER", "ADMIN", "MANAGER", "MEMBER", "VIEWER"} {
 		id := "managed-private-" + role
 		pagesSeedUser(t, h, workspace, id, strings.ToLower(role)+"@private.example", role)
@@ -271,10 +305,19 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 				}
 				if len(args) > 1 && args[1] == "checkpoints" {
 					var history struct {
-						Checkpoints []json.RawMessage `json:"checkpoints"`
+						Checkpoints []struct {
+							ID     string `json:"id"`
+							Rev    int64  `json:"rev"`
+							Schema int    `json:"schema"`
+						} `json:"checkpoints"`
 					}
-					if json.Unmarshal(out, &history) != nil || history.Checkpoints == nil || len(history.Checkpoints) != 0 {
-						t.Fatalf("actual history list before checkpoint: %s", out)
+					if json.Unmarshal(out, &history) != nil || len(history.Checkpoints) != 1 || history.Checkpoints[0].Rev != 0 || history.Checkpoints[0].Schema != 3 {
+						t.Fatalf("actual initial history: %s", out)
+					}
+					initialCheckpointID = history.Checkpoints[0].ID
+					pinned, err := invoke("doc", "checkpoint", "@"+created.PageID, initialCheckpointID)
+					if err != nil || !bytes.Contains(pinned, []byte("Pilot with one team")) {
+						t.Fatalf("actual initial checkpoint body: %v %s", err, pinned)
 					}
 				}
 			} else if err == nil || !bytes.Contains(out, []byte("404")) || bytes.Contains(out, []byte("Launch plan")) {
@@ -494,7 +537,7 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 			if err := h.db.QueryRow(`SELECT count(*) FROM document_checkpoints WHERE page_id=?`, created.PageID).Scan(&checkpoints); err != nil {
 				t.Fatal(err)
 			}
-			if head != 1 || cursor != 1 || checkpointRev != 1 || receipts != 3 || checkpoints != 1 {
+			if head != 1 || cursor != 1 || checkpointRev != 1 || receipts != 3 || checkpoints != 2 {
 				t.Fatalf("retry/conflict changed durable rows: head%d cursor%d pin%d receipts%d pins%d", head, cursor, checkpointRev, receipts, checkpoints)
 			}
 		}
@@ -605,7 +648,7 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 				Schema int    `json:"schema"`
 			} `json:"checkpoints"`
 		}
-		if out := readHistory("checkpoints", "@"+created.PageID); json.Unmarshal(out, &history) != nil || len(history.Checkpoints) != 1 || history.Checkpoints[0].ID != packet.Checkpoint.ID || history.Checkpoints[0].Rev != 1 || history.Checkpoints[0].Schema != 3 {
+		if out := readHistory("checkpoints", "@"+created.PageID); json.Unmarshal(out, &history) != nil || len(history.Checkpoints) != 2 || history.Checkpoints[1].ID != initialCheckpointID || history.Checkpoints[1].Rev != 0 || history.Checkpoints[0].ID != packet.Checkpoint.ID || history.Checkpoints[0].Rev != 1 || history.Checkpoints[0].Schema != 3 {
 			t.Fatalf("history lost confirmed checkpoint identity: %s", out)
 		}
 		var historical struct {
@@ -617,12 +660,15 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 		if out := readHistory("checkpoint", "@"+created.PageID, packet.Checkpoint.ID); json.Unmarshal(out, &historical) != nil || historical.PageID != created.PageID || historical.ID != packet.Checkpoint.ID || historical.Rev != 1 || historical.Schema != 3 || !bytes.Contains(out, []byte("CONFIRMED-A checkpoint content")) || bytes.Contains(out, []byte("Human intervening content")) {
 			t.Fatalf("historical read did not preserve the immutable saved body: %s", out)
 		}
+		if out := readHistory("checkpoint", "@"+created.PageID, initialCheckpointID); json.Unmarshal(out, &historical) != nil || historical.Rev != 0 || historical.ID != initialCheckpointID || !bytes.Contains(out, []byte("Pilot with one team")) || bytes.Contains(out, []byte("Human intervening content")) || bytes.Contains(out, []byte("CONFIRMED-A")) {
+			t.Fatalf("human edit changed initial confirmed history: %s", out)
+		}
 		for _, check := range []struct {
 			query string
 			want  int
 		}{
 			{`SELECT count(*) FROM document_creations`, 1}, {`SELECT count(*) FROM documents`, 1},
-			{`SELECT count(*) FROM document_checkpoints`, 1}, {`SELECT count(*) FROM document_receipts`, 4},
+			{`SELECT count(*) FROM document_checkpoints`, 2}, {`SELECT count(*) FROM document_receipts`, 4},
 			{`SELECT count(*) FROM page_grants WHERE subject_type='agent'`, 0},
 			{`SELECT count(*) FROM document_receipts WHERE id='managed-draft-b'`, 0},
 		} {
