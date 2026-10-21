@@ -157,8 +157,9 @@ retains its existing `workspace:admin` CLI scope. Then use
 
 Add `--private` together with `--allow-empty` to create an explicitly private
 empty Page, for example before `crewship slides initialize` on a server with
-Slides enabled. It posts only to `/api/v1/private-pages`, without automatic
-retry, preflight or fallback to ordinary creation. A server lacking this route
+Slides enabled. It requires `pages:write` for scoped CLI credentials and posts
+only to `/api/v1/private-pages`, without redirects, automatic retry, preflight
+or fallback to ordinary creation. A server lacking this route
 refuses before creating anything, including after a server rollback.
 The audience is its author and audited workspace OWNERs;
 workspace ADMIN alone cannot read it. Creation checks the current human

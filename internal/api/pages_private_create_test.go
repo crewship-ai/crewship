@@ -180,3 +180,35 @@ func TestPrivatePageRejectsLegacyContentAudienceBypasses(t *testing.T) {
 		})
 	}
 }
+
+func TestPrivateEmptyPageCreationRequiresExplicitWriteScope(t *testing.T) {
+	for _, tc := range []struct {
+		name, scopes string
+		status       int
+	}{
+		{"write", `["pages:write"]`, 201},
+		{"read", `["pages:read"]`, 403},
+		{"admin-only", `["workspace:admin"]`, 403},
+		{"write-and-admin", `["pages:write","workspace:admin"]`, 201},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newInstanceFixture(t)
+			seedInstanceUser(t, f.db, "private-member", "private-member@example.test", "ws-old", "MEMBER")
+			token := mintTokenFor(t, f.db, "private-member", "privatepagesmembertoken00001")
+			mustExec(t, f.db, `UPDATE cli_tokens SET scopes=? WHERE token_hash=?`, tc.scopes, sha256Hex(token))
+			rr := f.do(token, "POST", "/api/v1/private-pages?workspace_id=ws-old", `{"slug":"scoped-private","name":"Private scope sentinel","panels":[],"allow_empty":true}`)
+			wantCode(t, rr, tc.status, "explicit private creation scope")
+			var count int
+			if err := f.db.QueryRow(`SELECT count(*) FROM pages WHERE slug='scoped-private'`).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			expected := 0
+			if tc.status == 201 {
+				expected = 1
+			}
+			if count != expected {
+				t.Fatalf("unexpected stored private pages: %d", count)
+			}
+		})
+	}
+}

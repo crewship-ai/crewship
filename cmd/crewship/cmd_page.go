@@ -550,6 +550,12 @@ var pageCreateCmd = &cobra.Command{
 		body.Icon, body.Color = pageAvatarFromFlags(cmd)
 		var resp *http.Response
 		if private {
+			// A redirect may replay private input into legacy shared creation.
+			httpClient := *client.HTTPClient
+			httpClient.CheckRedirect = func(*http.Request, []*http.Request) error {
+				return errors.New("private Page creation does not follow redirects")
+			}
+			client.HTTPClient = &httpClient
 			resp, err = client.Post("/api/v1/private-pages", body)
 		} else {
 			resp, err = client.Post("/api/v1/pages", body)
