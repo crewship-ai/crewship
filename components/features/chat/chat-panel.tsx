@@ -7,7 +7,6 @@ import { AnimatePresence } from "motion/react"
 import {
   Bot,
   Command,
-  Link2,
   Users,
   Search,
   Download,
@@ -83,6 +82,7 @@ import { VirtualConversation, virtualChatEnabled } from "./virtual-conversation"
 import { ArtifactPane } from "./artifact/artifact-pane"
 import { RestrictedFiles } from "./files/restricted-files"
 import { RestrictedMemory } from "./restricted-memory"
+import { CopyLinkButton } from "./copy-link-button"
 import { Button } from "@/components/ui/button"
 import { ProjectInputPicker } from "./files/project-input-picker"
 import { useArtifactStore } from "@/stores/artifact-store"
@@ -1707,28 +1707,6 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
 }
 
 /* ---- Small shared sub-components extracted to reduce duplication ---- */
-
-/** The session id, in the one form a person can use: the address. */
-function CopyLinkButton() {
-  const [copied, setCopied] = useState(false)
-  return (
-    <button
-      type="button"
-      onClick={() => {
-        navigator.clipboard?.writeText(window.location.href).then(() => {
-          setCopied(true)
-          window.setTimeout(() => setCopied(false), 1500)
-        }).catch(() => {})
-      }}
-      aria-label="Copy link to this conversation"
-      title="Copy link to this conversation"
-      className="flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-micro text-muted-foreground transition-colors hover:text-foreground"
-    >
-      <Link2 className="h-3 w-3" aria-hidden="true" />
-      <span className="hidden sm:inline">{copied ? "Copied" : "Copy link"}</span>
-    </button>
-  )
-}
 
 /**
  * The chat palette's visible door.

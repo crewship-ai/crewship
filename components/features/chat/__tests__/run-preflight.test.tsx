@@ -34,3 +34,11 @@ it("reports unknown budget on an outage without a stale spending promise", async
  expect(await screen.findByRole("status")).toHaveTextContent("budget and gate are unavailable")
  expect(screen.queryByText(/Workspace payer/)).not.toBeInTheDocument()
 })
+it("keeps the composer's gutter and centres its summary in a finger-sized row", async () => {
+ fetch.mockResolvedValue(new Response(JSON.stringify(base)))
+ setup()
+ const summary = (await screen.findByText(/nonblocking review predicted/)).closest("summary")!
+ expect(summary.closest("details")).toHaveClass("mx-3")
+ expect(summary).toHaveClass("coarse:py-3.5")
+ expect(summary).not.toHaveClass("coarse:min-h-[44px]")
+})
