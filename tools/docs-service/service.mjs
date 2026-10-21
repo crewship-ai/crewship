@@ -99,6 +99,12 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
         try { return {schema:RICH_VERSION,snapshot:snapshot(doc),blocks:(await outline(doc,RICH_VERSION)).map(({id,hash})=>({id,hash}))}; }
         finally { doc.destroy(); }
       }
+      case 'prepare-copy': {
+        if (!request || typeof request !== 'object' || Array.isArray(request) || Object.keys(request).length !== 2 || !Object.hasOwn(request,'content') || ![VERSION,RICH_VERSION].includes(request.schema)) throw fault(400,'closed canonical copy content required');
+        const doc=create(request.content,request.schema);
+        try { return {schema:request.schema,snapshot:snapshot(doc),blocks:(await outline(doc,request.schema)).map(({id,hash})=>({id,hash}))}; }
+        finally {doc.destroy();}
+      }
       case 'read': return executeRead(page, 'read', context, request);
       case 'verify-targets': return executeRead(page, 'verify-targets', context, request);
       case 'comments': return executeRead(page, 'comments', context, request);
@@ -264,7 +270,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
       if (req.method === 'POST' && req.url === '/drain') { await drain(); return reply(200, { drained: true }); }
       if(draining){res.setHeader('Connection','close');res.once('finish',()=>req.socket.destroy());throw fault(503,'service draining');}
       if(!ready){res.setHeader('Connection','close');res.once('finish',()=>req.socket.destroy());throw fault(503,'engine recovering');}
-      const match = /^\/v1\/documents\/([a-zA-Z0-9_-]{1,128})\/(prepare-create|initialize|upgrade|read|verify-targets|patch|checkpoint|restore|comments|comment|resolve|checkpoints|checkpoint-read|export)$/.exec(req.url);
+      const match = /^\/v1\/documents\/([a-zA-Z0-9_-]{1,128})\/(prepare-create|prepare-copy|initialize|upgrade|read|verify-targets|patch|checkpoint|restore|comments|comment|resolve|checkpoints|checkpoint-read|export)$/.exec(req.url);
       if (req.method !== 'POST' || !match) throw fault(404, 'unknown operation');
       const context = { workspace: req.headers['x-workspace-id'], authorization: req.headers.authorization };
       if (!id(context.workspace) || typeof context.authorization !== 'string' || !/^Bearer \S+$/.test(context.authorization)) throw fault(401, 'workspace and bearer required');

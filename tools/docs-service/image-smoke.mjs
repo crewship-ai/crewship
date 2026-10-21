@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { execFileSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomBytes } from 'node:crypto';
-import { create, initialJSON, snapshot } from './schema.mjs';
+import { create, initialJSON, snapshot, load, validate } from './schema.mjs';
 
 const image = process.env.DOCS_IMAGE;
 assert.ok(image, 'DOCS_IMAGE must name the locally built exact-head image');
@@ -61,6 +61,9 @@ try {
   assert.equal((await stat(socket)).mode & 0o777, 0o600);
   const original = (await call('/v1/documents/p/read', {})).body;
   assert.equal(original.rev, 1); assert.equal(typeof original.epoch, 'string');
+  const copied=await call('/v1/documents/copied/prepare-copy',{schema:original.schema,content:original.content});
+  assert.equal(copied.status,200,'built image includes pure canonical copy operation');
+  const independent=load(copied.body.snapshot);try{assert.deepEqual(validate(independent,original.schema),original.content)}finally{independent.destroy()}
   await promisify(execFile)('docker', ['exec', name, 'node', 'healthcheck.mjs']);
   available = false; assert.equal((await call('/health/ready')).status, 503);
   available = true; assert.equal((await call('/health/ready')).status, 200);

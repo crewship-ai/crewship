@@ -43,6 +43,8 @@ var schemaKeyContracts = []struct {
 	// A zero value of the struct the handler serializes.
 	value any
 }{
+	{name: "DocumentDuplicate", pointer: "/components/schemas/DocumentDuplicate", value: duplicateDocumentResponse{}},
+	{name: "DocumentDuplicate.page", pointer: "/components/schemas/DocumentDuplicate/properties/page", value: duplicateDocumentPage{}},
 	{name: "WorkspacePendingRunResponseV1", pointer: "/components/schemas/WorkspacePendingRunResponseV1", value: pendingRunReceipt{}},
 	{name: "WorkspacePendingRunsResponseV1[]", pointer: "/components/schemas/WorkspacePendingRunsResponseV1/items", value: pendingRunReceipt{}},
 	{name: "Run", pointer: "/components/schemas/Run", value: runResponse{}},

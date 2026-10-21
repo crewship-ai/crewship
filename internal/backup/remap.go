@@ -107,6 +107,8 @@ func newRemapCUID() string {
 // and add the real FK in a migration when one becomes possible — this map is a
 // bridge over a schema gap, not a substitute for the schema.
 var virtualForeignKeys = map[string][]foreignKeyEdge{
+	// Preserve receipt tombstones after Page deletion; remap extant anchors on fork.
+	"document_copy_receipts":            {{column: "user_id", refTable: "users", refColumn: "id"}, {column: "source_page_id", refTable: "pages", refColumn: "id"}, {column: "result_page_id", refTable: "pages", refColumn: "id"}},
 	"agent_user_preferences":            {{column: "chat_id", refTable: "chats", refColumn: "id"}, {column: "feedback_id", refTable: "message_feedback", refColumn: "id"}},
 	"execution_origins":                 {{column: "chat_id", refTable: "chats", refColumn: "id"}},           // historical TEXT; follow an extant chat on fork
 	"issue_mutation_outbox":             {{column: "mission_id", refTable: "missions", refColumn: "id"}},     // historical audit target; an absent issue is valid

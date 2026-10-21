@@ -2507,3 +2507,33 @@ The index accepts `audience=personal` for explicitly private Pages owned by the 
 Optional `limit` and `offset` apply after authorization and audience filtering. The default limit is 100 when either paging parameter is present, the maximum is 500, and negative offsets become zero. With neither paging parameter the existing unpaged JSON array is preserved. `crewship api request GET /api/v1/pages --query audience=personal --query limit=20 --format json` requests a personal catalog page.
 
 The private-chat document composer shows the target personal space and its audience before submission. This view and label do not publish a Document, change its audience, enable shared-chat creation, or provide a work-folder sharing operation.
+
+
+## Duplicate a personal Document
+
+`POST /api/v1/pages/{id}/duplicate?workspace_id=<workspace-id>` creates an independent private native Document owned by the current human. The source must be that person's own private personal Document, without a crew owner or working folder. OWNER inspection does not substitute for ownership. Requires current `pages:read` and `pages:write` credentials and live workspace membership. Documents must be enabled.
+
+```http
+Idempotency-Key: copy-action-1
+Content-Type: application/json
+```
+
+```json
+{"mutation_id":"copy-action-1","expected_source":{"id":"immutable-source-id","pages_version":null}}
+```
+
+Use the same action key and unchanged body for every retry after a lost response. The header must equal `mutation_id` (1–128 ASCII letters, digits, underscores or hyphens). `expected_source.id` must match the immutable ID in the URL. `pages_version` is the Page's folder/membership version, **not** a Document revision. A number checks that membership version; `null` explicitly requests the latest confirmed server snapshot. Canonical content includes persisted incremental updates. The captured schema/revision/generation and Page membership version are checked again with current source ownership and credentials in the atomic commit; a concurrent change returns `409` without a copy.
+
+First commit returns `201`, an exact replay `200`, with the same receipt:
+
+```json
+{"page":{"id":"new-immutable-id","slug":"copy-new-immutable-id"}}
+```
+
+Replay rechecks current source and copy permissions. It returns the original copy even if the source's content has since advanced; it never recopies a newer head. Reusing the key with a changed packet returns `409`. Deleting or transferring the copy does not free the action key or recreate it.
+
+The new copy has `private_audience: true` (its owner plus audited workspace OWNER access), no folder or source grants. It contains clean independent Yjs content; source history, comments, proposals, run credentials, creation consent and editing authority are not copied. Its initial checkpoint belongs to the new Document. The source is unchanged. Only supported native Document schemas are copied; legacy schema 1 content is represented by the canonical schema 2 format in the new copy. Other artifact types and shared sources are outside this endpoint.
+
+Copy limits are explicit: canonical content and prepared snapshot must each fit within 1 MiB; schema validation permits at most 10,000 nodes and depth 40, with the existing document/workspace quotas also enforced. This operation does not use the agent author's 128-block limit. Oversized or unsupported content is refused intact, never truncated. `413` means the copy size limit, `422` unsupported canonical content, and `429` a document quota. Other errors include `400` invalid packet/header/query, `401` invalid human credential, `403` insufficient token scope, `404` unavailable personal source or copy, `409` stale state/action conflict, and `500`/`502`/`503` persistence or engine failure. Unknown outcomes require retrying the original key; no success response means no permission to invent a second key automatically. Responses are `Cache-Control: no-store`.
+
+Use `crewship page duplicate <id> --mutation-id <key>` for the same operation. The existing frontend copy/move flag remains off; enabling Duplicate independently is separate from enabling Move.

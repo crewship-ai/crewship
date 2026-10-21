@@ -30,7 +30,12 @@ func documentSchemaComponents() map[string]any {
 	history["additionalProperties"] = false
 	selected := obj(map[string]any{"page_id": str(), "id": checkpointID, "rev": revision, "schema": map[string]any{"type": "integer", "enum": []int{1, 2, 3}}, "content": ref("DocumentNode")}, "page_id", "id", "rev", "schema", "content")
 	selected["additionalProperties"] = false
+	copyPage := obj(map[string]any{"id": str(), "slug": str()}, "id", "slug")
+	copyPage["additionalProperties"] = false
+	copyReceipt := obj(map[string]any{"page": copyPage}, "page")
+	copyReceipt["additionalProperties"] = false
 	return map[string]any{
+		"DocumentDuplicate":           copyReceipt,
 		"DocumentRestoreReceipt":      obj(map[string]any{"page_id": str(), "id": checkpointID, "rev": revision, "epoch": str(), "kind": map[string]any{"type": "string", "enum": []string{"restore"}}, "schema": map[string]any{"type": "integer", "enum": []int{1, 2, 3}}, "duplicate": boolean()}, "page_id", "id", "rev", "epoch", "kind"),
 		"DocumentCheckpointList":      history,
 		"DocumentCheckpoint":          selected,
@@ -78,6 +83,14 @@ func documentSchemaCatalog() map[string]DomainSchema {
 		out["GET "+path] = contract
 	}
 	out["GET /api/v1/chats/{chatId}/document-results"] = DomainSchema{Response: ref("DocumentChatResults"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"401", "403", "404", "500", "503"}}
+	out["POST /api/v1/pages/{id}/duplicate"] = DomainSchema{
+		Request: map[string]any{"type": "object", "additionalProperties": false, "required": []string{"mutation_id", "expected_source"}, "properties": map[string]any{
+			"mutation_id":     map[string]any{"type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$"},
+			"expected_source": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"id", "pages_version"}, "properties": map[string]any{"id": map[string]any{"type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$"}, "pages_version": map[string]any{"type": "integer", "minimum": 0, "maximum": 9007199254740990, "nullable": true, "description": "Page membership version, never Document revision. Null explicitly captures confirmed server latest; the materialized Document tuple is rechecked at commit."}}},
+		}}, RequestRequired: true, Response: ref("DocumentDuplicate"), SuccessStatuses: []string{"200", "201"}, ErrorStatuses: []string{"400", "401", "403", "404", "409", "413", "422", "429", "500", "502", "503"},
+		Parameters:     []map[string]any{{"name": "Idempotency-Key", "in": "header", "required": true, "schema": map[string]any{"type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$"}, "description": "Must exactly equal mutation_id. Scoped to the current human and workspace; changed packet returns409. Exact retry returns the original copy after current source and copy authority checks, even if source content has since advanced."}},
+		SuccessHeaders: map[string]any{"Cache-Control": map[string]any{"schema": map[string]any{"type": "string", "enum": []string{"no-store"}}}},
+	}
 	out["GET /api/v1/documents/status"] = DomainSchema{Response: ref("DocumentAvailability"), SuccessStatuses: []string{"200"}}
 	post := func(path string, request map[string]any) {
 		out["POST "+base+path] = DomainSchema{Request: request, RequestRequired: true, Response: ref("DocumentReceipt"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"400", "401", "403", "404", "409", "413", "429", "500", "502", "503"}}

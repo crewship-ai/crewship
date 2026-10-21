@@ -321,6 +321,7 @@ var BackupTables = []string{
 	"pages",
 	"documents",
 	"document_creations",
+	"document_copy_receipts",
 	"slides_heads",
 	"slides_revisions",
 	"slides_receipts",

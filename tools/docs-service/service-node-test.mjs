@@ -739,3 +739,23 @@ test('authority deadline after durable commit permits exact receipt retry withou
     assert.equal(model.commits, 1, 'uncertain confirmation executed the original mutation again');
   } finally { await f.close(); }
 });
+
+
+test('prepare-copy preserves canonical rich content in a clean independent document without Go mutations', async () => {
+ const model=authorityModel(),f=await fixture(model.handle);await f.start();
+ const before=structuredClone(model.state),seen=model.seen.length;
+ const content={type:'doc',content:[{type:'heading',attrs:{id:'title',level:2},content:[{type:'text',text:'Copy latest'}]},{type:'paragraph',attrs:{id:'marked'},content:[{type:'text',text:'linked',marks:[{type:'link',attrs:{href:'https://example.invalid/'}}]}]},{type:'bulletList',attrs:{id:'list'},content:[{type:'listItem',attrs:{id:'item'},content:[{type:'paragraph',attrs:{id:'list-text'},content:[{type:'text',text:'Keep list'}]}]}]},{type:'table',attrs:{id:'table'},content:[{type:'tableRow',attrs:{id:'row'},content:[{type:'tableCell',attrs:{id:'cell',colspan:1,rowspan:1},content:[{type:'paragraph',attrs:{id:'cell-text'},content:[{type:'text',text:'Keep table'}]}]}]}]}]};
+ try {
+  const response=await call(f.socket,'/v1/documents/new-copy/prepare-copy',{schema:3,content});
+  assert.equal(response.status,200,'closed pure canonical preparation is available');
+  assert.deepEqual(Object.keys(response.body).sort(),['blocks','schema','snapshot']);
+  const copy=load(response.body.snapshot);
+  try { assert.deepEqual(JSON.parse(JSON.stringify(validate(copy,3))),content); assert.deepEqual(response.body.blocks,(await outline(copy,3)).map(({id,hash})=>({id,hash}))); } finally {copy.destroy()}
+  const many={type:'doc',content:Array.from({length:129},(_,i)=>({type:'paragraph',attrs:{id:`copy-${i}`},content:[{type:'text',text:`Paragraph ${i}`}]}))};
+  const bounded=await call(f.socket,'/v1/documents/new-copy/prepare-copy',{schema:3,content:many});assert.equal(bounded.status,200,'copy does not use the 128-block agent authoring limit');
+  const full=load(bounded.body.snapshot);try{assert.equal(validate(full,3).content.length,129,'no silent truncation')}finally{full.destroy()}
+  for(const invalid of [{schema:3,content,source_page_id:'forged'},{schema:99,content},{schema:3,content:{type:'doc',content:[{type:'image',attrs:{id:'private',src:'secret'}}]}},null]) assert.equal((await call(f.socket,'/v1/documents/new-copy/prepare-copy',invalid)).status,400);
+  assert.deepEqual(model.seen.slice(seen),[],'no state, receipt, lease, commit or live authority copied');
+  assert.deepEqual(model.state,before);
+ } finally {await f.close()}
+});

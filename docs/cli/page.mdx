@@ -1835,3 +1835,18 @@ for a retained version) or `crewship page project publish`.
 After a transport timeout the outcome can be unknown; inspect the current
 revision and build status before retrying. Data producers keep pushing through
 the existing panel API/`page.write` path independently of source edits.
+
+
+## `crewship page duplicate <immutable-page-id>`
+
+Create one independent private native Document from your own personal Document's latest confirmed server content, including persisted updates.
+
+```bash
+crewship page duplicate <immutable-page-id> --mutation-id copy-action-1 --format json
+# Optional Page membership fence; this is not a Document revision:
+crewship page duplicate <immutable-page-id> --mutation-id another-action --pages-version 3
+```
+
+Requires a current human credential with `pages:read` and `pages:write` and a selected workspace. Calls `POST /api/v1/pages/{id}/duplicate` with the same `Idempotency-Key` and `mutation_id`. Keep the exact key and flags on retry after a lost answer; an exact replay returns the original copy, while changed input returns `409`. Without `--pages-version`, `pages_version:null` requests latest at the confirmed server snapshot, not a pin to a version you previously viewed.
+
+The response is `{page:{id,slug}}`. The new copy has a new immutable ID and private personal audience, no source history, grants, folder or agent authority. Shared sources and other artifact types are unsupported. Canonical content and prepared snapshot are each limited to 1 MiB, with 10,000-node/depth-40 schema and existing quota limits; no content is silently shortened. See [Duplicate a personal Document](/api-reference/pages#duplicate-a-personal-document) for error and retry semantics.
