@@ -60,6 +60,16 @@ class WorkflowContracts(unittest.TestCase):
         }
         self.assertTrue(shipped - {'pnpm-lock.yaml'})
         self.assertLessEqual(shipped | {'go.mod'}, scanned)
+
+    def test_osv_leaves_go_reachability_to_govulncheck(self):
+        # osv-scanner's Go call analysis vendors an x/tools that panics on
+        # newer Go syntax whenever the database names a candidate package, so
+        # a scan dies with exit 2 depending on the day (#3877). This job is the
+        # reachability-blind dependency check; govulncheck owns reachability.
+        security = self.text('security.yml')
+        osv = self.job(security, 'osv-scan')
+        self.assertIn('--no-call-analysis=go', osv)
+        self.assertIn('govulncheck ./...', self.job(security, 'govulncheck'))
         router = self.job(security, 'changes')
         for pattern in ('**/package.json', '**/pnpm-lock.yaml', '**/pnpm-workspace.yaml'):
             self.assertIn("'" + pattern + "'", router)

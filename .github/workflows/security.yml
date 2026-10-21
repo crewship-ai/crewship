@@ -404,7 +404,13 @@ jobs:
       - name: Run osv-scanner against lockfiles
         run: |
           set +e
+          # --no-call-analysis=go: this job reports what is in the dependency
+          # graph regardless of reachability; Go reachability is govulncheck's
+          # job (above). osv-scanner's own Go call analysis vendors an x/tools
+          # that panics building SSA for Go 1.27 code whenever the database
+          # names a candidate package (#3877), turning a scan into exit 2.
           osv-scanner \
+            --no-call-analysis=go \
             --lockfile=go.mod \
             --lockfile=pnpm-lock.yaml \
             --lockfile=tools/pages-build/pnpm-lock.yaml \
