@@ -295,6 +295,7 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 	if err := reconcileCrewContainers(ctx, opts.DockerOps, target); err != nil {
 		return nil, err
 	}
+	pinCrewImageDigests(ctx, opts.DockerOps, target)
 
 	// 2a. Acquire the in-process workspace guard BEFORE the DB lock.
 	// This closes the TOCTOU race with mission-start: without it, a
@@ -858,4 +859,24 @@ func reconcileCrewContainers(ctx context.Context, ops DockerOps, target *Workspa
 		}
 	}
 	return nil
+}
+
+// pinCrewImageDigests records, per crew, the digest of the runtime image the
+// daemon holds now, so a later restore check can tell an archive built on an
+// older image. Best effort: a daemon without the capability, or an image that
+// is not local, leaves the digest empty and the check says nothing.
+func pinCrewImageDigests(ctx context.Context, ops DockerOps, target *WorkspaceTarget) {
+	d, ok := ops.(ImageDigester)
+	if !ok {
+		return
+	}
+	for i := range target.CrewTargets {
+		c := &target.CrewTargets[i]
+		if c.RuntimeImage == "" || c.BaseImageDigest != "" {
+			continue
+		}
+		if dig, err := d.ImageDigest(ctx, c.RuntimeImage); err == nil {
+			c.BaseImageDigest = dig
+		}
+	}
 }

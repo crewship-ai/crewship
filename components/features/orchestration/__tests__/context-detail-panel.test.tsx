@@ -40,7 +40,8 @@ describe("Context detail panel", () => {
     render(<ContextDetailPanel context={taskContext(t)} onTaskAction={vi.fn()} />)
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument()
     if (status === "COMPLETED") { expect(screen.queryByRole("button", { name: "Skip" })).not.toBeInTheDocument(); expect(screen.getByText("Passed")).toBeInTheDocument() }
-    else { expect(screen.getByRole("button", { name: "Skip" })).toBeInTheDocument(); expect(screen.getByText("Pending", { exact: true })).toBeInTheDocument() }
+    // The evaluation pill says Pending; a PENDING task's status pill says it too.
+    else { expect(screen.getByRole("button", { name: "Skip" })).toBeInTheDocument(); expect(screen.getAllByText("Pending", { exact: true })).toHaveLength(status === "PENDING" ? 2 : 1) }
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument()
     expect(screen.queryByText("Dependencies")).not.toBeInTheDocument()
   })

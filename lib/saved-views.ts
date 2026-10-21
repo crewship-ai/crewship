@@ -51,9 +51,28 @@ export function isJournalView(view: SavedView): boolean {
   }
 }
 
-/** Views the issues surface can apply — everything that is not a journal view. */
+/** The Calendar's saved views carry the same kind of marker. */
+export const CALENDAR_SURFACE = "calendar"
+
+export function isCalendarView(view: SavedView): boolean {
+  if (!view.filters_json) return false
+  try {
+    const parsed: unknown = JSON.parse(view.filters_json)
+    if (!parsed || typeof parsed !== "object") return false
+    return (parsed as Record<string, unknown>).surface === CALENDAR_SURFACE
+  } catch {
+    return false
+  }
+}
+
+/** Views the Calendar can apply. */
+export function calendarViews(views: SavedView[]): SavedView[] {
+  return views.filter(isCalendarView)
+}
+
+/** Views the issues surface can apply — everything that belongs to no other surface. */
 export function issueViews(views: SavedView[]): SavedView[] {
-  return views.filter((v) => !isJournalView(v))
+  return views.filter((v) => !isJournalView(v) && !isCalendarView(v))
 }
 
 /** Views the journal surface can apply. */

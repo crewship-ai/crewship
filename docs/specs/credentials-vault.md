@@ -155,3 +155,44 @@ credential it:
 
 The frontend wizard + list/detail update for the four new types is
 tracked separately (follow-up PR after `feat/credentials-vault-types`).
+
+## Credential retirement and audit history
+
+Deleting a credential retains its row with `deleted_at` set. Live selection,
+secret delivery, reveal, refresh and rotation exclude tombstones; forensic audit
+reads retain access to their historical identity. Credential audit foreign keys
+refuse a hard delete while history references the credential. Configured audit
+retention and whole-workspace erasure remain separate operations. Hard workspace
+erasure removes its credential history, including legacy rows whose audit
+workspace attribution is NULL; soft deletion never performs this cleanup.
+
+Reusing a retired name creates a new credential ID. Within the replacement
+transaction, the old name gains ` [retired:<unchanged credential ID>]`; the full
+original name remains before that exact suffix, without truncation. A name
+collision or failed replacement rolls back the rename. Old assignments cannot
+become grants to the replacement ID. Retirement preserves credential IDs and
+historical audit rows, but irreversibly clears encrypted secret and refresh-token
+values, OAuth configuration, account/username metadata, description, tags, error
+and IP hints, custom fields and pending OAuth state/PKCE verifiers. The migration
+also scrubs existing tombstones. Native guards apply the same erasure to later
+retirement and historical restore/fork inserts, including child rows inserted
+after their retired parent. Active credentials and their fields/state remain
+unchanged. A refused scrub rolls back the retirement rather than reporting it
+complete. Integration removal retires its unshared OAuth credentials and records
+each REVOKE in the same transaction; storage, scrub or audit failure rolls back
+the integration removal and its bindings.
+
+For GDPR identity erasure, a retired credential's `created_by` becomes NULL;
+its actor and approver attribution are cleared too. It needs no live custodian.
+A live credential still requires a valid user custodian and keeps the existing
+transfer-or-refuse behavior. Native constraints reject NULL creators on live
+inserts/updates and reject reactivation of a creatorless tombstone. The nullable
+creator keeps its users foreign key with NO ACTION and its ownership index.
+Workspace normal/fork backups preserve nullable retired creators by column name,
+including across the migration's changed column order, while keeping IDs and
+audit bindings (or the ordinary fork ID mapping).
+
+Workspace backups retain erased tombstones and workspace-attributed history;
+legacy audit rows with NULL workspace attribution remain outside that scope. A replacement restore that would orphan
+those rows is refused and rolled back, rather than deleting history absent from
+the bundle. The separate active-secret export excludes tombstones.

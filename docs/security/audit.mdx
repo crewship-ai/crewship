@@ -560,3 +560,29 @@ while walking the chain. On a broken chain the response stays `200` with
     Role-based access control that determines who can view audit logs.
   </Card>
 </CardGroup>
+
+## Instance administration and CLI tokens
+
+`GET /api/v1/admin/instance/audit` and `crewship admin instance audit` remain
+instance-admin only. CLI token creation (including pairing and bootstrap) and
+revocation append an event in the same transaction as the token mutation.
+Token events contain the actor ID, action and opaque token ID, never the token,
+its hash, name, scopes, IP address or user agent. Bulk revocation records each
+changed token; an empty bulk operation records none. Repeating a successful
+direct revoke retains its existing success/timestamp behavior and records another
+event. Stream revocation notifications run only after commit.
+
+Instance audit rows use a separate HMAC domain derived from the installation's
+stable journal key. The reader exposes `integrity`: `entry_verified` checks that
+row's stored bytes and immediate predecessor link; `legacy_unverified` means an
+older unchained row, and `invalid` reports a failed check. This bounded check is
+not verification of the whole history or protection against tail truncation or
+whole-database rollback. Existing rows are not backfilled with invented proofs;
+plaintext dev mode retains the journal's documented keying limitation.
+
+Password changes and sibling-session revocation still precede the token/audit
+transaction; their already-completed effects do not roll back if token audit
+fails. Suspension likewise retains its separate session-store boundary. Four
+existing operational callbacks append in an audit-only transaction: that does
+not make their external effects atomic. Workspace bundles exclude this global
+log and preserve the destination instance's own trail.

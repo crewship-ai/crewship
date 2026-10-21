@@ -40,6 +40,7 @@ func TestEveryMutationRouteDeclaresRole(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}
+	r.RegisterSlidesHuman(true)
 
 	if len(r.mutationRoutes) == 0 {
 		t.Fatal("mutationRoutes is empty: no mutation route was registered through authedMut/authedSelfMut — the route-table chokepoint is not wired")

@@ -306,7 +306,7 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 		&pipelineName, &issueIdentifier, &outcome,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		replyError(w, http.StatusNotFound, "run not found")
+		h.getAcceptedRun(w, r, workspaceID, runID)
 		return
 	}
 	if err != nil {
@@ -397,7 +397,34 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 	resp["step_outputs_available"] = outputsAvailable
 	dsl := h.enrichRunDefinition(r.Context(), workspaceID, runID, resp)
 	h.enrichRunFailure(r.Context(), runID, status, outcome.String, errorMessage.String, failedAtStep.String, currentStepID.String, dsl, stepOutputs, resp)
-	writeJSON(w, http.StatusOK, resp)
+	writeCostAwareJSON(w, r, http.StatusOK, resp)
+}
+
+// getAcceptedRun exposes the planned identity before its pipeline_runs row
+// exists. Like GetPendingRun, it is protected by workspace middleware and an
+// explicitly workspace-scoped lookup; foreign identities remain opaque 404s.
+func (h *PipelineHandler) getAcceptedRun(w http.ResponseWriter, r *http.Request, workspaceID, runID string) {
+	var pendingID, pipelineID, slug, pendingStatus, reason string
+	err := h.db.QueryRowContext(r.Context(), `SELECT id,pipeline_id,pipeline_slug,status,COALESCE(NULLIF(reason_code,''),'unknown')
+ FROM pending_runs WHERE workspace_id=? AND run_id=? AND COALESCE(fired_run_id,'')='' ORDER BY id LIMIT 1`, workspaceID, runID).Scan(&pendingID, &pipelineID, &slug, &pendingStatus, &reason)
+	if errors.Is(err, sql.ErrNoRows) {
+		replyError(w, http.StatusNotFound, "run not found")
+		return
+	}
+	if err != nil {
+		h.logger.Error("get accepted pipeline run", "error", err, "run_id", runID)
+		replyError(w, http.StatusInternalServerError, "load run")
+		return
+	}
+	status := "QUEUED"
+	switch pendingStatus {
+	case "failed", "expired", "cancelled":
+		status = strings.ToUpper(pendingStatus)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id": runID, "workspace_id": workspaceID, "pipeline_id": pipelineID, "pipeline_slug": slug,
+		"status": status, "pending_id": pendingID, "reason_code": reason,
+	})
 }
 
 // resolveIOStep reads the sub-span I/O gate from the GetRun query (#863):
@@ -771,7 +798,7 @@ func (h *PipelineHandler) ListWorkspaceRuns(w http.ResponseWriter, r *http.Reque
 			"outcome": outcome.String,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeCostAwareJSON(w, r, http.StatusOK, map[string]interface{}{
 		"rows":  out,
 		"count": len(out),
 	})

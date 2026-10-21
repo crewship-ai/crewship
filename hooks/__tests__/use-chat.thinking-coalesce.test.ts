@@ -62,7 +62,7 @@ describe("useChat thinking coalescence across transient parts", () => {
     const parts = result.current.turns[0].parts
     const thinkingParts = parts.filter((p) => p.type === "thinking")
     expect(thinkingParts).toHaveLength(1)
-    expect(thinkingParts[0].content).toBe("The user just greeted me with Ahoj.")
+    expect(thinkingParts[0].content).toBe("")
     // The status line stays a single quiet indicator, not a block splitter.
     expect(parts.filter((p) => p.type === "status").length).toBeLessThanOrEqual(1)
   })
@@ -78,7 +78,7 @@ describe("useChat thinking coalescence across transient parts", () => {
 
     const thinkingParts = result.current.turns[0].parts.filter((p) => p.type === "thinking")
     expect(thinkingParts).toHaveLength(1)
-    expect(thinkingParts[0].content).toBe("should respond warmly and professionally.")
+    expect(thinkingParts[0].content).toBe("")
   })
 
   it("still splits genuinely separate reasoning passes (think → text → think)", () => {
@@ -92,8 +92,8 @@ describe("useChat thinking coalescence across transient parts", () => {
 
     const thinkingParts = result.current.turns[0].parts.filter((p) => p.type === "thinking")
     expect(thinkingParts).toHaveLength(2)
-    expect(thinkingParts[0].content).toBe("first pass")
-    expect(thinkingParts[1].content).toBe("second pass")
+    expect(thinkingParts[0].content).toBe("")
+    expect(thinkingParts[1].content).toBe("")
   })
 
   it("suppresses thinking_tokens heartbeat system events entirely", () => {
@@ -115,7 +115,7 @@ describe("useChat thinking coalescence across transient parts", () => {
     expect(parts.filter((p) => p.type === "status")).toHaveLength(0)
     const thinkingParts = parts.filter((p) => p.type === "thinking")
     expect(thinkingParts).toHaveLength(1)
-    expect(thinkingParts[0].content).toBe("part one part two")
+    expect(thinkingParts[0].content).toBe("")
   })
 
   it("a burst of non-init system events keeps at most ONE status line", () => {

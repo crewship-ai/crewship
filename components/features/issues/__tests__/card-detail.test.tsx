@@ -126,13 +126,13 @@ describe("IssueCardDetail", () => {
         project={null}
       />,
     )
-    for (const label of ["Opened", "Updated", "Due", "Estimate", "Sub-issues"]) {
-      expect(screen.getByText(label)).toBeInTheDocument()
+    // The band now sits in Technical details, at the end of the aside.
+    const band = within(document.querySelector("[data-slot=issue-technical]") as HTMLElement)
+    for (const label of ["Opened", "Updated", "Due", "Estimate", "Sub-issues", "Comments"]) {
+      expect(band.getByText(label)).toBeInTheDocument()
     }
-    // "Comments" is deliberately in two places — the band counts them, the
-    // card at the foot holds them. Due and Estimate are not: they used to be
-    // in the band AND as rail rows, which is the duplication being removed.
-    expect(screen.getAllByText("Comments")).toHaveLength(2)
+    // Due and Estimate are not repeated as read-only property rows: they used
+    // to be in the band AND as rail rows, which is the duplication removed.
     expect(screen.getAllByText("Due")).toHaveLength(1)
     expect(screen.getAllByText("Estimate")).toHaveLength(1)
     expect(screen.getByText("3 pts")).toBeInTheDocument()
@@ -205,6 +205,8 @@ describe("IssueCardDetail", () => {
         project={null}
       />,
     )
+    // Runs is a segment of the Timeline (v67 I-FULL), not a card of its own.
+    fireEvent.click(screen.getByRole("radio", { name: "Runs" }))
     expect(screen.getByText(/No agent runs yet/)).toBeInTheDocument()
   })
 
@@ -222,6 +224,7 @@ describe("IssueCardDetail", () => {
         project={null}
       />,
     )
+    fireEvent.click(screen.getByRole("radio", { name: "Runs" }))
     // Both runs, not runs[0] alone; the raw enum never reaches the screen.
     const rows = screen.getAllByTestId("issue-run-row")
     expect(rows).toHaveLength(2)
@@ -233,8 +236,35 @@ describe("IssueCardDetail", () => {
     expect(screen.getByRole("link", { name: /open run/i })).toHaveAttribute("href", "/activity?run=run_1")
     expect(screen.getByText("run not recorded")).toBeInTheDocument()
     // The Related card names the crew, the journal and Activity as links.
-    expect(screen.getByRole("link", { name: /trace ENG-4/i })).toHaveAttribute("href", "/journal?mission_id=ENG-4")
+    expect(screen.getByRole("link", { name: /trace ENG-4/i })).toHaveAttribute("href", "/activity?mission=ENG-4")
     expect(screen.getByRole("link", { name: /all runs$/i }).getAttribute("href")).toMatch(/^\/activity\?mission=/)
+  })
+
+  it("Runs is a Timeline segment (All / Comments / Activity / Runs), not a separate card", () => {
+    const { container } = render(
+      <IssueCardDetail
+        issue={issue({ status: "IN_PROGRESS" })}
+        comments={[{ id: "c1", mission_id: "m1", author_type: "user", author_id: "u1", author_name: "Pavel", body: "Looks good", created_at: "2026-08-04T09:00:00Z", updated_at: "2026-08-04T09:00:00Z" }]}
+        activities={[]}
+        relations={[]}
+        runs={[{ id: "asg_1", run_id: "run_1", status: "RUNNING", duration_ms: 0, agent_name: "Robin", agent_slug: "robin", task: "Build the page", started_at: "2026-08-04T10:00:00Z" }]}
+        project={null}
+      />,
+    )
+    // No card is titled Runs any more.
+    const titles = [...container.querySelectorAll(".type-section")].map((n) => n.textContent)
+    expect(titles).not.toContain("Runs")
+    const show = screen.getByRole("radiogroup", { name: "Show" })
+    expect(within(show).getAllByRole("radio").map((r) => r.textContent)).toEqual(["All", "Comments", "Activity", "Runs"])
+    // All interleaves the run with the comment, newest first.
+    const all = screen.getAllByTestId(/^timeline-(comment|run)$/).map((n) => n.getAttribute("data-testid"))
+    expect(all).toEqual(["timeline-run", "timeline-comment"])
+    expect(screen.queryByTestId("issue-run-row")).toBeNull()
+    // Runs shows the run rows and nothing else.
+    fireEvent.click(within(show).getByRole("radio", { name: "Runs" }))
+    expect(screen.getAllByTestId("issue-run-row")).toHaveLength(1)
+    expect(screen.queryByText("Looks good")).toBeNull()
+    expect(within(show).getByRole("radio", { name: "Runs" })).toHaveAttribute("aria-checked", "true")
   })
 
   it("keeps the rail in view instead of stranding it beside a long description", () => {
@@ -362,7 +392,7 @@ describe("IssueCardDetail — mentions", () => {
         agents={[ROBIN]}
       />,
     )
-    fireEvent.click(screen.getByRole("button", { name: "history" }))
+    fireEvent.click(screen.getByRole("radio", { name: "Activity" }))
     expect(screen.getByText("mentioned")).toBeInTheDocument()
     expect(screen.getByTestId("mention-chip")).toHaveTextContent("@Robin")
   })
@@ -381,7 +411,7 @@ describe("IssueCardDetail — mentions", () => {
         agents={[ROBIN]}
       />,
     )
-    fireEvent.click(screen.getByRole("button", { name: "history" }))
+    fireEvent.click(screen.getByRole("radio", { name: "Activity" }))
     expect(screen.getAllByTestId("mention-chip")).toHaveLength(2)
   })
 
@@ -396,7 +426,7 @@ describe("IssueCardDetail — mentions", () => {
         agents={[ROBIN]}
       />,
     )
-    fireEvent.click(screen.getByRole("button", { name: "history" }))
+    fireEvent.click(screen.getByRole("radio", { name: "Activity" }))
     expect(screen.queryByTestId("mention-chip")).toBeNull()
     expect(screen.getByText(/mentioned/)).toBeInTheDocument()
     expect(screen.getByText(/a_someone_else/)).toBeInTheDocument()
@@ -413,7 +443,7 @@ describe("IssueCardDetail — mentions", () => {
         agents={[ROBIN]}
       />,
     )
-    fireEvent.click(screen.getByRole("button", { name: "history" }))
+    fireEvent.click(screen.getByRole("radio", { name: "Activity" }))
     expect(screen.getByText(/some future kind/)).toBeInTheDocument()
   })
 
@@ -465,11 +495,14 @@ describe("IssueCardDetail — mentions", () => {
 })
 
 describe("ProjectCardDetail", () => {
-  it("lists the project's issues — the question you opened it to ask", () => {
+  // The project page is a hero and tabs now (project-tabs.test.tsx covers
+  // the tabs); these keep the invariants the old single card earned.
+  it("lists the project's issues on the Issues tab", () => {
     render(
       <ProjectCardDetail
         project={project()}
         stats={NO_STATS}
+        tab="issues"
         issues={[issue(), issue({ id: "i2", identifier: "ENG-3", title: "Create a directory tree" })]}
       />,
     )
@@ -477,15 +510,14 @@ describe("ProjectCardDetail", () => {
     expect(screen.getByText("Create a directory tree")).toBeInTheDocument()
   })
 
-  it("links each row at the canonical issue route", () => {
-    render(<ProjectCardDetail project={project()} stats={NO_STATS} issues={[issue()]} />)
-    const row = screen.getByText("Generate a CSV report with random data").closest("a")
-    expect(row).toHaveAttribute("href", "/issues/ENG-4")
+  it("a row goes to the host, which opens the issue", () => {
+    const onOpenIssue = vi.fn()
+    render(<ProjectCardDetail project={project()} stats={NO_STATS} tab="issues" issues={[issue()]} onOpenIssue={onOpenIssue} />)
+    fireEvent.click(screen.getByText("Generate a CSV report with random data"))
+    expect(onOpenIssue).toHaveBeenCalledWith(expect.objectContaining({ identifier: "ENG-4" }))
   })
 
   it("says the project name once, not three times", () => {
-    // The old panel stacked a breadcrumb, a header reading "Project" and a
-    // title — the name appeared three times above the fold.
     render(<ProjectCardDetail project={project()} stats={NO_STATS} issues={[]} />)
     expect(screen.getAllByText("File Operations")).toHaveLength(1)
   })
@@ -498,37 +530,8 @@ describe("ProjectCardDetail", () => {
     expect(screen.queryByText("at_risk")).toBeNull()
   })
 
-  it("keeps the short cards out of the rail so it cannot outgrow the main column", () => {
-    // The void in the first screenshot was structural: a rail taller than the
-    // main column leaves dead space beside it that a two-column grid has
-    // nothing to fill. Teams / Labels / Metadata span the full width instead.
-    const { container } = render(
-      <ProjectCardDetail project={project()} stats={NO_STATS} issues={[issue()]} />,
-    )
-    const body = container.querySelector(".xl\\:grid-cols-3.2xl\\:grid-cols-4")
-    expect(body).not.toBeNull()
-    for (const heading of ["Teams", "Labels", "Metadata"]) {
-      expect(body!.contains(screen.getByText(heading))).toBe(false)
-    }
-    // Progress and Properties are what the rail keeps.
-    expect(body!.contains(screen.getByText("Properties"))).toBe(true)
-  })
-
-  it("tints the progress card by health", () => {
-    const { container, rerender } = render(
-      <ProjectCardDetail project={project({ health: "on_track" })} stats={NO_STATS} issues={[]} />,
-    )
-    expect(container.querySelector(".from-success\\/\\[0\\.06\\]")).not.toBeNull()
-
-    rerender(
-      <ProjectCardDetail project={project({ health: "off_track" })} stats={NO_STATS} issues={[]} />,
-    )
-    expect(container.querySelector(".from-destructive\\/\\[0\\.06\\]")).not.toBeNull()
-    expect(container.querySelector(".from-success\\/\\[0\\.06\\]")).toBeNull()
-  })
-
   it("tells the reader the project is empty instead of rendering nothing", () => {
-    render(<ProjectCardDetail project={project()} stats={null} issues={[]} />)
-    expect(screen.getByText(/Nothing is filed under this project yet/)).toBeInTheDocument()
+    render(<ProjectCardDetail project={project()} stats={null} tab="issues" issues={[]} />)
+    expect(screen.getByText("No issues in this project yet")).toBeInTheDocument()
   })
 })

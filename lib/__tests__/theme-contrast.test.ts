@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest"
 import { readFileSync } from "node:fs"
 import path from "node:path"
 
-import { ACCENTS, DEFAULT_ACCENT, accentBlock, type AccentId } from "@/lib/theme/accents"
+import { ACCENTS, DEFAULT_ACCENT, STYLE_ACCENTS, accentBlock, type AccentId, type StyleAccentId } from "@/lib/theme/accents"
 
 // Guards the WCAG AA (4.5:1) contrast of the dark-theme brand tokens in
 // app/globals.css. The app renders dark-only (<html className="dark">),
@@ -105,7 +105,7 @@ function block(theme: Theme): string {
   return css.slice(start, end)
 }
 
-function token(theme: Theme, name: string, accent: AccentId = DEFAULT_ACCENT): string {
+function token(theme: Theme, name: string, accent: AccentId | StyleAccentId = DEFAULT_ACCENT): string {
   const m = block(theme).match(new RegExp(`--${name}:\\s*([^;]+);`))
   expect(m, `--${name} present in the ${theme} theme`).toBeTruthy()
   const value = (m as RegExpMatchArray)[1].trim()
@@ -116,7 +116,7 @@ function token(theme: Theme, name: string, accent: AccentId = DEFAULT_ACCENT): s
   return brand as string
 }
 
-function tokenRgb(theme: Theme, name: string, accent?: AccentId): [number, number, number] {
+function tokenRgb(theme: Theme, name: string, accent?: AccentId | StyleAccentId): [number, number, number] {
   const value = token(theme, name, accent)
   const hex = value.match(/^#([0-9a-fA-F]{6})$/)
   if (hex) return hexToRgb(value)
@@ -127,7 +127,9 @@ function tokenRgb(theme: Theme, name: string, accent?: AccentId): [number, numbe
 }
 
 const WHITE = luminanceFromRgb([1, 1, 1])
-const ACCENT_IDS = ACCENTS.map((a) => a.id)
+// The picker's accents and the hidden ones a style carries: all on Harbor too,
+// since the accent outlives a switch of style.
+const ACCENT_IDS = [...ACCENTS.map((a) => a.id), ...STYLE_ACCENTS.map((a) => a.id)]
 
 // The dark theme carries the full axe-parity suite (the app is dark by default).
 describe.each(ACCENT_IDS)("accent %s — dark theme WCAG AA contrast (axe color-contrast parity)", (accent) => {
@@ -219,5 +221,196 @@ describe("concept hue text contrast", () => {
   })
   it.each(HUES)("text-%s on card ≥ 4.5:1 in the night theme", (name) => {
     expect(contrast(luminanceFromRgb(tokenRgb("night", name)), luminanceFromRgb(tokenRgb("night", "card")))).toBeGreaterThanOrEqual(4.5)
+  })
+})
+
+// ── Harbor 2 ─────────────────────────────────────────────────────────────
+//
+// The Harbor 2 revision keeps every token name and moves the values to the
+// design's (pinned mockup v67), with two contrast fixes the design itself
+// misses: the tertiary text grey (--muted-foreground-soft) is darker in day
+// and lighter in night than the design's #757D8C / #767D8B, which measured
+// 3.4–4.2:1 on several surfaces. --icon-faint is the design's unnamed fourth
+// grey, for icons and dividers only (3:1, WCAG 1.4.11).
+
+const HARBOR2: Record<Theme, Record<string, string>> = {
+  day: {
+    background: "#FFFFFF",
+    sidebar: "#F3F4F6",
+    card: "#FFFFFF",
+    popover: "#FFFFFF",
+    muted: "#F8F9FA",
+    "surface-subtle": "#F8F9FA",
+    "surface-raised": "#FFFFFF",
+    foreground: "#0C111B",
+    "muted-foreground": "#4B5363",
+    "muted-foreground-soft": "#616875",
+    "icon-faint": "#7E8797",
+    border: "#E4E6EA",
+    "sidebar-border": "#E4E6EA",
+    "line-strong": "#D2D6DC",
+    success: "#157A45",
+    warn: "#8A5A00",
+    destructive: "#C0261B",
+    "chip-ok-fg": "#157A45",
+    "chip-ok-bg": "#E5F4EC",
+    "chip-warn-fg": "#8A5A00",
+    "chip-warn-bg": "#FCF1DC",
+    "chip-danger-fg": "#C0261B",
+    "chip-danger-bg": "#FCEAE8",
+    "chip-violet-fg": "#6544D6",
+    "chip-violet-bg": "#F0EBFD",
+  },
+  night: {
+    background: "#0F1013",
+    sidebar: "#0A0B0D",
+    card: "#181A1F",
+    popover: "#181A1F",
+    muted: "#1E2127",
+    "surface-subtle": "#0F1013",
+    "surface-raised": "#1E2127",
+    foreground: "#ECEEF2",
+    "muted-foreground": "#A4AAB6",
+    "muted-foreground-soft": "#9096A1",
+    "icon-faint": "#6F7683",
+    border: "#282B33",
+    "sidebar-border": "#282B33",
+    "line-strong": "#373B45",
+    success: "#4CC38A",
+    warn: "#E5A83B",
+    destructive: "#F2695C",
+    "chip-ok-fg": "#4CC38A",
+    "chip-ok-bg": "#10261C",
+    "chip-warn-fg": "#E5A83B",
+    "chip-warn-bg": "#2B2010",
+    "chip-danger-fg": "#F2695C",
+    "chip-danger-bg": "#2E1513",
+    "chip-violet-fg": "#A28BFA",
+    "chip-violet-bg": "#1E1835",
+  },
+}
+
+describe.each(["day", "night"] as const)("Harbor 2 %s token values", (theme) => {
+  it.each(Object.entries(HARBOR2[theme]))("--%s is %s", (name, value) => {
+    expect(token(theme, name).toUpperCase()).toBe(value)
+  })
+})
+
+describe.each(["day", "night"] as const)("Harbor 2 %s contrast matrix", (theme) => {
+  const lum = (name: string) => luminanceFromRgb(tokenRgb(theme, name))
+  const SURFACES = ["background", "sidebar", "card", "muted", "surface-subtle", "surface-raised"]
+  // Hover is translucent foreground (--row-hover-bg, 4 %) over a surface;
+  // selection is the opaque accent tint (--selection-bg), so it is checked
+  // for every accent.
+  const hovered = (surface: string) =>
+    luminanceFromRgb(blend(tokenRgb(theme, "foreground"), 0.04, tokenRgb(theme, surface)))
+  const TEXT = ["foreground", "muted-foreground", "muted-foreground-soft", "success", "warn", "destructive"]
+
+  it("row hover is 4 % foreground and selection is the accent tint", () => {
+    expect(token(theme, "row-hover-bg")).toBe("color-mix(in srgb, var(--foreground) 4%, transparent)")
+    expect(block(theme)).toMatch(/--selection-bg:\s*var\(--brand-tint\);/)
+  })
+
+  it.each(TEXT)("text %s ≥ 4.5:1 on every surface and on its hover", (text) => {
+    for (const s of SURFACES) {
+      expect(contrast(lum(text), lum(s)), `${text} on ${s}`).toBeGreaterThanOrEqual(4.5)
+      expect(contrast(lum(text), hovered(s)), `${text} on hovered ${s}`).toBeGreaterThanOrEqual(4.5)
+    }
+  })
+
+  it.each(ACCENT_IDS)("every text token ≥ 4.5:1 on a selected row (accent %s)", (accent) => {
+    const tint = luminanceFromRgb(tokenRgb(theme, "selection-bg", accent))
+    for (const text of TEXT) {
+      expect(contrast(lum(text), tint), `${text} on ${accent} selection`).toBeGreaterThanOrEqual(4.5)
+    }
+  })
+
+  it("icon-faint ≥ 3:1 on every surface (icons and dividers only, never text)", () => {
+    for (const s of SURFACES) expect(contrast(lum("icon-faint"), lum(s)), `icon-faint on ${s}`).toBeGreaterThanOrEqual(3)
+  })
+
+  it("control-border ≥ 3:1 on every surface (WCAG 1.4.11, ODCH-16)", () => {
+    // scripts/check-control-accessibility.tsx measures the same thing in a
+    // browser in CI; it caught #8792AB at 2.96:1 on the day sidebar ground.
+    for (const s of SURFACES) expect(contrast(lum("control-border"), lum(s)), `control-border on ${s}`).toBeGreaterThanOrEqual(3)
+  })
+
+  it.each(["ok", "warn", "danger", "violet"])("chip %s text ≥ 4.5:1 on its fill and on card", (tone) => {
+    expect(contrast(lum(`chip-${tone}-fg`), lum(`chip-${tone}-bg`))).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(lum(`chip-${tone}-fg`), lum("card"))).toBeGreaterThanOrEqual(4.5)
+  })
+})
+
+// COM-04 (#3481, PRD TOK-08): charts by crew or agent need more than the five
+// --chart-* slots. --series-1..8 is the validated set: slots 1–5 are the
+// chart slots unchanged (a series keeps its colour), every slot is ≥ 3:1
+// (WCAG 1.4.11) on every surface in both schemes, and no two slots are
+// closer than ΔE 10 (OKLab ×100), so neighbours in a legend stay apart.
+function oklabOf(theme: Theme, name: string): [number, number, number] {
+  const value = token(theme, name)
+  const ok = value.match(/^oklch\(([\d.]+)\s+([\d.]+)\s+([\d.]+)\)$/)
+  if (ok) {
+    const [l, c, h] = [Number(ok[1]), Number(ok[2]), (Number(ok[3]) * Math.PI) / 180]
+    return [l, c * Math.cos(h), c * Math.sin(h)]
+  }
+  // sRGB hex → OKLab
+  const [r, g, b] = hexToRgb(value).map(srgbChannelToLinear)
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b)
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b)
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b)
+  return [
+    0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+    1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+    0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+  ]
+}
+
+describe.each(["day", "night"] as const)("%s chart series palette", (theme) => {
+  const SERIES = Array.from({ length: 8 }, (_, i) => `series-${i + 1}`)
+  const SURFACES = ["background", "sidebar", "card", "muted", "surface-subtle", "surface-raised"]
+  const lum = (name: string) => luminanceFromRgb(tokenRgb(theme, name))
+
+  it.each([1, 2, 3, 4, 5])("series-%i is the chart slot of the same number", (n) => {
+    expect(token(theme, `series-${n}`)).toBe(token(theme, `chart-${n}`))
+  })
+
+  it.each(SERIES)("%s ≥ 3:1 on every surface", (series) => {
+    for (const s of SURFACES) expect(contrast(lum(series), lum(s)), `${series} on ${s}`).toBeGreaterThanOrEqual(3)
+  })
+
+  it("no two series are closer than ΔE 10", () => {
+    for (let i = 0; i < SERIES.length; i++) {
+      for (let j = i + 1; j < SERIES.length; j++) {
+        const [a, b] = [oklabOf(theme, SERIES[i]), oklabOf(theme, SERIES[j])]
+        const d = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) * 100
+        expect(d, `${SERIES[i]} vs ${SERIES[j]}`).toBeGreaterThanOrEqual(10)
+      }
+    }
+  })
+
+  it("the series are Tailwind colours (bg-series-1 …)", () => {
+    for (const series of SERIES) expect(css).toContain(`--color-${series}: var(--${series});`)
+  })
+})
+
+// App banners (components/layout/app-banners.tsx, Harbor 2 G09): the sentence
+// is --foreground on the tone's chip fill in both themes, and the icon is the
+// chip's own ink. The runtime banner used to paint --warn text on a --warn
+// fill, which reads as nothing at all.
+describe.each(["day", "night"] as const)("app banner tones — %s theme", (theme) => {
+  it.each(ACCENT_IDS)("banner text ≥ 4.5:1 and icon ≥ 3:1 on every tone (accent %s)", (accent) => {
+    const lum = (name: string) => luminanceFromRgb(tokenRgb(theme, name, accent))
+    for (const tone of ["warn", "ok", "info"]) {
+      expect(contrast(lum("foreground"), lum(`chip-${tone}-bg`)), `foreground on ${tone} banner`).toBeGreaterThanOrEqual(4.5)
+      expect(contrast(lum(`chip-${tone}-fg`), lum(`chip-${tone}-bg`)), `${tone} icon on its banner`).toBeGreaterThanOrEqual(3)
+    }
+  })
+
+  it("the banner rules in globals.css use exactly those pairs", () => {
+    expect(css).toMatch(/\.page-banner\s*\{[^}]*color:\s*var\(--foreground\)/)
+    for (const tone of ["warn", "ok", "info"]) {
+      expect(css).toMatch(new RegExp(`\\.page-banner-${tone}\\s*\\{\\s*background:\\s*var\\(--chip-${tone}-bg\\);\\s*\\}`))
+      expect(css).toMatch(new RegExp(`\\.page-banner-${tone} > svg\\s*\\{\\s*color:\\s*var\\(--chip-${tone}-fg\\);\\s*\\}`))
+    }
   })
 })

@@ -108,7 +108,7 @@ export function EditorDataActionsSection({
             type="button"
             variant="outline"
             size="xs"
-            className="coarse:min-h-11"
+            className="coarse:min-h-[44px]"
             onClick={() => onNavigate("access")}
           >
             Manage producer access
@@ -300,7 +300,7 @@ function LiveDefinitionBanner({
             type="button"
             variant="outline"
             size="sm"
-            className="coarse:min-h-11"
+            className="coarse:min-h-[44px]"
             onClick={() => onNavigate("content")}
           >
             Review the candidate in Content

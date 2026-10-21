@@ -61,7 +61,7 @@ describe("AuthProvider session-expired redirect", () => {
     vi.restoreAllMocks()
   })
 
-  it("redirects to /login?reason=expired&redirect=<path> on the auth event", async () => {
+  it("redirects to /login?reason=revoked&redirect=<path> on a session_revoked auth event", async () => {
     mockFetch.mockResolvedValueOnce(okJSON(SESSION))
     const { result } = renderHook(() => useAuth(), { wrapper })
     await waitFor(() => expect(result.current.status).toBe("authenticated"))
@@ -70,10 +70,10 @@ describe("AuthProvider session-expired redirect", () => {
       window.dispatchEvent(new CustomEvent(AUTH_EVENT, { detail: { reason: "session_revoked" } }))
     })
 
-    expect(replaceSpy).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(replaceSpy).toHaveBeenCalledTimes(1))
     const target = replaceSpy.mock.calls[0][0] as string
     expect(target).toContain("/login?")
-    expect(target).toContain("reason=expired")
+    expect(target).toContain("reason=revoked")
     // happy-dom default location is http://localhost:3000/ — the current
     // path rides along so post-login can return the user.
     expect(target).toContain(`redirect=${encodeURIComponent("/")}`)
@@ -90,7 +90,7 @@ describe("AuthProvider session-expired redirect", () => {
       window.dispatchEvent(new CustomEvent(AUTH_EVENT, { detail: { reason: "x" } }))
     })
 
-    expect(replaceSpy).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(replaceSpy).toHaveBeenCalledTimes(1))
   })
 
   it("handles a cross-tab 'session-expired' broadcast like the local event", async () => {
@@ -104,11 +104,11 @@ describe("AuthProvider session-expired redirect", () => {
       channel!.onmessage?.({ data: { type: "session-expired" } })
     })
 
-    expect(replaceSpy).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(replaceSpy).toHaveBeenCalledTimes(1))
     expect(replaceSpy.mock.calls[0][0]).toContain("reason=expired")
   })
 
-  it("handles a cross-tab 'signout' broadcast with a clean /login redirect (no expired toast)", async () => {
+  it("handles a cross-tab 'signout' broadcast with the signed-out screen (no expired state)", async () => {
     mockFetch.mockResolvedValueOnce(okJSON(SESSION))
     const { result } = renderHook(() => useAuth(), { wrapper })
     await waitFor(() => expect(result.current.status).toBe("authenticated"))
@@ -118,8 +118,8 @@ describe("AuthProvider session-expired redirect", () => {
       channel!.onmessage?.({ data: { type: "signout" } })
     })
 
-    expect(replaceSpy).toHaveBeenCalledTimes(1)
-    expect(replaceSpy.mock.calls[0][0]).toBe("/login")
+    await waitFor(() => expect(replaceSpy).toHaveBeenCalledTimes(1))
+    expect(replaceSpy.mock.calls[0][0]).toBe("/login?reason=signed-out")
   })
 
   it("ignores unknown broadcast message types", async () => {
@@ -161,7 +161,7 @@ describe("AuthProvider session-expired redirect", () => {
     act(() => {
       window.dispatchEvent(new CustomEvent(AUTH_EVENT, { detail: { reason: "x" } }))
     })
-    expect(replaceSpy).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(replaceSpy).toHaveBeenCalledTimes(1))
   })
 })
 

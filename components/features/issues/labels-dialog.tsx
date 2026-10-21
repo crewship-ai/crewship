@@ -4,18 +4,18 @@ import { useState } from "react"
 import { Check, Pencil, Plus, Trash2, X } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { isImeComposing } from "@/lib/ime"
 import { LABEL_PRESET_COLORS } from "@/lib/colors"
 import { apiFetch } from "@/lib/api-fetch"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import type { IssueLabel } from "@/lib/types/mission"
 
 interface LabelsDialogProps {
@@ -156,12 +156,9 @@ export function LabelsDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[480px]">
-        <DialogHeader>
-          <DialogTitle>Manage Labels</DialogTitle>
-        </DialogHeader>
-
+    <CreateSurface open={open} onOpenChange={onOpenChange} size="sm">
+      <CreateSurfaceHeader concept="issues" title="Manage Labels" onClose={() => onOpenChange(false)} />
+      <CreateSurfaceBody className="space-y-4">
         {/* Create form */}
         <div className="space-y-3 border-b border-border pb-4">
           <div className="flex items-center gap-2">
@@ -366,7 +363,10 @@ export function LabelsDialog({
             </div>
           ))}
         </div>
-      </DialogContent>
-    </Dialog>
+      </CreateSurfaceBody>
+      {/* Every change above saves as it is made, so the only way out is Done —
+          there is no draft for a primary to commit. */}
+      <CreateSurfaceFooter hint={null} onCancel={() => onOpenChange(false)} cancelLabel="Done" />
+    </CreateSurface>
   )
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -28,6 +29,9 @@ func TestMemberAccessGeneratedContract(t *testing.T) {
 			t.Fatalf("missing policy error contracts: %s", method)
 		}
 		schema := responses["200"].(map[string]any)["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)
+		if target, ok := schema["$ref"].(string); ok {
+			schema = spec["components"].(map[string]any)["schemas"].(map[string]any)[strings.TrimPrefix(target, "#/components/schemas/")].(map[string]any)
+		}
 		if len(schema["required"].([]any)) != 4 {
 			t.Fatal("incomplete policy envelope")
 		}

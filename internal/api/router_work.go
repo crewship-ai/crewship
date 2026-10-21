@@ -36,5 +36,6 @@ func (r *Router) registerWorkRoutes() {
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/work-items/{workItemId}/resolve", roleCreate, workItems.Resolve)
 
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/webhook-deliveries", authed(wsCtx(http.HandlerFunc(deliveries.List))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/webhook-deliveries/summary", authed(wsCtx(http.HandlerFunc(deliveries.Summary))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/webhook-deliveries/{deliveryId}", authed(wsCtx(http.HandlerFunc(deliveries.Get))))
 }

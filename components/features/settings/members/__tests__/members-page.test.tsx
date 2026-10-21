@@ -151,8 +151,9 @@ describe("Members — the roster", () => {
     const groups = screen.getAllByRole("rowheader").filter((h) => h.getAttribute("scope") === "rowgroup").map((h) => h.textContent)
     expect(groups).toEqual(["Owners1", "Admins1", "Managers1", "Members1", "Viewers1"])
     const summary = document.querySelector("[data-slot=members-summary]")!
-    expect(summary).toHaveTextContent("5 people")
-    expect(summary).toHaveTextContent("1 can reveal secrets")
+    // v67's five tiles (PAR-102): a label over its figure.
+    expect(summary).toHaveTextContent("People5")
+    expect(summary).toHaveTextContent("Can reveal secrets1")
   })
 
   it("leads with what needs attention, each finding with its verb", async () => {
@@ -342,7 +343,7 @@ describe("Members — one person", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Change role" }))
     await waitFor(() => expect(writes()).toHaveLength(1))
     expect(writes()[0][0]).toBe("/api/v1/workspaces/ws1/members/m-mel?workspace_id=ws1")
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Cannot modify this member"))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Cannot modify this member", { duration: Infinity }))
   })
 
   it("lets a MANAGER change roles below them but never capabilities", async () => {
@@ -459,5 +460,156 @@ describe("Members — drafts stay where they were made", () => {
     fireEvent.click(control)
     expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull()
     expect(writes()).toHaveLength(0)
+  })
+
+  it("shows the unread-capabilities failure as the kit PageBanner (alert, bad tone) with Retry (COM-03)", async () => {
+    const normal = api.getMockImplementation()!
+    api.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (!init?.method && url.includes("/members/capabilities")) return { ok: false, status: 500, json: async () => ({}), text: async () => "" }
+      return normal(url, init)
+    })
+    renderPage("/settings/members")
+    const banner = await screen.findByRole("alert")
+    expect(banner).toHaveAttribute("data-tone", "bad")
+    expect(banner).toHaveClass("page-banner", "page-banner-bad")
+    expect(banner).toHaveAttribute("data-slot", "members-caps-error")
+    expect(banner).toHaveTextContent(/Could not read what people may do/)
+    expect(document.querySelectorAll(".page-banner")).toHaveLength(1)
+    const before = api.mock.calls.filter(([url]) => String(url).includes("/members/capabilities")).length
+    fireEvent.click(within(banner).getByRole("button", { name: "Retry" }))
+    await waitFor(() => expect(api.mock.calls.filter(([url]) => String(url).includes("/members/capabilities")).length).toBeGreaterThan(before))
+  })
+})
+
+// Harbor 2: the Invited view offers Reissue (a new link, shown once, valid 7
+// days) and Revoke (after a confirmation) on each pending invitation. An
+// ADMIN invitation is the owner's to manage, as the server enforces.
+describe("Members — pending invitations", () => {
+  const pending = (id: string, role: string, email: string) => ({
+    id, email, role,
+    expires_at: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+    created_at: new Date().toISOString(),
+    inviter: null,
+  })
+
+  it("reissues an invitation and shows the new link once", async () => {
+    invitations = [pending("i1", "MEMBER", "pat@x.io")]
+    nextWrite = ok({ id: "i1", email: "pat@x.io", role: "MEMBER", token: "wi1_new", expires_at: new Date(Date.now() + 7 * 86_400_000).toISOString() })
+    renderPage("/settings/members?status=invited")
+    const list = await slot("[data-slot=members-invitations]")
+    fireEvent.click(within(list).getByRole("button", { name: "Reissue pat@x.io" }))
+    await waitFor(() => expect(writes()[0][0]).toBe("/api/v1/workspaces/ws1/invitations/i1/reissue?workspace_id=ws1"))
+    expect(await within(list).findByDisplayValue(`${window.location.origin}/join#invitation_token=wi1_new`)).toBeInTheDocument()
+    expect(list).toHaveTextContent(/won’t be shown again/)
+  })
+
+  it("revokes an invitation after a confirmation", async () => {
+    invitations = [pending("i1", "MEMBER", "pat@x.io")]
+    renderPage("/settings/members?status=invited")
+    const list = await slot("[data-slot=members-invitations]")
+    fireEvent.click(within(list).getByRole("button", { name: "Revoke pat@x.io" }))
+    expect(writes()).toHaveLength(0)
+    await confirmWith(/^Revoke invitation$/)
+    await waitFor(() => expect(writes()[0]).toEqual(["/api/v1/workspaces/ws1/invitations/i1?workspace_id=ws1", { method: "DELETE" }]))
+  })
+
+  it("leaves an Admin invitation to the owner", async () => {
+    invitations = [pending("i2", "ADMIN", "boss@x.io")]
+    renderPage("/settings/members?status=invited")
+    const list = await slot("[data-slot=members-invitations]")
+    expect(within(list).queryByRole("button", { name: "Revoke boss@x.io" })).toBeNull()
+    expect(within(list).getByText(/Only the owner manages an Admin invitation/)).toBeInTheDocument()
+  })
+
+  it("says when nothing is pending", async () => {
+    renderPage("/settings/members?status=invited")
+    expect(await screen.findByText("No pending invitations.")).toBeInTheDocument()
+  })
+})
+
+// Harbor 2 (#3487 SET-01): one person opens in the kit's Peek — 480 px from
+// the right, J / K to the next / previous person in the order the roster
+// shows them — and each confirmation says WHEN it lands: a role change is
+// written at once ("Applies now"), a capability is a draft until the page's
+// Save ("Takes effect when you save").
+describe("Members — the person peek", () => {
+  const peek = () => waitFor(() => {
+    const el = document.querySelector<HTMLElement>("[data-slot=peek]")
+    if (!el) throw new Error("no peek")
+    return el
+  })
+
+  it("opens the person in the shared 480 px Peek, not a 520 px sheet", async () => {
+    renderPage("/settings/members?member=u-mel")
+    const p = await peek()
+    expect(p).toContainElement(await sheet())
+    expect(p.className).toContain("w-[480px]")
+    expect(document.querySelector("[data-slot=member-sheet]")).toBeNull()
+    expect(within(p).getByRole("heading", { name: "Mel Member" })).toBeInTheDocument()
+  })
+
+  it("moves to the next and previous person with J and K, in roster order", async () => {
+    renderPage("/settings/members?member=u-mel")
+    const p = await peek()
+    expect(await sheet()).toHaveAccessibleName("Member details: Mel Member")
+    // The roster behind the modal Peek is hidden from the a11y tree; wait for
+    // the neighbours instead.
+    await within(p).findByRole("button", { name: "Next (J)" })
+    fireEvent.keyDown(p, { key: "j" })
+    await waitFor(() => expect(document.querySelector("[data-slot=member-detail]")).toHaveAccessibleName("Member details: vic@example.com"))
+    fireEvent.keyDown(p, { key: "k" })
+    fireEvent.keyDown(p, { key: "k" })
+    await waitFor(() => expect(document.querySelector("[data-slot=member-detail]")).toHaveAccessibleName("Member details: Mo Manager"))
+    expect(within(p).getByRole("button", { name: "Previous (K)" })).toBeInTheDocument()
+    expect(within(p).getByRole("button", { name: "Next (J)" })).toBeInTheDocument()
+  })
+
+  it("says a role change applies now", async () => {
+    renderPage("/settings/members?member=u-mel")
+    const d = await sheet()
+    fireEvent.click(within(d).getByRole("radio", { name: "Manager" }))
+    const dialog = await screen.findByRole("alertdialog")
+    expect(dialog).toHaveTextContent(/Applies now/)
+    expect(dialog).not.toHaveTextContent(/when you save/i)
+    expect(dialog.querySelector("[data-when=now]")).not.toBeNull()
+  })
+
+  it("says a high-stakes grant takes effect when you save", async () => {
+    renderPage("/settings/members?member=u-mel")
+    const d = await sheet()
+    fireEvent.click(await within(d).findByRole("switch", { name: "Grant credentials:reveal to Mel Member" }))
+    const dialog = await screen.findByRole("alertdialog")
+    expect(dialog).toHaveTextContent(/Takes effect when you save/)
+    expect(dialog).not.toHaveTextContent(/Applies now/)
+    expect(dialog.querySelector("[data-when=save]")).not.toBeNull()
+  })
+
+  it("says a role change for many people applies now", async () => {
+    renderPage()
+    await table()
+    fireEvent.click(await within(rowOf("u-mel")).findByRole("checkbox", { name: "Select Mel Member" }))
+    const bar = await screen.findByRole("toolbar", { name: "Change the selected people" })
+    fireEvent.pointerDown(within(bar).getByRole("button", { name: /Role/ }), { button: 0, ctrlKey: false })
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Viewer" }))
+    const dialog = await screen.findByRole("alertdialog")
+    expect(dialog).toHaveTextContent(/Applies now/)
+    expect(dialog.querySelector("[data-when=now]")).not.toBeNull()
+  })
+
+  // SET-07: the section head belongs to the Settings drill frame — drawn once,
+  // and already there while the roster loads.
+  it("says what the page is once, in the section head, even while loading", async () => {
+    api.mockImplementation(() => new Promise(() => {}))
+    renderPage()
+    const head = document.querySelector<HTMLElement>("[data-slot=drill-head]")
+    expect(head).not.toBeNull()
+    expect(within(head!).getByRole("heading", { level: 2, name: "Members" })).toBeInTheDocument()
+    expect(screen.getAllByText(/Who is in this workspace/)).toHaveLength(1)
+  })
+
+  it("names the CLI command for the person in the peek's footer", async () => {
+    renderPage("/settings/members?member=u-mel")
+    const p = await peek()
+    expect(p).toHaveTextContent("crewship workspace member capabilities list u-mel")
   })
 })

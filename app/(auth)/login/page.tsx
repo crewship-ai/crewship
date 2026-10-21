@@ -1,15 +1,28 @@
 "use client"
 
 import { Suspense, useState, useEffect, type FormEvent } from "react"
-import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { AuthSplitShell } from "@/components/branding/auth-split-shell"
+import { User } from "lucide-react"
+import {
+  AUTH_BUTTON,
+  AUTH_INPUT,
+  AuthBanner,
+  AuthCard,
+  AuthCardSkeleton,
+  AuthLink,
+  AuthPasswordInput,
+  AuthScreen,
+} from "@/components/branding/auth-card"
+import { CreateSurfaceField } from "@/components/layout/create-surface"
 import { useAuth } from "@/hooks/use-auth"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { Spinner } from "@/components/ui/spinner"
 import { safeRedirectPath } from "./safe-redirect"
+import { returnPageName } from "./return-to"
 import { serverFetch } from "@/lib/server-base"
+import { SignedOutScreen } from "@/components/branding/signed-out-screen"
+import { forgetSignedOut, readSignedOut, signedOutKindFromQuery } from "@/lib/signed-out"
 
 export default function LoginPage() {
   return (
@@ -32,11 +45,17 @@ function LoginForm() {
   // doesn't leak who is registered. The banner has to stay as vague as
   // the API response is.
   const signupSubmitted = searchParams.get("signup") === "submitted"
-  const expired = searchParams.get("reason") === "expired"
+  // Reached because a session ended (#3787): the page opens on that state's
+  // full screen and shows the form once the person chooses to sign in.
+  const signedOut = signedOutKindFromQuery(searchParams.get("reason"))
+  const [formOpen, setFormOpen] = useState(false)
+  const [remembered, setRemembered] = useState<{ email: string | null; draftAgent: string | null }>({ email: null, draftAgent: null })
   // A sign-in refused on the server side (e.g. Google for a suspended
   // account) lands here; like a wrong password, it does not say why.
   const refused = searchParams.get("error") === "signin"
   const redirectTarget = safeRedirectPath(searchParams.get("redirect"))
+  // Display only: where the person lands is still redirectTarget.
+  const returnTo = returnPageName(searchParams.get("redirect"))
   const { signIn } = useAuth()
   // First-run gate: on an empty Crewship install the visitor should
   // never see the login form — they should land on /bootstrap to
@@ -45,6 +64,10 @@ function LoginForm() {
   // every page load.
   const [gateChecked, setGateChecked] = useState(false)
   const [signupAllowed, setSignupAllowed] = useState(true)
+
+  // Same tab, set by the auth provider just before it came here. Read with
+  // the first-run gate, which holds the page anyway.
+  useEffect(() => { setRemembered(readSignedOut()) }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -88,125 +111,131 @@ function LoginForm() {
     setLoading(false)
 
     if (!result.ok) {
-      setError(result.error ?? "Invalid email or password")
+      setError(result.status === 429 ? tooManyAttempts(result.retryAfter) : (result.error ?? "Invalid email or password"))
       return
     }
 
+    forgetSignedOut()
     router.push(redirectTarget)
   }
 
   // Block the entire form until the first-run gate resolves —
   // otherwise a fresh install would briefly flash the login UI before
-  // redirecting to /bootstrap.
+  // redirecting to /bootstrap. The skeleton stays empty for the first second.
   if (!gateChecked) {
-    return <div className="min-h-screen bg-gradient-to-b from-background to-muted/30" />
+    return (
+      <AuthScreen panel="login">
+        <AuthCardSkeleton />
+      </AuthScreen>
+    )
   }
 
+  if (signedOut && !formOpen) {
+    return (
+      <SignedOutScreen
+        kind={signedOut}
+        email={remembered.email}
+        draftAgent={remembered.draftAgent}
+        onSignIn={() => {
+          if (remembered.email) setEmail(remembered.email)
+          setFormOpen(true)
+        }}
+        onUseAnotherAccount={() => {
+          forgetSignedOut()
+          setRemembered({ email: null, draftAgent: null })
+          setEmail("")
+          setFormOpen(true)
+        }}
+      />
+    )
+  }
+
+  // One rank per kind of feedback: a redirect state is a banner in the card,
+  // anything the server refused is the band above the footer.
+  const banner = registered ? (
+    <AuthBanner tone="ok">Administrator account created. Sign in to continue setup.</AuthBanner>
+  ) : signupSubmitted ? (
+    // As vague as the API: the same sentence whether or not the address
+    // already had an account.
+    <AuthBanner tone="ok">If that address was not registered yet, the account is ready. Sign in below.</AuthBanner>
+  ) : null
+  const refusal = error ?? (refused ? "We could not sign you in. Try again, or ask your administrator." : null)
+
   return (
-    <AuthSplitShell
-      eyebrow="Self-hosted"
-      headline="Command the whole fleet."
-      blurb="Every agent in its own container, on hardware you own."
-    >
-      <div>
-        <p className="font-mono text-[11px] uppercase tracking-[0.11em] text-muted-foreground">
-          Welcome back
-        </p>
-        <h1 className="mt-3 text-balance text-[clamp(26px,2.4vw,32px)] font-extrabold leading-[1.12] tracking-[-0.028em]">
-          Sign in to Crewship
-        </h1>
-        <p className="mt-2 max-w-[34ch] text-sm text-muted-foreground">
-          Sign in to manage your AI workforce.
-        </p>
-        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
-            {registered && (
-              <div
-                className="rounded-md border border-success/40 bg-success/10 p-3 text-sm text-success"
-                role="status"
-                aria-live="polite"
-              >
-                Account created! Please sign in.
-              </div>
-            )}
-            {signupSubmitted && !registered && (
-              <div
-                className="rounded-md border border-success/40 bg-success/10 p-3 text-sm text-success"
-                role="status"
-                aria-live="polite"
-              >
-                Thanks! If that email address wasn&apos;t already registered,
-                your account is ready — sign in below.
-              </div>
-            )}
-            {expired && !error && (
-              <div
-                className="rounded-md border border-warn/40 bg-warn/10 p-3 text-sm text-warn"
-                role="status"
-                aria-live="polite"
-              >
-                Your session expired. Please sign in again.
-              </div>
-            )}
-            {refused && !error && (
-              <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive" role="alert">
-                We could not sign you in. Try again, or ask your administrator.
-              </div>
-            )}
-            {error && (
-              <div
-                className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
-                role="alert"
-                aria-live="assertive"
-              >
-                {error}
-              </div>
-            )}
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="you@company.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="password">Password</Label>
-                <Link
-                  href="/forgot-password"
-                  className="text-xs text-muted-foreground hover:text-foreground hover:underline"
-                >
-                  Forgot password?
-                </Link>
-              </div>
-              <Input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-            </div>
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Signing in..." : "Sign In"}
-            </Button>
-            {/* "or continue with" + the Google button lived here. Google
-                sign-in is switched off (2026-07-27) and its routes are no
-                longer registered, so a divider promising an alternative and
-                a button that cannot work are both worse than nothing. */}
-            {signupAllowed && (
-              <p className="text-center text-xs text-muted-foreground">
-                Don&apos;t have an account?{" "}
-                <a href="/signup" className="text-primary hover:underline">
-                  Sign up
-                </a>
-              </p>
-            )}
-        </form>
-      </div>
-    </AuthSplitShell>
+    <AuthScreen panel="login">
+      <AuthCard
+        icon={User}
+        title="Sign in to Crewship"
+        description={
+          returnTo ? (
+            <>
+              Sign in to manage your AI workforce.{" "}
+              <span data-slot="auth-return-to">You&apos;ll return to {returnTo}.</span>
+            </>
+          ) : (
+            "Sign in to manage your AI workforce."
+          )
+        }
+        onSubmit={handleSubmit}
+        banner={banner}
+        refusal={refusal}
+        links={
+          // "or continue with" + the Google button lived here. Google sign-in
+          // is switched off (2026-07-27) and its routes are no longer
+          // registered, so a divider promising an alternative and a button
+          // that cannot work are both worse than nothing.
+          signupAllowed ? (
+            <AuthLink href="/signup">Create an account</AuthLink>
+          ) : (
+            // Without sign-up the page must still say how to get in.
+            <span>Need access? Ask an administrator for an invitation.</span>
+          )
+        }
+        actions={
+          <Button type="submit" disabled={loading} className={AUTH_BUTTON}>
+            {loading && <Spinner className="size-3.5" />}
+            {loading ? "Signing in…" : "Sign in"}
+          </Button>
+        }
+      >
+        <CreateSurfaceField label="Email" htmlFor="email">
+          <Input
+            id="email"
+            type="email"
+            // "username" is what password managers pair with current-password.
+            autoComplete="username"
+            placeholder="you@company.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            className={AUTH_INPUT}
+          />
+        </CreateSurfaceField>
+        {/* The link sits in the label row but after the field in the DOM, so
+            Tab goes Email → Password → Forgot password → Sign in. Under a
+            coarse pointer it is 44 px tall, so it drops below the field
+            instead of overlapping it. */}
+        <div className="relative flex flex-col">
+          <CreateSurfaceField label="Password" htmlFor="password">
+            <AuthPasswordInput
+              id="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+          </CreateSurfaceField>
+          <AuthLink href="/forgot-password" className="absolute top-0 right-0 text-label leading-none coarse:static coarse:self-end">
+            Forgot password?
+          </AuthLink>
+        </div>
+      </AuthCard>
+    </AuthScreen>
   )
+}
+
+/** The sign-in limiter answers 429 with Retry-After in seconds. */
+function tooManyAttempts(retryAfter?: number): string {
+  const minutes = Math.max(1, Math.ceil((retryAfter ?? 60) / 60))
+  return `Too many sign-in attempts. Try again in ${minutes} ${minutes === 1 ? "minute" : "minutes"}, or reset your password.`
 }

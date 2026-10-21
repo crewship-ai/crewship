@@ -6,7 +6,7 @@ import { render, screen, cleanup } from "@testing-library/react"
 
 import { CrewAgentPreviewList } from "../crew-agent-preview-list"
 import { EmptyRoster } from "../empty-roster"
-import { RosterTab } from "../crew-canvas-tabs/roster-tab"
+import { CrewTeam } from "../crew-team"
 
 /**
  * A role badge is a promise: it names something the product can create. The
@@ -100,9 +100,6 @@ function crewRosterAgent(agent_role: string) {
 
 const CREWS = [{ id: "crew_ops", slug: "ops", name: "Ops" }]
 
-/** Only the fields RosterTab reads; the rest of CrewRecord is irrelevant here. */
-const CREW_RECORD = { id: "crew_ops", slug: "ops", name: "Ops", avatar_style: null } as never
-
 function renderPreview(role: string) {
   render(<CrewAgentPreviewList agents={[previewAgent(role)]} />)
 }
@@ -113,7 +110,7 @@ function renderRoster(role: string) {
 
 function renderCrewRoster(role: string) {
   render(
-    <RosterTab crew={CREW_RECORD} agentsForCrew={[crewRosterAgent(role)]} members={null} onSelectAgent={vi.fn()} />,
+    <CrewTeam agents={[crewRosterAgent(role)]} autonomy="guided" hireLimit={10} onSelectAgent={vi.fn()} onNewAgent={vi.fn()} onHire={vi.fn()} onApprove={vi.fn()} onRehire={vi.fn()} />,
   )
 }
 
@@ -130,7 +127,7 @@ function renderCrewRoster(role: string) {
 const SURFACES: { name: string; render: (role: string) => void }[] = [
   { name: "CrewAgentPreviewList (the wizard's lineup preview)", render: renderPreview },
   { name: "EmptyRoster (the agent roster)", render: renderRoster },
-  { name: "RosterTab (the crew canvas roster)", render: renderCrewRoster },
+  { name: "CrewTeam (the crew page Team tab)", render: renderCrewRoster },
 ]
 
 describe("agent role badges name only roles the product can create", () => {

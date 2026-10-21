@@ -41,7 +41,7 @@ import { join, relative, sep } from "node:path"
 // WHY THE MATCHER IS A REGEX AND NOT A PREFIX STRING. It used to be the literal
 // "/crews/agents/" — with a trailing slash, because every site found in the
 // first sweep was a sub-route. That shape cannot see the *index*: the toolbar
-// breadcrumb's <Link href="/crews/agents"> and app/(dashboard)/agents/page.tsx's
+// breadcrumb's <Link href="/crews/agents"> and app/(legacy)/agents/page.tsx's
 // router.replace("/crews/agents") both sailed through a green gate into a route
 // that has no page.tsx and no web/out/crews/agents.html — the Go static handler
 // falls all the way through to the SPA root, so the click lands the user on the
@@ -229,17 +229,15 @@ const REPAIRED = [
   // chat-client.tsx is what took over its links.
   "app/(dashboard)/chat/chat-client.tsx",
   "components/features/crews/agent-canvas-tabs/overview-tab.tsx",
-  "components/features/approvals/approval-detail.tsx",
   "components/features/journal/runs-view.tsx",
   "components/features/journal/journal-entry-card.tsx",
   "components/features/agents/agent-card.tsx",
-  "components/features/crews/crew-agents.tsx",
   "components/features/onboarding/setup-nudge.tsx",
   "hooks/use-active-runs.ts",
   // Index-route sweep: these two linked at /crews/agents itself, which the
   // trailing-slash prefix this gate used to carry could not see.
   "components/layout/app-toolbar.tsx",
-  "app/(dashboard)/agents/page.tsx",
+  "app/(legacy)/agents/page.tsx",
 ]
 
 // The matcher is the whole gate, so it gets pinned directly rather than only

@@ -18,7 +18,6 @@ it is safe against a shared development instance.
 | CLI subprocess coverage | Set `TEST_CREWSHIP_CLI_COVERAGE_DIR` to an existing absolute output directory when running `go test ./cmd/crewship` | Instruments the shared acceptance-test binary for `cmd/crewship`. Export its counters with `go tool covdata textfmt -i="$TEST_CREWSHIP_CLI_COVERAGE_DIR" -o=cli-subprocess.out`; combine matching statement blocks with the ordinary test profile. The subprocess report alone does not include in-process unit tests. |
 | Inspect trusted CI control inventory | `python3 -m unittest discover -s scripts/ci -p test_inventory_guard.py` | Tests the main-owned, metadata-only guard; administrator exceptions require a separate exact-head dispatch. See [trust limits and rollout](../docs/runbooks/ci-inventory-guard.md) |
 | PR throughput evidence | `python3 scripts/ci/pr-throughput.py --since YYYY-MM-DD --output /tmp/throughput.json --raw-output /tmp/throughput-raw.json` | Read-only bounded GitHub queries for merged PR latency, workflow attempts, failures and queue/execution; see [metric definitions and limitations](ci/pr-throughput.md) |
-| Plan repository merge policy | `python3 scripts/ci/repository-policy.py --output /tmp/policy-plan.json` | Reads the current main ruleset and prepares a preservation-first queue/CodeQL plan. Explicit `--apply --plan ... --documentation-commit ...` changes live rules only after review; see [the policy runbook](../docs/runbooks/ci-cd-implementation-2026-09-11.md#review-and-apply-repository-policy-2932) |
 | Plan repository merge policy | `python3 scripts/ci/repository-policy.py --output /tmp/policy-plan.json` | Reads the current main ruleset and prepares a preservation-first queue/CodeQL plan. Every `--apply --plan ...` requires `--analysis-commit ...` for reviewed source already on main and actual PR canary review; queue activation also requires `--documentation-commit ...`. See [the policy runbook](../docs/runbooks/ci-cd-implementation-2026-09-11.md#review-and-apply-repository-policy-2932) |
 | Documentation inventory | `make docs-inventory:strict` | Checks documented API/CLI references and writes ignored inventory reports |
 | Built chat XLSX worker | `pnpm test:chat-xlsx-worker` after `pnpm build` | Exercises the shipped local XLSX worker in Chromium with synthetic saved formulas, coordinates, corruption, macros and resource bounds |
@@ -66,6 +65,8 @@ commands. They may publish or remove release/package artifacts.
 | [agents-invariants/](agents-invariants/) | The machine-checkable repository rules in AGENTS.md |
 | [host-paths/](host-paths/) | AST check for independent host filesystem roots; existing exceptions must remain present, and CI prevents allowlist expansion against the PR base |
 | [docs-inventory/](docs-inventory/), [docs-surface-check/](docs-surface-check/) | API/CLI documentation and documentation surface/link checks |
+| [golangci-shards/](golangci-shards/) | CI lint partitions with canonical settings and unchanged deadlines |
+| [ci/document-create-acceptance.py](ci/document-create-acceptance.py) | Require the managed Document creation scenario to execute through the real CLI |
 | [lint-migrations/](lint-migrations/) | Migration ordering and immutability |
 | [lint-tsformat/](lint-tsformat/) | Timestamp formatting conventions |
 | [deps-drift/](deps-drift/) | Dependency drift checks |

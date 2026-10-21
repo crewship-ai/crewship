@@ -213,7 +213,7 @@ func (h *PipelineHandler) StepRun(w http.ResponseWriter, r *http.Request) {
 
 	valid, reason := pipeline.ValidateStepOutput(res.Output, step.Validation)
 
-	writeJSON(w, http.StatusOK, stepRunResponse{
+	writeCostAwareJSON(w, r, http.StatusOK, stepRunResponse{
 		StepID:           step.ID,
 		StepType:         string(step.Type),
 		Adapter:          am.Adapter,
@@ -276,7 +276,7 @@ func (h *PipelineHandler) stepRunDeterministic(w http.ResponseWriter, r *http.Re
 
 	valid, reason := pipeline.ValidateStepOutput(output, step.Validation)
 
-	writeJSON(w, http.StatusOK, stepRunResponse{
+	writeCostAwareJSON(w, r, http.StatusOK, stepRunResponse{
 		StepID:           step.ID,
 		StepType:         string(step.Type),
 		Output:           output,

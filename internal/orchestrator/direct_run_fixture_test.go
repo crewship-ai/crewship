@@ -46,6 +46,14 @@ func TestAwaitDirectRunAliveReportsStartupFailure(t *testing.T) {
 				tc.prepare(t, runID)
 			}
 			_, done, output := startDirectRunProcess(t, runID, tc.argv)
+			// Establish the already-exited fixture before probing: an immediate
+			// exit command can still be alive just after Start returns.
+			select {
+			case waitErr := <-done:
+				done <- waitErr // Preserve the exit status for the helper and caller.
+			case <-time.After(5 * time.Second):
+				t.Fatalf("startup-failure fixture did not exit: %s", output.String())
+			}
 			err := awaitDirectRunAlive(o, RunLocation{ContainerID: "test", AgentSlug: "a", RunID: runID}, done, output, 5*time.Second)
 			if err == nil {
 				t.Fatal("a fixture that died during startup read as alive")

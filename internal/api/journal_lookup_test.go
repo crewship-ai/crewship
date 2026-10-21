@@ -280,3 +280,49 @@ func containsString(haystack, needle string) bool {
 
 // Avoid unused-import on sql when only used in a helper.
 var _ = sql.ErrNoRows
+
+// TestJournalLookup_People: Activity names who made a change (#3636). The
+// lookup lists the workspace's people by id and display name — never an
+// email — and only people who are members of this workspace.
+func TestJournalLookup_People(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	if _, err := db.Exec(`INSERT INTO users (id, email, full_name) VALUES
+		('u-jana', 'jana@example.com', 'Jana Nováková'),
+		('u-noname', 'noname@example.com', ''),
+		('u-outside', 'outside@example.com', 'Not A Member')`); err != nil {
+		t.Fatalf("insert users: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES
+		('m2', ?, 'u-jana', 'MEMBER'), ('m3', ?, 'u-noname', 'MEMBER')`, wsID, wsID); err != nil {
+		t.Fatalf("insert members: %v", err)
+	}
+	h := NewJournalLookupHandler(db, newTestLogger())
+	req := withWorkspaceUser(httptest.NewRequest("GET", "/api/v1/journal/lookup", nil), userID, wsID, "MEMBER")
+	rr := httptest.NewRecorder()
+	h.Get(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var resp journalLookupResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	got := map[string]string{}
+	for _, p := range resp.People {
+		got[p.ID] = p.Name
+	}
+	want := map[string]string{"test-user-id": "Test User", "u-jana": "Jana Nováková", "u-noname": ""}
+	if len(got) != len(want) {
+		t.Fatalf("people = %v, want %v", got, want)
+	}
+	for id, name := range want {
+		if n, ok := got[id]; !ok || n != name {
+			t.Errorf("person %s = %q (present %v), want %q", id, n, ok, name)
+		}
+	}
+	if containsString(rr.Body.String(), "@example.com") {
+		t.Errorf("lookup must not expose emails: %s", rr.Body.String())
+	}
+}

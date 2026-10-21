@@ -55,7 +55,7 @@ func TestGetPipelineRun_FetchesWorkspaceScopedRun(t *testing.T) {
 	if detail.Status != "completed" || detail.PipelineSlug != "summarize-text" {
 		t.Errorf("detail = %+v", detail)
 	}
-	if detail.CostUSD != 0.0123 {
+	if detail.CostUSD == nil || *detail.CostUSD != 0.0123 {
 		t.Errorf("CostUSD = %v, want 0.0123", detail.CostUSD)
 	}
 }

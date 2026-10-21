@@ -35,6 +35,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/auth"
 )
 
 const (
@@ -124,8 +126,9 @@ func hashAdmin(token string, key []byte) string {
 
 // CLITokenHandler provides endpoints for creating, listing, validating, and revoking CLI authentication tokens.
 type CLITokenHandler struct {
-	db     *sql.DB
-	logger *slog.Logger
+	db      *sql.DB
+	logger  *slog.Logger
+	streams *auth.StreamCredentials
 }
 
 // NewCLITokenHandler creates a CLITokenHandler with the given database and logger.
@@ -165,7 +168,8 @@ type createTokenRequest struct {
 // The vocabulary is deliberately limited to scopes that actually gate a
 // route today (enforced by TestEveryMintableScopeMapsToARoute — every entry
 // here must be satisfiable against at least one recorded mutation route).
-// That is why there are no `<resource>:read` scopes and no `agents:run`:
+// Documents enforce pages:read and pages:write through their live private
+// authority. Other families have no `<resource>:read` scopes or `agents:run`:
 // reads are not scope-gated in this pass (GET routes register outside the
 // mutation chokepoint), and the agent-invocation surface is currently
 // ownership-gated (scopeSelf) rather than resource-scoped. Offering those
@@ -173,6 +177,9 @@ type createTokenRequest struct {
 // grants or gates nothing. They return when read-scoping / invocation-scoping
 // lands and a route requires them — see scopeForRoute in rbac_routes.go.
 var knownScopes = map[string]struct{}{
+	"pages:read":        {},
+	"pages:write":       {},
+	"pages:*":           {},
 	"*":                 {},
 	"agents:*":          {},
 	"agents:write":      {},
@@ -407,13 +414,32 @@ func (h *CLITokenHandler) Create(w http.ResponseWriter, r *http.Request) {
 	id := generateCUID()
 	nowStr := now.Format(time.RFC3339)
 
-	_, err := h.db.ExecContext(r.Context(),
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		replyInternalError(w, h.logger, "create cli token: begin", err)
+		return
+	}
+	defer tx.Rollback() //nolint:errcheck
+	tokenResult, err := tx.ExecContext(r.Context(),
 		`INSERT INTO cli_tokens (id, user_id, name, token_hash, tier, expires_at, scopes, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, user.ID, body.Name, tokenHash, tier, expiresAt, scopesJSON, nowStr)
 	if err != nil {
 		h.logger.Error("insert cli_token", "error", err, "tier", tier)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	if err := auditCLITokenTx(r.Context(), tx, user.ID, id, "auth.cli_token_created"); err != nil {
+		replyInternalError(w, h.logger, "create cli token: audit", err)
+		return
+	}
+	if err := ackCLITokenMutationTx(r.Context(), tx, tokenResult, id, user.ID, nil); err != nil {
+		replyInternalError(w, h.logger, "create cli token: acknowledge", err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "create cli token: commit", err)
 		return
 	}
 
@@ -536,7 +562,13 @@ func (h *CLITokenHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	tokenID := r.PathValue("tokenId")
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	result, err := h.db.ExecContext(r.Context(),
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		replyInternalError(w, h.logger, "revoke cli token: begin", err)
+		return
+	}
+	defer tx.Rollback() //nolint:errcheck
+	result, err := tx.ExecContext(r.Context(),
 		"UPDATE cli_tokens SET revoked_at = ? WHERE id = ? AND user_id = ?",
 		now, tokenID, user.ID)
 	if err != nil {
@@ -544,12 +576,32 @@ func (h *CLITokenHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, _ := result.RowsAffected()
+	rows, err := result.RowsAffected()
+	if err != nil {
+		replyInternalError(w, h.logger, "revoke cli token: count", err)
+		return
+	}
 	if rows == 0 {
 		replyError(w, http.StatusNotFound, "Token not found")
 		return
 	}
 
+	if err := auditCLITokenTx(r.Context(), tx, user.ID, tokenID, "auth.cli_token_revoked"); err != nil {
+		replyInternalError(w, h.logger, "revoke cli token: audit", err)
+		return
+	}
+	if err := ackCLITokenMutationTx(r.Context(), tx, result, tokenID, user.ID, &now); err != nil {
+		replyInternalError(w, h.logger, "revoke cli token: acknowledge", err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "revoke cli token: commit", err)
+		return
+	}
+
+	if h.streams != nil {
+		h.streams.NotifyTokenRevoked(tokenID)
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
 }
 
@@ -582,10 +634,12 @@ func IsCLIToken(token string) bool {
 // three identity strings — scopes ride alongside without breaking
 // callers that don't care.
 type ValidateCLITokenResult struct {
-	UserID string
-	Email  string
-	Name   string
-	Scopes stringSet // nil = unrestricted token (pre-v100 or no scopes set)
+	TokenID   string
+	ExpiresAt time.Time
+	UserID    string
+	Email     string
+	Name      string
+	Scopes    stringSet // nil = unrestricted token (pre-v100 or no scopes set)
 }
 
 // errInvalidCLIToken is the sentinel every genuinely-invalid-token path
@@ -603,7 +657,7 @@ var errInvalidCLIToken = errors.New("invalid CLI token")
 // effects on top) and IsValidCLIToken (a side-effect-free validity check for
 // the rate limiter's exemption decision, #1333) call this so the
 // security-sensitive hash/tier/expiry logic lives in exactly one place.
-func lookupCLIToken(ctx context.Context, db *sql.DB, token string) (tokenID, userID, email, name, tier string, scopes stringSet, err error) {
+func lookupCLIToken(ctx context.Context, db *sql.DB, token string, expiryOut ...*time.Time) (tokenID, userID, email, name, tier string, scopes stringSet, err error) {
 	var (
 		tokenHash    string
 		expectedTier string
@@ -661,7 +715,13 @@ func lookupCLIToken(ctx context.Context, db *sql.DB, token string) (tokenID, use
 	}
 	if expiresAt.Valid {
 		t, perr := time.Parse(time.RFC3339, expiresAt.String)
-		if perr == nil && time.Now().UTC().After(t) {
+		if perr != nil {
+			return "", "", "", "", "", nil, errInvalidCLIToken
+		}
+		if len(expiryOut) > 0 {
+			*expiryOut[0] = t
+		}
+		if !time.Now().UTC().Before(t) {
 			return "", "", "", "", "", nil, errInvalidCLIToken
 		}
 	}
@@ -691,7 +751,8 @@ func IsValidCLIToken(ctx context.Context, db *sql.DB, token string) bool {
 // three-string signature for callers that don't care about scopes;
 // it now delegates to this one.
 func ValidateCLITokenFull(ctx context.Context, db *sql.DB, token string, audit ValidateAuditContext) (ValidateCLITokenResult, error) {
-	tokenID, userID, email, name, dbTier, scopes, err := lookupCLIToken(ctx, db, token)
+	var expiry time.Time
+	tokenID, userID, email, name, dbTier, scopes, err := lookupCLIToken(ctx, db, token, &expiry)
 	if err != nil {
 		return ValidateCLITokenResult{}, err
 	}
@@ -742,6 +803,7 @@ func ValidateCLITokenFull(ctx context.Context, db *sql.DB, token string, audit V
 	}(tokenID)
 
 	return ValidateCLITokenResult{
+		TokenID: tokenID, ExpiresAt: expiry,
 		UserID: userID,
 		Email:  email,
 		Name:   name,

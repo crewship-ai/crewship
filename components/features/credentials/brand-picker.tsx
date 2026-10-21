@@ -145,7 +145,7 @@ export function BrandPicker({ value, onChange, className }: BrandPickerProps) {
           size="sm"
           // h-9 is 33px here, not 36 — `--spacing: 0.23rem`. The phone value has
           // to be h-12 to clear 44.
-          className={cn("h-12 gap-1.5 px-3 sm:h-8 sm:px-2", className)}
+          className={cn("h-[44px] gap-1.5 px-3 sm:h-8 sm:px-2 coarse:h-[44px]", className)}
           aria-label={`Provider: ${current.label}. Click to change.`}
         >
           <CurrentIcon
@@ -242,7 +242,7 @@ export function BrandPicker({ value, onChange, className }: BrandPickerProps) {
               {groups.map((g) => (
                 <React.Fragment key={g.category ?? "results"}>
                   {g.category && (
-                    <h4 className="type-meta col-span-full px-2 pb-0.5 pt-2 uppercase tracking-wide text-muted-foreground-soft first:pt-0">
+                    <h4 className="type-meta col-span-full px-2 pb-0.5 pt-2 font-semibold text-muted-foreground first:pt-0">
                       {g.category}
                     </h4>
                   )}

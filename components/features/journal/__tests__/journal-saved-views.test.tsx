@@ -153,7 +153,7 @@ describe("JournalSavedViews", () => {
 
     await waitFor(() => {
       expect(vi.mocked(toast.error)).toHaveBeenCalledWith(
-        "You do not have permission to save views in this workspace",
+        "You do not have permission to save views in this workspace", { duration: Infinity },
       )
     })
   })
@@ -171,7 +171,7 @@ describe("JournalSavedViews", () => {
     fireEvent.click(await screen.findByLabelText("Delete view Failed nightly digests"))
 
     await waitFor(() => {
-      expect(vi.mocked(toast.error)).toHaveBeenCalledWith("Only the owner can delete this view")
+      expect(vi.mocked(toast.error)).toHaveBeenCalledWith("Only the owner can delete this view", { duration: Infinity })
     })
   })
 

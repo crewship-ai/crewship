@@ -74,7 +74,7 @@ below loses its group or its place in either of the two maps that encode it.
 | Credentials | `keeper` | `credential.revealed`, `credential.reveal_policy_changed`, `credential.sensitivity_lowered`, `credential.lease_issued`, `credential.auto_assign_failed`, `credential.auto_assign_empty` |
 | Cost | `cost` | `llm.call`, `llm.cache_hit`, `cost.incurred`, `budget.exceeded`, `budget.warning` |
 | Memory | `memory` | `memory.updated`, `memory.consolidated`, `memory.consolidation_proposed`, `memory.priority_changed`, `memory.searched`, `memory.config_updated`, `memory.versions_swept`, `memory.write_rejected`, `memory.write_verifier_blocked`, `memory.skill_proposed/skill_approved/skill_rejected`, `summary.generated` |
-| Skills | `skill` | `skill.imported`, `skill.deleted`, `skill.assigned`, `skill.unassigned`, `skill.invoked` |
+| Skills | `skill` | `skill.imported`, `skill.deleted`, `skill.archived`, `skill.restored`, `skill.assigned`, `skill.unassigned`, `skill.invoked` |
 | Observability | `exec` / `network` / `file` / `container` | `exec.command`, `exec.output_chunk`, `network.port_opened/closed`, `network.egress`, `file.written`, `container.metrics`, `container.snapshot` |
 | Presence | `container` | `agent.status_change` |
 | Provisioning | `provisioning` | `provisioning.queued/building/step/complete/failed/build_failed` (crew runtime container build), `sidecar.stale`, `image.stale` |
@@ -320,6 +320,8 @@ _, _ = h.journal.Emit(ctx, journal.Entry{
 
 Emit is asynchronous: entries are queued (buffer 1024), a background goroutine batches up to 64 rows or flushes every 100ms. When the queue is saturated the call falls back to a synchronous write -- durability over latency. Call `Flush` before tearing down a long-running test to guarantee all prior emits are on disk.
 
+Transactional `AppendTx` reports success only after exactly one journal row is inserted. An ignored insert returns an error and no post-commit notification; the caller must roll back its business transaction rather than commit a change without its required audit record.
+
 ## Reading
 
 ### HTTP
@@ -534,7 +536,7 @@ crewship run insights -o json        # machine-readable for scripting
 
 ### Spend — cost rollup
 
-Cost attribution already flows end-to-end through the journal (`cost.incurred` entries) and `pipeline_runs.cost_usd` — the Spend tab is a rollup surface over data that already exists, not a new cost-tracking mechanism.
+Cost attribution already flows end-to-end through the journal (`cost.incurred` entries) and `pipeline_runs.cost_usd` — the Spend tab is a rollup surface over data that already exists, not a new cost-tracking mechanism. In the app it is **Activity › Spend** now; what that page shows is in [Activity › Spend](/guides/activity#spend).
 
 No single journal entry type carries all of (day, crew, agent, routine) at once: `cost.incurred` has `crew_id`/`agent_id` as first-class columns but no routine linkage; `pipeline_runs.cost_usd` (denormalized from the same cost ledger) has routine linkage but not per-agent breakdown. Rather than an artificial join, the rollup returns multiple breakdown sections in one response — the same shape `journal.RunInsights` already uses for `by_trigger`/`by_model`/`by_agent`.
 

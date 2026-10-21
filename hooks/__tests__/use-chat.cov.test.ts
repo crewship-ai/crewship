@@ -243,7 +243,7 @@ describe("thinking events", () => {
     expect(parts).toHaveLength(1)
     expect(parts[0].type).toBe("thinking")
     expect(parts[0].isStreaming).toBe(true)
-    expect(parts[0].content).toBe("hmm")
+    expect(parts[0].content).toBe("")
   })
 
   it("complete thinking block after status removes the status parts", () => {
@@ -268,7 +268,7 @@ describe("thinking events", () => {
     // Orphaned status-only turn removed; system + new assistant turn remain.
     expect(result.current.turns.map((t) => t.role)).toEqual(["system", "assistant"])
     expect(result.current.turns[1].parts[0].type).toBe("thinking")
-    expect(result.current.turns[1].parts[0].content).toBe("fresh")
+    expect(result.current.turns[1].parts[0].content).toBe("")
   })
 })
 

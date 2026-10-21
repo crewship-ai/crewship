@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import type { InboxItem } from "@/hooks/use-inbox"
 import { matchesInboxAttention, parseInboxAttention } from "../inbox-v2-attention"
 import type { InboxV2Entry } from "../inbox-v2-types"
+import { approvalEntry } from "../inbox-v2-derive"
 
 const entry = (kind: string, historical = false, itemProps: Partial<InboxItem> = {}): InboxV2Entry => ({
   key: kind,
@@ -39,5 +40,15 @@ describe("dashboard attention links in Inbox", () => {
     expect(matching("run-alerts")).toEqual(["failed_run", "schedule_circuit_breaker_tripped"])
     expect(matching("schedule-alerts")).toEqual(["schedule_missed"])
     expect(matchesInboxAttention(entry("waitpoint", true), "approvals")).toBe(false)
+  })
+
+  // /approvals now redirects here (#3406): the pending rows of the approvals
+  // queue are exactly the "Decisions waiting" that page listed. Decided ones
+  // are History.
+  it("counts a pending approval-queue request as a decision waiting, a decided one not", () => {
+    const row = { id: "ap1", kind: "tool_call", status: "pending", reason: "", created_at: "2026-09-25T12:00:00Z", payload: { tool: "github.merge_pr" } }
+    expect(matchesInboxAttention(approvalEntry(row), "approvals")).toBe(true)
+    expect(matchesInboxAttention(approvalEntry({ ...row, status: "approved" }), "approvals")).toBe(false)
+    expect(matchesInboxAttention(approvalEntry(row), "run-alerts")).toBe(false)
   })
 })

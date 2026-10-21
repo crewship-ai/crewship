@@ -13,14 +13,18 @@ vi.mock("@/lib/telemetry", async (original) => ({ ...await original<typeof impor
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
 it.each([
-  ["connecting", undefined, "Reconnecting…"],
-  ["disconnected", 0, "Disconnected"],
-  ["connecting", 1, "Reconnecting… · 1 message queued"],
-  ["disconnected", 3, "Disconnected · 3 messages queued"],
-] as const)("explains %s and its queued messages", (status, queuedCount, message) => {
-  render(<ReconnectBanner status={status} queuedCount={queuedCount} />)
-  expect(screen.getByRole("status")).toHaveTextContent(message)
-  expect(screen.getByRole("status")).toHaveAttribute("aria-live", "polite")
+  ["connecting", "retrying", undefined, "Reconnecting…"],
+  ["offline", "unreachable", 0, "Can't reach Crewship · retrying every 30 s"],
+  ["connecting", "retrying", 1, "Reconnecting… · 1 message queued"],
+  ["offline", "unreachable", 3, "Can't reach Crewship · retrying every 30 s · 3 messages queued"],
+] as const)("explains %s/%s and its queued messages", (status, reason, queuedCount, message) => {
+  vi.useFakeTimers()
+  try {
+    render(<ReconnectBanner status={status} reason={reason} queuedCount={queuedCount} />)
+    act(() => { vi.advanceTimersByTime(4_000) })
+    expect(screen.getByRole("status")).toHaveTextContent(message)
+    expect(screen.getByRole("status")).toHaveAttribute("aria-live", "polite")
+  } finally { vi.useRealTimers() }
 })
 it.each(["connected", "idle"])("keeps the connection banner hidden for %s", (status) => {
   render(<ReconnectBanner status={status} queuedCount={2} />)

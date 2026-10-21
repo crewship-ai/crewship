@@ -175,6 +175,58 @@ func discoverDeclSinks(decl ast.Node, sinks *sinkSet) {
 	}
 }
 
+// callbackRequestSinks finds request-forwarding function literals passed to a
+// named function's function-typed parameter. The callback name is a sink only
+// within that receiving declaration: another function's `call` may just log.
+func callbackRequestSinks(files []*ast.File, sinks *sinkSet) map[*ast.FuncDecl]map[string]int {
+	functions := map[string]*ast.FuncDecl{}
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Recv == nil && fn.Body != nil {
+				functions[fn.Name.Name] = fn
+			}
+		}
+	}
+	out := map[*ast.FuncDecl]map[string]int{}
+	for _, file := range files {
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			name, ok := call.Fun.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			fn := functions[name.Name]
+			if fn == nil || fn.Type.Params == nil {
+				return true
+			}
+			position := 0
+			for _, field := range fn.Type.Params.List {
+				for _, param := range field.Names {
+					if _, callable := field.Type.(*ast.FuncType); callable && position < len(call.Args) {
+						if callback, ok := call.Args[position].(*ast.FuncLit); ok {
+							if path, ok := funcLitPathParam(callback, sinks); ok {
+								if out[fn] == nil {
+									out[fn] = map[string]int{}
+								}
+								out[fn][param.Name] = path
+							}
+						}
+					}
+					position++
+				}
+				if len(field.Names) == 0 {
+					position++
+				}
+			}
+			return true
+		})
+	}
+	return out
+}
+
 // wrapperPathParam reports which parameter of fn reaches the path position of
 // a request call in its body, if any. A parameter reaches the path position
 // when it is passed there directly (`client.Get(path)`) or through a plain
@@ -363,6 +415,13 @@ func cliPathShapes(sources []docFile) ([]cliPathShape, error) {
 		}
 	}
 
+	callbacks := map[*ast.FuncDecl]map[string]int{}
+	for dir, files := range pkgFiles {
+		for fn, params := range callbackRequestSinks(files, pkgSinks[dir]) {
+			callbacks[fn] = params
+		}
+	}
+
 	seen := map[string]bool{}
 	var shapes []cliPathShape
 	for i, file := range files {
@@ -382,6 +441,11 @@ func cliPathShapes(sources []docFile) ([]cliPathShape, error) {
 			local := newShapeEnv(pkg)
 			local.bindAssignments(decl)
 			sinks := pkgSinks[dir].forDecl()
+			if fn, ok := decl.(*ast.FuncDecl); ok {
+				for name, path := range callbacks[fn] {
+					sinks.funcs[name] = path
+				}
+			}
 			discoverDeclSinks(decl, sinks)
 			ast.Inspect(decl, func(n ast.Node) bool {
 				call, ok := n.(*ast.CallExpr)
@@ -585,7 +649,7 @@ func (e *shapeEnv) callShapes(call *ast.CallExpr, depth int) []string {
 			}
 			var out []string
 			for _, format := range e.shapes(call.Args[0], depth) {
-				out = append(out, strings.ReplaceAll(sprintfVerb.ReplaceAllString(format, cliPathPlaceholder), "%%", "%"))
+				out = append(out, e.sprintfShapes(format, call.Args[1:], depth)...)
 			}
 			return out
 		}
@@ -608,6 +672,40 @@ func (e *shapeEnv) callShapes(call *ast.CallExpr, depth int) []string {
 		}
 	}
 	return []string{cliPathPlaceholder}
+}
+
+// sprintfShapes preserves known string suffixes passed through plain %s
+// verbs. Unknown values remain one-segment placeholders. Indexed/dynamic-width
+// formats retain the previous conservative rendering rather than guessing which
+// argument a verb consumes.
+func (e *shapeEnv) sprintfShapes(format string, args []ast.Expr, depth int) []string {
+	matches := sprintfVerb.FindAllStringIndex(format, -1)
+	if strings.Contains(format, "%%") {
+		return []string{strings.ReplaceAll(sprintfVerb.ReplaceAllString(format, cliPathPlaceholder), "%%", "%")}
+	}
+	for _, at := range matches {
+		if at[1]-at[0] != 2 {
+			return []string{strings.ReplaceAll(sprintfVerb.ReplaceAllString(format, cliPathPlaceholder), "%%", "%")}
+		}
+	}
+	out, start := []string{""}, 0
+	for i, at := range matches {
+		values := []string{cliPathPlaceholder}
+		if format[at[0]:at[1]] == "%s" && i < len(args) {
+			values = e.shapes(args[i], depth)
+		}
+		var next []string
+		for _, prefix := range out {
+			for _, value := range values {
+				next = append(next, prefix+format[start:at[0]]+value)
+			}
+		}
+		out, start = next, at[1]
+	}
+	for i := range out {
+		out[i] += format[start:]
+	}
+	return out
 }
 
 // normalizeShape reduces a rendered string to a comparable path shape, or to

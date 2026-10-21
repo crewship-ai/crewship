@@ -18,7 +18,7 @@ vi.mock("../use-backup-settings", () => ({
 vi.mock("next/link", () => ({ default: ({ href, children }: { href: string; children: React.ReactNode }) => <a href={href}>{children}</a> }))
 import { RestoreWizard } from "../backups-recovery"
 import { checksFixture } from "../__fixtures__/backups"
-import type { SectionCtx } from "../backups-console"
+import type { SectionCtx } from "../backups-scope"
 
 const ctx: SectionCtx = {
   scope: "instance", selected: new Set(), workspaces: [], currentWorkspaceId: "a", demo: false, go: vi.fn(),

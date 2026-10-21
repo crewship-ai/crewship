@@ -128,7 +128,7 @@ function mcpEntryLabel(e: McpServerInfo | undefined, withType = true): string {
 interface TurnRendererProps {
   entityCards?: React.ReactNode
   turn: ChatTurn
-  onCopy: (s: string) => void
+  onCopy: (s: string) => Promise<boolean>
   onFileClick: (s: string) => void
   isLastAssistant?: boolean
   onRegenerate?: () => void

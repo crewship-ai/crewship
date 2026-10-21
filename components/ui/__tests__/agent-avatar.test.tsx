@@ -11,7 +11,8 @@ const h = vi.hoisted(() => ({
   declineStored: false,
 }))
 
-vi.mock("@/lib/agent-avatar", () => ({
+vi.mock("@/lib/agent-avatar", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/agent-avatar")>()),
   getAgentAvatarUrl: (seed: string, style?: string | null) =>
     `data:image/svg+xml;utf8,generated-${seed}-${style ?? "default"}`,
 }))

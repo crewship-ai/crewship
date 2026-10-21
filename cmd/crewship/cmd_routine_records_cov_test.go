@@ -34,9 +34,9 @@ func TestRoutineRecordsRunE_TableOutput(t *testing.T) {
 	defer s.Close()
 	s.OnGet(covRecordsPath, clitest.JSONResponse(200, []runRecordRow{
 		{ID: "crun567890abcdefghijklm", PipelineSlug: "daily-report", Status: "completed", Mode: "live",
-			TriggeredVia: "schedule", DurationMs: 65000, CostUSD: 0.0123, StartedAt: "2026-06-10T08:00:00Z"},
+			TriggeredVia: "schedule", DurationMs: 65000, CostUSD: usdPtr(0.0123), StartedAt: "2026-06-10T08:00:00Z"},
 		{ID: "crun567890abcdefghijkln", PipelineSlug: "daily-report", Status: "failed", Mode: "live",
-			TriggeredVia: "manual", DurationMs: 0, CostUSD: 0, StartedAt: "2026-06-09T08:00:00Z"},
+			TriggeredVia: "manual", DurationMs: 0, CostUSD: usdPtr(0), StartedAt: "2026-06-09T08:00:00Z"},
 	}))
 	covSetupCli10(t, s.URL())
 

@@ -6,6 +6,7 @@ import { fetchWithRetry } from "@/lib/fetch-with-retry"
 import { apiFetch } from "@/lib/api-fetch"
 import { toApiError } from "@/lib/api-error"
 import { cn } from "@/lib/utils"
+import { usePageSaveGuard } from "@/components/ui/page-save-bar"
 
 // =============================================================================
 // Shared scaffolding for the tabbed detail panes used by `crew-canvas` and
@@ -280,6 +281,9 @@ export interface CanvasTabsProps<TTab extends string> {
 export function CanvasTabs<TTab extends string>({
   tabs, active, onChange, idPrefix, label,
 }: CanvasTabsProps<TTab>) {
+  // A tab switch unmounts the open tab's inline forms, so it asks first when
+  // the page's save bar holds edits (Stay / Discard / Save and leave).
+  const guard = usePageSaveGuard()
   return (
     <div
       role="tablist"
@@ -295,7 +299,7 @@ export function CanvasTabs<TTab extends string>({
             id={tabId}
             type="button"
             role="tab"
-            onClick={() => onChange(t.id)}
+            onClick={() => { if (!selected) guard(() => onChange(t.id)) }}
             aria-selected={selected}
             // Only the selected panel is mounted — the canvases render their
             // tabs as `{tab === "x" && <XTab/>}`, and the APG allows omitting

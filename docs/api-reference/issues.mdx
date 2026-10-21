@@ -88,6 +88,13 @@ Returns issues across the workspace with filtering, sorting, and pagination.
 | `project_id` | string | -- | Filter by project |
 | `crew_id` | string | -- | Filter by crew |
 | `assignee_id` | string | -- | Filter by assignee |
+| `owner_id` | string | -- | Filter by human owner: a user ID, or `me` for the caller |
+| `delegate_id` | string | -- | Filter by agent delegate |
+| `work_mode` | string | -- | Who holds the work: `agent` or `human`; anything else is `400` |
+| `mine` | string | -- | `1`: My work, open issues the caller owns or holds as the worker |
+| `working` | string | -- | `1`: Agents working, open issues an agent holds whose session is `active` or `stale` |
+| `needs` | string | -- | `reply`: open issues the caller owns or holds where a person is wanted: a session is `awaiting_input` or `error`, or the active execution is `needs_human`. `review`: issues in `REVIEW` with client acceptance on (`client_review_required`) that the caller requested (`created_by`; the owner when an agent created the issue). Anything else is `400` |
+| `blocked` | string | -- | `1`: Blocked, an open issue blocks it (`blocks` / `blocked_by` relation) |
 | `label` | string | -- | Filter by label name |
 | `q` | string | -- | Search in title or identifier (LIKE match), on the server |
 | `search` | string | -- | Older alias of `q` |
@@ -95,6 +102,8 @@ Returns issues across the workspace with filtering, sorting, and pagination.
 | `limit` | integer | `50` | Rows per page (1-500) |
 | `offset` | integer | `0` | Pagination offset |
 | `counts` | string | -- | `1` to also compute per-status totals under the same filters as the page (every filter applied, `limit`/`offset` ignored). Answered in the `X-Status-Counts` header; the body is unchanged. Any other value is ignored. |
+
+The view filters above (`owner_id` ... `blocked`) are the Issues panel's quick views. They combine with every other filter by AND, are scoped to the caller's workspace, and reach `X-Total-Count` and `counts=1` as well, so a view's count is exact rather than the size of a loaded page. "Open" means a status outside `DONE`, `COMPLETED`, `CANCELLED` and `DUPLICATE`. Views about the caller (`me`, `mine`, `needs`) match nothing when the request carries no user (a token without one); they never widen to every issue.
 
 The body stays a bare array. The total the filter matched — before `limit`/`offset` — is in the `X-Total-Count` response header, with `X-Limit` and `X-Offset` echoing the values applied. An agent assignee carries `assignee_slug` next to `assignee_name`.
 
@@ -282,6 +291,8 @@ The crew must have a LEAD agent. The issue identifier is auto-generated from the
 | `status` | string | No | `"BACKLOG"` | Starting status. Validated like a transition from `BACKLOG`, so only `BACKLOG`, `TODO`, `IN_PROGRESS`, `CANCELLED` or `DUPLICATE` are accepted; a terminal start stamps `completed_at` |
 | `assignee_type` | string | No | `null` | `"user"` or `"agent"`. Decides which typed slot `assignee_id` fills: `user` writes the human **owner** (`owner_user_id`), `agent` writes the agent **delegate** (`delegate_agent_id`). Required when `assignee_id` is set |
 | `assignee_id` | string | No | `null` | A workspace member's user ID (`user`) or an agent ID (`agent`) in this workspace; anything else is `400` |
+| `owner_user_id` | string | No | `null` | The accountable person: a user ID of a member of this workspace. Sets the human owner. Can be sent together with `delegate_agent_id`; refused (`400`) together with `assignee_id` |
+| `delegate_agent_id` | string | No | `null` | The agent that does the work: an agent ID in this workspace. Sets the delegate, so the agent holds the work. Can be sent together with `owner_user_id`; refused (`400`) together with `assignee_id` |
 | `due_date` | string | No | `null` | Due date (YYYY-MM-DD) |
 | `project_id` | string | No | `null` | Parent project ID |
 | `estimate` | integer | No | `null` | Effort/points estimate |

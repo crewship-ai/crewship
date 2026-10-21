@@ -8,7 +8,11 @@ import {
   CreateSurfaceFooter,
   CreateSurfaceHeader,
 } from "@/components/layout/create-surface"
-import { AVATAR_STYLES, DEFAULT_AVATAR_STYLE } from "@/lib/agent-avatar"
+import {
+  AVATAR_STYLES,
+  DEFAULT_AVATAR_STYLE,
+  isAnimatableAvatarStyle,
+} from "@/lib/agent-avatar"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { cn } from "@/lib/utils"
 
@@ -20,6 +24,7 @@ import { cn } from "@/lib/utils"
 const STYLE_OPTIONS = Object.entries(AVATAR_STYLES).map(([value, meta]) => ({
   value,
   label: meta.label,
+  isNew: Boolean(meta.isNew),
 }))
 
 export interface AvatarPickerDialogProps {
@@ -96,6 +101,7 @@ export function AvatarPickerBody({
 
   const effectiveStyle = draftStyle ?? crewStyle ?? DEFAULT_AVATAR_STYLE
 
+
   return (
     <>
         {/* Four stacked full-width blocks — a 96px preview, a 25-tile grid of
@@ -161,6 +167,14 @@ export function AvatarPickerBody({
           The same seed always produces the same face — leave the agent&apos;s name for a
           deterministic default.
         </p>
+        {/* One line, and only for a style that can move (#3789). It says
+            what the motion is and how to stop it; the motion itself never
+            stands for anything. */}
+        {isAnimatableAvatarStyle(effectiveStyle) && (
+          <p data-testid="avatar-motion-hint" className="type-meta -mt-1 text-muted-foreground">
+            Moves gently; still when Reduce motion is on
+          </p>
+        )}
 
         {/* Inherit is not a style, so it does not sit in the grid of styles.
             It used to, as a twelfth tile whose preview renders
@@ -229,11 +243,18 @@ export function AvatarPickerBody({
                     : "border-foreground/10 hover:bg-foreground/5",
                 )}
               >
-                <AgentAvatar
-                  seed={draftSeed}
-                  style={s.value}
-                  className="h-8 w-8 rounded"
-                />
+                <span className="relative">
+                  <AgentAvatar
+                    seed={draftSeed}
+                    style={s.value}
+                    className="h-8 w-8 rounded"
+                  />
+                  {s.isNew && (
+                    <span className="absolute -right-2 -top-1.5 rounded-sm bg-primary px-0.5 text-micro font-semibold leading-none text-primary-foreground">
+                      New
+                    </span>
+                  )}
+                </span>
                 <span
                   className={cn(
                     "w-full truncate text-center text-[9.5px] leading-tight",

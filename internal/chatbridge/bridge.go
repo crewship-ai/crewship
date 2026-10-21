@@ -18,6 +18,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/crewstart"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/documents"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
@@ -332,10 +333,12 @@ func (b *Bridge) SetProvisioningEnqueuer(p ProvisioningEnqueuer) {
 	b.provisioning = p
 }
 
-// BridgeConfig holds default resource limits for containers created by the bridge.
+// BridgeConfig holds resource defaults and optional chat capabilities.
+// Document creation is disabled unless explicitly enabled by the host.
 type BridgeConfig struct {
-	DefaultMemoryMB int
-	DefaultCPUs     float64
+	DocumentCreationEnabled bool
+	DefaultMemoryMB         int
+	DefaultCPUs             float64
 }
 
 // New creates a Bridge that connects WebSocket chat to the orchestrator.
@@ -543,6 +546,17 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		streamFn(ws.ChatEvent{Type: "error", Content: "Page context is invalid"})
 		return pageErr
 	}
+	triggerMessageID := generateMsgID()
+	if msgOpt.HumanResume && msgOpt.OriginalTriggerMessageID != "" {
+		triggerMessageID = msgOpt.OriginalTriggerMessageID
+	}
+	documentCreation, err := documentCreationForSend(b.cfg.DocumentCreationEnabled, msgOpt, info, userID, chatID, content, hasPage, triggerMessageID)
+	if err != nil {
+		streamFn(ws.ChatEvent{Type: "error", Content: err.Error()})
+		return err
+	}
+	msgOpt.OriginalTriggerMessageID = triggerMessageID
+	msgOpt.DocumentCreationIntent = documentCreation
 	var pageContext *PageChatContext
 	if hasPage {
 		if b.pageContextResolver == nil {
@@ -609,12 +623,18 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		userMsgMetadata.(map[string]any)["page_context"] = pageContext
 	}
 
+	if documentCreation != nil {
+		if userMsgMetadata == nil {
+			userMsgMetadata = map[string]any{}
+		}
+		userMsgMetadata.(map[string]any)[documents.CreationMetadataKey] = documentCreation
+	}
+
 	// The human turn is recorded and emitted regardless of whether the agent
 	// will respond. The sender also receives the event, which acknowledges
 	// persistence; its UI suppresses the duplicate optimistic turn.
-	triggerMessageID := generateMsgID()
 	persistUserMsg := func() error {
-		if err := b.convStore.Append(ctx, chatID, conversation.Message{
+		message := conversation.Message{
 			ID:           triggerMessageID,
 			AgentID:      info.AgentID,
 			Role:         conversation.RoleUser,
@@ -622,7 +642,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			Metadata:     userMsgMetadata,
 			AuthorUserID: userID,
 			Timestamp:    time.Now().UTC(),
-		}); err != nil {
+		}
+		if documentCreation != nil {
+			return b.convStore.AppendDocumentCreation(ctx, chatID, message, *documentCreation, info.HumanAuthority)
+		}
+		if err := b.convStore.Append(ctx, chatID, message); err != nil {
 			return err
 		}
 		return b.convStore.SyncSession(ctx, chatID)
@@ -892,6 +916,10 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// send owns the run slot. Persist + broadcast the human turn now that
 	// provisioning has cleared.
 	if err := persistUserMsg(); err != nil {
+		if errors.Is(err, conversation.ErrDocumentCreationConsentUnconfirmed) {
+			streamFn(ws.ChatEvent{Type: "error", Content: conversation.ErrDocumentCreationConsentUnconfirmed.Error()})
+			return err
+		}
 		b.logger.Error("failed to persist user message", "error", err)
 		streamFn(ws.ChatEvent{Type: "error", Content: "failed to save message"})
 		return fmt.Errorf("persist user message: %w", err)
@@ -1169,6 +1197,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// env / FIFO / exit files from RunID. Set from the id this path already
 	// mints for CreateRun and journal.WithRunID, so a chat turn and a
 	// concurrent routine/webhook run of the same agent no longer share them.
+	if documentCreation != nil {
+		req.UserMessage = documentCreationRunPrompt(content, documentCreation)
+	}
 	req.RunID = runID
 	runMeta := map[string]interface{}{
 		"cli_adapter": info.CLIAdapter,
@@ -1176,6 +1207,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		"crew_slug":   info.CrewSlug,
 		"agent_slug":  info.AgentSlug,
 		"tags":        []string{"chat", info.CLIAdapter},
+	}
+	if documentCreation != nil {
+		runMeta["document_creation_intent"] = documentCreation
 	}
 	ctx = runauthority.WithTriggerMessage(ctx, triggerMessageID)
 	ctx = chataudience.WithReceipt(ctx, info.HumanAuthority)
@@ -1202,7 +1236,19 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// /chats/{id}/steer) is detected and QUEUED instead of racing a second
 	// Exec into the same container. Released via the defer registered there.
 	req.RuntimeUse = runtimeUse
+	var capturedCompletedAt string
+	req.CapturedExit = func(at string) { capturedCompletedAt = at }
 	runErr := b.orch.RunAgent(ctx, req, handler)
+	updateRun := func(ctx context.Context, id, status string, exitCode *int, message *string, metadata map[string]interface{}) error {
+		if capturedCompletedAt == "" {
+			return b.resolver.UpdateRun(ctx, id, status, exitCode, message, metadata)
+		}
+		updater, ok := b.resolver.(CompletionTimeUpdater)
+		if !ok {
+			return errors.New("resolver cannot retain captured completion time")
+		}
+		return updater.UpdateRunWithCompletion(ctx, id, status, exitCode, message, metadata, capturedCompletedAt)
+	}
 
 	// Bill the ledger before branching on runErr, the way the scheduler does.
 	// A run that spent money and then failed spent the money: #1950 taught
@@ -1282,7 +1328,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			if errors.Is(runErr, orchestrator.ErrAgentStopped) {
 				meta["stop_origin"] = "agent_stop"
 			}
-			if err := b.resolver.UpdateRun(cleanCtx, runID, "CANCELLED", nil, &cancelMsg, meta); err != nil {
+			if err := updateRun(cleanCtx, runID, "CANCELLED", nil, &cancelMsg, meta); err != nil {
 				b.logger.Warn("failed to update run status", "run_id", runID, "status", "CANCELLED", "error", err)
 			}
 			// Persist whatever the run produced before it was stopped so the
@@ -1312,7 +1358,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		}
 
 		errMsg := runErr.Error()
-		if err := b.resolver.UpdateRun(ctx, runID, "FAILED", nil, &errMsg, terminalRunMeta(startedAt, acc, nil)); err != nil {
+		if err := updateRun(ctx, runID, "FAILED", nil, &errMsg, terminalRunMeta(startedAt, acc, nil)); err != nil {
 			b.logger.Warn("failed to update run status", "run_id", runID, "error", err)
 		}
 		// In-band failure: the CLI exited 0 and then reported that the turn
@@ -1360,7 +1406,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		b.logger.Warn("agent run produced no output; surfacing error to chat (#545)",
 			"chat_id", chatID, "run_id", runID, "agent_slug", info.AgentSlug)
 		noOutputErr := "agent returned no output (#545)"
-		if err := b.resolver.UpdateRun(ctx, runID, "FAILED", nil, &noOutputErr, terminalRunMeta(startedAt, acc, map[string]interface{}{
+		if err := updateRun(ctx, runID, "FAILED", nil, &noOutputErr, terminalRunMeta(startedAt, acc, map[string]interface{}{
 			"reason": "no_output",
 		})); err != nil {
 			b.logger.Warn("failed to update run status", "run_id", runID, "error", err)
@@ -1395,7 +1441,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// The ledger was billed right after the run (see above), so this only has
 	// to stamp the record.
 	orchestrator.MergeRunAccumulator(completedMeta, acc, info.LLMModel)
-	if err := b.resolver.UpdateRun(ctx, runID, "COMPLETED", &exitCode, nil, completedMeta); err != nil {
+	if err := updateRun(ctx, runID, "COMPLETED", &exitCode, nil, completedMeta); err != nil {
 		b.logger.Warn("failed to update run status", "run_id", runID, "error", err)
 	}
 

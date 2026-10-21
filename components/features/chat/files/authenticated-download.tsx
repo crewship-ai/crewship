@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState, type ComponentProps } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { apiFetch } from "@/lib/api-fetch"
 import { getAuthMode } from "@/lib/server-base"
 

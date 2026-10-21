@@ -1,32 +1,22 @@
 import { cn } from "@/lib/utils"
 import { Card, CardContent } from "@/components/ui/card"
 
-/**
- * - "card": wrapped in a bordered Card — a page-level empty state.
- * - "inline": flush with the surface it sits on.
- * - "compact": flush and smaller, for a list or tab inside a DetailCard
- *   (the register the former `components/ui/detail` EmptyState drew).
- */
-export type EmptyStateSize = "card" | "inline" | "compact"
+/** "compact" is flush with its surface; "inline" is its former name. */
+export type EmptyStateSize = "card" | "compact" | "inline"
 
 export interface EmptyStateProps {
   icon: React.ElementType
   title: string
   description?: string
+  /** "card" wraps in a bordered Card; "compact" renders flush with the
+   *  surface (a tab, a card body). "inline" is the same as "compact". */
   size?: EmptyStateSize
-  /** Rendered under the copy, in its own spaced row (a button, a link). */
+  /** The one button (or link) under the description. */
   action?: React.ReactNode
   className?: string
-  /** Rendered directly under the copy, for callers that lay out their own row. */
   children?: React.ReactNode
 }
 
-/**
- * The one empty state (#3344). There used to be a second component of the
- * same name in `components/ui/detail`; its props (`action`, an optional
- * `description`) and its look (`size="compact"`) live here now, and
- * components/__tests__/one-empty-state.test.ts keeps it that way.
- */
 export function EmptyState({
   icon: Icon,
   title,
@@ -36,38 +26,27 @@ export function EmptyState({
   className,
   children,
 }: EmptyStateProps) {
-  if (size === "compact") {
-    return (
-      <div className={cn("flex flex-col items-center justify-center px-6 py-12 text-center", className)}>
-        <div className="icon-tile mb-3 flex h-12 w-12 items-center justify-center rounded-card">
-          <Icon className="h-6 w-6" />
-        </div>
-        <div className="text-body font-medium text-foreground">{title}</div>
-        {description && <p className="type-row mt-1.5 max-w-sm leading-relaxed text-muted-foreground">{description}</p>}
-        {children}
-        {action && <div className="mt-4">{action}</div>}
-      </div>
-    )
-  }
-
+  const flush = size !== "card"
   const body = (
     <div
+      data-slot="empty-state"
+      data-size={flush ? "compact" : "card"}
       className={cn(
         "flex flex-col items-center justify-center px-4 text-center",
-        size === "card" ? "py-10 sm:py-16" : "py-8",
+        flush ? "py-8" : "py-10 sm:py-16",
       )}
     >
-      <div className="icon-tile mb-4 flex h-14 w-14 items-center justify-center rounded-card">
+      <div className="icon-tile mb-4 flex h-14 w-14 items-center justify-center rounded-2xl">
         <Icon className="h-6 w-6" />
       </div>
       <h3 className="text-default font-semibold tracking-[-0.02em]">{title}</h3>
       {description && <p className="mt-1 max-w-sm text-body text-muted-foreground">{description}</p>}
+      {action && <div data-slot="empty-state-action" className="mt-4">{action}</div>}
       {children}
-      {action && <div className="mt-4">{action}</div>}
     </div>
   )
 
-  if (size === "inline") {
+  if (flush) {
     return <div className={className}>{body}</div>
   }
 

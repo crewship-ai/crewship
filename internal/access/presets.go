@@ -59,16 +59,16 @@ func (d PresetDefinition) Operations(level string) ([]string, bool) {
 // Selection records saved intent, not live/effective authority. Inactive grant
 // issuers remain represented by Policy.GrantDetails; selection never reissues.
 type PresetSelection struct {
-	ID             string  `json:"id"`
-	Kind           string  `json:"kind"`
-	ResourceID     string  `json:"resource_id"`
-	PresetID       string  `json:"preset_id"`
-	Version        int     `json:"version"`
-	Level          string  `json:"level"`
-	DefinitionHash string  `json:"definition_hash"`
-	SelectedBy     *string `json:"selected_by,omitempty"`
-	SelectedAt     string  `json:"selected_at"`
-	State          string  `json:"state"` // selected saved intent, or custom/unsupported metadata
+	ID             string  `json:"id" yaml:"id"`
+	Kind           string  `json:"kind" yaml:"kind"`
+	ResourceID     string  `json:"resource_id" yaml:"resource_id"`
+	PresetID       string  `json:"preset_id" yaml:"preset_id"`
+	Version        int     `json:"version" yaml:"version"`
+	Level          string  `json:"level" yaml:"level"`
+	DefinitionHash string  `json:"definition_hash" yaml:"definition_hash"`
+	SelectedBy     *string `json:"selected_by,omitempty" yaml:"selected_by,omitempty"`
+	SelectedAt     string  `json:"selected_at" yaml:"selected_at"`
+	State          string  `json:"state" yaml:"state"` // selected saved intent, or custom/unsupported metadata
 }
 
 // PresetSelectionsIn is administrative, inside the caller's policy snapshot.
@@ -81,6 +81,12 @@ func (s Store) PresetSelectionsIn(ctx context.Context, tx *sql.Tx, actor, user, 
 	if err != nil {
 		return nil, err
 	}
+	return *policy.PresetSelections, nil
+}
+
+// Caller has already checked live administrative authority and read canonical
+// grants in this same transaction. This helper cannot recursively read Policy.
+func presetSelectionsForPolicyIn(ctx context.Context, tx *sql.Tx, policy Policy, workspace string) ([]PresetSelection, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT id,resource_kind,COALESCE(project_id,routine_id),preset_id,preset_version,level,definition_hash,managed_operations,selected_by,selected_at FROM access_preset_selections WHERE workspace_id=? AND member_id=? ORDER BY resource_kind,COALESCE(project_id,routine_id)`, workspace, policy.ID)
 	if err != nil {
 		return nil, err

@@ -149,6 +149,12 @@ func (h *PageHandler) Export(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
+	r, read, ready := h.beginPageMetadataRead(w, r)
+	if !ready {
+		return
+	}
+	defer read.tx.Rollback()
+
 	wsID := WorkspaceIDFromContext(r.Context())
 	slug := r.PathValue("slug")
 
@@ -264,6 +270,14 @@ func (h *PageHandler) Export(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.Header().Set("Cache-Control", "no-store")
+	if !h.auditPrivateOwnerAccess(w, r, rec) {
+		return
+	}
+
+	if !h.finishMetadataRead(w, r, read) {
+		return
+	}
+
 	writeJSON(w, http.StatusOK, bundle)
 }
 

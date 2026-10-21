@@ -329,11 +329,11 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 		h.logger.Error("create escalation", "error", err)
 		// Don't leave an orphaned PENDING_APPROVAL credential with no escalation
 		// to approve it through — roll it back. (createPendingCredential commits
-		// before this insert; this is the compensating delete.)
+		// before this insert; retire its orphan without erasing audit.)
 		if cid, ok := credentialID.(string); ok && cid != "" {
 			if _, delErr := h.db.ExecContext(r.Context(),
-				`DELETE FROM credentials WHERE id = ? AND workspace_id = ? AND status = 'PENDING_APPROVAL'`,
-				cid, body.WorkspaceID); delErr != nil {
+				`UPDATE credentials SET deleted_at = ?, updated_at = ?, status = 'REJECTED' WHERE id = ? AND workspace_id = ? AND status = 'PENDING_APPROVAL' AND deleted_at IS NULL`,
+				now, now, cid, body.WorkspaceID); delErr != nil {
 				h.logger.Error("rollback orphaned pending credential", "error", delErr, "credential_id", cid)
 			}
 		}
@@ -1217,7 +1217,7 @@ func (h *QueryHandler) refuseCredentialSelfApproval(w http.ResponseWriter, r *ht
 		if in.credentialID.Valid && in.credentialID.String != "" {
 			var lvl int
 			if err := h.db.QueryRowContext(r.Context(),
-				`SELECT COALESCE(security_level, 1) FROM credentials WHERE id = ? AND workspace_id = ?`,
+				`SELECT `+credentialEffectiveLevelSQL("c")+` FROM credentials c WHERE c.id = ? AND c.workspace_id = ?`,
 				in.credentialID.String, in.workspaceID).Scan(&lvl); err == nil {
 				tierForces = keeper.SecurityLevel(lvl).Tier().SecondApprover
 			} else if !errors.Is(err, sql.ErrNoRows) {

@@ -8,6 +8,7 @@ import {
   composeMessageWithAttachments,
   hasPendingUploads,
   sendableAttachments,
+  unattachedAttachments,
   type OutgoingAttachment,
 } from "@/lib/attachment-message"
 
@@ -190,6 +191,17 @@ export function useMessageSubmit({
         // silent about the rest — the same defect, one file narrower.
         if (hasPendingUploads(items)) {
           toast.error("Still uploading — wait for the attachment to finish, then send.")
+          return
+        }
+
+        // A failed or cancelled chip is not attached. Sending quietly without
+        // it would let the user believe the agent has the file.
+        const notAttached = unattachedAttachments(items)
+        if (notAttached.length > 0) {
+          toast.error(
+            `Not attached: ${notAttached.map((a) => a.name).join(", ")}`,
+            { description: "Retry or remove them, then send." },
+          )
           return
         }
 

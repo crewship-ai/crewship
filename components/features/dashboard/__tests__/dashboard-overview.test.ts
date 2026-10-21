@@ -4,7 +4,7 @@ import {
   attentionOverflow,
   attentionState,
   buildAttentionItems,
-  capacitySignal,
+  expiringKeys,
   deriveFleetHealth,
   heldForWorkspace,
   kpisFromInsights,
@@ -130,6 +130,7 @@ describe("dashboard overview derivations", () => {
       successOk: 9,
       successTotal: 10,
       p95Ms: 9_000,
+      p50Ms: 1_000,
     })
   })
 })
@@ -155,7 +156,7 @@ describe("the strip distinguishes 'nothing is wrong' from 'we could not find out
   })
 
   it("shows the items whenever there are any, even mid-load", () => {
-    const item = { id: "approvals", label: "2 approvals waiting", detail: "", href: "/inbox", tone: "warn" as const, icon: (() => null) as never }
+    const item = { id: "approvals", label: "2 approvals waiting", count: "2", title: "Approvals waiting", detail: "", href: "/inbox", tone: "warn" as const }
     expect(attentionState({ items: [item], inboxLoading: true, inboxError: null }).kind).toBe("items")
     expect(attentionState({ items: [item], inboxLoading: false, inboxError: "boom" }).kind).toBe("items")
   })
@@ -195,45 +196,26 @@ describe("capacity holds are this workspace's, counted per crew", () => {
   })
 })
 
-describe("runtime capacity does not report healthy when it could not be read", () => {
-  it("is unknown, not Available, when the fetch failed", () => {
-    const r = capacitySignal(null, [])
-    // "Unavailable" is the right answer and contains the substring, so match
-    // the whole value rather than a fragment of it.
-    expect(r.value).not.toBe("Available")
-    expect(r.value).toBe("Unavailable")
-    expect(r.tone).not.toMatch(/success/)
-  })
-
-  it("says Disabled when admission control is genuinely off", () => {
-    expect(capacitySignal({ enabled: false, held: [] } as never, []).value).toMatch(/disabled/i)
-  })
-
-  it("says Available only when it answered and nothing is held", () => {
-    expect(capacitySignal({ enabled: true, held: [] } as never, []).value).toMatch(/available/i)
-  })
-})
-
 // Nothing in the strip may be silently dropped — #2187.
-describe("the strip does not lose items past the third", () => {
+describe("the tiles do not lose items past the fourth", () => {
   const item = (id: string) => ({
-    id, label: id, detail: "", href: "/x", tone: "warn" as const, icon: (() => null) as never,
+    id, label: id, count: "1", title: id, detail: "", href: "/x", tone: "warn" as const,
   })
 
   it("reports the overflow when there are more than it can show", () => {
     const o = attentionOverflow([item("a"), item("b"), item("c"), item("d"), item("e")])
-    expect(o.map((i) => i.id)).toEqual(["d", "e"])
+    expect(o.map((i) => i.id)).toEqual(["e"])
   })
 
   it("reports none when everything fits", () => {
-    expect(attentionOverflow([item("a"), item("b"), item("c")])).toHaveLength(0)
+    expect(attentionOverflow([item("a"), item("b"), item("c"), item("d")])).toHaveLength(0)
   })
 
   it("keeps the dropped items addressable, not just counted", () => {
     // The badge already showed items.length while three rendered, so the
     // count was never the problem — reachability was. A credential gap is
     // fourth and "Open Inbox" does not cover it.
-    const o = attentionOverflow([item("a"), item("b"), item("c"), item("credentials")])
+    const o = attentionOverflow([item("a"), item("b"), item("c"), item("d"), item("credentials")])
     expect(o[0]).toMatchObject({ id: "credentials", href: "/x" })
   })
 })
@@ -241,7 +223,7 @@ describe("the strip does not lose items past the third", () => {
 // The strip's own fix had the defect it was fixing, one layer up.
 describe("a partial answer is not presented as a complete one", () => {
   const item = (id: string) => ({
-    id, label: id, detail: "", href: "/x", tone: "warn" as const, icon: (() => null) as never,
+    id, label: id, count: "1", title: id, detail: "", href: "/x", tone: "warn" as const,
   })
 
   it("marks the list incomplete when items exist but the inbox failed", () => {
@@ -267,5 +249,75 @@ describe("a partial answer is not presented as a complete one", () => {
 
   it("reports the inbox as known on a genuine all-clear", () => {
     expect(attentionState({ items: [], inboxLoading: false, inboxError: null }).inboxKnown).toBe(true)
+  })
+})
+
+describe("crews that need a rebuild", () => {
+  const held = [{ crew_id: "crew-1", reason: "host_memory", since: "2026-01-01", waited_ms: 5000 }]
+  const rebuild = [
+    { id: "c2", slug: "web", name: "Web" },
+    { id: "c3", slug: "data", name: "Data" },
+  ]
+
+  it.each([
+    { name: "none", crews: [], ids: [] as string[] },
+    { name: "one", crews: rebuild.slice(0, 1), ids: ["rebuild"], label: "1 crew needs a rebuild", detail: "Web" },
+    { name: "several", crews: rebuild, ids: ["rebuild"], label: "2 crews need a rebuild", detail: "Web" },
+  ])("$name", ({ crews, ids, label, detail }) => {
+    const items = buildAttentionItems({ inbox: [], heldCrews: [], rebuildCrews: crews })
+    expect(items.map((i) => i.id)).toEqual(ids)
+    if (!label) return
+    expect(items[0]).toMatchObject({ label, detail, href: "/crews", tone: "warn", count: String(crews.length) })
+  })
+
+  it("comes after capacity and before schedule alerts", () => {
+    const inbox = [{ id: "s1", kind: "schedule_missed", state: "unread" }] as InboxItem[]
+    const items = buildAttentionItems({ inbox, heldCrews: held, rebuildCrews: rebuild })
+    expect(items.map((i) => i.id)).toEqual(["capacity", "rebuild", "schedules"])
+  })
+
+  it("is enough on its own for the strip not to say nothing needs you", () => {
+    const items = buildAttentionItems({ inbox: [], heldCrews: [], rebuildCrews: rebuild })
+    expect(attentionState({ items, inboxLoading: false, inboxError: null }).kind).toBe("items")
+  })
+})
+
+describe("keys that are about to expire", () => {
+  const NOW = Date.parse("2026-10-19T10:00:00Z")
+  const day = (n: number) => new Date(NOW + n * 86_400_000).toISOString()
+  const cred = (id: string, name: string, expires: string | null, status = "ACTIVE") => ({ id, name, status, token_expires_at: expires })
+
+  it("lists active keys that expire within 7 days, soonest first, and names the days", () => {
+    const keys = expiringKeys(
+      [
+        cred("a", "OpenAI production", day(3)),
+        cred("b", "Later", day(20)),
+        cred("c", "Never", null),
+        cred("d", "Already expired", day(-1)),
+        cred("e", "Soonest", day(1.2)),
+        cred("f", "Revoked", day(2), "REVOKED"),
+        cred("g", "Junk date", "not a date"),
+      ],
+      NOW,
+    )
+    expect(keys.map((k) => [k.name, k.days])).toEqual([["Soonest", 1], ["OpenAI production", 3]])
+  })
+
+  it("is a tile after the rebuild tile with the first key and its days", () => {
+    const keys = [{ id: "a", name: "OpenAI production", days: 3 }, { id: "b", name: "GitHub app", days: 5 }]
+    const items = buildAttentionItems({
+      inbox: [{ id: "s1", kind: "schedule_missed", state: "unread" }] as InboxItem[],
+      heldCrews: [],
+      rebuildCrews: [{ id: "c", name: "Web" }],
+      expiringKeys: keys,
+    })
+    expect(items.map((i) => i.id)).toEqual(["rebuild", "keys", "schedules"])
+    expect(items[1]).toMatchObject({ label: "2 keys expiring", detail: "OpenAI production · 3 days", href: "/credentials", tone: "warn", count: "2" })
+    expect(buildAttentionItems({ inbox: [], heldCrews: [], expiringKeys: [keys[0]] })[0]).toMatchObject({ label: "1 key expiring" })
+  })
+
+  it("says today and tomorrow in words", () => {
+    const one = (days: number) => buildAttentionItems({ inbox: [], heldCrews: [], expiringKeys: [{ id: "a", name: "K", days }] })[0].detail
+    expect([one(0), one(1), one(2)]).toEqual(["K · today", "K · tomorrow", "K · 2 days"])
   })
 })

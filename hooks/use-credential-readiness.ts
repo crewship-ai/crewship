@@ -71,6 +71,7 @@ const EMPTY: CredentialReadiness = {
 interface CrewRow {
   id?: string
   name?: string
+  slug?: string | null
   icon?: string | null
   color?: string | null
 }
@@ -84,6 +85,8 @@ export interface CredentialCrewRef {
   name: string
   icon: string | null
   color: string | null
+  /** Present when the crews list carried one — `?crew=<slug>` links resolve through it. */
+  slug?: string
 }
 
 interface ReadinessBody {
@@ -133,6 +136,7 @@ export function useCredentialReadiness(workspaceId: string | null): CredentialRe
           name: c.name ?? c.id,
           icon: c.icon ?? null,
           color: c.color ?? null,
+          ...(c.slug ? { slug: c.slug } : {}),
         }
       }
 

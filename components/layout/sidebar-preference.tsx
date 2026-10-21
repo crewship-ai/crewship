@@ -4,7 +4,8 @@ import { useEffect, useRef } from "react"
 
 import { useSidebar } from "@/components/ui/sidebar"
 import { useSidebarChoice } from "@/hooks/use-appearance"
-import { setSidebarChoice } from "@/lib/theme/appearance"
+import { readSidebar, setSidebarChoice } from "@/lib/theme/appearance"
+import { markExplicit } from "@/lib/theme/appearance-explicit"
 
 /**
  * Keeps the left rail's mode and the synced appearance preference in step.
@@ -22,6 +23,9 @@ export function SidebarPreference() {
   const choice = useSidebarChoice()
 
   useEffect(() => {
+    // A rail mode that differs from the store was changed on the rail itself
+    // (the store's own changes switch the rail to the same value): the user's.
+    if (sidebarMode !== readSidebar()) markExplicit("sidebar")
     setSidebarChoice(sidebarMode)
   }, [sidebarMode])
 

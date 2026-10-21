@@ -13,9 +13,10 @@ interface StatusBadgeProps extends React.ComponentProps<typeof Badge> {
 }
 
 /**
- * StatusBadge — canonical pill for mission/task/agent/credential state.
- * Always routes through STATUS_BADGE_CLASSES so consumers never reinvent
- * the class map inline.
+ * @deprecated Use StatusPill (components/ui/status-pill), the one status pill.
+ * Kept only for components/features/pages/panels/status-panel.tsx, which the
+ * Pages team owns and whose type register pins this 12px pill;
+ * components/__tests__/status-pill-guard.test.ts fails on any new importer.
  */
 export function StatusBadge({
   status,

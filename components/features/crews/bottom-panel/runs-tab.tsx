@@ -86,7 +86,7 @@ export function RunsTab({ workspaceId, context }: { workspaceId: string; context
       <div className="overflow-x-auto">
       <table className="w-full border-collapse">
         <thead>
-          <tr className="text-muted-foreground-soft text-[10px] uppercase tracking-wide">
+          <tr className="text-muted-foreground-soft text-label font-medium">
             <th className="text-left font-medium pb-2 pr-3">{isMission ? "Agent" : "Run"}</th>
             {isMission && <th className="text-left font-medium pb-2 pr-3">Task</th>}
             <th className="text-left font-medium pb-2 pr-3">Status</th>

@@ -1,50 +1,93 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { motion, AnimatePresence } from "motion/react"
-import {
-  Activity,
-  PauseCircle,
-  ScrollText,
-  CheckCircle2,
-  XCircle,
-  CircleDashed,
-  Sparkles,
-  Flame,
-  Users,
-  EyeOff,
-  Check,
-} from "lucide-react"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
-import {
-  SidebarToolbar,
-  SidebarSearch,
-  SidebarFilterButton,
-  SidebarSection,
-  SidebarRow,
-  SidebarCollapseButton,
-} from "@/components/layout/sidebar-kit"
+import { ArrowDownUp, Check, ChevronLeft, FolderInput, FolderPlus, Hand, LayoutDashboard, List, ListChecks, Pause, Pencil, Play, PenLine, X } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { cn } from "@/lib/utils"
-import { matchesRoutineFilters, routineFilterInput } from "@/lib/routine-filters"
-import { AgentAvatar } from "@/components/ui/agent-avatar"
-import { RoutineGlyph } from "./routine-glyph"
+import type { LucideIcon } from "lucide-react"
+
+import {
+  SidebarActiveChip,
+  SidebarActiveChips,
+  SidebarFilterButton,
+  SidebarRow,
+  SidebarSearch,
+  SidebarSection,
+  SidebarToolbar,
+  SidebarViewButton,
+} from "@/components/layout/sidebar-kit"
+import { SidebarFacetBlock, SidebarInlineFacet, useSidebarFacets } from "@/components/layout/sidebar-facets"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { StatusPill } from "@/components/ui/status-pill"
+import type { StatusTone } from "@/lib/format-status"
+import { useUserPreference } from "@/hooks/use-user-preference"
+import {
+  matchesRoutineFilters,
+  routineFilterInput,
+  type RoutineFilterState,
+  type RoutineLifecycleFilter,
+  type RoutineStatusFilter,
+} from "@/lib/routine-filters"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import { isAwaitingApproval, useActiveRoutineRuns } from "@/hooks/use-active-routine-runs"
-import type { RoutineFilters } from "@/components/features/routines/routines-filter-sidebar"
+import {
+  EMPTY_PANEL_INDEX,
+  ROUTINE_TRIGGER_KINDS,
+  groupRoutines,
+  sortRoutines,
+  type RoutineGroupBy,
+  type RoutineTriggerKind,
+  type PanelFolder,
+  type RoutinePanelIndex,
+  type RoutineSort,
+} from "@/lib/routine-panel-index"
+import type { RoutineFolderPatch } from "@/hooks/use-routine-folders"
+import { FolderGlyph } from "@/components/features/pages/folder-glyph"
+import { RoutineGlyph } from "./routine-glyph"
+import { RoutineFolderDialog } from "./routine-folder-dialog"
+import { RoutineFolderMenu } from "./routine-folder-menu"
+import { toast } from "@/lib/toast"
+import type { PeekRun } from "./routine-run-peek"
+import { runBarTone } from "@/lib/routine-page"
+import { formatDurationMs } from "@/lib/activity-stream"
 
-// RoutinesExplorer — the /routines left sidebar, built on the shared
-// sidebar-kit primitives (SidebarToolbar/Search/FilterButton/Section/
-// Row) so it reads as one app with every other in-page sidebar. Search
-// + Filter chrome up top, a collapsible STATUS bucket section, and the
-// ROUTINES list (per-row status dot + name + invocation count + author
-// avatar). The usage/author/visibility facets stay routine-specific and
-// live in the Filter popover; everything routes selection through
-// SidebarRow's tokenized brand accent-bar.
+// The Routines secondary panel (Harbor 2): Views first — Overview, Needs
+// you, Running now, All runs, Drafts — then every routine grouped by the
+// crew that owns it. A row is the routine's glyph, its name, a pencil when
+// it has changes that are not live, and at most one status pill. Facets
+// (Status, Last run, Trigger, Crew) live in the Filter panel; group (Crew,
+// Trigger, None) and sort (Next run, Last run, Name, Spend) in View. Trigger,
+// next run and spend come from the panel index the layout composes from the
+// schedule, webhook, budget and chat command lists (lib/routine-panel-index).
+// Folders (ODCH-RT-01) are the first grouping once one exists: New folder in
+// the toolbar, Move in the selection bar. A workspace without folders groups
+// by crew until the first one is made. Each folder heading carries its own ⋯
+// menu (#3768) and its subfolders are listed under it, indented.
+
+export type RoutinesView = "overview" | "needs" | "live" | "runs" | "drafts"
+
+export const ROUTINE_VIEWS: { id: RoutinesView; label: string; icon: LucideIcon }[] = [
+  { id: "overview", label: "Overview", icon: LayoutDashboard },
+  { id: "needs", label: "Needs you", icon: Hand },
+  { id: "live", label: "Running now", icon: Play },
+  { id: "runs", label: "All runs", icon: List },
+  { id: "drafts", label: "Drafts", icon: PenLine },
+]
+
+export interface PanelCrew {
+  id: string
+  name: string
+}
 
 interface RoutinesExplorerProps {
   routines: Pipeline[]
@@ -52,35 +95,84 @@ interface RoutinesExplorerProps {
   onSearchChange: (value: string) => void
   selectedSlug: string | null
   onSelectRoutine: (slug: string) => void
-  filters: RoutineFilters
-  onChange: (next: RoutineFilters) => void
-  /** Collapse toggle — rendered in the toolbar next to search. */
-  onToggleCollapse?: () => void
+  filters: RoutineFilterState
+  onChange: (next: RoutineFilterState) => void
+  /** The list view on screen; null while a routine or a run is open. */
+  view: RoutinesView | null
+  onViewChange: (view: RoutinesView) => void
+  /** Counts beside the views; a null count is not shown. */
+  counts: { needs: number | null; live: number | null; drafts: number | null }
+  crews: ReadonlyMap<string, PanelCrew>
+  /** Triggers, next start and spend per routine; empty until loaded. */
+  index?: RoutinePanelIndex
+  /** While a run is open the panel lists the runs of its routine (v67 rtPanel). */
+  runsOf?: {
+    routineName: string
+    runs: PeekRun[]
+    current: string
+    onPeek: (runId: string) => void
+    onBack: () => void
+  }
+  /** Routine folders. `onCreate` is absent when the role cannot create. */
+  folders?: {
+    list: PanelFolder[]
+    /** A parent makes it a subfolder; resolves to a refusal message or null. */
+    onCreate?: (name: string, parentId?: string | null) => Promise<string | null>
+    /** File routines in a folder, or out of any with null; resolves to a refusal message or null. */
+    onMove?: (slugs: string[], folderId: string | null) => Promise<string | null>
+    /** Rename, icon and colour, move a folder. With onCreate and onDelete it draws the folder's menu. */
+    onUpdate?: (id: string, patch: RoutineFolderPatch) => Promise<string | null>
+    onDelete?: (id: string) => Promise<string | null>
+  }
+  /** Slugs found by the text of their steps (GET /pipelines?q=), added to the name match. */
+  stepMatches?: ReadonlySet<string> | null
+  /** Select several (PNL-03). Absent on a phone, where there is no selection. */
+  bulk?: {
+    /** Turning off is Owner and Admin on the server. */
+    canTurnOff: boolean
+    onTurnOff: (slugs: string[]) => Promise<void> | void
+    onRunNow: (slugs: string[]) => Promise<void> | void
+  }
 }
 
-const dropdownAnim = {
-  initial: { opacity: 0, scale: 0.95, y: -4 },
-  animate: { opacity: 1, scale: 1, y: 0, transition: { duration: 0.12 } },
-  exit: { opacity: 0, scale: 0.95, y: -4, transition: { duration: 0.1 } },
+/** The one pill a row carries: a live run first, then the routine's own
+ *  state, then how its last run ended. Nothing when all is well. */
+export function routineRowState(
+  routine: Pipeline,
+  live?: { status: string } | null,
+): { tone: StatusTone; label: string; live?: boolean } | null {
+  if (live) return isAwaitingApproval(live.status) ? { tone: "warn", label: "Waiting", live: true } : { tone: "blue", label: "Running", live: true }
+  if (routine.status === "proposed") return { tone: "purple", label: "Proposed" }
+  if (routine.status === "disabled") return { tone: "muted", label: "Off" }
+  if (routine.last_invocation_status?.toLowerCase() === "failed" || routine.last_run_outcome === "FAILED") return { tone: "danger", label: "Failed" }
+  return null
 }
 
-type StatusBucket = RoutineFilters["status"]
+const LIFECYCLE: { id: Exclude<RoutineLifecycleFilter, "all">; label: string }[] = [
+  { id: "active", label: "Active" },
+  { id: "draft", label: "Has draft changes" },
+  { id: "proposed", label: "Proposed" },
+  { id: "disabled", label: "Turned off" },
+]
+const LAST_RUN: { id: Exclude<RoutineStatusFilter, "all">; label: string }[] = [
+  { id: "completed", label: "Completed" },
+  { id: "awaiting", label: "Waiting for a person" },
+  { id: "failed", label: "Could not finish" },
+  { id: "running", label: "Running" },
+  { id: "never", label: "Never run" },
+]
 
-const STATUS_BUCKETS: {
-  id: StatusBucket
-  label: string
-  icon: typeof ScrollText
-  tone: string
-}[] = [
-  { id: "all", label: "All", icon: ScrollText, tone: "text-foreground/70" },
-  // Live buckets first. A routine parked on a human is the only state on
-  // this page that is waiting for the person reading it — burying that
-  // under three historical outcomes gets it found last.
-  { id: "awaiting", label: "Waiting for you", icon: PauseCircle, tone: "text-warn" },
-  { id: "running", label: "Running", icon: Activity, tone: "text-primary" },
-  { id: "completed", label: "Completed", icon: CheckCircle2, tone: "text-success" },
-  { id: "failed", label: "Could not finish", icon: XCircle, tone: "text-destructive" },
-  { id: "never", label: "Never run", icon: CircleDashed, tone: "text-muted-foreground" },
+const GROUPS: { id: RoutineGroupBy; label: string }[] = [
+  { id: "folder", label: "Folder" },
+  { id: "crew", label: "Crew" },
+  { id: "trigger", label: "Trigger" },
+  { id: "none", label: "None" },
+]
+const SORTS: { id: RoutineSort; label: string }[] = [
+  { id: "next", label: "Next run" },
+  { id: "recent", label: "Last run" },
+  { id: "name", label: "Name" },
+  { id: "spend", label: "Spend" },
 ]
 
 export function RoutinesExplorer({
@@ -91,476 +183,530 @@ export function RoutinesExplorer({
   onSelectRoutine,
   filters,
   onChange,
-  onToggleCollapse,
+  view,
+  onViewChange,
+  counts,
+  crews,
+  index = EMPTY_PANEL_INDEX,
+  bulk,
+  folders,
+  stepMatches,
+  runsOf,
 }: RoutinesExplorerProps) {
-  const [statusOpen, setStatusOpen] = useState(true)
-  const [filterDropdownOpen, setFilterDropdownOpen] = useState(false)
+  if (runsOf) return <RoutineRunsPanel {...runsOf} />
+  return (
+    <RoutinesList
+      {...{ routines, search, onSearchChange, selectedSlug, onSelectRoutine, filters, onChange, view, onViewChange, counts, crews, index, bulk, folders, stepMatches }}
+    />
+  )
+}
 
-  // Shared workspace live-runs subscription (one fetch loop app-wide,
-  // provided by the dashboard layout) — newest active run per slug.
+type RunBucket = "all" | "waiting" | "running" | "completed" | "stopped" | "failed"
+const RUN_BUCKETS: { id: RunBucket; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "waiting", label: "Waiting for a person" },
+  { id: "running", label: "Running" },
+  { id: "completed", label: "Completed" },
+  { id: "stopped", label: "Stopped" },
+  { id: "failed", label: "Could not finish" },
+]
+const DOT: Record<Exclude<RunBucket, "all">, string> = {
+  waiting: "bg-warn",
+  running: "bg-primary",
+  completed: "bg-success",
+  stopped: "bg-muted-foreground/50",
+  failed: "bg-destructive",
+}
+
+function runBucket(r: PeekRun): Exclude<RunBucket, "all"> {
+  if (r.status === "cancelled") return "stopped"
+  const { tone } = runBarTone(r)
+  return tone === "bad" ? "failed" : tone === "warn" ? "waiting" : tone === "info" ? "running" : "completed"
+}
+
+/** The runs of the open routine: status rows with counts, then the runs by day. */
+function RoutineRunsPanel({ routineName, runs, current, onPeek, onBack }: NonNullable<RoutinesExplorerProps["runsOf"]>) {
+  const [bucket, setBucket] = useState<RunBucket>("all")
+  const now = new Date()
+  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  const day = (r: PeekRun) => {
+    const t = Date.parse(r.started_at)
+    return t >= startOfDay ? "Today" : t >= startOfDay - 6 * 86_400_000 ? "This week" : "Earlier"
+  }
+  const rows = runs.filter((r) => bucket === "all" || runBucket(r) === bucket)
+  const count = (b: RunBucket) => (b === "all" ? runs.length : runs.filter((r) => runBucket(r) === b).length)
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex flex-col gap-1 border-b border-hairline px-2 py-2">
+        <Button type="button" variant="ghost" size="sm" className="w-fit gap-1 coarse:h-[44px]" onClick={onBack}>
+          <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
+          All routines
+        </Button>
+        <div className="px-2">
+          <p className="text-micro uppercase tracking-wider text-muted-foreground">Routine</p>
+          <p className="truncate text-body font-semibold text-foreground">{routineName}</p>
+          <p className="text-label text-muted-foreground">
+            {runs.length} {runs.length === 1 ? "run" : "runs"} · newest first
+          </p>
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto pb-1">
+        <SidebarSection label="Status">
+          <div role="group" aria-label="Run status">
+            {RUN_BUCKETS.map((b) => (
+              <SidebarRow key={b.id} as="div" selected={bucket === b.id} onSelect={() => setBucket(b.id)}>
+                <span className="min-w-0 flex-1 truncate">{b.label}</span>
+                <span className="text-micro tabular-nums text-muted-foreground-soft">{count(b.id)}</span>
+              </SidebarRow>
+            ))}
+          </div>
+        </SidebarSection>
+        {(["Today", "This week", "Earlier"] as const).map((g) => {
+          const list = rows.filter((r) => day(r) === g)
+          if (!list.length) return null
+          return (
+            <SidebarSection key={g} label={g} count={list.length}>
+              <div role="group" aria-label={g}>
+                {list.map((r) => {
+                  const b = runBucket(r)
+                  const t = new Date(r.started_at)
+                  const label = RUN_BUCKETS.find((x) => x.id === b)!.label
+                  return (
+                    <button
+                      key={r.id}
+                      type="button"
+                      aria-current={r.id === current ? "true" : undefined}
+                      aria-label={`Peek at run ${r.id.slice(0, 8)} · ${label}`}
+                      onClick={() => onPeek(r.id)}
+                      className={cn(
+                        "mx-1.5 flex w-[calc(100%-0.75rem)] items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-foreground/[0.04] coarse:min-h-[44px]",
+                        r.id === current && "bg-foreground/[0.06]",
+                      )}
+                    >
+                      <i aria-hidden className={cn("h-2 w-2 shrink-0 rounded-full", DOT[b])} />
+                      <span className="w-12 shrink-0 font-mono text-micro tabular-nums text-muted-foreground">
+                        {g === "Today" ? t.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : t.toLocaleDateString(undefined, { day: "numeric", month: "short" })}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-label text-foreground/85">
+                          {label}
+                          {r.outcome === "NO_CHANGE" ? " · nothing changed" : ""}
+                        </span>
+                        <span className="block truncate text-micro text-muted-foreground-soft">
+                          #{r.id.slice(0, 8)} · {r.triggered_via === "manual" ? "started by hand" : r.triggered_via || "manual"}
+                        </span>
+                      </span>
+                      <span className="shrink-0 font-mono text-micro tabular-nums text-muted-foreground">{r.duration_ms > 0 ? formatDurationMs(r.duration_ms) : ""}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </SidebarSection>
+          )
+        })}
+        {rows.length === 0 && <p className="px-4 py-6 text-center text-xs text-muted-foreground-soft">No runs match.</p>}
+      </div>
+    </div>
+  )
+}
+
+function RoutinesList({
+  routines,
+  search,
+  onSearchChange,
+  selectedSlug,
+  onSelectRoutine,
+  filters,
+  onChange,
+  view,
+  onViewChange,
+  counts,
+  crews,
+  index = EMPTY_PANEL_INDEX,
+  bulk,
+  folders,
+  stepMatches,
+}: Omit<RoutinesExplorerProps, "runsOf">) {
+  const [newFolderOpen, setNewFolderOpen] = useState(false)
+  const [selecting, setSelecting] = useState(false)
+  const [picked, setPicked] = useState<Set<string>>(() => new Set())
+  const [confirmOff, setConfirmOff] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const toggle = (slug: string) =>
+    setPicked((current) => {
+      const next = new Set(current)
+      if (next.has(slug)) next.delete(slug)
+      else next.add(slug)
+      return next
+    })
+  const leaveSelecting = () => {
+    setSelecting(false)
+    setPicked(new Set())
+  }
+  const pickedSlugs = () => [...picked]
+  const runBulk = async (action: () => Promise<void> | void) => {
+    setBusy(true)
+    try {
+      await action()
+      setPicked(new Set())
+    } finally {
+      setBusy(false)
+    }
+  }
+  const moveTo = async (folderId: string | null) => {
+    const message = await folders?.onMove?.(pickedSlugs(), folderId)
+    if (message) toast.error("Could not move the routines", { description: message })
+    else {
+      toast.success(folderId ? `Moved to ${folders?.list.find((f) => f.id === folderId)?.name ?? "the folder"}` : "Taken out of their folder")
+      setPicked(new Set())
+    }
+  }
   const { bySlug: liveBySlug } = useActiveRoutineRuns()
+  const [storedGroup, setGroupBy] = useUserPreference<RoutineGroupBy>("routines.panel.group", "folder")
+  const [storedSort, setSortBy] = useUserPreference<RoutineSort>("routines.panel.sort", "recent")
+  // A stored value from another version of the panel falls back, never breaks it.
+  const chosenGroup = GROUPS.some((g) => g.id === storedGroup) ? storedGroup : "folder"
+  const folderById = useMemo(() => new Map<string, PanelFolder>((folders?.list ?? []).map((f) => [f.id, f])), [folders?.list])
+  const folderMenu = folders?.onCreate && folders.onUpdate && folders.onDelete
+    ? { onCreate: folders.onCreate, onUpdate: folders.onUpdate, onDelete: folders.onDelete }
+    : null
+  // Without a folder yet, Folder would be one "No folder" section: show the crews instead.
+  const groupBy: RoutineGroupBy = chosenGroup === "folder" && folderById.size === 0 ? "crew" : chosenGroup
+  const sortBy = SORTS.some((o) => o.id === storedSort) ? storedSort : "recent"
+  const input = (p: Pipeline) => routineFilterInput(p, index.triggers.get(p.slug))
 
-  // Counts per status bucket (computed against the workspace-wide list,
-  // not the post-status-filter view — otherwise switching to "Failed"
-  // would make every other bucket show 0).
-  const statusCounts = useMemo(() => {
-    const c: Record<StatusBucket, number> = {
-      all: routines.length,
-      awaiting: 0,
-      running: 0,
-      completed: 0,
-      failed: 0,
-      never: 0,
+  // Facet counts are taken over the whole list, so picking one value does
+  // not zero every other.
+  const facetCounts = useMemo(() => {
+    const none = { ...filters, status: "all" as const, lifecycle: "all" as const, crewId: null, trigger: null }
+    const count = (patch: Partial<RoutineFilterState>) =>
+      routines.filter((p) => matchesRoutineFilters(input(p), { ...none, ...patch }, liveBySlug, search, stepMatches)).length
+    return {
+      lifecycle: Object.fromEntries(LIFECYCLE.map((o) => [o.id, count({ lifecycle: o.id })])),
+      lastRun: Object.fromEntries(LAST_RUN.map((o) => [o.id, count({ status: o.id })])),
+      trigger: Object.fromEntries(ROUTINE_TRIGGER_KINDS.map((o) => [o.id, count({ trigger: o.id })])),
+      crew: Object.fromEntries([...crews.keys()].map((id) => [id, count({ crewId: id })])),
     }
-    for (const p of routines) {
-      const s = p.last_invocation_status?.toLowerCase()
-      // Live state comes from the workspace run feed, not from the
-      // routine row: last_invocation_status still reads "running" while
-      // a run is parked on a human, so the row alone cannot tell the two
-      // apart — which is the distinction the bucket exists to make.
-      const live = liveBySlug.get(p.slug)
-      if (live) {
-        if (isAwaitingApproval(live.status)) c.awaiting++
-        else c.running++
-      }
-      if (p.invocation_count === 0) c.never++
-      if (s === "completed") c.completed++
-      if (s === "failed") c.failed++
-    }
-    return c
-  }, [routines, liveBySlug])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routines, filters, liveBySlug, search, stepMatches, crews, index])
 
-  // Author agents derived from loaded routines — same as Issues' agents
-  // facet but using author_agent_id/name instead of assignee.
-  const agents = useMemo(() => {
-    const map = new Map<string, { id: string; name: string; count: number }>()
-    for (const p of routines) {
-      if (!p.author_agent_id) continue
-      const cur = map.get(p.author_agent_id)
-      if (cur) {
-        cur.count++
-      } else {
-        map.set(p.author_agent_id, {
-          id: p.author_agent_id,
-          name: p.author_agent_name ?? p.author_agent_id.slice(0, 8),
-          count: 1,
-        })
-      }
-    }
-    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name))
-  }, [routines])
-
-  // Active facet count for the Filter button badge. Status has its own
-  // section above, so it's excluded here — only the popover facets
-  // (Usage / Authors / Visibility) count toward the badge.
-  const activeFilterCount = useMemo(() => {
-    let n = 0
-    if (filters.invocations !== "all") n++
-    if (filters.authorAgentId) n++
-    if (filters.showEphemeral) n++
-    if (filters.showTestRoutines) n++
-    return n
-  }, [filters])
-
-  // Routines visible in the list — through the SHARED matcher, which is
-  // the only thing that knows about live runs.
-  //
-  // The buckets above were computed from the live-run feed (a run parked
-  // on a human is "awaiting", a running one is "running") while this
-  // filtered on last_invocation_status, which reads "running" for both.
-  // So Awaiting approval could show a count of 1 over a list of nothing,
-  // and Running quietly included the parked one. The layout already had
-  // the right answer; this had a private copy that never learned about
-  // live runs.
   const displayed = useMemo(
-    () =>
-      routines.filter((p) =>
-        matchesRoutineFilters(routineFilterInput(p), filters, liveBySlug, search),
-      ),
-    [routines, search, filters, liveBySlug],
+    () => sortRoutines(routines.filter((p) => matchesRoutineFilters(input(p), filters, liveBySlug, search, stepMatches)), sortBy, index),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [routines, filters, liveBySlug, search, stepMatches, sortBy, index],
   )
 
 
+  const active = {
+    lifecycle: filters.lifecycle && filters.lifecycle !== "all" ? filters.lifecycle : null,
+    status: filters.status !== "all" ? filters.status : null,
+    trigger: filters.trigger ?? null,
+    crewId: filters.crewId ?? null,
+  }
+  const triggerLabel = (id: string) => ROUTINE_TRIGGER_KINDS.find((k) => k.id === id)?.label ?? id
+  const activeCount =
+    (active.lifecycle ? 1 : 0) + (active.status ? 1 : 0) + (active.trigger ? 1 : 0) + (active.crewId ? 1 : 0) + (filters.showTestRoutines ? 1 : 0) + (filters.showEphemeral ? 1 : 0)
+  const clear = () => onChange({ ...filters, status: "all", lifecycle: "all", crewId: null, trigger: null, showTestRoutines: false, showEphemeral: false })
+  const groups = useMemo(
+    () => groupRoutines(displayed, groupBy, index, crews, { folders: folderById, includeEmptyFolders: activeCount === 0 && !search }),
+    [displayed, groupBy, index, crews, folderById, activeCount, search],
+  )
+  const facets = useSidebarFacets()
+  const viewCount = (id: RoutinesView) => (id === "needs" ? counts.needs : id === "live" ? counts.live : id === "drafts" ? counts.drafts : null)
+
   return (
-    <div className="flex flex-col h-full">
-      {/* ── Search + Filter ── */}
+    <div className="flex h-full flex-col">
       <SidebarToolbar>
-        {/* data-routines-search wrapper keeps the `/` focus shortcut working
-            (routines-layout targets `[data-routines-search] input`). */}
-        <div data-routines-search className="flex-1 min-w-0">
-          <SidebarSearch
-            value={search}
-            onValueChange={onSearchChange}
-            placeholder="Search routines, agents…"
-          />
+        {/* data-routines-search keeps the `/` shortcut (routines-layout). */}
+        <div data-routines-search className="min-w-0 flex-1">
+          <SidebarSearch value={search} onValueChange={onSearchChange} placeholder="Search routines, agents…" />
         </div>
-        <div className="relative shrink-0">
-          <SidebarFilterButton
-            activeCount={activeFilterCount}
-            aria-expanded={filterDropdownOpen}
-            onClick={() => setFilterDropdownOpen(!filterDropdownOpen)}
-          />
-          <AnimatePresence>
-            {filterDropdownOpen && (
-              <>
-                <div
-                  className="fixed inset-0 z-40"
-                  onClick={() => setFilterDropdownOpen(false)}
-                />
-                <motion.div
-                  {...dropdownAnim}
-                  role="menu"
-                  className="absolute right-0 top-9 z-50 min-w-[220px] max-h-[360px] overflow-y-auto rounded-lg border border-foreground/[0.08] bg-card/95 py-1 shadow-2xl ring-1 ring-black/40 backdrop-blur-xl"
-                >
-                  <div className="px-3 py-1 text-[9px] font-semibold text-muted-foreground-soft uppercase tracking-wider">
-                    Usage
-                  </div>
-                  {(["all", "popular", "fresh"] as RoutineFilters["invocations"][]).map((v) => (
-                    <button
-                      key={v}
-                      onClick={() => {
-                        onChange({ ...filters, invocations: v })
-                        setFilterDropdownOpen(false)
-                      }}
-                      className={cn(
-                        "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors",
-                        filters.invocations === v
-                          ? "bg-primary/10 text-primary-hover"
-                          : "text-muted-foreground/80 hover:bg-foreground/[0.06] hover:text-foreground",
-                      )}
-                    >
-                      {v === "popular" && <Flame className="h-3.5 w-3.5 shrink-0" />}
-                      {v === "fresh" && <Sparkles className="h-3.5 w-3.5 shrink-0" />}
-                      {v === "all" && (
-                        <ScrollText className="h-3.5 w-3.5 shrink-0 opacity-60" />
-                      )}
-                      <span className="flex-1">
-                        {v === "all"
-                          ? "All usage"
-                          : v === "popular"
-                            ? "Popular (10+)"
-                            : "Fresh (no runs)"}
-                      </span>
-                      {filters.invocations === v && <Check className="h-3 w-3 shrink-0" />}
-                    </button>
-                  ))}
-                  {agents.length > 0 && (
-                    <>
-                      <div className="border-t border-foreground/[0.06] mt-1" />
-                      <div className="px-3 py-1 text-[9px] font-semibold text-muted-foreground-soft uppercase tracking-wider">
-                        Authors
-                      </div>
-                      <button
-                        onClick={() => {
-                          onChange({ ...filters, authorAgentId: null })
-                          setFilterDropdownOpen(false)
-                        }}
-                        className={cn(
-                          "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors",
-                          filters.authorAgentId === null
-                            ? "bg-primary/10 text-primary-hover"
-                            : "text-muted-foreground/80 hover:bg-foreground/[0.06] hover:text-foreground",
-                        )}
-                      >
-                        <Users className="h-3.5 w-3.5 shrink-0 opacity-60" />
-                        <span className="flex-1">All authors</span>
-                        {filters.authorAgentId === null && (
-                          <Check className="h-3 w-3 shrink-0" />
-                        )}
-                      </button>
-                      {agents.map((a) => (
-                        <button
-                          key={a.id}
-                          onClick={() => {
-                            onChange({ ...filters, authorAgentId: a.id })
-                            setFilterDropdownOpen(false)
-                          }}
-                          className={cn(
-                            "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors",
-                            filters.authorAgentId === a.id
-                              ? "bg-primary/10 text-primary-hover"
-                              : "text-muted-foreground/80 hover:bg-foreground/[0.06] hover:text-foreground",
-                          )}
-                        >
-                          <AgentAvatar
-                            seed={a.id}
-                            aria-hidden
-                            className="h-4 w-4 shrink-0 object-cover"
-                          />
-                          <span className="truncate flex-1">{a.name}</span>
-                          <span className="text-[10px] tabular-nums text-muted-foreground-soft">
-                            {a.count}
-                          </span>
-                          {filters.authorAgentId === a.id && (
-                            <Check className="h-3 w-3 shrink-0" />
-                          )}
-                        </button>
-                      ))}
-                    </>
-                  )}
-                  <div className="border-t border-foreground/[0.06] mt-1" />
-                  <div className="px-3 py-1 text-[9px] font-semibold text-muted-foreground-soft uppercase tracking-wider">
-                    Visibility
-                  </div>
-                  <button
-                    onClick={() =>
-                      onChange({ ...filters, showTestRoutines: !filters.showTestRoutines })
-                    }
-                    aria-pressed={!!filters.showTestRoutines}
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-muted-foreground hover:bg-muted"
-                  >
-                    <EyeOff className="h-3.5 w-3.5" />
-                    <span className="flex-1">Show test recipes</span>
-                    {filters.showTestRoutines && <Check className="h-3 w-3" />}
-                  </button>
-                  <button
-                    onClick={() =>
-                      onChange({ ...filters, showEphemeral: !filters.showEphemeral })
-                    }
-                    className={cn(
-                      "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors",
-                      filters.showEphemeral
-                        ? "bg-primary/10 text-primary-hover"
-                        : "text-muted-foreground/80 hover:bg-foreground/[0.06] hover:text-foreground",
-                    )}
-                  >
-                    <EyeOff className="h-3.5 w-3.5 shrink-0" />
-                    <span className="flex-1">
-                      {filters.showEphemeral ? "Include ephemeral" : "Show ephemeral"}
-                    </span>
-                    {filters.showEphemeral && <Check className="h-3 w-3 shrink-0" />}
-                  </button>
-                </motion.div>
-              </>
-            )}
-          </AnimatePresence>
-        </div>
-        {onToggleCollapse && (
-          <SidebarCollapseButton collapsed={false} onToggle={onToggleCollapse} />
+        <SidebarFilterButton activeCount={activeCount} {...facets.triggerProps}>
+          Filter
+        </SidebarFilterButton>
+        {folders?.onCreate && (
+          <SidebarViewButton aria-label="New folder" title="New folder" onClick={() => setNewFolderOpen(true)}>
+            <FolderPlus className="h-3.5 w-3.5" />
+          </SidebarViewButton>
+        )}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <SidebarViewButton aria-label="View: group and sort">
+              <ArrowDownUp className="h-3.5 w-3.5" />
+            </SidebarViewButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuLabel>Group by</DropdownMenuLabel>
+            <DropdownMenuRadioGroup value={groupBy} onValueChange={(v) => setGroupBy(v as RoutineGroupBy)}>
+              {GROUPS.map((g) => (
+                <DropdownMenuRadioItem key={g.id} value={g.id}>
+                  {g.label}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>Sort</DropdownMenuLabel>
+            <DropdownMenuRadioGroup value={sortBy} onValueChange={(v) => setSortBy(v as RoutineSort)}>
+              {SORTS.map((o) => (
+                <DropdownMenuRadioItem key={o.id} value={o.id}>
+                  {o.label}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {bulk && (
+          <SidebarViewButton
+            aria-label="Select several"
+            aria-pressed={selecting}
+            title="Select several"
+            onClick={() => (selecting ? leaveSelecting() : setSelecting(true))}
+          >
+            <ListChecks className="h-3.5 w-3.5" />
+          </SidebarViewButton>
         )}
       </SidebarToolbar>
 
-      {/* ── Status ── (single-select bucket) */}
-      <SidebarSection
-        label="Status"
-        count={STATUS_BUCKETS.length}
-        collapsible
-        collapsed={!statusOpen}
-        onToggle={() => setStatusOpen(!statusOpen)}
-        className="border-b border-foreground/[0.06]"
-      >
-        {STATUS_BUCKETS.map((b) => {
-          const IconComp = b.icon
-          const isSelected = filters.status === b.id
-          const count = statusCounts[b.id]
-          return (
-            <SidebarRow
-              key={b.id}
-              selected={isSelected}
-              onSelect={() => onChange({ ...filters, status: b.id })}
-            >
-              {/* A bucket holding nothing dims to match. Six rows of
-                  equal weight, four of them zero, is what made this
-                  column read as a wall — and the ones with something
-                  in them are the only ones worth a click. */}
-              <IconComp
-                className={cn(
-                  "h-3.5 w-3.5 shrink-0",
-                  b.tone,
-                  count === 0 && !isSelected && "opacity-40",
-                )}
-              />
-              <span
-                className={cn(
-                  "truncate flex-1",
-                  // Zero-count rows dim via the soft token, not an alpha:
-                  // foreground/40 on card measured under the wcag2aa floor
-                  // (#1617).
-                  count === 0 && !isSelected ? "text-muted-foreground-soft" : "text-foreground/80",
-                )}
-              >
-                {b.label}
-              </span>
-              <span
-                className={cn(
-                  "rounded-full px-1.5 py-px text-[10px] tabular-nums",
-                  count === 0
-                    ? "text-muted-foreground-soft"
-                    : isSelected
-                      // text-primary on bg-primary/15 reads ~4.3:1; the
-                      // brighter primary-hover token is the documented
-                      // contrast-safe pair for brand-tinted chips.
-                      ? "bg-primary/15 text-primary-hover"
-                      : "bg-foreground/[0.05] text-muted-foreground",
-                )}
-              >
-                {count}
-              </span>
-            </SidebarRow>
-          )
-        })}
-      </SidebarSection>
+      {!facets.open && (
+      <SidebarActiveChips>
+        {active.lifecycle && (
+          <SidebarActiveChip label={LIFECYCLE.find((o) => o.id === active.lifecycle)!.label} onRemove={() => onChange({ ...filters, lifecycle: "all" })}>
+            {LIFECYCLE.find((o) => o.id === active.lifecycle)!.label}
+          </SidebarActiveChip>
+        )}
+        {active.status && (
+          <SidebarActiveChip label={LAST_RUN.find((o) => o.id === active.status)!.label} onRemove={() => onChange({ ...filters, status: "all" })}>
+            {LAST_RUN.find((o) => o.id === active.status)!.label}
+          </SidebarActiveChip>
+        )}
+        {active.trigger && (
+          <SidebarActiveChip label={triggerLabel(active.trigger)} onRemove={() => onChange({ ...filters, trigger: null })}>
+            {triggerLabel(active.trigger)}
+          </SidebarActiveChip>
+        )}
+        {active.crewId && crews.get(active.crewId) && (
+          <SidebarActiveChip label={crews.get(active.crewId)!.name} onRemove={() => onChange({ ...filters, crewId: null })}>
+            {crews.get(active.crewId)!.name}
+          </SidebarActiveChip>
+        )}
+      </SidebarActiveChips>
+      )}
 
-      {/* ── Routines ── */}
-      <div className="flex-1 min-h-0 flex flex-col">
-        <SidebarSection label="Routines" count={displayed.length} />
-        <div className="flex-1 min-h-0 overflow-y-auto pb-1">
-          <TooltipProvider delayDuration={400}>
-            {displayed.map((routine, i) => {
-              const isSelected = selectedSlug === routine.slug
-              const lastStatus = routine.last_invocation_status?.toLowerCase()
-              // Live run for this routine (shared workspace hook,
-              // matched by pipeline_slug) — the row "comes alive":
-              // pulsing dot + a sub-line with the current step and
-              // elapsed time (amber ⏸ variant while parked on a
-              // human approval).
-              const liveRun = liveBySlug.get(routine.slug)
-              const liveAwaiting = liveRun ? isAwaitingApproval(liveRun.status) : false
-              const statusTone = liveRun
-                ? liveAwaiting
-                  ? "bg-warn animate-pulse"
-                  : "bg-primary animate-pulse"
-                : lastStatus === "completed"
-                  ? "bg-success"
-                  : lastStatus === "failed"
-                    ? "bg-destructive"
-                    : routine.invocation_count === 0
-                      ? "bg-muted-foreground/30"
-                      : "bg-primary"
+      {/* RT-01 (kit COM-01): the facets open inside the panel, under the
+          toolbar — never a floating popover — at most six values each. */}
+      <SidebarFacetBlock {...facets.blockProps} label="Filter routines" activeCount={activeCount} onClear={clear}>
+        <SidebarInlineFacet
+          label="Status"
+          defaultOpen
+          values={LIFECYCLE.map((o) => ({ value: o.id, label: o.label, count: facetCounts.lifecycle[o.id] }))}
+          selected={active.lifecycle}
+          onToggle={(v) => onChange({ ...filters, lifecycle: active.lifecycle === v ? "all" : (v as RoutineLifecycleFilter) })}
+          onClear={() => onChange({ ...filters, lifecycle: "all" })}
+        />
+        <SidebarInlineFacet
+          label="Last run"
+          defaultOpen
+          values={LAST_RUN.map((o) => ({ value: o.id, label: o.label, count: facetCounts.lastRun[o.id] }))}
+          selected={active.status}
+          onToggle={(v) => onChange({ ...filters, status: active.status === v ? "all" : (v as RoutineStatusFilter) })}
+          onClear={() => onChange({ ...filters, status: "all" })}
+        />
+        <SidebarInlineFacet
+          label="Trigger"
+          defaultOpen
+          values={ROUTINE_TRIGGER_KINDS.map((o) => ({ value: o.id, label: o.label, count: facetCounts.trigger[o.id] }))}
+          selected={active.trigger}
+          onToggle={(v) => onChange({ ...filters, trigger: active.trigger === v ? null : (v as RoutineTriggerKind) })}
+          onClear={() => onChange({ ...filters, trigger: null })}
+        />
+        {crews.size > 0 && (
+          <SidebarInlineFacet
+            label="Crew"
+            defaultOpen
+            values={[...crews.values()]
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map((c) => ({ value: c.id, label: c.name, count: facetCounts.crew[c.id] }))}
+            selected={active.crewId}
+            onToggle={(v) => onChange({ ...filters, crewId: active.crewId === v ? null : v })}
+            onClear={() => onChange({ ...filters, crewId: null })}
+          />
+        )}
+        <SidebarInlineFacet
+          label="Visibility"
+          values={[
+            { value: "test", label: "Show test recipes" },
+            { value: "ephemeral", label: "Show one-off routines" },
+          ]}
+          selected={[...(filters.showTestRoutines ? ["test"] : []), ...(filters.showEphemeral ? ["ephemeral"] : [])]}
+          onToggle={(v) => onChange(v === "test" ? { ...filters, showTestRoutines: !filters.showTestRoutines } : { ...filters, showEphemeral: !filters.showEphemeral })}
+          onClear={() => onChange({ ...filters, showTestRoutines: false, showEphemeral: false })}
+        />
+      </SidebarFacetBlock>
+
+      <div className="min-h-0 flex-1 overflow-y-auto pb-1">
+        <SidebarSection label="Views">
+          <div role="group" aria-label="Views">
+            {ROUTINE_VIEWS.map((v, i) => {
+              const Icon = v.icon
+              const n = viewCount(v.id)
               return (
-                <Tooltip key={routine.id}>
-                  <TooltipTrigger asChild>
-                    {/* Rows arrive in sequence rather than all at once,
-                        which is what makes a filter read as the list
-                        narrowing instead of the list being replaced. The
-                        delay is capped: past a dozen rows a per-row
-                        stagger stops being a cascade and starts being a
-                        wait. */}
-                    <motion.div
-                      initial={{ opacity: 0, y: 4 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{
-                        duration: 0.22,
-                        ease: [0.22, 1, 0.36, 1],
-                        delay: Math.min(i, 12) * 0.018,
-                      }}
-                    >
-                      <SidebarRow
-                        selected={isSelected}
-                        onSelect={() => onSelectRoutine(routine.slug)}
-                      >
-                        {/* Icon first, then the status dot. Thirty rows
-                            of identical text was the problem; the icon is
-                            what makes one findable at a glance, and the
-                            dot still carries the state. Same derivation
-                            the detail header uses — two surfaces showing
-                            a different icon for one routine would be
-                            worse than showing none. */}
-                        <span className="relative shrink-0 self-center">
-                          {/* A halo, not a moved icon. While a run is
-                              live the icon keeps its place — a row
-                              whose contents shift position is harder
-                              to track than one that just glows — and
-                              the ring pulses outward from behind it.
-                              Absolutely positioned so it costs no
-                              layout: a ring that changed the row's
-                              width would nudge every name beside it. */}
-                          {liveRun && (
-                            <span
-                              aria-hidden
-                              className={cn(
-                                "absolute -inset-1 animate-ping rounded-lg opacity-60",
-                                liveAwaiting ? "bg-warn/20" : "bg-primary/20",
-                              )}
-                            />
-                          )}
-                          {/* The glyph wears the routine's own colour (its
-                              identity); the dot beside it carries the state. */}
-                          <span className="relative flex h-5 w-5 items-center justify-center">
-                            <RoutineGlyph routine={routine} variant="bare" />
-                          </span>
-                          <span
-                            aria-hidden
-                            title={liveRun ? liveRun.status : (lastStatus ?? "never invoked")}
-                            className={cn(
-                              "absolute -bottom-0.5 -right-0.5 z-10 h-2 w-2 rounded-full ring-2 ring-card",
-                              statusTone,
-                            )}
-                          />
-                        </span>
-                        {/* One line per routine. The purpose lives in the
-                            tooltip and on the page; a second line under
-                            every name made thirty rows read as sixty, and
-                            a live-run line that grew and ticked under one
-                            of them broke the column. */}
-                        <span className="min-w-0 flex-1 truncate text-foreground/80">
-                          {routine.name || routine.slug}
-                        </span>
-                        {/* While a run is live the row's right edge says
-                            so, in place of the run count and without a
-                            timer: the halo already pulses, and a number
-                            changing every second is what made it messy. */}
-                        {liveRun ? (
-                          <span
-                            data-testid="routine-live-chip"
-                            className={cn(
-                              "inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-px text-[10px] font-medium",
-                              liveAwaiting ? "bg-warn/15 text-warn" : "bg-primary/15 text-primary-hover",
-                            )}
-                          >
-                            <span
-                              aria-hidden
-                              className={cn("h-1.5 w-1.5 rounded-full", liveAwaiting ? "bg-warn" : "bg-primary animate-pulse")}
-                            />
-                            {liveAwaiting ? "Waiting" : "Running"}
-                          </span>
-                        ) : (
-                          routine.invocation_count > 0 && (
-                            <span className="text-[10px] font-mono tabular-nums text-muted-foreground-soft shrink-0">
-                              {routine.invocation_count}
-                            </span>
-                          )
-                        )}
-                      </SidebarRow>
-                    </motion.div>
-                  </TooltipTrigger>
-                  <TooltipContent side="right" sideOffset={8}>
-                    <div className="space-y-0.5">
-                      <div className="font-medium">{routine.name || routine.slug}</div>
-                      <div className="flex items-center gap-1.5 text-[10px] font-mono opacity-70">
-                        {/* The author lives here, not on the row: a face on
-                            every row was a second icon column. */}
-                        {routine.author_agent_id && (
-                          <AgentAvatar
-                            seed={routine.author_agent_id}
-                            className="h-3.5 w-3.5 shrink-0 object-cover"
-                          />
-                        )}
-                        {routine.slug}
-                      </div>
-                      {routine.description && (
-                        <div className="text-[10px] opacity-80 max-w-[260px]">
-                          {routine.description}
-                        </div>
-                      )}
-                    </div>
-                  </TooltipContent>
-                </Tooltip>
+                <SidebarRow key={v.id} as="div" selected={view === v.id} aria-current={view === v.id ? "page" : undefined} onSelect={() => onViewChange(v.id)}>
+                  <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                  <span className="min-w-0 flex-1 truncate" title={`${v.label} · ${i + 1}`}>{v.label}</span>
+                  {n != null && n > 0 && <span className="text-micro tabular-nums text-muted-foreground-soft">{n}</span>}
+                </SidebarRow>
               )
             })}
-          </TooltipProvider>
-          {displayed.length === 0 && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.1 }}
-              className="flex items-center justify-center py-6 text-xs text-muted-foreground-soft"
-            >
-              No routines found
-            </motion.div>
-          )}
-        </div>
+          </div>
+        </SidebarSection>
+
+        {groups.map((g) => {
+          const folder = g.folderId ? folderById.get(g.folderId) : undefined
+          const depth = Math.min(g.depth ?? 0, 2)
+          return (
+          <SidebarSection
+            key={g.id}
+            className={folder ? "group/section" : undefined}
+            headerClassName={cn(depth === 1 && "pl-5", depth === 2 && "pl-8")}
+            label={
+              folder ? (
+                <span className="inline-flex min-w-0 items-center gap-1" data-folder-depth={depth}>
+                  <FolderGlyph icon={folder.icon} color={folder.color} className="h-3 w-3" />
+                  <span className="truncate">{g.label}</span>
+                </span>
+              ) : (
+                g.label
+              )
+            }
+            count={g.rows.length}
+            actions={folder && folderMenu ? <RoutineFolderMenu folder={folder} folders={folderById} {...folderMenu} /> : undefined}
+          >
+            <div role="group" aria-label={g.label} className={cn(depth === 1 && "pl-3", depth === 2 && "pl-6")}>
+              {g.rows.map((routine) => {
+                const state = routineRowState(routine, liveBySlug.get(routine.slug))
+                const content = (
+                  <span data-routine-row className="flex min-w-0 flex-1 items-center gap-2" title={routine.description || routine.slug}>
+                    <RoutineGlyph routine={routine} variant="bare" />
+                    <span className="min-w-0 flex-1 truncate text-foreground/85">{routine.name || routine.slug}</span>
+                    {routine.draft && (
+                      <span role="img" aria-label="Changes not live" title="Changes not live" className="shrink-0 text-muted-foreground">
+                        <Pencil className="h-3 w-3" aria-hidden />
+                      </span>
+                    )}
+                    {state && (
+                      <StatusPill tone={state.tone} label={state.label} live={state.live} data-testid={state.live ? "routine-live-chip" : undefined} />
+                    )}
+                  </span>
+                )
+                if (selecting) {
+                  const checked = picked.has(routine.slug)
+                  return (
+                    <button
+                      key={routine.id}
+                      type="button"
+                      role="checkbox"
+                      aria-checked={checked}
+                      aria-label={`Select ${routine.name || routine.slug}`}
+                      onClick={() => toggle(routine.slug)}
+                      className={cn(
+                        "mx-1.5 flex w-[calc(100%-0.75rem)] items-center gap-2 rounded-md px-2 py-1.5 text-left text-body transition-colors hover:bg-foreground/[0.04] coarse:min-h-[44px]",
+                        checked && "bg-primary/10",
+                      )}
+                    >
+                      <span
+                        aria-hidden
+                        className={cn(
+                          "flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm border",
+                          checked ? "border-primary bg-primary text-primary-foreground" : "border-control-border",
+                        )}
+                      >
+                        {checked && <Check className="h-3 w-3" />}
+                      </span>
+                      {content}
+                    </button>
+                  )
+                }
+                return (
+                  <SidebarRow key={routine.id} as="div" selected={selectedSlug === routine.slug} onSelect={() => onSelectRoutine(routine.slug)}>
+                    {content}
+                  </SidebarRow>
+                )
+              })}
+            </div>
+          </SidebarSection>
+          )
+        })}
+
+        {displayed.length === 0 && (
+          <p className="px-4 py-6 text-center text-xs text-muted-foreground-soft">
+            {routines.length === 0 ? "No routines yet." : "Nothing matches these filters."}
+          </p>
+        )}
       </div>
+
+      {/* PNL-03: the bulk bar sits at the bottom of the panel while selecting. */}
+      {selecting && bulk && (
+        <div role="toolbar" aria-label="Selected routines" className="flex shrink-0 flex-wrap items-center gap-1 border-t border-hairline bg-card px-2 py-1.5">
+          <span className="min-w-0 flex-1 basis-full truncate px-1 text-label text-muted-foreground">{picked.size ? `${picked.size} selected` : "Pick routines"}</span>
+          {folders?.onMove && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button type="button" variant="ghost" size="sm" className="gap-1 coarse:h-[44px]" disabled={!picked.size || busy}>
+                  <FolderInput className="h-3 w-3" aria-hidden />
+                  Move
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-52">
+                <DropdownMenuLabel>Move to folder</DropdownMenuLabel>
+                {folders.list.map((f) => (
+                  <DropdownMenuItem key={f.id} onSelect={() => void moveTo(f.id)}>
+                    {f.name}
+                  </DropdownMenuItem>
+                ))}
+                {folders.list.length > 0 && <DropdownMenuSeparator />}
+                <DropdownMenuItem onSelect={() => void moveTo(null)}>No folder</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+          {bulk.canTurnOff && (
+            <Button type="button" variant="ghost" size="sm" className="gap-1 coarse:h-[44px]" disabled={!picked.size || busy} onClick={() => setConfirmOff(true)}>
+              <Pause className="h-3 w-3" aria-hidden />
+              Turn off
+            </Button>
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="gap-1 coarse:h-[44px]"
+            disabled={!picked.size || busy}
+            title="Starts the selected routines that need no answer; a routine with a required input is skipped"
+            onClick={() => void runBulk(() => bulk.onRunNow(pickedSlugs()))}
+          >
+            <Play className="h-3 w-3" aria-hidden />
+            Run now
+          </Button>
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="Done selecting" title="Done selecting" onClick={leaveSelecting}>
+            <X className="h-3.5 w-3.5" aria-hidden />
+          </Button>
+        </div>
+      )}
+      {folders?.onCreate && <RoutineFolderDialog open={newFolderOpen} onOpenChange={setNewFolderOpen} onCreate={(name) => folders.onCreate!(name)} />}
+      <ConfirmDialog
+        open={confirmOff}
+        onOpenChange={setConfirmOff}
+        title={`Turn off ${picked.size} ${picked.size === 1 ? "routine" : "routines"}?`}
+        description="They cannot run until each is turned on again."
+        consequences={[
+          { tone: "lost", text: "Schedules, webhooks and the Run button stop starting them." },
+          { tone: "kept", text: "Their runs, versions and settings stay." },
+        ]}
+        confirmLabel="Turn off"
+        destructive
+        onConfirm={async () => {
+          if (bulk) await runBulk(() => bulk.onTurnOff(pickedSlugs()))
+        }}
+      />
     </div>
   )
 }

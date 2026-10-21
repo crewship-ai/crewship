@@ -10,11 +10,11 @@ import {
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -238,10 +238,15 @@ export function RegistryBrowser({
   const hasMore = servers.length < total
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[80dvh] flex flex-col gap-0 p-0">
-        <DialogHeader className="px-6 pt-6 pb-4 space-y-4 shrink-0">
-          <DialogTitle>Browse MCP Registry</DialogTitle>
+    // A pick surface: each row's Add IS the action, so the footer carries
+    // Cancel only and there is no onSubmit.
+    <CreateSurface open={open} onOpenChange={onOpenChange} size="md">
+      <CreateSurfaceHeader
+        icon={Globe}
+        title="Browse MCP Registry"
+        onClose={() => onOpenChange(false)}
+      />
+        <div className="shrink-0 space-y-2 border-b border-hairline px-4 py-3 sm:px-5">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
@@ -257,9 +262,9 @@ export function RegistryBrowser({
               {total.toLocaleString()} servers available
             </p>
           )}
-        </DialogHeader>
+        </div>
 
-        <div className="flex-1 overflow-y-auto px-6 pb-6 min-h-0">
+        <CreateSurfaceBody>
           {/* Error state */}
           {error && !loading && (
             <div className="flex items-center justify-center py-12">
@@ -364,8 +369,8 @@ export function RegistryBrowser({
               <Spinner className="h-5 w-5 text-muted-foreground" />
             </div>
           )}
-        </div>
-      </DialogContent>
-    </Dialog>
+        </CreateSurfaceBody>
+      <CreateSurfaceFooter hint={null} onCancel={() => onOpenChange(false)} />
+    </CreateSurface>
   )
 }

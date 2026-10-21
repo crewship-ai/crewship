@@ -336,3 +336,35 @@ describe("a decision has a decider", () => {
     expect(isArchivedNotDecided(settled("approve", "u-1"))).toBe(false)
   })
 })
+
+describe("server facet counts and server search", () => {
+  const server = (over: Record<string, unknown> = {}) => ({
+    total: 12, unread: 5,
+    spaces: { action: 9, updates: 2, history: 1 },
+    by_kind: { waitpoint: { action: 7, updates: 0, history: 1 }, message: { action: 0, updates: 2, history: 0 } },
+    by_attention: { decision: 7, review: 2 },
+    by_deadline: { hour: 1, soon: 3, none: 8 },
+    ...over,
+  })
+
+  it("takes the inbox figures from the server, for the viewed space, and adds the entries it cannot count", async () => {
+    const { serverFacetCounts, facetCounts, approvalEntry } = await import("../inbox-v2-derive")
+    const rest = facetCounts([approvalEntry({ id: "ap1", status: "pending", kind: "cost_threshold", reason: "r", created_at: "2026-08-30T10:00:00Z", timeout_at: null, payload: {} } as unknown as ApprovalRow)])
+    const merged = serverFacetCounts(server(), "action", rest)!
+    expect(merged.type.waitpoint).toBe(7)
+    expect(merged.type.message).toBe(0)
+    expect(merged.type.approval).toBe(1)
+    expect(merged.attention.decision).toBe(7 + 1)
+    expect(merged.attention.review).toBe(2)
+    expect(merged.deadline.soon).toBe(3)
+    expect(merged.unread).toBe(5 + 1)
+    expect(merged.total).toBe(9 + 1)
+    expect(serverFacetCounts(server(), "updates", facetCounts([]))!.type.message).toBe(2)
+  })
+
+  it("is null for a server that does not break counts down, so the loaded rows are counted", async () => {
+    const { serverFacetCounts, facetCounts } = await import("../inbox-v2-derive")
+    expect(serverFacetCounts(null, "action", facetCounts([]))).toBeNull()
+    expect(serverFacetCounts(server({ by_attention: undefined }), "action", facetCounts([]))).toBeNull()
+  })
+})

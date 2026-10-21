@@ -4,6 +4,7 @@ package main
 // per-routine monthly budget meter API.
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -16,8 +17,8 @@ func TestRoutineBudgetGet(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
 		stub := covStub(t)
 		stub.OnGet(budgetPath, clitest.JSONResponse(200, budgetRow{
-			Slug: "my-routine", HasBudget: true, MonthlyBudgetUSD: 50, Month: "2026-07",
-			SpentUSD: 12.5, PctUsed: 25, OverBudget: false,
+			Slug: "my-routine", HasBudget: true, MonthlyBudgetUSD: usdPtr(50), Month: "2026-07",
+			SpentUSD: usdPtr(12.5), PctUsed: usdPtr(25), OverBudget: false,
 		}))
 		covResetFlags(t, routineBudgetGetCmd)
 		out := covCaptureStdoutCli3(t, func() {
@@ -33,7 +34,7 @@ func TestRoutineBudgetGet(t *testing.T) {
 	t.Run("no budget set", func(t *testing.T) {
 		stub := covStub(t)
 		stub.OnGet(budgetPath, clitest.JSONResponse(200, budgetRow{
-			Slug: "my-routine", HasBudget: false, Month: "2026-07", SpentUSD: 3.0,
+			Slug: "my-routine", HasBudget: false, Month: "2026-07", SpentUSD: usdPtr(3.0),
 		}))
 		covResetFlags(t, routineBudgetGetCmd)
 		out := covCaptureStdoutCli3(t, func() {
@@ -43,6 +44,37 @@ func TestRoutineBudgetGet(t *testing.T) {
 		})
 		if !strings.Contains(out, "no budget set") {
 			t.Errorf("expected no-budget message:\n%s", out)
+		}
+	})
+
+	// #3590: below ADMIN the server keeps has_budget / over_budget and
+	// withholds the amounts. The CLI must say so, not print "$0.00".
+	t.Run("amounts withheld below ADMIN", func(t *testing.T) {
+		for _, c := range []struct {
+			name string
+			row  string
+			want string
+		}{
+			{"over", `{"slug":"my-routine","has_budget":true,"month":"2026-07","over_budget":true}`, "OVER BUDGET"},
+			{"within", `{"slug":"my-routine","has_budget":true,"month":"2026-07"}`, "within budget"},
+			{"none", `{"slug":"my-routine","has_budget":false,"month":"2026-07"}`, "no budget set"},
+		} {
+			t.Run(c.name, func(t *testing.T) {
+				stub := covStub(t)
+				stub.OnGet(budgetPath, clitest.JSONResponse(200, json.RawMessage(c.row)))
+				covResetFlags(t, routineBudgetGetCmd)
+				out := covCaptureStdoutCli3(t, func() {
+					if err := routineBudgetGetCmd.RunE(routineBudgetGetCmd, []string{"my-routine"}); err != nil {
+						t.Errorf("RunE: %v", err)
+					}
+				})
+				if !strings.Contains(out, c.want) || !strings.Contains(out, "OWNER and ADMIN") {
+					t.Errorf("want %q and the OWNER/ADMIN note:\n%s", c.want, out)
+				}
+				if strings.Contains(out, "$") {
+					t.Errorf("withheld amounts printed as dollars:\n%s", out)
+				}
+			})
 		}
 	})
 
@@ -72,7 +104,7 @@ func TestRoutineBudgetSet(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
 		stub := covStub(t)
 		stub.OnPatch(budgetPath, clitest.JSONResponse(200, budgetRow{
-			Slug: "my-routine", HasBudget: true, MonthlyBudgetUSD: 75, Month: "2026-07",
+			Slug: "my-routine", HasBudget: true, MonthlyBudgetUSD: usdPtr(75), Month: "2026-07",
 		}))
 		covResetFlags(t, routineBudgetSetCmd)
 		covSetFlags(t, routineBudgetSetCmd, map[string]string{"amount": "75"})
@@ -120,11 +152,11 @@ func TestRoutineBudgetSummary(t *testing.T) {
 	stub.OnGet(summaryPath, clitest.JSONResponse(200, budgetSummaryRowsResponse{
 		Month: "2026-07",
 		Routines: []budgetRow{
-			{Slug: "a", HasBudget: true, MonthlyBudgetUSD: 100, SpentUSD: 40, PctUsed: 40},
-			{Slug: "b", HasBudget: false, SpentUSD: 5},
+			{Slug: "a", HasBudget: true, MonthlyBudgetUSD: usdPtr(100), SpentUSD: usdPtr(40), PctUsed: usdPtr(40)},
+			{Slug: "b", HasBudget: false, SpentUSD: usdPtr(5)},
 		},
-		TotalBudgetUSD: 100,
-		TotalSpentUSD:  45,
+		TotalBudgetUSD: usdPtr(100),
+		TotalSpentUSD:  usdPtr(45),
 	}))
 	covResetFlags(t, routineBudgetSummaryCmd)
 	out := covCaptureStdoutCli3(t, func() {
@@ -156,3 +188,25 @@ func TestRoutineBudgetSummary_Empty(t *testing.T) {
 		t.Errorf("expected empty-state message:\n%s", out)
 	}
 }
+
+// #3590: the summary below ADMIN carries rows without amounts.
+func TestRoutineBudgetSummary_AmountsWithheld(t *testing.T) {
+	summaryPath := "/api/v1/workspaces/" + covWSCli3 + "/pipelines/budget-summary"
+	stub := covStub(t)
+	stub.OnGet(summaryPath, clitest.JSONResponse(200, json.RawMessage(
+		`{"month":"2026-07","routines":[{"slug":"a","has_budget":true,"over_budget":true},{"slug":"b","has_budget":false}]}`)))
+	covResetFlags(t, routineBudgetSummaryCmd)
+	out := covCaptureStdoutCli3(t, func() {
+		if err := routineBudgetSummaryCmd.RunE(routineBudgetSummaryCmd, nil); err != nil {
+			t.Errorf("RunE: %v", err)
+		}
+	})
+	if !strings.Contains(out, "OVER") || !strings.Contains(out, "OWNER and ADMIN") {
+		t.Errorf("want OVER state and the OWNER/ADMIN note:\n%s", out)
+	}
+	if strings.Contains(out, "$") {
+		t.Errorf("withheld amounts printed as dollars:\n%s", out)
+	}
+}
+
+func usdPtr(v float64) *float64 { return &v }

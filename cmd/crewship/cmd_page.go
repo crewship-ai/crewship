@@ -218,6 +218,7 @@ func (r pageListRowJSON) panelCount() int {
 // the document verbatim as a string would leave the server holding an opaque
 // blob it is required by §10b.1 to validate.
 type pageWriteJSON struct {
+	AllowEmpty  bool                 `json:"allow_empty,omitempty" yaml:"allow_empty,omitempty"`
 	Slug        string               `json:"slug" yaml:"slug"`
 	Name        string               `json:"name" yaml:"name"`
 	Description string               `json:"description,omitempty" yaml:"description,omitempty"`
@@ -308,11 +309,32 @@ var pageListCmd = &cobra.Command{
 	Short: "List the pages in this workspace",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
+		query := url.Values{}
+		audience, _ := cmd.Flags().GetString("audience")
+		if audience != "" {
+			if audience != "all" && audience != "personal" {
+				return errors.New("audience must be all or personal")
+			}
+			query.Set("audience", audience)
+		}
+		for _, flag := range []string{"limit", "offset"} {
+			if cmd.Flags().Changed(flag) {
+				value, _ := cmd.Flags().GetInt(flag)
+				if value < 0 || (flag == "limit" && (value == 0 || value > 500)) {
+					return fmt.Errorf("invalid %s", flag)
+				}
+				query.Set(flag, fmt.Sprint(value))
+			}
+		}
 		client, err := pageClient()
 		if err != nil {
 			return err
 		}
-		resp, err := client.Get("/api/v1/pages")
+		path := "/api/v1/pages"
+		if len(query) > 0 {
+			path += "?" + query.Encode()
+		}
+		resp, err := client.Get(path)
 		if err != nil {
 			return err
 		}
@@ -510,11 +532,16 @@ var pageCreateCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		allowEmpty, _ := cmd.Flags().GetBool("allow-empty")
+		if allowEmpty && (len(doc.Spec.Panels) != 0 || owner != "") {
+			return cli.WithExitCode(errors.New("--allow-empty requires no panels and the default human owner"), cli.ExitValidation)
+		}
 		client, err := pageClient()
 		if err != nil {
 			return err
 		}
 		body := pageWriteFrom(doc)
+		body.AllowEmpty = allowEmpty
 		body.Owner = owner
 		body.Icon, body.Color = pageAvatarFromFlags(cmd)
 		resp, err := client.Post("/api/v1/pages", body)
@@ -625,7 +652,13 @@ func pageDocumentFromFlag(cmd *cobra.Command) (*pages.Document, error) {
 	if err != nil {
 		return nil, cli.WithExitCode(fmt.Errorf("read %s: %w", path, err), cli.ExitValidation)
 	}
-	doc, err := pages.ParseDocument(raw)
+	var doc *pages.Document
+	allowEmpty, _ := cmd.Flags().GetBool("allow-empty")
+	if allowEmpty {
+		doc, err = pages.ParseDocumentAllowEmpty(raw)
+	} else {
+		doc, err = pages.ParseDocument(raw)
+	}
 	if err != nil {
 		return nil, cli.WithExitCode(err, cli.ExitValidation)
 	}
@@ -931,6 +964,7 @@ func pageDash(s string) string {
 }
 
 func init() {
+	pageCreateCmd.Flags().Bool("allow-empty", false, "Create an empty human-owned Page before document initialization; no panels or crew owner")
 	pageCreateCmd.Flags().String("file", "", "Page document to author from (YAML or JSON; - for stdin)")
 	// Create only. `update` re-applies a spec, and ownership is not part of the
 	// spec — see pageWriteJSON.Owner.
@@ -944,6 +978,9 @@ func init() {
 	pageSetCmd.Flags().String("data", "-", `Payload: "-" for stdin, "@path" for a file, or a literal JSON document`)
 	pageSetCmd.Flags().String("state", "", `The producer's own verdict: "ok" (default) or "failed"`)
 
+	pageListCmd.Flags().String("audience", "", "List all accessible Pages or only your explicitly private Pages (all|personal)")
+	pageListCmd.Flags().Int("limit", 100, "Maximum rows after authorization and audience filtering (1-500; unpaged when omitted)")
+	pageListCmd.Flags().Int("offset", 0, "Rows to skip after authorization and audience filtering")
 	pageCmd.AddCommand(pageListCmd)
 	pageCmd.AddCommand(pageGetCmd)
 	pageCmd.AddCommand(pageCreateCmd)

@@ -29,9 +29,9 @@ import { CountPill, StatusRows, type StatusRow } from "@/components/features/act
 import {
   SidebarActiveChip,
   SidebarActiveChips,
-  SidebarCollapseButton,
   SidebarRow,
   SidebarSection,
+  SidebarToolbar,
 } from "@/components/layout/sidebar-kit"
 import type { LedgerAgent } from "@/hooks/use-work-items"
 import {
@@ -136,22 +136,15 @@ const LEDGERS = [
   ["deliveries", "Deliveries", Webhook],
 ] as const
 
-function Header({
-  section,
-  onSection,
-  onLeave,
-  onCollapse,
-  subtitle,
-}: {
-  section: LedgerSection
-  onSection: (s: LedgerSection) => void
-  onLeave: () => void
-  onCollapse: () => void
-  subtitle: string
-}) {
+/**
+ * The rail's frame: Back to all activity is the panel toolbar (inside
+ * SecondaryPanel the kit toolbar is the panel's and carries its collapse
+ * button), and the rows scroll beneath it.
+ */
+function RailFrame({ onLeave, children }: { onLeave: () => void; children: React.ReactNode }) {
   return (
-    <>
-      <div className="flex items-center gap-1 border-b border-foreground/[0.06] px-2 py-1.5">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <SidebarToolbar>
         <button
           type="button"
           onClick={onLeave}
@@ -160,9 +153,23 @@ function Header({
           <ChevronLeft className="h-3.5 w-3.5" />
           All activity
         </button>
-        <span className="flex-1" />
-        <SidebarCollapseButton collapsed={false} onToggle={onCollapse} />
-      </div>
+      </SidebarToolbar>
+      <div className="min-h-0 flex-1 overflow-y-auto pb-4">{children}</div>
+    </div>
+  )
+}
+
+function Header({
+  section,
+  onSection,
+  subtitle,
+}: {
+  section: LedgerSection
+  onSection: (s: LedgerSection) => void
+  subtitle: string
+}) {
+  return (
+    <>
       <div className="flex flex-col gap-1.5 px-3 pb-1 pt-2">
         <p className="eyebrow text-muted-foreground">Ledger</p>
         {/* Two pages under one address (?section=): navigation, so it says
@@ -228,7 +235,6 @@ export interface WorkRailProps {
   windowLabel: string
   onSection: (s: LedgerSection) => void
   onLeave: () => void
-  onCollapse: () => void
 }
 
 export function WorkRail(p: WorkRailProps) {
@@ -237,12 +243,10 @@ export function WorkRail(p: WorkRailProps) {
     ...LEDGER_TONES.map((t) => ({ key: t, label: LEDGER_TONE_LABEL[t], count: p.counts[t], tone: LEDGER_TONE_TEXT[t], icon: TONE_ICON[t] })),
   ]
   return (
-    <div className="flex flex-col">
+    <RailFrame onLeave={p.onLeave}>
       <Header
         section="work"
         onSection={p.onSection}
-        onLeave={p.onLeave}
-        onCollapse={p.onCollapse}
         subtitle={`${p.counts.total} ${p.counts.total === 1 ? "piece" : "pieces"} of work · ${p.windowLabel}`}
       />
       <Chips chips={p.chips} />
@@ -257,7 +261,7 @@ export function WorkRail(p: WorkRailProps) {
           <FamilyRows rows={p.families} value={p.family} onPick={p.onFamily} />
         </>
       )}
-    </div>
+    </RailFrame>
   )
 }
 
@@ -276,7 +280,6 @@ export interface DeliveriesRailProps {
   windowLabel: string
   onSection: (s: LedgerSection) => void
   onLeave: () => void
-  onCollapse: () => void
 }
 
 export function DeliveriesRail(p: DeliveriesRailProps) {
@@ -286,12 +289,10 @@ export function DeliveriesRail(p: DeliveriesRailProps) {
     { key: "ignored", label: "Ignored", count: p.counts.ignored, tone: "text-muted-foreground", icon: CircleSlash },
   ]
   return (
-    <div className="flex flex-col">
+    <RailFrame onLeave={p.onLeave}>
       <Header
         section="deliveries"
         onSection={p.onSection}
-        onLeave={p.onLeave}
-        onCollapse={p.onCollapse}
         subtitle={`${p.counts.all} received · ${p.windowLabel}`}
       />
       <Chips chips={p.chips} />
@@ -306,6 +307,6 @@ export function DeliveriesRail(p: DeliveriesRailProps) {
           <FamilyRows rows={p.families} value={p.family} onPick={p.onFamily} />
         </>
       )}
-    </div>
+    </RailFrame>
   )
 }

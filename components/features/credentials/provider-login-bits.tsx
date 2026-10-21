@@ -14,6 +14,7 @@ import { getBrand } from "@/lib/credential-providers/registry"
 import { brandTileColors } from "@/lib/credentials/brand-tile"
 import type { StatusTone } from "@/lib/format-status"
 import {
+  accountState,
   formatClock,
   loginStatusLabel,
   type LoginCredential,
@@ -35,8 +36,21 @@ export function LoginStatusPill({ credential, className }: { credential: LoginCr
     <StatusPill
       tone={PILL_TONE[tone]}
       label={label}
-      className={cn("whitespace-nowrap", className)}
+      className={cn("font-sans tracking-normal whitespace-nowrap", className)}
       data-testid={`login-status-${status}`}
+    />
+  )
+}
+
+/** An AI provider account's state as the Vault's cards and list print it: Ready, Not used, Sign in again. */
+export function AccountStateMark({ credential, className }: { credential: LoginCredential; className?: string }) {
+  const s = accountState(credential)
+  return (
+    <StatusPill
+      tone={PILL_TONE[s.tone]}
+      label={s.label}
+      className={cn("font-sans tracking-normal whitespace-nowrap", className)}
+      data-testid={`account-state-${s.key}`}
     />
   )
 }
@@ -106,7 +120,7 @@ export function QuotaBar({
       >
         {known && <span className={cn("block h-full rounded-full", fill)} style={{ width: `${Math.max(value, 2)}%` }} />}
       </span>
-      <span className="w-9 shrink-0 text-right font-mono type-meta tabular-nums text-foreground/80">
+      <span className="w-9 shrink-0 text-right type-meta tabular-nums text-foreground/80">
         {known ? `${Math.round(value)}%` : "—"}
       </span>
     </div>

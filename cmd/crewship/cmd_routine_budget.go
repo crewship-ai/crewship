@@ -21,22 +21,38 @@ import (
 // budgetRow mirrors internal/api.budgetResponse / budgetSummaryRow —
 // both shapes fit in one struct since budgetSummaryRow is a strict
 // subset of budgetResponse's fields.
+//
+// The amounts are pointers because the server withholds them below ADMIN
+// (#3590): has_budget and over_budget stay, amounts are nil. nil is "not
+// shown to you", never "$0".
 type budgetRow struct {
-	Slug             string  `json:"slug" yaml:"slug"`
-	HasBudget        bool    `json:"has_budget" yaml:"has_budget"`
-	MonthlyBudgetUSD float64 `json:"monthly_budget_usd" yaml:"monthly_budget_usd"`
-	Month            string  `json:"month,omitempty" yaml:"month,omitempty"`
-	SpentUSD         float64 `json:"spent_usd" yaml:"spent_usd"`
-	PctUsed          float64 `json:"pct_used,omitempty" yaml:"pct_used,omitempty"`
-	OverBudget       bool    `json:"over_budget,omitempty" yaml:"over_budget,omitempty"`
+	Slug             string   `json:"slug" yaml:"slug"`
+	HasBudget        bool     `json:"has_budget" yaml:"has_budget"`
+	MonthlyBudgetUSD *float64 `json:"monthly_budget_usd" yaml:"monthly_budget_usd"`
+	Month            string   `json:"month,omitempty" yaml:"month,omitempty"`
+	SpentUSD         *float64 `json:"spent_usd" yaml:"spent_usd"`
+	PctUsed          *float64 `json:"pct_used,omitempty" yaml:"pct_used,omitempty"`
+	OverBudget       bool     `json:"over_budget,omitempty" yaml:"over_budget,omitempty"`
+}
+
+// amountsHidden reports a row whose figures the server withheld.
+func (r budgetRow) amountsHidden() bool { return r.SpentUSD == nil }
+
+const budgetAmountsHiddenNote = "  (amounts are visible to workspace OWNER and ADMIN)"
+
+func usdValue(p *float64) float64 {
+	if p == nil {
+		return 0
+	}
+	return *p
 }
 
 // budgetSummaryRowsResponse mirrors internal/api.budgetSummaryResponse.
 type budgetSummaryRowsResponse struct {
 	Month          string      `json:"month" yaml:"month"`
 	Routines       []budgetRow `json:"routines" yaml:"routines"`
-	TotalBudgetUSD float64     `json:"total_budget_usd" yaml:"total_budget_usd"`
-	TotalSpentUSD  float64     `json:"total_spent_usd" yaml:"total_spent_usd"`
+	TotalBudgetUSD *float64    `json:"total_budget_usd" yaml:"total_budget_usd"`
+	TotalSpentUSD  *float64    `json:"total_spent_usd" yaml:"total_spent_usd"`
 }
 
 var routineBudgetCmd = &cobra.Command{
@@ -91,17 +107,28 @@ var routineBudgetGetCmd = &cobra.Command{
 			return fmt.Errorf("decode response: %w", err)
 		}
 		return resolvedFormatter(cmd).AutoHuman(row, func() {
+			if row.amountsHidden() {
+				state := "no budget set"
+				if row.HasBudget {
+					state = "within budget"
+					if row.OverBudget {
+						state = "OVER BUDGET"
+					}
+				}
+				fmt.Printf("%s (%s): %s\n%s\n", row.Slug, row.Month, state, budgetAmountsHiddenNote)
+				return
+			}
 			if !row.HasBudget {
 				fmt.Printf("%s: no budget set (spent $%.2f this month, %s). Set one: crewship routine budget set %s --amount <N>\n",
-					row.Slug, row.SpentUSD, row.Month, row.Slug)
+					row.Slug, usdValue(row.SpentUSD), row.Month, row.Slug)
 				return
 			}
 			flag := ""
 			if row.OverBudget {
 				flag = "  OVER BUDGET"
 			}
-			fmt.Printf("%s (%s): %s\n", row.Slug, row.Month, budgetMeterBar(row.SpentUSD, row.MonthlyBudgetUSD))
-			fmt.Printf("  $%.2f of $%.2f (%.0f%%)%s\n", row.SpentUSD, row.MonthlyBudgetUSD, row.PctUsed, flag)
+			fmt.Printf("%s (%s): %s\n", row.Slug, row.Month, budgetMeterBar(usdValue(row.SpentUSD), usdValue(row.MonthlyBudgetUSD)))
+			fmt.Printf("  $%.2f of $%.2f (%.0f%%)%s\n", usdValue(row.SpentUSD), usdValue(row.MonthlyBudgetUSD), usdValue(row.PctUsed), flag)
 			fmt.Println("  (reporting only — does not stop or block runs; use the DSL's max_cost_usd for a hard per-run gate)")
 		})
 	},
@@ -147,7 +174,7 @@ var routineBudgetSetCmd = &cobra.Command{
 				fmt.Printf("Budget cleared for %s.\n", args[0])
 				return
 			}
-			fmt.Printf("Budget set for %s: $%.2f/month\n", args[0], row.MonthlyBudgetUSD)
+			fmt.Printf("Budget set for %s: $%.2f/month\n", args[0], usdValue(row.MonthlyBudgetUSD))
 			fmt.Println("(reporting only — this does not stop or block runs; use the DSL's max_cost_usd for a hard per-run gate)")
 		})
 	},
@@ -193,23 +220,30 @@ var routineBudgetSummaryCmd = &cobra.Command{
 		}
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(w, "ROUTINE\tBUDGET\tSPENT\tPCT\tSTATUS")
+		hidden := false
 		for _, r := range out.Routines {
 			budget := "—"
 			pct := "—"
 			status := ""
 			if r.HasBudget {
-				budget = fmt.Sprintf("$%.2f", r.MonthlyBudgetUSD)
-				pct = fmt.Sprintf("%.0f%%", r.PctUsed)
+				budget = usdOrDash("$%.2f", r.MonthlyBudgetUSD)
+				pct = usdOrDash("%.0f%%", r.PctUsed)
+				status = "ok"
 				if r.OverBudget {
 					status = "OVER"
 				}
 			}
-			fmt.Fprintf(w, "%s\t%s\t$%.2f\t%s\t%s\n", r.Slug, budget, r.SpentUSD, pct, status)
+			hidden = hidden || r.amountsHidden()
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", r.Slug, budget, usdOrDash("$%.2f", r.SpentUSD), pct, status)
 		}
 		if err := w.Flush(); err != nil {
 			return err
 		}
-		fmt.Printf("\n%s total: $%.2f spent of $%.2f budgeted\n", out.Month, out.TotalSpentUSD, out.TotalBudgetUSD)
+		if hidden || out.TotalSpentUSD == nil {
+			fmt.Println(budgetAmountsHiddenNote)
+		} else {
+			fmt.Printf("\n%s total: $%.2f spent of $%.2f budgeted\n", out.Month, usdValue(out.TotalSpentUSD), usdValue(out.TotalBudgetUSD))
+		}
 		fmt.Println("(reporting only — budgets do not stop or block runs; use each routine's DSL max_cost_usd for a hard per-run gate)")
 		return nil
 	},

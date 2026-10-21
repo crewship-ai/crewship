@@ -172,7 +172,7 @@ func (h *RunHandler) Get(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "enrich failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, enriched[0])
+	writeCostAwareJSON(w, r, http.StatusOK, enriched[0])
 }
 
 // List returns a paginated list of agent runs in the workspace with stats and optional filters.
@@ -252,7 +252,7 @@ func (h *RunHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, runListResponse{
+	writeCostAwareJSON(w, r, http.StatusOK, runListResponse{
 		Data:  runs,
 		Stats: runStats{Running: stats.Running, Today: stats.Today, Failed: stats.FailedToday},
 		Pagination: pagination{

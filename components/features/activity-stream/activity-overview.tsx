@@ -405,7 +405,7 @@ export function ActivityOverview({
                         <FeedRow {...rowProps(c.latest)} />
                       </div>
                       {c.count > 1 && (
-                        <span className="shrink-0 rounded-md bg-destructive/15 px-1.5 py-0.5 font-mono text-micro tabular-nums text-destructive">
+                        <span className="shrink-0 rounded-md bg-destructive/15 px-1.5 py-0.5 text-micro tabular-nums text-destructive">
                           ×{c.count}
                         </span>
                       )}
@@ -436,8 +436,8 @@ export function ActivityOverview({
                 : undefined
             }
             action={
-              <a href="/journal" className="text-primary-hover hover:underline">
-                Full journal →
+              <a href="/activity?section=log" className="text-primary-hover hover:underline">
+                Full log →
               </a>
             }
           >

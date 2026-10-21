@@ -83,21 +83,23 @@ Subcommand status:
 // adding fields server-side requires updating both sites, which is
 // the price of stable wire shape contracts.
 type pipelineRowJSON struct {
-	ID                   string   `json:"id" yaml:"id"`
-	Slug                 string   `json:"slug" yaml:"slug"`
-	Name                 string   `json:"name" yaml:"name"`
-	Description          string   `json:"description" yaml:"description"`
-	DSLVersion           string   `json:"dsl_version" yaml:"dsl_version"`
-	DefinitionHash       string   `json:"definition_hash" yaml:"definition_hash"`
-	Ephemeral            bool     `json:"ephemeral" yaml:"ephemeral"`
-	WorkspaceVisible     bool     `json:"workspace_visible" yaml:"workspace_visible"`
-	InvocationCount      int      `json:"invocation_count" yaml:"invocation_count"`
-	LastInvokedAt        *string  `json:"last_invoked_at" yaml:"last_invoked_at"`
-	LastInvocationStatus string   `json:"last_invocation_status" yaml:"last_invocation_status"`
-	AuthorCrewID         string   `json:"author_crew_id" yaml:"author_crew_id"`
-	AuthorAgentID        string   `json:"author_agent_id" yaml:"author_agent_id"`
-	AuthorUserID         string   `json:"author_user_id" yaml:"author_user_id"`
-	AuthoredVia          string   `json:"authored_via" yaml:"authored_via"`
+	ID                   string  `json:"id" yaml:"id"`
+	Slug                 string  `json:"slug" yaml:"slug"`
+	Name                 string  `json:"name" yaml:"name"`
+	Description          string  `json:"description" yaml:"description"`
+	DSLVersion           string  `json:"dsl_version" yaml:"dsl_version"`
+	DefinitionHash       string  `json:"definition_hash" yaml:"definition_hash"`
+	Ephemeral            bool    `json:"ephemeral" yaml:"ephemeral"`
+	WorkspaceVisible     bool    `json:"workspace_visible" yaml:"workspace_visible"`
+	InvocationCount      int     `json:"invocation_count" yaml:"invocation_count"`
+	LastInvokedAt        *string `json:"last_invoked_at" yaml:"last_invoked_at"`
+	LastInvocationStatus string  `json:"last_invocation_status" yaml:"last_invocation_status"`
+	AuthorCrewID         string  `json:"author_crew_id" yaml:"author_crew_id"`
+	AuthorAgentID        string  `json:"author_agent_id" yaml:"author_agent_id"`
+	AuthorUserID         string  `json:"author_user_id" yaml:"author_user_id"`
+	AuthoredVia          string  `json:"authored_via" yaml:"authored_via"`
+	// FolderID is the routine folder it is filed in (`routine folders`); list only.
+	FolderID             string   `json:"folder_id,omitempty" yaml:"folder_id,omitempty"`
 	Status               string   `json:"status" yaml:"status"`
 	CreatedAt            string   `json:"created_at" yaml:"created_at"`
 	UpdatedAt            string   `json:"updated_at" yaml:"updated_at"`
@@ -157,6 +159,13 @@ var pipelineListCmd = &cobra.Command{
 				sep = "&"
 			}
 			path += sep + "status=" + url.QueryEscape(status)
+		}
+		if search, _ := cmd.Flags().GetString("search"); strings.TrimSpace(search) != "" {
+			sep := "?"
+			if strings.Contains(path, "?") {
+				sep = "&"
+			}
+			path += sep + "q=" + url.QueryEscape(search)
 		}
 		resp, err := client.Get(path)
 		if err != nil {
@@ -763,7 +772,7 @@ var pipelineRunCmd = &cobra.Command{
 			Output         string            `json:"output" yaml:"output"`
 			StepOutputs    map[string]string `json:"step_outputs" yaml:"step_outputs"`
 			DurationMs     int64             `json:"duration_ms" yaml:"duration_ms"`
-			CostUSD        float64           `json:"cost_usd" yaml:"cost_usd"`
+			CostUSD        *float64          `json:"cost_usd" yaml:"cost_usd"` // nil below ADMIN (#3590)
 			FailedAtStep   string            `json:"failed_at_step" yaml:"failed_at_step"`
 			ErrorMessage   string            `json:"error_message" yaml:"error_message"`
 			WaitpointToken string            `json:"waitpoint_token" yaml:"waitpoint_token"`
@@ -845,7 +854,7 @@ var pipelineRunCmd = &cobra.Command{
 			}
 			return nil
 		}
-		fmt.Printf("Run %s: %s (%dms, $%.4f)\n", result.RunID, result.Status, result.DurationMs, result.CostUSD)
+		fmt.Printf("Run %s: %s (%dms, %s)\n", result.RunID, result.Status, result.DurationMs, usdOrDash("$%.4f", result.CostUSD))
 		if result.Status == "FAILED" {
 			fmt.Printf("  failed at step: %s\n  error: %s\n", result.FailedAtStep, result.ErrorMessage)
 			return fmt.Errorf("routine run failed")
@@ -969,8 +978,8 @@ func waitForPipelineRun(cmd *cobra.Command, client *cli.Client, runID string, ti
 		return nil
 	}
 
-	fmt.Printf("Run %s: %s (%dms, $%.4f)\n",
-		detail.ID, strings.ToUpper(detail.Status), detail.DurationMs, detail.CostUSD)
+	fmt.Printf("Run %s: %s (%dms, %s)\n",
+		detail.ID, strings.ToUpper(detail.Status), detail.DurationMs, usdOrDash("$%.4f", detail.CostUSD))
 	switch strings.ToLower(detail.Status) {
 	case "failed", "interrupted":
 		// Parity with agent runs (cmd_run.go): ping the operator who
@@ -1041,7 +1050,7 @@ var pipelineDryRunCmd = &cobra.Command{
 		// and "would this prompt do the right thing" is not a question you can
 		// answer from the first 300 characters.
 		return resolvedFormatter(cmd).AutoHuman(result, func() {
-			fmt.Printf("Dry run: %s (estimated %dms, $%.4f total)\n\n", result.Status, result.DurationMs, result.CostUSD)
+			fmt.Printf("Dry run: %s (estimated %dms, %s total)\n\n", result.Status, result.DurationMs, usdOrDash("$%.4f", result.CostUSD))
 			for i, s := range result.WouldExecute {
 				fmt.Printf("Step %d [%s] (%s):\n", i+1, s.StepID, s.StepType)
 				if s.WouldCallAgent != "" {
@@ -1091,7 +1100,7 @@ type dryRunStep struct {
 type dryRunResult struct {
 	Status       string       `json:"status" yaml:"status"`
 	DurationMs   int64        `json:"duration_ms" yaml:"duration_ms"`
-	CostUSD      float64      `json:"cost_usd" yaml:"cost_usd"`
+	CostUSD      *float64     `json:"cost_usd" yaml:"cost_usd"` // nil below ADMIN (#3590)
 	WouldExecute []dryRunStep `json:"would_execute" yaml:"would_execute"`
 }
 
@@ -1293,6 +1302,7 @@ func indent(s, prefix string) string {
 
 func init() {
 	pipelineListCmd.Flags().String("order", "popularity", "sort order: popularity | recent | name")
+	pipelineListCmd.Flags().String("search", "", "words that must all appear in a routine's name, slug, description or step text")
 	pipelineListCmd.Flags().String("tag", "", "filter routines by definition tag (cross-crew discovery)")
 	pipelineListCmd.Flags().String("status", "", "filter by governance status: active | proposed | disabled")
 	// No local --format flag here. It used to shadow the global one, taking

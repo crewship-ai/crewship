@@ -9,6 +9,10 @@ tag: Experimental
 Crewship pushes real-time updates — log streaming, chat token streams, and entity-change events — over a single token-authenticated WebSocket. Clients subscribe to typed channels (`workspace:{id}`, `session:{chatId}`, …); the server validates each subscription against database membership and fans state changes out to the subscribers. Most dashboard state arrives on the `workspace` channel, while a few high-fanout streams (chat, mission detail, files) use narrower channels.
 
 <Note>
+  Cost fields on this page are `OWNER` / `ADMIN` only. Other roles receive the same response with them left out — see [Who sees cost figures](/api-reference/paymaster#who-sees-cost-figures).
+</Note>
+
+<Note>
   Connecting requires a short-lived JWT from `GET /api/v1/ws-token` (itself session- or CLI-authenticated). The token is sent as the first message after the connection opens, not a URL query parameter -- a `?token=` would leak into proxy/access logs, browser history, and Referer headers. It is validated only at that point; the connection stays authenticated afterward.
 </Note>
 

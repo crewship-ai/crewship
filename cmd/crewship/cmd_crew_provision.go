@@ -444,11 +444,64 @@ func plural(n int) string {
 	return "s"
 }
 
+// provisionSummaryCrew mirrors one row of GET /api/v1/crews/provisioning-summary.
+type provisionSummaryCrew struct {
+	ID    string `json:"id" yaml:"id"`
+	Slug  string `json:"slug" yaml:"slug"`
+	Name  string `json:"name" yaml:"name"`
+	Error string `json:"error,omitempty" yaml:"error,omitempty"`
+}
+
+type provisionSummaryResponse struct {
+	Failed         []provisionSummaryCrew `json:"failed" yaml:"failed"`
+	NeedsProvision []provisionSummaryCrew `json:"needs_provision" yaml:"needs_provision"`
+	Total          int                    `json:"total" yaml:"total"`
+}
+
+var crewProvisionSummaryCmd = &cobra.Command{
+	Use:   "summary",
+	Short: "List the crews whose build failed or that still need a build",
+	Long: `One request for the whole workspace: the crews whose latest image build
+failed and the crews that have no built image yet. The Dashboard uses the same
+endpoint for its "crews need a rebuild" tile. For one crew's full state use
+'crewship crew provision status <slug>'.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		resp, err := client.Get("/api/v1/crews/provisioning-summary")
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var result provisionSummaryResponse
+		if err := cli.ReadJSON(resp, &result); err != nil {
+			return err
+		}
+		rows := make([][]string, 0, result.Total)
+		for _, c := range result.Failed {
+			rows = append(rows, []string{c.Slug, c.Name, "failed", c.Error})
+		}
+		for _, c := range result.NeedsProvision {
+			rows = append(rows, []string{c.Slug, c.Name, "needs_provision", ""})
+		}
+		return newFormatter().Auto(result, []string{"SLUG", "NAME", "STATE", "ERROR"}, rows)
+	},
+}
+
 func init() {
 	crewProvisionCmd.Flags().Bool("no-watch", false, "do not watch progress; return immediately after triggering")
 	crewProvisionStatusCmd.Flags().Bool("watch", false, "stream live progress until the build completes")
 	crewRebuildCmd.Flags().Bool("no-watch", false, "do not watch progress; return immediately after triggering")
 	crewProvisionCmd.AddCommand(crewProvisionStatusCmd)
+	crewProvisionCmd.AddCommand(crewProvisionSummaryCmd)
 	crewCmd.AddCommand(crewProvisionCmd)
 	crewCmd.AddCommand(crewRebuildCmd)
 	crewCmd.AddCommand(crewRestartAgentsCmd)

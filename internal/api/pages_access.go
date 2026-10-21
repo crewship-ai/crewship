@@ -126,6 +126,12 @@ func (h *PageHandler) PageAccess(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
+	r, read, ready := h.beginPageMetadataRead(w, r)
+	if !ready {
+		return
+	}
+	defer read.tx.Rollback()
+
 	wsID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 	rec, ok := h.grantPage(w, r, wsID)
@@ -201,6 +207,10 @@ func (h *PageHandler) PageAccess(w http.ResponseWriter, r *http.Request) {
 		last := subjects[end-1]
 		out.NextCursor = encodePageAccessCursor(last.SubjectType + "|" + last.SubjectID)
 	}
+	if !h.finishMetadataRead(w, r, read) {
+		return
+	}
+
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -211,21 +221,57 @@ func (h *PageHandler) PageAccess(w http.ResponseWriter, r *http.Request) {
 // for another person is that person's ACL across the workspace, which §4 keeps
 // to administrators.
 func (h *PageHandler) SubjectAccess(w http.ResponseWriter, r *http.Request) {
+	if UserFromContext(r.Context()) == nil {
+		replyError(w, 401, "Unauthorized")
+		return
+	}
+
+	for attempt := 0; attempt < 2; attempt++ {
+		request, b, err := h.startMetadataRead(r, attempt == 1)
+		if err != nil {
+			replyInternalError(w, h.logger, "begin subject metadata read", err)
+			return
+		}
+		out, private, ok := h.prepareSubjectAccess(w, request)
+		if !ok {
+			b.tx.Rollback()
+			return
+		}
+		if len(private) > 0 && !b.writer {
+			b.tx.Rollback()
+			continue
+		}
+		for _, rec := range private {
+			if !h.auditPrivateOwnerAccess(w, request, rec) {
+				b.tx.Rollback()
+				return
+			}
+		}
+		if !h.finishMetadataRead(w, request, b) {
+			b.tx.Rollback()
+			return
+		}
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+}
+
+func (h *PageHandler) prepareSubjectAccess(w http.ResponseWriter, r *http.Request) (pageSubjectAccessWire, []*pageRecord, bool) {
 	user := UserFromContext(r.Context())
 	if user == nil {
 		replyError(w, http.StatusUnauthorized, "Unauthorized")
-		return
+		return pageSubjectAccessWire{}, nil, false
 	}
 	wsID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 
 	subjectType, ref, ok := pageAccessSubjectParam(w, r)
 	if !ok {
-		return
+		return pageSubjectAccessWire{}, nil, false
 	}
 	limit, after, ok := pageAccessPaging(w, r)
 	if !ok {
-		return
+		return pageSubjectAccessWire{}, nil, false
 	}
 	subjectID, label, err := h.resolveGrantSubjectQuietly(r.Context(), wsID, subjectType, ref)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -235,51 +281,51 @@ func (h *PageHandler) SubjectAccess(w http.ResponseWriter, r *http.Request) {
 		// a member. But an admin gets the honest miss.
 		if !canRole(role, "manage") {
 			replyError(w, http.StatusForbidden, pageSubjectAccessRefusal)
-			return
+			return pageSubjectAccessWire{}, nil, false
 		}
 		replyError(w, http.StatusNotFound, fmt.Sprintf("%s/%s does not exist in this workspace", subjectType, ref))
-		return
+		return pageSubjectAccessWire{}, nil, false
 	}
 	if err != nil {
 		replyInternalError(w, h.logger, "resolve access subject", err)
-		return
+		return pageSubjectAccessWire{}, nil, false
 	}
 	if !canRole(role, "manage") && !(subjectType == pageSubjectUser && subjectID == user.ID) {
 		replyError(w, http.StatusForbidden, pageSubjectAccessRefusal)
-		return
+		return pageSubjectAccessWire{}, nil, false
 	}
 
 	pagesByID, order, err := h.loadAccessPages(r.Context(), wsID)
 	if err != nil {
 		replyInternalError(w, h.logger, "list pages for access", err)
-		return
+		return pageSubjectAccessWire{}, nil, false
 	}
 	panelsByPage, err := h.loadPanelsIn(r.Context(), wsID, pagesInWorkspace(wsID))
 	if err != nil {
 		replyInternalError(w, h.logger, "load page panels", err)
-		return
+		return pageSubjectAccessWire{}, nil, false
 	}
 	crewSlugs, err := h.loadCrewSlugs(r.Context(), wsID)
 	if err != nil {
 		replyInternalError(w, h.logger, "load crew slugs", err)
-		return
+		return pageSubjectAccessWire{}, nil, false
 	}
 	grantsByPage, err := h.loadPageGrantRecordsIn(r.Context(), wsID, "")
 	if err != nil {
 		replyInternalError(w, h.logger, "load page grants", err)
-		return
+		return pageSubjectAccessWire{}, nil, false
 	}
 	// Folders and their ACL, once for the workspace: the `folder:<slug>` arm
 	// of pageReach (#2533) is a path like any other and has to appear here.
 	folders, err := h.loadFoldersIn(r.Context(), wsID)
 	if err != nil {
 		replyInternalError(w, h.logger, "load folders", err)
-		return
+		return pageSubjectAccessWire{}, nil, false
 	}
 	folderACL, err := h.loadFolderACLIn(r.Context(), wsID)
 	if err != nil {
 		replyInternalError(w, h.logger, "load folder permissions", err)
-		return
+		return pageSubjectAccessWire{}, nil, false
 	}
 
 	// The subject's standing, per kind: a user's is the same viewer the index
@@ -290,13 +336,28 @@ func (h *PageHandler) SubjectAccess(w http.ResponseWriter, r *http.Request) {
 		viewer, err = h.loadAccessUserViewer(r.Context(), wsID, subjectID)
 		if err != nil {
 			replyInternalError(w, h.logger, "load subject viewer", err)
-			return
+			return pageSubjectAccessWire{}, nil, false
 		}
 	}
 
 	var rows []pageAccessPageWire
+	privateBySlug := map[string]*pageRecord{}
+	var privateCaller *pageViewer
 	for _, id := range order {
 		rec := pagesByID[id]
+		if rec.PrivateAudience {
+			if privateCaller == nil {
+				liveRole, err := h.liveContentHumanRole(r.Context(), wsID, user.ID)
+				if err != nil {
+					replyInternalError(w, h.logger, "authorize private access report", err)
+					return pageSubjectAccessWire{}, nil, false
+				}
+				privateCaller = &pageViewer{UserID: user.ID, Role: liveRole}
+			}
+			if !privatePageViewer(rec, privateCaller) {
+				continue
+			}
+		}
 		ownerCrewSlug := ""
 		if rec.OwnerCrewID != "" {
 			ownerCrewSlug = crewSlugs[rec.OwnerCrewID]
@@ -313,12 +374,18 @@ func (h *PageHandler) SubjectAccess(w http.ResponseWriter, r *http.Request) {
 			paths = pageAccessCrewPaths(rec, subjectID, label, panelsByPage[rec.ID],
 				folderCrewReachSlug(rec, folders, folderACL, subjectID), grantsByPage[rec.ID])
 		default:
+			if rec.PrivateAudience {
+				continue
+			}
 			paths = pageAccessAgentPaths(subjectID, grantsByPage[rec.ID])
 		}
 		if len(paths) == 0 {
 			continue
 		}
 		rows = append(rows, pageAccessPageWire{Slug: rec.Slug, Name: rec.Name, Paths: paths})
+		if rec.PrivateAudience {
+			privateBySlug[rec.Slug] = rec
+		}
 	}
 
 	start := 0
@@ -345,7 +412,13 @@ func (h *PageHandler) SubjectAccess(w http.ResponseWriter, r *http.Request) {
 	if end < len(rows) {
 		out.NextCursor = encodePageAccessCursor(rows[end-1].Slug)
 	}
-	writeJSON(w, http.StatusOK, out)
+	emitted := make([]*pageRecord, 0)
+	for _, wire := range out.Pages {
+		if rec := privateBySlug[wire.Slug]; rec != nil {
+			emitted = append(emitted, rec)
+		}
+	}
+	return out, emitted, true
 }
 
 // ── Deriving the paths ─────────────────────────────────────────────────────
@@ -356,6 +429,9 @@ func (h *PageHandler) SubjectAccess(w http.ResponseWriter, r *http.Request) {
 // user or one of their crews follow in the level vocabulary's order.
 func (h *PageHandler) pageAccessUserPaths(rec *pageRecord, ownerCrewSlug string, panels []*panelRecord,
 	viewer *pageViewer, folderSlug string, grants []pageGrantRecord) []string {
+	if rec.PrivateAudience {
+		return h.pageReach(rec, ownerCrewSlug, panels, viewer, "", false)
+	}
 	paths := h.pageReach(rec, ownerCrewSlug, panels, viewer, folderSlug, false)
 	return append(paths, pageAccessGrantPaths(grants, pageViewerGrantMatch(viewer))...)
 }
@@ -367,6 +443,9 @@ func (h *PageHandler) pageAccessUserPaths(rec *pageRecord, ownerCrewSlug string,
 // the crew is named, never at which level — the same rendering a user's row
 // gets — so a view-only entry and a can-edit entry read alike here.
 func pageAccessCrewPaths(rec *pageRecord, crewID, slug string, panels []*panelRecord, folderSlug string, grants []pageGrantRecord) []string {
+	if rec.PrivateAudience {
+		return nil
+	}
 	var paths []string
 	if rec.OwnerCrewID != "" && rec.OwnerCrewID == crewID {
 		paths = append(paths, pageReachOwner)
@@ -499,7 +578,7 @@ func (h *PageHandler) loadAccessWorkspace(ctx context.Context, wsID string) (*pa
 // accessRows runs one statement and hands each row to scan, closing the
 // cursor on every path.
 func (h *PageHandler) accessRows(ctx context.Context, query string, args []any, scan func(*sql.Rows) error) error {
-	rows, err := h.db.QueryContext(ctx, query, args...)
+	rows, err := h.pageAuthReader(ctx).QueryContext(ctx, query, args...)
 	if err != nil {
 		return err
 	}
@@ -587,6 +666,9 @@ func (h *PageHandler) pageAccessSubjects(rec *pageRecord, ws *pageAccessWorkspac
 		return agents[i].id < agents[j].id
 	})
 	for _, a := range agents {
+		if rec.PrivateAudience {
+			continue
+		}
 		paths := pageAccessAgentPaths(a.id, grants)
 		if len(paths) == 0 {
 			continue
@@ -688,8 +770,8 @@ func (h *PageHandler) loadAccessPages(ctx context.Context, wsID string) (map[str
 	// folder_id is read here because folderReachSlug keys on it: without it
 	// the `folder:<slug>` arm is silently empty and a subject who reaches a
 	// page only through its folder's ACL is missing from the report.
-	rows, err := h.db.QueryContext(ctx, `
-		SELECT id, slug, name, COALESCE(owner_user_id, ''), COALESCE(owner_crew_id, ''), COALESCE(folder_id, '')
+	rows, err := h.pageAuthReader(ctx).QueryContext(ctx, `
+		SELECT id, slug, name, COALESCE(owner_user_id, ''), COALESCE(owner_crew_id, ''), COALESCE(folder_id, ''), private_audience
 		FROM pages WHERE workspace_id = ? ORDER BY slug ASC`, wsID)
 	if err != nil {
 		return nil, nil, err
@@ -699,7 +781,7 @@ func (h *PageHandler) loadAccessPages(ctx context.Context, wsID string) (map[str
 	var order []string
 	for rows.Next() {
 		var p pageRecord
-		if err := rows.Scan(&p.ID, &p.Slug, &p.Name, &p.OwnerUserID, &p.OwnerCrewID, &p.FolderID); err != nil {
+		if err := rows.Scan(&p.ID, &p.Slug, &p.Name, &p.OwnerUserID, &p.OwnerCrewID, &p.FolderID, &p.PrivateAudience); err != nil {
 			return nil, nil, err
 		}
 		byID[p.ID] = &p
@@ -712,11 +794,11 @@ func (h *PageHandler) loadAccessPages(ctx context.Context, wsID string) (map[str
 // role comes from the membership row rather than from the request context.
 func (h *PageHandler) loadAccessUserViewer(ctx context.Context, wsID, userID string) (*pageViewer, error) {
 	v := &pageViewer{UserID: userID, Crews: map[string]bool{}}
-	if err := h.db.QueryRowContext(ctx,
+	if err := h.pageAuthReader(ctx).QueryRowContext(ctx,
 		`SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?`, wsID, userID).Scan(&v.Role); err != nil {
 		return nil, err
 	}
-	rows, err := h.db.QueryContext(ctx, `
+	rows, err := h.pageAuthReader(ctx).QueryContext(ctx, `
 		SELECT cm.crew_id
 		FROM crew_members cm
 		JOIN crews c ON c.id = cm.crew_id

@@ -108,6 +108,7 @@ Returns every workspace the authenticated user belongs to, ordered by `created_a
     "allow_privileged_credentials": false,
     "run_retention_days": null,
     "pages_theme": { "accent": "#0f766e" },
+    "appearance_default": { "style": "slate", "accent": "teal", "theme": "dark" },
     "_count": { "crews": 4, "agents": 12, "members": 7 },
     "_count_crews": 4,
     "_count_agents": 12,
@@ -132,6 +133,7 @@ Returns every workspace the authenticated user belongs to, ordered by `created_a
 | `audit_log_retention_days` | integer? | Days of `audit_logs` history to keep. `null` **and** `0` both mean keep forever — that is the default, because `audit_logs` is the compliance trail. Present on Update responses. |
 | `approvals_retention_days` | integer? | Days of decided `approvals_queue` history to keep. `null` uses the 90-day default; `0` means keep forever, same as the audit pair above. Present on Update responses. |
 | `pages_theme` | object | The shared Page colours, `{ "accent": "#RRGGBB", … }` over the keys `accent`, `background`, `surface`, `text`, `muted`, `border`. `{}` when unset — the Page SDK then uses its defaults. Always present. |
+| `appearance_default` | object | The workspace default look, `{ "style", "knobs", "accent", "theme" }`, each optional. `{}` when unset. Members inherit each value they have not chosen themselves. Always present. |
 | `_count` | object | Canonical nested usage counts: `{ crews, agents, members }`. Always present (zeros included). Prefer this over the flat keys below. |
 | `_count_crews` | integer | Deprecated flat alias for `_count.crews` (omitted when `0`; retained one release for back-compat) |
 | `_count_agents` | integer | Deprecated flat alias for `_count.agents` (omitted when `0`) |
@@ -207,6 +209,7 @@ Partial update -- only provided fields are changed. Setting `preferred_language`
 | `audit_log_retention_days` | integer | Days to keep `audit_logs`. `0` is legal and means keep forever. Negative is rejected. |
 | `approvals_retention_days` | integer | Days of decided `approvals_queue` history to keep. `0` is legal and means keep forever. Negative is rejected, and so is anything above `106751` (~292 years) — that is where `days * 24h` overflows an `int64`-nanosecond `time.Duration` and wraps negative, which would move the sweep's cutoff into the future and delete every terminal row regardless of age. |
 | `pages_theme` | object | The shared colours every custom Page application reads through its `--crewship-page-*` design tokens (the **Settings → General → Pages appearance** card; CLI: `crewship workspace update --pages-theme`). A JSON object whose keys are a subset of `accent`, `background`, `surface`, `text`, `muted`, `border` and whose values are `#RRGGBB`. It **replaces** the stored object; omitted keys inherit the SDK defaults and `{}` resets everything. Anything else — another key, a named colour, a string instead of an object, more than 1 KiB — is a 400 naming the rule. Appearance only: no CSS, URLs or execution settings travel here. A change reaches open Pages without rebuilding them. |
+| `appearance_default` | object | The default look for members who have not chosen their own (**Settings → Appearance → Workspace default**; CLI: `crewship workspace update --appearance-default`). A JSON object with optional keys `style` and `accent` (ids of lowercase letters, digits and dashes, up to 32), `theme` (`dark`, `light` or `system`) and `knobs` (up to 16 string values of up to 64 characters, keyed by id). The object **replaces** the stored one and `{}` resets it. Unknown keys, other shapes or more than 2 KiB are `400`. Style, accent and knob ids are not checked against a list: a client that does not know one shows the built-in look. `OWNER`/`ADMIN` only (`403` otherwise), and audited. |
 
 <Note>
 `0` behaves differently on `run_retention_days` than on the other three:
@@ -2627,3 +2630,93 @@ CLI: `crewship routine shared-runs <routine-id-or-slug> [run-id]`.
 `GET /api/v1/workspaces/{workspaceId}/access/presets` returns `{presets: [{definition, definition_hash}]}`. Each definition includes its immutable `preset_id`, `version`, resource `kind`, managed operations, and explicit level bundles. The read requires the same live trusted workspace OWNER/ADMIN authority and `workspace:admin` credential scope as member-policy GET. Responses are `Cache-Control: no-store`. Listing does not change grants, membership revisions or saved selections.
 
 Catalog responses: `200` returns the definitions; `400` rejects invalid workspace context; `401` requires authentication; `403` rejects insufficient credential scope or route authority; `404` hides unavailable workspaces or live administrative authority; `500` reports an internal database failure.
+
+### Informational preset selections
+
+Administrative member access GET/PUT responses include `preset_selections: []` or saved selection entries (`id`, `kind`, `resource_id`, `preset_id`, `version`, `level`, `definition_hash`, `selected_at`, optional `selected_by`, and `state`). Entries describe saved intent, not effective authority. A manual PUT may round-trip this read-only field but cannot create or rewrite a selection through it; the response is computed from stored canonical state. Own-access responses omit the administrative metadata.
+
+
+## Preview member access preset
+
+`POST /api/v1/workspaces/{workspaceId}/members/{memberId}/access/presets/preview` is read-only. It requires current active trusted OWNER/ADMIN authority, the existing administrative GET credential boundary (`workspace:admin` for scoped credentials) and an existing restricted member. Responses use `Cache-Control: no-store`. Submit:
+
+```json
+{"membership_id":"current-member-row","revision":9,"resource":{"kind":"project","id":"project-id"},"preset_id":"project-levels","preset_version":1,"level":"manage","reissue":[]}
+```
+
+Only this resource's managed operations change in the proposed policy. Unrelated and orthogonal rights remain intact. Explicit reissue names a retained managed right, never an unrelated or newly added right. Bounded strict JSON rejects unknown and trailing input.
+
+The response includes `selection`, `definition_hash`, nullable `current_selection`, complete `before` provenance, `changes`, `after_rights`, `orthogonal_rights`, `warnings` and `confirmation_digest`. One snapshot binds membership incarnation/revision, caller/issuer authority, role floors, resource state and exact consequences. Display names and future application timestamps are not authority; the digest never authorizes a write.
+
+Warnings explain Results history, conditional retained issue deletion, runtime gates and draft-only Edit. Preview changes no grants, choices, member revisions or policy audit; ordinary credential-use accounting still applies. Application uses the separate confirmed endpoint described below.
+
+Malformed/version/reissue/trusted-target input returns400; stale membership revision returns409 requiring a fresh preview; hidden/foreign targets return404 without their identities; administrative credential denial returns403. Database errors return500.
+
+## Apply a confirmed member access preset
+
+`POST /api/v1/workspaces/{workspaceId}/members/{memberId}/access/presets/apply` requires the same current trusted workspace administrator and `workspace:admin` credential scope as policy replacement. Submit only `{selection: <normalized preview selection>, confirmation_digest: <exact preview checksum>}`. Bounded strict JSON rejects unknown and trailing fields. The existing restricted membership and immutable version/level must still match.
+
+The server recomputes the whole preview in the writer transaction and compares its digest before replacing canonical managed grants. Unrelated rights and unchanged grant IDs/issuers/timestamps remain intact; only deliberately named retained managed rights are reissued as the authenticated actor. It never changes mode, role or future publication authority. Canonical replacement, complete provenance/preset audit and final informational selection commit once. Any audit/selection failure rolls back all grants, revisions and metadata. The no-store response is the current complete administrative member policy with server-computed selections.
+
+Malformed consent returns400; changed membership/authority/resource/consequences returns409 and requires a new reviewed preview; foreign/hidden targets return404; credential denial returns403; transactional failures return500 without partial writes. The server never substitutes a refreshed revision or automatic reissue. On an uncertain network outcome, read current policy before producing new consent.
+
+## Human-owned content custody
+
+`GET /api/v1/workspaces/{workspaceId}/page-ownership` lists human-owned
+content that requires explicit succession. Workspace owners and administrators
+can review its current owner and eligible successors. The endpoint returns
+metadata and current readers, without document, HTML, or drawing source.
+Use `owner_user_id`, `limit` (1–100, default 25), and the returned `next_cursor`
+to review one owner's content across pages. Keep the owner filter unchanged
+when following the cursor. Responses use `Cache-Control: no-store`.
+
+`POST /api/v1/workspaces/{workspaceId}/page-ownership/{pageID}` accepts
+`expected_owner_user_id` and `successor_user_id`. The successor must already
+have current read access and be an active trusted human workspace member.
+The server rechecks the actor, original owner and successor inside the transfer
+transaction. An owner changed since review returns 409. The operation preserves
+content and grant records; each existing grant still requires its issuer's
+current authority. Transferring ownership does not reveal linked source content.
+
+Documents, Slides, Boards and static Artifacts retain human custody when their
+storage is present. Ordinary Pages retain their existing succession behavior.
+An owner departure that would remove private content custody returns a conflict
+until the affected content has been transferred. Instance administration alone
+does not expose workspace-private names or successor contacts.
+
+CLI: `crewship workspace page-ownership list` and
+`crewship workspace page-ownership transfer <page-id>`.
+
+Scoped CLI credentials need `workspace:admin` for both listing and transfer.
+`workspace:*` and unrestricted tokens also carry this authority. Session callers
+need a current trusted workspace OWNER or ADMIN session.
+
+## Artifact creation policy
+
+Workspace administrators can configure which crews may participate in agent
+artifact creation. The policy starts disabled with an empty crew allowlist and
+version `0`. This administrative ceiling does not itself authorize an agent run;
+creation also requires the run's human consent and content permissions.
+
+`GET /api/v1/workspaces/{workspaceId}/artifact-creation-policy` returns
+`enabled`, sorted `crew_ids`, and `version`.
+`PUT /api/v1/workspaces/{workspaceId}/artifact-creation-policy` accepts a request
+body of at most 64 KiB and requires all
+three request fields: `enabled`, the complete `crew_ids` allowlist, and
+`base_version` from the last read. A stale version returns `409` with
+`code: "stale_policy"`; read the latest policy before deciding on a replacement.
+Only active crews from the selected workspace are accepted. Responses use
+`Cache-Control: no-store`. CLI access requires `workspace:admin`.
+
+Use `crewship workspace artifact-policy show`, then explicitly replace the
+policy with `crewship workspace artifact-policy set --base-version <version>
+--enabled=true --crew-id <crew-id>`. To disable creation and empty the allowlist,
+use `--enabled=false --clear-crews` with the reviewed `--base-version`.
+Workspace backups preserve this configuration and remap the allowed crews when
+restoring into a new workspace; live run principals require fresh admission.
+
+Authentication: a current trusted workspace OWNER or ADMIN session, or a CLI
+credential carrying `workspace:admin`. Statuses: 200 saved/read policy; 400 invalid
+request or crews; 401 invalid human credential; 403 insufficient current role or
+scope; 404 wrong workspace; 409 stale policy version; 413 body exceeds 64 KiB;
+500 unavailable storage.

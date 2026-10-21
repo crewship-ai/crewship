@@ -59,20 +59,20 @@ export function RestrictedMemory({ chatId, workspaceId, userId, refreshKey }: { 
   }
 
   return <details className="shrink-0 border-t px-4 py-2 text-sm">
-    <summary className="cursor-pointer coarse:min-h-12">Conversation memory</summary>
+    <summary className="cursor-pointer coarse:min-h-[44px]">Conversation memory</summary>
     <p className="py-2 text-xs text-muted-foreground">Notes are used in this conversation. Exports include the latest 256 authorized context versions.</p>
-    <input aria-label="Search conversation memory" className="w-full rounded border bg-background p-2 coarse:min-h-12" value={search} maxLength={256} onChange={event => setSearch(event.target.value)} />
+    <input aria-label="Search conversation memory" className="w-full rounded border bg-background p-2 coarse:min-h-[44px]" value={search} maxLength={256} onChange={event => setSearch(event.target.value)} />
     {error && <p role="alert" className="py-2 text-destructive">{error}</p>}
     <ul className="max-h-40 overflow-auto">{entries.map(entry => <li key={entry.id} className="border-b py-2">
       <p className="whitespace-pre-wrap break-words">{entry.content}</p>
       <span className="text-xs text-muted-foreground">{entry.created_at}</span>
-      {entry.created_by === userId && <button type="button" className="ml-2 rounded border px-3 py-1 coarse:min-h-12" disabled={busy} onClick={() => void change(entry.id)}>Remove note</button>}
+      {entry.created_by === userId && <button type="button" className="ml-2 rounded border px-3 py-1 coarse:min-h-[44px]" disabled={busy} onClick={() => void change(entry.id)}>Remove note</button>}
     </li>)}</ul>
     <textarea aria-label="New conversation memory" className="mt-2 w-full rounded border bg-background p-2" value={draft} maxLength={8192} onChange={event => setDraft(event.target.value)} />
     <div className="flex flex-wrap gap-2 py-2">
-      <button type="button" className="rounded border px-3 py-1 coarse:min-h-12" disabled={busy || !draft.trim()} onClick={() => void change()}>Save note</button>
-      <button type="button" className="rounded border px-3 py-1 coarse:min-h-12" disabled={busy} onClick={() => setRefresh(value => value + 1)}>Refresh memory</button>
-      <button type="button" className="rounded border px-3 py-1 coarse:min-h-12" disabled={busy} onClick={() => void exportContext()}>Export context versions</button>
+      <button type="button" className="rounded border px-3 py-1 coarse:min-h-[44px]" disabled={busy || !draft.trim()} onClick={() => void change()}>Save note</button>
+      <button type="button" className="rounded border px-3 py-1 coarse:min-h-[44px]" disabled={busy} onClick={() => setRefresh(value => value + 1)}>Refresh memory</button>
+      <button type="button" className="rounded border px-3 py-1 coarse:min-h-[44px]" disabled={busy} onClick={() => void exportContext()}>Export context versions</button>
     </div>
   </details>
 }

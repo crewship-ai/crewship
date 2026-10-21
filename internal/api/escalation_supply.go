@@ -215,13 +215,9 @@ func (h *QueryHandler) SupplyEscalationCredential(w http.ResponseWriter, r *http
 			level = body.SecurityLevel
 		}
 		credName = name
-		// Mirror createPendingCredential: a soft-deleted namesake is cleared so
-		// the UNIQUE(workspace_id, name) constraint cannot trip; a live one is a
-		// conflict the human resolves by hand (never auto-rename a secret).
-		if _, err := tx.ExecContext(r.Context(),
-			"DELETE FROM credentials WHERE workspace_id = ? AND name = ? AND deleted_at IS NOT NULL",
-			workspaceID, credName); err != nil {
-			replyInternalError(w, h.logger, "supply credential: clear soft-deleted namesake", err)
+		// Preserve the retired identity and its audit while freeing the name.
+		if err := releaseCredentialNameIn(r.Context(), tx, workspaceID, credName); err != nil {
+			replyInternalError(w, h.logger, "supply credential: release retired name", err)
 			return
 		}
 		var existing int

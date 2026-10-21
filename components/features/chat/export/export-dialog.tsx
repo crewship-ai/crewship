@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
 import { Download, FileText, Copy } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { Button } from "@/components/ui/button"
 import {

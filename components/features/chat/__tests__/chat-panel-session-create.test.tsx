@@ -35,7 +35,7 @@ const chatStub = {
   regenerateLastTurn: vi.fn(),
   editAndResend: vi.fn(),
   loadHistory: vi.fn(),
-  markHistoryUnavailable: vi.fn(),
+  markHistoryUnavailable: vi.fn(), markHistoryDenied: vi.fn(),
   resubscribeSession,
   isStreaming: false,
   connectionStatus: "connected",
@@ -360,8 +360,8 @@ describe("ChatPanel — the first send creates the row, whatever the history sai
   // EnsureChatSessionProvider), so the panel cannot word it per caller. The
   // wording therefore has to be true for both: the conversation could not be
   // started. What did not happen next — no message, no attachment — is said by
-  // the caller that knows, which for the upload is the per-file toast and the
-  // error chip.
+  // the caller that knows, which for the upload is the error chip and the
+  // composer notice.
   it("does not claim a message was sent when the create fails during an upload", async () => {
     createStatus = 500
     useComposerStore.setState({ attachments: {}, drafts: {} })
@@ -378,18 +378,12 @@ describe("ChatPanel — the first send creates the row, whatever the history sai
     // The create was attempted and refused — this is the upload path reaching
     // ensureSession, not a send.
     await waitFor(() => expect(creates).toHaveLength(1))
-    await waitFor(() => expect(toastError).toHaveBeenCalled())
-
-    const said = toastError.mock.calls
-      .map(([title, opts]) => `${title} ${JSON.stringify(opts ?? {})}`)
-      .join("\n")
-
-    // Nothing may describe a message. The user attached a file.
-    expect(said).not.toMatch(/message/i)
+    // No toast: the chip says Upload failed and the inline notice names the
+    // file, so nothing can cover Retry and nothing claims a message was sent.
+    await waitFor(() => expect(screen.getByRole("note").textContent).toContain("receipt.pdf"))
+    expect(toastError).not.toHaveBeenCalled()
+    const said = screen.getByRole("note").textContent ?? ""
     expect(said).not.toMatch(/wasn't sent|was not sent/i)
-    // And the thing that DID fail is still named.
-    expect(said).toMatch(/conversation/i)
-    expect(said).toContain("receipt.pdf")
     expect(sendMessage).not.toHaveBeenCalled()
   })
 

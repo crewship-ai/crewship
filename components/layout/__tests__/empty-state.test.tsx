@@ -1,52 +1,49 @@
-import { describe, it, expect } from "vitest"
-import { render, screen } from "@testing-library/react"
-import { Workflow } from "lucide-react"
+import { describe, it, expect, vi } from "vitest"
+import { render, screen, fireEvent } from "@testing-library/react"
+import { Webhook } from "lucide-react"
 
-import { EmptyState } from "@/components/layout/empty-state"
+import { EmptyState } from "../empty-state"
 
-// The merged EmptyState (#3344) keeps every prop either former component
-// offered: icon/title/description/size/className/children from the layout
-// one, `action` and an optional description from the ui/detail one.
-
-describe("<EmptyState>", () => {
-  it("wraps in a card by default and renders children", () => {
-    const { container } = render(
-      <EmptyState icon={Workflow} title="No crews" description="Create one.">
-        <button>Create crew</button>
-      </EmptyState>,
-    )
-    expect(screen.getByRole("heading", { name: "No crews" })).toBeInTheDocument()
-    expect(screen.getByText("Create one.")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Create crew" })).toBeInTheDocument()
-    expect(container.querySelector("[data-slot=card]")).not.toBeNull()
+// RT-10 / COM: the one EmptyState has a compact size (flush with the surface,
+// for a tab or a card body) and an `action` slot for its one button.
+describe("EmptyState", () => {
+  it("compact is flush: no Card around it, marked data-size=compact", () => {
+    render(<EmptyState size="compact" icon={Webhook} title="No webhooks yet" description="Create one." />)
+    const root = screen.getByRole("heading", { name: "No webhooks yet" }).closest("[data-slot=empty-state]")!
+    expect(root).toHaveAttribute("data-size", "compact")
+    expect(root.closest("[data-slot=card]")).toBeNull()
   })
 
-  it("renders flush with size=inline", () => {
-    const { container } = render(<EmptyState icon={Workflow} title="Nothing" description="Here" size="inline" className="x-inline" />)
-    expect(container.firstElementChild).toHaveClass("x-inline")
-    expect(container.querySelector("[data-slot=card]")).toBeNull()
+  it("the card size keeps the Card", () => {
+    render(<EmptyState icon={Webhook} title="Nothing" description="Here." />)
+    const root = screen.getByRole("heading", { name: "Nothing" }).closest("[data-slot=empty-state]")!
+    expect(root).toHaveAttribute("data-size", "card")
+    expect(root.closest("[data-slot=card]")).not.toBeNull()
   })
 
-  it("compact keeps the former detail-kit register: title, description and action", () => {
-    render(
-      <EmptyState icon={Workflow} size="compact" title="Nothing yet" description="Description" action={<button>Add</button>} />,
-    )
-    expect(screen.getByText("Nothing yet")).toHaveClass("text-body", "font-medium")
-    expect(screen.getByText("Description")).toHaveClass("type-row")
-    expect(screen.getByRole("button", { name: "Add" }).parentElement).toHaveClass("mt-4")
+  it("renders the action under the description and it works", () => {
+    const onClick = vi.fn()
+    render(<EmptyState size="compact" icon={Webhook} title="T" description="D" action={<button type="button" onClick={onClick}>Add webhook</button>} />)
+    const btn = screen.getByRole("button", { name: "Add webhook" })
+    expect(btn.closest("[data-slot=empty-state-action]")).not.toBeNull()
+    const text = screen.getByText("D")
+    expect(text.compareDocumentPosition(btn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    fireEvent.click(btn)
+    expect(onClick).toHaveBeenCalledOnce()
   })
 
-  it("description is optional in every size", () => {
-    for (const size of ["card", "inline", "compact"] as const) {
-      const { container, unmount } = render(<EmptyState icon={Workflow} size={size} title="Only a title" />)
-      expect(screen.getByText("Only a title")).toBeInTheDocument()
-      expect(container.querySelector("p")).toBeNull()
-      unmount()
-    }
+  it("keeps the old inline size working as the same flush layout", () => {
+    render(<EmptyState size="inline" icon={Webhook} title="Old" description="Caller." />)
+    expect(screen.getByRole("heading", { name: "Old" }).closest("[data-slot=empty-state]")).toHaveAttribute("data-size", "compact")
   })
+})
 
-  it("renders action under the copy outside compact too", () => {
-    render(<EmptyState icon={Workflow} size="inline" title="Empty" description="d" action={<button>Go</button>} />)
-    expect(screen.getByRole("button", { name: "Go" }).parentElement).toHaveClass("mt-4")
-  })
+// Optional description is retained from the former detail-kit EmptyState.
+it("supports a title-only state without an empty paragraph in every size", () => {
+  for (const size of ["card", "compact", "inline"] as const) {
+    const { container, unmount } = render(<EmptyState size={size} icon={Webhook} title="Only a title" />)
+    expect(screen.getByRole("heading", { name: "Only a title" })).toBeInTheDocument()
+    expect(container.querySelector("p")).toBeNull()
+    unmount()
+  }
 })

@@ -21,6 +21,15 @@ type routineCalendarEvent struct {
 	Timezone   string `json:"timezone,omitempty"`
 	Status     string `json:"status,omitempty"`
 	Outcome    string `json:"outcome,omitempty"`
+	// The agents of the routine's agent_run steps, for the Calendar's Agents
+	// lanes and agent filter. Omitted when the routine has none.
+	Agents []routineCalendarAgent `json:"agents,omitempty"`
+}
+
+type routineCalendarAgent struct {
+	ID   string `json:"id"`
+	Slug string `json:"slug"`
+	Name string `json:"name"`
 }
 
 type routineCalendarResponse struct {
