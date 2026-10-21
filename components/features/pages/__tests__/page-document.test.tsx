@@ -28,58 +28,6 @@ it("hydrates saved CRDT content before binding the editor without manufacturing 
   saved.destroy()
 })
 
-it("undo takes back only this editor's own edit and keeps another person's confirmed edit", async () => {
-  const server = new Y.Doc({ gc: false })
-  const base = new Y.XmlElement("paragraph"); base.setAttribute("id", "base-paragraph")
-  const baseText = new Y.XmlText(); baseText.insert(0, "Base"); base.insert(0, [baseText]); server.getXmlFragment("default").insert(0, [base])
-  let rev = 1, otherConfirmed = false
-  const posted: string[] = []
-  request.mockImplementation(async (url: string, init?: RequestInit) => {
-    if (init?.method === "POST") {
-      const body = JSON.parse(init.body as string)
-      posted.push(body.update); Y.applyUpdate(server, decodeUpdate(body.update))
-      if (!otherConfirmed) {
-        // A second identity, its own Yjs client, confirms a paragraph in the same head.
-        otherConfirmed = true
-        const other = new Y.Doc({ gc: false }); Y.applyUpdate(other, Y.encodeStateAsUpdate(server))
-        const theirs = new Y.XmlElement("paragraph"); theirs.setAttribute("id", "other-paragraph")
-        const theirsText = new Y.XmlText(); theirsText.insert(0, "Theirs confirmed"); theirs.insert(0, [theirsText])
-        other.getXmlFragment("default").push([theirs])
-        Y.applyUpdate(server, Y.encodeStateAsUpdate(other, Y.encodeStateVector(server))); other.destroy()
-      }
-      rev++
-      return { ok: true, status: 200, json: async () => ({ id: body.id, epoch: body.epoch, rev }) }
-    }
-    return { ok: true, json: async () => url.includes("/comments") ? { comments: [], can_comment: false } : url.includes("/requests") ? { requests: [], can_dispatch: false, eligible_chats: [] } : { page_id: "page", schema: 2, rev, epoch: "go:node:1", can_write: true, snapshot: encodeUpdate(Y.encodeStateAsUpdate(server)) } }
-  })
-  render(<PageDocument workspaceId="w" slug="notes" pageId="page" />)
-  await screen.findByText("Base")
-  const editor = (screen.getByLabelText("Document editor") as HTMLElement & { editor: Editor }).editor
-  await waitFor(() => expect(editor.isEditable).toBe(true))
-  act(() => { editor.commands.insertContent("Mine ") })
-  await waitFor(() => expect(editor.getText()).toContain("Theirs confirmed"), { timeout: 5000 })
-  expect(editor.getText()).toContain("Mine Base")
-  // The toolbar offers the same undo, for touch screens without a keyboard shortcut.
-  const undo = screen.getByRole("button", { name: "Undo" })
-  await waitFor(() => expect(undo).toBeEnabled())
-  fireEvent.click(undo)
-  expect(editor.getText()).not.toContain("Mine")
-  expect(editor.getText()).toContain("Base")
-  expect(editor.getText()).toContain("Theirs confirmed")
-  // The undo is an ordinary local write: the server loses this editor's text, never the other person's.
-  await waitFor(() => expect(posted.length).toBeGreaterThanOrEqual(2), { timeout: 5000 })
-  const serverText = server.getXmlFragment("default").toString()
-  expect(serverText).not.toContain("Mine")
-  expect(serverText).toContain("Theirs confirmed")
-  // Nothing remains to undo: the other person's paragraph is not in this editor's history.
-  await waitFor(() => expect(undo).toBeDisabled())
-  act(() => { expect(editor.commands.undo()).toBe(false) })
-  expect(editor.getText()).toContain("Theirs confirmed")
-  fireEvent.click(screen.getByRole("button", { name: "Redo" }))
-  expect(editor.getText()).toContain("Mine Base")
-  server.destroy()
-})
-
 it("offers an unsaved draft download after a real editor update is rejected", async () => {
   const saved = new Y.Doc({ gc: false })
   const paragraph = new Y.XmlElement("paragraph"); paragraph.setAttribute("id", "recovery-paragraph")
@@ -373,4 +321,56 @@ it("keeps editing when the journal cannot be locked; earlier rows are download-o
   expect(document.body.textContent).not.toContain("retained privately")
   expect(recoveryJournal.remove).not.toHaveBeenCalled()
  }finally{recoveryJournal.exclusive=true;confirmed.destroy()}
+})
+
+it("undo takes back only this editor's own edit and keeps another person's confirmed edit", async () => {
+  const server = new Y.Doc({ gc: false })
+  const base = new Y.XmlElement("paragraph"); base.setAttribute("id", "base-paragraph")
+  const baseText = new Y.XmlText(); baseText.insert(0, "Base"); base.insert(0, [baseText]); server.getXmlFragment("default").insert(0, [base])
+  let rev = 1, otherConfirmed = false
+  const posted: string[] = []
+  request.mockImplementation(async (url: string, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      const body = JSON.parse(init.body as string)
+      posted.push(body.update); Y.applyUpdate(server, decodeUpdate(body.update))
+      if (!otherConfirmed) {
+        // A second identity, its own Yjs client, confirms a paragraph in the same head.
+        otherConfirmed = true
+        const other = new Y.Doc({ gc: false }); Y.applyUpdate(other, Y.encodeStateAsUpdate(server))
+        const theirs = new Y.XmlElement("paragraph"); theirs.setAttribute("id", "other-paragraph")
+        const theirsText = new Y.XmlText(); theirsText.insert(0, "Theirs confirmed"); theirs.insert(0, [theirsText])
+        other.getXmlFragment("default").push([theirs])
+        Y.applyUpdate(server, Y.encodeStateAsUpdate(other, Y.encodeStateVector(server))); other.destroy()
+      }
+      rev++
+      return { ok: true, status: 200, json: async () => ({ id: body.id, epoch: body.epoch, rev }) }
+    }
+    return { ok: true, json: async () => url.includes("/comments") ? { comments: [], can_comment: false } : url.includes("/requests") ? { requests: [], can_dispatch: false, eligible_chats: [] } : { page_id: "page", schema: 2, rev, epoch: "go:node:1", can_write: true, snapshot: encodeUpdate(Y.encodeStateAsUpdate(server)) } }
+  })
+  render(<PageDocument workspaceId="w" slug="notes" pageId="page" />)
+  await screen.findByText("Base")
+  const editor = (screen.getByLabelText("Document editor") as HTMLElement & { editor: Editor }).editor
+  await waitFor(() => expect(editor.isEditable).toBe(true))
+  act(() => { editor.commands.insertContent("Mine ") })
+  await waitFor(() => expect(editor.getText()).toContain("Theirs confirmed"), { timeout: 5000 })
+  expect(editor.getText()).toContain("Mine Base")
+  // The toolbar offers the same undo, for touch screens without a keyboard shortcut.
+  const undo = screen.getByRole("button", { name: "Undo" })
+  await waitFor(() => expect(undo).toBeEnabled())
+  fireEvent.click(undo)
+  expect(editor.getText()).not.toContain("Mine")
+  expect(editor.getText()).toContain("Base")
+  expect(editor.getText()).toContain("Theirs confirmed")
+  // The undo is an ordinary local write: the server loses this editor's text, never the other person's.
+  await waitFor(() => expect(posted.length).toBeGreaterThanOrEqual(2), { timeout: 5000 })
+  const serverText = server.getXmlFragment("default").toString()
+  expect(serverText).not.toContain("Mine")
+  expect(serverText).toContain("Theirs confirmed")
+  // Nothing remains to undo: the other person's paragraph is not in this editor's history.
+  await waitFor(() => expect(undo).toBeDisabled())
+  act(() => { expect(editor.commands.undo()).toBe(false) })
+  expect(editor.getText()).toContain("Theirs confirmed")
+  fireEvent.click(screen.getByRole("button", { name: "Redo" }))
+  expect(editor.getText()).toContain("Mine Base")
+  server.destroy()
 })
