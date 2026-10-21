@@ -80,6 +80,12 @@ describe("chat artifact entry points", () => {
     expect(screen.queryByTestId("context-tab")).not.toBeInTheDocument()
     expect(screen.getByText("No output files in this conversation.")).toBeInTheDocument()
   })
+  it("opens conversation memory, not files, for the restricted mobile Memory page", async () => {
+    global.fetch = vi.fn((url: string) => Promise.resolve({ ok: true, status: 200, json: async () => String(url).includes("/execution-profile") ? { mode: "restricted" } : String(url).includes("/restricted-memory") ? { entries: [] } : String(url).includes("/restricted-files") ? { files: [] } : String(url).includes("/messages") ? { messages: [] } : {} })) as unknown as typeof fetch
+    render(<ChatPanel {...props} mobilePanel="memory" />)
+    await screen.findByText("Conversation memory")
+    expect(screen.queryByText("Output files")).not.toBeInTheDocument()
+  })
   it("opens Artifacts on the mobile context page", async () => {
     render(<ChatPanel {...props} mobilePanel="artifacts" />)
     expect(await screen.findByTestId("context-tab")).toHaveTextContent("artifacts")

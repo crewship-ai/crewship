@@ -1422,7 +1422,9 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   if (mobilePanel === "artifacts" || mobilePanel === "work" || mobilePanel === "memory") {
     if (executionProfile !== "trusted") return <div className="h-full overflow-auto">
       {executionProfile === "restricted" && sessionId && workspaceId
-        ? <RestrictedFiles key={sessionId} chatId={sessionId} workspaceId={workspaceId} refreshKey={turns.length * 2 + Number(isStreaming)} />
+        ? mobilePanel === "memory"
+          ? <RestrictedMemory key={`memory:${sessionId}`} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId ?? undefined} refreshKey={turns.length * 2 + Number(isStreaming)} />
+          : <RestrictedFiles key={sessionId} chatId={sessionId} workspaceId={workspaceId} refreshKey={turns.length * 2 + Number(isStreaming)} />
         : <p className="p-4 text-sm text-muted-foreground">Checking conversation access…</p>}
     </div>
     return (
