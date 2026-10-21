@@ -40,6 +40,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Chat shows the model the chat is configured to use.** The composer's model control read a path the server never served and always offered a built-in list, silently treating its first entry as selected. It now shows the model the chat run preview reports, lists the provider's models from the server labelled as live or curated, says plainly when the list cannot be loaded, and states that a listed model is not proof of access or of what a run will use. Choosing a model from the list is not offered yet.
 
+- **Slides says a local draft is not saved, in the same words as Document.** With `NEXT_PUBLIC_SLIDES_EDITOR` on, an edited deck reads **Not stored in this browser or on the server · keep this tab open**, and **Saved** with **Confirmed by server** appears only after a receipt for the change that was sent. Document and Slides now share one save lifecycle (save states, a write queue that waits for the receipt and retries the same change, and the leave prompt); what Document shows is unchanged, and nothing changes with the flag off.
+
 - Preserve Claude Code tool result text and error details in chat and run traces when the CLI returns structured content blocks.
 - Reject unsupported Document revision selectors instead of silently returning the latest content. Saved checkpoints remain available through their explicit reader.
 - **The Document save status separates "saved locally" from "confirmed by server".** While work is unsent the header says whether the browser has kept a copy, is still writing it, or could not store it; only a server receipt shows "Confirmed by server".
