@@ -233,11 +233,15 @@ func (s Store) PlanPresetIn(ctx context.Context, tx *sql.Tx, actor, user, worksp
 		return desired[r] && (!exists || renew[r] || g.Live)
 	}
 	if d.Kind == "routine" {
-		result.Warnings = append(result.Warnings, PresetWarning{Code: "ROUTINE_RESULTS_HISTORY", Message: "View with Results includes eligible past and future regular outputs, possibly input material; live issuer and private-audience gates still apply."})
+		if desired[Right{d.Kind, req.Resource.ID, "results"}] {
+			result.Warnings = append(result.Warnings, PresetWarning{Code: "ROUTINE_RESULTS_HISTORY", Message: "View with Results includes eligible past and future regular outputs, possibly input material; live issuer and private-audience gates still apply."})
+		}
 		if slices.Contains(ops, "run") {
 			result.Warnings = append(result.Warnings, PresetWarning{Code: "EXECUTION_GATES", Message: "Run also needs current agent, provider, delegation and runtime authority; this preview does not execute work."})
 		}
-		if slices.Contains(ops, "edit") {
+		if slices.Contains(ops, "publish") {
+			result.Warnings = append(result.Warnings, PresetWarning{Code: "PUBLISH_GATES", Message: "Publish requires current View and Edit shares, active grant issuers and supported execution configuration. This preset adds neither View, Results nor Run and preserves their existing shares. Structural validation does not execute a test run."})
+		} else if slices.Contains(ops, "edit") {
 			result.Warnings = append(result.Warnings, PresetWarning{Code: "DRAFT_ONLY", Message: "Edit allows draft changes, never publication."})
 		}
 	} else if g, retained := before[Right{"project", req.Resource.ID, "delete_issues"}]; retained {

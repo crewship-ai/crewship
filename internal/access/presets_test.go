@@ -23,7 +23,7 @@ func TestPresetCatalogV1IsImmutableAndExplicit(t *testing.T) {
 			t.Fatal("v1 includes publication")
 		}
 	}
-	if _, ok := ResolvePreset("routine-levels", 2); ok {
+	if _, ok := ResolvePreset("routine-levels", 999); ok {
 		t.Fatal("unknown version silently resolved")
 	}
 }

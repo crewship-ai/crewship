@@ -14,13 +14,14 @@ export const resourcePolicySchema = z.object({
 })
 export type ResourcePolicy = z.infer<typeof resourcePolicySchema>
 export type SharedResource = { kind: "routine" | "project"; id: string; name: string }
-export const shareOperations = { routine: ["view", "results", "run", "edit"], project: ["list", "read", "contribute", "manage", "delete_issues"] } as const
+export const shareOperations = { routine: ["view", "results", "run", "edit", "publish"], project: ["list", "read", "contribute", "manage", "delete_issues"] } as const
 export const isResourceRight = (right: z.infer<typeof resourceRightSchema>, resource: SharedResource) =>
   right.kind === resource.kind && right.id === resource.id
 
 /** Preserve every other resource and unknown future operation; never convert accounts. */
 export function resourceShareReplacement(policy: ResourcePolicy, resource: SharedResource, operations: string[], reissue: string[]) {
   if (policy.mode !== "restricted") throw new Error("Trusted access is managed through workspace roles")
+  if (resource.kind === "routine" && operations.includes("publish") && !operations.includes("edit")) throw new Error("Publish requires Edit on the same routine")
   const editable = new Set<string>(shareOperations[resource.kind])
   if ([...operations, ...reissue].some(op => !editable.has(op)) || reissue.some(op => !operations.includes(op))) {
     throw new Error("Invalid resource operation")
@@ -33,4 +34,4 @@ export function resourceShareReplacement(policy: ResourcePolicy, resource: Share
   }
 }
 
-export const resourceOperationLabel = (operation: string) => operation === "results" ? "View runs and outputs" : operation === "delete_issues" ? "Delete issues" : operation === "edit" ? "Edit draft" : operation
+export const resourceOperationLabel = (operation: string) => operation === "results" ? "View runs and outputs" : operation === "delete_issues" ? "Delete issues" : operation === "edit" ? "Edit draft" : operation === "publish" ? "Publish" : operation

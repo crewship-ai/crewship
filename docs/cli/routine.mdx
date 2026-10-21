@@ -2395,7 +2395,7 @@ crewship routine shared-draft save ROUTINE_ID --file - < draft.json
 
 `shared-draft <routine-id-or-slug>` supports table, JSON and YAML output. Save
 requires `--file` containing one complete JSON snapshot; `-` reads stdin.
-`can_edit` is a read-only server hint and is removed before saving. Unknown
+`can_edit` and `can_publish` are read-only server hints and are removed before saving. Unknown
 fields and incomplete snapshots fail locally. PUT requires the existing
 `workspace:admin` token scope and rechecks current rights, issuers and account.
 A 409 preserves the conflict for review; the CLI performs no hidden GET or retry.
@@ -2411,6 +2411,10 @@ crewship routine draft publish ROUTINE_ID --draft-id ID --revision N --base-revi
 ```
 
 Both commands send the exact reviewed reference without refreshing or retrying.
+The web editor provides the same flow through **Save shared draft → Validate
+saved draft → Publish reviewed draft**. A further edit clears validation;
+conflicts require explicit reload. Publication displays its version without
+starting a run.
 Validate checks structure only; publish additionally requires current View, Edit,
 Publish and the referenced agent execution grants. A stale reference or busy
 writer returns 409; existing triggers return 422 and must be removed explicitly.

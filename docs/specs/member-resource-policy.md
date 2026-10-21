@@ -492,16 +492,16 @@ save checks the exact draft ID/revision and publication base. A stale editor or
 changed published base receives 409 without automatic refresh or retry; an audit
 failure rolls back the edit. Saving does not change executable bytes or version
 history, create a trigger, run a test or approve risk. Server-owned draft metadata
-and origin remain intact. The trusted authoring workflow must review and test the
-exact revision before publishing. Direct Guest publication and full Routine Edit
-acceptance remain unfinished PRD work.
+and origin remain intact. The trusted authoring workflow retains its own review
+and test gates. Direct Guest publication uses a separate current Publish share
+and exact saved-revision review; structural validation is not a test receipt.
 
 The Guest definition view offers **Edit shared draft** only with current View,
 Edit and mutation scope. Transient errors/conflicts retain local work; hard
 access loss clears the editor. The CLI reads the same JSON snapshot with
 `crewship routine shared-draft ROUTINE` and saves it with
 `crewship routine shared-draft save ROUTINE --file draft.json` (or `--file -`).
-Read-only `can_edit` is removed before PUT; the CLI performs no hidden GET or
+Read-only `can_edit` and `can_publish` are removed before PUT; the CLI performs no hidden GET or
 conflict retry.
 
 
@@ -930,6 +930,20 @@ on the same routine; it implies neither View nor Run. Effective Publish also
 requires live View and active account/issuers. Policy, invitation, provisioning
 and preset preview/apply reject Publish without Edit with 422 before writes.
 The v1 preset catalog is unchanged.
+
+The immutable `routine-levels` v2 `edit_publish` level explicitly manages only
+Edit and Publish. It adds neither View, Results nor Run; existing grants and
+their issuers remain orthogonal and unchanged unless explicitly reissued.
+Preview shows these consequences before the existing confirmation/apply flow.
+Routine Share and the person's Access card reject saving Publish without Edit.
+
+In Shared definitions, an editor saves the draft, selects **Validate saved
+draft**, then—with a current Publish hint—**Publish reviewed draft**. Both POSTs
+carry the saved draft ID/revision/base revision. Editing or saving again clears
+validation; unsaved content cannot be validated or published. A conflict or
+uncertain publication requires explicit reload/review without hidden retry.
+Hard access loss clears cached draft content. Publication acknowledges its
+version without starting a run. Hints never replace the endpoint's live checks.
 
 Publication archives retain physical authority across backup/restore. Generic
 Run, nested calls and trigger writers refuse bounded publication authority;

@@ -10,6 +10,8 @@ import { presetCatalogSchema, presetPreviewSchema, type PresetPreview } from "@/
 import { Button } from "@/components/ui/button"
 import { nativeSelect } from "./shared"
 
+const levelLabel = (level: string) => level === "edit_publish" ? "Edit + Publish" : level
+
 type Resource = {kind:"project"|"routine";id:string}
 export function ResourcePresetEditor({workspaceId,policy,resource,disabled,onBusy,onSaved,onSaveStarted}:{
   workspaceId:string;policy:ResourcePolicy;resource:Resource;disabled:boolean;onBusy:(busy:boolean)=>void;onSaved:(policy:ResourcePolicy)=>void;onSaveStarted:()=>((policy:ResourcePolicy)=>boolean)
@@ -77,9 +79,9 @@ export function ResourcePresetEditor({workspaceId,policy,resource,disabled,onBus
     finally{setBusy(false);onBusy(false)}
   }
   return <section className="space-y-2 rounded-md border p-3" aria-label="Ordered resource preset">
-    <p>{saved?`Saved ${saved.level} v${saved.version} · ${saved.state} — intent, not effective authority`:"Custom — no preset was explicitly selected"}</p>
+    <p>{saved?`Saved ${levelLabel(saved.level)} v${saved.version} · ${saved.state} — intent, not effective authority`:"Custom — no preset was explicitly selected"}</p>
     <label>Ordered preset<select aria-label="Ordered preset" className={nativeSelect} value={selected} disabled={blocked||!catalog.data} onChange={event=>{setSelected(event.target.value);setReissue([]);clearPreview()}}>
-      <option value="">Choose an explicit preset</option>{choices.map(item=><option key={item.key} value={item.key}>{item.level.level} v{item.entry.definition.version} · {item.level.operations.join(" + ")}</option>)}
+      <option value="">Choose an explicit preset</option>{choices.map(item=><option key={item.key} value={item.key}>{levelLabel(item.level.level)} v{item.entry.definition.version} · {item.level.operations.join(" + ")}</option>)}
     </select></label>
     {catalog.isPending&&<p role="status">Loading preset definitions…</p>}
     {catalog.isError&&<div role="alert"><p>Preset catalog unavailable.</p><Button size="sm" variant="outline" className="coarse:h-[44px]" disabled={busy||disabled} onClick={()=>{clearPreview();setSelected("");setReissue([]);void catalog.refetch()}}>Retry catalog</Button></div>}
