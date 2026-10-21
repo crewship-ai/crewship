@@ -26,6 +26,7 @@ export function SavedDocumentPanel({ headerExtra, ...props }: SavedDocumentPanel
           Open full editor<ExternalLink className="size-4" aria-hidden />
         </a>
       </Button>
-      <DocumentReadonly schema={document.content.schema} content={document.content.content} accessibleLabel="Saved document body" />
+      <DocumentReadonly schema={document.content.schema} content={document.content.content} accessibleLabel="Saved document body"
+        emptyText="This document is empty. Open the full editor to start writing, or ask the agent in this chat to draft it." />
     </div>} />
 }

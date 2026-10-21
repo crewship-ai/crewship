@@ -1,6 +1,6 @@
 "use client"
 
-import { DOMSerializer } from "@tiptap/pm/model"
+import { DOMSerializer, type Node as DocumentNode } from "@tiptap/pm/model"
 import { documentSchema } from "@/lib/documents/schema"
 
 export interface DocumentReadonlyProps {
@@ -8,6 +8,8 @@ export interface DocumentReadonlyProps {
   content: unknown
   /** A label from the authorized caller; never infer a private title here. */
   accessibleLabel: string
+  /** Shown in place of a body that holds only empty paragraphs. */
+  emptyText?: string
 }
 
 const unavailable = "Document unavailable. This content cannot be displayed by this reader."
@@ -25,9 +27,11 @@ function confirmedContent(content: unknown, version: number) {
 }
 
 /** A separate saved-content view. It has no editor or authority of its own. */
-export function DocumentReadonly({ schema, content, accessibleLabel }: DocumentReadonlyProps) {
+export function DocumentReadonly({ schema, content, accessibleLabel, emptyText = "This document is empty." }: DocumentReadonlyProps) {
   const confirmed = confirmedContent(content, schema)
   if (!confirmed) return <p role="status">{unavailable}</p>
+  const empty = confirmed.node.children.every((child: DocumentNode) => child.type.name === "paragraph" && child.content.size === 0)
+  if (empty) return <div role="region" aria-label={accessibleLabel} className="rounded-md border p-4 text-sm text-muted-foreground"><p>{emptyText}</p></div>
   return <div
     role="region"
     aria-label={accessibleLabel}
