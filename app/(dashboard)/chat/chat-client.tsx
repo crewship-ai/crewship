@@ -4,7 +4,7 @@ import { useAttachmentScopePrefix } from "@/hooks/use-attachment-scope"
 import { AttachmentLifecycle } from "@/components/features/chat/composer/attachment-lifecycle"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import { LayoutGrid, ListTodo, Menu, MessageSquare } from "lucide-react"
+import { Brain, LayoutGrid, ListTodo, Menu, MessageSquare } from "lucide-react"
 
 import { UnifiedConversationPanel, UnifiedNewChatMenu, useUnifiedConversations } from "@/components/features/conversations/unified-chat"
 import { SubBar } from "@/components/layout/sub-bar"
@@ -96,12 +96,13 @@ function useAgentSlugFromUrl(): string | null {
 
 /** Which full-screen panel the phone is showing. ChatPanel has had these
  *  branches since it was written. */
-type MobilePanel = "chat" | "artifacts" | "work"
+type MobilePanel = "chat" | "artifacts" | "work" | "memory"
 
 const MOBILE_PANELS: { id: MobilePanel; label: string; icon: typeof MessageSquare }[] = [
   { id: "chat", label: "Chat", icon: MessageSquare },
   { id: "artifacts", label: "Artifacts", icon: LayoutGrid },
   { id: "work", label: "Work", icon: ListTodo },
+  { id: "memory", label: "Memory", icon: Brain },
 ]
 
 /**

@@ -22,7 +22,7 @@ vi.mock("../artifact/artifact-pane", () => ({ ArtifactPane: ({ onAskSelection }:
 } }))
 vi.mock("../composer/slash-palette", () => ({ SlashPalette: () => null }))
 vi.mock("../composer/chat-composer", () => ({ ChatComposer: ({ contextRequest }: { contextRequest?: { text: string } }) => <><output data-testid="composer-context">{contextRequest?.text}</output><textarea aria-label="Draft message" defaultValue="" /></> }))
-vi.mock("../right-panel", () => ({ RightPanel: ({ initialTab }: { initialTab: string }) => <div data-testid="context-tab">{initialTab}</div> }))
+vi.mock("../right-panel", () => ({ RightPanel: ({ initialTab, hideTabs }: { initialTab: string; hideTabs?: boolean }) => <div data-testid="context-tab" data-hide-tabs={String(!!hideTabs)}>{initialTab}</div> }))
 vi.mock("../turn-renderer", () => ({ TurnRenderer: ({ onFileClick }: { onFileClick: (path: string) => void }) => <>
   <button onClick={() => onFileClick("reports/result.pdf")}>Preview generated PDF</button>
   <button onClick={() => onFileClick("runs/msg_1/AGENTS.md")}>Preview agent configuration</button>
@@ -83,6 +83,12 @@ describe("chat artifact entry points", () => {
   it("opens Artifacts on the mobile context page", async () => {
     render(<ChatPanel {...props} mobilePanel="artifacts" />)
     expect(await screen.findByTestId("context-tab")).toHaveTextContent("artifacts")
+  })
+  it("opens Memory through the mobile Memory page, without a second row of the phone's tabs", async () => {
+    render(<ChatPanel {...props} mobilePanel="memory" />)
+    const tab = await screen.findByTestId("context-tab")
+    expect(tab).toHaveTextContent("memory")
+    expect(tab).toHaveAttribute("data-hide-tabs", "true")
   })
   it("opens Work through the mobile Work page", async () => {
     render(<ChatPanel {...props} mobilePanel="work" />)

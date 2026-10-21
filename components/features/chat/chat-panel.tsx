@@ -165,7 +165,7 @@ interface ChatPanelProps {
   /** A Page reference is resolved and authorized by the server on send. */
   pageContextSlug?: string
   /** Mobile-only: which panel to show full-screen. Undefined = desktop mode. */
-  mobilePanel?: "chat" | "artifacts" | "work"
+  mobilePanel?: "chat" | "artifacts" | "work" | "memory"
   /** Fired when the user sends a message — lets the parent optimistically
    *  title a freshly-created session in the sidebar (matching the server's
    *  auto-title) so the new entry shows its name without a manual refresh. */
@@ -1419,7 +1419,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     </div>
   ) : null
 
-  if (mobilePanel === "artifacts" || mobilePanel === "work") {
+  if (mobilePanel === "artifacts" || mobilePanel === "work" || mobilePanel === "memory") {
     if (executionProfile !== "trusted") return <div className="h-full overflow-auto">
       {executionProfile === "restricted" && sessionId && workspaceId
         ? <RestrictedFiles key={sessionId} chatId={sessionId} workspaceId={workspaceId} refreshKey={turns.length * 2 + Number(isStreaming)} />
@@ -1433,6 +1433,9 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
           agentId={agentId}
           workspaceId={workspaceId}
           initialTab={mobilePanel}
+          // The phone's own tab row above already picks the section; a second
+          // row of the same tabs inside it showed Work twice.
+          hideTabs
           workHeader={waitingForYou}
           style={{ width: "100%", height: "100%" }}
         />
