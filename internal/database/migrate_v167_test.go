@@ -45,7 +45,8 @@ func TestV167_UpgradeRebuildsAndRepairsDamagedJournal(t *testing.T) {
 	execV167(t, db, `INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status)
 		VALUES (?,?,?,?,?,?,?)`, missionID, wsID, crewID, agentID, "trace_167", "mission", "BACKLOG")
 
-	w := journal.NewWriter(db, quiet, journal.WriterOptions{FlushInterval: time.Hour})
+	// This fixture represents legacy v1 rows written before the signing-key migration.
+	w := journal.NewWriter(db, quiet, journal.WriterOptions{FlushInterval: time.Hour, ChainKey: journal.ChainKeyFromEnv()})
 	emit := func(e journal.Entry) string {
 		t.Helper()
 		id, err := w.Emit(ctx, e)
@@ -252,7 +253,8 @@ func TestV167_RestoreBackfillRepairsRestoredRows(t *testing.T) {
 	const wsID, missionID = "ws_167_restore", "mission_restore"
 	execV167(t, db, `INSERT INTO workspaces (id, name, slug) VALUES (?,?,?)`, wsID, "restore", "restore")
 
-	w := journal.NewWriter(db, quiet, journal.WriterOptions{FlushInterval: time.Hour})
+	// This fixture represents legacy v1 rows written before the signing-key migration.
+	w := journal.NewWriter(db, quiet, journal.WriterOptions{FlushInterval: time.Hour, ChainKey: journal.ChainKeyFromEnv()})
 	entryID, err := w.Emit(ctx, journal.Entry{
 		WorkspaceID: wsID, MissionID: missionID,
 		Type: journal.EntryMissionStatus, Severity: journal.SeverityInfo,
