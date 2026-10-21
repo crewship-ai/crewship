@@ -278,6 +278,17 @@ func (h *UserProfileHandler) ChangePassword(w http.ResponseWriter, r *http.Reque
 		replyInternalError(w, h.logger, "final token revocation acknowledge", err)
 		return
 	}
+	if req.RevokeCLITokens {
+		var remaining bool
+		if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM cli_tokens WHERE user_id = ? AND revoked_at IS NULL)`, user.ID).Scan(&remaining); err != nil {
+			replyInternalError(w, h.logger, "check final token set", err)
+			return
+		}
+		if remaining {
+			replyInternalError(w, h.logger, "acknowledge final token set", errors.New("unrevoked CLI token remains"))
+			return
+		}
+	}
 
 	if err := tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "commit password change", err)

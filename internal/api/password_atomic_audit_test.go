@@ -12,7 +12,11 @@ import (
 
 func TestPasswordMutationAtomicAudit(t *testing.T) {
 	for _, door := range []string{"change", "reset"} {
-		for _, fault := range []string{"none", "audit", "session", "audit_undo", "audit_new_session"} {
+		faults := []string{"none", "audit", "session", "audit_undo", "audit_new_session"}
+		if door == "change" {
+			faults = append(faults, "audit_new_token")
+		}
+		for _, fault := range faults {
 			t.Run(door+"/"+fault, func(t *testing.T) {
 				h, store, user := newProfileRig(t)
 				notifier := &recordingNotifier{}
@@ -37,7 +41,7 @@ func TestPasswordMutationAtomicAudit(t *testing.T) {
 				action := "auth.password_changed"
 				invoke := func() *httptest.ResponseRecorder {
 					rr := httptest.NewRecorder()
-					h.ChangePassword(rr, selfReq(t, "POST", "/api/v1/users/me/password", map[string]string{"current_password": "oldpassword1", "new_password": "newpassword123"}, user, current.ID))
+					h.ChangePassword(rr, selfReq(t, "POST", "/api/v1/users/me/password", map[string]any{"current_password": "oldpassword1", "new_password": "newpassword123", "revoke_cli_tokens": fault == "audit_new_token"}, user, current.ID))
 					return rr
 				}
 				if door == "reset" {
@@ -63,6 +67,9 @@ func TestPasswordMutationAtomicAudit(t *testing.T) {
 				}
 				if fault == "audit_new_session" {
 					execOrFatal(t, h.db, fmt.Sprintf(`CREATE TRIGGER insert_session_after_password_audit AFTER INSERT ON instance_audit_logs WHEN NEW.action=%q BEGIN INSERT INTO user_sessions(id,user_id,expires_at) VALUES('unexpected-session','test-user-recovery',datetime('now','+1 hour')); END`, action))
+				}
+				if fault == "audit_new_token" {
+					execOrFatal(t, h.db, `CREATE TRIGGER insert_token_after_password_audit AFTER INSERT ON instance_audit_logs WHEN NEW.action='auth.password_changed' BEGIN INSERT INTO cli_tokens(id,user_id,name,token_hash,tier) VALUES('unexpected-token','test-user-recovery','fixture','synthetic-fingerprint','STANDARD'); END`)
 				}
 				if fault == "session" {
 					execOrFatal(t, h.db, `CREATE TRIGGER fail_password_session BEFORE UPDATE OF revoked_at ON user_sessions BEGIN SELECT RAISE(ABORT,'session unavailable'); END`)
@@ -108,6 +115,15 @@ func TestPasswordMutationAtomicAudit(t *testing.T) {
 					}
 					if inserted != 0 {
 						t.Error("new session from final audit did not roll back")
+					}
+				}
+				if fault == "audit_new_token" {
+					var inserted int
+					if err := h.db.QueryRow(`SELECT COUNT(*) FROM cli_tokens WHERE id='unexpected-token'`).Scan(&inserted); err != nil {
+						t.Fatal(err)
+					}
+					if inserted != 0 {
+						t.Error("new token from final audit did not roll back")
 					}
 				}
 				notifier.mu.Lock()
