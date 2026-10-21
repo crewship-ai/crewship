@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/documents"
 	wsproto "github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -126,6 +127,19 @@ Examples:
 		quiet, _ := cmd.Flags().GetBool("quiet")
 		existingChat, _ := cmd.Flags().GetString("chat")
 		timeoutSecs, _ := cmd.Flags().GetInt("timeout")
+		targetFile, _ := cmd.Flags().GetString("document-target")
+		var documentTarget *documents.IterationIntent
+		if targetFile != "" {
+			plan, _ := cmd.Flags().GetBool("plan")
+			if existingChat == "" || interactive || offline || plan {
+				return fmt.Errorf("--document-target requires one existing --chat and a direct non-interactive run")
+			}
+			var err error
+			documentTarget, err = readRunDocumentTarget(targetFile)
+			if err != nil {
+				return err
+			}
+		}
 
 		if !interactive && prompt == "" {
 			return fmt.Errorf("prompt is required (provide as argument, --prompt flag, or use --interactive)")
@@ -190,6 +204,9 @@ Examples:
 			return err
 		}
 		if restricted {
+			if documentTarget != nil {
+				return fmt.Errorf("targeted Document edits require a trusted human chat")
+			}
 			if interactive {
 				return fmt.Errorf("restricted text interactive mode is not yet supported")
 			}
@@ -239,10 +256,10 @@ Examples:
 		}
 
 		if noStream {
-			return runNoStream(server, wsToken, agentID, chatID, prompt, quiet, md, saveFile, maxTurns)
+			return runNoStream(server, wsToken, agentID, chatID, prompt, quiet, md, saveFile, maxTurns, documentTarget)
 		}
 
-		return runStream(server, wsToken, agentID, agentSlug, chatID, prompt, quiet, md, saveFile, maxTurns)
+		return runStream(server, wsToken, agentID, agentSlug, chatID, prompt, quiet, md, saveFile, maxTurns, documentTarget)
 	},
 }
 
@@ -284,7 +301,7 @@ func openSaveFile(cmd *cobra.Command) (*cli.AtomicFile, error) {
 	return f, nil
 }
 
-func runStream(serverURL, wsToken, agentID, agentSlug, chatID, prompt string, quiet bool, md *cli.MarkdownRenderer, save *cli.AtomicFile, maxTurns int) error {
+func runStream(serverURL, wsToken, agentID, agentSlug, chatID, prompt string, quiet bool, md *cli.MarkdownRenderer, save *cli.AtomicFile, maxTurns int, targets ...*documents.IterationIntent) error {
 	ws, err := cli.NewWSClient(serverURL, wsToken)
 	if err != nil {
 		return err
@@ -311,14 +328,14 @@ func runStream(serverURL, wsToken, agentID, agentSlug, chatID, prompt string, qu
 	}()
 
 	agentChannel := "agent:" + agentID
-	if err := ws.SendMessage(agentChannel, chatID, prompt, maxTurns); err != nil {
+	if err := sendRunMessage(ws, agentChannel, chatID, prompt, maxTurns, targets...); err != nil {
 		return fmt.Errorf("send message: %w", err)
 	}
 
 	return streamEvents(ws, quiet, md, save)
 }
 
-func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool, md *cli.MarkdownRenderer, save *cli.AtomicFile, maxTurns int) error {
+func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool, md *cli.MarkdownRenderer, save *cli.AtomicFile, maxTurns int, targets ...*documents.IterationIntent) error {
 	ws, err := cli.NewWSClient(serverURL, wsToken)
 	if err != nil {
 		return err
@@ -331,7 +348,7 @@ func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool,
 	}
 
 	agentChannel := "agent:" + agentID
-	if err := ws.SendMessage(agentChannel, chatID, prompt, maxTurns); err != nil {
+	if err := sendRunMessage(ws, agentChannel, chatID, prompt, maxTurns, targets...); err != nil {
 		return fmt.Errorf("send message: %w", err)
 	}
 
@@ -1178,6 +1195,7 @@ func init() {
 	runCmd.Flags().Bool("stdin", false, "Append piped stdin as context after the prompt (stdin is only read implicitly when no prompt is given)")
 	runCmd.Flags().Bool("paste", false, "Append the system clipboard as context (pbpaste/wl-paste/xclip/xsel)")
 	runCmd.Flags().Bool("dry-run", false, "Print the assembled prompt (with all context) and exit without running")
+	runCmd.Flags().String("document-target", "", "Closed JSON file with original submission_id, page_id, schema, rev and generation for one existing Document update")
 	runCmd.Flags().StringArray("project-file-version", nil, "Select an immutable project file version for a restricted native run; repeat up to 16 times")
 	runCmd.Flags().Bool("estimate", false, "Print token count + cost estimate for the prompt and exit (no run)")
 	runCmd.Flags().Bool("markdown", false, "Render markdown ANSI styling (overrides config)")
