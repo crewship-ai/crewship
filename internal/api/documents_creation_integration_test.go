@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -78,7 +79,26 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 	t.Cleanup(func() { _ = node.Process.Kill(); _ = node.Wait() })
 	documentsWaitSocket(t, nodeSocket)
 	documentsWaitReady(t, nodeSocket, secret)
-	host := httptest.NewServer(router)
+	var droppedCreateResponse atomic.Bool
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/internal/documents/create" || !droppedCreateResponse.CompareAndSwap(false, true) {
+			router.ServeHTTP(w, r)
+			return
+		}
+		// Commit through the real Router, Node service and SQLite authority before
+		// dropping the host socket. No response headers or body reach the sidecar.
+		committed := httptest.NewRecorder()
+		router.ServeHTTP(committed, r)
+		if committed.Code != http.StatusCreated {
+			t.Errorf("fault must follow a successful real creation: HTTP%d %s", committed.Code, committed.Body.String())
+		}
+		connection, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Errorf("owned host response drop: %v", err)
+			return
+		}
+		_ = connection.Close()
+	}))
 	t.Cleanup(host.Close)
 	client := &http.Client{Timeout: 20 * time.Second}
 	request := func(base, method, path, token, internal string, body any) ([]byte, int, error) {
@@ -160,12 +180,25 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 	}
 	execute := func(inputFile string) ([]byte, error) { return executeDoc("create", "--file", inputFile) }
 	output, err := execute(file)
+	if err == nil {
+		t.Fatalf("first create must lose the committed network response, not succeed: %s", output)
+	}
+	// The sidecar's transport failure is a plain-text 503; the CLI rejects it
+	// through its existing bounded-JSON guard rather than returning a saved ID.
+	if !droppedCreateResponse.Load() || !bytes.Contains(output, []byte("bounded Docs creation JSON response required")) {
+		t.Fatalf("first create did not report the injected lost host response: %s", output)
+	}
+	var committedPage string
+	if err := h.db.QueryRow(`SELECT c.page_id FROM document_creations c JOIN documents d ON d.page_id=c.page_id WHERE c.run_id=?`, run).Scan(&committedPage); err != nil || committedPage == "" {
+		t.Fatalf("response was lost before the real creation committed: %q %v", committedPage, err)
+	}
+	output, err = execute(file)
 	if err != nil {
-		t.Fatalf("actual protected CLI create: %v %s", err, output)
+		t.Fatalf("actual protected CLI retry after lost response: %v %s", err, output)
 	}
 	var created documentCreationResult
-	if json.Unmarshal(output, &created) != nil || created.PageID == "" || created.Schema != 3 || created.Revision != 0 || created.WorkspaceID != workspace || !strings.Contains(created.URL, "workspace_id=") {
-		t.Fatalf("actual CLI result: %s", output)
+	if json.Unmarshal(output, &created) != nil || created.PageID != committedPage || created.Schema != 3 || created.Revision != 0 || created.WorkspaceID != workspace || !strings.Contains(created.URL, "workspace_id=") {
+		t.Fatalf("actual CLI retry changed the committed creation: %s", output)
 	}
 	retry, err := execute(file)
 	if err != nil {
