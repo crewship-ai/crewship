@@ -51,6 +51,10 @@ type Key struct {
 type Principal struct {
 	AuthorityID, MandateID string
 	Targets                []string
+	// HistoryFloor is the oldest revision whose successors the principal may
+	// read through the commits feed: an agent mandate's base revision. Zero
+	// leaves the feed bounded by retained history only.
+	HistoryFloor int64
 }
 type Authorize func(context.Context, *sql.Tx) (Principal, error)
 

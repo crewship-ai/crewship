@@ -49,7 +49,8 @@ type Feed struct {
 // Commits reads confirmed revisions after since, in ascending order, under the
 // same authorization as a workbook read. Revisions whose command history was
 // pruned (or predates command history) cannot be replayed: a since before the
-// newest such revision, or after the head, requires a snapshot reread.
+// newest such revision, before the principal's HistoryFloor, or after the head,
+// requires a snapshot reread.
 func (s *Store) Commits(ctx context.Context, k Key, since int64, limit int, a Authorize) (f Feed, err error) {
 	if since < 0 || limit < 1 || limit > MaxFeedLimit {
 		return Feed{}, ErrInvalid
@@ -65,7 +66,9 @@ func (s *Store) Commits(ctx context.Context, k Key, since int64, limit int, a Au
 		if e := tx.QueryRowContext(ctx, `SELECT max(rev) FROM gridcraft_audit WHERE page_id=? AND command IS NULL`, k.PageID).Scan(&gone); e != nil {
 			return e
 		}
-		f.MinSince = gone.Int64
+		// A principal never reads history from before its floor (an agent
+		// mandate's base revision), even where it is retained.
+		f.MinSince = max(gone.Int64, p.HistoryFloor)
 		if since < f.MinSince || since > f.HeadRev {
 			return &HistoryGoneError{HeadRev: f.HeadRev, Generation: f.Generation, MinSince: f.MinSince}
 		}
@@ -127,15 +130,29 @@ type Committed struct {
 }
 
 // ClaimCommitted marks up to limit undelivered revisions as sent, optionally
-// only those of one Page, and returns them in revision order for a push. A
-// revision is claimed once, so a crash after claiming loses only the push;
-// clients recover it from the commits feed after a reconnect or a revision gap.
+// only those of one Page, and returns them in revision order for a push.
+// Delivery is at most once: a revision is claimed once, so a push lost after
+// the claim (a crash, a dropped connection) is not repeated, and clients
+// recover it from the commits feed after a reconnect or a revision gap.
 func (s *Store) ClaimCommitted(ctx context.Context, pageID string, limit int) ([]Committed, error) {
 	if !s.options.Enabled {
 		return nil, ErrDisabled
 	}
 	if limit < 1 {
 		limit = 1
+	}
+	// Most calls find nothing pending. Check that with a plain read, so an
+	// idle sweep never takes the database-wide write lock.
+	probe, probeArgs := `SELECT EXISTS(SELECT 1 FROM gridcraft_outbox WHERE state='pending')`, []any{}
+	if pageID != "" {
+		probe, probeArgs = `SELECT EXISTS(SELECT 1 FROM gridcraft_outbox WHERE state='pending' AND page_id=?)`, []any{pageID}
+	}
+	var pending bool
+	if err := s.db.QueryRowContext(ctx, probe, probeArgs...).Scan(&pending); err != nil {
+		return nil, err
+	}
+	if !pending {
+		return nil, nil
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
