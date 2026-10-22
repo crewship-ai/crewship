@@ -276,6 +276,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 
 	// Crew Connections
 	conns := NewCrewConnectionHandler(r.db, r.logger)
+	conns.journal = r.journal
 	r.mux.Handle("GET /api/v1/crew-connections", authed(wsCtx(http.HandlerFunc(conns.List))))
 	r.authedMut("POST", "/api/v1/crew-connections", roleCreate, conns.Create)
 	r.authedMut("PUT", "/api/v1/crew-connections/{connectionId}/file-access", roleCreate, conns.UpdateFileAccess)
@@ -620,6 +621,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// Read is open to every workspace member (names are not secret, counts
 	// follow credential visibility); the handlers repeat the role gates.
 	credFolders := NewCredentialFolderHandler(r.db, r.logger)
+	credFolders.journal = r.journal
 	r.mux.Handle("GET /api/v1/credential-folders", authed(wsCtx(http.HandlerFunc(credFolders.List))))
 	r.authedMut("POST", "/api/v1/credential-folders", roleInline, credFolders.Create)
 	r.authedMut("PATCH", "/api/v1/credential-folders/{folderId}", roleInline, credFolders.Update)

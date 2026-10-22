@@ -24,6 +24,27 @@ not yet have `WriteAuditLog` calls wired into their handlers:
 Keeper security decisions are tracked separately in the
 `keeper_requests` table (see below), not in `audit_logs`.
 
+### Access changes are chained and atomic
+
+A change to who or what may access something appends a hash-chained journal
+entry in the **same transaction** as the change: if the audit cannot be written,
+the change is rolled back and the request fails. The entry carries the previous
+and current values, never secrets. Where the Settings Audit view reads
+`audit_logs`, the same transaction also writes that row. This covers workspace
+and crew settings (including crew runtime privileges: `privileged`, added
+capabilities, `init` and mounts), member roles and capabilities, invitations,
+Page grants, crew links and their shared-file access
+(`crew_link.create|update|delete|file_access`), the artifact creation policy
+(`workspace.artifact_creation_policy.update`), credential folder policy
+(`credential_folder.update`), routine origin binding clears
+(`routine.origin_binding.clear`) and refused waitpoint decisions
+(`waitpoint.decision_refused`; the journal entry names the run and step, not the
+callback token).
+
+A source-scanning test (`internal/api/audit_logs_writer_guard_test.go`) fails
+when a new code path writes an access action to `audit_logs` without the chain;
+the few legacy-only writers it allows are listed there with their reasons.
+
 ### Keeper Decision Auditing
 
 Keeper security decisions are stored in the `keeper_requests` table with detailed fields:
