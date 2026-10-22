@@ -73,6 +73,7 @@ type Router struct {
 
 	issueMutationHandler   *IssueHandler
 	issueMutationWorker    *issueMutationWorker
+	gridcraftOutbox        *gridcraftOutboxWorker
 	transcriptLock         func(context.Context) (func(), error)
 	transcriptSnapshotLock func(context.Context) (func(), error)
 	restrictedWorkflow     *restrictedworkflow.Service
@@ -1044,6 +1045,7 @@ func (r *Router) Shutdown() {
 	})
 
 	r.issueMutationWorker.stop()
+	r.gridcraftOutbox.stop()
 	if r.provisioning != nil {
 		r.provisioning.Stop()
 	}

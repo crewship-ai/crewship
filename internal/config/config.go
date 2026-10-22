@@ -569,6 +569,9 @@ func applyEnvOverrides(cfg *Config) {
 	if v, ok := os.LookupEnv("CREWSHIP_GRIDCRAFT_SERVICE_TOKEN_FILE"); ok {
 		cfg.GridCraft.ServiceTokenFile = v
 	}
+	if v, ok := os.LookupEnv("CREWSHIP_GRIDCRAFT_EDITOR_ENABLED"); ok {
+		cfg.GridCraft.EditorEnabled = v == "true" || v == "1"
+	}
 	if v, ok := os.LookupEnv("CREWSHIP_SLIDES_ENABLED"); ok {
 		cfg.Slides.Enabled = v == "true" || v == "1"
 	}

@@ -11,10 +11,17 @@ type GridCraftConfig struct {
 	ServiceTokenFile    string `yaml:"service_token_file"`
 	MaxWorkers          int    `yaml:"max_workers"`
 	MaxWorkspaceWorkers int    `yaml:"max_workspace_workers"`
+	// EditorEnabled is the operator switch of live workbook editing (editor
+	// sessions, cell edits and the commits feed); the workspace flag
+	// gridcraft_editor must be on as well.
+	EditorEnabled bool `yaml:"editor_enabled"`
 }
 
 func (c GridCraftConfig) validate() error {
 	if !c.Enabled {
+		if c.EditorEnabled {
+			return errors.New("gridcraft editor requires the gridcraft workbook API to be enabled")
+		}
 		return nil
 	}
 	if _, err := appengine.NewWorkerClient(c.ServiceSocket, c.ServiceTokenFile); err != nil {

@@ -44,6 +44,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"gridcraft_audit":        IntentExcludeOperational,
 	"gridcraft_outbox":       IntentExcludeOperational,
 	"gridcraft_intents":      IntentExcludeRuntime,
+	"gridcraft_sessions":     IntentExcludeRuntime,
 	"gridcraft_writer_fence": IntentExcludeRuntime,
 
 	"document_iteration_intents": IntentExcludeRuntime, // original live targeted-message grants never survive restore

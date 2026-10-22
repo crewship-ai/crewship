@@ -18808,6 +18808,148 @@
         ],
         "type": "object"
       },
+      "WorkbookCommit": {
+        "properties": {
+          "actor_label": {
+            "description": "Display name of the writer",
+            "type": "string"
+          },
+          "kind": {
+            "description": "snapshot is an import: reread the workbook",
+            "enum": [
+              "cells",
+              "snapshot"
+            ],
+            "type": "string"
+          },
+          "mutation_id": {
+            "description": "Own revisions only",
+            "type": "string"
+          },
+          "ops": {
+            "items": {
+              "properties": {
+                "cell": {
+                  "type": "string"
+                },
+                "input": {
+                  "type": "string"
+                },
+                "sheet": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "sheet",
+                "cell",
+                "input"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "own": {
+            "description": "Written by the caller (for an agent, by its mandate)",
+            "type": "boolean"
+          },
+          "rev": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "session_id": {
+            "description": "Own revisions only",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rev",
+          "kind",
+          "actor_label",
+          "own"
+        ],
+        "type": "object"
+      },
+      "WorkbookCommits": {
+        "properties": {
+          "commits": {
+            "items": {
+              "$ref": "#/components/schemas/WorkbookCommit"
+            },
+            "type": "array"
+          },
+          "generation": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "head_rev": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "min_since": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "head_rev",
+          "generation",
+          "min_since",
+          "commits"
+        ],
+        "type": "object"
+      },
+      "WorkbookEditorSession": {
+        "properties": {
+          "actor_label": {
+            "description": "Display name of the session's user",
+            "type": "string"
+          },
+          "bundle_digest": {
+            "description": "Digest of the qualified editor bundle; empty when no editor origin is configured (do not frame)",
+            "type": "string"
+          },
+          "editor_url": {
+            "description": "Editor frame URL; absent when no editor origin is configured",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "generation": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "page_id": {
+            "type": "string"
+          },
+          "protocol": {
+            "enum": [
+              1
+            ],
+            "type": "integer"
+          },
+          "rev": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "session_id": {
+            "pattern": "^[A-Za-z0-9_-]{1,128}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "page_id",
+          "actor_label",
+          "rev",
+          "generation",
+          "protocol",
+          "expires_at",
+          "bundle_digest"
+        ],
+        "type": "object"
+      },
       "WorkbookError": {
         "properties": {
           "conflicts": {
@@ -18820,8 +18962,18 @@
           "error": {
             "type": "string"
           },
+          "generation": {
+            "description": "Current generation (410 snapshot_required only)",
+            "minimum": 1,
+            "type": "integer"
+          },
           "head_rev": {
             "description": "Current head revision (409 precondition_failed only)",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "min_since": {
+            "description": "Oldest since the commits feed still serves (410 snapshot_required only)",
             "minimum": 0,
             "type": "integer"
           },
@@ -135863,6 +136015,170 @@
         "x-crewship-read-only": true
       }
     },
+    "/api/v1/pages/{slug}/workbook/commits": {
+      "get": {
+        "description": "List page workbook commits (GET /api/v1/pages/{slug}/workbook/commits).",
+        "operationId": "get_api_v1_pages_slug_workbook_commits",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Return confirmed revisions after this one",
+            "in": "query",
+            "name": "since",
+            "required": true,
+            "schema": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Revisions per page (default 100)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbookCommits"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbookError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbookError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbookError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbookError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbookError"
+                }
+              }
+            },
+            "description": "Gone"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbookError"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbookError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbookError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "List page workbook commits",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
     "/api/v1/pages/{slug}/workbook/edits": {
       "post": {
         "description": "Create page workbook edits (POST /api/v1/pages/{slug}/workbook/edits).",
@@ -136922,6 +137238,310 @@
           "pages"
         ],
         "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/pages/{slug}/workbook/sessions": {
+      "post": {
+        "description": "Create page workbook sessions (POST /api/v1/pages/{slug}/workbook/sessions).",
+        "operationId": "post_api_v1_pages_slug_workbook_sessions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "protocol": {
+                    "description": "Editor bridge protocol the client speaks",
+                    "enum": [
+                      1
+                    ],
+                    "type": "integer"
+                  },
+                  "session_id": {
+                    "description": "Renew (heartbeat) this live session instead of opening a new one",
+                    "pattern": "^[A-Za-z0-9_-]{1,128}$",
+                    "type": "string"
+                  }
+                },
+                "required": null,
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbookEditorSession"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbookEditorSession"
+                }
+              }
+            },
+            "description": "Created",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbookError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbookError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbookError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbookError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbookError"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbookError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbookError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Create page workbook sessions",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/workbook/sessions/{session}": {
+      "delete": {
+        "description": "Delete page workbook session (DELETE /api/v1/pages/{slug}/workbook/sessions/{session}).",
+        "operationId": "delete_api_v1_pages_slug_workbook_sessions_session",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "session_id": {
+                      "pattern": "^[A-Za-z0-9_-]{1,128}$",
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "session_id"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbookError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbookError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbookError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbookError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbookError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbookError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Delete page workbook session",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
       }
     },
     "/api/v1/paymaster/credential-spend": {
