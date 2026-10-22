@@ -1,25 +1,25 @@
 package config
 
 import (
-	"strings"
 	"testing"
 )
 
-func TestGridCraftDefaultOffAndDigestQualification(t *testing.T) {
+func TestGridCraftDefaultOffAndPrivateServicePaths(t *testing.T) {
 	c := Default()
 	if c.GridCraft.Enabled {
 		t.Fatal("default on")
 	}
-	if err := (GridCraftConfig{Enabled: true, Image: "worker:latest"}).validate(); err == nil {
-		t.Fatal("mutable worker accepted")
+	if err := (GridCraftConfig{Enabled: true, ServiceSocket: "worker.sock"}).validate(); err == nil {
+		t.Fatal("relative socket accepted")
 	}
-	if err := (GridCraftConfig{Enabled: true, Image: "registry.example.test/workbook@sha256:" + strings.Repeat("a", 64)}).validate(); err != nil {
+	if err := (GridCraftConfig{Enabled: true, ServiceSocket: "/run/workbook/service.sock", ServiceTokenFile: "/run/secrets/worker-token"}).validate(); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("CREWSHIP_GRIDCRAFT_ENABLED", "true")
-	t.Setenv("CREWSHIP_GRIDCRAFT_IMAGE", "registry.example.test/workbook@sha256:"+strings.Repeat("b", 64))
+	t.Setenv("CREWSHIP_GRIDCRAFT_SERVICE_SOCKET", "/run/workbook/service.sock")
+	t.Setenv("CREWSHIP_GRIDCRAFT_SERVICE_TOKEN_FILE", "/run/secrets/worker-token")
 	applyEnvOverrides(c)
-	if !c.GridCraft.Enabled || !strings.HasSuffix(c.GridCraft.Image, strings.Repeat("b", 64)) {
+	if !c.GridCraft.Enabled || c.GridCraft.ServiceSocket != "/run/workbook/service.sock" || c.GridCraft.ServiceTokenFile != "/run/secrets/worker-token" {
 		t.Fatal("operator override lost")
 	}
 	t.Setenv("CREWSHIP_GRIDCRAFT_ENABLED", "misspelled")

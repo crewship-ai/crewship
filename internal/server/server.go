@@ -35,8 +35,8 @@ import (
 	"github.com/crewship-ai/crewship/internal/pages"
 	"path/filepath"
 
+	"github.com/crewship-ai/crewship/internal/appengine"
 	"github.com/crewship-ai/crewship/internal/memory"
-	"github.com/crewship-ai/crewship/internal/mooring"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
 	appleprovider "github.com/crewship-ai/crewship/internal/provider/apple"
@@ -1053,9 +1053,9 @@ func (s *Server) mountAPIRouter(
 		s.apiRouter = apiRouter
 		apiRouter.RegisterSlidesHuman(cfg.Slides.Enabled)
 		if cfg.GridCraft.Enabled {
-			runner, err := mooring.NewDockerRunner(cfg.GridCraft.Image)
+			runner, err := appengine.NewWorkerClient(cfg.GridCraft.ServiceSocket, cfg.GridCraft.ServiceTokenFile)
 			if err == nil {
-				apiRouter.RegisterGridCraft(mooring.Options{Enabled: true, MaxWorkers: cfg.GridCraft.MaxWorkers, MaxWorkspaceWorkers: cfg.GridCraft.MaxWorkspaceWorkers}, mooring.GridCraft{Runner: runner})
+				apiRouter.RegisterGridCraft(appengine.Options{Enabled: true, MaxWorkers: cfg.GridCraft.MaxWorkers, MaxWorkspaceWorkers: cfg.GridCraft.MaxWorkspaceWorkers}, appengine.GridCraft{Runner: runner})
 			}
 		}
 		// Provider-login refresh (docs/prd/provider-logins.md §5.3) rides the

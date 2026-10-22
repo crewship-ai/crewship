@@ -645,7 +645,6 @@ func kitEnv(kit *RecoveryKit) (map[string]string, error) {
 // must not survive a move: sign-in sessions, pairings, locks, the scheduler
 // lease, OAuth polling. Tables absent from this schema are skipped.
 var runtimeResets = []struct{ table, what string }{
-	{"gridcraft_intents", "workbook run intents"},
 	{"document_creation_consents", "document creation consents"},
 	{"document_iteration_intents", "document iteration intents"},
 	{"artifact_run_principals", "artifact run principal admissions"},
@@ -728,20 +727,6 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 			if n > 0 {
 				rep.RuntimeReset = append(rep.RuntimeReset, fmt.Sprintf("%s (%d)", r.what, n))
 			}
-		}
-		// Offline workbook candidates cannot survive physical recovery.
-		var gridcraftExists bool
-		if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name='gridcraft_heads')`).Scan(&gridcraftExists); err != nil {
-			return err
-		}
-		if gridcraftExists {
-			if _, err := db.ExecContext(ctx, `UPDATE gridcraft_heads SET generation=generation+1`); err != nil {
-				return err
-			}
-			if _, err := db.ExecContext(ctx, `UPDATE gridcraft_operations SET state='failed',token=token+1,lease_until=0 WHERE state!='applied'`); err != nil {
-				return err
-			}
-			rep.RuntimeReset = append(rep.RuntimeReset, "workbook writer generations and reservations")
 		}
 		// Physical instance bundles include document bytes and their source leases.
 		// Preserve content/history, fence every source engine before first boot.

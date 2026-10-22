@@ -1,8 +1,9 @@
-package mooring
+package appengine
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/crewship-ai/crewship/internal/database"
 	"os"
 	"path/filepath"
@@ -73,5 +74,32 @@ func TestRealGridCraftImportEditRestartAndRetry(t *testing.T) {
 	files, err := filepath.Glob(filepath.Join(scratch, "workbook-*"))
 	if err != nil || len(files) != 0 {
 		t.Fatalf("scratch survived: %v %v", files, err)
+	}
+}
+
+// Known pilot limitation: the complete diff cannot yet distinguish direct
+// mandated effects from trusted engine-derived formula recalculation.
+func TestRealGridCraftDependentFormulaIsKnownLimitation(t *testing.T) {
+	binary := os.Getenv("CREWSHIP_TEST_GRIDCRAFT_BINARY")
+	if binary == "" {
+		t.Skip("set CREWSHIP_TEST_GRIDCRAFT_BINARY for the pinned formula engine contract")
+	}
+	raw, err := os.ReadFile("testdata/blank-workbook.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := localFixtureRunner{binary, t.TempDir()}
+	base, err := runner.Run(t.Context(), raw, Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	formula, err := runner.Run(t.Context(), base.Result, Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "C9", Input: "=B2*2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := GridCraft{Runner: runner}
+	_, err = engine.Prepare(t.Context(), Binding{Engine: engine.Identity()}, State{Snapshot: formula.Result}, Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "42"})
+	if !errors.Is(err, ErrEffects) {
+		t.Fatalf("expected known dependent formula limitation, got %v", err)
 	}
 }

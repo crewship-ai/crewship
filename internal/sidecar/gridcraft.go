@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/crewship-ai/crewship/internal/mooring"
+	"github.com/crewship-ai/crewship/internal/appengine"
 )
 
 func (s *Server) handleGridCraft(w http.ResponseWriter, r *http.Request) {
@@ -31,8 +31,8 @@ func (s *Server) handleGridCraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer release()
-	raw, err := io.ReadAll(io.LimitReader(r.Body, mooring.MaxSnapshotBytes+16385))
-	if err != nil || len(raw) > mooring.MaxSnapshotBytes+16384 {
+	raw, err := io.ReadAll(io.LimitReader(r.Body, appengine.MaxSnapshotBytes+16385))
+	if err != nil || len(raw) > appengine.MaxSnapshotBytes+16384 {
 		http.Error(w, "workbook packet exceeds limit", 413)
 		return
 	}
@@ -42,7 +42,7 @@ func (s *Server) handleGridCraft(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "live run capability refused", 403)
 		return
 	}
-	response, err := s.sendBoundedHostRequest(r, http.MethodPost, "/api/v1/internal/gridcraft", raw, mooring.MaxSnapshotBytes+16384, slug)
+	response, err := s.sendBoundedHostRequest(r, http.MethodPost, "/api/v1/internal/gridcraft", raw, appengine.MaxSnapshotBytes+16384, slug)
 	if err != nil {
 		http.Error(w, "workbook outcome unavailable; retain the exact packet", 503)
 		return
@@ -95,12 +95,12 @@ func (s *Server) respondGridCraftMCPToolCall(w http.ResponseWriter, r *http.Requ
 		return true
 	}
 	var args struct {
-		ArtifactID string           `json:"artifact_id"`
-		MandateID  string           `json:"mandate_id"`
-		MutationID string           `json:"mutation_id,omitempty"`
-		Request    *mooring.Request `json:"request,omitempty"`
+		ArtifactID string             `json:"artifact_id"`
+		MandateID  string             `json:"mandate_id"`
+		MutationID string             `json:"mutation_id,omitempty"`
+		Request    *appengine.Request `json:"request,omitempty"`
 	}
-	if mooring.DecodeStrict(raw, &args) != nil || args.ArtifactID == "" || args.MandateID == "" {
+	if appengine.DecodeStrict(raw, &args) != nil || args.ArtifactID == "" || args.MandateID == "" {
 		s.writeRoutinesMCPToolResult(w, req, 400, mustJSON(map[string]string{"error": "invalid workbook packet"}))
 		return true
 	}
@@ -127,7 +127,7 @@ func (s *Server) respondGridCraftMCPToolCall(w http.ResponseWriter, r *http.Requ
 	}
 	defer release()
 	body, _ := json.Marshal(payload)
-	response, err := s.sendBoundedHostRequest(r, http.MethodPost, "/api/v1/internal/gridcraft", body, mooring.MaxSnapshotBytes+16384, slug)
+	response, err := s.sendBoundedHostRequest(r, http.MethodPost, "/api/v1/internal/gridcraft", body, appengine.MaxSnapshotBytes+16384, slug)
 	if err != nil {
 		s.writeRoutinesMCPToolResult(w, req, 503, mustJSON(map[string]string{"error": "workbook outcome unknown; retain the exact packet"}))
 		return true

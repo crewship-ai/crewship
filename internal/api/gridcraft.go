@@ -12,25 +12,25 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/appengine"
 	"github.com/crewship-ai/crewship/internal/artifacts"
-	"github.com/crewship-ai/crewship/internal/mooring"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 type gridcraftHTTP struct {
 	pages      *PageHandler
-	store      *mooring.Store
-	engine     mooring.Engine
+	store      *appengine.Store
+	engine     appengine.Engine
 	operations artifacts.GridCraftOperations
 }
 
 // RegisterGridCraft installs only the explicit experimental offline surface.
 // Disabled installs no routes. The engine must be an operator-qualified worker.
-func (r *Router) RegisterGridCraft(options mooring.Options, engine mooring.Engine) {
+func (r *Router) RegisterGridCraft(options appengine.Options, engine appengine.Engine) {
 	if !options.Enabled || engine == nil {
 		return
 	}
-	store := mooring.New(r.db, options)
+	store := appengine.New(r.db, options)
 	adapter := artifacts.NewGridCraftAdapter(store, engine, true)
 	operations, ok := artifacts.NewRegistry(artifacts.EnabledTypes{"gridcraft-workbook": true}, nil, adapter).GridCraft()
 	if !ok {
@@ -59,31 +59,31 @@ func (r *Router) RegisterGridCraft(options mooring.Options, engine mooring.Engin
 func gridcraftError(w http.ResponseWriter, err error) {
 	code, message := 500, "Workbook operation failed"
 	switch {
-	case errors.Is(err, mooring.ErrForbidden), errors.Is(err, mooring.ErrNotFound):
+	case errors.Is(err, appengine.ErrForbidden), errors.Is(err, appengine.ErrNotFound):
 		code, message = 404, "Workbook not found"
-	case errors.Is(err, mooring.ErrInvalid), errors.Is(err, mooring.ErrCandidate):
+	case errors.Is(err, appengine.ErrInvalid), errors.Is(err, appengine.ErrCandidate):
 		code, message = 400, "Invalid workbook operation"
-	case errors.Is(err, mooring.ErrConflict):
+	case errors.Is(err, appengine.ErrConflict):
 		code, message = 409, "conflict"
-	case errors.Is(err, mooring.ErrPrecondition):
+	case errors.Is(err, appengine.ErrPrecondition):
 		code, message = 409, "precondition_failed"
-	case errors.Is(err, mooring.ErrEffects):
+	case errors.Is(err, appengine.ErrEffects):
 		code, message = 403, "effect_out_of_mandate"
-	case errors.Is(err, mooring.ErrInProgress):
+	case errors.Is(err, appengine.ErrInProgress):
 		code, message = 409, "in_progress"
-	case errors.Is(err, mooring.ErrFence):
+	case errors.Is(err, appengine.ErrFence):
 		code, message = 409, "stale_generation"
-	case errors.Is(err, mooring.ErrCapacity):
+	case errors.Is(err, appengine.ErrCapacity):
 		code, message = 429, "capacity_exhausted"
-	case errors.Is(err, mooring.ErrQuota):
+	case errors.Is(err, appengine.ErrQuota):
 		code, message = 429, "history_quota_exceeded"
-	case errors.Is(err, mooring.ErrDisabled), errors.Is(err, mooring.ErrEngineUnavailable):
+	case errors.Is(err, appengine.ErrDisabled), errors.Is(err, appengine.ErrEngineUnavailable):
 		code, message = 503, "Workbook unavailable"
 	}
 	replyError(w, code, message)
 }
-func (h *gridcraftHTTP) humanAuthority(r *http.Request, k mooring.Key, write bool, capture func(*pageRecord)) mooring.Authorize {
-	return func(ctx context.Context, tx *sql.Tx) (mooring.Principal, error) {
+func (h *gridcraftHTTP) humanAuthority(r *http.Request, k appengine.Key, write bool, capture func(*pageRecord)) appengine.Authorize {
+	return func(ctx context.Context, tx *sql.Tx) (appengine.Principal, error) {
 		if capture != nil {
 			capture(nil)
 		}
@@ -92,45 +92,45 @@ func (h *gridcraftHTTP) humanAuthority(r *http.Request, k mooring.Key, write boo
 		user := UserFromContext(ctx)
 		agent, _ := pageGrantCallerIsAgent(request)
 		if user == nil || agent || projectAgentFrom(ctx) != nil || ctx.Value(artifactRunKey{}) != nil {
-			return mooring.Principal{}, mooring.ErrForbidden
+			return appengine.Principal{}, appengine.ErrForbidden
 		}
 		scope := "pages:read"
 		if write {
 			scope = "pages:write"
 		}
 		if validateContentHumanCredential(request, tx, scope) != nil {
-			return mooring.Principal{}, mooring.ErrForbidden
+			return appengine.Principal{}, appengine.ErrForbidden
 		}
 		viewer, err := h.pages.livePrivatePageReader(ctx, k.WorkspaceID, user.ID)
 		if err != nil || viewer == nil {
-			return mooring.Principal{}, mooring.ErrForbidden
+			return appengine.Principal{}, appengine.ErrForbidden
 		}
 		ctx = context.WithValue(ctx, ctxRole, viewer.Role)
 		rec, err := h.pages.loadPageForRead(ctx, k.WorkspaceID, "@"+k.PageID)
 		if err != nil || rec.OwnerUserID == "" || rec.OwnerCrewID != "" || !rec.PrivateAudience || rec.FolderID != "" || rec.HasDocument || rec.HasProject || rec.HasApplication {
-			return mooring.Principal{}, mooring.ErrForbidden
+			return appengine.Principal{}, appengine.ErrForbidden
 		}
 		if write {
 			if rec.OwnerUserID != user.ID || !h.pages.mayEditSpec(ctx, k.WorkspaceID, user.ID, viewer.Role, rec) {
-				return mooring.Principal{}, mooring.ErrForbidden
+				return appengine.Principal{}, appengine.ErrForbidden
 			}
 		} else if !privatePageViewer(rec, viewer) {
-			return mooring.Principal{}, mooring.ErrForbidden
+			return appengine.Principal{}, appengine.ErrForbidden
 		}
 		if capture != nil {
 			capture(rec)
 		}
-		return mooring.Principal{AuthorityID: "user:" + user.ID, MandateID: "human-import", Targets: []string{"*"}}, nil
+		return appengine.Principal{AuthorityID: "user:" + user.ID, MandateID: "human-import", Targets: []string{"*"}}, nil
 	}
 }
-func (h *gridcraftHTTP) humanKey(r *http.Request, write bool) (mooring.Key, error) {
-	k := mooring.Key{WorkspaceID: WorkspaceIDFromContext(r.Context())}
+func (h *gridcraftHTTP) humanKey(r *http.Request, write bool) (appengine.Key, error) {
+	k := appengine.Key{WorkspaceID: WorkspaceIDFromContext(r.Context())}
 	column, ref := "slug", r.PathValue("slug")
 	if strings.HasPrefix(ref, "@") {
 		column, ref = "id", strings.TrimPrefix(ref, "@")
 	}
 	if h.pages.db.QueryRowContext(r.Context(), "SELECT id FROM pages WHERE workspace_id=? AND "+column+"=?", k.WorkspaceID, ref).Scan(&k.PageID) != nil {
-		return k, mooring.ErrForbidden
+		return k, appengine.ErrForbidden
 	}
 	tx, err := h.pages.db.BeginTx(r.Context(), nil)
 	if err != nil {
@@ -159,12 +159,12 @@ func (h *gridcraftHTTP) read(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, state)
 }
 func decodeGridCraftBody(w http.ResponseWriter, r *http.Request, target any) error {
-	r.Body = http.MaxBytesReader(w, r.Body, mooring.MaxSnapshotBytes+16384)
+	r.Body = http.MaxBytesReader(w, r.Body, appengine.MaxSnapshotBytes+16384)
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
-		return mooring.ErrInvalid
+		return appengine.ErrInvalid
 	}
-	return mooring.DecodeStrict(raw, target)
+	return appengine.DecodeStrict(raw, target)
 }
 func (h *gridcraftHTTP) importFile(w http.ResponseWriter, r *http.Request) {
 	artifactCommentHeaders(w)
@@ -173,13 +173,13 @@ func (h *gridcraftHTTP) importFile(w http.ResponseWriter, r *http.Request) {
 		gridcraftError(w, err)
 		return
 	}
-	var req mooring.Request
+	var req appengine.Request
 	if err = decodeGridCraftBody(w, r, &req); err != nil {
 		gridcraftError(w, err)
 		return
 	}
 	if req.Command.Kind != "import" || req.MandateID != "human-import" {
-		gridcraftError(w, mooring.ErrInvalid)
+		gridcraftError(w, appengine.ErrInvalid)
 		return
 	}
 	result, err := h.operations.Apply(r.Context(), k, req, h.humanAuthority(r, k, true, nil))
@@ -229,7 +229,7 @@ func (h *gridcraftHTTP) mandate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(req.MandateID) == 0 || len(req.MandateID) > 256 || len(req.RunID) == 0 || len(req.Targets) != 1 || req.Targets[0] == "*" || len(req.Targets[0]) > 256 || req.BaseRev < 1 || req.Generation < 1 {
-		gridcraftError(w, mooring.ErrInvalid)
+		gridcraftError(w, appengine.ErrInvalid)
 		return
 	}
 	tx, err := h.pages.db.BeginTx(r.Context(), nil)
@@ -250,22 +250,22 @@ func (h *gridcraftHTTP) mandate(w http.ResponseWriter, r *http.Request) {
 	ctx := context.WithValue(r.Context(), pageAuthReaderKey{}, tx)
 	a, err := h.run(ctx, tx, req.RunID, k.WorkspaceID)
 	if err != nil || p.AuthorityID != "user:"+a.HumanUserID || h.pages.checkArtifactRunPrincipal(ctx, &a) != nil || !h.pages.artifactAgentPolicyAllows(ctx, a.WorkspaceID, a.CrewID) {
-		gridcraftError(w, mooring.ErrForbidden)
+		gridcraftError(w, appengine.ErrForbidden)
 		return
 	}
 	// The private chat seal is durable before the first agent read or prompt copy.
 	var sealed int
 	if tx.QueryRowContext(ctx, `SELECT count(*) FROM chats WHERE id=? AND workspace_id=? AND created_by=? AND visibility='private' AND (private_artifact_author_user_id IS NULL OR private_artifact_author_user_id=?)`, a.ChatID, a.WorkspaceID, a.HumanUserID, a.HumanUserID).Scan(&sealed) != nil || sealed != 1 {
-		gridcraftError(w, mooring.ErrForbidden)
+		gridcraftError(w, appengine.ErrForbidden)
 		return
 	}
 	var rev, generation, pageVersion, policyVersion int64
 	if tx.QueryRowContext(ctx, `SELECT g.head_rev,g.generation,p.pages_version FROM gridcraft_heads g JOIN pages p ON p.id=g.page_id AND p.workspace_id=g.workspace_id WHERE g.workspace_id=? AND g.page_id=?`, k.WorkspaceID, k.PageID).Scan(&rev, &generation, &pageVersion) != nil {
-		gridcraftError(w, mooring.ErrNotFound)
+		gridcraftError(w, appengine.ErrNotFound)
 		return
 	}
 	if tx.QueryRowContext(ctx, `SELECT version FROM workspace_artifact_creation_policy WHERE workspace_id=? AND enabled=1`, k.WorkspaceID).Scan(&policyVersion) != nil {
-		gridcraftError(w, mooring.ErrForbidden)
+		gridcraftError(w, appengine.ErrForbidden)
 		return
 	}
 	targets, _ := json.Marshal(req.Targets)
@@ -276,7 +276,7 @@ func (h *gridcraftHTTP) mandate(w http.ResponseWriter, r *http.Request) {
 	e := tx.QueryRowContext(ctx, `SELECT payload_hash FROM gridcraft_intents WHERE workspace_id=? AND page_id=? AND mandate_id=? AND human_user_id=? AND revoked_at IS NULL`, k.WorkspaceID, k.PageID, req.MandateID, a.HumanUserID).Scan(&old)
 	if e == nil {
 		if old != fingerprint {
-			gridcraftError(w, mooring.ErrConflict)
+			gridcraftError(w, appengine.ErrConflict)
 			return
 		}
 	} else {
@@ -285,12 +285,12 @@ func (h *gridcraftHTTP) mandate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if req.BaseRev != rev || req.Generation != generation {
-			gridcraftError(w, mooring.ErrPrecondition)
+			gridcraftError(w, appengine.ErrPrecondition)
 			return
 		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO gridcraft_intents(workspace_id,page_id,mandate_id,human_user_id,run_id,base_rev,generation,page_version,policy_version,targets_json,payload_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, k.WorkspaceID, k.PageID, req.MandateID, a.HumanUserID, a.RunID, req.BaseRev, req.Generation, pageVersion, policyVersion, string(targets), fingerprint)
 		if err != nil {
-			gridcraftError(w, mooring.ErrConflict)
+			gridcraftError(w, appengine.ErrConflict)
 			return
 		}
 	}
@@ -343,11 +343,11 @@ func (h *gridcraftHTTP) revoke(w http.ResponseWriter, r *http.Request) {
 }
 
 type gridcraftAgentRequest struct {
-	Action     string           `json:"action"`
-	ArtifactID string           `json:"artifact_id"`
-	MandateID  string           `json:"mandate_id"`
-	MutationID string           `json:"mutation_id,omitempty"`
-	Request    *mooring.Request `json:"request,omitempty"`
+	Action     string             `json:"action"`
+	ArtifactID string             `json:"artifact_id"`
+	MandateID  string             `json:"mandate_id"`
+	MutationID string             `json:"mutation_id,omitempty"`
+	Request    *appengine.Request `json:"request,omitempty"`
 }
 
 func (h *gridcraftHTTP) agent(w http.ResponseWriter, r *http.Request) {
@@ -364,49 +364,49 @@ func (h *gridcraftHTTP) agent(w http.ResponseWriter, r *http.Request) {
 	}
 	a, _ := r.Context().Value(artifactRunKey{}).(*artifactRunAuthority)
 	if a == nil {
-		gridcraftError(w, mooring.ErrForbidden)
+		gridcraftError(w, appengine.ErrForbidden)
 		return
 	}
-	k := mooring.Key{WorkspaceID: a.WorkspaceID, PageID: body.ArtifactID}
-	authority := func(ctx context.Context, tx *sql.Tx) (mooring.Principal, error) {
+	k := appengine.Key{WorkspaceID: a.WorkspaceID, PageID: body.ArtifactID}
+	authority := func(ctx context.Context, tx *sql.Tx) (appengine.Principal, error) {
 		ctx = context.WithValue(ctx, pageAuthReaderKey{}, tx)
 		if h.pages.checkArtifactRunPrincipal(ctx, a) != nil || !h.pages.artifactAgentPolicyAllows(ctx, a.WorkspaceID, a.CrewID) {
-			return mooring.Principal{}, mooring.ErrForbidden
+			return appengine.Principal{}, appengine.ErrForbidden
 		}
 		role, err := h.pages.liveContentHumanRole(ctx, a.WorkspaceID, a.HumanUserID)
 		if err != nil {
-			return mooring.Principal{}, mooring.ErrForbidden
+			return appengine.Principal{}, appengine.ErrForbidden
 		}
 		ctx = context.WithValue(ctx, ctxRole, role)
 		rec, err := h.pages.loadPage(ctx, a.WorkspaceID, "@"+k.PageID)
 		if err != nil || rec.OwnerUserID != a.HumanUserID || rec.OwnerCrewID != "" || !rec.PrivateAudience || rec.FolderID != "" || !h.pages.mayEditSpec(ctx, a.WorkspaceID, a.HumanUserID, role, rec) {
-			return mooring.Principal{}, mooring.ErrForbidden
+			return appengine.Principal{}, appengine.ErrForbidden
 		}
 		var targets string
 		var base, generation, pageVersion, policyVersion int64
 		if tx.QueryRowContext(ctx, `SELECT targets_json,base_rev,generation,page_version,policy_version FROM gridcraft_intents WHERE workspace_id=? AND page_id=? AND mandate_id=? AND run_id=? AND human_user_id=? AND revoked_at IS NULL`, k.WorkspaceID, k.PageID, body.MandateID, a.RunID, a.HumanUserID).Scan(&targets, &base, &generation, &pageVersion, &policyVersion) != nil {
-			return mooring.Principal{}, mooring.ErrForbidden
+			return appengine.Principal{}, appengine.ErrForbidden
 		}
 		var livePolicy bool
 		if tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM workspace_artifact_creation_policy WHERE workspace_id=? AND enabled=1 AND version=?)`, k.WorkspaceID, policyVersion).Scan(&livePolicy) != nil || !livePolicy {
-			return mooring.Principal{}, mooring.ErrForbidden
+			return appengine.Principal{}, appengine.ErrForbidden
 		}
 		if rec.PagesVersion != pageVersion {
-			return mooring.Principal{}, mooring.ErrForbidden
+			return appengine.Principal{}, appengine.ErrForbidden
 		}
 		if body.Request != nil && (body.Request.MandateID != body.MandateID || body.Request.BaseRev != base || body.Request.Generation != generation) {
-			return mooring.Principal{}, mooring.ErrForbidden
+			return appengine.Principal{}, appengine.ErrForbidden
 		}
 		var bounds []string
 		if json.Unmarshal([]byte(targets), &bounds) != nil {
-			return mooring.Principal{}, mooring.ErrForbidden
+			return appengine.Principal{}, appengine.ErrForbidden
 		}
-		return mooring.Principal{AuthorityID: "agent:" + a.AgentID + ":run:" + a.RunID + ":mandate:" + body.MandateID, MandateID: body.MandateID, Targets: bounds}, nil
+		return appengine.Principal{AuthorityID: "agent:" + a.AgentID + ":run:" + a.RunID + ":mandate:" + body.MandateID, MandateID: body.MandateID, Targets: bounds}, nil
 	}
 	switch body.Action {
 	case "read":
 		if body.Request != nil || body.MutationID != "" {
-			gridcraftError(w, mooring.ErrInvalid)
+			gridcraftError(w, appengine.ErrInvalid)
 			return
 		}
 		result, err := h.operations.Read(r.Context(), k, authority)
@@ -417,7 +417,7 @@ func (h *gridcraftHTTP) agent(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, result)
 	case "apply":
 		if body.Request == nil || body.Request.Command.Kind != "cell.set" || body.MutationID != "" {
-			gridcraftError(w, mooring.ErrInvalid)
+			gridcraftError(w, appengine.ErrInvalid)
 			return
 		}
 		result, err := h.operations.Apply(r.Context(), k, *body.Request, authority)
@@ -428,7 +428,7 @@ func (h *gridcraftHTTP) agent(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, result)
 	case "status":
 		if body.Request != nil || body.MutationID == "" {
-			gridcraftError(w, mooring.ErrInvalid)
+			gridcraftError(w, appengine.ErrInvalid)
 			return
 		}
 		result, err := h.store.Status(r.Context(), k, body.MutationID, authority)
@@ -438,6 +438,6 @@ func (h *gridcraftHTTP) agent(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, 200, result)
 	default:
-		gridcraftError(w, mooring.ErrInvalid)
+		gridcraftError(w, appengine.ErrInvalid)
 	}
 }

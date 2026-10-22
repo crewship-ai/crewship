@@ -2,17 +2,17 @@ package artifacts
 
 import (
 	"context"
-	"github.com/crewship-ai/crewship/internal/mooring"
+	"github.com/crewship-ai/crewship/internal/appengine"
 )
 
-type GridCraftOperations = Operations[mooring.Key, mooring.Request, mooring.Request, UnsupportedExportRequest, UnsupportedExportRequest, UnsupportedExportRequest, mooring.State, mooring.Receipt, []map[string]any, UnsupportedExportResult, UnsupportedExportResult, mooring.Authorize]
+type GridCraftOperations = Operations[appengine.Key, appengine.Request, appengine.Request, UnsupportedExportRequest, UnsupportedExportRequest, UnsupportedExportRequest, appengine.State, appengine.Receipt, []map[string]any, UnsupportedExportResult, UnsupportedExportResult, appengine.Authorize]
 type GridCraftAdapter struct {
-	store   *mooring.Store
-	engine  mooring.Engine
+	store   *appengine.Store
+	engine  appengine.Engine
 	enabled bool
 }
 
-func NewGridCraftAdapter(store *mooring.Store, engine mooring.Engine, enabled bool) *GridCraftAdapter {
+func NewGridCraftAdapter(store *appengine.Store, engine appengine.Engine, enabled bool) *GridCraftAdapter {
 	return &GridCraftAdapter{store, engine, enabled}
 }
 func (a *GridCraftAdapter) check(op Operation) error {
@@ -21,40 +21,40 @@ func (a *GridCraftAdapter) check(op Operation) error {
 	}
 	return Check("gridcraft-workbook", 1, EnabledTypes{"gridcraft-workbook": a.enabled}, op)
 }
-func (a *GridCraftAdapter) Create(ctx context.Context, k mooring.Key, r mooring.Request, auth mooring.Authorize) (mooring.State, error) {
+func (a *GridCraftAdapter) Create(ctx context.Context, k appengine.Key, r appengine.Request, auth appengine.Authorize) (appengine.State, error) {
 	if err := a.check(Create); err != nil {
-		return mooring.State{}, err
+		return appengine.State{}, err
 	}
 	if r.Command.Kind != "import" || r.BaseRev != 0 {
-		return mooring.State{}, mooring.ErrInvalid
+		return appengine.State{}, appengine.ErrInvalid
 	}
 	if _, err := a.store.Execute(ctx, k, r, auth, a.engine); err != nil {
-		return mooring.State{}, err
+		return appengine.State{}, err
 	}
 	return a.store.Read(ctx, k, auth)
 }
-func (a *GridCraftAdapter) Read(ctx context.Context, k mooring.Key, auth mooring.Authorize) (mooring.State, error) {
+func (a *GridCraftAdapter) Read(ctx context.Context, k appengine.Key, auth appengine.Authorize) (appengine.State, error) {
 	if err := a.check(Read); err != nil {
-		return mooring.State{}, err
+		return appengine.State{}, err
 	}
 	return a.store.Read(ctx, k, auth)
 }
-func (a *GridCraftAdapter) Apply(ctx context.Context, k mooring.Key, r mooring.Request, auth mooring.Authorize) (mooring.Receipt, error) {
+func (a *GridCraftAdapter) Apply(ctx context.Context, k appengine.Key, r appengine.Request, auth appengine.Authorize) (appengine.Receipt, error) {
 	if err := a.check(Apply); err != nil {
-		return mooring.Receipt{}, err
+		return appengine.Receipt{}, err
 	}
 	return a.store.Execute(ctx, k, r, auth, a.engine)
 }
-func (a *GridCraftAdapter) Versions(context.Context, mooring.Key, mooring.Authorize) ([]map[string]any, error) {
+func (a *GridCraftAdapter) Versions(context.Context, appengine.Key, appengine.Authorize) ([]map[string]any, error) {
 	return nil, ErrUnsupported
 }
-func (a *GridCraftAdapter) Restore(context.Context, mooring.Key, UnsupportedExportRequest, mooring.Authorize) (mooring.Receipt, error) {
-	return mooring.Receipt{}, ErrUnsupported
+func (a *GridCraftAdapter) Restore(context.Context, appengine.Key, UnsupportedExportRequest, appengine.Authorize) (appengine.Receipt, error) {
+	return appengine.Receipt{}, ErrUnsupported
 }
-func (a *GridCraftAdapter) Snapshot(context.Context, mooring.Key, UnsupportedExportRequest, mooring.Authorize) (UnsupportedExportResult, error) {
+func (a *GridCraftAdapter) Snapshot(context.Context, appengine.Key, UnsupportedExportRequest, appengine.Authorize) (UnsupportedExportResult, error) {
 	return UnsupportedExportResult{}, ErrUnsupported
 }
-func (a *GridCraftAdapter) Export(context.Context, mooring.Key, UnsupportedExportRequest, mooring.Authorize) (UnsupportedExportResult, error) {
+func (a *GridCraftAdapter) Export(context.Context, appengine.Key, UnsupportedExportRequest, appengine.Authorize) (UnsupportedExportResult, error) {
 	return UnsupportedExportResult{}, ErrUnsupported
 }
 

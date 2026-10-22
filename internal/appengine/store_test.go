@@ -1,4 +1,4 @@
-package mooring
+package appengine
 
 import (
 	"context"
@@ -343,8 +343,18 @@ func TestWorkbookStorageRejectsWrongWorkspaceAndOtherContent(t *testing.T) {
 	}
 	k.WorkspaceID = "ws"
 	imported(t, s, a, k, e)
-	if _, err := db.Exec(`INSERT INTO documents(workspace_id,page_id,schema_version,head_rev,epoch,snapshot_rev,snapshot,projection,generation) VALUES('ws','page',1,0,0,0,x'01','[]',1)`); err == nil {
-		t.Fatal("Document attached over workbook")
+	if _, err := db.Exec(`INSERT INTO documents(workspace_id,page_id,schema_version,head_rev,epoch,snapshot_rev,snapshot,projection,generation) VALUES('ws','page',1,0,0,0,x'01','[]',1)`); err != nil {
+		t.Fatalf("workbook interfered with Docs: %v", err)
+	}
+	if _, err := s.Read(t.Context(), k, a); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("conflicting workbook remained accessible: %v", err)
+	}
+	if _, err := s.Execute(t.Context(), k, edit(), a, e); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("conflicting workbook remained mutable: %v", err)
+	}
+	var triggers int
+	if err := db.QueryRow(`SELECT count(*) FROM sqlite_schema WHERE type='trigger' AND name LIKE '%exclude_gridcraft%'`).Scan(&triggers); err != nil || triggers != 0 {
+		t.Fatalf("foreign triggers: %d %v", triggers, err)
 	}
 }
 

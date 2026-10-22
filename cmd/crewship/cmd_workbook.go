@@ -19,8 +19,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/appengine"
 	"github.com/crewship-ai/crewship/internal/cli"
-	"github.com/crewship-ai/crewship/internal/mooring"
 	"github.com/spf13/cobra"
 )
 
@@ -38,8 +38,8 @@ func workbookInput(cmd *cobra.Command) ([]byte, error) {
 		defer f.Close()
 		input = f
 	}
-	raw, err := io.ReadAll(io.LimitReader(input, mooring.MaxSnapshotBytes+16385))
-	if err != nil || len(raw) > mooring.MaxSnapshotBytes+16384 || !json.Valid(raw) {
+	raw, err := io.ReadAll(io.LimitReader(input, appengine.MaxSnapshotBytes+16385))
+	if err != nil || len(raw) > appengine.MaxSnapshotBytes+16384 || !json.Valid(raw) {
 		return nil, errors.New("bounded workbook JSON packet required")
 	}
 	return raw, nil
@@ -62,8 +62,8 @@ func newWorkbookCommandWithTransport(transport http.RoundTripper) *cobra.Command
 					return err
 				}
 				if operation == "import" {
-					var req mooring.Request
-					if mooring.DecodeStrict(body, &req) != nil || req.Command.Kind != "import" {
+					var req appengine.Request
+					if appengine.DecodeStrict(body, &req) != nil || req.Command.Kind != "import" {
 						return errors.New("native workbook import packet required")
 					}
 				}
@@ -133,8 +133,8 @@ func newWorkbookCommandWithTransport(transport http.RoundTripper) *cobra.Command
 			return errors.New("workbook outcome unknown; retain the exact packet")
 		}
 		defer response.Body.Close()
-		body, err := io.ReadAll(io.LimitReader(response.Body, mooring.MaxSnapshotBytes+16385))
-		if err != nil || len(body) > mooring.MaxSnapshotBytes+16384 || !json.Valid(body) {
+		body, err := io.ReadAll(io.LimitReader(response.Body, appengine.MaxSnapshotBytes+16385))
+		if err != nil || len(body) > appengine.MaxSnapshotBytes+16384 || !json.Valid(body) {
 			return errors.New("bounded workbook response required")
 		}
 		body = bytes.ReplaceAll(body, []byte(token), []byte("[REDACTED]"))

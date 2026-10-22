@@ -154,7 +154,7 @@
       "cell"
     ],
     "export_formats": [],
-    "execution_profile": "mooring-headless/v1",
+    "execution_profile": "headless-worker/v1",
     "authoring_skill": ""
   }
 ]

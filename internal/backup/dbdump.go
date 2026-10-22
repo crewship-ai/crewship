@@ -320,11 +320,6 @@ var BackupTables = []string{
 	"page_folder_acl", // FK folder_id → page_folders; nullable set_by_user_id → users
 	"pages",
 	"documents",
-	"gridcraft_heads",
-	"gridcraft_revisions",
-	"gridcraft_operations",
-	"gridcraft_audit",
-	"gridcraft_outbox",
 	"document_creations",
 	"slides_heads",
 	"slides_revisions",
@@ -585,6 +580,21 @@ func DumpWorkspace(ctx context.Context, db *sql.DB, workspaceID string) (*DBDump
 		return nil, fmt.Errorf("backup: begin dump tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	// Until portable workbook backup is supported, never return a successful
+	// bundle which silently drops experimental user content.
+	var hasWorkbookTable bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='gridcraft_heads')`).Scan(&hasWorkbookTable); err != nil {
+		return nil, err
+	}
+	if hasWorkbookTable {
+		var hasWorkbook bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM gridcraft_heads WHERE workspace_id=?)`, workspaceID).Scan(&hasWorkbook); err != nil {
+			return nil, err
+		}
+		if hasWorkbook {
+			return nil, fmt.Errorf("backup: portable backup of experimental workbooks is unavailable")
+		}
+	}
 
 	dump := &DBDump{
 		WorkspaceID: workspaceID,
@@ -1087,6 +1097,12 @@ type RestoreDumpHooks struct {
 // with the supplied lifecycle hooks. See RestoreDumpHooks for the
 // contract of each hook.
 func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *RestoreDumpHooks) (RestoreStats, error) {
+	for table, rows := range dump.Tables {
+		if strings.HasPrefix(table, "gridcraft_") && len(rows) > 0 {
+			return RestoreStats{}, fmt.Errorf("backup: portable restore of experimental workbooks is unavailable")
+		}
+	}
+
 	if hooks == nil {
 		hooks = &RestoreDumpHooks{}
 	}
@@ -1247,21 +1263,6 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			// copies whatever row is current — has to come after it or its
 			// CANCELLED status would be thrown away.
 			row := safeConversationRestoreRow(table, originalRow, conversationAssignments)
-			row, err = safeGridCraftRestoreRow(table, row)
-			if err != nil {
-				return stats, err
-			}
-			if table == "gridcraft_heads" {
-				if _, err = tx.ExecContext(ctx, `UPDATE gridcraft_operations SET state='failed',token=token+1,lease_until=0 WHERE workspace_id=? AND page_id=? AND state!='applied'`, row["workspace_id"], row["page_id"]); err != nil {
-					return stats, err
-				}
-				if _, err = tx.ExecContext(ctx, `DELETE FROM gridcraft_intents WHERE workspace_id=? AND page_id=?`, row["workspace_id"], row["page_id"]); err != nil {
-					return stats, err
-				}
-				if _, err = tx.ExecContext(ctx, `UPDATE gridcraft_heads SET generation=MAX(generation+1,?) WHERE workspace_id=? AND page_id=?`, row["generation"], row["workspace_id"], row["page_id"]); err != nil {
-					return stats, err
-				}
-			}
 			row, err = safeDocumentRestoreRow(table, row)
 			if err != nil {
 				return stats, err

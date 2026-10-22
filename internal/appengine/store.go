@@ -1,4 +1,4 @@
-package mooring
+package appengine
 
 import (
 	"context"
@@ -67,6 +67,15 @@ func (s *Store) tx(ctx context.Context, k Key, a Authorize, fn func(*sql.Tx, Pri
 		return err
 	}
 	if !bounded(p.AuthorityID) || !bounded(p.MandateID) || len(p.Targets) == 0 {
+		return ErrForbidden
+	}
+	// Only workbook operations are refused when another domain attaches content.
+	// Do not install triggers on Docs, Slides, or Page application tables.
+	var occupied bool
+	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM documents WHERE page_id=?) OR EXISTS(SELECT 1 FROM slides_heads WHERE page_id=?) OR EXISTS(SELECT 1 FROM page_panels WHERE page_id=?) OR EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=?) OR EXISTS(SELECT 1 FROM page_project_live WHERE page_id=?)`, k.PageID, k.PageID, k.PageID, k.PageID, k.PageID).Scan(&occupied); err != nil {
+		return err
+	}
+	if occupied {
 		return ErrForbidden
 	}
 	if err = fn(tx, p); err != nil {

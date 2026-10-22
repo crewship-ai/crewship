@@ -11,18 +11,18 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/appengine"
 	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/database"
-	"github.com/crewship-ai/crewship/internal/mooring"
 	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 type gridcraftFixtureEngine struct{}
 
 func (gridcraftFixtureEngine) Identity() string { return "fixture-engine@1" }
-func (gridcraftFixtureEngine) Prepare(_ context.Context, b mooring.Binding, s mooring.State, c mooring.Command) (mooring.Candidate, error) {
-	return mooring.NewCandidate(b, c.Snapshot, []string{"*"}), nil
+func (gridcraftFixtureEngine) Prepare(_ context.Context, b appengine.Binding, s appengine.State, c appengine.Command) (appengine.Candidate, error) {
+	return appengine.NewCandidate(b, c.Snapshot, []string{"*"}), nil
 }
 func TestGridCraftHumanDefaultOffImportReadRetryAndPrivacy(t *testing.T) {
 	f := gridcraftInstanceFixture(t)
@@ -30,8 +30,8 @@ func TestGridCraftHumanDefaultOffImportReadRetryAndPrivacy(t *testing.T) {
 	mustExec(t, f.db, `UPDATE pages SET private_audience=1 WHERE id='workbook-original'`)
 	base := "/api/v1/pages/workbook-test/workbook"
 	wantCode(t, f.do(f.boss, "GET", base+"?workspace_id=ws-old", ""), 404, "default off")
-	f.r.RegisterGridCraft(mooring.Options{Enabled: true}, gridcraftFixtureEngine{})
-	req := mooring.Request{MutationID: "import-1", MandateID: "human-import", Command: mooring.Command{Kind: "import", Snapshot: json.RawMessage(`{"sheets":[{}]}`)}}
+	f.r.RegisterGridCraft(appengine.Options{Enabled: true}, gridcraftFixtureEngine{})
+	req := appengine.Request{MutationID: "import-1", MandateID: "human-import", Command: appengine.Command{Kind: "import", Snapshot: json.RawMessage(`{"sheets":[{}]}`)}}
 	raw, _ := json.Marshal(req)
 	call := func(token, method, path, body string) {
 		t.Helper()
@@ -57,7 +57,7 @@ func TestGridCraftAgentRequiresRetainedMandateAndRevokesDuringCandidate(t *testi
 	wmSeedPage(t, f.rig.db, f.a.WorkspaceID, "grid-agent-page", "grid-agent", "Workbook", f.a.HumanUserID, "")
 	mustExec(t, f.rig.db, `UPDATE pages SET private_audience=1 WHERE id='grid-agent-page'`)
 	f.pages.artifactMasterToken = "synthetic-workbook-master"
-	store := mooring.New(f.rig.db, mooring.Options{Enabled: true})
+	store := appengine.New(f.rig.db, appengine.Options{Enabled: true})
 	engine := &gridcraftBlockingEngine{}
 	adapter := artifacts.NewGridCraftAdapter(store, engine, true)
 	h := &gridcraftHTTP{pages: f.pages, store: store, engine: engine, operations: adapter}
@@ -126,7 +126,7 @@ func TestGridCraftAgentRequiresRetainedMandateAndRevokesDuringCandidate(t *testi
 type gridcraftBlockingEngine struct{ before func() }
 
 func (*gridcraftBlockingEngine) Identity() string { return "authority-fixture@1" }
-func (e *gridcraftBlockingEngine) Prepare(_ context.Context, b mooring.Binding, _ mooring.State, c mooring.Command) (mooring.Candidate, error) {
+func (e *gridcraftBlockingEngine) Prepare(_ context.Context, b appengine.Binding, _ appengine.State, c appengine.Command) (appengine.Candidate, error) {
 	if e.before != nil {
 		e.before()
 	}
@@ -136,18 +136,18 @@ func (e *gridcraftBlockingEngine) Prepare(_ context.Context, b mooring.Binding, 
 		snapshot = json.RawMessage(`{"sheets":[{"B2":"42"}]}`)
 		effects = []string{"Sheet1!B2"}
 	}
-	return mooring.NewCandidate(b, snapshot, effects), nil
+	return appengine.NewCandidate(b, snapshot, effects), nil
 }
 
 func registerGridCraftTestRoutes(r *Router) {
-	r.RegisterGridCraft(mooring.Options{Enabled: true}, gridcraftFixtureEngine{})
+	r.RegisterGridCraft(appengine.Options{Enabled: true}, gridcraftFixtureEngine{})
 }
 
 func TestGridCraftOwnerReadAuditsOtherPrivateWorkbook(t *testing.T) {
 	f := gridcraftInstanceFixture(t)
 	wmSeedPage(t, f.db, "ws-old", "workbook-admin-private", "admin-workbook", "Private workbook", "wsadmin", "")
 	mustExec(t, f.db, `UPDATE pages SET private_audience=1 WHERE id='workbook-admin-private'`)
-	f.r.RegisterGridCraft(mooring.Options{Enabled: true}, gridcraftFixtureEngine{})
+	f.r.RegisterGridCraft(appengine.Options{Enabled: true}, gridcraftFixtureEngine{})
 	body := `{"mutation_id":"private-import","mandate_id":"human-import","base_rev":0,"generation":0,"command":{"kind":"import","snapshot":{"sheets":[{}]}}}`
 	base := "/api/v1/pages/admin-workbook/workbook"
 	wantCode(t, f.do(f.wsAdmin, "POST", base+"/operations?workspace_id=ws-old", body), 200, "human custodian import")
@@ -176,7 +176,7 @@ func TestGridCraftFixtureRetainsDurabilityAfterConnectionReplacement(t *testing.
 	f.db.SetMaxIdleConns(0)
 	wmSeedPage(t, f.db, "ws-old", "reopened-workbook", "reopened-workbook", "Workbook", "boss", "")
 	mustExec(t, f.db, `UPDATE pages SET private_audience=1 WHERE id='reopened-workbook'`)
-	f.r.RegisterGridCraft(mooring.Options{Enabled: true}, gridcraftFixtureEngine{})
+	f.r.RegisterGridCraft(appengine.Options{Enabled: true}, gridcraftFixtureEngine{})
 	body := `{"mutation_id":"reopened-import","mandate_id":"human-import","base_rev":0,"generation":0,"command":{"kind":"import","snapshot":{"sheets":[{}]}}}`
 	wantCode(t, f.do(f.boss, "POST", "/api/v1/pages/reopened-workbook/workbook/operations?workspace_id=ws-old", body), 200, "FULL after replacement")
 }
@@ -209,7 +209,7 @@ func TestGridCraftNormalPoolCannotClaimNodeDurability(t *testing.T) {
 	wmSeedPage(t, f.db, "ws-old", "nondurable-workbook", "nondurable-workbook", "Workbook", "boss", "")
 	mustExec(t, f.db, `UPDATE pages SET private_audience=1 WHERE id='nondurable-workbook'`)
 	engine := &gridcraftBlockingEngine{before: func() { t.Fatal("non-durable admission started engine work") }}
-	f.r.RegisterGridCraft(mooring.Options{Enabled: true}, engine)
+	f.r.RegisterGridCraft(appengine.Options{Enabled: true}, engine)
 	body := `{"mutation_id":"nondurable-import","mandate_id":"human-import","base_rev":0,"generation":0,"command":{"kind":"import","snapshot":{"sheets":[{}]}}}`
 	wantCode(t, f.do(f.boss, "POST", "/api/v1/pages/nondurable-workbook/workbook/operations?workspace_id=ws-old", body), 400, "NORMAL storage refused")
 	for _, table := range []string{"gridcraft_heads", "gridcraft_operations", "gridcraft_audit", "gridcraft_outbox"} {

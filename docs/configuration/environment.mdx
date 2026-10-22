@@ -606,7 +606,9 @@ original operation identity; a temporary admission refusal does not erase them.
 
 `CREWSHIP_GRIDCRAFT_ENABLED` enables the experimental personal workbook API and
 agent tools; default `false`. Only `true` or `1` enables it. Activation requires
-independent runtime qualification and the operator-pinned image in
-`CREWSHIP_GRIDCRAFT_IMAGE`, an immutable `repository@sha256:<digest>` reference.
-The server never pulls the image or falls back to an unsandboxed executable.
+independent qualification of a persistent operator-pinned worker. Set
+`CREWSHIP_GRIDCRAFT_SERVICE_SOCKET` to its clean absolute private Unix socket
+path and `CREWSHIP_GRIDCRAFT_SERVICE_TOKEN_FILE` to its regular mode-0600 secret
+file. These paths must differ and fit within 100 bytes. The application never
+launches containers or falls back to an unsandboxed executable.
 See [workbook commands](/cli/workbook) for scope and request contracts.

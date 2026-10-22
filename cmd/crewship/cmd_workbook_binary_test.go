@@ -13,15 +13,15 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/api"
-	"github.com/crewship-ai/crewship/internal/mooring"
+	"github.com/crewship-ai/crewship/internal/appengine"
 	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 type binaryWorkbookEngine struct{}
 
 func (binaryWorkbookEngine) Identity() string { return "binary-fixture@1" }
-func (binaryWorkbookEngine) Prepare(_ context.Context, b mooring.Binding, _ mooring.State, c mooring.Command) (mooring.Candidate, error) {
-	return mooring.NewCandidate(b, c.Snapshot, []string{"*"}), nil
+func (binaryWorkbookEngine) Prepare(_ context.Context, b appengine.Binding, _ appengine.State, c appengine.Command) (appengine.Candidate, error) {
+	return appengine.NewCandidate(b, c.Snapshot, []string{"*"}), nil
 }
 func TestWorkbookHumanBinary(t *testing.T) {
 	db := testutil.MigratedDB(t).DB
@@ -46,7 +46,7 @@ func TestWorkbookHumanBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(router.Shutdown)
-	router.RegisterGridCraft(mooring.Options{Enabled: true}, binaryWorkbookEngine{})
+	router.RegisterGridCraft(appengine.Options{Enabled: true}, binaryWorkbookEngine{})
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
 	binary := buildCrewshipBinary(t)
@@ -76,7 +76,7 @@ func TestWorkbookHumanBinary(t *testing.T) {
 	if string(first) != string(retry) {
 		t.Fatalf("receipt changed: %s %s", first, retry)
 	}
-	var receipt mooring.Receipt
+	var receipt appengine.Receipt
 	if json.Unmarshal(retry, &receipt) != nil || receipt.Rev != 1 {
 		t.Fatalf("receipt %s", retry)
 	}

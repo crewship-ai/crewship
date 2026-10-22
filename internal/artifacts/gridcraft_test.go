@@ -2,7 +2,7 @@ package artifacts
 
 import (
 	"errors"
-	"github.com/crewship-ai/crewship/internal/mooring"
+	"github.com/crewship-ai/crewship/internal/appengine"
 	"github.com/crewship-ai/crewship/internal/pages"
 	"testing"
 )
@@ -15,7 +15,7 @@ func TestGridCraftRegistryDefaultOffMissingAdapterAndUnsupportedOperations(t *te
 	if err := registry.Check("gridcraft-workbook", 1, Apply); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("missing adapter: %v", err)
 	}
-	adapter := NewGridCraftAdapter(mooring.New(nil, mooring.Options{}), nil, false)
+	adapter := NewGridCraftAdapter(appengine.New(nil, appengine.Options{}), nil, false)
 	registry = NewRegistry(nil, nil, adapter)
 	if _, ok := registry.GridCraft(); ok {
 		t.Fatal("default off adapter exposed")

@@ -1,6 +1,6 @@
-// Package mooring prepares offline workbook candidates while Go alone commits
+// Package appengine prepares offline workbook candidates while Go alone commits
 // authorized revisions. It installs no public routes or agent credentials.
-package mooring
+package appengine
 
 import (
 	"bytes"
