@@ -17,10 +17,14 @@
 //     scoped to the bundle path, so the opaque-origin document cannot fetch
 //     the Studio API or load Studio scripts, and Studio's frame-src names the
 //     bundle path only, so a frame that navigates itself cannot reach a
-//     Studio document. Requests a credentialless sandboxed frame would not
-//     make are refused: any Cookie (the iframe lacks credentialless), a
-//     document that is not a frame, and assets not requested cross-site
-//     (Studio loading the foreign code into its own origin).
+//     Studio document. Both hold only while nothing in front of Crewship
+//     redirects or normalises the prefix; CheckProxy verifies that through
+//     the public URL and a failed check disables the editor. Requests a
+//     credentialless sandboxed frame would not make are refused: Crewship's
+//     own cookies (the iframe lacks credentialless; cookies a proxy sets are
+//     ignored), a document that is not a frame, and assets not requested
+//     cross-site (Studio loading the foreign code into its own origin).
+//     Responses carry Studio's HSTS and are never stored by shared caches.
 //
 // In both modes:
 //   - The editor document carries CSP `sandbox allow-scripts`. It runs in an
@@ -41,7 +45,11 @@
 //     computed from the verified file; there is no 'unsafe-inline' script.
 //   - Every response carries headers set here, not by the bundle. A <meta>
 //     policy inside a compromised bundle can only tighten them.
-//   - Cookies are never read and never set.
+//   - The policy blocks WebRTC (webrtc 'block'), which connect-src does not
+//     govern. Browsers do not all enforce that directive yet, so bundles
+//     that reference the WebRTC API are refused at load (qualification).
+//   - Cookies are never set. In same-host mode only their names are read,
+//     to refuse a frame that carries Crewship's own.
 package editororigin
 
 import (
@@ -76,6 +84,16 @@ const SameHostPrefix = "/_editor"
 // sameHostVary names every request header a same-host response depends on,
 // so no cache replays an asset to a request it would refuse.
 const sameHostVary = "Cookie, Sec-Fetch-Site, Sec-Fetch-Dest"
+
+// StudioHSTS is the Strict-Transport-Security value of every Studio
+// response. Same-host editor responses send the same value: a browser
+// replaces a host's stored HSTS policy with each one it receives, so a
+// weaker header on the editor would drop includeSubDomains for the host.
+const StudioHSTS = "max-age=31536000; includeSubDomains"
+
+// dedicatedHSTS is sent by a dedicated editor host, which has no subdomains
+// of its own to cover.
+const dedicatedHSTS = "max-age=31536000"
 
 const (
 	maxBundles       = 4
@@ -119,6 +137,7 @@ type Handler struct {
 	base     string
 	csp      string
 	bundles  map[string]bundle
+	check    proxyState
 }
 
 // IsDigest reports whether s is a lowercase hex SHA-256 digest, the only
@@ -295,7 +314,7 @@ func basePolicy(self, ancestor, extraScript string) string {
 	return "default-src 'none'; script-src " + self + " 'wasm-unsafe-eval'" + extraScript +
 		"; style-src " + self + " 'unsafe-inline'; img-src " + self + " data: blob:; font-src " + self +
 		"; connect-src " + self + "; worker-src 'none'; child-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors " +
-		ancestor + "; sandbox allow-scripts"
+		ancestor + "; webrtc 'block'; sandbox allow-scripts"
 }
 
 const denyCSP = "default-src 'none'; frame-ancestors 'none'; sandbox"
@@ -561,9 +580,46 @@ func loadBundle(dir, digest string) (map[string]file, error) {
 		if hex.EncodeToString(got[:]) != sum {
 			return nil, fmt.Errorf("%s does not match its manifest digest", name)
 		}
+		if api := webRTCReference(name, body); api != "" {
+			return nil, fmt.Errorf("%s references the WebRTC API (%s); a qualified editor bundle must not use WebRTC", name, api)
+		}
 		files[name] = file{body: body, contentType: contentType(name), index: name == "index.html"}
 	}
 	return files, nil
+}
+
+// webRTCAPIs are the WebRTC interfaces whose use opens a network channel
+// that CSP connect-src does not govern. Matching is on the plain name, which
+// also covers vendor-prefixed spellings (webkitRTCPeerConnection). It is a
+// qualification check against a supplier bundle using WebRTC, not a
+// boundary against deliberately obfuscated code.
+var webRTCAPIs = [][]byte{
+	[]byte("RTCPeerConnection"),
+	[]byte("RTCDataChannel"),
+	[]byte("RTCIceTransport"),
+	[]byte("RTCIceCandidate"),
+	[]byte("RTCSessionDescription"),
+	[]byte("RTCRtpSender"),
+	[]byte("RTCRtpReceiver"),
+	[]byte("RTCRtpTransceiver"),
+	[]byte("RTCSctpTransport"),
+	[]byte("RTCDtlsTransport"),
+}
+
+// webRTCReference returns the first WebRTC API a code or markup file names,
+// or "". Images and fonts are not scanned.
+func webRTCReference(name string, body []byte) string {
+	switch path.Ext(name) {
+	case ".js", ".mjs", ".wasm", ".html", ".json", ".svg":
+	default:
+		return ""
+	}
+	for _, api := range webRTCAPIs {
+		if bytes.Contains(body, api) {
+			return string(api)
+		}
+	}
+	return ""
 }
 
 func validName(name string) bool {
@@ -671,18 +727,51 @@ func (h *Handler) IndexURL(digest string) string {
 	return h.base + BundlePrefix + digest + "/index.html"
 }
 
+// IsCrewshipCookie reports whether a cookie name is one Crewship issues on
+// the Studio origin: the auth session, refresh and CSRF cookies (with or
+// without the __Secure-/__Host- prefix, current and legacy NextAuth names)
+// and the UI's own cookie. Names are compared case-insensitively.
+func IsCrewshipCookie(name string) bool {
+	n := strings.ToLower(strings.TrimSpace(name))
+	if rest, ok := strings.CutPrefix(n, "__secure-"); ok {
+		n = rest
+	} else if rest, ok := strings.CutPrefix(n, "__host-"); ok {
+		n = rest
+	}
+	return strings.HasPrefix(n, "authjs.") || strings.HasPrefix(n, "next-auth.") || n == "sidebar_state"
+}
+
+// carriesCrewshipCookie reports whether any Cookie header of r names a
+// Crewship cookie. Values are never looked at.
+func carriesCrewshipCookie(r *http.Request) bool {
+	for _, line := range r.Header.Values("Cookie") {
+		for _, pair := range strings.Split(line, ";") {
+			name, _, _ := strings.Cut(pair, "=")
+			if IsCrewshipCookie(name) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // sameHostRequestAllowed reports whether r looks like a request from a
 // credentialless sandboxed editor frame. Only such a frame may receive
 // bundle content on the Studio origin:
-//   - no Cookie: a credentialless iframe has an empty ephemeral cookie jar,
-//     an iframe without the attribute sends Studio's cookies;
+//   - no Crewship cookie: a credentialless iframe starts with an empty
+//     ephemeral cookie jar, an iframe without the attribute sends Studio's
+//     session and CSRF cookies. The ephemeral jar is shared by the whole
+//     Studio document, so cookies that a proxy, load balancer or CDN sets
+//     on editor responses (stickiness, bot management) come back when the
+//     editor is reopened in the same tab; they prove nothing and are
+//     ignored;
 //   - the document only as a frame (Studio frames it same-origin, a
 //     self-navigation from the opaque origin is cross-site);
 //   - assets only cross-site, which is what an opaque origin sends, and never
 //     as a document. A Studio document loading the foreign code into the
 //     Studio origin sends same-origin and is refused.
 func sameHostRequestAllowed(r *http.Request, index bool) bool {
-	if len(r.Header.Values("Cookie")) > 0 {
+	if carriesCrewshipCookie(r) {
 		return false
 	}
 	dest := r.Header.Get("Sec-Fetch-Dest")
@@ -708,13 +797,18 @@ func (h *Handler) setHeaders(w http.ResponseWriter, csp string) {
 	hdr.Set("Origin-Agent-Cluster", "?1")
 	hdr.Set("Referrer-Policy", "no-referrer")
 	hdr.Set("X-Content-Type-Options", "nosniff")
-	hdr.Set("Strict-Transport-Security", "max-age=31536000")
+	if h.sameHost {
+		hdr.Set("Strict-Transport-Security", StudioHSTS)
+	} else {
+		hdr.Set("Strict-Transport-Security", dedicatedHSTS)
+	}
 	hdr.Set("Permissions-Policy", permissionsPolicy)
 	hdr.Set("Cache-Control", "no-store")
 }
 
-// ServeHTTP serves one verified bundle file. It never looks at cookies or
-// credentials; the bundle is public, constant code with no user data.
+// ServeHTTP serves one verified bundle file. It never looks at credentials
+// (same-host mode reads only cookie names); the bundle is public, constant
+// code with no user data.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.setHeaders(w, h.csp)
 	if h.sameHost {
@@ -738,6 +832,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
+	if reason := h.check.disabledReason(); reason != "" {
+		http.Error(w, "the embedded editor is disabled: "+reason, http.StatusServiceUnavailable)
+		return
+	}
 	if h.sameHost && !sameHostRequestAllowed(r, f.index) {
 		http.Error(w, "the editor loads only in a credentialless sandboxed frame", http.StatusForbidden)
 		return
@@ -745,7 +843,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if f.index {
 		w.Header().Set("Content-Security-Policy", b.indexCSP)
 	} else {
-		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		// Same host: never in a shared cache. One that ignores Vary would
+		// replay a frame's 200 to a Studio-context request refused above.
+		cache := "public, max-age=31536000, immutable"
+		if h.sameHost {
+			cache = "private, max-age=31536000, immutable"
+		}
+		w.Header().Set("Cache-Control", cache)
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Cross-Origin-Resource-Policy", "cross-origin")
 	}

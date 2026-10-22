@@ -116,8 +116,15 @@ func TestSameHostRefusesRequestsASandboxedCredentiallessFrameWouldNotMake(t *tes
 		// A frame without the credentialless attribute carries Studio's
 		// cookies; refusing it keeps the attribute mandatory even where
 		// Studio's COEP is missing (a proxy strips it, another browser).
-		{"index with studio cookie", index, with(frameNav, "Cookie", "__Secure-authjs.session-token=s")},
-		{"index with any cookie", index, with(frameNav, "Cookie", "theme=dark")},
+		{"index with studio session cookie", index, with(frameNav, "Cookie", "__Secure-authjs.session-token=s")},
+		{"index with studio session cookie over http", index, with(frameNav, "Cookie", "authjs.session-token=s")},
+		{"index with studio csrf cookie", index, with(frameNav, "Cookie", "__Host-authjs.csrf-token=c")},
+		{"index with studio csrf cookie over http", index, with(frameNav, "Cookie", "authjs.csrf-token=c")},
+		{"index with studio refresh cookie", index, with(frameNav, "Cookie", "__Secure-authjs.refresh-token=r")},
+		{"index with legacy session cookie", index, with(frameNav, "Cookie", "next-auth.session-token=s")},
+		{"index with studio ui cookie", index, with(frameNav, "Cookie", "sidebar_state=true")},
+		{"index with studio cookie among proxy cookies", index, with(frameNav, "Cookie", "AWSALBCORS=a; __cf_bm=b;authjs.session-token=s")},
+		{"index with studio cookie in a second header", index, with(frameNav, "Cookie", "AWSALBCORS=a", "Cookie", " __Secure-authjs.session-token=s")},
 		{"index opened top-level", index, []string{"Sec-Fetch-Site", "none", "Sec-Fetch-Mode", "navigate", "Sec-Fetch-Dest", "document"}},
 		{"index without fetch metadata", index, nil},
 		{"index as script", index, frameScript},
@@ -127,7 +134,7 @@ func TestSameHostRefusesRequestsASandboxedCredentiallessFrameWouldNotMake(t *tes
 		{"asset typed url", asset, []string{"Sec-Fetch-Site", "none", "Sec-Fetch-Mode", "navigate", "Sec-Fetch-Dest", "document"}},
 		{"asset without fetch metadata", asset, nil},
 		{"asset as frame document", asset, frameSelfNav},
-		{"asset with cookie", asset, with(frameScript, "Cookie", "theme=dark")},
+		{"asset with studio cookie", asset, with(frameScript, "Cookie", "__Secure-authjs.session-token=s")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := serve(h, "GET", "studio.example.test", tc.path, tc.header...)
@@ -150,17 +157,77 @@ func TestSameHostRefusesRequestsASandboxedCredentiallessFrameWouldNotMake(t *tes
 	}
 }
 
+// A proxy, load balancer or CDN in front of Crewship may set its own
+// SameSite=None cookies on editor responses (ALB stickiness, bot management).
+// The credentialless frame's ephemeral jar is shared by the whole Studio
+// document, so a reopened editor sends them back. Only Crewship's own cookies
+// prove the frame lost the credentialless attribute; other cookies must not
+// break reopening the editor in the same tab.
+func TestSameHostIgnoresThirdPartyCookies(t *testing.T) {
+	h, digest := sameHostFixture(t)
+	for _, cookie := range []string{
+		"AWSALBCORS=abc",
+		"AWSALB=abc; AWSALBCORS=abc",
+		"__cf_bm=abc; __cflb=def",
+		"LBSTICKY=abc",
+		"INGRESSCOOKIE=1; route=sticky",
+		// Names that merely contain Crewship's are not Crewship's.
+		"xauthjs.session-token=1; my_sidebar_state=1",
+		"malformed; =x; ;",
+	} {
+		for _, tc := range []struct {
+			file   string
+			header []string
+		}{{"index.html", frameNav}, {"app.js", frameScript}} {
+			w := serve(h, "GET", "studio.example.test", "/_editor/b/"+digest+"/"+tc.file, with(tc.header, "Cookie", cookie)...)
+			if w.Code != http.StatusOK {
+				t.Errorf("%s with cookie %q: status %d, want 200", tc.file, cookie, w.Code)
+			}
+			if w.Header().Get("Set-Cookie") != "" {
+				t.Errorf("%s: editor set a cookie", tc.file)
+			}
+		}
+	}
+}
+
+func TestIsCrewshipCookie(t *testing.T) {
+	for name, want := range map[string]bool{
+		"authjs.session-token":          true,
+		"__Secure-authjs.session-token": true,
+		"authjs.refresh-token":          true,
+		"__Secure-authjs.refresh-token": true,
+		"authjs.csrf-token":             true,
+		"__Host-authjs.csrf-token":      true,
+		"next-auth.session-token":       true,
+		"__Secure-next-auth.csrf-token": true,
+		"sidebar_state":                 true,
+		" AUTHJS.SESSION-TOKEN ":        true,
+		"AWSALBCORS":                    false,
+		"__cf_bm":                       false,
+		"xauthjs.session-token":         false,
+		"__Secure-other":                false,
+		"":                              false,
+	} {
+		if got := IsCrewshipCookie(name); got != want {
+			t.Errorf("IsCrewshipCookie(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
+
 func TestSameHostHeadersAreExact(t *testing.T) {
 	h, digest := sameHostFixture(t)
 	policy := func(extra string) string {
-		return "default-src 'none'; script-src " + sameHostSelf + " 'wasm-unsafe-eval'" + extra + "; style-src " + sameHostSelf + " 'unsafe-inline'; img-src " + sameHostSelf + " data: blob:; font-src " + sameHostSelf + "; connect-src " + sameHostSelf + "; worker-src 'none'; child-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors " + studio + "; sandbox allow-scripts"
+		return "default-src 'none'; script-src " + sameHostSelf + " 'wasm-unsafe-eval'" + extra + "; style-src " + sameHostSelf + " 'unsafe-inline'; img-src " + sameHostSelf + " data: blob:; font-src " + sameHostSelf + "; connect-src " + sameHostSelf + "; worker-src 'none'; child-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors " + studio + "; webrtc 'block'; sandbox allow-scripts"
 	}
 	for _, tc := range []struct {
 		file, csp, corp, cache, acao string
 		header                       []string
 	}{
 		{"index.html", policy(" " + scriptHash(bootstrap)), "same-origin", "no-store", "", frameNav},
-		{"app.js", policy(""), "cross-origin", "public, max-age=31536000, immutable", "*", frameScript},
+		// Shared caches must not store assets: one that ignores Vary would
+		// replay a frame's 200 to a Studio-context request the editor
+		// refuses. Browsers still cache them privately.
+		{"app.js", policy(""), "cross-origin", "private, max-age=31536000, immutable", "*", frameScript},
 	} {
 		t.Run(tc.file, func(t *testing.T) {
 			w := serve(h, "GET", "studio.example.test", "/_editor/b/"+digest+"/"+tc.file, tc.header...)
@@ -177,6 +244,10 @@ func TestSameHostHeadersAreExact(t *testing.T) {
 				"X-Content-Type-Options":       "nosniff",
 				"Set-Cookie":                   "",
 				"X-Frame-Options":              "",
+				// The editor shares the Studio host: its HSTS must be
+				// Studio's, or each editor load would drop includeSubDomains
+				// from the host's stored policy (RFC 6797 section 8.1).
+				"Strict-Transport-Security": "max-age=31536000; includeSubDomains",
 			}
 			for k, v := range want {
 				if got := w.Header().Get(k); got != v {

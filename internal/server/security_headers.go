@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/editororigin"
 	"github.com/crewship-ai/crewship/internal/pages"
 )
 
@@ -97,7 +98,8 @@ func securityHeadersMiddlewareWith(next http.Handler, o securityHeaderOptions) h
 			// omitted on purpose — opting into Chrome's preload list
 			// is a one-way door (removal takes months) and requires
 			// every current and future subdomain to be HTTPS-only.
-			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+			// The same-host workbook editor sends this exact value too.
+			w.Header().Set("Strict-Transport-Security", editororigin.StudioHSTS)
 
 			// COEP `credentialless` strips cookies from cross-origin
 			// no-cors requests so the page can opt into cross-origin

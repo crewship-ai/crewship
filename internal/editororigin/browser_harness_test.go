@@ -10,6 +10,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -70,7 +73,10 @@ var harnessWasm = string([]byte{0, 'a', 's', 'm', 1, 0, 0, 0})
 // With CREWSHIP_TEST_EDITOR_MODE=same-host it is the front server of the
 // Studio origin, as the Crewship server is: Gate sends the editor prefix to
 // the same-host handler and reverse-proxies everything else, unchanged, to
-// the Studio stand-in at CREWSHIP_TEST_STUDIO_UPSTREAM.
+// the Studio stand-in at CREWSHIP_TEST_STUDIO_UPSTREAM. A front layer in the
+// same process can play a load balancer that sets its own SameSite=None
+// cookie on editor responses (/__proxycookie?on=1) and records the Cookie
+// headers the editor prefix receives (/__editorcookies).
 func TestEditorOriginBrowserHarness(t *testing.T) {
 	out := os.Getenv("CREWSHIP_TEST_EDITOR_FILE")
 	if out == "" {
@@ -122,6 +128,9 @@ func TestEditorOriginBrowserHarness(t *testing.T) {
 		studio := &httputil.ReverseProxy{Rewrite: func(pr *httputil.ProxyRequest) { pr.SetURL(upstream); pr.Out.Host = pr.In.Host }}
 		serve = Gate(h, studio)
 	}
+	var proxyCookie atomic.Bool
+	var seenMu sync.Mutex
+	var seen []string
 	stop := make(chan struct{}, 1)
 	server := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/__stop" {
@@ -131,6 +140,26 @@ func TestEditorOriginBrowserHarness(t *testing.T) {
 			}
 			w.WriteHeader(204)
 			return
+		}
+		switch r.URL.Path {
+		case "/__proxycookie":
+			proxyCookie.Store(r.URL.Query().Get("on") == "1")
+			w.WriteHeader(204)
+			return
+		case "/__editorcookies":
+			seenMu.Lock()
+			json.NewEncoder(w).Encode(append([]string{}, seen...))
+			seen = nil
+			seenMu.Unlock()
+			return
+		}
+		if sameHost && strings.HasPrefix(strings.ToLower(r.URL.Path), SameHostPrefix+"/") {
+			seenMu.Lock()
+			seen = append(seen, strings.Join(r.Header.Values("Cookie"), "; "))
+			seenMu.Unlock()
+			if proxyCookie.Load() {
+				w.Header().Add("Set-Cookie", "LBSTICKY=abc; Path=/; SameSite=None; Secure")
+			}
 		}
 		serve.ServeHTTP(w, r)
 	})}

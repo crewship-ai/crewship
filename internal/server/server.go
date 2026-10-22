@@ -103,6 +103,7 @@ type Server struct {
 	pprofShutdown     func()
 	pyroscopeShutdown func()
 	startedAt         time.Time
+	editor            *editororigin.Handler
 	runCtx            context.Context
 	runCancel         context.CancelFunc
 
@@ -422,6 +423,15 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	mainHandler = pathTraversalRejectMiddleware(mainHandler)
 	// V-10: Wrap with security headers middleware
 	editor := newEditorOrigin(cfg, logger)
+	if cfg.GridCraft.Enabled && cfg.GridCraft.EditorEnabled {
+		// Reported on /healthz; in same-host mode the server also checks its
+		// public URL for a proxy that would defeat the path-scoped isolation.
+		s.editor = editor
+		if s.bgCtx == nil {
+			s.bgCtx, s.bgCancel = context.WithCancel(journal.WithSigningKeys(context.Background(), cfg.Audit.Keys))
+		}
+		startEditorProxyCheck(s.bgCtx, &s.bgWg, editor, cfg.PageStudioOrigin(), logger, newEditorProxyCheckClient(), editorProxyCheckSchedule)
+	}
 	mainHandler = securityHeadersMiddlewareWith(mainHandler, editorHeaderOptions(cfg, editor))
 	// The editor (its host, or its path prefix on the Studio origin) serves
 	// only allowlisted bundles under its own headers; it never reaches the

@@ -21,7 +21,8 @@
 //                            expects, otherwise known caches are searched
 //   HOST_COEP=1              Studio sends COEP credentialless (production)
 //   HOST_SANDBOX=1           host iframe also has sandbox="allow-scripts"
-//   EDITOR_MODE=same-host    zero-config mode (always with Studio COEP)
+//   EDITOR_MODE=same-host    zero-config mode (always with Studio COEP), including
+//                            reopening behind a proxy that sets its own cookie
 import { createServer } from 'node:http'
 import { readFile, mkdtemp, rm } from 'node:fs/promises'
 import { existsSync, readFileSync } from 'node:fs'
@@ -73,7 +74,8 @@ const server = createServer((req, res) => {
     throw new Error('editor path reached Studio: ' + req.url)
   }
   res.setHeader('Content-Type', 'text/html')
-  res.setHeader('Set-Cookie', 'sid=parent-session; Path=/; SameSite=Lax')
+  // Studio's own session cookie, by its real name (plain HTTP spelling).
+  res.setHeader('Set-Cookie', 'authjs.session-token=parent-session; Path=/; SameSite=Lax')
   if (isRuntime) {
     // A Studio-origin document that Studio may frame, like the Page runtime
     // bootstrap in a development setup where the runtime origin equals Studio. It reports
@@ -167,7 +169,7 @@ async function checkContained(page, context, consoleLines, opts, label) {
   check(page.url().startsWith(parentOrigin + '/') && !page.url().includes('navigated'), `top window navigated to ${page.url()}`)
   check(zeroHits(), `forbidden requests reached Studio: ${JSON.stringify(hits)}`)
   const cookies = await context.cookies(parentOrigin)
-  check(cookies.length === 1 && cookies[0].name === 'sid' && cookies[0].value === 'parent-session', `parent cookie jar changed: ${JSON.stringify(cookies)}`)
+  check(cookies.length === 1 && cookies[0].name === 'authjs.session-token' && cookies[0].value === 'parent-session', `parent cookie jar changed: ${JSON.stringify(cookies)}`)
   check(!consoleLines.some(l => /Refused to (execute|load|apply)/.test(l)), `CSP refused a bundle resource: ${consoleLines.join('\n')}`)
 }
 
@@ -332,6 +334,38 @@ try {
       await context.close()
     }
     console.log('PASS: without the credentialless attribute the editor does not load (browser COEP and server cookie gate, each on its own)')
+
+    // 5. S4c: a load balancer or CDN in front sets its own SameSite=None
+    // cookie on editor responses (ALB stickiness, bot management). The
+    // credentialless frame's ephemeral jar belongs to the whole Studio
+    // document, so reopening the editor in the same tab sends it back. Only
+    // Crewship's own cookies may refuse the frame; this one must not.
+    await fetch(parentOrigin + '/__proxycookie?on=1')
+    try {
+      const { context, page } = await freshPage()
+      await mount(page, { sandbox: 'allow-scripts', credentialless: true })
+      await fetch(parentOrigin + '/__editorcookies')
+      // Reopen with a new iframe element (another workbook Page, "open again").
+      await page.evaluate(() => document.querySelectorAll('iframe').forEach(f => f.remove()))
+      const reopened = await mount(page, { sandbox: 'allow-scripts', credentialless: true, timeout: 5000 }).then(r => (r.type === 'gridcraft:echo' ? 'handshake' : JSON.stringify(r)), e => e.message)
+      // Reload the same element in place.
+      const reloaded = await page.evaluate(timeout => new Promise(resolve => {
+        const frame = document.querySelector('iframe')
+        const timer = setTimeout(() => resolve('no handshake'), timeout)
+        addEventListener('message', e => { if (e.source === frame.contentWindow && e.origin === 'null' && e.data?.type === 'gridcraft:hello') { clearTimeout(timer); resolve('handshake') } })
+        frame.src = frame.src + '&r=2'
+      }), 5000)
+      const sent = await (await fetch(parentOrigin + '/__editorcookies')).json()
+      console.log('S4c reopen in the same tab with a proxy cookie:', JSON.stringify({ reopened, reloaded, sent }))
+      check(sent.some(c => c.includes('LBSTICKY=abc')), `the reopened frame did not send the proxy cookie; S4c is not exercised: ${JSON.stringify(sent)}`)
+      check(!sent.some(c => /authjs|sidebar_state/.test(c)), `a credentialless frame sent Studio's cookies: ${JSON.stringify(sent)}`)
+      check(reopened === 'handshake', `editor did not reopen in the same tab behind a cookie-setting proxy: ${reopened}`)
+      check(reloaded === 'handshake', `editor did not reload in place behind a cookie-setting proxy: ${reloaded}`)
+      await context.close()
+    } finally {
+      await fetch(parentOrigin + '/__proxycookie?on=0')
+    }
+    console.log('PASS: S4c a proxy cookie in the shared credentialless jar does not stop the editor from reopening or reloading in the same tab')
   }
 } finally {
   await browser?.close()

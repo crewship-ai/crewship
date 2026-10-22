@@ -74,7 +74,7 @@ func serve(h http.Handler, method, host, path string, header ...string) *httptes
 	r := httptest.NewRequest(method, "http://"+host+path, nil)
 	r.Host = host
 	for i := 0; i+1 < len(header); i += 2 {
-		r.Header.Set(header[i], header[i+1])
+		r.Header.Add(header[i], header[i+1])
 	}
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
@@ -84,7 +84,7 @@ func serve(h http.Handler, method, host, path string, header ...string) *httptes
 // The bundle runs in an opaque origin (CSP sandbox without allow-same-origin),
 // so every source names the editor origin explicitly instead of 'self'.
 func policy(extraScript string) string {
-	return "default-src 'none'; script-src " + editor + " 'wasm-unsafe-eval'" + extraScript + "; style-src " + editor + " 'unsafe-inline'; img-src " + editor + " data: blob:; font-src " + editor + "; connect-src " + editor + "; worker-src 'none'; child-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors " + studio + "; sandbox allow-scripts"
+	return "default-src 'none'; script-src " + editor + " 'wasm-unsafe-eval'" + extraScript + "; style-src " + editor + " 'unsafe-inline'; img-src " + editor + " data: blob:; font-src " + editor + "; connect-src " + editor + "; worker-src 'none'; child-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors " + studio + "; webrtc 'block'; sandbox allow-scripts"
 }
 
 var wantCSP = policy("")
