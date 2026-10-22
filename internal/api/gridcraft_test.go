@@ -87,6 +87,40 @@ func TestGridCraftAgentRequiresRetainedMandateAndRevokesDuringCandidate(t *testi
 		return w
 	}
 	wantCode(t, call(packet), 404, "no implicit run-wide workbook grant")
+	// Mandate names of human operations are reserved: an agent revision must
+	// never be recorded under a human mandate.
+	for _, reserved := range []string{"human-edit", "human-import", "human-other"} {
+		w := httptest.NewRecorder()
+		h.mandate(w, humanRequest("POST", "/", fmt.Sprintf(`{"mandate_id":%q,"run_id":%q,"base_rev":1,"generation":1,"targets":["Sheet1!B2"]}`, reserved, f.a.RunID)))
+		wantCode(t, w, 400, "reserved mandate "+reserved)
+	}
+	// Only the owner's own human credential may edit cells: an agent run token
+	// or an internal-token request is refused on the human edit route.
+	editBody := `{"session_id":"s1","mutation_id":"s1:1","base_rev":1,"generation":1,"ops":[{"kind":"cell.set","sheet":"Sheet1","cell":"B2","input":"7"}]}`
+	asAgent := documentDraftRequest(f, token, "POST", editBody)
+	// Even when the request also carries the owner's user context.
+	agentCtx := context.WithValue(asAgent.Context(), ctxUser, &AuthUser{ID: f.a.HumanUserID})
+	agentCtx = context.WithValue(agentCtx, ctxWorkspaceID, f.a.WorkspaceID)
+	agentCtx = context.WithValue(agentCtx, ctxAuthKind, AuthKindCLIToken)
+	asAgent = asAgent.WithContext(agentCtx)
+	asAgent.SetPathValue("slug", "@grid-agent-page")
+	edited := httptest.NewRecorder()
+	h.edit(edited, asAgent)
+	wantCode(t, edited, 404, "agent run token on human edits")
+	internal := humanRequest("POST", "/", editBody)
+	internal.Header.Set("X-Internal-Token", "anything")
+	edited = httptest.NewRecorder()
+	h.edit(edited, internal)
+	wantCode(t, edited, 404, "internal token on human edits")
+	inRun := humanRequest("POST", "/", editBody)
+	inRun = inRun.WithContext(context.WithValue(inRun.Context(), artifactRunKey{}, &artifactRunAuthority{}))
+	edited = httptest.NewRecorder()
+	h.edit(edited, inRun)
+	wantCode(t, edited, 404, "artifact run context on human edits")
+	var afterRefusals int
+	if err := f.rig.db.QueryRow(`SELECT head_rev FROM gridcraft_heads WHERE page_id='grid-agent-page'`).Scan(&afterRefusals); err != nil || afterRefusals != 1 {
+		t.Fatalf("refused edits changed head: %d %v", afterRefusals, err)
+	}
 	grant := httptest.NewRecorder()
 	grantBody := fmt.Sprintf(`{"mandate_id":"cell-edit","run_id":%q,"base_rev":1,"generation":1,"targets":["Sheet1!B2"]}`, f.a.RunID)
 	h.mandate(grant, humanRequest("POST", "/", grantBody))

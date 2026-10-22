@@ -25,6 +25,15 @@ func gridcraftSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	create := obj(map[string]any{"slug": str(), "name": str()}, "slug", "name")
 	create["additionalProperties"] = false
 	created := obj(map[string]any{"page_id": str(), "slug": str(), "name": str()}, "page_id", "slug", "name")
+	conflict := obj(map[string]any{"sheet": str(), "cell": str(), "input": map[string]any{"type": "string", "description": "The cell's input in the head revision"}, "rev": integer(1), "actor_label": map[string]any{"type": "string", "description": "Display name of the writer of that input"}}, "sheet", "cell", "input", "rev", "actor_label")
+	// Every error carries "error"; a 409 precondition_failed from an edit or
+	// import also carries the head and what the client must do next.
+	workbookError := obj(map[string]any{
+		"error":             str(),
+		"head_rev":          map[string]any{"type": "integer", "minimum": 0, "description": "Current head revision (409 precondition_failed only)"},
+		"snapshot_required": map[string]any{"type": "boolean", "description": "Reread the workbook; retrying the same packet cannot succeed (409 precondition_failed only)"},
+		"conflicts":         map[string]any{"type": "array", "items": ref("WorkbookCellConflict"), "description": "Target cells another writer changed since base_rev (409 precondition_failed only)"},
+	}, "error")
 	routes := map[string]DomainSchema{}
 	routes["POST /api/v1/workbooks"] = DomainSchema{Request: create, RequestRequired: true, Response: created}
 	base := "/api/v1/pages/{slug}/workbook"
@@ -41,7 +50,10 @@ func gridcraftSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		}
 		c.ErrorStatuses = []string{"400", "401", "403", "404", "409", "429", "500", "503"}
 		c.SuccessHeaders = map[string]any{"Cache-Control": map[string]any{"schema": map[string]any{"type": "string", "enum": []string{"no-store"}}}}
+		if key == "POST "+base+"/edits" || key == "POST "+base+"/operations" {
+			c.ErrorMedia, c.ErrorResponse = []string{"application/json"}, ref("WorkbookError")
+		}
 		routes[key] = c
 	}
-	return routes, map[string]any{"WorkbookState": state, "WorkbookReceipt": receipt, "WorkbookStatus": status, "WorkbookMandate": mandate}
+	return routes, map[string]any{"WorkbookState": state, "WorkbookReceipt": receipt, "WorkbookStatus": status, "WorkbookMandate": mandate, "WorkbookError": workbookError, "WorkbookCellConflict": conflict}
 }

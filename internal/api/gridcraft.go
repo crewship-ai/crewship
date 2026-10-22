@@ -304,11 +304,17 @@ func (h *gridcraftHTTP) importFile(w http.ResponseWriter, r *http.Request) {
 		gridcraftError(w, err)
 		return
 	}
-	if req.Command.Kind != "import" || req.MandateID != "human-import" {
+	// Client sessions belong to cell edits; an import is never attributed to one.
+	if req.Command.Kind != "import" || req.MandateID != "human-import" || req.SessionID != "" {
 		gridcraftError(w, appengine.ErrInvalid)
 		return
 	}
 	result, err := h.operations.Apply(r.Context(), k, req, h.humanAuthority(r, k, true, nil))
+	var precondition *appengine.PreconditionError
+	if errors.As(err, &precondition) {
+		h.writePrecondition(w, r, precondition)
+		return
+	}
 	if err != nil {
 		gridcraftError(w, err)
 		return
@@ -365,8 +371,10 @@ type gridcraftConflict struct {
 	ActorLabel string `json:"actor_label"`
 }
 
-// writePrecondition reports the server's values for conflicting cells. Writers
-// are shown only by display label, never by internal authority or session.
+// writePrecondition reports the head revision, whether the client must reread
+// the workbook, and each conflicting cell's input in the head with the revision
+// and writer that set it. Writers are shown only by display label, never by
+// internal authority or session.
 func (h *gridcraftHTTP) writePrecondition(w http.ResponseWriter, r *http.Request, p *appengine.PreconditionError) {
 	labels := map[string]string{}
 	conflicts := make([]gridcraftConflict, 0, len(p.Conflicts))
@@ -434,7 +442,9 @@ func (h *gridcraftHTTP) mandate(w http.ResponseWriter, r *http.Request) {
 		gridcraftError(w, err)
 		return
 	}
-	if len(req.MandateID) == 0 || len(req.MandateID) > 256 || len(req.RunID) == 0 || len(req.Targets) != 1 || req.Targets[0] == "*" || len(req.Targets[0]) > 256 || req.BaseRev < 1 || req.Generation < 1 {
+	// Mandate names of human operations ("human-import", "human-edit") are
+	// reserved, so an agent revision is never recorded under one.
+	if len(req.MandateID) == 0 || len(req.MandateID) > 256 || strings.HasPrefix(req.MandateID, appengine.HumanMandatePrefix) || len(req.RunID) == 0 || len(req.Targets) != 1 || req.Targets[0] == "*" || len(req.Targets[0]) > 256 || req.BaseRev < 1 || req.Generation < 1 {
 		gridcraftError(w, appengine.ErrInvalid)
 		return
 	}
@@ -599,7 +609,7 @@ func (h *gridcraftHTTP) agent(w http.ResponseWriter, r *http.Request) {
 	k := appengine.Key{WorkspaceID: a.WorkspaceID, PageID: body.ArtifactID}
 	authority := func(ctx context.Context, tx *sql.Tx) (appengine.Principal, error) {
 		ctx = context.WithValue(ctx, pageAuthReaderKey{}, tx)
-		if h.pages.checkArtifactRunPrincipal(ctx, a) != nil || !h.pages.artifactAgentPolicyAllows(ctx, a.WorkspaceID, a.CrewID) {
+		if strings.HasPrefix(body.MandateID, appengine.HumanMandatePrefix) || h.pages.checkArtifactRunPrincipal(ctx, a) != nil || !h.pages.artifactAgentPolicyAllows(ctx, a.WorkspaceID, a.CrewID) {
 			return appengine.Principal{}, appengine.ErrForbidden
 		}
 		role, err := h.pages.liveContentHumanRole(ctx, a.WorkspaceID, a.HumanUserID)

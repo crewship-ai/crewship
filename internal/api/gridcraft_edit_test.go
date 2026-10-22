@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -34,6 +35,8 @@ func TestGridCraftHumanCellEditsUseCellLevelConcurrency(t *testing.T) {
 	f.r.RegisterGridCraft(appengine.Options{Enabled: true}, gridcraftCellsEngine{})
 	base := "/api/v1/pages/edit-workbook/workbook"
 	q := "?workspace_id=ws-old"
+	// Client sessions belong to cell edits; an import is never attributed to one.
+	wantCode(t, f.do(f.boss, "POST", base+"/operations"+q, `{"mutation_id":"import","mandate_id":"human-import","session_id":"s1","base_rev":0,"generation":0,"command":{"kind":"import","snapshot":{"sheets":[{}]}}}`), 400, "import with a session")
 	wantCode(t, f.do(f.boss, "POST", base+"/operations"+q, `{"mutation_id":"import","mandate_id":"human-import","base_rev":0,"generation":0,"command":{"kind":"import","snapshot":{"sheets":[{}]}}}`), 200, "import")
 	edit := func(session string, seq, base int, cells ...string) string {
 		var ops []string
@@ -84,13 +87,42 @@ func TestGridCraftHumanCellEditsUseCellLevelConcurrency(t *testing.T) {
 		"unsupported op":      strings.Replace(edit("s1", 9, 3, "D5"), `"cell.set"`, `"range.fill"`, 1),
 		"unknown field":       strings.Replace(edit("s1", 9, 3, "D5"), `"generation":1`, `"generation":1,"mandate_id":"human-import"`, 1),
 		"missing session":     strings.Replace(edit("s1", 9, 3, "D5"), `"session_id":"s1",`, ``, 1),
+		"session charset":     edit("s#1", 9, 3, "D5"),
 		"import through edit": `{"session_id":"s1","mutation_id":"s1:9","base_rev":3,"generation":1,"ops":[{"kind":"import"}]}`,
 	} {
 		wantCode(t, f.do(f.boss, "POST", base+"/edits"+q, body), 400, name)
 	}
 	wantCode(t, f.do(f.wsAdmin, "POST", base+"/edits"+q, edit("s3", 1, 3, "D5")), 404, "not the owner")
+	// A retry of the same packet cannot succeed after a generation change, a
+	// base ahead of the head or an import based on an older revision: the 409
+	// says to reread instead.
+	stale := map[string]string{
+		"other generation": strings.Replace(edit("s1", 10, 3, "D5"), `"generation":1`, `"generation":2`, 1),
+		"base ahead":       edit("s1", 11, 9, "D5"),
+	}
+	for name, body := range stale {
+		assertSnapshotRequired(t, f.do(f.boss, "POST", base+"/edits"+q, body), name)
+	}
+	assertSnapshotRequired(t, f.do(f.boss, "POST", base+"/operations"+q, `{"mutation_id":"reimport","mandate_id":"human-import","base_rev":2,"generation":1,"command":{"kind":"import","snapshot":{"sheets":[{}]}}}`), "stale import")
 	var head int
 	if err := f.db.QueryRow(`SELECT head_rev FROM gridcraft_heads WHERE page_id='workbook-edit'`).Scan(&head); err != nil || head != 3 {
 		t.Fatalf("head=%d err=%v", head, err)
+	}
+}
+
+func assertSnapshotRequired(t *testing.T, w interface {
+	Result() *http.Response
+}, name string) {
+	t.Helper()
+	response := w.Result()
+	defer response.Body.Close()
+	var body struct {
+		Error            string            `json:"error"`
+		HeadRev          int64             `json:"head_rev"`
+		SnapshotRequired bool              `json:"snapshot_required"`
+		Conflicts        []json.RawMessage `json:"conflicts"`
+	}
+	if response.StatusCode != 409 || json.NewDecoder(response.Body).Decode(&body) != nil || body.Error != "precondition_failed" || body.HeadRev != 3 || !body.SnapshotRequired || len(body.Conflicts) != 0 {
+		t.Fatalf("%s: %d %+v", name, response.StatusCode, body)
 	}
 }

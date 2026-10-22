@@ -18778,6 +18778,63 @@
         ],
         "type": "object"
       },
+      "WorkbookCellConflict": {
+        "properties": {
+          "actor_label": {
+            "description": "Display name of the writer of that input",
+            "type": "string"
+          },
+          "cell": {
+            "type": "string"
+          },
+          "input": {
+            "description": "The cell's input in the head revision",
+            "type": "string"
+          },
+          "rev": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "sheet": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sheet",
+          "cell",
+          "input",
+          "rev",
+          "actor_label"
+        ],
+        "type": "object"
+      },
+      "WorkbookError": {
+        "properties": {
+          "conflicts": {
+            "description": "Target cells another writer changed since base_rev (409 precondition_failed only)",
+            "items": {
+              "$ref": "#/components/schemas/WorkbookCellConflict"
+            },
+            "type": "array"
+          },
+          "error": {
+            "type": "string"
+          },
+          "head_rev": {
+            "description": "Current head revision (409 precondition_failed only)",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "snapshot_required": {
+            "description": "Reread the workbook; retrying the same packet cannot succeed (409 precondition_failed only)",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
       "WorkbookMandate": {
         "additionalProperties": false,
         "properties": {
@@ -135914,15 +135971,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkbookError"
                 }
               }
             },
@@ -135932,15 +135981,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkbookError"
                 }
               }
             },
@@ -135950,15 +135991,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkbookError"
                 }
               }
             },
@@ -135968,15 +136001,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkbookError"
                 }
               }
             },
@@ -135986,15 +136011,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkbookError"
                 }
               }
             },
@@ -136004,15 +136021,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkbookError"
                 }
               }
             },
@@ -136022,15 +136031,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkbookError"
                 }
               }
             },
@@ -136040,15 +136041,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkbookError"
                 }
               }
             },
@@ -136621,15 +136614,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkbookError"
                 }
               }
             },
@@ -136639,15 +136624,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkbookError"
                 }
               }
             },
@@ -136657,15 +136634,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkbookError"
                 }
               }
             },
@@ -136675,15 +136644,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkbookError"
                 }
               }
             },
@@ -136693,15 +136654,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkbookError"
                 }
               }
             },
@@ -136711,15 +136664,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkbookError"
                 }
               }
             },
@@ -136729,15 +136674,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkbookError"
                 }
               }
             },
@@ -136747,15 +136684,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkbookError"
                 }
               }
             },
