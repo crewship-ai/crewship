@@ -110,7 +110,8 @@ export function createWriteQueue<W extends QueuedWrite>(options: WriteQueueOptio
       const index = writes.findIndex(write => write.id === id)
       if (index < 0 || (index === 0 && inflight)) return false
       const [write] = writes.splice(index, 1)
-      void options.persist?.remove(write)
+      // The write has left the queue either way; a journal that failed to drop it is only logged.
+      void Promise.resolve(options.persist?.remove(write)).catch(error => console.warn("write queue: journal removal failed", error))
       return true
     },
     coalesce(merge) {

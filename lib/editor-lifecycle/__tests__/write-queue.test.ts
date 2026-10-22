@@ -88,6 +88,24 @@ describe("coalescing and persistence", () => {
     expect(queue.writes().map(write => write.id)).toEqual(["a", "c"])
     expect(remove).toHaveBeenCalledWith(expect.objectContaining({ id: "b" }))
   })
+  it("does not leave a failed journal removal unhandled", async () => {
+    const unhandled = vi.fn()
+    process.on("unhandledRejection", unhandled)
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      const { queue } = setup({ persist: { put: vi.fn(), remove: vi.fn(() => Promise.reject(new Error("journal gone"))) } })
+      queue.enqueue(row("a")); queue.enqueue(row("b"))
+      expect(queue.remove("b")).toBe(true)
+      expect(queue.writes().map(write => write.id)).toEqual(["a"])
+      vi.useRealTimers()
+      await new Promise(resolve => setTimeout(resolve, 10))
+      expect(unhandled).not.toHaveBeenCalled()
+      expect(warn).toHaveBeenCalled()
+    } finally {
+      process.off("unhandledRejection", unhandled)
+      warn.mockRestore()
+    }
+  })
 })
 
 describe("retry keeps the mutation identity", () => {
