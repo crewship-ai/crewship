@@ -50,7 +50,8 @@ report goes to an unlinked file the worker holds. The host
 requires the digest to match the result it received, counts formula cells
 itself and requires the report's count to match, and accepts derived changes
 only when every formula cell was checked and matched exactly. A formula in the
-target cell also requires a report with no mismatches. Volatile functions such
+target cell also requires a report with no mismatches and non-iterative
+calculation. Volatile functions such
 as `NOW()` cannot be confirmed, and with iterative calculation enabled the
 oracle accepts any fixed point of a cycle, so such workbooks reject any edit
 that recalculates another cell. The receipt's effects list only the mandated

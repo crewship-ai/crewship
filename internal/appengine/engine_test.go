@@ -146,6 +146,7 @@ func TestGridCraftEffectsSeparateAuthoredFromDerivedRecalculation(t *testing.T) 
 		{"target formula verified", with(map[[2]int]string{b2: formula("1+1", "2")}), &RecalcVerification{FormulaCells: 3, Checked: 3}, nil, false},
 		{"target formula mismatched", with(map[[2]int]string{b2: formula("1+1", "3")}), &RecalcVerification{FormulaCells: 3, Checked: 3, Mismatched: 1}, ErrEffects, false},
 		{"target formula without report", with(map[[2]int]string{b2: formula("1+1", "2")}), nil, ErrEffects, false},
+		{"target formula under iterative calculation", with(map[[2]int]string{b2: formula("B2", "4242")}), &RecalcVerification{FormulaCells: 3, Checked: 3}, ErrEffects, true},
 		{"target formula report for other bytes", with(map[[2]int]string{b2: formula("1+1", "2")}), &RecalcVerification{FormulaCells: 3, Checked: 3, SHA256: strings.Repeat("0", 64)}, ErrEffects, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {

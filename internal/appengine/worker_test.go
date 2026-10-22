@@ -358,8 +358,9 @@ func TestRealGridCraftIterativeCycleRejectsDerivedChanges(t *testing.T) {
 		t.Fatalf("iterative recalculation: %v", err)
 	}
 	// A forged fixed point passes the oracle itself...
-	var workbook map[string]any
-	if err = json.Unmarshal(snapshot, &workbook); err != nil {
+	// Decode numbers exactly so only the forged values differ.
+	workbook, err := decodeWorkbook(snapshot)
+	if err != nil {
 		t.Fatal(err)
 	}
 	row := workbook["sheets"].([]any)[0].(map[string]any)["cells"].(map[string]any)["bands"].(map[string]any)["0"].(map[string]any)["rows"].(map[string]any)["0"].(map[string]any)
@@ -385,5 +386,50 @@ func TestRealGridCraftIterativeCycleRejectsDerivedChanges(t *testing.T) {
 	engine = GridCraft{Runner: forging}
 	if _, err = engine.Prepare(t.Context(), b, State{Snapshot: snapshot}, Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "1"}); !errors.Is(err, ErrEffects) {
 		t.Fatalf("forged fixed point: %v", err)
+	}
+	// Without any other cycle, so only the target itself is in question.
+	simple, err := json.Marshal(blank)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range []Command{
+		{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "1"},
+		{Kind: "cell.set", Sheet: "Sheet1", Cell: "C9", Input: "=B2*2"},
+	} {
+		out, err := runner.Run(t.Context(), simple, step)
+		if err != nil {
+			t.Fatal(err)
+		}
+		simple = out.Result
+	}
+	// A self-referencing target formula is a cycle too: any forged cached value
+	// is a fixed point, so a target formula needs non-iterative calculation.
+	forgeTarget := runnerFunc(func(ctx context.Context, in []byte, c Command) (EngineResult, error) {
+		out, err := runner.Run(ctx, in, c)
+		if err != nil {
+			return out, err
+		}
+		candidate, err := decodeWorkbook(out.Result)
+		if err != nil {
+			return out, err
+		}
+		rows := candidate["sheets"].([]any)[0].(map[string]any)["cells"].(map[string]any)["bands"].(map[string]any)["0"].(map[string]any)["rows"].(map[string]any)
+		rows["8"].(map[string]any)["2"].(map[string]any)["value"] = map[string]any{"t": "Number", "v": json.Number("4242")}
+		forged, err := json.Marshal(candidate)
+		if err != nil {
+			return out, err
+		}
+		report, err := verifyRecalc(ctx, binary, t.TempDir(), forged)
+		if err != nil {
+			return out, err
+		}
+		if !report.verified() {
+			t.Fatalf("expected the oracle to accept the forged target fixed point: %+v", report)
+		}
+		return EngineResult{Base: out.Base, Result: forged, Recalc: report}, nil
+	})
+	engine = GridCraft{Runner: forgeTarget}
+	if _, err = engine.Prepare(t.Context(), b, State{Snapshot: simple}, Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "C9", Input: "=C9"}); !errors.Is(err, ErrEffects) {
+		t.Fatalf("forged target fixed point: %v", err)
 	}
 }
