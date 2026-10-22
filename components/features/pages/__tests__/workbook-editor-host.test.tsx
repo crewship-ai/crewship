@@ -3,14 +3,40 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { BRIDGE_HANDSHAKE_TIMEOUT_MS, type TransportResponse, type WorkbookSession, type WorkbookTransport } from "@/lib/workbooks/bridge"
 import type { WorkbookEditorClient } from "@/lib/workbooks/editor-client"
-import { PageWorkbookSurface, createEditorFrame, workbookSaveLabel } from "../workbook-editor-host"
+import { PageWorkbookSurface, WORKBOOK_HEAD_POLL_CONNECTED_MS, WORKBOOK_HEAD_POLL_MS, WORKBOOK_SESSION_HEARTBEAT_MS, createEditorFrame, workbookSaveLabel } from "../workbook-editor-host"
 import { initialSaveState } from "@/lib/editor-lifecycle/save-state"
 
 const requests = vi.hoisted(() => vi.fn())
-vi.mock("@/lib/api-fetch", () => ({ apiFetch: requests, broadcastSessionExpired: vi.fn() }))
+vi.mock("@/lib/api-fetch", () => ({ apiFetch: requests, broadcastSessionExpired: vi.fn(), tryRefresh: vi.fn(async () => "ok") }))
+/** Realtime as the Pages layout provides it: event handlers and channel subscriptions are recorded. */
+const realtime = vi.hoisted(() => ({ handlers: new Map<string, Set<(event: { type: string; payload: Record<string, unknown> }) => void>>(), channels: [] as string[], status: null as string | null }))
+vi.mock("@/hooks/use-realtime", async () => {
+  const React = await import("react")
+  return {
+    useRealtimeEventSafe: (type: string, callback: (event: { type: string; payload: Record<string, unknown> }) => void) => {
+      const ref = React.useRef(callback); ref.current = callback
+      React.useEffect(() => {
+        const handler = (event: { type: string; payload: Record<string, unknown> }) => ref.current(event)
+        const set = realtime.handlers.get(type) ?? new Set()
+        realtime.handlers.set(type, set); set.add(handler)
+        return () => { set.delete(handler) }
+      }, [type])
+    },
+    useRealtimeChannelSafe: (channel: string | null) => {
+      React.useEffect(() => {
+        if (!channel) return
+        realtime.channels.push(channel)
+        return () => { realtime.channels.splice(realtime.channels.indexOf(channel), 1) }
+      }, [channel])
+    },
+    useRealtimeStatusSafe: () => realtime.status,
+  }
+})
+const push = (type: string, payload: Record<string, unknown>) => act(async () => { for (const handler of realtime.handlers.get(type) ?? []) handler({ type, payload }) })
 
 const DIGEST = "b".repeat(64)
-const BUNDLE = "sha256:fake-editor"
+/** The session's bundle pin is the same plain hex digest as in the editor URL and the frame's hello. */
+const BUNDLE = DIGEST
 const EDITOR_URL = `https://editor.test/b/${DIGEST}/index.html`
 const SID = "ws_session_secret"
 const session: WorkbookSession = { session_id: SID, actor_label: "Owner", rev: 41, generation: 1, protocol: 1, bundle_digest: BUNDLE, editor_url: EDITOR_URL }
@@ -156,6 +182,7 @@ describe("mounting", () => {
     ["the Studio origin", `${window.location.origin}/b/${DIGEST}/index.html`],
     ["plain HTTP", `http://editor.test/b/${DIGEST}/index.html`],
     ["no editor URL", undefined],
+    ["another bundle than the session's pin", `https://editor.test/b/${"e".repeat(64)}/index.html`],
   ])("never frames an editor at %s, and closes the session", async (_, editorUrl) => {
     const t = setup({ open: { ok: true, session: { ...session, editor_url: editorUrl } } })
     expect(await screen.findByText(/cannot be opened safely/)).toBeInTheDocument()
@@ -311,7 +338,6 @@ describe("failures fall back to the preview", () => {
   it.each([
     ["revoked", "disabled"],
     ["disabled", "disabled"],
-    ["expired", "expired"],
     ["access", "access"],
   ] as const)("rechecks the session on focus: %s ends the editor (%s)", async (check, reason) => {
     const t = setup({ checkSession: async () => check })
@@ -321,6 +347,48 @@ describe("failures fall back to the preview", () => {
     await waitFor(() => expect(t.frame()).toBeNull())
     expect(t.client.checkSession).toHaveBeenCalledWith(session)
     expect(screen.getByTestId("workbook-editor-notice")).toHaveAttribute("data-reason", reason)
+  })
+
+  it("opens a new session when the recheck finds the session expired, and keeps the editor", async () => {
+    const t = setup({ checkSession: async () => "expired" })
+    await t.connect()
+    const renewed = { ...session, session_id: "ws_session_next" }
+    vi.mocked(t.client.openSession).mockResolvedValueOnce({ ok: true, session: renewed })
+    await act(async () => { window.dispatchEvent(new Event("focus")) })
+    await waitFor(() => expect(t.client.openSession).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(t.client.transport).toHaveBeenLastCalledWith(renewed))
+    expect(t.frame()).not.toBeNull()
+    expect(screen.queryByTestId("workbook-editor-notice")).toBeNull()
+  })
+
+  it("sends a pending edit again under a new session when the server says the session expired", async () => {
+    const edits: string[] = []
+    const t = setup({ transport: { edit: vi.fn(async (id: string): Promise<TransportResponse> => {
+      edits.push(id)
+      return id.startsWith(`${SID}:`) ? { status: 401, body: { error: "session_expired" } } : ok({ operation_key: { artifact_id: "page-1", authority_id: "user:u1", mutation_id: id }, outcome: "applied", rev: 42, durability: "node" })
+    }) } })
+    await t.connect()
+    vi.mocked(t.client.openSession).mockResolvedValueOnce({ ok: true, session: { ...session, session_id: "ws_session_next" } })
+    await t.send(mutation(1, 41, "B3", "21"))
+    await waitFor(() => expect(t.status()).toBe("Saved"))
+    expect(edits).toEqual([`${SID}:1`, "ws_session_next:1"])
+    expect(t.fromFrame).toContainEqual({ type: "ack", protocol: 1, seq: 1, rev: 42 })
+    expect(t.frame()).not.toBeNull()
+  })
+
+  it("renews the session on a timer while the editor is open and visible, not only on focus", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const t = setup()
+      await t.connect()
+      expect(t.client.checkSession).not.toHaveBeenCalled()
+      await act(async () => { await vi.advanceTimersByTimeAsync(WORKBOOK_SESSION_HEARTBEAT_MS + 100) })
+      await waitFor(() => expect(t.client.checkSession).toHaveBeenCalledTimes(1))
+      await act(async () => { await vi.advanceTimersByTimeAsync(WORKBOOK_SESSION_HEARTBEAT_MS) })
+      await waitFor(() => expect(t.client.checkSession).toHaveBeenCalledTimes(2))
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("keeps the editor when the recheck cannot reach the server", async () => {
@@ -378,6 +446,32 @@ describe("save state and leave guard", () => {
     expect(t.fromFrame).toContainEqual(expect.objectContaining({ type: "committed", rev: 42, ops: [{ op: "cell.set", sheet: "Sheet1", cell: "B2", input: "7" }] }))
     expect(t.fromFrame).toContainEqual(expect.objectContaining({ type: "rejected", seq: 1, code: "precondition_failed", cells: [{ cell: "B2", input: "7", rev: 42, actor_label: "Agent Ada" }] }))
     expect(t.dirty.at(-1)).toBe(false)
+  })
+
+  it("reads the commits feed on a workbook.committed push for its Page, and ignores other Pages", async () => {
+    const t = setup({ transport: { commits: vi.fn(async (since: number) => ok({ head_rev: 42, generation: 1, commits: since < 42 ? [{ rev: 42, kind: "cells", actor_label: "Agent Ada", own: false, ops: [{ sheet: "Sheet1", cell: "B2", input: "99" }] }] : [] })) } })
+    await t.connect()
+    expect(realtime.channels).toContain("page:page-1")
+    await push("workbook.committed", { page_id: "other", rev: 42, generation: 1, kind: "cells", cells: 1 })
+    expect(t.transport.commits).not.toHaveBeenCalled()
+    await push("workbook.committed", { page_id: "page-1", rev: 42, generation: 1, kind: "cells", cells: 1 })
+    await waitFor(() => expect(t.fromFrame).toContainEqual({ type: "committed", protocol: 1, rev: 42, actor_label: "Agent Ada", ops: [{ op: "cell.set", sheet: "Sheet1", cell: "B2", input: "99" }] }))
+  })
+
+  it("polls the head only as a slow fallback while the realtime connection is up", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    realtime.status = "connected"
+    try {
+      const t = setup()
+      await t.connect()
+      await act(async () => { await vi.advanceTimersByTimeAsync(WORKBOOK_HEAD_POLL_MS * 3) })
+      expect(t.client.head).not.toHaveBeenCalled()
+      await act(async () => { await vi.advanceTimersByTimeAsync(WORKBOOK_HEAD_POLL_CONNECTED_MS) })
+      await waitFor(() => expect(t.client.head).toHaveBeenCalled())
+    } finally {
+      realtime.status = null
+      vi.useRealTimers()
+    }
   })
 
   it("delivers a commit the head poll finds", async () => {

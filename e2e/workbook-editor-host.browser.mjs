@@ -12,8 +12,10 @@ import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+// The bundle pin: plain lowercase hex SHA-256 of the manifest bytes, the same in the session's
+// bundle_digest, the editor URL path and the editor's hello (as the server and editor origin emit it).
 const DIGEST = "c".repeat(64)
-const BUNDLE = "sha256:fake-editor-build"
+const BUNDLE = DIGEST
 const PAGE = "page-1"
 
 // ----- mock workbook API -------------------------------------------------------------------------
@@ -40,6 +42,8 @@ const api = {
   snapshotFails: false,
   /** "memory": commit, but answer a non-durable receipt; "unreadable": commit nothing, answer 200 with no body. */
   editMode: "normal",
+  /** Access-token refreshes the host's fetch layer asked for. */
+  refreshes: 0,
   /** Every edit request as received. */
   editLog: [],
 }
@@ -70,6 +74,7 @@ function gridcraftSnapshot() {
 const json = (response, status, body) => { response.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" }); response.end(body === undefined ? "" : JSON.stringify(body)) }
 const readBody = request => new Promise(resolve => { let data = ""; request.on("data", chunk => { data += chunk }); request.on("end", () => resolve(data)) })
 const DISABLED = { error: "gridcraft_editor_disabled" }
+const SESSION_OVER = { error: "editor_session_expired" }
 
 async function workbookApi(request, response, path, query) {
   if (path === "" && request.method === "GET") {
@@ -81,21 +86,31 @@ async function workbookApi(request, response, path, query) {
     const renew = JSON.parse((await readBody(request)) || "{}").session_id
     if (renew) {
       // The heartbeat: same session, and the bundle the server qualifies now.
-      if (!api.sessions.has(renew)) return json(response, 401, { error: "session_expired" })
+      if (!api.sessions.has(renew)) return json(response, 404, { error: "Workbook not found" })
+      if (!api.sessions.get(renew).open) return json(response, 409, SESSION_OVER)
       return json(response, 200, { session_id: renew, actor_label: "Owner", rev: api.rev, generation: 1, protocol: 1, bundle_digest: api.bundle, editor_url: `${editorOrigin}/b/${DIGEST}/index.html`, expires_at: "2099-01-01T00:00:00Z" })
     }
     const id = `ws_mock${++sessionCount}`
     api.sessions.set(id, { open: true })
+    api.lastSession = id
     api.opened++
     return json(response, 201, { session_id: id, actor_label: "Owner", rev: api.rev, generation: 1, protocol: 1, bundle_digest: BUNDLE, editor_url: `${editorOrigin}/b/${DIGEST}/index.html`, expires_at: "2099-01-01T00:00:00Z" })
   }
   const close = /^\/sessions\/([^/]+)$/.exec(path)
-  if (close && request.method === "DELETE") { api.closed.push(decodeURIComponent(close[1])); api.sessions.delete(decodeURIComponent(close[1])); response.writeHead(204); return response.end() }
+  if (close && request.method === "DELETE") {
+    const id = decodeURIComponent(close[1])
+    api.closed.push(id)
+    if (api.sessions.has(id)) api.sessions.get(id).open = false
+    return json(response, 200, { status: "closed", session_id: id })
+  }
   if (path === "/edits" && request.method === "POST") {
     const raw = await readBody(request)
     const edit = JSON.parse(raw)
     api.editLog.push(edit)
+    // As the server: a session never opened is 404; an expired or closed one answers the editor's
+    // own code, which is not the app-wide sign-in expiry (`session_expired`).
     if (!api.sessions.has(edit.session_id)) return json(response, 404, { error: "Workbook not found" })
+    if (!api.sessions.get(edit.session_id).open) return json(response, 409, SESSION_OVER)
     if (api.disabled === "edits") return json(response, 503, DISABLED)
     if (api.editMode === "unreadable") { response.writeHead(200, { "content-type": "application/json" }); return response.end() }
     if (api.hold) await api.hold
@@ -131,7 +146,7 @@ const editorHits = []
 
 /** A stand-in for the editor bundle: the bridge side of protocol 1 and a tiny cell form. */
 function fakeEditor(mode) {
-  const hello = `parent.postMessage({ type: "gridcraft:hello", protocol: 1, bundle: ${JSON.stringify(mode === "bad-digest" ? "sha256:other-build" : BUNDLE)} }, parentOrigin)`
+  const hello = `parent.postMessage({ type: "gridcraft:hello", protocol: 1, bundle: ${JSON.stringify(mode === "bad-digest" ? "e".repeat(64) : mode === "prefixed-digest" ? `sha256:${BUNDLE}` : BUNDLE)} }, parentOrigin)`
   return `<!doctype html><meta charset="utf-8"><title>Fake editor</title>
 <label>Cell <input id="cell" value="B3"></label> <label>Value <input id="value"></label> <button id="commit">Commit</button>
 <label>Draft <input id="draft"></label> <button id="away">Navigate away</button>
@@ -233,6 +248,9 @@ try {
     const workbook = /^\/api\/v1\/pages\/(?:%40|@)page-1\/workbook(.*)$/.exec(url.pathname)
     if (workbook) return workbookApi(request, response, workbook[1], url.searchParams)
     if (url.pathname === "/api/v1/feature-flags") return json(response, 200, [{ id: "f1", key: "gridcraft_editor", description: null, enabled: api.flag, percentage: 100, created_at: "", updated_at: "" }])
+    // The sign-in is valid: an access-token refresh succeeds. The editor must never need it for its
+    // own session ending; the count proves that.
+    if (url.pathname === "/api/auth/token/refresh" && request.method === "POST") { api.refreshes++; return json(response, 200, { ok: true }) }
     if (url.pathname.startsWith("/api/")) return json(response, 404, { error: "not mocked" })
     response.writeHead(200, { "content-type": "text/html", ...studioHeaders })
     response.end('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Host</title><div id="root"></div><script type="module" src="/bundle.js"></script>')
@@ -377,7 +395,7 @@ try {
   step("navigation-kills", { reason: "navigation", frameRemoved: true, sessionClosed: api.closed.at(-1), notice: await b.getByTestId("workbook-editor-notice").textContent() })
 
   // 6. Hellos the host must refuse, each in a fresh page: the frame is removed and never connected.
-  for (const [mode, reason] of [["bad-digest", "handshake"], ["early-hello", "handshake"], ["renavigate", "navigation"]]) {
+  for (const [mode, reason] of [["bad-digest", "handshake"], ["prefixed-digest", "handshake"], ["early-hello", "handshake"], ["renavigate", "navigation"]]) {
     editorMode = mode
     const page = await open(contextA, mode)
     await page.getByTestId("workbook-editor-notice").waitFor()
@@ -460,7 +478,7 @@ try {
   {
     const page = await open(contextA, "bundle-revoked")
     await waitEditor(page, s => s.connects === 1)
-    api.bundle = "sha256:revoked-build"
+    api.bundle = "f".repeat(64)
     for (let i = 0; i < 160 && await notice(page).count() === 0; i++) {
       await page.evaluate(() => dispatchEvent(new Event("focus")))
       await page.waitForTimeout(50)
@@ -497,6 +515,37 @@ try {
     assert.equal(api.cells.C4, "later")
     assert.equal(await page.locator("iframe").count(), 1)
     step("unconfirmed-bounded", { memorySettledByFeed: true, unreadableAttempts: c3.length, rejected: state.rejected.at(-1).code, laterEditSaved: true })
+    await page.close()
+  }
+
+  // 13. The session expires while an edit is pending: the host opens a new session, sends the edit
+  //     again under it and keeps the frame; the heartbeat finding it expired does the same.
+  {
+    const page = await open(contextA, "session-expired")
+    await waitEditor(page, s => s.connects === 1)
+    const first = api.lastSession
+    api.sessions.get(first).open = false
+    const openedBefore = api.opened, refreshesBefore = api.refreshes
+    await commitCell(page, "D1", "after-expiry")
+    await page.getByText("Saved", { exact: true }).waitFor({ timeout: 5000 })
+    const d1 = editsFor("D1")
+    assert.equal(api.cells.D1, "after-expiry")
+    assert.equal(api.opened, openedBefore + 1)
+    // The editor's own expiry never reaches the app-wide sign-in handling: no token refresh, no replay.
+    assert.deepEqual(d1.map(edit => edit.session_id), [first, api.lastSession])
+    assert.equal(api.refreshes, refreshesBefore)
+    assert.deepEqual(d1.map(edit => edit.mutation_id.split(":")[1]), ["1", "1"], "same frame seq under the new session")
+    assert.equal(await page.locator("iframe").count(), 1)
+    assert.equal(await notice(page).count(), 0)
+    const second = api.lastSession
+    api.sessions.get(second).open = false
+    for (let i = 0; i < 160 && api.lastSession === second; i++) {
+      await page.evaluate(() => dispatchEvent(new Event("focus")))
+      await page.waitForTimeout(50)
+    }
+    assert.notEqual(api.lastSession, second, "the heartbeat opened a new session")
+    assert.equal(await page.locator("iframe").count(), 1)
+    step("session-expired-reopens", { edits: d1.map(edit => edit.mutation_id.replace(/^ws_mock\d+/, "ws_…")), reopenedByHeartbeat: true, frames: 1 })
     await page.close()
   }
 

@@ -23,9 +23,21 @@
  *   A 200 without such a receipt is retried with the same mutation (after asking its status) a
  *   bounded number of times, then refused as `not_confirmed`; later mutations still go out.
  * - 409 reconciles (catch up, then refuse with the server's cells, or retry the same mutation
- *   when the head merely moved), 429 on the artifact retries the same mutation. A refusal
- *   (`editorRefusal`: lost access, an expired session, the editor turned off) destroys the
- *   session and the port; nothing retries it.
+ *   when the head merely moved; `snapshot_required` is never retried), 429 on the artifact
+ *   retries the same mutation, `403 effect_out_of_mandate` refuses the one edit. A refusal
+ *   (`editorRefusal`: lost access, the editor turned off) destroys the session and the port;
+ *   nothing retries it.
+ * - `401 session_expired` on an edit (the session expired, was closed or belongs to an older
+ *   generation) opens a new session through `reopenSession` and sends the pending edits again
+ *   under it: same frame `seq`, base and ops, the new session's `mutation_id` (the server binds
+ *   the id to its session). An edit that may have reached the old session is first looked up by
+ *   its old id, and its receipt is taken instead of sending it again. Each expired session is
+ *   replaced once; a replacement that expires again before the server accepted anything from it
+ *   (within `BRIDGE_REOPEN_SETTLE_MS`) ends the editor as `expired`.
+ * - The commits feed answering `410 snapshot_required` (history pruned) rereads the snapshot.
+ * - Bundle pin: the plain lowercase hex SHA-256 of the bundle's manifest bytes, the same in the
+ *   session's `bundle_digest`, the `/b/<digest>/` path of `editor_url` and the frame's hello. An
+ *   empty or differently written pin (for example `sha256:` prefixed) never matches: fail closed.
  * - The editor must say hello and receive its snapshot within `BRIDGE_HANDSHAKE_TIMEOUT_MS`, and
  *   a failed snapshot read at connect ends the session as `load`; the host shows the preview.
  *
@@ -55,10 +67,15 @@ export const BRIDGE_DEFAULT_RETRY_MS = 150
 export const BRIDGE_MAX_UNCONFIRMED = 5
 /** From the bridge's creation until the editor said hello and holds its snapshot. */
 export const BRIDGE_HANDSHAKE_TIMEOUT_MS = 15_000
+/** A replacement session must live this long (or have an edit accepted) before it may be replaced again. */
+export const BRIDGE_REOPEN_SETTLE_MS = 60_000
 /** Bridge pacing: a confirmed cell is sent at once, not on the document autosave cadence. */
 export const BRIDGE_PACING: Partial<Pacing> = { minGapMs: 0, baseDelayMs: 250, maxDelayMs: 10_000 }
 
 const CELL = /^[A-Z]{1,3}[1-9][0-9]{0,6}$/
+const BUNDLE_DIGEST = /^[0-9a-f]{64}$/
+/** A bundle pin as the server and the editor origin write it: plain lowercase hex SHA-256, no prefix. */
+export const isBundleDigest = (value: unknown): value is string => typeof value === "string" && BUNDLE_DIGEST.test(value)
 const encoder = new TextEncoder()
 const bytes = (text: string) => encoder.encode(text).length
 const object = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value)
@@ -77,7 +94,10 @@ function shaped(value: Record<string, unknown>, required: readonly string[], opt
 export interface CellOp { op: "cell.set"; sheet: string; cell: string; input: string }
 export interface ServerCellOp { kind: "cell.set"; sheet: string; cell: string; input: string }
 
-/** `POST /api/v1/pages/{slug}/workbook/sessions`. */
+/**
+ * `POST /api/v1/pages/{slug}/workbook/sessions`. The server opens sessions only on an imported
+ * workbook (revision 1 or later). `bundle_digest` stays empty until an editor origin is configured.
+ */
 export interface WorkbookSession {
   session_id: string
   actor_label: string
@@ -133,7 +153,7 @@ export type HostMessage =
   | { type: "rejected"; protocol: 1; seq: number; code: RejectCode; current_rev: number; cells: WorkbookConflict[] }
   | { type: "online" | "offline"; protocol: 1 }
 
-export type RejectCode = "precondition_failed" | "invalid_ops" | "conflict" | "history_quota_exceeded" | "too_many_pending" | "not_confirmed"
+export type RejectCode = "precondition_failed" | "invalid_ops" | "conflict" | "history_quota_exceeded" | "too_many_pending" | "not_confirmed" | "effect_out_of_mandate"
 
 /** Editor → host, after validation. */
 export interface FrameMutation { seq: number; base_rev: number; ops: CellOp[] }
@@ -162,8 +182,8 @@ export type KillReason = "handshake" | "protocol" | "generation" | "navigation" 
 // Validation
 
 export function parseWorkbookSession(value: unknown): WorkbookSession | null {
-  if (!object(value) || !text(value.session_id) || typeof value.actor_label !== "string" || !count(value.rev) || !positive(value.generation)) return null
-  if (value.protocol !== BRIDGE_PROTOCOL || !text(value.bundle_digest)) return null
+  if (!object(value) || !text(value.session_id) || typeof value.actor_label !== "string" || !positive(value.rev) || !positive(value.generation)) return null
+  if (value.protocol !== BRIDGE_PROTOCOL || !isBundleDigest(value.bundle_digest)) return null
   return value as unknown as WorkbookSession
 }
 
@@ -276,6 +296,9 @@ export interface BridgePort {
 export interface FrameWindow { postMessage(message: unknown, targetOrigin: string, transfer?: unknown[]): void }
 export interface WindowMessage { origin: string; source: unknown; data: unknown }
 
+/** What `reopenSession` found: a new session for the same Page, or the refusal that ended the old one for good. */
+export type ReopenResult = { ok: true; session: WorkbookSession; transport: WorkbookTransport } | { ok: false; refusal?: EditorRefusal }
+
 export interface WorkbookBridgeOptions {
   /** The session the server opened for this frame. */
   session: WorkbookSession
@@ -295,6 +318,8 @@ export interface WorkbookBridgeOptions {
   onSaveEvent?: (event: SaveEvent) => void
   /** The session is over: destroy the frame. `unsaved` writes never got a receipt. */
   onKill?: (kill: { reason: KillReason; unsaved: number }) => void
+  /** Opens a new session after `401 session_expired`; without it an expired session ends the editor. */
+  reopenSession?: () => Promise<ReopenResult>
   /** Tests only; defaults to `BRIDGE_HANDSHAKE_TIMEOUT_MS`. */
   handshakeTimeoutMs?: number
 }
@@ -303,6 +328,8 @@ export type BridgePhase = "waiting" | "connecting" | "live" | "killed"
 
 export interface WorkbookBridge {
   readonly phase: BridgePhase
+  /** The session edits go out under now; it changes when an expired session is replaced. */
+  readonly session: WorkbookSession
   /** Last revision delivered to the editor, in order. */
   readonly confirmedRev: number
   /** Mutations without a receipt. */
@@ -322,6 +349,8 @@ export interface WorkbookBridge {
   /** The realtime connection came back: tell the editor, replay from the last revision, retry. */
   online(): void
   offline(): void
+  /** The host learned that this session expired (the heartbeat): replace it as an edit's `401 session_expired` would. */
+  sessionExpired(sessionId?: string): void
   /** Ends the session (a refusal the host learned of, `session_closed`, unmount). */
   close(reason?: KillReason): void
 }
@@ -338,6 +367,10 @@ interface BridgeWrite extends QueuedWrite {
   rebases: number
   /** Attempts answered 200 without a durable receipt. */
   unconfirmed: number
+  /** Ids this write had under sessions that expired; a receipt for any of them settles it. */
+  aliases: string[]
+  /** Of those, the ids that may have reached the server: their status is asked before sending. */
+  priors: string[]
 }
 
 type Outcome = { type: "ack"; rev: number } | { type: "rejected"; message: HostMessage }
@@ -346,8 +379,10 @@ type Handling =
   | { action: "retry" }
   | { action: "kill"; reason: KillReason }
   | { action: "reject"; code: RejectCode; cells?: WorkbookConflict[] }
-  | { action: "reconcile"; headRev: number; cells: WorkbookConflict[] }
+  | { action: "reconcile"; headRev: number; cells: WorkbookConflict[]; final: boolean }
   | { action: "snapshot" }
+  /** `sessionId`: the session the refused attempt went out under. */
+  | { action: "renew"; sessionId: string }
 
 /** A failed send: how the write queue counts it, and what the bridge does about it. */
 class BridgeFailure extends Error {
@@ -359,11 +394,14 @@ function retryAfter(body: unknown): number {
   return object(body) && count(body.retry_after_ms) ? body.retry_after_ms : BRIDGE_DEFAULT_RETRY_MS
 }
 
-/** Maps a non-200 edit answer onto queue accounting and bridge handling. */
-function editFailure(response: TransportResponse): BridgeFailure {
+/** Maps a non-200 edit answer, sent under `sessionId`, onto queue accounting and bridge handling. */
+function editFailure(response: TransportResponse, sessionId: string): BridgeFailure {
   const { status, body } = response
   const error = object(body) && typeof body.error === "string" ? body.error : ""
+  // An edit whose recalculation could not be confirmed (volatile formulas): only this edit is refused.
+  if (status === 403 && error === "effect_out_of_mandate") return new BridgeFailure({ kind: "rejected" }, { action: "reject", code: "effect_out_of_mandate" })
   const refusal = editorRefusal(response)
+  if (refusal === "expired") return new BridgeFailure({ kind: "transient", retryAfterMs: 0 }, { action: "renew", sessionId })
   if (refusal) return new BridgeFailure({ kind: "denied" }, { action: "kill", reason: refusal })
   if (status === 400) return new BridgeFailure({ kind: "rejected" }, { action: "reject", code: "invalid_ops" })
   if (status === 410) return new BridgeFailure({ kind: "conflict" }, { action: "snapshot" })
@@ -373,7 +411,9 @@ function editFailure(response: TransportResponse): BridgeFailure {
     if (error === "precondition_failed") {
       const cells = object(body) ? parseConflicts(body.conflicts) : null
       const headRev = object(body) && count(body.head_rev) ? body.head_rev : 0
-      if (cells) return new BridgeFailure({ kind: "conflict" }, { action: "reconcile", headRev, cells })
+      // `snapshot_required`: the same packet can never succeed (an import or pruned history in between).
+      const final = object(body) && body.snapshot_required === true
+      if (cells) return new BridgeFailure({ kind: "conflict" }, { action: "reconcile", headRev, cells, final })
     }
     return new BridgeFailure({ kind: "rejected" }, { action: "reject", code: error === "precondition_failed" ? "precondition_failed" : "conflict" })
   }
@@ -387,10 +427,15 @@ function editFailure(response: TransportResponse): BridgeFailure {
 }
 
 export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBridge {
-  const { session, transport } = options
+  let { session, transport } = options
   const timers = options.timers ?? { now: () => Date.now(), setTimeout: (run, ms) => setTimeout(run, ms), clearTimeout: handle => clearTimeout(handle as ReturnType<typeof setTimeout>) }
   const emit = (event: SaveEvent) => { if (phase !== "killed" || event.type === "denied") options.onSaveEvent?.(event) }
-  const mutationPrefix = `${session.session_id}:`
+  let mutationPrefix = `${session.session_id}:`
+  /** Every session this bridge sent edits under: their revisions in the feed are the editor's own. */
+  const ownSessions = new Set([session.session_id])
+  let renewing: Promise<void> | undefined, renewRuns = 0
+  /** When the current session replaced an expired one, until the server accepted an edit under it. */
+  let reopenedAt: number | undefined
 
   let phase: BridgePhase = "waiting"
   /** Cleared once the editor holds its first snapshot; until then the session has a deadline. */
@@ -444,9 +489,11 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
   // ----- ordering -----------------------------------------------------------------------------
 
   function ownSeq(commit: Extract<WorkbookCommit, { kind: "cells" }>): number | undefined {
-    if (commit.session_id !== session.session_id || !commit.mutation_id?.startsWith(mutationPrefix)) return undefined
-    const seq = Number(commit.mutation_id.slice(mutationPrefix.length))
-    return positive(seq) && String(seq) === commit.mutation_id.slice(mutationPrefix.length) ? seq : undefined
+    if (!commit.session_id || !ownSessions.has(commit.session_id)) return undefined
+    const prefix = `${commit.session_id}:`
+    if (!commit.mutation_id?.startsWith(prefix)) return undefined
+    const seq = Number(commit.mutation_id.slice(prefix.length))
+    return positive(seq) && String(seq) === commit.mutation_id.slice(prefix.length) ? seq : undefined
   }
 
   function ackFrame(seq: number, rev: number) {
@@ -540,7 +587,12 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
           if (phase !== "live") return
           const refusal = editorRefusal(response)
           if (refusal) { kill(refusal); return }
-          if (response.status === 410) { if (!(await reloadSnapshot())) scheduleCatchUp(); continue }
+          if (response.status === 410) {
+            // History before `min_since` was pruned: only the snapshot can bring the editor forward.
+            if (object(response.body) && count(response.body.head_rev)) wantRev = Math.max(wantRev, response.body.head_rev)
+            if (!(await reloadSnapshot())) { if (phase === "live") scheduleCatchUp(); return }
+            continue
+          }
           const feed = response.status === 200 ? parseCommits(response.body, since) : null
           if (!feed) { scheduleCatchUp(); return }
           if (feed.generation !== session.generation) { kill("generation"); return }
@@ -571,7 +623,31 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
 
   // ----- sending ------------------------------------------------------------------------------
 
+  /** A receipt for this write under its current id or any id it had under an expired session. */
+  function receiptOf(value: unknown, write: BridgeWrite): WorkbookReceipt | null {
+    for (const id of [write.id, ...write.aliases]) {
+      const receipt = parseDurableReceipt(value, id)
+      if (receipt) return receipt
+    }
+    return null
+  }
+
   async function send(write: BridgeWrite): Promise<unknown> {
+    // Ids under expired sessions that may have committed: find out before sending under the new one.
+    while (write.priors.length) {
+      const id = write.priors[0]
+      let status: TransportResponse | undefined
+      try { status = await transport.operation(id) } catch { /* unknown: ask again later */ }
+      if (!status) return fail({ kind: "offline" }, { action: "retry" })
+      if (status.status === 404) { write.priors.shift(); continue } // it never arrived
+      const refusal = editorRefusal(status)
+      if (refusal && refusal !== "expired") fail({ kind: "denied" }, { action: "kill", reason: refusal })
+      if (status.status === 200 && object(status.body)) {
+        const receipt = parseDurableReceipt(status.body.receipt, id)
+        if (receipt) return receipt
+      }
+      return fail({ kind: "transient", retryAfterMs: BRIDGE_DEFAULT_RETRY_MS }, { action: "retry" })
+    }
     if (write.uncertain) {
       // The previous attempt may have committed: ask before sending the same bytes again.
       let status: TransportResponse | undefined
@@ -588,10 +664,13 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
       }
     }
     let response: TransportResponse
+    const sentUnder = session.session_id
     try { response = await transport.edit(write.id, write.body) } catch { write.uncertain = true; return fail({ kind: "offline" }, { action: "retry" }) }
+    // The session answered something other than "expired": it is a working session.
+    if (sentUnder === session.session_id && editorRefusal(response) !== "expired") reopenedAt = undefined
     if (response.status === 200) return response.body
     if (response.status >= 500) write.uncertain = true
-    throw editFailure(response)
+    throw editFailure(response, sentUnder)
   }
 
   /**
@@ -600,7 +679,7 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
    * as `not_confirmed` so the queue moves on to later mutations.
    */
   function verify(result: unknown, write: BridgeWrite): boolean {
-    const receipt = parseDurableReceipt(result, write.id)
+    const receipt = receiptOf(result, write)
     if (!receipt) {
       // The commits feed already showed it committed while this attempt was in flight.
       if (outcomes.get(write.seq)?.type === "ack") return true
@@ -641,11 +720,15 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
       case "kill": kill(handling.reason); return
       case "reject": reject(write, handling.code); queue.resume(); return
       case "snapshot": await reloadSnapshot(); queue.resume(); return
+      case "renew":
+        await renew(handling.sessionId)
+        if (phase === "live") queue.resume()
+        return
       case "reconcile":
         // The editor first sees what the server has, in order; then the verdict on its write.
         await catchUp(handling.headRev)
         if (phase !== "live") return
-        if (handling.cells.length) reject(write, "precondition_failed", handling.cells)
+        if (handling.cells.length || handling.final) reject(write, "precondition_failed", handling.cells)
         else if (write.rebases < BRIDGE_MAX_REBASES) write.rebases++ // the head moved: same mutation again
         else reject(write, "precondition_failed")
         queue.resume()
@@ -658,6 +741,7 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
     driving = true
     try {
       while (phase === "live" && queue.size > 0 && !queue.halted) {
+        if (renewing) { await renewing; continue }
         const ms = queue.wait()
         if (ms > 0) {
           timers.clearTimeout(driveTimer)
@@ -670,6 +754,59 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
     } finally {
       driving = false
     }
+  }
+
+  // ----- session renewal ----------------------------------------------------------------------
+
+  function editBody(write: BridgeWrite): string {
+    const { base_rev, generation, ops } = JSON.parse(write.body) as { base_rev: number; generation: number; ops: unknown }
+    return JSON.stringify({ session_id: session.session_id, mutation_id: write.id, base_rev, generation, ops })
+  }
+
+  /**
+   * Replaces the expired session `expiredId` once: a new session of the same generation and bundle,
+   * and every pending write moved to it (same seq, base and ops; the new session's mutation id).
+   */
+  function renew(expiredId: string): Promise<void> {
+    if (phase === "killed") return Promise.resolve()
+    // Already replaced (the heartbeat and an edit can both find out): use the new one.
+    if (expiredId !== session.session_id) return renewing ?? Promise.resolve()
+    if (renewing) return renewing
+    const settled = reopenedAt === undefined || timers.now() - reopenedAt >= BRIDGE_REOPEN_SETTLE_MS
+    if (!options.reopenSession || !settled) { kill("expired"); return Promise.resolve() }
+    const reopen = options.reopenSession
+    const run = ++renewRuns
+    renewing = (async () => {
+      await undefined
+      try {
+        let result: ReopenResult
+        try { result = await reopen() } catch { result = { ok: false } }
+        const discard = () => { if (result.ok) void result.transport.closeSession().catch(() => {}) }
+        if ((phase as BridgePhase) === "killed") { discard(); return }
+        if (!result.ok) { kill(result.refusal ?? "expired"); return }
+        // The frame holds this generation's content and runs this bundle: anything else needs a new frame.
+        if (result.session.generation !== session.generation) { discard(); kill("generation"); return }
+        if (!isBundleDigest(result.session.bundle_digest) || result.session.bundle_digest !== session.bundle_digest) { discard(); kill("disabled"); return }
+        const expired = transport
+        session = result.session
+        transport = result.transport
+        // The old session is over; closing it is only bookkeeping on the server.
+        void expired.closeSession().catch(() => {})
+        mutationPrefix = `${session.session_id}:`
+        ownSessions.add(session.session_id)
+        reopenedAt = timers.now()
+        for (const write of queue.writes()) {
+          write.aliases.push(write.id)
+          if (write.attempted) write.priors.push(write.id)
+          write.id = `${mutationPrefix}${write.seq}`
+          write.body = editBody(write)
+          write.uncertain = false
+        }
+      } finally {
+        if (renewRuns === run) renewing = undefined
+      }
+    })()
+    return renewing
   }
 
   // ----- editor messages ----------------------------------------------------------------------
@@ -696,7 +833,7 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
     known.set(mutation.seq, { epoch, frameKey })
     const id = `${mutationPrefix}${mutation.seq}`
     const write: BridgeWrite = {
-      id, seq: mutation.seq, frameKey, epoch, attempted: false, uncertain: false, rebases: 0, unconfirmed: 0,
+      id, seq: mutation.seq, frameKey, epoch, attempted: false, uncertain: false, rebases: 0, unconfirmed: 0, aliases: [], priors: [],
       body: JSON.stringify({ session_id: session.session_id, mutation_id: id, base_rev: mutation.base_rev, generation: session.generation, ops: mutation.ops.map(({ sheet, cell, input }) => ({ kind: "cell.set", sheet, cell, input })) }),
     }
     if (queue.size >= BRIDGE_MAX_PENDING) { reject(write, "too_many_pending"); return true }
@@ -780,6 +917,7 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
 
   return {
     get phase() { return phase },
+    get session() { return session },
     get confirmedRev() { return confirmedRev },
     get pending() { return queue.size },
     handleWindowMessage(event) {
@@ -794,7 +932,8 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
       if (phase !== "waiting") { kill("handshake"); return }
       const data = event.data
       if (!object(data) || data.type !== "gridcraft:hello") return
-      if (!shaped(data, ["type", "protocol", "bundle"]) || data.protocol !== BRIDGE_PROTOCOL || data.bundle !== session.bundle_digest) { kill("handshake"); return }
+      // No pin (no editor origin configured) or one written differently never matches: fail closed.
+      if (!shaped(data, ["type", "protocol", "bundle"]) || data.protocol !== BRIDGE_PROTOCOL || !isBundleDigest(session.bundle_digest) || data.bundle !== session.bundle_digest) { kill("handshake"); return }
       // A hello before the frame's first load comes from a document the host has not seen load,
       // and that load would later be indistinguishable from a navigation: refuse it, port unsent.
       if (loads !== 1) { kill("handshake"); return }
@@ -823,6 +962,10 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
       if (phase !== "live") return
       post({ type: "offline", protocol: 1 })
       emit({ type: "offline" })
+    },
+    sessionExpired(sessionId = session.session_id) {
+      if (phase !== "live") return
+      void renew(sessionId).then(() => { if (phase === "live") { queue.resume(); void drive() } })
     },
     close(reason = "closed") { kill(reason) },
   }

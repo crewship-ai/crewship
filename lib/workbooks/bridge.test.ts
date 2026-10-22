@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { SaveEvent } from "@/lib/editor-lifecycle/save-state"
-import { BRIDGE_HANDSHAKE_TIMEOUT_MS, BRIDGE_MAX_INPUT_BYTES, BRIDGE_MAX_UNCONFIRMED, EDITOR_FRAME_ATTRIBUTES, BRIDGE_MAX_MESSAGE_BYTES, BRIDGE_MAX_OPS, createWorkbookBridge, createWorkbookHttpTransport, parseCommits, parseFrameMessage, parseWorkbookSession, type HostMessage, type KillReason, type TransportResponse, type WorkbookTransport } from "./bridge"
+import { BRIDGE_HANDSHAKE_TIMEOUT_MS, BRIDGE_MAX_REBASES, BRIDGE_MAX_INPUT_BYTES, BRIDGE_MAX_UNCONFIRMED, EDITOR_FRAME_ATTRIBUTES, BRIDGE_MAX_MESSAGE_BYTES, BRIDGE_MAX_OPS, createWorkbookBridge, createWorkbookHttpTransport, parseCommits, parseFrameMessage, parseWorkbookSession, type HostMessage, type KillReason, type TransportResponse, type WorkbookBridgeOptions, type WorkbookSession, type WorkbookTransport } from "./bridge"
 
 const SID = "ws_session1"
 /** The editor document is served with CSP `sandbox allow-scripts`: its origin is opaque. */
 const ORIGIN = "null"
-const DIGEST = "sha256:bundle"
+/** A bundle pin: the plain lowercase hex SHA-256 of the bundle's manifest bytes. */
+const DIGEST = "d".repeat(64)
 const session = { session_id: SID, actor_label: "Owner", rev: 41, generation: 1, protocol: 1, bundle_digest: DIGEST }
 
 type Cells = [cell: string, input: string][]
@@ -32,7 +33,7 @@ beforeEach(() => { vi.useFakeTimers() })
 afterEach(() => { vi.useRealTimers() })
 
 /** `loaded`: the frame's first load event already happened, as it does before a real hello. */
-function setup(overrides: Partial<WorkbookTransport> = {}, { loaded = true } = {}) {
+function setup(overrides: Partial<WorkbookTransport> = {}, { loaded = true, reopen, sessionOverride }: { loaded?: boolean; reopen?: WorkbookBridgeOptions["reopenSession"]; sessionOverride?: Partial<WorkbookSession> } = {}) {
   const frame = { postMessage: vi.fn() }
   const port = { postMessage: vi.fn(), close: vi.fn(), start: vi.fn(), onmessage: null as ((event: { data: unknown }) => void) | null }
   const base: WorkbookTransport = {
@@ -47,7 +48,7 @@ function setup(overrides: Partial<WorkbookTransport> = {}, { loaded = true } = {
   const events: SaveEvent[] = []
   const kills: { reason: KillReason; unsaved: number }[] = []
   const bridge = createWorkbookBridge({
-    session, frame: () => frame, transport, pageLabel: "Budget", clientId: "client-a",
+    session: { ...session, ...sessionOverride }, frame: () => frame, transport, pageLabel: "Budget", clientId: "client-a", reopenSession: reopen,
     createChannel: () => ({ port1: port, port2: "port2" }), random: () => 1,
     onSaveEvent: event => events.push(event), onKill: kill => kills.push(kill),
   })
@@ -116,7 +117,9 @@ describe("handshake", () => {
 
   it.each([
     ["a wrong protocol", { type: "gridcraft:hello", protocol: 2, bundle: DIGEST }],
-    ["a wrong bundle digest", { type: "gridcraft:hello", protocol: 1, bundle: "sha256:other" }],
+    ["a wrong bundle digest", { type: "gridcraft:hello", protocol: 1, bundle: "e".repeat(64) }],
+    ["the right digest with a prefix", { type: "gridcraft:hello", protocol: 1, bundle: `sha256:${DIGEST}` }],
+    ["the right digest in upper case", { type: "gridcraft:hello", protocol: 1, bundle: DIGEST.toUpperCase() }],
     ["a missing bundle digest", { type: "gridcraft:hello", protocol: 1 }],
     ["extra fields", { type: "gridcraft:hello", protocol: 1, bundle: DIGEST, token: "x" }],
   ])("kills the session on %s", async (_, data) => {
@@ -820,6 +823,201 @@ describe("catch-up after the editor already holds the head", () => {
     expect(t.types()).toEqual(["committed:42", "rejected", "committed:43", "ack:44"])
     expect(t.bridge.confirmedRev).toBe(44)
     expect(t.kills).toEqual([])
+  })
+})
+
+describe("the server's live-session contract", () => {
+  const receiptFor = (mutationId: string, rev: number) => ok({ operation_key: { artifact_id: "page1", authority_id: "user:u1", mutation_id: mutationId }, outcome: "applied", rev, durability: "node" })
+  const SID2 = "ws_session2"
+  const expired: TransportResponse = { status: 401, body: { error: "session_expired" } }
+  const reopened = (overrides: Partial<WorkbookSession> = {}, transport: Partial<WorkbookTransport> = {}) => vi.fn(async () => ({
+    ok: true as const,
+    session: { ...session, session_id: SID2, rev: 41, ...overrides },
+    transport: {
+      snapshot: async () => ok({ schema_version: 1, rev: 41, generation: 1, snapshot: {} }),
+      edit: async (id: string) => receiptFor(id, 42),
+      commits: async (since: number) => feed(since, []),
+      operation: async (): Promise<TransportResponse> => ({ status: 404, body: { error: "Workbook not found" } }),
+      closeSession: async () => {},
+      ...transport,
+    },
+  }))
+
+  it("401 session_expired: opens a new session once and sends the pending edits again under it, after checking the old ones", async () => {
+    const edits: [string, string][] = []
+    const operations: string[] = []
+    const reopen = reopened({}, {
+      edit: async (id: string, body: string) => { edits.push([id, body]); return receiptFor(id, 41 + edits.length) },
+      operation: async (id: string): Promise<TransportResponse> => { operations.push(id); return { status: 404, body: { error: "Workbook not found" } } },
+    })
+    const t = setup({ edit: vi.fn(async () => expired) }, { reopen })
+    await t.connect()
+    t.send(mutation(1, 41, [["B3", "21"]]))
+    t.send(mutation(2, 41, [["B4", "22"]]))
+    await flush()
+    expect(reopen).toHaveBeenCalledTimes(1)
+    expect(t.kills).toEqual([])
+    // The first edit reached the old session: its status is asked before it goes again.
+    expect(operations).toEqual([`${SID}:1`])
+    // Same frame seq, same base and ops; the server requires the new session's prefix.
+    expect(edits).toEqual([
+      [`${SID2}:1`, JSON.stringify({ session_id: SID2, mutation_id: `${SID2}:1`, base_rev: 41, generation: 1, ops: [{ kind: "cell.set", sheet: "Sheet1", cell: "B3", input: "21" }] })],
+      [`${SID2}:2`, JSON.stringify({ session_id: SID2, mutation_id: `${SID2}:2`, base_rev: 41, generation: 1, ops: [{ kind: "cell.set", sheet: "Sheet1", cell: "B4", input: "22" }] })],
+    ])
+    expect(t.types()).toEqual(["ack:42", "ack:43"])
+    expect(t.bridge.session.session_id).toBe(SID2)
+    expect(t.bridge.pending).toBe(0)
+  })
+
+  it.each([409, 401, 404])("the editor's own expiry code (%i editor_session_expired) reopens too, never \"access lost\"", async status => {
+    const reopen = reopened()
+    const t = setup({ edit: vi.fn(async (): Promise<TransportResponse> => ({ status, body: { error: "editor_session_expired" } })) }, { reopen })
+    await t.connect()
+    t.send(mutation(1, 41, [["B3", "21"]]))
+    await flush()
+    expect(reopen).toHaveBeenCalledTimes(1)
+    expect(t.kills).toEqual([])
+    expect(t.types()).toEqual(["ack:42"])
+  })
+
+  it("takes the old session's receipt instead of sending again when the expired edit had committed", async () => {
+    let first = true
+    const t = setup({ edit: vi.fn(async (): Promise<TransportResponse> => { if (first) { first = false; throw new TypeError("network") } return expired }) }, {
+      reopen: reopened({}, {
+        operation: async (id: string): Promise<TransportResponse> => id === `${SID}:1` ? ok({ state: "applied", receipt: receiptFor(`${SID}:1`, 42).body }) : { status: 404, body: null },
+        edit: async () => { throw new Error("must not resend") },
+      }),
+    })
+    await t.connect()
+    t.send(mutation(1, 41, [["B3", "21"]]))
+    await flush()
+    t.bridge.online() // the retry: status 404 under the old session, then 401
+    await flush()
+    await flush()
+    expect(t.types()).toEqual(["online", "ack:42"])
+    expect(t.kills).toEqual([])
+  })
+
+  it("still recognises the old session's own revisions in the feed after reopening", async () => {
+    const t = setup({ edit: vi.fn(async () => expired) }, {
+      reopen: reopened({}, {
+        commits: async (since: number) => since === 41 ? feed(42, [own(42, 1, [["B3", "21"]])]) : feed(since, []),
+        operation: async (): Promise<TransportResponse> => ({ status: 200, body: { state: "in_progress" } }),
+      }),
+    })
+    await t.connect()
+    t.send(mutation(1, 41, [["B3", "21"]]))
+    await flush()
+    t.bridge.notify({ rev: 42, generation: 1 })
+    await flush()
+    expect(t.types()).toEqual(["ack:42"])
+    expect(t.bridge.pending).toBe(0)
+  })
+
+  it("reopens at most once per expired session: a new session refused as expired before it was ever accepted ends the editor", async () => {
+    const reopen = reopened({}, { edit: async () => expired })
+    const t = setup({ edit: vi.fn(async () => expired) }, { reopen })
+    await t.connect()
+    t.send(mutation(1, 41, [["B3", "21"]]))
+    await flush(); await flush()
+    expect(reopen).toHaveBeenCalledTimes(1)
+    expect(t.kills).toEqual([{ reason: "expired", unsaved: 1 }])
+  })
+
+  it.each([
+    ["the server will not open one", { ok: false as const }, "expired"],
+    ["the editor was turned off", { ok: false as const, refusal: "disabled" as const }, "disabled"],
+    ["access was lost", { ok: false as const, refusal: "access" as const }, "access"],
+  ])("ends the editor when no new session can be opened (%s)", async (_, answer, reason) => {
+    const t = setup({ edit: vi.fn(async () => expired) }, { reopen: vi.fn(async () => answer) })
+    await t.connect()
+    t.send(mutation(1, 41, [["B3", "21"]]))
+    await flush()
+    expect(t.kills).toEqual([{ reason, unsaved: 1 }])
+  })
+
+  it.each([
+    ["another generation", { generation: 2 }, "generation"],
+    ["another bundle", { bundle_digest: "e".repeat(64) }, "disabled"],
+  ] as const)("ends the editor when the new session names %s", async (_, overrides, reason) => {
+    const t = setup({ edit: vi.fn(async () => expired) }, { reopen: reopened(overrides) })
+    await t.connect()
+    t.send(mutation(1, 41, [["B3", "21"]]))
+    await flush()
+    expect(t.kills).toEqual([{ reason, unsaved: 1 }])
+  })
+
+  it("reopens when the heartbeat finds the session expired", async () => {
+    const reopen = reopened()
+    const t = setup({}, { reopen })
+    await t.connect()
+    t.bridge.sessionExpired()
+    await flush()
+    expect(reopen).toHaveBeenCalledTimes(1)
+    expect(t.bridge.session.session_id).toBe(SID2)
+    expect(t.kills).toEqual([])
+  })
+
+  it("410 snapshot_required from the feed rereads the snapshot without ending the editor", async () => {
+    const t = setup({ commits: vi.fn(async (): Promise<TransportResponse> => ({ status: 410, body: { error: "snapshot_required", head_rev: 900, generation: 1, min_since: 600 } })) })
+    await t.connect()
+    t.transport.snapshot.mockResolvedValueOnce(ok({ schema_version: 1, rev: 900, generation: 1, snapshot: {} }))
+    t.bridge.notify({ rev: 900, generation: 1 })
+    await flush()
+    expect(t.types()).toEqual(["snapshot"])
+    expect(t.kills).toEqual([])
+  })
+
+  it("410 with an unreadable snapshot backs off instead of rereading the feed in a tight loop", async () => {
+    let calls = 0
+    const t = setup({ commits: vi.fn(async (since: number): Promise<TransportResponse> => ++calls > 50 ? feed(since, []) : { status: 410, body: { error: "snapshot_required", head_rev: 900, generation: 1, min_since: 600 } }) })
+    await t.connect()
+    t.transport.snapshot.mockResolvedValue({ status: 500, body: null })
+    t.bridge.notify({ rev: 900, generation: 1 })
+    await flush()
+    expect(calls).toBe(1)
+    expect(t.kills).toEqual([])
+  })
+
+  it("409 snapshot_required: never sends the same packet again; the editor learns the head, then the refusal", async () => {
+    const t = setup({
+      edit: vi.fn(async (): Promise<TransportResponse> => ({ status: 409, body: { error: "precondition_failed", head_rev: 42, snapshot_required: true, conflicts: [] } })),
+      commits: vi.fn(async (since: number) => since === 41 ? feed(42, [remote(42, [["Z9", "1"]])]) : feed(since, [])),
+    })
+    await t.connect()
+    t.send(mutation(1, 41, [["B3", "21"]]))
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(t.transport.edit).toHaveBeenCalledTimes(1)
+    expect(BRIDGE_MAX_REBASES).toBeGreaterThan(0)
+    expect(t.types()).toEqual(["committed:42", "rejected"])
+  })
+
+  it("403 effect_out_of_mandate refuses the edit; it does not mean access was lost", async () => {
+    const t = setup({ edit: vi.fn(async (id: string): Promise<TransportResponse> => id.endsWith(":1") ? { status: 403, body: { error: "effect_out_of_mandate" } } : receipt(2, 42)) })
+    await t.connect()
+    t.send(mutation(1, 41, [["B3", "=RAND()"]]))
+    t.send(mutation(2, 41, [["B4", "2"]]))
+    await flush()
+    expect(t.kills).toEqual([])
+    expect(t.toFrame()).toEqual([
+      { type: "rejected", protocol: 1, seq: 1, code: "effect_out_of_mandate", current_rev: 41, cells: [] },
+      { type: "ack", protocol: 1, seq: 2, rev: 42 },
+    ])
+  })
+
+  it("fails closed on a session without a bundle pin: no port for any hello", async () => {
+    const t = setup({}, { sessionOverride: { bundle_digest: "" } })
+    t.hello({ type: "gridcraft:hello", protocol: 1, bundle: "" })
+    await flush()
+    expect(t.frame.postMessage).not.toHaveBeenCalled()
+    expect(t.kills).toEqual([{ reason: "handshake", unsaved: 0 }])
+  })
+
+  it("parses only sessions the server issues: a positive revision and a plain lowercase hex bundle pin", () => {
+    expect(parseWorkbookSession({ ...session, bundle_digest: DIGEST })).not.toBeNull()
+    for (const bundle_digest of ["", `sha256:${DIGEST}`, DIGEST.toUpperCase(), DIGEST.slice(1), "sha256:fake-editor"]) expect(parseWorkbookSession({ ...session, bundle_digest })).toBeNull()
+    // The server opens sessions only on an imported workbook (revision 1 or later); an edit at 0 is refused.
+    expect(parseWorkbookSession({ ...session, rev: 0 })).toBeNull()
   })
 })
 

@@ -2,15 +2,19 @@
 
 import * as React from "react"
 import { Button } from "@/components/ui/button"
-import { useRealtimeEventSafe } from "@/hooks/use-realtime"
+import { useRealtimeChannelSafe, useRealtimeEventSafe, useRealtimeStatusSafe, type RealtimeEventType } from "@/hooks/use-realtime"
 import { initialSaveState, losesWork, saveReducer, type SaveState } from "@/lib/editor-lifecycle/save-state"
 import { useLeaveGuard } from "@/lib/editor-lifecycle/use-leave-guard"
 import { EDITOR_FRAME_ATTRIBUTES, createWorkbookBridge, type FrameWindow, type KillReason, type WorkbookBridge } from "@/lib/workbooks/bridge"
-import { createWorkbookEditorClient, editorFrameSrc, type SessionCheck, type WorkbookEditorClient } from "@/lib/workbooks/editor-client"
+import { WORKBOOK_COMMITTED_EVENT, createWorkbookEditorClient, editorFrameSrc, parseCommittedPush, type SessionCheck, type WorkbookEditorClient } from "@/lib/workbooks/editor-client"
 import { PageWorkbook } from "./page-workbook"
 
-/** How often the host reads the head revision while the editor is visible (the push backstop). */
+/** How often the host reads the head revision while the editor is visible and no realtime push can arrive. */
 export const WORKBOOK_HEAD_POLL_MS = 2000
+/** The same read while the realtime connection is up: `workbook.committed` drives it, this is the fallback. */
+export const WORKBOOK_HEAD_POLL_CONNECTED_MS = 15_000
+/** Session renewal while the editor is open and visible, well inside the shortest session lifetime. */
+export const WORKBOOK_SESSION_HEARTBEAT_MS = 60_000
 /** New frames opened in a row after the workbook moved to a new generation. */
 export const WORKBOOK_GENERATION_REOPENS = 3
 /** Least time between two rechecks of the open session (focus, reconnect, back online). */
@@ -128,7 +132,7 @@ export function PageWorkbookSurface({ workspaceId, pageId, name, onDirtyChange, 
   const reopen = () => { reopens.current = 0; setEnd(undefined); setAttempt(value => value + 1) }
 
   if (enabled === true && !end && editorFrameSupported()) {
-    return <WorkbookEditorHost key={attempt} client={editorClient} name={name} onEnd={onEnd} onDirtyChange={onDirtyChange} />
+    return <WorkbookEditorHost key={attempt} client={editorClient} pageId={pageId} name={name} onEnd={onEnd} onDirtyChange={onDirtyChange} />
   }
   const notice = end && endMessage(end)
   return <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -147,8 +151,9 @@ export function PageWorkbookSurface({ workspaceId, pageId, name, onDirtyChange, 
  * time). Unsent edits hold a leave guard. On focus, reconnect and back online the host renews the
  * session, which rechecks the flag and the qualified bundle.
  */
-export function WorkbookEditorHost({ client, name, onEnd, onDirtyChange }: {
+export function WorkbookEditorHost({ client, pageId, name, onEnd, onDirtyChange }: {
   client: WorkbookEditorClient
+  pageId: string
   name?: string
   onEnd: (end: EditorEnd) => void
   onDirtyChange?: (dirty: boolean) => void
@@ -160,6 +165,8 @@ export function WorkbookEditorHost({ client, name, onEnd, onDirtyChange }: {
   const pollRef = React.useRef<() => void>(() => {})
   const onEndRef = React.useRef(onEnd); onEndRef.current = onEnd
   const nameRef = React.useRef(name); nameRef.current = name
+  const realtimeStatus = useRealtimeStatusSafe()
+  const pushesLive = React.useRef(false); pushesLive.current = realtimeStatus === "connected"
 
   useLeaveGuard(losesWork(save), onDirtyChange)
 
@@ -168,9 +175,11 @@ export function WorkbookEditorHost({ client, name, onEnd, onDirtyChange }: {
     let bridge: WorkbookBridge | undefined
     let frame: HTMLIFrameElement | null = null
     let timer: ReturnType<typeof setInterval> | undefined
+    let heartbeat: ReturnType<typeof setInterval> | undefined
+    let polledAt = Date.now()
     let polling = false
     let sessionGeneration = 0
-    let checkSession: (() => Promise<SessionCheck>) | undefined
+    let checkSession: ((current: WorkbookBridge) => Promise<SessionCheck>) | undefined
     let checking = false, checkedAt = -Infinity
 
     const onMessage = (event: MessageEvent) => bridge?.handleWindowMessage(event)
@@ -180,7 +189,8 @@ export function WorkbookEditorHost({ client, name, onEnd, onDirtyChange }: {
     const onFocus = () => { void poll(); void recheck() }
     const detach = () => {
       if (timer !== undefined) clearInterval(timer)
-      timer = undefined
+      if (heartbeat !== undefined) clearInterval(heartbeat)
+      timer = heartbeat = undefined
       window.removeEventListener("message", onMessage)
       window.removeEventListener("online", online)
       window.removeEventListener("offline", offline)
@@ -199,6 +209,7 @@ export function WorkbookEditorHost({ client, name, onEnd, onDirtyChange }: {
       const current = bridge
       if (!current || current.phase !== "live" || polling || document.visibilityState === "hidden") return
       polling = true
+      polledAt = Date.now()
       try {
         const result = await client.head(current.confirmedRev)
         if (current.phase !== "live") return
@@ -218,9 +229,12 @@ export function WorkbookEditorHost({ client, name, onEnd, onDirtyChange }: {
       if (now - checkedAt < WORKBOOK_SESSION_RECHECK_MS) return
       checking = true; checkedAt = now
       try {
-        const result = await checkSession()
+        const checked = current.session.session_id
+        const result = await checkSession(current)
         if (current.phase !== "live") return
         if (result === "revoked") current.close("disabled")
+        // An expired session is replaced and the pending edits go out under the new one.
+        else if (result === "expired") current.sessionExpired(checked)
         else if (result !== "live" && result !== "unknown") current.close(result)
       } finally {
         checking = false
@@ -237,9 +251,10 @@ export function WorkbookEditorHost({ client, name, onEnd, onDirtyChange }: {
       if (!opened.ok) { finish({ reason: "unavailable", status: opened.status }); return }
       const session = opened.session
       sessionGeneration = session.generation
-      checkSession = () => client.checkSession(session)
+      // The bridge's session, which changes when an expired one is replaced.
+      checkSession = current => client.checkSession(current.session)
       const transport = client.transport(session)
-      const src = editorFrameSrc(session.editor_url, window.location.origin)
+      const src = editorFrameSrc(session.editor_url, session.bundle_digest, window.location.origin)
       if (!src || !editorFrameSupported()) {
         void transport.closeSession().catch(() => {})
         finish({ reason: "config" })
@@ -256,6 +271,11 @@ export function WorkbookEditorHost({ client, name, onEnd, onDirtyChange }: {
           if (disposed) return
           dispatch(event)
           if (bridge) setRev(bridge.confirmedRev)
+        },
+        reopenSession: async () => {
+          const next = await client.openSession()
+          if (!next.ok) return { ok: false, refusal: next.refusal }
+          return { ok: true, session: next.session, transport: client.transport(next.session) }
         },
         onKill: kill => {
           // The frame goes first: after a kill no document in it may hold anything of this session.
@@ -276,7 +296,11 @@ export function WorkbookEditorHost({ client, name, onEnd, onDirtyChange }: {
       window.addEventListener("offline", offline)
       document.addEventListener("visibilitychange", onFocus)
       window.addEventListener("focus", onFocus)
-      timer = setInterval(() => { void poll() }, WORKBOOK_HEAD_POLL_MS)
+      polledAt = Date.now()
+      // With realtime up, pushes drive the feed and the head read is only a slow fallback.
+      timer = setInterval(() => { if (!pushesLive.current || Date.now() - polledAt >= WORKBOOK_HEAD_POLL_CONNECTED_MS) void poll() }, WORKBOOK_HEAD_POLL_MS)
+      // Keeps the session alive during continuous work; focus, visibility and reconnect also renew it.
+      heartbeat = setInterval(() => { void recheck() }, WORKBOOK_SESSION_HEARTBEAT_MS)
       container.current.append(frame)
     })()
 
@@ -289,8 +313,14 @@ export function WorkbookEditorHost({ client, name, onEnd, onDirtyChange }: {
     }
   }, [client])
 
-  // The workbook push (`workbook.committed`) is not on the realtime wire yet; until it is, a
-  // reconnect still means pushes may have been missed, so read from the last revision.
+  // `workbook.committed` on `page:{pageId}` names a confirmed revision; the bridge reads its content
+  // through the commits feed (duplicates and stale revisions are no-ops). A reconnect means pushes
+  // may have been missed, so read from the last revision.
+  useRealtimeChannelSafe(`page:${pageId}`)
+  useRealtimeEventSafe(WORKBOOK_COMMITTED_EVENT as RealtimeEventType, event => {
+    const head = parseCommittedPush(event.payload, pageId)
+    if (head) bridgeRef.current?.notify(head)
+  })
   useRealtimeEventSafe("realtime.reconnected", () => { bridgeRef.current?.online(); pollRef.current() })
 
   const label = workbookSaveLabel(save)
