@@ -21,6 +21,29 @@ describe("compiled Page content contract", () => {
 })
 
 
+// Same shape as internal/pages/content_types_cases.json; Go's DeriveContentTypes must produce
+// exactly these once it reads has_workbook (then they belong in that shared fixture).
+const workbookCases = [
+  { name: "workbook", facts: { has_workbook: true }, expected: { content_descriptor: { type_id: "gridcraft-workbook", schema_version: 1, supported: true }, can_initialize_content: false } },
+  { name: "workbook-human", facts: { has_workbook: true, human_owned: true }, expected: { content_descriptor: { type_id: "gridcraft-workbook", schema_version: 1, supported: true }, can_initialize_content: false } },
+  { name: "workbook-and-document", facts: { has_workbook: true, has_document: true, document_schema: 2 }, expected: { content_descriptor: { type_id: "conflicting", schema_version: 0, supported: false, reason: "conflicting-storage" }, can_initialize_content: false } },
+  { name: "workbook-and-panels", facts: { has_workbook: true, has_panels: true }, expected: { content_descriptor: { type_id: "conflicting", schema_version: 0, supported: false, reason: "conflicting-storage" }, can_initialize_content: false } },
+  { name: "workbook-and-project", facts: { has_workbook: true, has_project: true }, expected: { content_descriptor: { type_id: "conflicting", schema_version: 0, supported: false, reason: "conflicting-storage" }, can_initialize_content: false } },
+]
+describe("GridCraft workbook content", () => {
+  for (const fixture of workbookCases) it(fixture.name, () => expect(deriveContentTypes(fixture.facts)).toEqual(fixture.expected))
+  it("resolves a legacy workbook Page without an explicit descriptor", () => {
+    const result = resolvePageContent({ human_owned: true, has_workbook: true })
+    expect(result.supported).toBe(true)
+    expect(result.primary?.type_id).toBe("gridcraft-workbook")
+    expect(result.canInitializeContent).toBe(false)
+  })
+  it("accepts the explicit workbook descriptor and refuses one that hides the workbook", () => {
+    expect(resolvePageContent({ has_workbook: true, content_descriptor: { type_id: "gridcraft-workbook", schema_version: 1, supported: true } }).supported).toBe(true)
+    expect(resolvePageContent({ has_workbook: true, content_descriptor: { type_id: "panels", schema_version: 1, supported: true } }).supported).toBe(false)
+  })
+})
+
 describe("content registry isolation and trust boundaries", () => {
   it("returns owned descriptor arrays from lists and lookup", () => {
     const original = lookupContentType("panels", 1)!

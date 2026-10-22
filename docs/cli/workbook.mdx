@@ -8,6 +8,11 @@ The experimental `workbook` commands are disabled on the server by default.
 They support personal, human-owned private Pages and native GridCraft JSON.
 There is no embedded spreadsheet editor or collaborative editing in this pilot.
 
+Opening a workbook Page in the web app shows a read-only preview of its sheets
+(values, with formulas as tooltips) and its revision; Refresh, or returning to
+the window, re-reads it. Cell styles and number formats are not rendered, and a
+workbook Page cannot carry panels.
+
 ```bash
 crewship workbook create my-book --name "My book"
 crewship workbook import @PAGE_ID --file import.json

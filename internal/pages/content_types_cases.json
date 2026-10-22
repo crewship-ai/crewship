@@ -376,5 +376,38 @@
       },
       "can_initialize_content": false
     }
+  },
+  {
+    "name": "workbook-human",
+    "facts": {
+      "human_owned": true,
+      "has_workbook": true
+    },
+    "expected": {
+      "content_descriptor": {
+        "type_id": "gridcraft-workbook",
+        "schema_version": 1,
+        "supported": true
+      },
+      "can_initialize_content": false
+    }
+  },
+  {
+    "name": "workbook-with-document-conflicts",
+    "facts": {
+      "human_owned": true,
+      "has_workbook": true,
+      "has_document": true,
+      "document_schema": 3
+    },
+    "expected": {
+      "content_descriptor": {
+        "type_id": "conflicting",
+        "schema_version": 0,
+        "supported": false,
+        "reason": "conflicting-storage"
+      },
+      "can_initialize_content": false
+    }
   }
 ]

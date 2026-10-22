@@ -382,6 +382,18 @@ func TestGridCraftHumanCreatesEmptyPrivateWorkbookPage(t *testing.T) {
 	importBody := `{"mutation_id":"import-1","mandate_id":"human-import","base_rev":0,"generation":0,"command":{"kind":"import","snapshot":{"sheets":[{}]}}}`
 	wantCode(t, f.do(f.boss, "POST", "/api/v1/pages/pilot-book/workbook/operations?workspace_id=ws-old", importBody), 200, "created page accepts import")
 	wantCode(t, create(f.boss, body), 409, "a page with a workbook is no longer an empty create result")
+	detail := f.do(f.boss, "GET", "/api/v1/pages/pilot-book?workspace_id=ws-old", "")
+	wantCode(t, detail, 200, "author reads the workbook page")
+	if !strings.Contains(detail.Body.String(), `"has_workbook":true`) {
+		t.Fatalf("page detail does not classify the workbook: %s", detail.Body.String())
+	}
+	if list := f.do(f.boss, "GET", "/api/v1/pages?workspace_id=ws-old", ""); !strings.Contains(list.Body.String(), `"has_workbook":true`) {
+		t.Fatalf("page list does not classify the workbook: %s", list.Body.String())
+	}
+	mustExec(t, f.db, `INSERT INTO crews(id,workspace_id,name,slug) VALUES('crew-lookout','ws-old','Lookout','lookout')`)
+	panels := `{"panels":[{"id":"p","schema":"status.v1","title":"t","owner":"crew/lookout","producer":"script/watch.sh","sla_seconds":30}]}`
+	wantCode(t, f.do(f.boss, "PATCH", "/api/v1/pages/pilot-book?workspace_id=ws-old", panels), 409, "panels cannot hide a workbook")
+	wantCode(t, f.do(f.boss, "GET", "/api/v1/pages/pilot-book/workbook?workspace_id=ws-old", ""), 200, "workbook still readable")
 	wantCode(t, f.do(f.wsAdmin, "GET", "/api/v1/pages/pilot-book/workbook?workspace_id=ws-old", ""), 404, "private to its author")
 	listed := f.do(f.wsAdmin, "GET", "/api/v1/pages?workspace_id=ws-old", "")
 	if strings.Contains(listed.Body.String(), "pilot-book") || strings.Contains(listed.Body.String(), created.PageID) {
