@@ -225,8 +225,20 @@ test.describe("onboarding wizard — first-run flow", () => {
         r.request().method() === "POST",
       { timeout: 15_000 },
     )
+    // Step 3 mounts the setup chat, which immediately POSTs
+    // /onboarding/setup-agent/start (a write). Reloading while that request is
+    // still in flight cancels it, and the reload's "networkidle" wait could
+    // then hang on the abandoned request until the test timed out. Let it
+    // finish first.
+    const setupAgentStartPromise = page.waitForResponse(
+      (r) =>
+        new URL(r.url()).pathname === "/api/v1/onboarding/setup-agent/start" &&
+        r.request().method() === "POST",
+      { timeout: 15_000 },
+    )
     await continueFromAdapter.click()
     expect((await credentialRespPromise).status()).toBe(201)
+    expect((await setupAgentStartPromise).status()).toBe(200)
 
     // This is the resume boundary that failed in production: after the
     // credential had been encrypted successfully, a reload/re-login rebuilt
