@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/editororigin"
 	"github.com/crewship-ai/crewship/internal/pages"
 )
 
@@ -22,14 +23,38 @@ import (
 //     also matches this path and skips CSP so the API router doesn't re-stamp
 //     the lockdown after this middleware bowed out.
 func securityHeadersMiddleware(next http.Handler, pageRuntimeOrigin ...string) http.Handler {
+	var o securityHeaderOptions
+	if len(pageRuntimeOrigin) > 0 {
+		o.pageRuntimeOrigin = pageRuntimeOrigin[0]
+	}
+	return securityHeadersMiddlewareWith(next, o)
+}
+
+// securityHeaderOptions are the operator-configured origins Studio may frame.
+type securityHeaderOptions struct {
+	pageRuntimeOrigin string
+	// editorOrigin is the embedded workbook editor origin, set only while the
+	// editor is enabled. It is framed only from Page routes (/pages/<slug>),
+	// never from the rest of the UI.
+	editorOrigin string
+}
+
+func appendFrameSrc(frameSrc, origin string) string {
+	if origin == "" {
+		return frameSrc
+	}
+	if frameSrc == "frame-src 'none'" {
+		return "frame-src " + origin
+	}
+	return frameSrc + " " + origin
+}
+
+func securityHeadersMiddlewareWith(next http.Handler, o securityHeaderOptions) http.Handler {
+	editorFrameSrc := editororigin.FrameSrc(o.editorOrigin)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		frameSrc := pages.FrameSrcDirective()
-		if len(pageRuntimeOrigin) > 0 && pageRuntimeOrigin[0] != "" {
-			if frameSrc == "frame-src 'none'" {
-				frameSrc = "frame-src " + pageRuntimeOrigin[0]
-			} else {
-				frameSrc += " " + pageRuntimeOrigin[0]
-			}
+		frameSrc := appendFrameSrc(pages.FrameSrcDirective(), o.pageRuntimeOrigin)
+		if editorFrameSrc != "" && strings.HasPrefix(r.URL.Path, "/pages/") && len(r.URL.Path) > len("/pages/") {
+			frameSrc = appendFrameSrc(frameSrc, editorFrameSrc)
 		}
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("X-Content-Type-Options", "nosniff")

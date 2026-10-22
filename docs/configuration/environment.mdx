@@ -612,3 +612,40 @@ path and `CREWSHIP_GRIDCRAFT_SERVICE_TOKEN_FILE` to its regular mode-0600 secret
 file. These paths must differ and fit within 100 bytes. The application never
 launches containers or falls back to an unsandboxed executable.
 See [workbook commands](/cli/workbook) for scope and request contracts.
+
+#### Embedded workbook editor origin
+
+The browser workbook editor is third-party code. It runs only in an iframe on
+its own origin, holds no Crewship credential and is served only from
+operator-pinned bundles. All of it is off by default.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_GRIDCRAFT_EDITOR_ENABLED` | `false` | Literal `true` or `1` serves the editor. Requires `CREWSHIP_GRIDCRAFT_ENABLED`. |
+| `CREWSHIP_EDITOR_RUNTIME_ORIGIN` | *(unset)* | HTTPS origin of the editor, e.g. `https://editor.example.org` for `https://studio.example.test`. Its host must differ from the Studio host and the Page runtime host on every port, and it must not appear in `CREWSHIP_ALLOWED_ORIGINS`. Once set, that host serves only editor bundles: the API, the UI and probes return 404 there, even while the editor is disabled. |
+| `CREWSHIP_EDITOR_RUNTIME_DEVELOPMENT_SAME_SITE` | `false` | Development only. Literal `true` permits a sibling subdomain of Studio (`https://editor.example.test`). Without it the editor origin must be on a different site. The origin itself is never shared with Studio. |
+| `CREWSHIP_GRIDCRAFT_EDITOR_BUNDLE_DIR` | *(unset)* | Clean absolute directory holding one `<digest>/` directory per bundle, each with a `manifest.json` (`{"files":{"<path>":"<sha256>"}}`). |
+| `CREWSHIP_GRIDCRAFT_EDITOR_BUNDLES` | *(unset)* | Comma-separated allowlist of lowercase hex SHA-256 digests of each bundle's `index.html`. Removing a digest stops serving it after restart. |
+
+At startup each allowlisted bundle is read once. The `index.html` digest must
+equal the pin and every file must match its manifest digest. Symlinks and paths
+that leave the bundle directory are refused. A bundle that fails is not served
+and the error is logged. Files are served from memory at
+`/b/<digest>/<path>`. Every response carries a fixed policy set by the server,
+not the bundle:
+
+```
+Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'none'; child-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors <Studio origin>
+Cross-Origin-Resource-Policy: same-origin
+Cross-Origin-Opener-Policy: same-origin
+Origin-Agent-Cluster: ?1
+Referrer-Policy: no-referrer
+X-Content-Type-Options: nosniff
+Permissions-Policy: camera=(), microphone=(), geolocation=(), clipboard-read=(), usb=(), serial=(), hid=()
+Cache-Control: no-store                                  (index.html)
+Cache-Control: public, max-age=31536000, immutable      (other files)
+```
+
+`'wasm-unsafe-eval'` is granted only on the editor origin. The editor host
+never reads or sets cookies. While the editor is enabled, Studio adds the editor
+origin to `frame-src` only on Page routes (`/pages/<slug>`).

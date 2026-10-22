@@ -9,6 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Default-off workbook editor origin.** Operators can configure a dedicated HTTPS origin that serves only digest-pinned, manifest-verified editor bundles under a fixed server-set policy (`'wasm-unsafe-eval'` only there, `frame-ancestors` limited to the Studio origin, no cookies). The configuration refuses an editor host shared with Studio or the Page runtime, or listed as a trusted API origin; Studio frames it only on Page routes while enabled. No editor UI ships yet.
 - **Experimental offline workbook operations** add a default-off GridCraft Artifact adapter, native-file imports and scoped agent cell edits with durable receipts, retry recovery and bounded worker admission. Runtime activation requires a qualified persistent digest-pinned worker reached over a private authenticated socket. Embedded editing, collaboration and portable workbook backup/restore are unavailable; affected workspace backups fail explicitly.
 - A Document or Slides page with edits the server has not accepted now asks before an in-app link leaves it (Keep editing or Leave anyway); the link used to do nothing and say nothing.
 - Replaying a Document creation submission after a lost reply no longer adds a duplicate human message or starts another run.
