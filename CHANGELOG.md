@@ -9,7 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Experimental offline workbook operations** add a default-off GridCraft Artifact adapter, native-file imports and scoped agent cell edits with durable receipts, retry recovery and bounded worker admission. Runtime activation requires a qualified persistent digest-pinned worker reached over a private authenticated socket. Embedded editing, collaboration and portable workbook backup/restore are unavailable; affected workspace backups fail explicitly.
+- **Experimental offline workbook operations** add a default-off GridCraft Artifact adapter, native-file imports and scoped agent cell edits with durable receipts, retry recovery and bounded worker admission. Runtime activation requires a qualified persistent digest-pinned worker reached over a private authenticated socket. Embedded editing and collaboration are unavailable. Portable workbook backups now preserve snapshots and receipts; recovery fences pending candidates and requires fresh run admission.
 - A Document or Slides page with edits the server has not accepted now asks before an in-app link leaves it (Keep editing or Leave anyway); the link used to do nothing and say nothing.
 - Replaying a Document creation submission after a lost reply no longer adds a duplicate human message or starts another run.
 - Enter in a Document acts where the caret is shown: after a quick keyboard caret move such as Ctrl+End, it no longer splits the document where the caret was a moment before.
