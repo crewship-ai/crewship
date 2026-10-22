@@ -652,6 +652,7 @@ func TestWorkerHandlerCapacityNRunsConcurrentlyAndRefusesNPlusOne(t *testing.T) 
 	request := func() int {
 		req := httptest.NewRequest(http.MethodPost, "/v1/candidate", strings.NewReader(body))
 		req.Header.Set(workerServiceHeader, secret)
+		setContractHeaders(req.Header)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 		return rec.Code
@@ -666,6 +667,12 @@ func TestWorkerHandlerCapacityNRunsConcurrentlyAndRefusesNPlusOne(t *testing.T) 
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for scratch() != capacity {
+		select {
+		case code := <-codes:
+			openGate(t, gate)
+			t.Fatalf("admitted candidate answered %d before the gate opened", code)
+		default:
+		}
 		if time.Now().After(deadline) {
 			openGate(t, gate)
 			t.Fatalf("%d of %d candidates started", scratch(), capacity)
