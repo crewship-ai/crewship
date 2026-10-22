@@ -50,7 +50,13 @@ the oracle is a second, independent evaluation by the same pinned engine, not a
 different implementation. An engine pin identifies trusted format semantics;
 isolation alone does not.
 
-Go atomically stores snapshot, revision, immutable receipt, audit and outbox.
+Go atomically stores head snapshot, immutable receipt, audit and outbox. Each
+audit row records the revision kind (`snapshot` for an import, `cells` for cell
+edits), its writer and the canonical command. History keeps a full snapshot only
+for imports and every 50th revision (`gridcraft_revisions` checkpoints); the
+head is always a full snapshot. The history quota counts checkpoint snapshots
+and recorded commands (default 64 MiB) and at most 1000 checkpoints. Rows
+recorded before command history are treated as snapshot revisions.
 Receipts require FULL synchronous storage and report `durability: node`.
 Delivery remains `pending`: no live broadcast/presence transport is installed.
 No receipt detail or replay fence is deleted by this module. A fresh candidate

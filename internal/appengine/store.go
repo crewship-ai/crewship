@@ -264,15 +264,26 @@ func (s *Store) Execute(ctx context.Context, k Key, r Request, a Authorize, e En
 		}
 		// The imported blob is inline and therefore reaches node durability in the
 		// same FULL-synchronous SQLite transaction as all references and receipts.
-		var revisions int
-		var historyBytes int64
-		if err = tx.QueryRowContext(ctx, `SELECT count(*),coalesce(sum(length(snapshot)),0) FROM gridcraft_revisions WHERE page_id=?`, k.PageID).Scan(&revisions, &historyBytes); err != nil {
+		kind, command, err := recordCommand(r.Command)
+		if err != nil {
 			return err
 		}
-		if revisions >= s.options.MaxRevisions || historyBytes+int64(len(c.Snapshot)) > s.options.MaxHistoryBytes {
+		rev := v.Rev + 1
+		// History keeps a full snapshot only at imports and every
+		// CheckpointInterval-th revision; every revision keeps its command.
+		checkpoint := kind == "snapshot" || rev%CheckpointInterval == 0
+		var checkpoints int
+		var historyBytes int64
+		if err = tx.QueryRowContext(ctx, `SELECT count(*),coalesce(sum(length(snapshot)),0)+(SELECT coalesce(sum(length(command)),0) FROM gridcraft_audit WHERE page_id=?) FROM gridcraft_revisions WHERE page_id=?`, k.PageID, k.PageID).Scan(&checkpoints, &historyBytes); err != nil {
+			return err
+		}
+		historyBytes += int64(len(command))
+		if checkpoint {
+			historyBytes += int64(len(c.Snapshot))
+		}
+		if (checkpoint && checkpoints >= s.options.MaxRevisions) || historyBytes > s.options.MaxHistoryBytes {
 			return ErrQuota
 		}
-		rev := v.Rev + 1
 		generation := v.Generation
 		if generation == 0 {
 			generation = 1
@@ -285,10 +296,12 @@ func (s *Store) Execute(ctx context.Context, k Key, r Request, a Authorize, e En
 		if _, err = tx.ExecContext(ctx, `INSERT INTO gridcraft_heads(page_id,workspace_id,schema_version,head_rev,generation,snapshot) VALUES(?,?,?,?,?,?) ON CONFLICT(page_id) DO UPDATE SET head_rev=excluded.head_rev,snapshot=excluded.snapshot`, k.PageID, k.WorkspaceID, SchemaVersion, rev, generation, []byte(c.Snapshot)); err != nil {
 			return err
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO gridcraft_revisions(page_id,rev,snapshot) VALUES(?,?,?)`, k.PageID, rev, []byte(c.Snapshot)); err != nil {
-			return err
+		if checkpoint {
+			if _, err = tx.ExecContext(ctx, `INSERT INTO gridcraft_revisions(page_id,rev,snapshot) VALUES(?,?,?)`, k.PageID, rev, []byte(c.Snapshot)); err != nil {
+				return err
+			}
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO gridcraft_audit(page_id,rev,authority_id,mutation_id,mandate_id,base_rev,receipt) VALUES(?,?,?,?,?,?,?)`, k.PageID, rev, p.AuthorityID, r.MutationID, p.MandateID, r.BaseRev, receiptBytes); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO gridcraft_audit(page_id,rev,authority_id,mutation_id,mandate_id,base_rev,receipt,kind,writer,command) VALUES(?,?,?,?,?,?,?,?,?,?)`, k.PageID, rev, p.AuthorityID, r.MutationID, p.MandateID, r.BaseRev, receiptBytes, kind, writerOf(p, r), command); err != nil {
 			return err
 		}
 		if _, err = tx.ExecContext(ctx, `INSERT INTO gridcraft_outbox(page_id,rev) VALUES(?,?)`, k.PageID, rev); err != nil {

@@ -171,6 +171,41 @@ func commandTargets(c Command) []string {
 	}
 	return []string{c.Sheet + "!" + c.Cell}
 }
+
+// CheckpointInterval is how often a full snapshot is kept in history besides
+// imports. Revisions in between are recorded only as commands.
+const CheckpointInterval = 50
+
+// CellInput is one authored cell value in a recorded command.
+type CellInput struct {
+	Sheet string `json:"sheet"`
+	Cell  string `json:"cell"`
+	Input string `json:"input"`
+}
+
+// commandRecord is the canonical history form of a confirmed command. An import
+// is a snapshot revision whose content lives in its checkpoint, not here.
+type commandRecord struct {
+	Kind  string      `json:"kind"`
+	Cells []CellInput `json:"cells,omitempty"`
+}
+
+func recordCommand(c Command) (string, []byte, error) {
+	record := commandRecord{Kind: "snapshot"}
+	switch c.Kind {
+	case "import":
+	case "cell.set":
+		record = commandRecord{Kind: "cells", Cells: []CellInput{{c.Sheet, c.Cell, c.Input}}}
+	default:
+		return "", nil, ErrInvalid
+	}
+	data, err := json.Marshal(record)
+	return record.Kind, data, err
+}
+
+// writerOf identifies who wrote a revision for cell-level concurrency.
+func writerOf(p Principal, _ Request) string { return p.AuthorityID }
+
 func payloadHash(k Key, r Request) (string, error) {
 	if len(r.Command.Snapshot) > 0 {
 		decoder := json.NewDecoder(bytes.NewReader(r.Command.Snapshot))
