@@ -1,5 +1,4 @@
 """CI-only isolated worker qualification; synthetic inputs, no host credentials."""
-import hashlib
 import http.client
 import json
 import os
@@ -59,7 +58,13 @@ def main():
             assert host['Memory'] == host['MemorySwap'] == 256 * 1024 * 1024
             assert host['NanoCpus'] == 1000000000
             assert 'no-new-privileges' in host['SecurityOpt']
-            assert len(cfg['Mounts']) == 2 and all(m['Destination'] in ('/run/worker', '/run/secrets/service-token') for m in cfg['Mounts'])
+            assert all(m['Destination'] in ('/run/worker', '/run/secrets/service-token', '/scratch') for m in cfg['Mounts'])
+            binds = [m for m in cfg['Mounts'] if m['Type'] == 'bind']
+            assert {m['Destination'] for m in binds} == {'/run/worker', '/run/secrets/service-token'}
+            assert all(m['Type'] in ('bind', 'tmpfs') for m in cfg['Mounts'])
+            assert next(m for m in binds if m['Destination'] == '/run/secrets/service-token')['RW'] is False
+            scratch = host['Tmpfs']['/scratch']
+            assert all(option in scratch.split(',') for option in ('noexec', 'nosuid', 'nodev', 'size=32m', 'mode=0700'))
             native = json.loads(Path('internal/appengine/testdata/blank-workbook.json').read_text())
 
             def candidate(snapshot, command, bearer=secret):
