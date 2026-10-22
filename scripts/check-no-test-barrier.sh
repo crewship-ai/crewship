@@ -6,10 +6,11 @@
 #   scripts/check-no-test-barrier.sh dist            # every Go binary in dist
 #   scripts/check-no-test-barrier.sh /crewship       # one binary (image build)
 #
-# Reads build settings with `go version -m`. Non-Go files found inside a
-# directory are skipped, but a file named explicitly must be a readable Go
-# binary, and at least one Go binary must be found, so a wrong path cannot
-# pass silently.
+# Reads build settings with `go version -m`. Symlinks are followed. Readable
+# non-Go files found inside a directory are skipped, but a file named
+# explicitly must be a readable Go binary, an unreadable file anywhere fails,
+# and at least one Go binary must be found, so a wrong path cannot pass
+# silently.
 # POSIX sh on purpose: the Docker build stage (Alpine) runs it too.
 set -eu
 
@@ -32,11 +33,16 @@ done
 
 list="$(mktemp)"
 trap 'rm -f "$list"' EXIT
-find "$@" -type f > "$list"
+find -L "$@" -type f > "$list"
 
 checked=0
 bad=0
 while IFS= read -r file; do
+  if [ ! -r "$file" ]; then
+    echo "FAIL  $file is not readable, cannot prove it is clean" >&2
+    bad=1
+    continue
+  fi
   info="$(go version -m "$file" 2>/dev/null)" || continue
   checked=$((checked + 1))
   tags="$(printf '%s\n' "$info" | awk '$1 == "build" && $2 ~ /^-tags=/ { sub(/^-tags=/, "", $2); print $2 }')"

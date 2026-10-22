@@ -48,6 +48,21 @@ expect 1 "explicit non-Go file fails" -- "$CHECK" "$TMP/clean/app" "$TMP/empty/r
 if [ "$(id -u)" -ne 0 ]; then
   expect 1 "explicit unreadable file fails" -- "$CHECK" "$TMP/clean/app" "$TMP/unreadable"
 fi
+# Symlinks are followed: an argument or a directory entry that links to a
+# tagged binary is checked like the binary itself.
+mkdir -p "$TMP/linkdir" "$TMP/linkdist"
+ln -s "$TMP/tagged/app" "$TMP/link-to-tagged"
+ln -s "$TMP/tagged" "$TMP/link-to-tagged-dir"
+ln -s "$TMP/tagged/app" "$TMP/linkdist/app"
+expect 1 "explicit symlink to a tagged binary fails" -- "$CHECK" "$TMP/clean/app" "$TMP/link-to-tagged"
+expect 1 "symlink to a tagged directory fails" -- "$CHECK" "$TMP/clean" "$TMP/link-to-tagged-dir"
+expect 1 "directory entry linking to a tagged binary fails" -- "$CHECK" "$TMP/clean" "$TMP/linkdist"
+# An unreadable file inside a directory cannot be proven clean.
+if [ "$(id -u)" -ne 0 ]; then
+  mkdir -p "$TMP/hidden"; cp "$TMP/clean/app" "$TMP/hidden/app"
+  cp "$TMP/tagged/app" "$TMP/hidden/secret"; chmod 000 "$TMP/hidden/secret"
+  expect 1 "unreadable file in a directory fails" -- "$CHECK" "$TMP/hidden"
+fi
 # The Docker build stage runs it under a POSIX shell, not bash.
 expect 0 "POSIX sh: untagged binary passes" -- sh "$CHECK" "$TMP/clean/app"
 expect 1 "POSIX sh: tagged binary fails" -- sh "$CHECK" "$TMP/clean/app" "$TMP/tagged/app"
