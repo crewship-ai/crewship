@@ -302,8 +302,14 @@ The only explicit publication path is the experimental workbook share
 it names editors as owner-issued user `write` grants. Workbook contents remain
 limited to the owner, those editors, and the audited workspace OWNER. Generic
 write grants are refused on a workbook Page, and a write grant not issued by
-its current owner is inert. Deleting, renaming, rolling back and reading spec
-versions of a workbook Page remain owner-only, because workbooks have no backup.
+its current owner is inert. Deleting, renaming, rolling back, moving into or out
+of a folder and reading spec versions of a workbook Page remain owner-only,
+because workbooks have no backup; deleting also needs a current human
+credential. A workbook is a human-only private output for departure and
+erasure (§7.1 rule 1b): it is never transferred to a crew, and an
+administrator selects a human successor through the custody flow. A workbook
+whose owner is no longer a member without such a transfer may be deleted only
+by a workspace OWNER, audited as `artifact.orphaned_workbook_deleted`.
 Shared Page authorization and workspace-wide storage accounting are unchanged.
 Private read checks require a live account, workspace and membership. Guest
 catalogs omit unauthorized private outputs without failing the whole listing.

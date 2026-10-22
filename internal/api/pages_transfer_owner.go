@@ -15,7 +15,7 @@ package api
 // whole erasure refuses rather than proceeding halfway when a page cannot be
 // resolved.
 //
-// Docs, Artifacts and Boards always refuse until an administrator explicitly transfers
+// Docs, Artifacts, Boards and Workbooks always refuse until an administrator explicitly transfers
 // them through WorkspaceHandler.TransferPageOwnership. The automatic rule below
 // applies only to regular panel Pages.
 //
@@ -92,7 +92,7 @@ type ErrPagesNeedManualTransfer struct {
 
 func (e *ErrPagesNeedManualTransfer) Error() string {
 	return fmt.Sprintf(
-		"cannot erase this user: page(s) %s require ownership resolution — regular Pages require a panel-owning or member crew; Docs, Artifacts and Boards require an explicit human successor selection. %s",
+		"cannot erase this user: page(s) %s require ownership resolution — regular Pages require a panel-owning or member crew; Docs, Artifacts, Boards and Workbooks require an explicit human successor selection. %s",
 		strings.Join(e.Pages, ", "), pageOwnershipHelp)
 }
 

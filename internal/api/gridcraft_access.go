@@ -2,9 +2,14 @@ package api
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/appengine"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // workbookAccess is how a human reaches workbook content.
@@ -82,6 +87,11 @@ func (h *PageHandler) workbookHumanAccess(ctx context.Context, workspace, pageID
 // rename, roll back or read the spec history of a Page holding a workbook.
 const workbookPageRefusal = "only the workbook owner may delete, rename, roll back or read the history of this page; workbooks have no backup or archive"
 
+// workbookFolderRefusal is shown to anyone but the owner who tries to move a
+// Page holding a workbook into or out of a folder. A workbook in a folder is
+// unreachable for everyone, so filing it is a lifecycle decision.
+const workbookFolderRefusal = "only the workbook owner may move this page into or out of a folder"
+
 // workbookPageOwnerOnly keeps the lifecycle and metadata history of a Page
 // holding a workbook with its owner, before and after publication. Workbooks
 // are excluded from backups and have no archive, so an ADMIN, the workspace
@@ -89,4 +99,64 @@ const workbookPageRefusal = "only the workbook owner may delete, rename, roll ba
 // versions from the private period must not become readable to others.
 func workbookPageOwnerOnly(rec *pageRecord, userID string) bool {
 	return !rec.HasWorkbook || rec.OwnerUserID == userID
+}
+
+// workbookHumanDeleteRefusal is shown when an agent, or a request carrying an
+// agent's identity, tries to delete a Page holding a workbook.
+const workbookHumanDeleteRefusal = "deleting a workbook page requires a current human credential; agents cannot delete workbooks"
+
+// workbookOrphanSQL is true for a Page whose owner is no longer a member of its
+// workspace, including a Page an older departure handed to a crew. Nobody can
+// read or change such a workbook, so only its deletion remains possible.
+const workbookOrphanSQL = `(pages.owner_user_id IS NULL OR NOT EXISTS(SELECT 1 FROM workspace_members o WHERE o.workspace_id = pages.workspace_id AND o.user_id = pages.owner_user_id))`
+
+// deleteWorkbookPage deletes a Page holding a workbook, or returns why not.
+// Workbooks have no backup, so it needs a current human credential, like any
+// workbook write. The owner may delete it. A workspace OWNER may delete it
+// only when it is orphaned (workbookOrphanSQL), and that deletion is audited
+// in the same transaction. Both rules are repeated in the DELETE itself.
+func (h *PageHandler) deleteWorkbookPage(r *http.Request, workspace string, rec *pageRecord, user *AuthUser) (string, error) {
+	ctx := r.Context()
+	if agent, _ := pageGrantCallerIsAgent(r); agent || projectAgentFrom(ctx) != nil || ctx.Value(artifactRunKey{}) != nil {
+		return workbookHumanDeleteRefusal, nil
+	}
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = tx.Rollback() }()
+	ctx = context.WithValue(ctx, pageAuthReaderKey{}, tx)
+	if validateContentHumanCredential(r.WithContext(ctx), tx, "pages:write") != nil {
+		return workbookHumanDeleteRefusal, nil
+	}
+	var res sql.Result
+	if rec.OwnerUserID != "" && rec.OwnerUserID == user.ID {
+		res, err = tx.ExecContext(ctx, `DELETE FROM pages WHERE id = ? AND workspace_id = ? AND owner_user_id = ?`, rec.ID, workspace, user.ID)
+	} else {
+		role, roleErr := h.liveContentHumanRole(ctx, workspace, user.ID)
+		if roleErr != nil && !errors.Is(roleErr, sql.ErrNoRows) {
+			return "", roleErr
+		}
+		var orphaned bool
+		if err := tx.QueryRowContext(ctx, `SELECT `+workbookOrphanSQL+` FROM pages WHERE id = ? AND workspace_id = ?`, rec.ID, workspace).Scan(&orphaned); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return "", err
+		}
+		if role != "OWNER" || !orphaned {
+			return workbookPageRefusal, nil
+		}
+		metadata, _ := json.Marshal(map[string]string{"owner_user_id": rec.OwnerUserID, "owner_crew_id": rec.OwnerCrewID})
+		if err := execOneRow(ctx, tx, `INSERT INTO audit_logs(id,workspace_id,user_id,action,entity_type,entity_id,metadata,created_at) VALUES(?,?,?,?,?,?,?,?)`, generateCUID(), workspace, user.ID, "artifact.orphaned_workbook_deleted", "page", rec.ID, string(metadata), tsformat.Format(time.Now())); err != nil {
+			return "", err
+		}
+		res, err = tx.ExecContext(ctx, `DELETE FROM pages WHERE id = ? AND workspace_id = ? AND `+workbookOrphanSQL+` AND EXISTS(SELECT 1 FROM workspace_members m JOIN users u ON u.id = m.user_id AND u.suspended_at IS NULL WHERE m.workspace_id = pages.workspace_id AND m.user_id = ? AND m.role = 'OWNER')`, rec.ID, workspace, user.ID)
+	}
+	if err != nil {
+		return "", err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return "", err
+	} else if n != 1 {
+		return workbookPageRefusal, nil
+	}
+	return "", tx.Commit()
 }

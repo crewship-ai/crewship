@@ -20870,7 +20870,8 @@
               "artifact",
               "board",
               "document",
-              "slides"
+              "slides",
+              "workbook"
             ],
             "type": "string"
           }
@@ -128570,6 +128571,24 @@
               }
             },
             "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "500": {
             "content": {

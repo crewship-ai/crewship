@@ -30,8 +30,9 @@ First create the empty personal private Page that the workbook is imported into.
 Only its author (and an audited workspace OWNER) can read it. Repeating the same
 slug and name returns the same still-empty Page; any other slug reuse is a
 conflict, and an existing Page is never converted. One author may hold at most
-five empty workbook Pages at a time. A member who owns a private Page can be
-removed from the workspace only by an OWNER, who chooses a successor.
+five empty workbook Pages at a time. A member who owns a workbook can leave the
+workspace, or be erased, only after a workspace OWNER chooses a human successor
+(see [When the owner leaves](#when-the-owner-leaves)).
 
 Import a native workbook with an immutable request envelope:
 
@@ -105,9 +106,13 @@ again.
   every sheet and the revision number (so how many revisions it has had), but
   not earlier revisions or other people's operation status. The Page's spec
   versions (name and description history) stay readable only to the owner.
-- **Only the owner deletes, renames or rolls back the Page**, before and after
-  publication. Workbooks have no backup or archive, so workspace admins, the
-  workspace OWNER and editors are refused.
+- **Only the owner deletes, renames, rolls back or moves the Page** into or out
+  of a folder, before and after publication. Workbooks have no backup or
+  archive, so workspace admins, the workspace OWNER and editors are refused. A
+  workbook in a folder is unreachable for everyone, including the owner, until
+  the owner takes it out again. Deleting needs a current human credential: an
+  agent, or a request with an acting agent, is refused even with the owner's
+  token. The one exception is an orphaned workbook (see below).
 - **Editors share the history quota.** Every import by an editor counts toward
   the workbook's revision and size limits. When the quota is full, writes are
   refused for everyone, including the owner.
@@ -116,6 +121,32 @@ again.
   Workbooks do not support proposals yet, so there is no direct agent fallback.
 
 The Page must already hold an imported workbook. Only the owner may share it.
+
+## When the owner leaves
+
+A workbook is never handed to a crew. When its owner leaves the workspace or is
+erased, the workbook is treated like the owner's other private outputs (Docs,
+Artifacts, Boards):
+
+1. The departure or erasure is refused with `409 page_ownership_transfer_required`,
+   and the response lists the workbook with `type: workbook`.
+2. A workspace administrator reviews it with
+   `crewship workspace page-ownership list` (a private workbook is listed only to
+   a workspace OWNER) and picks a human successor with
+   `crewship workspace page-ownership transfer`. The successor becomes the owner,
+   with the workbook's contents and the owner's rights. Editors named by the
+   previous owner lose access, because their grants were not issued by the new
+   owner; the new owner can share again. Agent mandates of the previous owner
+   stop working.
+3. The departure or erasure is then retried and succeeds.
+
+**Who can delete a workbook after its owner leaves.** Normally nobody needs to:
+the successor owns it and may delete it. A workbook whose owner is no longer a
+member without such a transfer (for example, one handed to a crew by an older
+server version) can be read or changed by nobody. Only a workspace **OWNER**
+can delete it, with `crewship page delete` and a current human credential. The
+deletion is recorded in the audit log as `artifact.orphaned_workbook_deleted`.
+Workspace admins, crew members and editors cannot delete it.
 
 An agent retains this exact packet for apply and uncertain retries:
 

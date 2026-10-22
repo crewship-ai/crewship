@@ -760,6 +760,10 @@ func (h *PageHandler) AddFolderPage(w http.ResponseWriter, r *http.Request) {
 			"moving page %q is initiated by its owner or a workspace admin; you are neither", rec.Slug))
 		return
 	}
+	if !workbookPageOwnerOnly(rec, user.ID) {
+		replyError(w, http.StatusForbidden, workbookFolderRefusal)
+		return
+	}
 	if !mayArrangeFolder(viewer, f, acl) {
 		replyError(w, http.StatusForbidden, folderAcceptRefusal(f))
 		return
@@ -784,7 +788,7 @@ func (h *PageHandler) AddFolderPage(w http.ResponseWriter, r *http.Request) {
 	// an ACL change that lands between the check above and this write makes
 	// the write miss, rather than filing the page under permissions the
 	// caller never saw (§3/12).
-	res, err := h.db.ExecContext(r.Context(), folderMoveStatement, f.ID, rec.ID, rec.PagesVersion, f.ID, f.ACLVersion)
+	res, err := h.db.ExecContext(r.Context(), folderMoveStatement, f.ID, rec.ID, rec.PagesVersion, f.ID, f.ACLVersion, user.ID)
 	if err != nil {
 		replyInternalError(w, h.logger, "move page into folder", err)
 		return
@@ -839,6 +843,10 @@ func (h *PageHandler) RemoveFolderPage(w http.ResponseWriter, r *http.Request) {
 			"removing page %q from its folder is the page owner's, a workspace admin's, or somebody the folder's permissions let edit it; nobody else has a say", rec.Slug))
 		return
 	}
+	if !workbookPageOwnerOnly(rec, user.ID) {
+		replyError(w, http.StatusForbidden, workbookFolderRefusal)
+		return
+	}
 	if rec.PagesVersion != *req.PagesVersion || rec.FolderID != f.ID {
 		// A page that is not in this folder is a page the client's view of
 		// has gone stale, which is what the fence exists to say.
@@ -847,7 +855,8 @@ func (h *PageHandler) RemoveFolderPage(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := h.db.ExecContext(r.Context(), `
 		UPDATE pages SET folder_id = NULL, pages_version = pages_version + 1
-		WHERE id = ? AND pages_version = ? AND folder_id = ?`, rec.ID, rec.PagesVersion, f.ID)
+		WHERE id = ? AND pages_version = ? AND folder_id = ?
+		  AND (owner_user_id = ? OR NOT EXISTS (SELECT 1 FROM gridcraft_heads WHERE page_id = pages.id))`, rec.ID, rec.PagesVersion, f.ID, user.ID)
 	if err != nil {
 		replyInternalError(w, h.logger, "remove page from folder", err)
 		return
