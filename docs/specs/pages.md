@@ -306,8 +306,13 @@ its current owner is inert. Deleting, renaming, rolling back, moving into or out
 of a folder and reading spec versions of a workbook Page remain owner-only,
 because workbooks have no backup; deleting also needs a current human
 credential. A workbook is a human-only private output for departure and
-erasure (§7.1 rule 1b): it is never transferred to a crew, and an
-administrator selects a human successor through the custody flow. A workbook
+erasure (§7.1 rule 1b): it is never transferred to a crew, and a workspace
+OWNER selects a human successor through the custody flow. Workbook custody opens
+only once the owner is no longer a live member (removed, suspended, restricted,
+or with a removal or erasure refused because of the workbook within 7 days,
+recorded as `artifact.workbook_custody_requested`); ADMINs are never workbook
+custodians, and each transfer is audited as
+`artifact.workbook_custody_transferred` in the same transaction. A workbook
 whose owner is no longer a member without such a transfer may be deleted only
 by a workspace OWNER, audited as `artifact.orphaned_workbook_deleted`.
 Shared Page authorization and workspace-wide storage accounting are unchanged.
