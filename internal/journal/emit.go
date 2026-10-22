@@ -79,6 +79,13 @@ type Writer struct {
 	commitMu  sync.RWMutex
 	commitObs []func([]Entry)
 	readObs   []func([]Entry)
+
+	// chainBreakMu guards the chain-break observer and its per-workspace
+	// rate limit (emit_held.go).
+	chainBreakMu  sync.Mutex
+	chainBreakObs func(context.Context, string, error)
+	chainBreakAt  map[string]time.Time
+	heldRetry     time.Duration
 }
 
 // AddCommitObserver registers fn to be called after each durable commit with
@@ -237,6 +244,9 @@ type WriterOptions struct {
 	// Set explicitly only in legacy-format tests that need a known key.
 	ChainKey    []byte
 	SigningKeys *SigningKeys
+	// HeldRetryInterval is how often entries held by a broken chain tail are
+	// retried (default 30s; see emit_held.go).
+	HeldRetryInterval time.Duration
 }
 
 // NewWriter builds a Writer bound to db. Callers MUST call Close before
@@ -253,6 +263,9 @@ func NewWriter(db *sql.DB, logger *slog.Logger, opts WriterOptions) *Writer {
 	}
 	if logger == nil {
 		logger = slog.Default()
+	}
+	if opts.HeldRetryInterval <= 0 {
+		opts.HeldRetryInterval = defaultHeldRetryInterval
 	}
 	keys := opts.SigningKeys
 	var keyErr error
@@ -278,6 +291,7 @@ func NewWriter(db *sql.DB, logger *slog.Logger, opts WriterOptions) *Writer {
 		signingKeys:     keys,
 		signingKeyError: keyErr,
 		notifyCh:        make(chan struct{}),
+		heldRetry:       opts.HeldRetryInterval,
 	}
 	w.wg.Add(1)
 	go w.run()
@@ -451,6 +465,26 @@ func (w *Writer) run() {
 	// (at that point we start logging and dropping oldest).
 	const maxBatchRetryBytes = 64 * 1024 * 1024 // ~64 MB of buffered entries
 	var persistFailures int
+	// held: entries a broken chain tail refused (emit_held.go). Retried on
+	// the ticker, never dropped as poison; lost only at shutdown or past cap.
+	var held []Entry
+	lastHeldRetry := time.Now()
+	defer func() {
+		if len(held) > 0 {
+			w.logger.Error("journal entries held by a broken audit chain were not written before shutdown", "n", len(held))
+		}
+	}()
+	retry := func() {
+		if len(held) == 0 || time.Since(lastHeldRetry) < w.heldRetry {
+			return
+		}
+		lastHeldRetry = time.Now()
+		var committed []Entry
+		held, committed = w.retryHeld(held)
+		if len(committed) > 0 {
+			w.afterCommit(committed)
+		}
+	}
 	drain := func() {
 		if len(batch) == 0 {
 			return
@@ -477,17 +511,30 @@ func (w *Writer) run() {
 		// path below unchanged, so the durability contract still holds for
 		// recoverable outages.
 		if isPermanentDBError(err) {
-			kept := batch[:0]
+			var kept, committed, suspects []Entry
 			dropped := 0
-			// committed is a SEPARATE slice (its own backing array) — kept
-			// reuses batch's array, so appending committed rows there would be
-			// clobbered by the in-place filter.
-			var committed []Entry
-			for _, e := range batch {
+			// One workspace at a time first: a broken chain tail refuses its
+			// whole workspace (held, not dropped) without blocking the others.
+			for _, group := range groupByWorkspace(batch) {
+				gerr := w.persistBatch(context.Background(), group)
+				switch {
+				case gerr == nil:
+					committed = append(committed, group...)
+				case isChainAdmissionError(gerr):
+					held = w.hold(held, group)
+				case isPermanentDBError(gerr):
+					suspects = append(suspects, group...)
+				default:
+					kept = append(kept, group...)
+				}
+			}
+			for _, e := range suspects {
 				perr := w.persistOne(context.Background(), e)
 				switch {
 				case perr == nil:
 					committed = append(committed, e)
+				case isChainAdmissionError(perr):
+					held = w.hold(held, []Entry{e})
 				case isPermanentDBError(perr):
 					w.logger.Error("journal entry permanently rejected — dropping to unblock the stream",
 						"err", perr, "entry_id", e.ID, "entry_type", e.Type,
@@ -552,6 +599,7 @@ func (w *Writer) run() {
 			}
 		case <-ticker.C:
 			drain()
+			retry()
 		case <-w.closed:
 			// Shutdown signal from Close(). Drain anything already
 			// buffered in the channel so Close->Wait doesn't race
@@ -597,7 +645,9 @@ func (w *Writer) persistOne(ctx context.Context, e Entry) error {
 // else — "database is locked"/"busy", context deadline, a dropped connection
 // — is treated as transient and retained for retry, so a recoverable outage
 // never drops an audit entry. Classify conservatively: only errors we are
-// confident are deterministic count as permanent.
+// confident are deterministic count as permanent. Chain-admission refusals
+// are permanent for the batch (they route it to per-workspace isolation) but
+// their entries are held and retried, never dropped (emit_held.go).
 func isPermanentDBError(err error) bool {
 	if err == nil {
 		return false
@@ -752,6 +802,9 @@ func (w *Writer) persistBatchTx(ctx context.Context, tx *sql.Tx, batch []Entry, 
 				head, err = loadChainHeadWithKeys(ctx, tx, e.WorkspaceID, keys)
 			}
 			if err != nil {
+				if isChainAdmissionError(err) {
+					w.reportChainBreak(e.WorkspaceID, err)
+				}
 				return err
 			}
 			heads[e.WorkspaceID] = head
@@ -843,6 +896,9 @@ func (w *Writer) persistBatchTx(ctx context.Context, tx *sql.Tx, batch []Entry, 
 	// here would make every audited write cost O(history) under the lock.
 	for workspace, head := range heads {
 		if err := verifyAppendTail(ctx, tx, workspace, keys, starts[workspace], head.seq); err != nil {
+			if isChainAdmissionError(err) {
+				w.reportChainBreak(workspace, err)
+			}
 			return err
 		}
 	}

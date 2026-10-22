@@ -1,0 +1,155 @@
+package api
+
+import (
+	"database/sql"
+	"encoding/json"
+	"testing"
+	"time"
+
+	"github.com/crewship-ai/crewship/internal/journal"
+)
+
+func drainAlerts(t *testing.T) {
+	t.Helper()
+	if !waitForBackgroundWork(10 * time.Second) {
+		t.Fatal("audit chain alert did not finish")
+	}
+}
+
+// adminAlerts counts audit chain inbox items for user whose source starts
+// with the incident key prefix.
+func adminAlerts(t *testing.T, db *sql.DB, user, keyPrefix string) int {
+	t.Helper()
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE target_user_id=? AND source_id LIKE ? AND json_extract(payload_json,'$.subkind')='audit_chain_incident'`, user, "audit_chain:"+keyPrefix+"%:"+user).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func breakEvents(t *testing.T, db *sql.DB, entityPrefix string) (chained, fallback int) {
+	t.Helper()
+	if err := db.QueryRow(`SELECT
+		COUNT(*) FILTER (WHERE chain_seq IS NOT NULL),
+		COUNT(*) FILTER (WHERE chain_seq IS NULL AND json_extract(metadata,'$.audit_chain')='unchained_fallback')
+		FROM instance_audit_logs WHERE action='audit.chain_break_detected' AND entity_type='audit_chain' AND entity_id LIKE ?`, entityPrefix+"%").Scan(&chained, &fallback); err != nil {
+		t.Fatal(err)
+	}
+	return chained, fallback
+}
+
+// A broken instance chain tail met by any audited action produces one
+// incident event (unchained, since the chain itself is broken) and one inbox
+// item per instance admin; repeats of the same incident add neither.
+func TestAuditInstanceChainBreakAlertsAdmins(t *testing.T) {
+	f := newInstanceFixture(t)
+	defer f.r.Shutdown()
+	writer := journal.NewWriter(f.db, newTestLogger(), journal.WriterOptions{FlushInterval: time.Hour})
+	defer writer.Close()
+	r, err := NewRouter(f.db, "this-is-a-32-char-test-secret-pad", newTestLogger(), WithJournal(writer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Shutdown()
+	f.r = r
+	breakInstanceAuditTail(t, f.db)
+	if rr := f.do(f.boss, "POST", "/api/v1/admin/instance/people/carol/suspend", `{"reason":"incident response"}`); rr.Code != 200 {
+		t.Fatalf("suspend with broken tail: HTTP %d %s", rr.Code, rr.Body.String())
+	}
+	drainAlerts(t)
+	if chained, fallback := breakEvents(t, f.db, "chain_break:instance:"); chained != 0 || fallback != 1 {
+		t.Fatalf("incident events chained=%d fallback=%d, want one fallback", chained, fallback)
+	}
+	if n := adminAlerts(t, f.db, "boss", "chain_break:instance:"); n != 1 {
+		t.Fatalf("instance admin inbox items=%d, want 1", n)
+	}
+	if n := adminAlerts(t, f.db, "wsadmin", ""); n != 0 {
+		t.Fatalf("non-instance-admin alerted: %d", n)
+	}
+	// Reactivation grants access: refused, and the same incident is not re-recorded.
+	if rr := f.do(f.boss, "POST", "/api/v1/admin/instance/people/carol/reactivate", ``); rr.Code != 500 {
+		t.Fatalf("reactivate with broken tail: HTTP %d", rr.Code)
+	}
+	drainAlerts(t)
+	if chained, fallback := breakEvents(t, f.db, "chain_break:instance:"); chained+fallback != 1 {
+		t.Fatalf("repeated incident recorded again: chained=%d fallback=%d", chained, fallback)
+	}
+}
+
+// A workspace append refused by its chain tail alerts through the writer's
+// chain-break observer, with a chained instance event.
+func TestAuditWorkspaceChainBreakAlertsAdmins(t *testing.T) {
+	f := newInstanceFixture(t)
+	defer f.r.Shutdown()
+	writer := journal.NewWriter(f.db, newTestLogger(), journal.WriterOptions{FlushInterval: time.Hour})
+	defer writer.Close()
+	r, err := NewRouter(f.db, "this-is-a-32-char-test-secret-pad", newTestLogger(), WithJournal(writer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Shutdown()
+	for range 2 {
+		if _, err := writer.EmitSync(t.Context(), journal.Entry{WorkspaceID: "ws-old", Type: journal.EntryInvitationCreated, ActorType: journal.ActorSystem, Summary: "History"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	execOrFatal(t, f.db, `UPDATE journal_entries SET summary='changed' WHERE workspace_id='ws-old' AND seq=2`)
+	if _, err := writer.EmitSync(t.Context(), journal.Entry{WorkspaceID: "ws-old", Type: journal.EntryInvitationCreated, ActorType: journal.ActorSystem, Summary: "Refused"}); err == nil {
+		t.Fatal("append onto broken workspace tail succeeded")
+	}
+	drainAlerts(t)
+	if chained, fallback := breakEvents(t, f.db, "chain_break:workspace:ws-old:seq:2"); chained != 1 || fallback != 0 {
+		t.Fatalf("workspace incident events chained=%d fallback=%d, want one chained", chained, fallback)
+	}
+	if n := adminAlerts(t, f.db, "boss", "chain_break:workspace:ws-old:"); n != 1 {
+		t.Fatalf("instance admin inbox items=%d, want 1", n)
+	}
+}
+
+// Every reseal is visible in the instance trail and notifies instance admins.
+func TestAuditResealAlertsAdmins(t *testing.T) {
+	for _, scope := range []string{"instance", "workspace"} {
+		t.Run(scope, func(t *testing.T) {
+			f := newInstanceFixture(t)
+			defer f.r.Shutdown()
+			t.Setenv("CREWSHIP_OWNER_EMAIL", "boss@ex.com")
+			table, sequence := "instance_audit_logs", "chain_seq"
+			body := map[string]any{"scope": scope, "reason": "Approved synthetic recovery"}
+			writer := journal.NewWriter(f.db, newTestLogger(), journal.WriterOptions{FlushInterval: time.Hour})
+			defer writer.Close()
+			f.r.journal = writer
+			if scope == "workspace" {
+				if _, err := writer.EmitSync(t.Context(), journal.Entry{WorkspaceID: "ws-old", Type: journal.EntryInvitationCreated, ActorType: journal.ActorSystem, Summary: "History"}); err != nil {
+					t.Fatal(err)
+				}
+				table, sequence = "journal_entries", "seq"
+				body["workspace_id"] = "ws-old"
+			} else if err := auditInstance(t.Context(), nil, f.db, "fixture.history", "instance", "", "", nil); err != nil {
+				t.Fatal(err)
+			}
+			var seq int64
+			var hash string
+			if err := f.db.QueryRow(`SELECT `+sequence+`,entry_hash FROM `+table+` WHERE `+sequence+`>0 ORDER BY `+sequence+` DESC LIMIT 1`).Scan(&seq, &hash); err != nil {
+				t.Fatal(err)
+			}
+			body["expected_tail_seq"], body["expected_tail_hash"] = seq, hash
+			raw, err := json.Marshal(body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rr := f.do(f.boss, "POST", "/api/v1/admin/audit/reseal", string(raw))
+			if rr.Code != 200 {
+				t.Fatalf("reseal: HTTP %d %s", rr.Code, rr.Body.String())
+			}
+			drainAlerts(t)
+			action := map[string]string{"instance": "audit.resealed", "workspace": "audit.workspace_resealed"}[scope]
+			var events int
+			if err := f.db.QueryRow(`SELECT COUNT(*) FROM instance_audit_logs WHERE action=? AND chain_seq IS NOT NULL`, action).Scan(&events); err != nil || events != 1 {
+				t.Fatalf("chained %s events=%d %v", action, events, err)
+			}
+			if n := adminAlerts(t, f.db, "boss", "reseal:"); n != 1 {
+				t.Fatalf("reseal inbox items=%d, want 1", n)
+			}
+		})
+	}
+}

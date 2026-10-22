@@ -365,6 +365,34 @@ inside a writer transaction on a hot path: run it on demand with
 [`crewship admin instance audit verify`](/cli/admin#audit-verify) (instance), or
 through the backup drill.
 
+Background journal entries (agent activity, run lifecycle) that a broken
+workspace tail refuses are **held**, not dropped: the writer keeps them in
+order, retries each affected workspace every 30 seconds with one tail-only
+admission, and keeps committing every other workspace meanwhile. At most 10,000
+entries are held; past that the oldest are dropped with an ERROR naming the
+count, and entries still held at shutdown are logged as lost.
+
+#### Alerts on chain breaks and reseals
+
+A detected break — an append refused by a workspace or instance chain tail, an
+instance audit row failing its check while the audit log is listed, or breaks
+reported by `journal verify` — and every OWNER reseal reach the instance admins:
+
+- **Instance audit event.** A break records `audit.chain_break_detected`
+  (entity `audit_chain`, one event per incident: scope, workspace, seq), chained
+  normally or as an unchained fallback when the instance chain tail is itself
+  broken. A reseal records `audit.resealed` (instance chain) or
+  `audit.workspace_resealed` (workspace chain) in the reseal's own transaction.
+- **Inbox notification.** Each instance admin gets one item in their primary
+  workspace inbox, targeted at them alone (the same routing as backup
+  incidents), titled **Audit chain needs attention** or **Audit chain
+  resealed**, with category `security`, so it also reaches their external
+  channels per their notification preferences. Repeats of the same incident do
+  not add items.
+
+The alert is written by a background task after detection, never inside the
+writer transaction that detected it.
+
 There is no new quarantine state; with a broken tail, audit-producing writes
 on that chain fail while reads and unrelated chains retain their own authority
 checks (security-reducing instance actions are the exception below). Database

@@ -53,5 +53,8 @@ func (h *JournalIntegrityHandler) Verify(w http.ResponseWriter, r *http.Request)
 		replyError(w, http.StatusInternalServerError, "verification failed")
 		return
 	}
+	if res.BrokenSeq > 0 || res.BreakCount > 0 {
+		raiseAuditChainIncident(r.Context(), auditChainIncident{Kind: "chain_break", Scope: "workspace", WorkspaceID: workspaceID, Seq: res.BrokenSeq, Reason: res.Reason})
+	}
 	writeJSON(w, http.StatusOK, res)
 }

@@ -1110,7 +1110,7 @@ func (h *InstanceAdminHandler) AuditLog(w http.ResponseWriter, r *http.Request) 
 	if anchor != nil {
 		checkpointSeq = anchor.OldTailSeq + 1
 	}
-	provenFailure := false
+	provenFailure, failedSeq := false, int64(0)
 	limit := 100
 	if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && v > 0 {
 		limit = min(v, 500)
@@ -1164,6 +1164,9 @@ func (h *InstanceAdminHandler) AuditLog(w http.ResponseWriter, r *http.Request) 
 			expected, macErr := journal.InstanceAuditMACForKeys(keys, proof.keyID, proof.macVersion, proof.seq.Int64, proof.prev.String, fields)
 			if macErr == nil && !hmac.Equal([]byte(expected), []byte(proof.hash.String)) {
 				provenFailure = true
+				if failedSeq == 0 || proof.seq.Int64 < failedSeq {
+					failedSeq = proof.seq.Int64
+				}
 			}
 		}
 		out = append(out, a)
@@ -1178,6 +1181,7 @@ func (h *InstanceAdminHandler) AuditLog(w http.ResponseWriter, r *http.Request) 
 	}
 	if provenFailure {
 		h.logger.Error("instance audit chain integrity failure; inspect audit history before explicit OWNER reseal")
+		raiseAuditChainIncident(r.Context(), auditChainIncident{Kind: "chain_break", Scope: "instance", Seq: failedSeq, Reason: "instance audit row failed its MAC check while listing"})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
