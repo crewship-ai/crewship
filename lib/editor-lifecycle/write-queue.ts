@@ -54,6 +54,8 @@ export interface WriteQueue<W extends QueuedWrite> {
   head(): W | undefined
   writes(): readonly W[]
   enqueue(write: W): void
+  /** Drops a queued write that must never be sent again (the server refused it for good); never the one in flight. */
+  remove(id: string): boolean
   /** Merges into the newest write while it was never sent; false when a new write is needed. */
   coalesce(merge: (newest: W) => void): boolean
   /** Milliseconds until the head may be sent; Infinity while one is in flight or the queue is halted. */
@@ -104,6 +106,13 @@ export function createWriteQueue<W extends QueuedWrite>(options: WriteQueueOptio
     head: () => writes[0],
     writes: () => [...writes],
     enqueue(write) { writes.push(write); options.persist?.put(write); pump() },
+    remove(id) {
+      const index = writes.findIndex(write => write.id === id)
+      if (index < 0 || (index === 0 && inflight)) return false
+      const [write] = writes.splice(index, 1)
+      void options.persist?.remove(write)
+      return true
+    },
     coalesce(merge) {
       const newest = writes.at(-1)
       if (!newest || newest.attempted) return false

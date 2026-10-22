@@ -78,6 +78,16 @@ describe("coalescing and persistence", () => {
     expect(queue.coalesce(newest => { newest.body += "+2" })).toBe(false)
     expect(queue.head()?.body).toBe("a+1")
   })
+  it("removes a refused write, but never the one in flight", () => {
+    const { queue, remove } = setup()
+    queue.enqueue(row("a")); queue.enqueue(row("b")); queue.enqueue(row("c"))
+    void queue.deliver(() => new Promise(() => {}))
+    expect(queue.remove("a")).toBe(false)
+    expect(queue.remove("b")).toBe(true)
+    expect(queue.remove("missing")).toBe(false)
+    expect(queue.writes().map(write => write.id)).toEqual(["a", "c"])
+    expect(remove).toHaveBeenCalledWith(expect.objectContaining({ id: "b" }))
+  })
 })
 
 describe("retry keeps the mutation identity", () => {
