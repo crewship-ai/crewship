@@ -99,3 +99,100 @@ it("offers no form for a credential without mutation scope", async () => {
   await screen.findByText("This credential cannot edit the draft.")
   expect(screen.queryByRole("button", { name: "Save shared draft" })).toBeNull()
 })
+
+it("validates and publishes only an unchanged saved revision, without running it", async () => {
+  api.mockImplementation(async (url: string) => response(url.endsWith("/validate") ? { valid: true, scope: "structure_only" } : url.endsWith("/publish") ? { id: "r", version: 4, publication_revision: 3 } : { ...draft, can_publish: true }))
+  show()
+  await screen.findByRole("textbox", { name: "Draft name" })
+  expect(screen.getByRole("button", { name: "Publish reviewed draft" })).toBeDisabled()
+  fireEvent.click(screen.getByRole("button", { name: "Check saved draft structure" }))
+  await screen.findByText(/Structural check passed.*not a test run/)
+  expect(screen.getByRole("button", { name: "Publish reviewed draft" })).toBeEnabled()
+  fireEvent.change(screen.getByRole("textbox", { name: "Draft name" }), { target: { value: "Unsaved work" } })
+  expect(screen.getByRole("button", { name: "Publish reviewed draft" })).toBeDisabled()
+  expect(screen.getByRole("button", { name: "Check saved draft structure" })).toBeDisabled()
+  fireEvent.change(screen.getByRole("textbox", { name: "Draft name" }), { target: { value: draft.name } })
+  expect(screen.getByRole("button", { name: "Publish reviewed draft" })).toBeDisabled()
+  fireEvent.click(screen.getByRole("button", { name: "Check saved draft structure" }))
+  await waitFor(() => expect(screen.getByRole("button", { name: "Publish reviewed draft" })).toBeEnabled())
+  fireEvent.click(screen.getByRole("button", { name: "Publish reviewed draft" }))
+  await screen.findByText(/Published version 4.*No run was started/)
+  const posts = api.mock.calls.filter(([, init]) => init?.method === "POST")
+  expect(posts.map(([url]) => url.split("/").pop())).toEqual(["validate", "validate", "publish"])
+  for (const [, init] of posts) expect(JSON.parse(String(init.body))).toEqual({ draft_id: "d1", revision: 3, base_revision: 2 })
+  expect(screen.getByRole("button", { name: "Publish reviewed draft" })).toBeDisabled()
+})
+
+it("does not retry a stale publication or obtain a newer snapshot implicitly", async () => {
+  api.mockImplementation(async (url: string) => url.endsWith("/publish") ? response({}, 409) : response(url.endsWith("/validate") ? { valid: true, scope: "structure_only" } : { ...draft, can_publish: true }))
+  show()
+  await screen.findByRole("textbox", { name: "Draft name" })
+  fireEvent.click(screen.getByRole("button", { name: "Check saved draft structure" }))
+  await waitFor(() => expect(screen.getByRole("button", { name: "Publish reviewed draft" })).toBeEnabled())
+  fireEvent.click(screen.getByRole("button", { name: "Publish reviewed draft" }))
+  await screen.findByText(/Publication changed.*Reload/)
+  expect(api).toHaveBeenCalledTimes(3)
+  expect(screen.getByRole("button", { name: "Publish reviewed draft" })).toBeDisabled()
+  expect(screen.getByRole("textbox", { name: "Draft name" })).toHaveValue(draft.name)
+})
+
+it("clears cached draft content when publication authority is lost", async () => {
+  api.mockImplementation(async (url: string) => url.endsWith("/publish") ? response({}, 404) : response(url.endsWith("/validate") ? { valid: true, scope: "structure_only" } : { ...draft, can_publish: true }))
+  const client = show()
+  await screen.findByRole("textbox", { name: "Draft name" })
+  fireEvent.click(screen.getByRole("button", { name: "Check saved draft structure" }))
+  await waitFor(() => expect(screen.getByRole("button", { name: "Publish reviewed draft" })).toBeEnabled())
+  fireEvent.click(screen.getByRole("button", { name: "Publish reviewed draft" }))
+  await screen.findByText("Draft access is no longer available.")
+  expect(screen.queryByRole("textbox", { name: "Draft name" })).toBeNull()
+  expect(client.getQueryData(["shared-routine-draft", "guest", "/api/v1/workspaces/w/restricted-routine-library/r/draft"])).toBeNull()
+})
+
+for (const outcome of ["conflict", "uncertain", "wrong-revision", "wrong-routine", "published"]) {
+  it(`retains ${outcome} publication state across remount until explicit successful reload`, async () => {
+    api.mockImplementation(async (url: string) => url.endsWith("/publish")
+      ? response({ id: outcome === "wrong-routine" ? "other" : "r", version: 4, publication_revision: outcome === "wrong-revision" ? 2 : 3 }, outcome === "conflict" ? 409 : outcome === "uncertain" ? 500 : 200)
+      : response(url.endsWith("/validate") ? { valid: true, scope: "structure_only" } : { ...draft, can_publish: true }))
+    const client = show()
+    await screen.findByRole("textbox", { name: "Draft name" })
+    fireEvent.click(screen.getByRole("button", { name: "Check saved draft structure" }))
+    await waitFor(() => expect(screen.getByRole("button", { name: "Publish reviewed draft" })).toBeEnabled())
+    fireEvent.click(screen.getByRole("button", { name: "Publish reviewed draft" }))
+    if (outcome === "published") await screen.findByText(/Published version 4/)
+    else await screen.findByText(outcome === "conflict" ? /Publication changed/ : /Publication could not be confirmed/)
+    cleanup()
+    render(<QueryClientProvider client={client}><SharedRoutineDraft url="/api/v1/workspaces/w/restricted-routine-library/r/draft" userId="guest" /></QueryClientProvider>)
+    fireEvent.click(screen.getByRole("button", { name: "Edit shared draft" }))
+    await screen.findByRole("textbox", { name: "Draft name" })
+    expect(screen.getByRole("button", { name: "Check saved draft structure" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Publish reviewed draft" })).toBeDisabled()
+    expect(api).toHaveBeenCalledTimes(3)
+    await act(async () => { await client.invalidateQueries({ queryKey: ["shared-routine-draft"] }) })
+    expect(screen.getByRole("button", { name: "Check saved draft structure" })).toBeDisabled()
+    fireEvent.click(screen.getByRole("button", { name: "Reload draft and discard local changes" }))
+    await waitFor(() => expect(screen.getByRole("button", { name: "Check saved draft structure" })).toBeEnabled())
+    expect(screen.getByRole("button", { name: "Publish reviewed draft" })).toBeDisabled()
+    expect(api).toHaveBeenCalledTimes(5)
+  })
+}
+
+it.each([
+  ["publish", "Remove existing routine triggers before publishing this v1 routine"],
+  ["publish", "Other routines call this routine with call_pipeline. Remove those steps before publishing this v1 routine"],
+  ["validate", "Routine requires unsupported publication steps or resources"],
+])("shows the server's reason when %s is refused with 422", async (operation, reason) => {
+  api.mockImplementation(async (url: string) => url.endsWith(`/${operation}`) ? response({ error: reason }, 422)
+    : response(url.endsWith("/validate") ? { valid: true, scope: "structure_only" } : { ...draft, can_publish: true }))
+  show()
+  await screen.findByRole("textbox", { name: "Draft name" })
+  fireEvent.click(screen.getByRole("button", { name: "Check saved draft structure" }))
+  if (operation === "publish") {
+    await waitFor(() => expect(screen.getByRole("button", { name: "Publish reviewed draft" })).toBeEnabled())
+    fireEvent.click(screen.getByRole("button", { name: "Publish reviewed draft" }))
+  }
+  expect(await screen.findByRole("alert")).toHaveTextContent(reason)
+  expect(screen.queryByText(/could not be confirmed/)).toBeNull()
+  // A definite refusal changed nothing: the editor may fix the cause and check again.
+  expect(screen.getByRole("button", { name: "Check saved draft structure" })).toBeEnabled()
+  expect(screen.getByRole("button", { name: "Publish reviewed draft" })).toBeDisabled()
+})

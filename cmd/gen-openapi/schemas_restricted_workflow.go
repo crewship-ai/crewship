@@ -53,7 +53,8 @@ func restrictedWorkflowSchemaCatalog() (map[string]DomainSchema, map[string]any)
 		draftResponse[key] = value
 	}
 	draftResponse["can_edit"] = map[string]any{"type": "boolean"}
-	components["RestrictedRoutineDraft"] = obj(draftResponse, append(draftRequired, "can_edit")...)
+	draftResponse["can_publish"] = map[string]any{"type": "boolean", "description": "Current Publish permission with View, Edit and token scope; the publication endpoint rechecks authority and the exact saved revision."}
+	components["RestrictedRoutineDraft"] = obj(draftResponse, append(draftRequired, "can_edit", "can_publish")...)
 
 	positiveRevision := func() map[string]any { return map[string]any{"type": "integer", "minimum": 1} }
 	components["RestrictedRoutinePublicationError"] = errorSchema()
