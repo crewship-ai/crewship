@@ -7,6 +7,7 @@ import secrets
 import socket
 import subprocess
 import tempfile
+import threading
 import time
 
 
@@ -23,6 +24,63 @@ class UnixHTTP(http.client.HTTPConnection):
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.sock.settimeout(25)
         self.sock.connect(self.socket_path)
+
+
+ENGINE = b'/usr/local/bin/gridcraft-cli'
+ENGINE_LIMITS = {
+    'Max address space': '268435456',
+    'Max file size': '4194304',
+    'Max cpu time': '15',
+    'Max core file size': '0',
+}
+
+
+def engine_children(worker_pid):
+    """Host view of the worker's engine children: (pid, proc path)."""
+    found = []
+    for entry in os.listdir('/proc'):
+        if not entry.isdigit():
+            continue
+        proc = Path('/proc') / entry
+        try:
+            stat = (proc / 'stat').read_text()
+            if int(stat[stat.rindex(')') + 2:].split()[1]) != worker_pid:
+                continue
+            if (proc / 'cmdline').read_bytes().split(b'\0')[0] == ENGINE:
+                found.append(proc)
+        except (OSError, ValueError):
+            continue
+    return found
+
+
+def observe_engine(worker_pid, stop, seen):
+    """Record the confinement of an engine process once the worker has
+    detached from it (TracerPid 0), i.e. after its limits were set at exec."""
+    while not stop.is_set() and not seen:
+        for proc in engine_children(worker_pid):
+            try:
+                status = (proc / 'status').read_text()
+                fields = dict(line.split(':\t', 1) for line in status.splitlines() if ':\t' in line)
+                if fields.get('TracerPid', '').strip() != '0':
+                    continue
+                limits = (proc / 'limits').read_text()
+                adj = (proc / 'oom_score_adj').read_text().strip()
+                if (proc / 'cmdline').read_bytes().split(b'\0')[0] != ENGINE:
+                    continue
+            except OSError:
+                continue
+            seen.append((fields, limits, adj))
+            return
+
+
+def assert_engine_confined(fields, limits, adj):
+    for name, value in ENGINE_LIMITS.items():
+        line = next(line for line in limits.splitlines() if line.startswith(name))
+        soft, hard = line[len(name):].split()[:2]
+        assert soft == hard == value, name + ' is ' + soft + '/' + hard + ', want ' + value
+    assert adj == '1000', 'engine oom_score_adj ' + adj
+    assert fields['NoNewPrivs'].strip() == '1'
+    assert fields['Seccomp'].strip() == '2', 'engine runs without its seccomp filter'
 
 
 def main():
@@ -95,6 +153,25 @@ def main():
             pid = str(json.loads(docker('inspect', identifier))[0]['State']['Pid'])
             proc = Path('/proc') / pid
             assert (proc / 'cmdline').read_bytes().split(b'\0')[0] == b'/usr/local/bin/crewship-gridcraft-worker'
+            # The launcher is traced until it executes the engine; the worker
+            # sets the engine's limits at that exec stop. Under the real
+            # profile (no capabilities, no-new-privileges, Docker's default
+            # seccomp and AppArmor) every candidate must still succeed, and a
+            # running engine must show its limits, OOM preference and filter.
+            stop, seen = threading.Event(), []
+            sampler = threading.Thread(target=observe_engine, args=(int(pid), stop, seen), daemon=True)
+            sampler.start()
+            try:
+                for attempt in range(200):
+                    status, _ = candidate(base, {'kind': 'cell.set', 'sheet': 'Sheet1', 'cell': 'B2', 'input': str(attempt)})
+                    assert status == 200, 'traced launcher path failed in the container profile'
+                    if seen:
+                        break
+            finally:
+                stop.set()
+                sampler.join(5)
+            assert seen, 'no running engine process observed'
+            assert_engine_confined(*seen[0])
             # Long-lived service survives multiple fresh CLI processes. Scratch
             # must contain neither completed candidate inputs nor inherited
             # secrets, and no engine process may outlive its candidate.
@@ -105,6 +182,7 @@ def main():
             for tool in ('bin/sh', 'bin/bash', 'usr/bin/node', 'usr/bin/env'):
                 assert not os.path.lexists(proc / 'root' / tool), tool + ' must not be in the worker image'
             print('PASS: private authenticated worker, real import/edit, narrow commands, bounded offline container, '
+                  'traced launcher with engine limits, OOM preference and seccomp, '
                   'scratch cleanup, no surviving engine process, no shell or interpreter')
         finally:
             docker('rm', '--force', identifier)
