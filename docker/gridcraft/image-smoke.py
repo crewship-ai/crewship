@@ -90,11 +90,22 @@ def main():
             assert status == 200, 'edit failed'
             changed = json.loads(edited)['result']
             assert changed != base and json.loads(edited)['base'] == base
+            # The image has no shell, so inspect the container's view from the
+            # host through its PID 1 (same unprivileged UID as the worker).
+            pid = str(json.loads(docker('inspect', identifier))[0]['State']['Pid'])
+            proc = Path('/proc') / pid
+            assert (proc / 'cmdline').read_bytes().split(b'\0')[0] == b'/usr/local/bin/crewship-gridcraft-worker'
             # Long-lived service survives multiple fresh CLI processes. Scratch
-            # must contain neither completed candidate inputs nor inherited secrets.
-            assert docker('exec', identifier, '/bin/sh', '-c', 'test -z "$(ls -A /scratch)"').decode() == ''
-            assert docker('exec', identifier, '/bin/sh', '-c', 'test ! -S /var/run/docker.sock && test ! -e /data/crewship.db').decode() == ''
-            print('PASS: private authenticated worker, real import/edit, narrow commands, bounded offline container, scratch cleanup')
+            # must contain neither completed candidate inputs nor inherited
+            # secrets, and no engine process may outlive its candidate.
+            assert os.listdir(proc / 'root' / 'scratch') == []
+            assert (proc / 'task' / pid / 'children').read_text().split() == []
+            assert not os.path.lexists(proc / 'root' / 'var' / 'run' / 'docker.sock')
+            assert not os.path.lexists(proc / 'root' / 'data' / 'crewship.db')
+            for tool in ('bin/sh', 'bin/bash', 'usr/bin/node', 'usr/bin/env'):
+                assert not os.path.lexists(proc / 'root' / tool), tool + ' must not be in the worker image'
+            print('PASS: private authenticated worker, real import/edit, narrow commands, bounded offline container, '
+                  'scratch cleanup, no surviving engine process, no shell or interpreter')
         finally:
             docker('rm', '--force', identifier)
 
