@@ -62,7 +62,7 @@ func gridcraftMCPCatalog() []memoryMCPToolDescriptor {
 	command := object(map[string]any{"kind": map[string]any{"const": "cell.set"}, "sheet": text, "cell": text, "input": text}, []string{"kind", "sheet", "cell", "input"})
 	packet := object(map[string]any{"mutation_id": text, "mandate_id": text, "base_rev": integer, "generation": integer, "command": command}, []string{"mutation_id", "mandate_id", "base_rev", "generation", "command"})
 	result := []memoryMCPToolDescriptor{}
-	for _, name := range []string{"workbook_read", "workbook_apply", "workbook_status"} {
+	for _, name := range []string{"workbook_read", "workbook_apply", "workbook_status", "workbook_commits"} {
 		props := map[string]any{"artifact_id": text, "mandate_id": text}
 		required := []string{"artifact_id", "mandate_id"}
 		if name == "workbook_apply" {
@@ -73,8 +73,15 @@ func gridcraftMCPCatalog() []memoryMCPToolDescriptor {
 			props["mutation_id"] = text
 			required = append(required, "mutation_id")
 		}
+		description := "Experimental offline workbook operation under an explicit retained human mandate and current run authority. Keep original mutation, mandate, base revision and generation on uncertain retry. Only cell.set is supported; never renew scope or refresh preconditions automatically."
+		if name == "workbook_commits" {
+			props["since"] = map[string]any{"type": "integer", "minimum": 0}
+			props["limit"] = map[string]any{"type": "integer", "minimum": 1, "maximum": appengine.MaxFeedLimit}
+			required = append(required, "since")
+			description = "Experimental: list confirmed workbook revisions after since (ascending, at most limit) under the retained human mandate and current run authority. own marks this mandate's revisions; others show only a display label. A 410 snapshot_required means reread the workbook. Reading never widens the mandate."
+		}
 		schema, _ := json.Marshal(object(props, required))
-		result = append(result, memoryMCPToolDescriptor{Name: name, Description: "Experimental offline workbook operation under an explicit retained human mandate and current run authority. Keep original mutation, mandate, base revision and generation on uncertain retry. Only cell.set is supported; never renew scope or refresh preconditions automatically.", InputSchema: schema})
+		result = append(result, memoryMCPToolDescriptor{Name: name, Description: description, InputSchema: schema})
 	}
 	return result
 }
@@ -87,6 +94,8 @@ func (s *Server) respondGridCraftMCPToolCall(w http.ResponseWriter, r *http.Requ
 		action = "apply"
 	case "workbook_status":
 		action = "status"
+	case "workbook_commits":
+		action = "commits"
 	default:
 		return false
 	}
@@ -99,6 +108,8 @@ func (s *Server) respondGridCraftMCPToolCall(w http.ResponseWriter, r *http.Requ
 		MandateID  string             `json:"mandate_id"`
 		MutationID string             `json:"mutation_id,omitempty"`
 		Request    *appengine.Request `json:"request,omitempty"`
+		Since      *int64             `json:"since,omitempty"`
+		Limit      int                `json:"limit,omitempty"`
 	}
 	if appengine.DecodeStrict(raw, &args) != nil || args.ArtifactID == "" || args.MandateID == "" {
 		s.writeRoutinesMCPToolResult(w, req, 400, mustJSON(map[string]string{"error": "invalid workbook packet"}))
@@ -108,7 +119,18 @@ func (s *Server) respondGridCraftMCPToolCall(w http.ResponseWriter, r *http.Requ
 		s.writeRoutinesMCPToolResult(w, req, 400, mustJSON(map[string]string{"error": "invalid workbook operation"}))
 		return true
 	}
+	feed := args.Since != nil || args.Limit != 0
+	if action == "commits" && (args.Since == nil || *args.Since < 0 || args.Limit < 0 || args.Limit > appengine.MaxFeedLimit) || action != "commits" && feed {
+		s.writeRoutinesMCPToolResult(w, req, 400, mustJSON(map[string]string{"error": "invalid workbook feed request"}))
+		return true
+	}
 	payload := map[string]any{"action": action, "artifact_id": args.ArtifactID, "mandate_id": args.MandateID}
+	if args.Since != nil {
+		payload["since"] = *args.Since
+	}
+	if args.Limit != 0 {
+		payload["limit"] = args.Limit
+	}
 	if args.Request != nil {
 		payload["request"] = args.Request
 	}

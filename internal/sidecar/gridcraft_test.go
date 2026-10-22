@@ -83,3 +83,72 @@ func TestGridCraftHostReceiptCanOutliveMemoryIPCBudget(t *testing.T) {
 		t.Fatalf("receipt lost: %#v", response)
 	}
 }
+
+// workbook_commits forwards the agent's commits feed request under its signed
+// run, unchanged, and refuses packets that mix in other operations.
+func TestGridCraftMCPCommitsFeed(t *testing.T) {
+	s, key := newRunIdentityServer(t)
+	s.ipc.GridCraftEnabled = true
+	token := internaltoken.DeriveAgentRunToken(key, "ws-1", "agent-boot", "run-boot")
+	var bodies []string
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/internal/gridcraft" || r.Header.Get("Authorization") != "Bearer "+token {
+			t.Error("workbook transport changed verified authority")
+			w.WriteHeader(403)
+			return
+		}
+		raw, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(raw))
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"head_rev":3,"generation":1,"min_since":0,"commits":[{"rev":3,"kind":"cells","actor_label":"Owner","own":false,"ops":[{"sheet":"Sheet1","cell":"C3","input":"9"}]}]}`)
+	}))
+	defer host.Close()
+	s.ipc.BaseURL = host.URL
+	s.ipc.Token = "synthetic-workbook-ipc"
+	var listed bool
+	for _, tool := range gridcraftMCPCatalog() {
+		if tool.Name == "workbook_commits" {
+			listed = strings.Contains(string(tool.InputSchema), `"since"`) && strings.Contains(string(tool.InputSchema), `"limit"`)
+		}
+	}
+	if !listed {
+		t.Fatal("workbook_commits is not offered with since and limit")
+	}
+	call := func(arguments string) (bool, string) {
+		r := httptest.NewRequest("POST", "/mcp/routines", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"workbook_commits","arguments":`+arguments+`}}`))
+		r.Header.Set("Authorization", "Bearer "+token)
+		w := httptest.NewRecorder()
+		s.handleRoutinesMCP(w, r)
+		return documentCreateMCPResult(t, w)
+	}
+	if failed, body := call(`{"artifact_id":"page","mandate_id":"m","since":2,"limit":50}`); failed || !strings.Contains(body, `"head_rev":3`) {
+		t.Fatalf("commits failed: %s", body)
+	}
+	if len(bodies) != 1 || bodies[0] != `{"action":"commits","artifact_id":"page","limit":50,"mandate_id":"m","since":2}` {
+		t.Fatalf("forwarded %v", bodies)
+	}
+	if failed, body := call(`{"artifact_id":"page","mandate_id":"m","since":0}`); failed || len(bodies) != 2 || bodies[1] != `{"action":"commits","artifact_id":"page","mandate_id":"m","since":0}` {
+		t.Fatalf("since 0: %s %v", body, bodies)
+	}
+	for _, bad := range []string{
+		`{"artifact_id":"page","mandate_id":"m"}`,
+		`{"artifact_id":"page","mandate_id":"m","since":0,"mutation_id":"x"}`,
+		`{"artifact_id":"page","mandate_id":"m","since":-1}`,
+		`{"artifact_id":"page","mandate_id":"m","since":0,"limit":201}`,
+	} {
+		if failed, _ := call(bad); !failed {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("invalid packets reached the host: %v", bodies)
+	}
+	// Feed fields belong only to commits.
+	r := httptest.NewRequest("POST", "/mcp/routines", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"workbook_read","arguments":{"artifact_id":"page","mandate_id":"m","since":0}}}`))
+	r.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	s.handleRoutinesMCP(w, r)
+	if failed, _ := documentCreateMCPResult(t, w); !failed || len(bodies) != 2 {
+		t.Fatal("read accepted feed fields")
+	}
+}
