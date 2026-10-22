@@ -140,24 +140,26 @@ func TestEditorOriginServesAllowlistedBundleOnlyOnEditorHost(t *testing.T) {
 func TestEditorOriginHeadersAreExact(t *testing.T) {
 	h, digest := fixture(t)
 	common := map[string]string{
-		"Cross-Origin-Resource-Policy": "same-origin",
-		"Cross-Origin-Opener-Policy":   "same-origin",
-		"Origin-Agent-Cluster":         "?1",
-		"Referrer-Policy":              "no-referrer",
-		"X-Content-Type-Options":       "nosniff",
-		"Strict-Transport-Security":    "max-age=31536000",
-		"Permissions-Policy":           "camera=(), microphone=(), geolocation=(), clipboard-read=(), usb=(), serial=(), hid=()",
+		"Cross-Origin-Opener-Policy": "same-origin",
+		"Origin-Agent-Cluster":       "?1",
+		"Referrer-Policy":            "no-referrer",
+		"X-Content-Type-Options":     "nosniff",
+		"Strict-Transport-Security":  "max-age=31536000",
+		"Permissions-Policy":         "camera=(), microphone=(), geolocation=(), clipboard-read=(), usb=(), serial=(), hid=()",
 	}
 	for _, tc := range []struct {
-		file, contentType, cache, csp, acao string
+		file, contentType, cache, csp, acao, corp string
 	}{
-		// The document is sandboxed and never readable cross-origin.
-		{"index.html", "text/html; charset=utf-8", "no-store", policy(" " + scriptHash(bootstrap)), ""},
-		// The opaque-origin document fetches assets in CORS mode; they are
-		// public constant code, so any origin may read them without credentials.
-		{"app.js", "text/javascript; charset=utf-8", "public, max-age=31536000, immutable", wantCSP, "*"},
-		{"app_bg.wasm", "application/wasm", "public, max-age=31536000, immutable", wantCSP, "*"},
-		{"assets/font.woff2", "font/woff2", "public, max-age=31536000, immutable", wantCSP, "*"},
+		// The document is sandboxed and never readable cross-origin. CORP
+		// same-origin on it is the fail-closed COEP embedding check.
+		{"index.html", "text/html; charset=utf-8", "no-store", policy(" " + scriptHash(bootstrap)), "", "same-origin"},
+		// Every request from the opaque-origin document is cross-origin:
+		// CORS loads need ACAO and no-cors loads (<link>, <img>, classic
+		// <script src>) need CORP cross-origin. Assets are public constant
+		// code; credentials are never allowed.
+		{"app.js", "text/javascript; charset=utf-8", "public, max-age=31536000, immutable", wantCSP, "*", "cross-origin"},
+		{"app_bg.wasm", "application/wasm", "public, max-age=31536000, immutable", wantCSP, "*", "cross-origin"},
+		{"assets/font.woff2", "font/woff2", "public, max-age=31536000, immutable", wantCSP, "*", "cross-origin"},
 	} {
 		t.Run(tc.file, func(t *testing.T) {
 			// A browser on a sibling subdomain may attach same-site cookies;
@@ -166,7 +168,7 @@ func TestEditorOriginHeadersAreExact(t *testing.T) {
 			if w.Code != 200 {
 				t.Fatal(w.Code)
 			}
-			want := map[string]string{"Content-Type": tc.contentType, "Cache-Control": tc.cache, "Content-Security-Policy": tc.csp}
+			want := map[string]string{"Content-Type": tc.contentType, "Cache-Control": tc.cache, "Content-Security-Policy": tc.csp, "Cross-Origin-Resource-Policy": tc.corp}
 			for k, v := range common {
 				want[k] = v
 			}
@@ -195,7 +197,7 @@ func TestEditorOriginHeadersAreExact(t *testing.T) {
 		})
 	}
 	w := serve(h, "GET", "editor.example.test", "/b/"+strings.Repeat("0", 64)+"/index.html")
-	if w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Set-Cookie") != "" || w.Header().Get("Content-Security-Policy") != wantCSP {
+	if w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Set-Cookie") != "" || w.Header().Get("Content-Security-Policy") != wantCSP || w.Header().Get("Cross-Origin-Resource-Policy") != "same-origin" {
 		t.Fatalf("404 headers: %v", w.Header())
 	}
 	if strings.Contains(w.Body.String(), "example.test") {
@@ -367,5 +369,33 @@ func TestDisabledGateStillIsolatesEditorHost(t *testing.T) {
 	// An unparsable editor origin cannot be matched by host; Deny closes everything.
 	if w := serve(Gate(Deny(), main), "GET", "studio.example.test", "/"); w.Code != 404 {
 		t.Fatalf("deny gate reached main app: %d", w.Code)
+	}
+}
+
+func TestManifestDecodingIsStrict(t *testing.T) {
+	sum := strings.Repeat("a", 64)
+	for _, tc := range []struct {
+		name, raw string
+		ok        bool
+	}{
+		{"plain", `{"files":{"index.html":"` + sum + `"}}`, true},
+		{"known metadata", `{"source_commit":"x","toolchain":{"rustc":"1"},"files":{"index.html":"` + sum + `"}}`, true},
+		{"reviewer differential", `{"files":{"index.html":"a"},"FILES":{"evil.js":"b"},"files":{"index.html":"c"}}`, false},
+		{"duplicate files key", `{"files":{"index.html":"` + sum + `"},"files":{"index.html":"` + sum + `"}}`, false},
+		{"case variant key", `{"Files":{"index.html":"` + sum + `"}}`, false},
+		{"unknown key", `{"files":{"index.html":"` + sum + `"},"extra":1}`, false},
+		{"duplicate file", `{"files":{"index.html":"` + sum + `","index.html":"` + sum + `"}}`, false},
+		{"missing files", `{"source_commit":"x"}`, false},
+		{"files not object", `{"files":[]}`, false},
+		{"digest not string", `{"files":{"index.html":1}}`, false},
+		{"trailing data", `{"files":{"index.html":"` + sum + `"}} {}`, false},
+		{"not object", `[]`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			files, err := decodeManifest([]byte(tc.raw))
+			if (err == nil) != tc.ok {
+				t.Fatalf("files=%v err=%v want ok=%v", files, err, tc.ok)
+			}
+		})
 	}
 }

@@ -13,9 +13,12 @@
 //     navigate the top window, open popups or submit forms, even though the
 //     editor host is a sibling of the Studio site. Policy sources therefore
 //     name the editor origin explicitly instead of 'self'.
-//   - Assets are public constant code, readable by any origin in CORS mode
-//     (Access-Control-Allow-Origin: *, never with credentials), which is how
-//     an opaque-origin document fetches its scripts and wasm.
+//   - Every request from the opaque-origin document is cross-origin. Assets
+//     are public constant code: CORS loads get Access-Control-Allow-Origin: *
+//     (never credentials) and no-cors loads (<link>, <img>, classic
+//     <script src>) get Cross-Origin-Resource-Policy: cross-origin. Only the
+//     document keeps CORP same-origin, which binds it to a credentialless
+//     iframe under Studio's COEP.
 //   - A bundle is pinned by the sha256 of its exact manifest.json bytes; the
 //     manifest pins every file. Files are verified at load and served from
 //     memory, so a later change on disk cannot alter what browsers receive.
@@ -315,8 +318,103 @@ func inlineScriptHashes(doc []byte) []string {
 	}
 }
 
-type manifest struct {
-	Files map[string]string `json:"files"`
+// manifestKeys are the only top-level manifest keys. Matching is exact and
+// case-sensitive, like the operator's installer, so every reader of a pinned
+// manifest sees the same file set.
+var manifestKeys = map[string]bool{"files": true, "source_commit": true, "toolchain": true}
+
+// decodeManifest returns the files map of a manifest, refusing unknown,
+// case-variant or duplicate keys at any level, non-string digests and any
+// data after the object. encoding/json alone would match keys
+// case-insensitively and merge duplicates.
+func decodeManifest(raw []byte) (map[string]string, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	var files map[string]string
+	if err := objectEach(dec, func(key string) error {
+		if !manifestKeys[key] {
+			return fmt.Errorf("unknown manifest key %q", key)
+		}
+		if key != "files" {
+			return skipValue(dec)
+		}
+		files = map[string]string{}
+		return objectEach(dec, func(name string) error {
+			var sum string
+			if err := dec.Decode(&sum); err != nil {
+				return fmt.Errorf("manifest digest for %q: %w", name, err)
+			}
+			files[name] = sum
+			return nil
+		})
+	}); err != nil {
+		return nil, err
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return nil, errors.New("manifest has data after the object")
+	}
+	if files == nil {
+		return nil, errors.New("manifest has no files object")
+	}
+	return files, nil
+}
+
+// objectEach reads one JSON object, calling value for each key exactly once.
+func objectEach(dec *json.Decoder, value func(key string) error) error {
+	if t, err := dec.Token(); err != nil || t != json.Delim('{') {
+		return errors.New("manifest expects a JSON object")
+	}
+	seen := map[string]bool{}
+	for dec.More() {
+		t, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		key, _ := t.(string)
+		if seen[key] {
+			return fmt.Errorf("duplicate manifest key %q", key)
+		}
+		seen[key] = true
+		if err := value(key); err != nil {
+			return err
+		}
+	}
+	_, err := dec.Token()
+	return err
+}
+
+// skipValue consumes one JSON value, rejecting duplicate keys inside it.
+func skipValue(dec *json.Decoder) error {
+	t, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	switch t {
+	case json.Delim('{'):
+		seen := map[string]bool{}
+		for dec.More() {
+			k, err := dec.Token()
+			if err != nil {
+				return err
+			}
+			key, _ := k.(string)
+			if seen[key] {
+				return fmt.Errorf("duplicate manifest key %q", key)
+			}
+			seen[key] = true
+			if err := skipValue(dec); err != nil {
+				return err
+			}
+		}
+		_, err = dec.Token()
+	case json.Delim('['):
+		for dec.More() {
+			if err := skipValue(dec); err != nil {
+				return err
+			}
+		}
+		_, err = dec.Token()
+	}
+	return err
 }
 
 func loadBundle(dir, digest string) (map[string]file, error) {
@@ -346,19 +444,19 @@ func loadBundle(dir, digest string) (map[string]file, error) {
 	if sum := sha256.Sum256(raw); hex.EncodeToString(sum[:]) != digest {
 		return nil, errors.New("manifest.json does not match the pin")
 	}
-	var m manifest
-	if err := json.NewDecoder(bytes.NewReader(raw)).Decode(&m); err != nil {
+	manifestFiles, err := decodeManifest(raw)
+	if err != nil {
 		return nil, fmt.Errorf("manifest: %w", err)
 	}
-	if len(m.Files) == 0 || len(m.Files) > maxBundleFiles {
+	if len(manifestFiles) == 0 || len(manifestFiles) > maxBundleFiles {
 		return nil, errors.New("manifest must list between 1 and 512 files")
 	}
-	if _, ok := m.Files["index.html"]; !ok {
+	if _, ok := manifestFiles["index.html"]; !ok {
 		return nil, errors.New("manifest does not list index.html")
 	}
-	files := make(map[string]file, len(m.Files))
+	files := make(map[string]file, len(manifestFiles))
 	total := 0
-	for name, sum := range m.Files {
+	for name, sum := range manifestFiles {
 		if !validName(name) || !IsDigest(sum) {
 			return nil, fmt.Errorf("manifest entry %q is not a clean relative path with a digest", name)
 		}
@@ -443,8 +541,9 @@ func (h *Handler) setHeaders(w http.ResponseWriter, csp string) {
 	hdr := w.Header()
 	hdr.Del("X-Frame-Options")
 	hdr.Set("Content-Security-Policy", csp)
-	// Fail closed: a document framed under COEP is embeddable only through a
-	// credentialless iframe. Do not relax to cross-origin.
+	// Fail closed for documents: one framed under Studio's COEP is
+	// embeddable only through a credentialless iframe. Do not relax this on
+	// index.html or error responses; only verified assets are cross-origin.
 	hdr.Set("Cross-Origin-Resource-Policy", "same-origin")
 	hdr.Set("Cross-Origin-Opener-Policy", "same-origin")
 	hdr.Set("Origin-Agent-Cluster", "?1")
@@ -477,6 +576,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Cross-Origin-Resource-Policy", "cross-origin")
 	}
 	w.Header().Set("Content-Type", f.contentType)
 	w.Header().Set("Content-Length", fmt.Sprint(len(f.body)))
