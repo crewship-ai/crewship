@@ -341,7 +341,7 @@ it("shows each preset version's saved record and offers the v2 removal levels", 
     levels: [{ level: "none", operations: [] }, { level: "edit", operations: ["edit"] }, { level: "edit_publish", operations: ["edit", "publish"] }] } }
   catalog.presets.push(v2 as typeof catalog.presets[number])
   try {
-    const record = (version: number, level: string) => ({ id: `choice-${version}`, kind: "routine" as const, resource_id: "routine", preset_id: "routine-levels", version, level, definition_hash: `routine-v${version}`, selected_at: "2026-10-17T00:00:00Z", state: "selected" })
+    const record = (version: number, level: string) => ({ id: `choice-${version}`, kind: "routine" as const, resource_id: "routine", preset_id: "routine-levels", version, level, definition_hash: `routine-v${version}`, selected_at: "2026-10-17T00:00:00Z", state: "selected" as const })
     show({ policy: { ...policy, preset_selections: [record(1, "edit"), record(2, "edit_publish")] } }); await choose("routine", "view")
     expect(screen.getByText("Saved edit v1 · selected — intent, not effective authority")).toBeVisible()
     expect(screen.getByText("Saved Edit + Publish v2 · selected — intent, not effective authority")).toBeVisible()
