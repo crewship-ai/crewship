@@ -18960,6 +18960,7 @@
             "type": "array"
           },
           "error": {
+            "description": "Machine-readable code, for example precondition_failed (409), editor_session_expired (409: open a new editor session; never a 401), snapshot_required (410), too_many_editor_sessions (429, with Retry-After) or gridcraft_editor_disabled (503)",
             "type": "string"
           },
           "generation": {
@@ -137359,6 +137360,16 @@
               }
             },
             "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbookError"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "429": {
             "content": {

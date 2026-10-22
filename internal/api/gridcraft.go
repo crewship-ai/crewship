@@ -31,6 +31,9 @@ type gridcraftHTTP struct {
 	// editorBundle reports the qualified editor bundle digest and frame URL
 	// for new sessions; nil until an editor origin is configured.
 	editorBundle func() (digest, url string)
+	// outbox is the router's push sweeper; once started it sends pushes off
+	// the response path.
+	outbox *gridcraftOutboxWorker
 }
 
 // RegisterGridCraft installs only the explicit experimental offline surface.
@@ -61,7 +64,7 @@ func (r *Router) RegisterGridCraft(options appengine.Options, engine appengine.E
 	r.authedMut("POST", "/api/v1/pages/{slug}/workbook/operations", roleInline, h.importFile)
 	// openapi: responses 200,400,401,403,404,409,429,500,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/workbook/edits", roleInline, h.edit)
-	// openapi: responses 200,201,400,401,403,404,429,500,503
+	// openapi: responses 200,201,400,401,403,404,409,429,500,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/workbook/sessions", roleInline, h.openSession)
 	// openapi: responses 200,400,401,403,404,500,503
 	r.authedMut("DELETE", "/api/v1/pages/{slug}/workbook/sessions/{session}", roleInline, h.closeSession)
@@ -78,6 +81,7 @@ func (r *Router) RegisterGridCraft(options appengine.Options, engine appengine.E
 	// openapi: responses 200,400,403,404,409,429,500,503
 	r.mux.Handle("POST /api/v1/internal/gridcraft", internalAuth(http.HandlerFunc(h.agent)))
 	r.gridcraftOutbox = &gridcraftOutboxWorker{h: h}
+	h.outbox = r.gridcraftOutbox
 }
 func gridcraftError(w http.ResponseWriter, err error) {
 	code, message := 500, "Workbook operation failed"
@@ -363,7 +367,8 @@ func (h *gridcraftHTTP) edit(w http.ResponseWriter, r *http.Request) {
 		gridcraftError(w, err)
 		return
 	}
-	result, err := h.operations.Apply(r.Context(), k, req, h.sessionAuthority(r, k, req.SessionID))
+	var seen liveEditorSession
+	result, err := h.operations.Apply(r.Context(), k, req, h.sessionAuthority(r, k, req.SessionID, &seen))
 	var precondition *appengine.PreconditionError
 	if errors.As(err, &precondition) {
 		h.writePrecondition(w, r, precondition)
@@ -375,6 +380,7 @@ func (h *gridcraftHTTP) edit(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	h.renewOnUse(r, req.SessionID, seen)
 	writeJSON(w, 200, result)
 	h.published(k.PageID)
 }
@@ -659,7 +665,9 @@ func (h *gridcraftHTTP) agent(w http.ResponseWriter, r *http.Request) {
 		if json.Unmarshal([]byte(targets), &bounds) != nil {
 			return appengine.Principal{}, appengine.ErrForbidden
 		}
-		return appengine.Principal{AuthorityID: "agent:" + a.AgentID + ":run:" + a.RunID + ":mandate:" + body.MandateID, MandateID: body.MandateID, Targets: bounds}, nil
+		// The mandate's base revision is also the agent's history floor: the
+		// commits feed never shows it what changed before the mandate.
+		return appengine.Principal{AuthorityID: "agent:" + a.AgentID + ":run:" + a.RunID + ":mandate:" + body.MandateID, MandateID: body.MandateID, Targets: bounds, HistoryFloor: base}, nil
 	}
 	if body.Action != "commits" && (body.Since != nil || body.Limit != 0) {
 		gridcraftError(w, appengine.ErrInvalid)

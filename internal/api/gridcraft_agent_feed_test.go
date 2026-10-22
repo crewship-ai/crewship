@@ -59,11 +59,12 @@ func TestGridCraftAgentCommitsFeedUnderMandate(t *testing.T) {
 		h.agent(w, documentDraftRequest(f, token, "POST", body))
 		return w
 	}
-	commits := `{"action":"commits","artifact_id":"grid-feed-page","mandate_id":"feed-mandate","since":0}`
+	commits := `{"action":"commits","artifact_id":"grid-feed-page","mandate_id":"feed-mandate","since":1}`
 	wantError(t, call(commits), 503, "gridcraft_editor_disabled", "workspace flag off")
 	mustExec(t, f.rig.db, `INSERT INTO feature_flag_overrides(id,flag_id,workspace_id,enabled) VALUES('ffo-agent-feed','ffl_gridcraft_editor',?,1)`, f.a.WorkspaceID)
 	wantCode(t, call(`{"action":"apply","artifact_id":"grid-feed-page","mandate_id":"feed-mandate","request":{"mutation_id":"agent-1","mandate_id":"feed-mandate","base_rev":1,"generation":1,"command":{"kind":"cell.set","sheet":"Sheet1","cell":"B2","input":"42"}}}`), 200, "agent apply")
-	if len(pushed) != 2 || pushed[0].Rev != 1 || pushed[1].Rev != 2 || pushed[1].Cells != 1 {
+	// The import happened while the workspace flag was off: it is not pushed.
+	if len(pushed) != 1 || pushed[0].Rev != 2 || pushed[0].Cells != 1 {
 		t.Fatalf("pushes %+v", pushed)
 	}
 	got := call(commits)
@@ -78,14 +79,16 @@ func TestGridCraftAgentCommitsFeedUnderMandate(t *testing.T) {
 			MutationID string `json:"mutation_id"`
 		} `json:"commits"`
 	}
-	if err := json.Unmarshal(got.Body.Bytes(), &feed); err != nil || feed.HeadRev != 2 || len(feed.Commits) != 2 {
+	// The feed starts at the mandate's base revision (1); the import before it
+	// is not part of it (TestGridCraftAgentFeedStartsAtMandateBase).
+	if err := json.Unmarshal(got.Body.Bytes(), &feed); err != nil || feed.HeadRev != 2 || len(feed.Commits) != 1 {
 		t.Fatalf("feed %s", got.Body.String())
 	}
-	if c := feed.Commits[0]; c.Own || c.MutationID != "" || c.ActorLabel != "Owner Person" || c.Kind != "snapshot" {
-		t.Fatalf("human commit seen by agent %+v", c)
-	}
-	if c := feed.Commits[1]; !c.Own || c.MutationID != "agent-1" || c.Kind != "cells" {
+	if c := feed.Commits[0]; !c.Own || c.MutationID != "agent-1" || c.Kind != "cells" {
 		t.Fatalf("own agent commit %+v", c)
+	}
+	if before := call(strings.Replace(commits, `"since":1`, `"since":0`, 1)); before.Code != 410 || !strings.Contains(before.Body.String(), `"min_since":1`) {
+		t.Fatalf("since before the mandate %d %s", before.Code, before.Body.String())
 	}
 	if strings.Contains(got.Body.String(), "user:") || strings.Contains(got.Body.String(), "agent:") {
 		t.Fatalf("internal authority leaked: %s", got.Body.String())
@@ -94,13 +97,13 @@ func TestGridCraftAgentCommitsFeedUnderMandate(t *testing.T) {
 		"missing since":       `{"action":"commits","artifact_id":"grid-feed-page","mandate_id":"feed-mandate"}`,
 		"limit over max":      `{"action":"commits","artifact_id":"grid-feed-page","mandate_id":"feed-mandate","since":0,"limit":201}`,
 		"since on a read":     `{"action":"read","artifact_id":"grid-feed-page","mandate_id":"feed-mandate","since":0}`,
-		"request on commits":  strings.Replace(commits, `"since":0`, `"since":0,"mutation_id":"agent-1"`, 1),
-		"negative since":      strings.Replace(commits, `"since":0`, `"since":-1`, 1),
-		"unknown packet item": strings.Replace(commits, `"since":0`, `"since":0,"session_id":"s1"`, 1),
+		"request on commits":  strings.Replace(commits, `"since":1`, `"since":1,"mutation_id":"agent-1"`, 1),
+		"negative since":      strings.Replace(commits, `"since":1`, `"since":-1`, 1),
+		"unknown packet item": strings.Replace(commits, `"since":1`, `"since":1,"session_id":"s1"`, 1),
 	} {
 		wantCode(t, call(body), 400, name)
 	}
-	gone := call(strings.Replace(commits, `"since":0`, `"since":9`, 1))
+	gone := call(strings.Replace(commits, `"since":1`, `"since":9`, 1))
 	if gone.Code != 410 || !strings.Contains(gone.Body.String(), `"error":"snapshot_required"`) {
 		t.Fatalf("since after head %d %s", gone.Code, gone.Body.String())
 	}

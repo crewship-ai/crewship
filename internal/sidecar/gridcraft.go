@@ -78,7 +78,7 @@ func gridcraftMCPCatalog() []memoryMCPToolDescriptor {
 			props["since"] = map[string]any{"type": "integer", "minimum": 0}
 			props["limit"] = map[string]any{"type": "integer", "minimum": 1, "maximum": appengine.MaxFeedLimit}
 			required = append(required, "since")
-			description = "Experimental: list confirmed workbook revisions after since (ascending, at most limit) under the retained human mandate and current run authority. own marks this mandate's revisions; others show only a display label. A 410 snapshot_required means reread the workbook. Reading never widens the mandate."
+			description = "Experimental: list confirmed workbook revisions after since (ascending, at most limit) under the retained human mandate and current run authority. own marks this mandate's revisions; others show only a display label. The feed starts at the mandate's base revision: since below it answers 410 snapshot_required with min_since, as does pruned history; then reread the workbook. After the base revision every changed cell is listed, as workbook_read shows the whole workbook. Reading never widens what the mandate may write."
 		}
 		schema, _ := json.Marshal(object(props, required))
 		result = append(result, memoryMCPToolDescriptor{Name: name, Description: description, InputSchema: schema})

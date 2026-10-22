@@ -107,7 +107,8 @@ func TestGridCraftEditorFlagGatesLiveEditing(t *testing.T) {
 
 // An edit must name a live session of the same user, credential and Page.
 // Someone else's or another Page's session is not found (404); an expired or
-// closed session must be replaced (401 session_expired).
+// closed session, or one opened with another credential of the same user, must
+// be replaced (409 editor_session_expired).
 func TestGridCraftEditsRequireLiveOwnSession(t *testing.T) {
 	f := gridcraftInstanceFixture(t)
 	f.r.RegisterGridCraft(appengine.Options{Enabled: true, Editor: true}, gridcraftCellsEngine{})
@@ -148,10 +149,11 @@ func TestGridCraftEditsRequireLiveOwnSession(t *testing.T) {
 	c := openEditorSession(t, f, f.wsAdmin, foreign)
 	wantCode(t, edit(f.boss, c.SessionID, 1, 2), 404, "another user's session")
 	wantCode(t, f.do(f.wsAdmin, "POST", base+"/sessions"+q, ""), 404, "only the owner opens a session")
-	// The session is bound to the credential that opened it.
+	// The session is bound to the credential that opened it; the same user
+	// with another credential reopens rather than losing access.
 	const otherToken = "crewship_cli_instfixbosssecond000000000"
 	mustExec(t, f.db, `INSERT INTO cli_tokens(id,user_id,name,token_hash,created_at) VALUES('clt-boss-second','boss','t2',?,datetime('now'))`, sha256Hex(otherToken))
-	wantCode(t, edit(otherToken, a.SessionID, 2, 2), 404, "another credential of the same user")
+	wantError(t, edit(otherToken, a.SessionID, 2, 2), 409, "editor_session_expired", "another credential of the same user")
 
 	// A heartbeat renews the same session; the writer stays the same.
 	renewed := f.do(f.boss, "POST", base+"/sessions"+q, fmt.Sprintf(`{"session_id":%q}`, a.SessionID))
@@ -172,13 +174,13 @@ func TestGridCraftEditsRequireLiveOwnSession(t *testing.T) {
 	}
 
 	mustExec(t, f.db, `UPDATE gridcraft_sessions SET expires_at=created_at+1 WHERE session_id=?`, a.SessionID)
-	wantError(t, edit(f.boss, a.SessionID, 2, 2), 401, "session_expired", "expired session")
-	wantError(t, f.do(f.boss, "POST", base+"/sessions"+q, fmt.Sprintf(`{"session_id":%q}`, a.SessionID)), 401, "session_expired", "renew expired")
+	wantError(t, edit(f.boss, a.SessionID, 2, 2), 409, "editor_session_expired", "expired session")
+	wantError(t, f.do(f.boss, "POST", base+"/sessions"+q, fmt.Sprintf(`{"session_id":%q}`, a.SessionID)), 409, "editor_session_expired", "renew expired")
 
 	d := openEditorSession(t, f, f.boss, base)
 	wantCode(t, f.do(f.boss, "DELETE", base+"/sessions/"+d.SessionID+q, ""), 200, "close")
 	wantCode(t, f.do(f.boss, "DELETE", base+"/sessions/"+d.SessionID+q, ""), 200, "close is idempotent")
-	wantError(t, edit(f.boss, d.SessionID, 1, 2), 401, "session_expired", "closed session")
+	wantError(t, edit(f.boss, d.SessionID, 1, 2), 409, "editor_session_expired", "closed session")
 	wantCode(t, f.do(f.boss, "DELETE", base+"/sessions/"+c.SessionID+q, ""), 404, "close another user's session")
 	wantCode(t, f.do(f.wsAdmin, "DELETE", foreign+"/sessions/"+c.SessionID+q, ""), 200, "owner closes own session")
 
@@ -197,7 +199,7 @@ func TestGridCraftEditsRequireLiveOwnSession(t *testing.T) {
 	// A session belongs to one workbook generation.
 	e := openEditorSession(t, f, f.boss, base)
 	mustExec(t, f.db, `UPDATE gridcraft_heads SET generation=2 WHERE page_id='session-book'`)
-	wantError(t, edit(f.boss, e.SessionID, 1, 2), 401, "session_expired", "session of an older generation")
+	wantError(t, edit(f.boss, e.SessionID, 1, 2), 409, "editor_session_expired", "session of an older generation")
 }
 
 // The commits feed returns confirmed revisions after since under the workbook

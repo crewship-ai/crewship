@@ -24,9 +24,18 @@ import (
 // gridcraftEditorFlag is the workspace kill switch of the live editor surface.
 const gridcraftEditorFlag = "gridcraft_editor"
 
-// gridcraftSessionTTL bounds one editor session; it also never outlives the
-// credential that opened it. A heartbeat renews it.
-const gridcraftSessionTTL = 12 * time.Hour
+// An editor session expires when nobody used or renewed it for
+// gridcraftSessionIdle; edits and heartbeats slide that expiry. It never lives
+// longer than gridcraftSessionTTL from opening, nor beyond the human
+// credential behind it: the web sign-in session (not its short-lived access
+// token, which the app refreshes) or the CLI token.
+const (
+	gridcraftSessionIdle = 15 * time.Minute
+	gridcraftSessionTTL  = 12 * time.Hour
+	// An edit renews the idle expiry only once less than idle minus this step
+	// remains, so at most one edit per step and session writes the renewal.
+	gridcraftSessionRenewStep = 5 * time.Minute
+)
 
 // gridcraftMaxSessions bounds the live editor sessions of one user on one Page.
 const gridcraftMaxSessions = 32
@@ -36,7 +45,10 @@ const gridcraftEditorProtocol = 1
 
 var (
 	errGridCraftEditorDisabled = errors.New("gridcraft_editor_disabled")
-	errGridCraftSessionExpired = errors.New("session_expired")
+	// The expired-session refusal is deliberately not a 401: the web app's
+	// fetch wrapper treats every 401 as an expired sign-in and refreshes or
+	// signs out. A client reopens an editor session instead.
+	errGridCraftSessionExpired = errors.New("editor_session_expired")
 )
 
 // editorOn reports whether the live editor surface is enabled for workspace.
@@ -55,27 +67,62 @@ func editorError(w http.ResponseWriter, err error) bool {
 	case errors.Is(err, errGridCraftEditorDisabled):
 		replyError(w, 503, errGridCraftEditorDisabled.Error())
 	case errors.Is(err, errGridCraftSessionExpired):
-		replyError(w, 401, errGridCraftSessionExpired.Error())
+		replyError(w, 409, errGridCraftSessionExpired.Error())
 	default:
 		return false
 	}
 	return true
 }
 
-// humanCredential identifies the credential of a human request: the auth
-// session for the web app, the CLI token otherwise, with its expiry (zero when
-// it has none).
-func humanCredential(r *http.Request) (string, time.Time, bool) {
+// humanCredential identifies the credential of a human request: the sign-in
+// session for the web app (which outlives every access token refreshed from
+// it), the CLI token otherwise.
+func humanCredential(r *http.Request) (string, bool) {
 	user := UserFromContext(r.Context())
 	switch {
 	case user == nil:
-		return "", time.Time{}, false
+		return "", false
 	case user.SessionID != "":
-		return "session:" + user.SessionID, user.CredentialExpiresAt, true
+		return "session:" + user.SessionID, true
 	case user.TokenID != "":
-		return "token:" + user.TokenID, user.CredentialExpiresAt, true
+		return "token:" + user.TokenID, true
 	}
-	return "", time.Time{}, false
+	return "", false
+}
+
+// credentialLimit is the expiry of the human credential an editor session may
+// not outlive: the current sign-in session record for the web app, read in tx,
+// or the CLI token's expiry. Zero means the credential does not expire.
+func credentialLimit(ctx context.Context, tx *sql.Tx, r *http.Request) (time.Time, error) {
+	user := UserFromContext(r.Context())
+	if user == nil {
+		return time.Time{}, appengine.ErrForbidden
+	}
+	if user.SessionID == "" {
+		return user.CredentialExpiresAt, nil
+	}
+	var expiry string
+	if err := tx.QueryRowContext(ctx, `SELECT expires_at FROM user_sessions WHERE id=? AND user_id=? AND revoked_at IS NULL`, user.SessionID, user.ID).Scan(&expiry); err != nil {
+		return time.Time{}, appengine.ErrForbidden
+	}
+	limit, err := time.Parse(time.RFC3339Nano, expiry)
+	if err != nil {
+		return time.Time{}, appengine.ErrForbidden
+	}
+	return limit, nil
+}
+
+// sessionDeadline is a session's expiry when used at now: the idle expiry,
+// bounded by the absolute lifetime from opening and by the credential.
+func sessionDeadline(created, now, limit time.Time) time.Time {
+	expires := now.Add(gridcraftSessionIdle)
+	if absolute := created.Add(gridcraftSessionTTL); absolute.Before(expires) {
+		expires = absolute
+	}
+	if !limit.IsZero() && limit.Before(expires) {
+		expires = limit
+	}
+	return expires
 }
 
 type gridcraftEditorSession struct {
@@ -129,7 +176,7 @@ func (h *gridcraftHTTP) openSession(w http.ResponseWriter, r *http.Request) {
 		gridcraftError(w, appengine.ErrInvalid)
 		return
 	}
-	credential, credentialExpiry, ok := humanCredential(r)
+	credential, ok := humanCredential(r)
 	if !ok {
 		gridcraftError(w, appengine.ErrForbidden)
 		return
@@ -160,31 +207,39 @@ func (h *gridcraftHTTP) openSession(w http.ResponseWriter, r *http.Request) {
 		gridcraftError(w, appengine.ErrNotFound)
 		return
 	}
-	now := time.Now().UTC()
-	expires := now.Add(gridcraftSessionTTL)
-	if !credentialExpiry.IsZero() && credentialExpiry.Before(expires) {
-		expires = credentialExpiry
-	}
-	if !expires.After(now) {
-		gridcraftError(w, appengine.ErrForbidden)
+	limit, err := credentialLimit(ctx, tx, r)
+	if err != nil {
+		gridcraftError(w, err)
 		return
 	}
+	now := time.Now().UTC()
 	status := 201
 	if req.SessionID != "" {
 		// A heartbeat renews only a live session of this user, credential,
 		// Page and generation; anything else must open a new session.
-		if err = h.liveSession(ctx, tx, k, user, credential, req.SessionID); err != nil {
+		live, err := h.liveSession(ctx, tx, k, user, credential, req.SessionID)
+		if err != nil {
 			if !editorError(w, err) {
 				gridcraftError(w, err)
 			}
 			return
 		}
-		if _, err = tx.ExecContext(ctx, `UPDATE gridcraft_sessions SET expires_at=max(expires_at,?) WHERE session_id=?`, expires.UnixMilli(), req.SessionID); err != nil {
+		expires := sessionDeadline(live.created, now, limit)
+		if !expires.After(now) {
+			editorError(w, errGridCraftSessionExpired)
+			return
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE gridcraft_sessions SET expires_at=? WHERE session_id=?`, expires.UnixMilli(), req.SessionID); err != nil {
 			gridcraftError(w, err)
 			return
 		}
 		out.SessionID, status = req.SessionID, 200
 	} else {
+		expires := sessionDeadline(now, now, limit)
+		if !expires.After(now) {
+			gridcraftError(w, appengine.ErrForbidden)
+			return
+		}
 		// Expired sessions linger a day, so a late edit still learns that its
 		// session expired rather than that it never existed.
 		if _, err = tx.ExecContext(ctx, `DELETE FROM gridcraft_sessions WHERE page_id=? AND expires_at<?`, k.PageID, now.Add(-24*time.Hour).UnixMilli()); err != nil {
@@ -192,12 +247,16 @@ func (h *gridcraftHTTP) openSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var live int
-		if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM gridcraft_sessions WHERE page_id=? AND user_id=? AND closed_at IS NULL AND expires_at>?`, k.PageID, user, now.UnixMilli()).Scan(&live); err != nil {
+		var soonest sql.NullInt64
+		if err = tx.QueryRowContext(ctx, `SELECT count(*),min(expires_at) FROM gridcraft_sessions WHERE page_id=? AND user_id=? AND closed_at IS NULL AND expires_at>?`, k.PageID, user, now.UnixMilli()).Scan(&live, &soonest); err != nil {
 			gridcraftError(w, err)
 			return
 		}
 		if live >= gridcraftMaxSessions {
-			replyError(w, 429, "too many open editor sessions; close one first")
+			// Unused sessions expire when idle; retry once the first one has.
+			wait := time.UnixMilli(soonest.Int64).Sub(now)
+			w.Header().Set("Retry-After", strconv.FormatInt(max(1, int64((wait+time.Second-1)/time.Second)), 10))
+			replyError(w, 429, "too_many_editor_sessions")
 			return
 		}
 		if out.SessionID, err = newEditorSessionID(); err != nil {
@@ -271,35 +330,45 @@ func (h *gridcraftHTTP) closeSession(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]string{"status": "closed", "session_id": session})
 }
 
+// liveEditorSession is what an edit or heartbeat learns about its session.
+type liveEditorSession struct {
+	created, expires time.Time
+}
+
 // liveSession checks, in the caller's transaction, that session is a live
 // editor session of user, opened with credential on this Page for the current
-// workbook generation. Someone else's session is not found; an expired, closed
-// or older-generation session must be replaced.
-func (h *gridcraftHTTP) liveSession(ctx context.Context, tx *sql.Tx, k appengine.Key, user, credential, session string) error {
+// workbook generation. Someone else's session is not found. An expired, closed
+// or older-generation session, or the user's own session opened with another
+// credential (another sign-in or token), must be replaced.
+func (h *gridcraftHTTP) liveSession(ctx context.Context, tx *sql.Tx, k appengine.Key, user, credential, session string) (liveEditorSession, error) {
 	var owner, bound string
-	var generation, head, expires int64
+	var generation, head, created, expires int64
 	var closed sql.NullInt64
-	err := tx.QueryRowContext(ctx, `SELECT s.user_id,s.credential,s.generation,s.expires_at,s.closed_at,h.generation FROM gridcraft_sessions s JOIN gridcraft_heads h ON h.page_id=s.page_id AND h.workspace_id=s.workspace_id WHERE s.session_id=? AND s.workspace_id=? AND s.page_id=?`, session, k.WorkspaceID, k.PageID).Scan(&owner, &bound, &generation, &expires, &closed, &head)
+	err := tx.QueryRowContext(ctx, `SELECT s.user_id,s.credential,s.generation,s.created_at,s.expires_at,s.closed_at,h.generation FROM gridcraft_sessions s JOIN gridcraft_heads h ON h.page_id=s.page_id AND h.workspace_id=s.workspace_id WHERE s.session_id=? AND s.workspace_id=? AND s.page_id=?`, session, k.WorkspaceID, k.PageID).Scan(&owner, &bound, &generation, &created, &expires, &closed, &head)
 	if errors.Is(err, sql.ErrNoRows) {
-		return appengine.ErrForbidden
+		return liveEditorSession{}, appengine.ErrForbidden
 	}
 	if err != nil {
-		return err
+		return liveEditorSession{}, err
 	}
-	if owner != user || bound != credential {
-		return appengine.ErrForbidden
+	if owner != user {
+		return liveEditorSession{}, appengine.ErrForbidden
 	}
-	if closed.Valid || time.Now().UnixMilli() >= expires || generation != head {
-		return errGridCraftSessionExpired
+	live := liveEditorSession{created: time.UnixMilli(created), expires: time.UnixMilli(expires)}
+	now := time.Now()
+	if bound != credential || closed.Valid || !now.Before(live.expires) || !now.Before(live.created.Add(gridcraftSessionTTL)) || generation != head {
+		return liveEditorSession{}, errGridCraftSessionExpired
 	}
-	return nil
+	return live, nil
 }
 
 // sessionAuthority is the human edit authority: the Page owner's write
 // authority, the editor switches and a live own session, all rechecked inside
-// every writer transaction of the edit.
-func (h *gridcraftHTTP) sessionAuthority(r *http.Request, k appengine.Key, session string) appengine.Authorize {
+// every writer transaction of the edit. seen receives the session as last
+// checked, for renewOnUse.
+func (h *gridcraftHTTP) sessionAuthority(r *http.Request, k appengine.Key, session string, seen *liveEditorSession) appengine.Authorize {
 	human := h.humanAuthority(r, k, true, nil)
+	var mu sync.Mutex
 	return func(ctx context.Context, tx *sql.Tx) (appengine.Principal, error) {
 		p, err := human(ctx, tx)
 		if err != nil {
@@ -308,15 +377,49 @@ func (h *gridcraftHTTP) sessionAuthority(r *http.Request, k appengine.Key, sessi
 		if !h.editorOn(ctx, tx, k.WorkspaceID) {
 			return appengine.Principal{}, errGridCraftEditorDisabled
 		}
-		credential, _, ok := humanCredential(r)
+		credential, ok := humanCredential(r)
 		if !ok {
 			return appengine.Principal{}, appengine.ErrForbidden
 		}
-		if err = h.liveSession(ctx, tx, k, UserFromContext(ctx).ID, credential, session); err != nil {
+		live, err := h.liveSession(ctx, tx, k, UserFromContext(ctx).ID, credential, session)
+		if err != nil {
 			return appengine.Principal{}, err
 		}
+		mu.Lock()
+		*seen = live
+		mu.Unlock()
 		p.MandateID = appengine.HumanEditMandate
 		return p, nil
+	}
+}
+
+// renewOnUse slides the idle expiry of a session after a confirmed edit. It
+// writes only once less than idle minus a renew step remains, so most edits
+// add no write; a failure only leaves the session to expire as it would have.
+func (h *gridcraftHTTP) renewOnUse(r *http.Request, session string, seen liveEditorSession) {
+	now := time.Now()
+	if seen.expires.IsZero() || seen.expires.Sub(now) > gridcraftSessionIdle-gridcraftSessionRenewStep {
+		return
+	}
+	ctx := r.Context()
+	err := func() error {
+		tx, err := h.pages.db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		limit, err := credentialLimit(ctx, tx, r)
+		if err != nil {
+			return err
+		}
+		expires := sessionDeadline(seen.created, now, limit)
+		if _, err = tx.ExecContext(ctx, `UPDATE gridcraft_sessions SET expires_at=? WHERE session_id=? AND closed_at IS NULL AND expires_at>? AND expires_at<?`, expires.UnixMilli(), session, now.UnixMilli(), expires.UnixMilli()); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}()
+	if err != nil && h.pages.logger != nil {
+		h.pages.logger.Warn("workbook editor session renewal", "error", err)
 	}
 }
 
@@ -431,16 +534,27 @@ type gridcraftCommitted struct {
 }
 
 // publish claims the undelivered revisions of one Page (all Pages when empty)
-// and pushes each on its Page channel. The hub rechecks the recipient's access
-// before every frame. Failures leave rows for the sweeper.
+// and pushes each on its Page channel while the live editor is on for its
+// workspace. The hub rechecks the recipient's access before every frame.
+// Delivery is at most once: a claimed revision is not pushed again, also when
+// the editor was off, and clients recover a missed push from the commits feed.
 func (h *gridcraftHTTP) publish(ctx context.Context, pageID string) error {
+	editor := map[string]bool{}
 	for {
 		claimed, err := h.store.ClaimCommitted(ctx, pageID, 100)
 		if err != nil {
 			return err
 		}
 		for _, c := range claimed {
-			if c.Deliverable && h.broadcast != nil {
+			if !c.Deliverable || h.broadcast == nil {
+				continue
+			}
+			on, known := editor[c.WorkspaceID]
+			if !known {
+				on = h.editorOn(ctx, h.pages.db, c.WorkspaceID)
+				editor[c.WorkspaceID] = on
+			}
+			if on {
 				h.broadcast("page", c.PageID, "workbook.committed", gridcraftCommitted{PageID: c.PageID, Rev: c.Rev, Generation: c.Generation, Kind: c.Kind, Cells: c.Cells})
 			}
 		}
@@ -450,9 +564,14 @@ func (h *gridcraftHTTP) publish(ctx context.Context, pageID string) error {
 	}
 }
 
-// published pushes a confirmed revision after the response is decided. It is
+// published hands a confirmed revision to the push. With the sweeper started
+// it only wakes the sweeper, so claiming and pushing stay off the response
+// path; without one (a server that never started it) it pushes inline,
 // detached from the request so a disconnecting client cannot cancel it.
 func (h *gridcraftHTTP) published(pageID string) {
+	if h.outbox.notify() {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := h.publish(ctx, pageID); err != nil && h.pages.logger != nil {
@@ -460,11 +579,14 @@ func (h *gridcraftHTTP) published(pageID string) {
 	}
 }
 
-// gridcraftOutboxWorker sweeps undelivered revisions every few seconds, so a
-// crash between commit and push delays the push instead of losing it.
+// gridcraftOutboxWorker pushes confirmed revisions when woken by a commit and
+// sweeps every few seconds, so a revision whose push was not yet claimed when
+// the server stopped is pushed after the next start.
 type gridcraftOutboxWorker struct {
 	h      *gridcraftHTTP
+	mu     sync.Mutex
 	cancel context.CancelFunc
+	kick   chan struct{}
 	wg     sync.WaitGroup
 }
 
@@ -473,15 +595,22 @@ const gridcraftOutboxInterval = 5 * time.Second
 // StartGridCraftOutbox starts the workbook outbox sweeper for the server's
 // lifetime. It does nothing when the workbook API is not installed.
 func (r *Router) StartGridCraftOutbox(ctx context.Context) {
-	if r.gridcraftOutbox == nil || r.gridcraftOutbox.cancel != nil {
+	if r.gridcraftOutbox == nil {
 		return
 	}
 	r.gridcraftOutbox.start(ctx)
 }
 
 func (w *gridcraftOutboxWorker) start(parent context.Context) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.kick != nil {
+		return
+	}
 	ctx, cancel := context.WithCancel(parent)
 	w.cancel = cancel
+	kick := make(chan struct{}, 1)
+	w.kick = kick
 	w.wg.Add(1)
 	go func() {
 		defer w.wg.Done()
@@ -492,13 +621,37 @@ func (w *gridcraftOutboxWorker) start(parent context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				w.sweep(ctx)
+			case <-kick:
 			}
+			w.sweep(ctx)
 		}
 	}()
 }
 
+// notify wakes a started sweeper and reports whether it was ever started.
+// After stop it drops the wake-up: the revision stays pending for the next
+// start rather than being pushed while the server shuts down.
+func (w *gridcraftOutboxWorker) notify() bool {
+	if w == nil {
+		return false
+	}
+	w.mu.Lock()
+	kick := w.kick
+	w.mu.Unlock()
+	if kick == nil {
+		return false
+	}
+	select {
+	case kick <- struct{}{}:
+	default:
+	}
+	return true
+}
+
 func (w *gridcraftOutboxWorker) sweep(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
 	attempt, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err := w.h.publish(attempt, ""); err != nil && ctx.Err() == nil && w.h.pages.logger != nil {
@@ -507,8 +660,14 @@ func (w *gridcraftOutboxWorker) sweep(ctx context.Context) {
 }
 
 func (w *gridcraftOutboxWorker) stop() {
-	if w != nil && w.cancel != nil {
-		w.cancel()
+	if w == nil {
+		return
+	}
+	w.mu.Lock()
+	cancel := w.cancel
+	w.mu.Unlock()
+	if cancel != nil {
+		cancel()
 		w.wg.Wait()
 	}
 }

@@ -29,7 +29,7 @@ func gridcraftSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	// Every error carries "error"; a 409 precondition_failed from an edit or
 	// import also carries the head and what the client must do next.
 	workbookError := obj(map[string]any{
-		"error":             str(),
+		"error":             map[string]any{"type": "string", "description": "Machine-readable code, for example precondition_failed (409), editor_session_expired (409: open a new editor session; never a 401), snapshot_required (410), too_many_editor_sessions (429, with Retry-After) or gridcraft_editor_disabled (503)"},
 		"head_rev":          map[string]any{"type": "integer", "minimum": 0, "description": "Current head revision (409 precondition_failed only)"},
 		"snapshot_required": map[string]any{"type": "boolean", "description": "Reread the workbook; retrying the same packet cannot succeed (409 precondition_failed only)"},
 		"conflicts":         map[string]any{"type": "array", "items": ref("WorkbookCellConflict"), "description": "Target cells another writer changed since base_rev (409 precondition_failed only)"},
@@ -61,7 +61,7 @@ func gridcraftSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	routes["POST "+base+"/mandates"] = DomainSchema{Request: mandate, RequestRequired: true, Response: ref("WorkbookMandate")}
 	routes["DELETE "+base+"/mandates/{mandate}"] = DomainSchema{Response: obj(map[string]any{"status": str()}, "status")}
 	live := map[string]DomainSchema{
-		"POST " + base + "/sessions":             {Request: openSession, Response: ref("WorkbookEditorSession"), SuccessStatuses: []string{"200", "201"}, ErrorStatuses: []string{"400", "401", "403", "404", "429", "500", "503"}},
+		"POST " + base + "/sessions":             {Request: openSession, Response: ref("WorkbookEditorSession"), SuccessStatuses: []string{"200", "201"}, ErrorStatuses: []string{"400", "401", "403", "404", "409", "429", "500", "503"}},
 		"DELETE " + base + "/sessions/{session}": {Response: obj(map[string]any{"status": str(), "session_id": sessionID}, "status", "session_id"), ErrorStatuses: []string{"400", "401", "403", "404", "500", "503"}},
 		"GET " + base + "/commits": {Response: ref("WorkbookCommits"), ErrorStatuses: []string{"400", "401", "403", "404", "410", "429", "500", "503"}, Parameters: []map[string]any{
 			{"name": "since", "in": "query", "required": true, "description": "Return confirmed revisions after this one", "schema": integer(0)},

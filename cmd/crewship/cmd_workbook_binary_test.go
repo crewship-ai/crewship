@@ -198,7 +198,7 @@ func TestWorkbookHumanBinary(t *testing.T) {
 	run("", "workbook", "session", "open", "@workbook-binary-page", "--renew", w2)
 	run("", "workbook", "session", "close", "@workbook-binary-page", w1)
 	run("", "workbook", "session", "close", "@workbook-binary-page", w1)
-	if out := refused(4, editPacket(w1, 2, "D5", "late"), "workbook", "edit", "@workbook-binary-page", "--file", "-"); !strings.Contains(out, "session_expired") {
+	if out := refused(5, editPacket(w1, 2, "D5", "late"), "workbook", "edit", "@workbook-binary-page", "--file", "-"); !strings.Contains(out, `"editor_session_expired"`) {
 		t.Fatalf("closed session: %s", out)
 	}
 	if _, err = db.Exec(`UPDATE feature_flag_overrides SET enabled=0 WHERE id='workbook-editor-on'`); err != nil {
