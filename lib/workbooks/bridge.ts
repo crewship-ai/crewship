@@ -139,7 +139,7 @@ export const EDITOR_FRAME_ATTRIBUTES = Object.freeze({ sandbox: "allow-scripts",
 /** `MessageEvent.origin` of a document with an opaque origin. */
 export const OPAQUE_ORIGIN = "null"
 
-export type KillReason = "handshake" | "protocol" | "access" | "generation" | "closed"
+export type KillReason = "handshake" | "protocol" | "access" | "generation" | "navigation" | "closed"
 
 // ---------------------------------------------------------------------------------------------
 // Validation
@@ -290,6 +290,12 @@ export interface WorkbookBridge {
   readonly pending: number
   /** Feed every `window` "message" event here. */
   handleWindowMessage(event: WindowMessage): void
+  /**
+   * Feed the iframe's every "load" event here. The first load precedes the hello; any load after
+   * the handshake means the frame now holds a different document, so the session ends and the
+   * port is never offered again: the host must create a new frame and a new session.
+   */
+  frameLoaded(): void
   /** A `workbook.committed` push for this page. Duplicates and stale revisions are no-ops. */
   notify(push: { rev: number; generation: number }): void
   /** The realtime connection came back: tell the editor, replay from the last revision, retry. */
@@ -723,6 +729,9 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
       if (!object(data) || data.type !== "gridcraft:hello") return
       if (!shaped(data, ["type", "protocol", "bundle"]) || data.protocol !== BRIDGE_PROTOCOL || data.bundle !== session.bundle_digest) { kill("handshake"); return }
       void connect(frame)
+    },
+    frameLoaded() {
+      if (phase === "connecting" || phase === "live") kill("navigation")
     },
     notify(push) {
       if (phase === "killed" || !count(push?.rev) || !count(push?.generation)) return

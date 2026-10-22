@@ -153,9 +153,45 @@ describe("handshake", () => {
     expect(t.bridge.phase).toBe("live")
   })
 
-  it("describes the frame the host must create", () => {
-    expect(EDITOR_FRAME_ATTRIBUTES).toEqual({ sandbox: "allow-scripts", credentialless: true, referrerPolicy: "no-referrer" })
-    expect(EDITOR_FRAME_ATTRIBUTES.sandbox).not.toContain("allow-same-origin")
+  it("describes the frame the host must create, exactly", () => {
+    // Exactly these attributes: a new sandbox token (above all allow-same-origin) must fail here.
+    expect(EDITOR_FRAME_ATTRIBUTES).toStrictEqual({ sandbox: "allow-scripts", credentialless: true, referrerPolicy: "no-referrer" })
+    expect(EDITOR_FRAME_ATTRIBUTES.sandbox.split(/\s+/)).toStrictEqual(["allow-scripts"])
+    expect(Object.isFrozen(EDITOR_FRAME_ATTRIBUTES)).toBe(true)
+  })
+
+  it("ignores the frame's first load, before its hello", async () => {
+    const t = setup()
+    t.bridge.frameLoaded()
+    t.hello(); await flush()
+    expect(t.bridge.phase).toBe("live")
+    expect(t.kills).toEqual([])
+  })
+
+  it("discards the session when the frame loads a document after connect, and never resends the port", async () => {
+    const t = setup({ edit: vi.fn(() => new Promise<TransportResponse>(() => {})) })
+    await t.connect()
+    t.send(mutation(1, 41, [["B3", "1"]]))
+    t.bridge.frameLoaded() // the frame navigated or reloaded
+    expect(t.kills).toEqual([{ reason: "navigation", unsaved: 1 }])
+    expect(t.port.close).toHaveBeenCalled()
+    expect(t.bridge.phase).toBe("killed")
+    // The new document says hello: it gets nothing; a new frame and handshake are required.
+    t.hello(); await flush()
+    t.bridge.frameLoaded()
+    expect(t.frame.postMessage).toHaveBeenCalledTimes(1)
+    expect(t.kills).toHaveLength(1)
+  })
+
+  it("discards the session when the frame loads while connect is still in progress", async () => {
+    const snapshot = deferred<TransportResponse>()
+    const t = setup({ snapshot: () => snapshot.promise })
+    t.hello()
+    t.bridge.frameLoaded()
+    snapshot.resolve(ok({ schema_version: 1, rev: 41, generation: 1, snapshot: {} }))
+    await flush()
+    expect(t.kills).toEqual([{ reason: "navigation", unsaved: 0 }])
+    expect(t.port.postMessage).not.toHaveBeenCalled()
   })
 })
 
