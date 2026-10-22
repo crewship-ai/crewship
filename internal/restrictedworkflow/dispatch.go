@@ -214,22 +214,14 @@ func (s *Service) executeAssignment(ctx context.Context, a dispatch.Assignment, 
 func (s *Service) failOwned(j job, a dispatch.Assignment) {
 	clean, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	tx, err := s.db.BeginTx(clean, nil)
+	err := s.commitFailure(clean, j, a, true)
+	if errors.Is(err, errStopAudit) {
+		// Stopping must not depend on the audit writer. The failed state
+		// still commits; the missing event is logged for operators.
+		slog.Error("published routine stop audit failed", "error", err)
+		err = s.commitFailure(clean, j, a, false)
+	}
 	if err != nil {
-		return
-	}
-	defer tx.Rollback()
-	if s.checkOwnership(clean, tx, a) != nil {
-		return
-	}
-	// Only the origin loaded from the private durable job is revoked here.
-	if _, err = tx.ExecContext(clean, `UPDATE access_attempts SET revoked_at=COALESCE(revoked_at,?) WHERE id=?`, tsformat.Format(time.Now()), j.Origin); err != nil {
-		return
-	}
-	if _, err = tx.ExecContext(clean, `UPDATE restricted_workflow_jobs SET state='failed',finished_at=? WHERE id=? AND state='running'`, tsformat.Format(time.Now()), j.ID); err != nil {
-		return
-	}
-	if tx.Commit() != nil {
 		return
 	}
 	if handle, err := encryption.Decrypt(j.Handle); err == nil {
@@ -237,6 +229,49 @@ func (s *Service) failOwned(j job, a dispatch.Assignment) {
 			slog.Error("record restricted workflow outcome failed")
 		}
 	}
+}
+
+var errStopAudit = errors.New("published run stop audit unavailable")
+
+func (s *Service) commitFailure(clean context.Context, j job, a dispatch.Assignment, audit bool) error {
+	tx, err := s.db.BeginTx(clean, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err = s.checkOwnership(clean, tx, a); err != nil {
+		return err
+	}
+	// Classify a published run before its origin is revoked below. Live
+	// authority means the graph itself failed rather than being stopped.
+	g, graphErr := decodeGraph(j)
+	published := audit && graphErr == nil && g.Publication != nil
+	reason := "execution_failed"
+	if published {
+		if handle, err := encryption.Decrypt(j.Handle); err != nil || s.checkJob(clean, tx, j, handle) != nil {
+			reason = publishedStopReason(clean, tx, j, g)
+		}
+	}
+	// Only the origin loaded from the private durable job is revoked here.
+	if _, err = tx.ExecContext(clean, `UPDATE access_attempts SET revoked_at=COALESCE(revoked_at,?) WHERE id=?`, tsformat.Format(time.Now()), j.Origin); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(clean, `UPDATE restricted_workflow_jobs SET state='failed',finished_at=? WHERE id=? AND state='running'`, tsformat.Format(time.Now()), j.ID); err != nil {
+		return err
+	}
+	var audited func()
+	if published {
+		if audited, err = s.auditPublishedRun(clean, tx, j, g, "published_run_stopped", reason); err != nil {
+			return errors.Join(errStopAudit, err)
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	if audited != nil {
+		audited()
+	}
+	return nil
 }
 func (s *Service) Result(ctx context.Context, user, workspace, id string) (Result, error) {
 	var result Result

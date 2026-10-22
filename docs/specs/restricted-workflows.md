@@ -16,6 +16,46 @@ Execution is bounded to 16 agent leaves, 64 graph nodes and nesting depth four. 
 
 These projections use private context and delivery rather than shared activity streams. The routine UI selects them using the server-derived current membership access mode. Text and native execution require an explicitly installed typed adapter for the configured profile; unsupported profiles have no trusted fallback.
 
+## Guest-published routines
+
+A routine whose HEAD carries a Guest publication manifest runs only through the
+manual `POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run` admission
+above (`crewship routine run <slug> --wait`). Page actions, issue preflight,
+schedules, webhooks, nested `call_pipeline` and resume refuse it. Admission
+recompiles the exact published version: every step must be a direct `agent_run`
+on the agent, crew and `responses_text`/`native_api_key` profile recorded at
+publication, and both the caller's grants (root-routine Run, agent Run and
+Delegate) and the publisher's frozen View/Edit/Publish and agent bindings must
+be live, with the same grant, publisher membership and issuer identities and a
+live trusted OWNER/ADMIN issuer. A run-only Guest can invoke another Guest's
+publication within both sets of grants.
+
+Run authority belongs to those grants and the accounts, not to a browser
+session or CLI token: logging out does not stop an accepted run. Before every
+step, on each streamed chunk and on the existing 50 ms run monitor, one
+composite query rechecks the exact HEAD publication, every frozen binding and
+whether an administrator revoked the caller's or publisher's sessions
+(`admin_revoke`/`admin_invalidate`) after acceptance; the existing private-job
+check covers the caller's own grants, membership revision and suspension. A
+failed check stops the run before the next step starts; no further provider
+request is made. Recorded provider expiry in the manifest is not used; provider
+slots keep their existing live expiry checks.
+
+A published run has a hard 30-minute limit measured from its scheduled start
+(`delay_seconds`), fixed when it is accepted. Moving HEAD (republish or
+rollback) also stops an older run, as a changed recipe does for legacy runs.
+Results stay private to the run's caller; other Guests and the publisher receive
+the opaque 404.
+
+Acceptance appends a chained `audit.entity_created` journal event
+(`action: published_run_started`) with the run, routine, version, version ID,
+authority fingerprint and publisher. A stop appends `audit.entity_updated`
+(`action: published_run_stopped`) in the same transaction as the failed state,
+with `reason` one of `grant_revoked`, `membership_changed`, `account_suspended`,
+`sessions_revoked`, `issuer_authority_lost`, `unpublished`,
+`publication_changed`, `max_duration`, `authority_changed` or
+`execution_failed`. Events carry no inputs or outputs.
+
 ## Authorized routine catalog
 
 ```http
