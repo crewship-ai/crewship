@@ -29,6 +29,7 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// serves agent authoring. Neither dispatches a real run; /run does.
 	pipes := NewPipelineHandler(r.db, r.logger, nil, nil)
 	pipes.runTokenSecret = r.internalToken
+	pipes.policyJournal = r.journal
 	pipes.restrictedWorkflow = func() *restrictedworkflow.Service { return r.restrictedWorkflow }
 	pipes.storagePath = r.storagePath
 	// The routine detail's `files` member reads the author crew's shared
