@@ -132,3 +132,64 @@ func TestAcceptancePublishedRoutineRunCLI(t *testing.T) {
 		})
 	}
 }
+
+func TestAcceptanceRoutineUnpublishCLI(t *testing.T) {
+	for _, status := range []int{200, 404, 409} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var calls atomic.Int64
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if r.URL.Path == "/api/v1/workspaces" {
+					_, _ = io.WriteString(w, `[{"id":"ws_test","slug":"ws_test"}]`)
+					return
+				}
+				calls.Add(1)
+				if r.Method != "POST" || r.URL.Path != "/api/v1/workspaces/ws_test/restricted-routine-library/shared/unpublish" {
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+				}
+				if body, _ := io.ReadAll(r.Body); len(body) != 0 {
+					t.Errorf("unpublish sent a body: %s", body)
+				}
+				w.WriteHeader(status)
+				if status != 200 {
+					_, _ = io.WriteString(w, `{"error":"Routine has no current Guest publication to withdraw"}`)
+					return
+				}
+				_, _ = io.WriteString(w, `{"id":"shared","version":4,"withdrawn_at":"2026-10-22T12:00:00.000000000Z"}`)
+			}))
+			defer server.Close()
+			out, err := runGuestCLI(t, server.URL, "", "routine", "unpublish", "shared", "--format", "json")
+			if calls.Load() != 1 || (err != nil) != (status != 200) {
+				t.Fatalf("calls=%d err=%v output=%s", calls.Load(), err, out)
+			}
+			if status == 200 && !strings.Contains(out, "withdrawn_at") {
+				t.Fatalf("missing withdrawal receipt: %s", out)
+			}
+		})
+	}
+}
+
+func TestAcceptanceWorkspaceGuestRoutineRunLimitCLI(t *testing.T) {
+	var body map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/workspaces" {
+			_, _ = io.WriteString(w, `[{"id":"ws_test","slug":"ws_test"}]`)
+			return
+		}
+		if r.Method != "PATCH" || r.URL.Path != "/api/v1/workspaces/ws_test" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		_, _ = io.WriteString(w, `{"id":"ws_test","guest_routine_max_run_minutes":45}`)
+	}))
+	defer server.Close()
+	if out, err := runGuestCLI(t, server.URL, "", "workspace", "update", "--guest-routine-max-run-minutes", "45"); err != nil {
+		t.Fatalf("err=%v output=%s", err, out)
+	}
+	if len(body) != 1 || body["guest_routine_max_run_minutes"] != float64(45) {
+		t.Fatalf("unexpected update body: %+v", body)
+	}
+}

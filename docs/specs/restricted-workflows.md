@@ -52,8 +52,12 @@ a run whose dispatch ownership is lost, and the run's deadline cancels an
 in-flight provider call. The manifest's recorded grant/key expiry is not used;
 provider slots keep their existing live expiry checks.
 
-A published run has a hard 30-minute limit from its acceptance, fixed when it
-is accepted. Deferred start is refused: `delay_seconds` other than 0 returns
+A published run has a hard limit from its acceptance, fixed when it is
+accepted: the workspace's `guest_routine_max_run_minutes` (1-240, default 30),
+set by OWNER/ADMIN through `PATCH /api/v1/workspaces/{workspaceId}`.
+Withdrawing the publication (`POST .../restricted-routine-library/{routineId}/unpublish`,
+Publish holder or OWNER/ADMIN) refuses new runs and stops running ones with
+reason `unpublished`; republishing clears it. Deferred start is refused: `delay_seconds` other than 0 returns
 HTTP 422 for a published routine. Moving HEAD (republish or rollback) also stops
 an older run, as a changed recipe does for legacy runs. Results stay private to
 the run's caller; other Guests and the publisher receive the opaque 404. A

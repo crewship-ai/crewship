@@ -69,11 +69,13 @@ func coreResourceSchemas() map[string]any {
 		// #2233 — the approvals_queue sweep window, same null/0 semantics
 		// as the audit pair.
 		"approvals_retention_days": nullableInt(),
-		"_count":                   ref("WorkspaceCounts"),
-		"_count_crews":             intSchema(), "_count_agents": intSchema(), "_count_members": intSchema(),
+		// Hard limit for one Guest-published routine run.
+		"guest_routine_max_run_minutes": map[string]any{"type": "integer", "minimum": 1, "maximum": 240},
+		"_count":                        ref("WorkspaceCounts"),
+		"_count_crews":                  intSchema(), "_count_agents": intSchema(), "_count_members": intSchema(),
 	}, "id", "name", "slug", "kind", "created_at", "updated_at", "allow_privileged_credentials",
 		"logo_url", "preferred_language", "pages_theme", "appearance_default", "run_retention_days", "credential_audit_retention_days", "audit_log_retention_days",
-		"approvals_retention_days")
+		"approvals_retention_days", "guest_routine_max_run_minutes")
 
 	crew := object(map[string]any{
 		"id": stringSchema(), "workspace_id": stringSchema(), "name": stringSchema(), "slug": stringSchema(),

@@ -414,6 +414,7 @@ POST /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/comments roleI
 POST /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones roleInline
 POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/publish roleInline
 POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/validate roleInline
+POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/unpublish roleInline
 POST /api/v1/workspaces/{workspaceId}/signals roleCreate
 POST /api/v1/workspaces/{workspaceId}/skills/bulk-import roleCreate
 POST /api/v1/workspaces/{workspaceId}/skills/generate roleInline

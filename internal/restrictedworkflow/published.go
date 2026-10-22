@@ -15,8 +15,23 @@ import (
 )
 
 // DefaultPublishedRunLimit bounds one Guest-published run from its scheduled
-// start. The job deadline is immutable once accepted.
+// start unless the workspace sets guest_routine_max_run_minutes (1-240). The
+// job deadline is immutable once accepted.
 const DefaultPublishedRunLimit = 30 * time.Minute
+
+func (s *Service) publishedRunLimitFor(ctx context.Context, workspace string) (time.Duration, error) {
+	if s.publishedRunLimit > 0 {
+		return s.publishedRunLimit, nil
+	}
+	var minutes int
+	if err := s.db.QueryRowContext(ctx, `SELECT guest_routine_max_run_minutes FROM workspaces WHERE id=? AND deleted_at IS NULL`, workspace).Scan(&minutes); err != nil {
+		return 0, graphLookupError(err)
+	}
+	if minutes < 1 || minutes > 240 {
+		return 0, ErrDenied
+	}
+	return time.Duration(minutes) * time.Minute, nil
+}
 
 // publishedRef pins the exact publication a frozen graph consumes. It is
 // queue data selected on the host, never a request field or a capability.
@@ -43,7 +58,7 @@ func loadPublishedRoot(ctx context.Context, q rowQuery, workspace, id string) (*
 	r := &graphRecipe{ID: id}
 	err := q.QueryRowContext(ctx, `SELECT p.publication_authority_fingerprint,typeof(p.publication_authority_fingerprint)='text',p.author_crew_id,
  v.id,v.version,v.definition_json,v.authority_fingerprint,v.publication_authority_json,
- COALESCE(v.definition_json=p.definition_json AND v.authority_fingerprint=p.publication_authority_fingerprint,0)
+ COALESCE(v.definition_json=p.definition_json AND v.authority_fingerprint=p.publication_authority_fingerprint AND p.publication_withdrawn_at IS NULL,0)
  FROM main.pipelines p LEFT JOIN main.pipeline_versions v ON v.pipeline_id=p.id AND v.version=p.head_version
  WHERE p.id=? AND p.workspace_id=? AND p.deleted_at IS NULL AND p.status='active'`, id, workspace).Scan(&physical, &physicalText, &r.Crew, &versionID, &version, &raw, &fingerprint, &canonical, &sameBody)
 	if err != nil {
@@ -139,7 +154,7 @@ func (s *Service) compilePublishedGraph(ctx context.Context, user, workspace str
 const publishedCTE = `WITH m AS (
  SELECT v.definition_json AS raw,p.author_crew_id AS crew,v.publication_authority_json AS manifest
  FROM main.pipelines p JOIN main.pipeline_versions v ON v.pipeline_id=p.id AND v.version=p.head_version
- WHERE p.id=? AND p.workspace_id=? AND p.deleted_at IS NULL AND p.status='active'
+ WHERE p.id=? AND p.workspace_id=? AND p.deleted_at IS NULL AND p.status='active' AND p.publication_withdrawn_at IS NULL
  AND typeof(p.publication_authority_fingerprint)='text' AND p.publication_authority_fingerprint=?
  AND v.id=? AND v.version=? AND v.authority_fingerprint=p.publication_authority_fingerprint
  AND v.definition_json=p.definition_json AND v.publication_authority_json IS NOT NULL),
@@ -384,7 +399,7 @@ func publishedStopReason(ctx context.Context, tx *sql.Tx, j job, g frozenGraph) 
 	ref := g.Publication
 	var unpublished, changed, suspended, membership, sessions bool
 	err := tx.QueryRowContext(ctx, `SELECT
- NOT EXISTS(SELECT 1 FROM pipelines WHERE id=? AND deleted_at IS NULL AND status='active'),
+ NOT EXISTS(SELECT 1 FROM pipelines WHERE id=? AND deleted_at IS NULL AND status='active' AND publication_withdrawn_at IS NULL),
  NOT EXISTS(SELECT 1 FROM pipelines p JOIN pipeline_versions v ON v.pipeline_id=p.id AND v.version=p.head_version
   WHERE p.id=? AND p.publication_authority_fingerprint=? AND v.id=?),
  EXISTS(SELECT 1 FROM users WHERE id IN (?,?) AND suspended_at IS NOT NULL),

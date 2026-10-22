@@ -76,6 +76,9 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/validate", roleInline, r.routinePublicationValidate)
 	// openapi: responses 200,400,401,403,404,409,422,500
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/publish", roleInline, r.routinePublicationPublish)
+	// Publish holder or trusted OWNER/ADMIN; checked in the writer transaction.
+	// openapi: responses 200,400,401,403,404,409,500
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/unpublish", roleInline, r.routinePublicationUnpublish)
 	// 503 carries code restricted_runtime_unavailable when no private runtime is installed (#2877).
 	// openapi: responses 200,400,401,403,404,500,503
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routines", authed(wsCtx(http.HandlerFunc(r.restrictedRoutineCatalog))))

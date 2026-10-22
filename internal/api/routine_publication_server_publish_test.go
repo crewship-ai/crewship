@@ -24,6 +24,7 @@ type serverPublicationHTTPFixture struct {
 	db                                                                      *sql.DB
 	writer                                                                  *journal.Writer
 	owner, workspace, path, publisherToken, cipher, description, definition string
+	ownerToken                                                              string
 	draft                                                                   guestRoutineDraft
 	call                                                                    func(string, string, string, any, int) *httptest.ResponseRecorder
 	checkForeignKeys                                                        func()
@@ -143,7 +144,7 @@ func newServerPublicationHTTPFixture(t *testing.T, active ...bool) *serverPublic
 	if draft.DraftID == "" || draft.Revision != 1 {
 		t.Fatal("real draft calibration did not persist")
 	}
-	return &serverPublicationHTTPFixture{db: db, writer: writer, owner: owner, workspace: workspace, path: path, publisherToken: publisherToken, cipher: cipher, description: description, definition: replacement, draft: draft, call: call, checkForeignKeys: assertNoForeignKeyFailures}
+	return &serverPublicationHTTPFixture{ownerToken: ownerToken, db: db, writer: writer, owner: owner, workspace: workspace, path: path, publisherToken: publisherToken, cipher: cipher, description: description, definition: replacement, draft: draft, call: call, checkForeignKeys: assertNoForeignKeyFailures}
 }
 
 // Snapshots retain native SQL values in memory, including NULL and BLOB shape.

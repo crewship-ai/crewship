@@ -104,6 +104,8 @@ func TestPublishedRoutineRunCompletesAndSurvivesLogout(t *testing.T) {
 	if started := publishedJournal(t, s, receipt.ID, "published_run_started"); len(started) != 1 {
 		t.Fatalf("run start audit = %v", started)
 	}
+	// A workspace limit applies to runs accepted after it is set.
+	mustExec(t, s, `UPDATE workspaces SET guest_routine_max_run_minutes=7 WHERE id='w'`)
 	var limit float64
 	if err = s.db.QueryRowContext(t.Context(), `SELECT round((julianday(expires_at)-julianday(fire_at))*86400) FROM restricted_workflow_jobs WHERE id=?`, receipt.ID).Scan(&limit); err != nil || limit != DefaultPublishedRunLimit.Seconds() {
 		t.Fatalf("published run deadline = %vs, err=%v", limit, err)
@@ -122,6 +124,9 @@ func TestPublishedRoutineRunCompletesAndSurvivesLogout(t *testing.T) {
 	other, err := s.AdmitManual(t.Context(), "h2", "w", "private-work", map[string]any{"task": "other"}, "", 0)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if err = s.db.QueryRowContext(t.Context(), `SELECT round((julianday(expires_at)-julianday(fire_at))*86400) FROM restricted_workflow_jobs WHERE id=?`, other.ID).Scan(&limit); err != nil || limit != 420 {
+		t.Fatalf("workspace run limit = %vs, err=%v", limit, err)
 	}
 	if worked, err := s.DispatchNext(t.Context()); !worked || err != nil {
 		t.Fatalf("dispatch worked=%v err=%v", worked, err)
@@ -165,8 +170,11 @@ func TestPublishedRoutineRunStopsAtNextStep(t *testing.T) {
 		{"issuer loses authority", stopIssuer, func(t *testing.T, s *Service) {
 			mustExec(t, s, `UPDATE workspace_members SET role='MEMBER' WHERE id='mo'`)
 		}, ""},
-		{"routine withdrawn", stopUnpublished, func(t *testing.T, s *Service) {
+		{"routine disabled", stopUnpublished, func(t *testing.T, s *Service) {
 			mustExec(t, s, `UPDATE pipelines SET status='disabled' WHERE id='routine'`)
+		}, ""},
+		{"routine unpublished", stopUnpublished, func(t *testing.T, s *Service) {
+			mustExec(t, s, `UPDATE pipelines SET publication_withdrawn_at=? WHERE id='routine'`, tsformat.Format(time.Now()))
 		}, ""},
 		{"max duration", stopDuration, func(t *testing.T, s *Service) {
 			// Wait until the immutable deadline accepted with this run has passed.
@@ -230,6 +238,13 @@ func TestPublishedRoutineRunStopsAtNextStep(t *testing.T) {
 }
 
 func TestPublishedRoutineAdmissionRefusals(t *testing.T) {
+	t.Run("unpublished", func(t *testing.T) {
+		s, _ := publishedFixture(t)
+		mustExec(t, s, `UPDATE pipelines SET publication_withdrawn_at=? WHERE id='routine'`, tsformat.Format(time.Now()))
+		if _, err := s.AdmitManual(t.Context(), "h1", "w", "private-work", map[string]any{"task": "x"}, "", 0); !errors.Is(err, ErrDenied) {
+			t.Fatalf("withdrawn publication admitted: %v", err)
+		}
+	})
 	t.Run("credential rotated after publication", func(t *testing.T) {
 		s, _ := publishedFixture(t)
 		rotated, err := encryption.Encrypt("synthetic-rotated-workflow-key")

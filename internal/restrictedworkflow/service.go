@@ -360,9 +360,8 @@ func (s *Service) admit(ctx context.Context, user, workspace, slug string, suppl
 	}
 	lifetime := time.Hour
 	if graph.Publication != nil {
-		lifetime = DefaultPublishedRunLimit
-		if s.publishedRunLimit > 0 {
-			lifetime = s.publishedRunLimit
+		if lifetime, err = s.publishedRunLimitFor(ctx, workspace); err != nil {
+			return receipt, err
 		}
 	}
 	j := job{ID: id(), Workspace: workspace, Principal: user, Member: m.ID, Revision: m.Revision, Pipeline: pipelineID, RecipeHash: recipeHash, Recipe: recipe, Agent: agent, Profile: profile, Chat: chatID, Origin: origin.ID, Handle: ciphertext, Idempotency: idempotency, Source: source, Page: pageID, PageAction: pageAction, PageHash: pageHash, Inputs: string(rawInputs), Rights: string(rawRights), SourceFacet: facet, State: "pending", Created: tsformat.Format(time.Now()), FireAt: tsformat.Format(time.Now().Add(delay)), Expires: tsformat.Format(time.Now().Add(delay + lifetime))}
