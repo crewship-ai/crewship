@@ -21,7 +21,7 @@ func TestTestBarrierIsNoOpWithoutBuildTag(t *testing.T) {
 	}
 	t.Setenv(TestBarrierDirEnv, dir)
 	t.Setenv(TestBarrierSlotEnv, "dev2")
-	if active, err := ConfigureTestBarrier(); active || err != nil || TestBarrierActive() {
+	if active, err := ConfigureTestBarrier(8082); active || err != nil || TestBarrierActive() {
 		t.Fatalf("active=%v err=%v", active, err)
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)

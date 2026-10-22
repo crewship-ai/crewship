@@ -8,7 +8,7 @@ const barrierCompiledIn = false
 
 // ConfigureTestBarrier is a no-op in normal builds, even when the barrier
 // environment is set: the hook is not compiled in.
-func ConfigureTestBarrier() (bool, error) { return false, nil }
+func ConfigureTestBarrier(int) (bool, error) { return false, nil }
 
 // TestBarrierActive is always false in normal builds.
 func TestBarrierActive() bool { return false }

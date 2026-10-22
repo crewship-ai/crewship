@@ -19,14 +19,14 @@ func TestTaggedBarrierRefusesStageAndAdvertisesOnDev(t *testing.T) {
 		t.Fatal(err)
 	}
 	marker := t.TempDir()
-	if err := os.WriteFile(filepath.Join(marker, "test-barrier-dev2.enabled"), nil, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(marker, "test-barrier-dev2.enabled"), []byte("slot=dev2 port=8082\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(appengine.SetTestBarrierMarkerForTest(marker, os.Getuid(), func() int { return os.Getuid() + 1 }))
 	t.Setenv(appengine.TestBarrierDirEnv, dir)
 	t.Cleanup(func() {
 		os.Unsetenv(appengine.TestBarrierDirEnv)
-		_, _ = appengine.ConfigureTestBarrier()
+		_, _ = appengine.ConfigureTestBarrier(0)
 	})
 	for _, slot := range []string{"stage", "prod"} {
 		t.Setenv(appengine.TestBarrierSlotEnv, slot)
@@ -35,7 +35,12 @@ func TestTaggedBarrierRefusesStageAndAdvertisesOnDev(t *testing.T) {
 		}
 	}
 	t.Setenv(appengine.TestBarrierSlotEnv, "dev2")
-	if err := startGridCraftTestBarrier(nil); err != nil {
+	// The marker names port 8082: another instance on the same host (stage
+	// shares /etc/crewship) must not activate it.
+	if err := startGridCraftTestBarrier(nil, 8084); err == nil {
+		t.Fatal("marker for :8082 activated an instance on :8084")
+	}
+	if err := startGridCraftTestBarrier(nil, 8082); err != nil {
 		t.Fatal(err)
 	}
 	s := newTestServer()

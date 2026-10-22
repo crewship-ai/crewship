@@ -7,11 +7,20 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
+
+// testPort is the listen port the tests' service claims; a marker binds the
+// barrier to one slot and one instance on the host.
+const testPort = 8082
+
+func markerFor(slot string, port int) []byte {
+	return []byte(fmt.Sprintf("slot=%s port=%d\n", slot, port))
+}
 
 // operatorMarker stands in for the root-owned /etc/crewship marker: a test
 // cannot create root-owned files, so the expected owner is this user and the
@@ -20,7 +29,7 @@ func operatorMarker(t *testing.T, slots ...string) string {
 	t.Helper()
 	dir := t.TempDir()
 	for _, slot := range slots {
-		if err := os.WriteFile(filepath.Join(dir, "test-barrier-"+slot+".enabled"), nil, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "test-barrier-"+slot+".enabled"), markerFor(slot, testPort), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -39,7 +48,7 @@ func activateBarrier(t *testing.T) string {
 	operatorMarker(t, "dev2")
 	t.Setenv(TestBarrierDirEnv, dir)
 	t.Setenv(TestBarrierSlotEnv, "dev2")
-	if active, err := ConfigureTestBarrier(); !active || err != nil {
+	if active, err := ConfigureTestBarrier(testPort); !active || err != nil {
 		t.Fatalf("barrier not active: %v", err)
 	}
 	t.Cleanup(func() {
@@ -126,7 +135,7 @@ func TestTestBarrierStartupRefusals(t *testing.T) {
 			t.Setenv(TestBarrierDirEnv, tc.dir)
 			t.Setenv(TestBarrierSlotEnv, tc.slot)
 			t.Cleanup(func() { barrierState.mu.Lock(); barrierState.dir = ""; barrierState.mu.Unlock() })
-			active, err := ConfigureTestBarrier()
+			active, err := ConfigureTestBarrier(testPort)
 			if active != tc.active || (err != nil) != tc.fails || TestBarrierActive() != tc.active {
 				t.Fatalf("active=%v err=%v", active, err)
 			}
@@ -223,7 +232,7 @@ func TestTestBarrierIgnoresEarlierReleaseAndStaleFiles(t *testing.T) {
 	touch(t, base+".parked")
 	touch(t, base+".release")
 	// A new service incarnation clears files left by a killed predecessor.
-	if active, err := ConfigureTestBarrier(); !active || err != nil {
+	if active, err := ConfigureTestBarrier(testPort); !active || err != nil {
 		t.Fatal(err)
 	}
 	noFiles(t, dir)
@@ -271,7 +280,7 @@ func TestTestBarrierRequiresOperatorMarker(t *testing.T) {
 		{"service owns the marker", func(d string) string { return "test-barrier-dev2.enabled" }, self, func() int { return self }, false},
 		{"group-writable marker", func(d string) string {
 			p := filepath.Join(d, "test-barrier-dev2.enabled")
-			if err := os.WriteFile(p, nil, 0o644); err != nil {
+			if err := os.WriteFile(p, markerFor("dev2", testPort), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.Chmod(p, 0o664); err != nil {
@@ -279,9 +288,15 @@ func TestTestBarrierRequiresOperatorMarker(t *testing.T) {
 			}
 			return ""
 		}, self, other, false},
+		// Stage shares the host and /etc/crewship: the marker must name this
+		// instance, not only the host.
+		{"marker names another port", writeMarker(t, "slot=dev2 port=8084\n"), self, other, false},
+		{"marker names another slot", writeMarker(t, "slot=stage port=8082\n"), self, other, false},
+		{"empty marker", writeMarker(t, ""), self, other, false},
+		{"marker with extra fields", writeMarker(t, "slot=dev2 port=8082 any=1\n"), self, other, false},
 		{"symlinked marker", func(d string) string {
 			target := filepath.Join(t.TempDir(), "real")
-			if err := os.WriteFile(target, nil, 0o644); err != nil {
+			if err := os.WriteFile(target, markerFor("dev2", testPort), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.Symlink(target, filepath.Join(d, "test-barrier-dev2.enabled")); err != nil {
@@ -293,16 +308,42 @@ func TestTestBarrierRequiresOperatorMarker(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			if name := tc.setup(dir); name != "" {
-				if err := os.WriteFile(filepath.Join(dir, name), nil, 0o644); err != nil {
+				if err := os.WriteFile(filepath.Join(dir, name), markerFor("dev2", testPort), 0o644); err != nil {
 					t.Fatal(err)
 				}
 			}
 			t.Cleanup(SetTestBarrierMarkerForTest(dir, tc.owner, tc.euid))
-			active, err := ConfigureTestBarrier()
+			active, err := ConfigureTestBarrier(testPort)
 			if active != tc.active || (err != nil) == tc.active || TestBarrierActive() != tc.active {
 				t.Fatalf("active=%v err=%v", active, err)
 			}
 		})
+	}
+}
+
+func writeMarker(t *testing.T, content string) func(string) string {
+	return func(d string) string {
+		if err := os.WriteFile(filepath.Join(d, "test-barrier-dev2.enabled"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return ""
+	}
+}
+
+// A service that does not know its own port cannot match any marker.
+func TestTestBarrierRefusesUnknownPort(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	operatorMarker(t, "dev2")
+	t.Setenv(TestBarrierDirEnv, dir)
+	t.Setenv(TestBarrierSlotEnv, "dev2")
+	t.Cleanup(func() { barrierState.mu.Lock(); barrierState.dir = ""; barrierState.mu.Unlock() })
+	for _, port := range []int{0, -1, 8084} {
+		if active, err := ConfigureTestBarrier(port); active || err == nil {
+			t.Fatalf("port %d: active=%v err=%v", port, active, err)
+		}
 	}
 }
 

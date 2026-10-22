@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,7 +59,7 @@ var barrierState struct {
 // directory: inactive, no error. Otherwise every condition must hold or the
 // service must refuse to start: a development slot (never stage or prod), an
 // absolute, real (non-symlink) directory with mode 0700 owned by this user.
-func ConfigureTestBarrier() (bool, error) {
+func ConfigureTestBarrier(listenPort int) (bool, error) {
 	barrierState.mu.Lock()
 	defer barrierState.mu.Unlock()
 	barrierState.dir = ""
@@ -72,7 +73,7 @@ func ConfigureTestBarrier() (bool, error) {
 	default:
 		return false, fmt.Errorf("gridcraft test barrier refused on slot %q: only dev1..dev4", slot)
 	}
-	if err := checkBarrierMarker(slot); err != nil {
+	if err := checkBarrierMarker(slot, listenPort); err != nil {
 		return false, err
 	}
 	if !filepath.IsAbs(dir) || filepath.Clean(dir) != dir {
@@ -158,7 +159,7 @@ func testBarrier(ctx context.Context, point barrierPoint, k Key, authority, muta
 
 // checkBarrierMarker requires the operator's marker for exactly this slot.
 // Called with barrierState.mu held.
-func checkBarrierMarker(slot string) error {
+func checkBarrierMarker(slot string, listenPort int) error {
 	marker := filepath.Join(barrierMarkerDir, "test-barrier-"+slot+".enabled")
 	if barrierServiceUID() == barrierMarkerOwner {
 		return fmt.Errorf("gridcraft test barrier refused: the service must not run as the owner of %s", marker)
@@ -170,6 +171,28 @@ func checkBarrierMarker(slot string) error {
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !info.Mode().IsRegular() || info.Mode().Perm()&0o022 != 0 || !ok || int(stat.Uid) != barrierMarkerOwner {
 		return fmt.Errorf("gridcraft test barrier refused: %s must be a regular file owned by uid %d and not writable by group or others", marker, barrierMarkerOwner)
+	}
+	// Several instances share a host and /etc/crewship (stage does), so the
+	// marker names the instance too: exactly "slot=<slot> port=<listen port>".
+	if listenPort < 1 || listenPort > 65535 {
+		return fmt.Errorf("gridcraft test barrier refused: unknown listen port %d", listenPort)
+	}
+	f, err := os.OpenFile(marker, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return fmt.Errorf("gridcraft test barrier refused: operator marker %s: %w", marker, err)
+	}
+	defer f.Close()
+	opened, err := f.Stat()
+	if err != nil || !os.SameFile(info, opened) {
+		return fmt.Errorf("gridcraft test barrier refused: operator marker %s changed while checked", marker)
+	}
+	content, err := io.ReadAll(io.LimitReader(f, 256))
+	if err != nil {
+		return fmt.Errorf("gridcraft test barrier refused: operator marker %s: %w", marker, err)
+	}
+	want := fmt.Sprintf("slot=%s port=%d", slot, listenPort)
+	if strings.TrimSpace(string(content)) != want {
+		return fmt.Errorf("gridcraft test barrier refused: operator marker %s does not name this instance (%s)", marker, want)
 	}
 	return nil
 }

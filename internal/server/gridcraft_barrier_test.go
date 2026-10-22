@@ -20,10 +20,10 @@ func TestHealthzOmitsTestBarrierWhenInactive(t *testing.T) {
 	// state behind for later tests (cleanups run before t.Setenv restores).
 	t.Cleanup(func() {
 		os.Unsetenv(appengine.TestBarrierDirEnv)
-		_, _ = appengine.ConfigureTestBarrier()
+		_, _ = appengine.ConfigureTestBarrier(0)
 	})
 	s := newTestServer()
-	if err := startGridCraftTestBarrier(nil); err != nil {
+	if err := startGridCraftTestBarrier(nil, 8082); err != nil {
 		t.Fatal(err)
 	}
 	if appengine.TestBarrierActive() {

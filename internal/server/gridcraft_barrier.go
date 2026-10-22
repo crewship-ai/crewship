@@ -11,8 +11,8 @@ import (
 // binary was built with the crewship_testbarrier tag and the environment asks
 // for it. Any invalid request (for example a stage or prod slot) stops startup.
 // Normal builds compile a no-op and never fail here.
-func startGridCraftTestBarrier(logger *slog.Logger) error {
-	active, err := appengine.ConfigureTestBarrier()
+func startGridCraftTestBarrier(logger *slog.Logger, listenPort int) error {
+	active, err := appengine.ConfigureTestBarrier(listenPort)
 	if err != nil {
 		return fmt.Errorf("GridCraft test barrier: %w", err)
 	}

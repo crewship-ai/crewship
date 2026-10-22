@@ -82,12 +82,18 @@ built with `-tags crewship_testbarrier` can park operations, and only when:
 - `CREWSHIP_GRIDCRAFT_TEST_BARRIER_SLOT` is `dev1`..`dev4`, and
 - the operator marker `/etc/crewship/test-barrier-<slot>.enabled` exists for
   exactly that slot: a regular file (not a symlink) owned by root, not
-  writable by group or others, while the service itself does not run as root.
+  writable by group or others, whose only content is
+  `slot=<slot> port=<server.port>` naming this instance's configured listen
+  port, while the service itself does not run as root.
 
-The environment is self-asserted; the marker is not. Provisioning creates it
-only on development hosts (for example an Ansible task with `owner: root`,
-`mode: "0644"`, guarded by the slot inventory) and must assert it is absent on
-stage and production, together with the two environment variables.
+The environment is self-asserted; the marker is not, and it binds the
+barrier to one instance rather than to the host: several instances (stage
+included) share a host and `/etc/crewship`, and an instance listening on a
+different port never matches. Provisioning writes the marker only for the
+development instance that should have it (for example an Ansible `copy` with
+`content: "slot=dev2 port=8082\n"`, `owner: root`, `mode: "0644"`) and asserts
+that no marker names a stage or production port and that stage and
+production set neither environment variable.
 
 Any other slot (including `stage` and `prod`) or an unsafe directory stops the
 server at startup. While active, startup logs a warning and `/healthz` carries
