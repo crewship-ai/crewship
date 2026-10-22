@@ -297,6 +297,10 @@ reads return 404 and catalogs omit the name and entry. OWNER opening another
 human's private output writes a content-free audit before metadata or content is
 released; unavailable audit storage refuses that access. Ordinary grants,
 folders and legacy public links cannot silently publish a private artifact. Private grant administration and production are also limited to the custodian and workspace OWNER; an ADMIN role or a legacy producer grant does not widen those controls.
+The only explicit publication path is the experimental workbook share
+(`docs/cli/workbook.mdx`). The owner confirms it, it is audited and one-way, and
+it names editors as owner-issued user `write` grants. Workbook contents remain
+limited to the owner, those editors, and the audited workspace OWNER.
 Shared Page authorization and workspace-wide storage accounting are unchanged.
 Private read checks require a live account, workspace and membership. Guest
 catalogs omit unauthorized private outputs without failing the whole listing.

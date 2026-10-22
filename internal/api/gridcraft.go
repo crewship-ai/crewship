@@ -55,6 +55,8 @@ func (r *Router) RegisterGridCraft(options appengine.Options, engine appengine.E
 	r.authedMut("POST", "/api/v1/pages/{slug}/workbook/mandates", roleInline, h.mandate)
 	// openapi: responses 200,400,401,403,404,409,429,500,503
 	r.authedMut("DELETE", "/api/v1/pages/{slug}/workbook/mandates/{mandate}", roleInline, h.revoke)
+	// openapi: responses 200,400,401,403,404,409,429,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/workbook/editors", roleInline, h.share)
 	// The crew IPC authenticates transport; the original signed run bearer is
 	// independently verified by artifactAgentRequest and checked again in SQL.
 	// openapi: responses 200,400,403,404,409,429,500,503
@@ -81,15 +83,17 @@ func gridcraftError(w http.ResponseWriter, err error) {
 		code, message = 429, "capacity_exhausted"
 	case errors.Is(err, appengine.ErrQuota):
 		code, message = 429, "history_quota_exceeded"
+	case errors.Is(err, errWorkbookProposalRequired):
+		code, message = 409, "proposal_required: this workbook is shared; agent changes need a proposal, which workbooks do not support yet"
 	case errors.Is(err, appengine.ErrDisabled), errors.Is(err, appengine.ErrEngineUnavailable):
 		code, message = 503, "Workbook unavailable"
 	}
 	replyError(w, code, message)
 }
-func (h *gridcraftHTTP) humanAuthority(r *http.Request, k appengine.Key, write bool, capture func(*pageRecord)) appengine.Authorize {
+func (h *gridcraftHTTP) humanAuthority(r *http.Request, k appengine.Key, write bool, capture func(*pageRecord, workbookAccess)) appengine.Authorize {
 	return func(ctx context.Context, tx *sql.Tx) (appengine.Principal, error) {
 		if capture != nil {
-			capture(nil)
+			capture(nil, workbookNoAccess)
 		}
 		ctx = context.WithValue(ctx, pageAuthReaderKey{}, tx)
 		request := r.WithContext(ctx)
@@ -105,27 +109,29 @@ func (h *gridcraftHTTP) humanAuthority(r *http.Request, k appengine.Key, write b
 		if validateContentHumanCredential(request, tx, scope) != nil {
 			return appengine.Principal{}, appengine.ErrForbidden
 		}
-		viewer, err := h.pages.livePrivatePageReader(ctx, k.WorkspaceID, user.ID)
-		if err != nil || viewer == nil {
-			return appengine.Principal{}, appengine.ErrForbidden
-		}
-		ctx = context.WithValue(ctx, ctxRole, viewer.Role)
-		rec, err := h.pages.loadPageForRead(ctx, k.WorkspaceID, "@"+k.PageID)
-		if err != nil || rec.OwnerUserID == "" || rec.OwnerCrewID != "" || !rec.PrivateAudience || rec.FolderID != "" || rec.HasDocument || rec.HasProject || rec.HasApplication {
-			return appengine.Principal{}, appengine.ErrForbidden
-		}
-		if write {
-			if rec.OwnerUserID != user.ID || !h.pages.mayEditSpec(ctx, k.WorkspaceID, user.ID, viewer.Role, rec) {
-				return appengine.Principal{}, appengine.ErrForbidden
-			}
-		} else if !privatePageViewer(rec, viewer) {
-			return appengine.Principal{}, appengine.ErrForbidden
+		rec, access, err := h.pages.workbookHumanAccess(ctx, k.WorkspaceID, k.PageID, user.ID, write)
+		if err != nil {
+			return appengine.Principal{}, err
 		}
 		if capture != nil {
-			capture(rec)
+			capture(rec, access)
 		}
 		return appengine.Principal{AuthorityID: "user:" + user.ID, MandateID: "human-import", Targets: []string{"*"}}, nil
 	}
+}
+
+// auditRead keeps the workspace OWNER read audit for a private workbook and
+// for a published one the OWNER reaches only through that audit authority.
+func (h *gridcraftHTTP) auditRead(w http.ResponseWriter, r *http.Request, rec *pageRecord, access workbookAccess) bool {
+	if rec == nil {
+		gridcraftError(w, appengine.ErrForbidden)
+		return false
+	}
+	audited := *rec
+	if access == workbookAuditor {
+		audited.PrivateAudience = true
+	}
+	return h.pages.auditPrivateOwnerAccess(w, r, &audited)
 }
 func (h *gridcraftHTTP) humanKey(r *http.Request, write bool) (appengine.Key, error) {
 	k := appengine.Key{WorkspaceID: WorkspaceIDFromContext(r.Context())}
@@ -272,12 +278,13 @@ func (h *gridcraftHTTP) read(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var record *pageRecord
-	state, err := h.operations.Read(r.Context(), k, h.humanAuthority(r, k, false, func(p *pageRecord) { record = p }))
+	var access workbookAccess
+	state, err := h.operations.Read(r.Context(), k, h.humanAuthority(r, k, false, func(p *pageRecord, a workbookAccess) { record, access = p, a }))
 	if err != nil {
 		gridcraftError(w, err)
 		return
 	}
-	if record == nil || !h.pages.auditPrivateOwnerAccess(w, r, record) {
+	if !h.auditRead(w, r, record, access) {
 		return
 	}
 	writeJSON(w, 200, state)
@@ -321,12 +328,13 @@ func (h *gridcraftHTTP) status(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var record *pageRecord
-	result, err := h.store.Status(r.Context(), k, r.PathValue("mutation"), h.humanAuthority(r, k, false, func(p *pageRecord) { record = p }))
+	var access workbookAccess
+	result, err := h.store.Status(r.Context(), k, r.PathValue("mutation"), h.humanAuthority(r, k, false, func(p *pageRecord, a workbookAccess) { record, access = p, a }))
 	if err != nil {
 		gridcraftError(w, err)
 		return
 	}
-	if record == nil || !h.pages.auditPrivateOwnerAccess(w, r, record) {
+	if !h.auditRead(w, r, record, access) {
 		return
 	}
 	writeJSON(w, 200, result)
@@ -366,9 +374,16 @@ func (h *gridcraftHTTP) mandate(w http.ResponseWriter, r *http.Request) {
 		gridcraftError(w, err)
 		return
 	}
-	p, err := h.humanAuthority(r, k, true, nil)(r.Context(), tx)
+	var record *pageRecord
+	var access workbookAccess
+	p, err := h.humanAuthority(r, k, true, func(rec *pageRecord, a workbookAccess) { record, access = rec, a })(r.Context(), tx)
 	if err != nil {
 		gridcraftError(w, err)
+		return
+	}
+	// A shared workbook accepts agent changes only as proposals.
+	if record == nil || access != workbookOwner || !record.PrivateAudience {
+		gridcraftError(w, errWorkbookProposalRequired)
 		return
 	}
 	ctx := context.WithValue(r.Context(), pageAuthReaderKey{}, tx)
@@ -526,6 +541,9 @@ func (h *gridcraftHTTP) agent(w http.ResponseWriter, r *http.Request) {
 		}
 		ctx = context.WithValue(ctx, ctxRole, role)
 		rec, err := h.pages.loadPage(ctx, a.WorkspaceID, "@"+k.PageID)
+		if err == nil && !rec.PrivateAudience && rec.HasWorkbook && rec.OwnerUserID == a.HumanUserID && rec.OwnerCrewID == "" && rec.FolderID == "" {
+			return appengine.Principal{}, errWorkbookProposalRequired
+		}
 		if err != nil || rec.OwnerUserID != a.HumanUserID || rec.OwnerCrewID != "" || !rec.PrivateAudience || rec.FolderID != "" || !h.pages.mayEditSpec(ctx, a.WorkspaceID, a.HumanUserID, role, rec) {
 			return appengine.Principal{}, appengine.ErrForbidden
 		}

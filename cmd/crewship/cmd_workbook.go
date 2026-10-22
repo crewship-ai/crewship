@@ -6,6 +6,7 @@ package main
 // GET /api/v1/pages/{slug}/workbook/operations/{mutation} workbook status
 // POST /api/v1/pages/{slug}/workbook/mandates workbook admit
 // DELETE /api/v1/pages/{slug}/workbook/mandates/{mandate} workbook revoke
+// POST /api/v1/pages/{slug}/workbook/editors workbook share
 // POST /api/v1/internal/gridcraft workbook agent
 
 import (
@@ -118,6 +119,26 @@ func newWorkbookCommandWithTransport(transport http.RoundTripper) *cobra.Command
 	create.Flags().String("name", "", "Page name; repeat the same slug and name to retry safely")
 	_ = create.MarkFlagRequired("name")
 	root.AddCommand(create)
+	share := &cobra.Command{Use: "share <page-slug|@ID>", Short: "Name a workspace member as an editor of your workbook (revoke with page revoke --user)", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		if os.Getenv("CREWSHIP_AGENT_TOKEN") != "" {
+			return errors.New("human workbook operations require a human credential; use workbook agent for an admitted run")
+		}
+		editor, _ := cmd.Flags().GetString("editor")
+		publish, _ := cmd.Flags().GetBool("publish")
+		client, err := pageClient()
+		if err != nil {
+			return err
+		}
+		response, err := client.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/workbook/editors", map[string]any{"editor": editor, "publish": publish})
+		if err != nil {
+			return err
+		}
+		return printPageArtifactResponse(cmd, response)
+	}}
+	share.Flags().String("editor", "", "Workspace member to name as editor, by email or user ID")
+	share.Flags().Bool("publish", false, "Confirm ending the private audience: the editor sees the current contents, workspace admins see the name; history stays private")
+	_ = share.MarkFlagRequired("editor")
+	root.AddCommand(share)
 	agent := &cobra.Command{Use: "agent", Short: "Send a retained read/apply/status packet through the protected run sidecar", Args: cobra.NoArgs, PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 		for _, key := range []string{"config", "server", "profile", "workspace", "server-allow-mismatch"} {
 			if cmd.Flags().Changed(key) || cmd.InheritedFlags().Changed(key) {

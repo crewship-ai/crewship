@@ -6,7 +6,8 @@ tag: Experimental
 
 The experimental `workbook` commands are disabled on the server by default.
 They support personal, human-owned private Pages and native GridCraft JSON.
-There is no embedded spreadsheet editor or collaborative editing in this pilot.
+An owner can explicitly share a workbook with named editors (see below). There
+is no embedded spreadsheet editor or live collaborative editing in this pilot.
 
 Opening a workbook Page in the web app shows a read-only preview of its sheets
 (values, with formulas as tooltips) and its revision; Refresh, or returning to
@@ -20,6 +21,8 @@ crewship workbook read @PAGE_ID
 crewship workbook status @PAGE_ID import-1
 crewship workbook admit @PAGE_ID --file mandate.json
 crewship workbook revoke @PAGE_ID mandate-1
+crewship workbook share @PAGE_ID --editor ada@example.com --publish
+crewship page revoke @PAGE_ID --user ada@example.com
 crewship workbook agent --file packet.json
 ```
 
@@ -58,6 +61,46 @@ and rechecks current authority on every operation. The
 mandate permits one original base; another instruction requires another mandate.
 It cannot authorize another run or expand to a different cell through a reread.
 
+## Sharing with a second editor
+
+The owner can name another workspace member as an editor:
+
+```bash
+crewship workbook share @PAGE_ID --editor ada@example.com --publish
+```
+
+A private workbook must first be published, and `--publish` confirms it.
+Without it, the server refuses with `409 publication_required` and changes
+nothing. Publication:
+
+- ends the private audience,
+- revokes every live agent mandate on the Page,
+- is recorded in the audit log with the head revision at that moment,
+- happens in the same transaction as the grant.
+
+Publication is one-way. Removing the last editor does not make the Page private
+again.
+
+- **The editor is an ordinary Page grant** (`user`, `write`, issued by the owner).
+  `crewship page grants` lists it. `crewship page revoke <page> --user <email>`
+  withdraws it, and the next request after that fails with `404`. Access is
+  checked again inside every write transaction, so a grant revoked while a
+  candidate is running commits nothing.
+- **Who reaches the contents.** The owner and the named editors read and import.
+  A workspace OWNER keeps the audited, read-only access. Workspace ADMIN role,
+  folder access, crew, agent and workspace grants, `read` grants, and grants
+  issued by anyone other than the current owner do not reach the contents.
+  The editor and admins see the Page name in listings. Other members do not.
+- **The editor must be an active, unrestricted member.** A suspended, restricted
+  or departed editor loses access, and so does every editor when the owner does.
+- **History is not shared.** Editors read the current head. Earlier revisions
+  and other people's operation status stay unavailable.
+- **Agents need proposals.** Agent read, apply and status return
+  `409 proposal_required` on a shared workbook. So does a new mandate.
+  Workbooks do not support proposals yet, so there is no direct agent fallback.
+
+The Page must already hold an imported workbook. Only the owner may share it.
+
 An agent retains this exact packet for apply and uncertain retries:
 
 ```json
@@ -81,6 +124,7 @@ API equivalents:
 | GET | `/api/v1/pages/{slug}/workbook/operations/{mutation}` | `workbook status` |
 | POST | `/api/v1/pages/{slug}/workbook/mandates` | `workbook admit` |
 | DELETE | `/api/v1/pages/{slug}/workbook/mandates/{mandate}` | `workbook revoke` |
+| POST | `/api/v1/pages/{slug}/workbook/editors` | `workbook share` |
 | POST | Protected sidecar workbook transport (crew transport and signed run) | `workbook agent` |
 
 Status codes: `200` confirms the response; `400` rejects an invalid request;
@@ -122,6 +166,18 @@ Read the original human operation receipt and current delivery/head information.
 
 The operation ID here is the mandate ID to revoke. Revocation prevents further
 agent access and commits, including retries that would expose an old receipt.
+
+## `crewship workbook share <page-slug|@ID>`
+
+`--editor <email|id>` (required) names the member. `--publish` confirms ending
+the private audience of a private workbook. The response has these fields:
+
+- `page`, `editor`, `editor_user_id`
+- `published`: true only when this call published the workbook
+- `published_rev`
+- `revoked_mandates`
+
+Repeating the command for an existing editor re-issues the same grant.
 
 ## `crewship workbook agent`
 
