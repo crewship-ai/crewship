@@ -16,7 +16,10 @@ import (
 	"github.com/crewship-ai/crewship/internal/documents"
 )
 
-var errEngineEscaped = errors.New("engine process outlived its candidate")
+// errEngineEscaped ends the worker when it can no longer vouch for engine
+// isolation: a process outlived its candidate, the verified CLI changed, or
+// scratch cleanup failed. The supervisor restarts it and the CLI is hashed again.
+var errEngineEscaped = errors.New("engine isolation unverifiable")
 
 // Concurrent candidates per worker. The default fits the documented container
 // profile (256 MiB, 32 PIDs); a higher value needs the larger profile listed in
@@ -27,6 +30,45 @@ const (
 	defaultWorkerCapacity = 2
 	maxWorkerCapacity     = 8
 )
+
+// Per-engine-process resource limits (RLIMIT_AS, RLIMIT_FSIZE, RLIMIT_CPU).
+const (
+	memoryEnv = "CREWSHIP_GRIDCRAFT_ENGINE_MEMORY_MIB"
+	fileEnv   = "CREWSHIP_GRIDCRAFT_ENGINE_FILE_MIB"
+	cpuEnv    = "CREWSHIP_GRIDCRAFT_ENGINE_CPU_SECONDS"
+)
+
+func boundedEnv(getenv func(string) string, name string, fallback, low, high uint64) (uint64, error) {
+	value := getenv(name)
+	if value == "" {
+		return fallback, nil
+	}
+	n, err := strconv.ParseUint(value, 10, 64)
+	if err != nil || n < low || n > high {
+		return 0, fmt.Errorf("%s must be an integer from %d to %d", name, low, high)
+	}
+	return n, nil
+}
+
+// engineLimits reads the engine limits. A 1 MiB workbook needs about 10 MiB of
+// memory and writes outputs of at most 1 MiB that the worker accepts; the CPU
+// limit stays below the 20 s candidate timeout.
+func engineLimits(getenv func(string) string) (appengine.EngineLimits, error) {
+	d := appengine.DefaultEngineLimits
+	memory, err := boundedEnv(getenv, memoryEnv, d.AddressSpace>>20, 64, 4096)
+	if err != nil {
+		return appengine.EngineLimits{}, err
+	}
+	file, err := boundedEnv(getenv, fileEnv, d.FileSize>>20, 2, 32)
+	if err != nil {
+		return appengine.EngineLimits{}, err
+	}
+	cpu, err := boundedEnv(getenv, cpuEnv, d.CPUSeconds, 1, 20)
+	if err != nil {
+		return appengine.EngineLimits{}, err
+	}
+	return appengine.EngineLimits{AddressSpace: memory << 20, FileSize: file << 20, CPUSeconds: cpu}, nil
+}
 
 func workerCapacity(getenv func(string) string) (int, error) {
 	value := getenv(capacityEnv)
@@ -62,6 +104,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	limits, err := engineLimits(os.Getenv)
+	if err != nil {
+		return err
+	}
 	// Refuse to serve unless every engine execution can be confined and every
 	// engine descendant is reparented to this process for the survivor sweep.
 	if err = appengine.PrepareEngineSandbox(); err != nil {
@@ -76,6 +122,7 @@ func run() error {
 	engine := appengine.WorkerEngine{
 		Binary:  "/usr/local/bin/gridcraft-cli",
 		Scratch: "/scratch",
+		Limits:  limits,
 		Escaped: func() { escapeOnce.Do(func() { close(escaped) }) },
 	}
 	// Hash the pinned CLI once; candidates then only confirm its identity.
@@ -115,7 +162,7 @@ func serve(ctx context.Context, escaped <-chan struct{}, stop func(context.Conte
 func main() {
 	if err := run(); err != nil {
 		if errors.Is(err, errEngineEscaped) {
-			fmt.Fprintln(os.Stderr, "workbook worker stopping: engine process outlived its candidate")
+			fmt.Fprintln(os.Stderr, "workbook worker stopping: engine isolation unverifiable; restart required")
 		} else {
 			fmt.Fprintln(os.Stderr, "workbook worker unavailable")
 		}

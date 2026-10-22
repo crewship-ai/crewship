@@ -39,8 +39,8 @@ The CLI is treated as untrusted code. The worker reads the secret once at
 startup and keeps it in memory. It also verifies the CLI's SHA-256 pin once at
 startup and refuses to serve on a mismatch. Each candidate then checks that the
 file still has the verified identity (device, inode, size, mode, owner, mtime,
-ctime); any change makes the worker unavailable until a restart verifies the
-digest again. Each CLI execution:
+ctime); any change makes the worker exit non-zero, so the supervisor restarts it
+and the digest is verified again. Each CLI execution:
 
 - starts with an empty environment except `PATH`, `HOME` and `TMPDIR` set to
   its own candidate directory, without the secret in environment or arguments,
@@ -54,6 +54,20 @@ digest again. Each CLI execution:
   ptrace the worker, or use TCP. Landlock needs no capability and works under
   `no-new-privileges` with Docker's default seccomp profile. If the kernel
   lacks Landlock, the worker refuses to start; there is no unconfined fallback;
+- runs under a seccomp filter installed by the same launcher, which refuses
+  with `EPERM` `setsid`, `prctl(PR_SET_CHILD_SUBREAPER)`, `unshare` and `clone`
+  with namespace flags (`clone3` gets `ENOSYS`, so libc falls back to `clone`).
+  No engine process can start a session or hide descendants from the worker.
+  If seccomp is unavailable, the worker refuses to start;
+- has its own resource limits, inherited by its descendants: address space
+  (`RLIMIT_AS`, default 256 MiB, `CREWSHIP_GRIDCRAFT_ENGINE_MEMORY_MIB`, 64 to
+  4096), largest written file (`RLIMIT_FSIZE`, default 4 MiB,
+  `CREWSHIP_GRIDCRAFT_ENGINE_FILE_MIB`, 2 to 32), CPU time (`RLIMIT_CPU`,
+  default 15 s, `CREWSHIP_GRIDCRAFT_ENGINE_CPU_SECONDS`, 1 to 20) and no core
+  files. Its `oom_score_adj` is 1000, so under memory pressure the kernel kills
+  an engine before the worker or another candidate. `RLIMIT_NPROC` is not used:
+  it counts every process of the UID, including the worker, other candidates
+  and, without a user namespace, the same UID outside the container;
 - runs in its own session and process group. After every execution (success,
   error, timeout or cancellation) the whole group is killed with `SIGKILL` and
   reaped.
@@ -64,12 +78,16 @@ and attributes them by session: processes of other executions still in flight
 are left to their own sweep, so concurrent candidates never see each other's
 dying processes as escapes. A process that left its group but kept the
 execution's session (`setpgid`) is that candidate's escape. A process in a new
-session (`setsid`) cannot be attributed, so every candidate in flight fails
-closed. Escaped processes are killed. The worker then becomes unavailable and
-exits non-zero, which ends the container's PID namespace and every process in
-it, so the supervisor starts a clean container and socket. The worker reads
-engine output only from a regular, single-link file opened without following
-links.
+session cannot be attributed, so every candidate in flight fails closed; the
+seccomp filter makes that path a backstop. Escaped processes are killed. The
+worker then becomes unavailable and exits non-zero, which ends the container's
+PID namespace and every process in it, so the supervisor starts a clean
+container and socket. The worker reads engine output only from a regular,
+single-link file opened without following links. Before removing a candidate
+directory it restores owner permissions on every directory in it (the engine
+can `chmod` its own files), walking by file descriptor without following links;
+if removal still fails, the worker exits so a new container brings clean
+scratch.
 
 ## Concurrency
 
@@ -78,7 +96,10 @@ links.
 engine process exists. Each candidate has its own scratch directory and
 Landlock write scope; a crashing candidate fails alone. One writer per
 workbook is enforced by the application, which admits at most one candidate per
-artifact. The default fits the profile above. Each concurrent candidate needs
+artifact. The figures below are container sizing, not per-candidate isolation;
+the per-process limits above bound one engine process, but candidates still
+share the container's memory, PIDs, CPU and `/scratch`. The default fits the
+profile above. Each concurrent candidate needs
 about 64 MiB of memory (request buffers, a transient launcher, the CLI, and
 scratch) and up to 8 PIDs (the PID limit counts threads). For capacity N, set
 memory to at least 128 MiB + N × 64 MiB, PIDs to at least 16 + N × 8, and
@@ -89,10 +110,20 @@ Residual risk, accepted for the default-off pilot:
 
 - The CLI runs under the worker's UID (1000). With all capabilities dropped,
   the worker cannot switch it to another UID. Landlock covers the file system,
-  ptrace and TCP. On kernels older than 6.12 (Landlock ABI below 6), a
-  compromised CLI can still send signals to the worker. That is denial of
-  service only: the worker exits and is restarted. It can also connect to the
-  socket, but cannot authenticate without the secret.
+  ptrace and TCP. On kernels with Landlock ABI 6 (6.12 and later) the worker
+  also scopes signals and abstract sockets to the engine's own domain. On older
+  kernels a compromised CLI can still send signals to the worker and, with
+  capacity above 1, to concurrent candidates, possibly of other workspaces.
+  That is denial of service only: the worker exits and is restarted, or the
+  other candidate fails or times out; no data leaks and no invalid result is
+  returned. It can also connect to the socket, but cannot authenticate without
+  the secret.
+- Repeated escapes or changed binaries restart the worker each time; the
+  supervisor's start limit can then leave it down until an operator acts.
+- A process of one candidate that left its process group is that candidate's
+  escape only; a concurrent candidate may still return its result during the
+  short drain, because the survivor cannot read or change another candidate's
+  scratch.
 - Between the CLI exiting and the sweep, an escaped process runs for a few
   milliseconds inside the same Landlock domain. It cannot reach the secret,
   socket directory or other candidates.

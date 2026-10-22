@@ -34,3 +34,5 @@ func fileIdentity(*os.File) (engineIdentity, error) {
 func (*engineIdentity) check(string) error {
 	return fmt.Errorf("%w: %v", ErrEngineUnavailable, errEngineSandboxPlatform)
 }
+
+func makeRemovable(string) error { return nil }

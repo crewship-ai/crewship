@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/appengine"
 )
 
 func TestServeExitsWithErrorAfterEngineEscape(t *testing.T) {
@@ -67,5 +69,41 @@ func TestWorkerCapacityDefaultsAndBounds(t *testing.T) {
 	}
 	if defaultWorkerCapacity < 1 || defaultWorkerCapacity > maxWorkerCapacity {
 		t.Fatalf("default capacity %d outside 1..%d", defaultWorkerCapacity, maxWorkerCapacity)
+	}
+}
+
+func TestEngineLimitsDefaultsAndBounds(t *testing.T) {
+	limits, err := engineLimits(func(string) string { return "" })
+	if err != nil || limits != appengine.DefaultEngineLimits {
+		t.Fatalf("defaults: %+v %v", limits, err)
+	}
+	env := map[string]string{memoryEnv: "384", fileEnv: "8", cpuEnv: "10"}
+	limits, err = engineLimits(func(name string) string { return env[name] })
+	if err != nil || limits.AddressSpace != 384<<20 || limits.FileSize != 8<<20 || limits.CPUSeconds != 10 {
+		t.Fatalf("configured: %+v %v", limits, err)
+	}
+	for name, value := range map[string]string{
+		memoryEnv: "32", fileEnv: "1", cpuEnv: "0",
+	} {
+		if _, err := engineLimits(func(n string) string {
+			if n == name {
+				return value
+			}
+			return ""
+		}); err == nil {
+			t.Fatalf("%s=%s accepted", name, value)
+		}
+	}
+	for name, value := range map[string]string{
+		memoryEnv: "4097", fileEnv: "33", cpuEnv: "21",
+	} {
+		if _, err := engineLimits(func(n string) string {
+			if n == name {
+				return value
+			}
+			return ""
+		}); err == nil {
+			t.Fatalf("%s=%s accepted", name, value)
+		}
 	}
 }

@@ -12,13 +12,17 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // TestMain lets the test binary act as the engine sandbox launcher, exactly as
@@ -28,6 +32,9 @@ func TestMain(m *testing.M) {
 		err := ExecEngineSandbox(os.Args[2:])
 		fmt.Fprintln(os.Stderr, "engine sandbox:", err)
 		os.Exit(126)
+	}
+	if len(os.Args) == 2 && os.Args[1] == testSandboxProbeFlag {
+		os.Exit(sandboxProbe())
 	}
 	if len(os.Args) == 4 && os.Args[1] == testLeaveGroupFlag {
 		// Stands in for a CLI descendant that moves to a new process group
@@ -65,6 +72,54 @@ func fakeCLI(t *testing.T, body string) WorkerEngine {
 }
 
 const testLeaveGroupFlag = "--test-leave-group"
+const testSandboxProbeFlag = "--test-sandbox-probe"
+
+// The Go runtime reserves more address space than the pinned CLI's default
+// limit allows; test helpers written in Go get a larger one.
+const goHelperAddressSpace = 4 << 30
+
+// sandboxProbe runs inside the confined engine and reports, by exit code, the
+// first process-control call that was not refused with EPERM.
+func sandboxProbe() int {
+	if _, err := unix.Setsid(); !errors.Is(err, unix.EPERM) {
+		return 10
+	}
+	if err := unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0); !errors.Is(err, unix.EPERM) {
+		return 11
+	}
+	for _, flag := range []int{unix.CLONE_NEWUSER, unix.CLONE_NEWNS, unix.CLONE_NEWPID, unix.CLONE_NEWNET, unix.CLONE_NEWUTS, unix.CLONE_NEWIPC} {
+		if err := unix.Unshare(flag); !errors.Is(err, unix.EPERM) {
+			return 12
+		}
+	}
+	// clone with a namespace flag must be refused before a child exists.
+	if _, _, errno := unix.RawSyscall6(unix.SYS_CLONE, uintptr(unix.CLONE_NEWUSER|unix.CLONE_NEWPID|int(unix.SIGCHLD)), 0, 0, 0, 0, 0); errno != unix.EPERM {
+		if errno == 0 {
+			// A child was created; this branch also runs in it.
+			unix.RawSyscall(unix.SYS_EXIT_GROUP, 13, 0, 0)
+		}
+		return 13
+	}
+	// Ordinary process creation still works under the filter.
+	if err := exec.Command("/usr/bin/true").Run(); err != nil {
+		return 14
+	}
+	return 0
+}
+
+// sandboxProbeScript runs the probe binary inside the engine sandbox.
+func sandboxProbeScript(t *testing.T, engine *WorkerEngine) string {
+	t.Helper()
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine.ReadOnly = append(engine.ReadOnly, filepath.Dir(self))
+	engine.Limits.AddressSpace = goHelperAddressSpace
+	return fmt.Sprintf(`if setsid true </dev/null >/dev/null 2>&1; then exit 9; fi
+%q %s </dev/null >/dev/null 2>&1 || exit $?
+cp "$src" "$dst"`, self, testSandboxProbeFlag)
+}
 
 // leaveGroupScript starts a descendant that leaves the engine's process group
 // but stays in its session, and waits until it has done so.
@@ -75,8 +130,9 @@ func leaveGroupScript(t *testing.T, engine *WorkerEngine, marker string) string 
 		t.Fatal(err)
 	}
 	engine.ReadOnly = append(engine.ReadOnly, filepath.Dir(self))
+	engine.Limits.AddressSpace = goHelperAddressSpace
 	return fmt.Sprintf(`%q %s %s "$TMPDIR/left" </dev/null >/dev/null 2>&1 &
-while [ ! -e "$TMPDIR/left" ]; do sleep 0.01; done
+i=0; while [ ! -e "$TMPDIR/left" ]; do i=$((i+1)); [ $i -lt 500 ] || exit 70; sleep 0.01; done
 cp "$src" "$dst"`, self, testLeaveGroupFlag, marker)
 }
 
@@ -151,19 +207,12 @@ func importBlank(t *testing.T, ctx context.Context, engine WorkerEngine) (Engine
 	return engine.Run(ctx, raw, Command{Kind: "import", Snapshot: raw})
 }
 
-// detachScript double-forks a child that leaves the engine's session and
-// process group, and waits until it has done so before reporting success.
-func detachScript(marker string) string {
-	return `( setsid sh -c 'echo > "$1"; exec sleep ` + marker + `' sh "$TMPDIR/escaped" </dev/null >/dev/null 2>&1 & )
-while [ ! -e "$TMPDIR/escaped" ]; do sleep 0.01; done
-cp "$src" "$dst"`
-}
-
 func TestWorkerEngineDetachedChildFailsClosedAndIsKilled(t *testing.T) {
 	marker := sleepMarker(t)
-	// Double fork plus setsid: the child leaves the engine's process group and
-	// session and is reparented when its parent exits; the CLI reports success.
-	engine := fakeCLI(t, detachScript(marker))
+	// The child leaves the engine's process group and is reparented when its
+	// parent exits; the CLI reports success.
+	engine := fakeCLI(t, "")
+	engine = fakeCLI2(t, engine, leaveGroupScript(t, &engine, marker))
 	var escapes atomic.Int32
 	engine.Escaped = func() { escapes.Add(1) }
 	_, err := importBlank(t, t.Context(), engine)
@@ -181,7 +230,8 @@ func TestWorkerEngineDetachedChildFailsClosedAndIsKilled(t *testing.T) {
 
 func TestWorkerHandlerQuarantinesAfterEngineEscape(t *testing.T) {
 	marker := sleepMarker(t)
-	engine := fakeCLI(t, detachScript(marker))
+	engine := fakeCLI(t, "")
+	engine = fakeCLI2(t, engine, leaveGroupScript(t, &engine, marker))
 	var escapes atomic.Int32
 	engine.Escaped = func() { escapes.Add(1) }
 	secret := strings.Repeat("q", 64)
@@ -426,43 +476,155 @@ cp "$src" "$dst"`
 	}
 }
 
-// A descendant that starts its own session cannot be attributed to a
-// candidate. The worker then fails every candidate in flight closed (it is
-// about to exit anyway) rather than return output an escaped process could
-// have influenced.
-func TestWorkerEngineUnattributedEscapeFailsEveryCandidateInFlight(t *testing.T) {
-	marker := sleepMarker(t)
-	bad := fakeCLI(t, detachScript(marker))
-	good := fakeCLI(t, "")
-	gate := gateDir(t, &good)
-	good = fakeCLI2(t, good, gatedScript(gate, `cp "$src" "$dst"`))
+// The engine cannot start a session, become a subreaper, or create
+// namespaces, so no engine descendant can hold a session ID that is not its
+// candidate's.
+func TestWorkerEngineCannotStartSessionsSubreapersOrNamespaces(t *testing.T) {
+	engine := fakeCLI(t, "")
+	engine = fakeCLI2(t, engine, sandboxProbeScript(t, &engine))
 	var escapes atomic.Int32
-	bad.Escaped = func() { escapes.Add(1) }
-	good.Escaped = bad.Escaped
-	goodDone := make(chan error, 1)
-	go func() { _, err := importBlank(t, t.Context(), good); goodDone <- err }()
-	// Let the healthy candidate start before the escape is detected.
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		if dirs, _ := filepath.Glob(filepath.Join(good.Scratch, "workbook-*")); len(dirs) == 1 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("healthy candidate did not start")
-		}
-		time.Sleep(5 * time.Millisecond)
+	engine.Escaped = func() { escapes.Add(1) }
+	if _, err := importBlank(t, t.Context(), engine); err != nil {
+		t.Fatalf("engine process-control call was not refused: %v", err)
 	}
-	if _, err := importBlank(t, t.Context(), bad); !errors.Is(err, ErrEngineEscaped) {
-		t.Fatalf("escaping candidate must fail closed, got %v", err)
+	if escapes.Load() != 0 {
+		t.Fatalf("probe is not an escape; hook called %d times", escapes.Load())
 	}
-	openGate(t, gate)
-	if err := <-goodDone; !errors.Is(err, ErrEngineEscaped) {
-		t.Fatalf("candidate in flight during an unattributed escape must fail closed, got %v", err)
+}
+
+// Backstop: a worker child in no registered session cannot be attributed, so
+// the sweep kills it and fails every candidate in flight closed.
+func TestSweepFailsEveryCandidateInFlightOnUnattributedProcess(t *testing.T) {
+	if err := PrepareEngineSandbox(); err != nil {
+		t.Skipf("engine sandbox unavailable: %v", err)
 	}
-	if escapes.Load() == 0 {
-		t.Fatal("worker exit hook not called")
+	marker := sleepMarker(t)
+	stray := exec.Command("/usr/bin/sleep", marker)
+	stray.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := stray.Start(); err != nil {
+		t.Fatal(err)
+	}
+	// Session IDs that no process can have, standing in for two candidates.
+	sweeping, other := &engineRun{session: -2}, &engineRun{session: -3}
+	engineRuns.Lock()
+	engineRuns.live[sweeping.session], engineRuns.live[other.session] = sweeping, other
+	engineRuns.Unlock()
+	defer func() {
+		engineRuns.Lock()
+		delete(engineRuns.live, sweeping.session)
+		delete(engineRuns.live, other.session)
+		engineRuns.Unlock()
+	}()
+	if err := sweepEngineSurvivors(sweeping); err != nil {
+		t.Fatal(err)
+	}
+	engineRuns.Lock()
+	failed := sweeping.escaped && other.escaped
+	engineRuns.Unlock()
+	if !failed {
+		t.Fatal("unattributed process must fail every candidate in flight")
+	}
+	if err := stray.Wait(); err == nil {
+		t.Fatal("unattributed process was not killed")
 	}
 	requireGone(t, marker)
+}
+
+// Each engine process runs with resource limits and is the first OOM victim,
+// so one candidate cannot take the worker or its siblings down with it.
+func TestWorkerEngineRunsWithResourceLimitsAndOOMPreference(t *testing.T) {
+	marker := sleepMarker(t)
+	engine := fakeCLI(t, `if head -c 3145728 /dev/zero > "$TMPDIR/big" 2>/dev/null; then exit 76; fi
+rm -f "$TMPDIR/big"
+sleep `+marker+` </dev/null >/dev/null 2>&1
+cp "$src" "$dst"`)
+	engine.Limits = EngineLimits{AddressSpace: 512 << 20, FileSize: 2 << 20, CPUSeconds: 7}
+	done := make(chan error, 1)
+	go func() { _, err := importBlank(t, t.Context(), engine); done <- err }()
+	var pid int
+	deadline := time.Now().Add(5 * time.Second)
+	for pid == 0 {
+		if pids := processesWithArg(marker); len(pids) == 1 {
+			pid = pids[0]
+		} else if time.Now().After(deadline) {
+			t.Fatal("engine did not start")
+		} else {
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	adj, _ := os.ReadFile(fmt.Sprintf("/proc/%d/oom_score_adj", pid))
+	limits, _ := os.ReadFile(fmt.Sprintf("/proc/%d/limits", pid))
+	_ = syscall.Kill(pid, syscall.SIGKILL)
+	if err := <-done; err != nil {
+		t.Fatalf("limited engine failed (file size limit not enforced?): %v", err)
+	}
+	if strings.TrimSpace(string(adj)) != "1000" {
+		t.Fatalf("engine oom_score_adj %q, want 1000", adj)
+	}
+	for _, want := range []string{
+		`Max cpu time\s+7\s+7\s`,
+		`Max file size\s+2097152\s+2097152\s`,
+		`Max address space\s+536870912\s+536870912\s`,
+	} {
+		if !regexp.MustCompile(want).Match(limits) {
+			t.Fatalf("engine limits lack %s:\n%s", want, limits)
+		}
+	}
+}
+
+// The engine owns its candidate directory and can remove its own permissions
+// (Landlock does not restrict chmod). Cleanup restores them without following
+// links, so the worker does not lose the directory or become unavailable.
+func TestWorkerEngineCleanupSurvivesUnreadableDirectories(t *testing.T) {
+	for _, scenario := range []string{"nested", "candidate-dir"} {
+		t.Run(scenario, func(t *testing.T) {
+			body := `mkdir -p "$TMPDIR/d/e" && touch "$TMPDIR/d/e/f" && chmod 000 "$TMPDIR/d/e" "$TMPDIR/d"
+cp "$src" "$dst"`
+			if scenario == "candidate-dir" {
+				body = `cp "$src" "$dst"; chmod 000 "$TMPDIR"`
+			}
+			engine := fakeCLI(t, body)
+			var escapes atomic.Int32
+			engine.Escaped = func() { escapes.Add(1) }
+			_, err := importBlank(t, t.Context(), engine)
+			if errors.Is(err, ErrEngineUnavailable) {
+				t.Fatalf("permission change made the worker unavailable: %v", err)
+			}
+			if scenario == "nested" && err != nil {
+				t.Fatal(err)
+			}
+			if files, _ := filepath.Glob(filepath.Join(engine.Scratch, "workbook-*")); len(files) != 0 {
+				t.Fatalf("scratch survived: %v", files)
+			}
+			if escapes.Load() != 0 {
+				t.Fatalf("hook called %d times", escapes.Load())
+			}
+		})
+	}
+}
+
+func TestMakeRemovableDoesNotFollowLinks(t *testing.T) {
+	outside := t.TempDir()
+	if err := os.Chmod(outside, 0500); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(outside, 0700)
+	dir := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(dir, "link")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "sub"), 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := makeRemovable(dir); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := os.Stat(outside); err != nil || st.Mode().Perm() != 0500 {
+		t.Fatalf("link target changed: %v %v", st.Mode(), err)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // Capacity N admits N concurrent candidates; candidate N+1 is refused
@@ -626,7 +788,9 @@ func TestWorkerEngineVerifiesDigestOnceAndRefusesChangedBinary(t *testing.T) {
 	if err := engine.Verify(); err != nil {
 		t.Fatal(err)
 	}
-	if !engine.verifiedIdentity() {
+	var exits atomic.Int32
+	engine.Escaped = func() { exits.Add(1) }
+	if engine.pinned == nil {
 		t.Fatal("verified engine has no recorded identity")
 	}
 	if _, err := importBlank(t, t.Context(), engine); err != nil {
@@ -648,6 +812,9 @@ func TestWorkerEngineVerifiesDigestOnceAndRefusesChangedBinary(t *testing.T) {
 	}
 	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("replaced engine binary was executed")
+	}
+	if exits.Load() != 1 {
+		t.Fatalf("changed binary must make the worker exit for a re-verifying restart; hook called %d times", exits.Load())
 	}
 }
 

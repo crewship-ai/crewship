@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"sync"
 	"syscall"
@@ -65,6 +66,9 @@ func PrepareEngineSandbox() error {
 	if _, err := landlockABI(); err != nil {
 		return err
 	}
+	if err := seccompAvailable(); err != nil {
+		return err
+	}
 	subreaperOnce.Do(func() {
 		// Orphaned engine descendants are reparented to this process (PID 1 in
 		// the image does this anyway), so the post-candidate sweep sees them.
@@ -85,7 +89,11 @@ func (e WorkerEngine) execEngine(ctx context.Context, dir string, args []string)
 		}
 		launcher = self
 	}
-	argv := []string{EngineSandboxFlag, "--rw", dir, "--ro", e.Binary}
+	limits := e.Limits.resolved()
+	argv := []string{EngineSandboxFlag, "--rw", dir, "--ro", e.Binary,
+		"--as", strconv.FormatUint(limits.AddressSpace, 10),
+		"--fsize", strconv.FormatUint(limits.FileSize, 10),
+		"--cpu", strconv.FormatUint(limits.CPUSeconds, 10)}
 	for _, root := range append(append([]string(nil), defaultEngineReadOnly...), e.ReadOnly...) {
 		argv = append(argv, "--ro", root)
 	}
@@ -237,6 +245,10 @@ func sweepEngineSurvivors(run *engineRun) error {
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		engineRuns.Lock()
+		// The unreaped leader holds the group ID, so this cannot hit another
+		// group; it also kills a process that rejoined the group after the
+		// first kill.
+		_ = syscall.Kill(-run.session, syscall.SIGKILL)
 		children, err := workerChildren()
 		if err != nil {
 			run.escaped = true
@@ -379,6 +391,7 @@ const landlockFileRights = unix.LANDLOCK_ACCESS_FS_EXECUTE | unix.LANDLOCK_ACCES
 func ExecEngineSandbox(args []string) error {
 	var rw string
 	var ro []string
+	var limits EngineLimits
 	for len(args) > 0 && args[0] != "--" {
 		if len(args) < 2 {
 			return errors.New("invalid engine sandbox arguments")
@@ -391,18 +404,37 @@ func ExecEngineSandbox(args []string) error {
 			rw = args[1]
 		case "--ro":
 			ro = append(ro, args[1])
+		case "--as", "--fsize", "--cpu":
+			n, err := strconv.ParseUint(args[1], 10, 64)
+			if err != nil || n == 0 {
+				return errors.New("invalid engine sandbox arguments")
+			}
+			switch args[0] {
+			case "--as":
+				limits.AddressSpace = n
+			case "--fsize":
+				limits.FileSize = n
+			default:
+				limits.CPUSeconds = n
+			}
 		default:
 			return errors.New("invalid engine sandbox arguments")
 		}
 		args = args[2:]
 	}
-	if rw == "" || len(args) < 2 {
+	if rw == "" || len(args) < 2 || limits.AddressSpace == 0 || limits.FileSize == 0 || limits.CPUSeconds == 0 {
 		return errors.New("invalid engine sandbox arguments")
 	}
 	binary, argv := args[1], args[1:]
 	// Landlock and no_new_privs apply to this thread; execve from the same
 	// thread carries them into the engine.
 	runtime.LockOSThread()
+	// Make the engine the first OOM victim, ahead of the worker and other
+	// candidates. Raising the score needs no privilege; /proc is still
+	// reachable because Landlock is not applied yet.
+	if err := os.WriteFile("/proc/self/oom_score_adj", []byte("1000"), 0); err != nil {
+		return fmt.Errorf("oom_score_adj: %w", err)
+	}
 	abi, err := landlockABI()
 	if err != nil {
 		return err
@@ -463,7 +495,51 @@ func ExecEngineSandbox(args []string) error {
 	if err := unix.Close(ruleset); err != nil {
 		return err
 	}
-	return unix.Exec(binary, argv, os.Environ())
+	if err := installEngineSeccomp(); err != nil {
+		return err
+	}
+	return execWithLimits(binary, argv, os.Environ(), limits)
+}
+
+// execWithLimits applies the engine's resource limits and replaces the
+// process with the engine. The limits come last so the Go launcher never runs
+// under the engine's address space limit; between them and execve nothing
+// allocates and the garbage collector is off, so the runtime does not need
+// new mappings in that window.
+func execWithLimits(binary string, argv, env []string, limits EngineLimits) error {
+	path, err := syscall.BytePtrFromString(binary)
+	if err != nil {
+		return err
+	}
+	argvp, err := syscall.SlicePtrFromStrings(argv)
+	if err != nil {
+		return err
+	}
+	envp, err := syscall.SlicePtrFromStrings(env)
+	if err != nil {
+		return err
+	}
+	resources := [...]struct {
+		resource int
+		limit    unix.Rlimit
+	}{
+		{unix.RLIMIT_AS, unix.Rlimit{Cur: limits.AddressSpace, Max: limits.AddressSpace}},
+		{unix.RLIMIT_FSIZE, unix.Rlimit{Cur: limits.FileSize, Max: limits.FileSize}},
+		{unix.RLIMIT_CPU, unix.Rlimit{Cur: limits.CPUSeconds, Max: limits.CPUSeconds}},
+		{unix.RLIMIT_CORE, unix.Rlimit{}},
+	}
+	debug.SetGCPercent(-1)
+	for i := range resources {
+		if _, _, errno := unix.RawSyscall6(unix.SYS_PRLIMIT64, 0, uintptr(resources[i].resource),
+			uintptr(unsafe.Pointer(&resources[i].limit)), 0, 0, 0); errno != 0 {
+			return fmt.Errorf("engine resource limit: %w", errno)
+		}
+	}
+	_, _, errno := unix.RawSyscall(unix.SYS_EXECVE, uintptr(unsafe.Pointer(path)),
+		uintptr(unsafe.Pointer(&argvp[0])), uintptr(unsafe.Pointer(&envp[0])))
+	runtime.KeepAlive(argvp)
+	runtime.KeepAlive(envp)
+	return fmt.Errorf("engine exec: %w", errno)
 }
 
 func landlockAllow(ruleset int, path string, access uint64, optional bool) error {
@@ -489,6 +565,64 @@ func landlockAllow(ruleset int, path string, access uint64, optional bool) error
 	if _, _, errno := unix.Syscall6(unix.SYS_LANDLOCK_ADD_RULE, uintptr(ruleset), unix.LANDLOCK_RULE_PATH_BENEATH,
 		uintptr(unsafe.Pointer(&rule)), 0, 0, 0); errno != 0 {
 		return fmt.Errorf("landlock rule %s: %w", path, errno)
+	}
+	return nil
+}
+
+// makeRemovable gives the worker back write and search permission on every
+// directory under dir, which the engine owns and may have chmod-ed (Landlock
+// does not restrict chmod). It walks by file descriptor with O_NOFOLLOW, so a
+// link never redirects it outside the candidate directory.
+func makeRemovable(dir string) error {
+	// The worker created dir; the engine cannot replace it (it has no write
+	// access to the scratch root), only change its mode.
+	var st unix.Stat_t
+	if err := unix.Lstat(dir, &st); err != nil {
+		return err
+	}
+	if st.Mode&unix.S_IFMT != unix.S_IFDIR {
+		return errors.New("candidate directory is not a directory")
+	}
+	if err := unix.Chmod(dir, 0700); err != nil {
+		return err
+	}
+	fd, err := unix.Open(dir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return err
+	}
+	return makeRemovableAt(fd, 0)
+}
+
+func makeRemovableAt(fd, depth int) error {
+	f := os.NewFile(uintptr(fd), "candidate")
+	defer f.Close()
+	if depth > 64 {
+		return errors.New("candidate directory too deep")
+	}
+	if err := unix.Fchmod(fd, 0700); err != nil {
+		return err
+	}
+	entries, err := f.ReadDir(-1)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue // links and files: removing them needs only the parent
+		}
+		child, err := unix.Openat(fd, entry.Name(), unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+		if errors.Is(err, unix.EACCES) {
+			if err = unix.Fchmodat(fd, entry.Name(), 0700, 0); err != nil {
+				return err
+			}
+			child, err = unix.Openat(fd, entry.Name(), unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+		}
+		if err != nil {
+			return err
+		}
+		if err := makeRemovableAt(child, depth+1); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -28,9 +28,14 @@ type WorkerEngine struct {
 	// ReadOnly adds read/execute roots for the confined engine. The image
 	// needs none beyond the defaults; tests add their fixture directory.
 	ReadOnly []string
-	// Escaped is called when an engine process survived its candidate. The
-	// worker must then exit so the container and its PID namespace restart.
+	// Escaped is called when the worker can no longer vouch for engine
+	// isolation: an engine process survived its candidate, the verified CLI
+	// changed, or candidate scratch could not be removed. The worker must then
+	// exit so the container, its PID namespace and its scratch are replaced and
+	// the CLI is verified again.
 	Escaped func()
+	// Limits bound each engine process; zero fields use DefaultEngineLimits.
+	Limits EngineLimits
 	// digest overrides the pinned CLI digest in package tests only.
 	digest string
 	// pinned is the identity of the binary Verify hashed. Without it every
@@ -51,8 +56,6 @@ func (e *WorkerEngine) Verify() error {
 	e.pinned = id
 	return nil
 }
-
-func (e WorkerEngine) verifiedIdentity() bool { return e.pinned != nil }
 
 // hashBinary checks the digest and the identity of the same open file, so the
 // identity describes exactly the content that was hashed.
@@ -82,6 +85,34 @@ func (e WorkerEngine) hashBinary() (*engineIdentity, error) {
 		return nil, fmt.Errorf("%w: engine digest mismatch", ErrCandidate)
 	}
 	return &after, nil
+}
+
+// EngineLimits bound one engine process. They are resource limits of that
+// process (and its descendants inherit them), not of the container.
+type EngineLimits struct {
+	// AddressSpace is RLIMIT_AS in bytes.
+	AddressSpace uint64
+	// FileSize is RLIMIT_FSIZE in bytes: the largest file the engine can write.
+	FileSize uint64
+	// CPUSeconds is RLIMIT_CPU.
+	CPUSeconds uint64
+}
+
+// DefaultEngineLimits fit the documented container profile. The engine needs
+// about 10 MiB for a 1 MiB workbook; its outputs above 1 MiB are rejected.
+var DefaultEngineLimits = EngineLimits{AddressSpace: 256 << 20, FileSize: 4 << 20, CPUSeconds: 15}
+
+func (l EngineLimits) resolved() EngineLimits {
+	if l.AddressSpace == 0 {
+		l.AddressSpace = DefaultEngineLimits.AddressSpace
+	}
+	if l.FileSize == 0 {
+		l.FileSize = DefaultEngineLimits.FileSize
+	}
+	if l.CPUSeconds == 0 {
+		l.CPUSeconds = DefaultEngineLimits.CPUSeconds
+	}
+	return l
 }
 
 // RunGridCraftWorker belongs inside the offline worker image. It is not a host
@@ -114,6 +145,10 @@ func (e WorkerEngine) Run(ctx context.Context, input []byte, c Command) (result 
 	if e.pinned != nil {
 		// Hashed once at startup; only confirm it is still that file.
 		if err := e.pinned.check(e.Binary); err != nil {
+			// Only a restart, which hashes the binary again, may trust it.
+			if e.Escaped != nil {
+				e.Escaped()
+			}
 			return EngineResult{}, err
 		}
 	} else if _, err := e.hashBinary(); err != nil {
@@ -124,7 +159,16 @@ func (e WorkerEngine) Run(ctx context.Context, input []byte, c Command) (result 
 		return EngineResult{}, err
 	}
 	defer func() {
-		if cleanupErr := os.RemoveAll(dir); cleanupErr != nil {
+		cleanupErr := makeRemovable(dir)
+		if cleanupErr == nil {
+			cleanupErr = os.RemoveAll(dir)
+		}
+		if cleanupErr != nil {
+			// Scratch is shared by every candidate; only a new container
+			// guarantees it is clean again.
+			if e.Escaped != nil {
+				e.Escaped()
+			}
 			result = EngineResult{}
 			err = fmt.Errorf("%w: private scratch cleanup unconfirmed", ErrEngineUnavailable)
 		}
