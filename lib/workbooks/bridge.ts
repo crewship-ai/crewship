@@ -8,7 +8,8 @@
  *   `EDITOR_FRAME_ATTRIBUTES`, so its origin is opaque and every message from it carries
  *   `origin === "null"`. A "null" origin alone proves nothing (any sandboxed document has it), so
  *   only `gridcraft:hello` whose `source` is our own frame window is considered, and a wrong
- *   protocol or bundle digest kills the session. The answer transfers a private `MessagePort`
+ *   protocol or bundle digest kills the session. The hello must follow the frame's first `load`
+ *   (`frameLoaded()`); an earlier hello or any other load kills the session. The answer transfers a private `MessagePort`
  *   once; every later message travels over it as a JSON string, and any further window message
  *   from the frame kills the session.
  * - Every inbound port message is validated (size, protocol, exact keys, ops) before anything
@@ -291,8 +292,10 @@ export interface WorkbookBridge {
   /** Feed every `window` "message" event here. */
   handleWindowMessage(event: WindowMessage): void
   /**
-   * Feed the iframe's every "load" event here. The first load precedes the hello; any load after
-   * the handshake means the frame now holds a different document, so the session ends and the
+   * Feed the iframe's every "load" event here. The hello is heard only after the first load (the
+   * editor says hello from its own `load` event or later), so the port only ever goes to the
+   * document whose load the host saw. Any other load means the frame now holds a different
+   * document: a second load before the hello, or any load after it, ends the session, and the
    * port is never offered again: the host must create a new frame and a new session.
    */
   frameLoaded(): void
@@ -369,6 +372,8 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
   const mutationPrefix = `${session.session_id}:`
 
   let phase: BridgePhase = "waiting"
+  /** Load events of the frame so far; the hello must follow exactly one. */
+  let loads = 0
   let port: BridgePort | undefined
   let confirmedRev = 0
   /** Lowest revision the editor can resume from: the last snapshot it loaded. */
@@ -728,10 +733,15 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
       const data = event.data
       if (!object(data) || data.type !== "gridcraft:hello") return
       if (!shaped(data, ["type", "protocol", "bundle"]) || data.protocol !== BRIDGE_PROTOCOL || data.bundle !== session.bundle_digest) { kill("handshake"); return }
+      // A hello before the frame's first load comes from a document the host has not seen load,
+      // and that load would later be indistinguishable from a navigation: refuse it, port unsent.
+      if (loads !== 1) { kill("handshake"); return }
       void connect(frame)
     },
     frameLoaded() {
-      if (phase === "connecting" || phase === "live") kill("navigation")
+      loads++
+      // The first load is the editor document itself; any further one is a different document.
+      if (phase === "connecting" || phase === "live" || loads > 1) kill("navigation")
     },
     notify(push) {
       if (phase === "killed" || !count(push?.rev) || !count(push?.generation)) return

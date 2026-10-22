@@ -31,7 +31,8 @@ const flush = () => vi.advanceTimersByTimeAsync(0)
 beforeEach(() => { vi.useFakeTimers() })
 afterEach(() => { vi.useRealTimers() })
 
-function setup(overrides: Partial<WorkbookTransport> = {}) {
+/** `loaded`: the frame's first load event already happened, as it does before a real hello. */
+function setup(overrides: Partial<WorkbookTransport> = {}, { loaded = true } = {}) {
   const frame = { postMessage: vi.fn() }
   const port = { postMessage: vi.fn(), close: vi.fn(), start: vi.fn(), onmessage: null as ((event: { data: unknown }) => void) | null }
   const base: WorkbookTransport = {
@@ -50,6 +51,7 @@ function setup(overrides: Partial<WorkbookTransport> = {}) {
     createChannel: () => ({ port1: port, port2: "port2" }), random: () => 1,
     onSaveEvent: event => events.push(event), onKill: kill => kills.push(kill),
   })
+  if (loaded) bridge.frameLoaded()
   const toFrame = (): HostMessage[] => port.postMessage.mock.calls.map(([data]) => JSON.parse(data as string))
   const types = () => toFrame().map(message => message.type === "committed" || message.type === "ack" ? `${message.type}:${message.rev}` : message.type)
   const hello = (data: unknown = { type: "gridcraft:hello", protocol: 1, bundle: DIGEST }, origin = ORIGIN, source: unknown = frame) => bridge.handleWindowMessage({ origin, source, data })
@@ -161,11 +163,34 @@ describe("handshake", () => {
   })
 
   it("ignores the frame's first load, before its hello", async () => {
-    const t = setup()
+    const t = setup({}, { loaded: false })
     t.bridge.frameLoaded()
     t.hello(); await flush()
     expect(t.bridge.phase).toBe("live")
     expect(t.kills).toEqual([])
+  })
+
+  it("refuses a hello before the frame's first load: the port goes only to a document seen loading", async () => {
+    const t = setup({}, { loaded: false })
+    t.hello(); await flush()
+    expect(t.kills).toEqual([{ reason: "handshake", unsaved: 0 }])
+    expect(t.frame.postMessage).not.toHaveBeenCalled()
+    t.bridge.frameLoaded()
+    t.hello(); await flush()
+    expect(t.frame.postMessage).not.toHaveBeenCalled()
+    expect(t.kills).toHaveLength(1)
+  })
+
+  it("discards the session on a second load before the hello: a navigated document never gets the port", async () => {
+    const t = setup({}, { loaded: false })
+    t.bridge.frameLoaded()
+    t.bridge.frameLoaded() // the first document navigated before saying hello
+    expect(t.kills).toEqual([{ reason: "navigation", unsaved: 0 }])
+    expect(t.bridge.phase).toBe("killed")
+    t.hello(); await flush()
+    expect(t.frame.postMessage).not.toHaveBeenCalled()
+    expect(t.transport.snapshot).not.toHaveBeenCalled()
+    expect(t.transport.closeSession).toHaveBeenCalledTimes(1)
   })
 
   it("discards the session when the frame loads a document after connect, and never resends the port", async () => {
