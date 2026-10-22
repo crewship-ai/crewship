@@ -198,6 +198,11 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport
 		if err := rejectPrivateArtifactRecoveryTarget(ctx, dataDir); err != nil {
 			return rep, err
 		}
+		// A booted target holds its own audit keyring. Refuse one recovery
+		// could not back up and replace now, before the database is removed.
+		if err := journal.CheckSigningKeysReplaceable(dataDir); err != nil {
+			return rep, err
+		}
 	}
 	if err := prepareDataDir(dataDir, opts.Force); err != nil {
 		return rep, err
@@ -856,9 +861,12 @@ func writeRecoveredSecrets(rep *RecoverReport, kit *RecoveryKit, dataDir string)
 		}
 	}
 	if kit != nil && len(kit.AuditKeyring) > 0 {
-		auditPath, err := journal.RestoreSigningKeys(dataDir, kit.AuditKeyring)
+		auditPath, replaced, err := journal.ReplaceSigningKeys(dataDir, kit.AuditKeyring, time.Now())
 		if err != nil {
 			return err
+		}
+		if replaced != "" {
+			rep.Notes = append(rep.Notes, "the data dir's previous audit keyring was replaced by the bundle's and kept as "+replaced+"; entries it signed after the backup do not verify with the restored keyring")
 		}
 		kitLines = append(kitLines, journal.SigningKeysPathEnv+"="+auditPath)
 	}

@@ -75,8 +75,8 @@ func acknowledgePasswordSessions(ctx context.Context, tx *sql.Tx, user, expected
 
 // AuditLocalPasswordResetTx records host-side recovery without inventing an
 // authenticated human actor. The caller owns mutations and the final commit.
-func AuditLocalPasswordResetTx(ctx context.Context, tx *sql.Tx, userID, expectedHash, now string, sessionsRevoked int64) error {
-	metadata, err := json.Marshal(map[string]any{"source": "local_recovery", "sessions_revoked": sessionsRevoked, "cli_tokens_revoked": 0})
+func AuditLocalPasswordResetTx(ctx context.Context, tx *sql.Tx, userID, expectedHash, now string, sessionsRevoked int64, tokensRevoked int) error {
+	metadata, err := json.Marshal(map[string]any{"source": "local_recovery", "sessions_revoked": sessionsRevoked, "cli_tokens_revoked": tokensRevoked})
 	if err != nil {
 		return err
 	}
@@ -93,6 +93,9 @@ func AuditLocalPasswordResetTx(ctx context.Context, tx *sql.Tx, userID, expected
 	if active != 0 {
 		return errors.New("local reset sessions not revoked")
 	}
+	if err := acknowledgeNoCLITokensTx(ctx, tx, userID); err != nil {
+		return err
+	}
 	if err := acknowledgePasswordRecoveryTx(ctx, tx, userID); err != nil {
 		return err
 	}
@@ -108,6 +111,62 @@ func acknowledgePasswordRecoveryTx(ctx context.Context, tx *sql.Tx, user string)
 	}
 	if failed != 0 || locked.Valid || last.Valid {
 		return errors.New("password recovery lockout reset not acknowledged")
+	}
+	return nil
+}
+
+// RevokeRecoveryCLITokensTx revokes and audits every active CLI token of a
+// recovered account on the caller's transaction. Recovery proves control of
+// the account, not of the credentials minted under the old password, so none
+// of them survive it. An empty actor records host-side recovery without
+// inventing a human. Stream notification is the caller's post-commit duty.
+func RevokeRecoveryCLITokensTx(ctx context.Context, tx *sql.Tx, actor, userID, now string) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM cli_tokens WHERE user_id=? AND revoked_at IS NULL ORDER BY id`, userID)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE cli_tokens SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL`, now, userID)
+	if err != nil {
+		return nil, err
+	}
+	if n, err := res.RowsAffected(); err != nil || n != int64(len(ids)) {
+		return nil, errors.Join(err, errors.New("token revoke count changed"))
+	}
+	for _, id := range ids {
+		if err := appendInstanceAuditTx(ctx, tx, journal.InstanceAuditFields{
+			ID: generateCUID(), UserID: sql.NullString{String: actor, Valid: actor != ""}, Action: "auth.cli_token_revoked",
+			EntityType: "cli_token", EntityID: sql.NullString{String: id, Valid: true}, CreatedAt: now,
+		}); err != nil {
+			return nil, err
+		}
+	}
+	if err := ackCLITokenRevocationsTx(ctx, tx, ids, userID, now); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+// acknowledgeNoCLITokensTx runs after the final password audit, so a token
+// inserted by a later write in the same transaction cannot outlive recovery.
+func acknowledgeNoCLITokensTx(ctx context.Context, tx *sql.Tx, userID string) error {
+	var remaining bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM cli_tokens WHERE user_id=? AND revoked_at IS NULL)`, userID).Scan(&remaining); err != nil {
+		return err
+	}
+	if remaining {
+		return errors.New("unrevoked CLI token remains after password recovery")
 	}
 	return nil
 }
