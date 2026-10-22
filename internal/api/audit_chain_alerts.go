@@ -57,6 +57,15 @@ func (i auditChainIncident) key() string {
 	return fmt.Sprintf("chain_break:instance:seq:%d", i.Seq)
 }
 
+// auditIncidentReason names the verdict class first: post_upgrade_invalid is
+// damage since the keyring upgrade and must not read like inherited history.
+func auditIncidentReason(res *journal.VerifyResult) string {
+	if res.HistoricalStatus != "" {
+		return res.HistoricalStatus + ": " + res.Reason
+	}
+	return res.Reason
+}
+
 type auditChainAlerter struct {
 	db     *sql.DB
 	logger *slog.Logger

@@ -62,6 +62,9 @@ func VerifyInstanceAuditWithKeys(ctx context.Context, db chainReader, keys *Sign
 				provenBad = true
 			}
 			result.Reason = "instance audit history contains an unverifiable entry"
+			if result.BrokenSeq == 0 {
+				result.BrokenSeq = seq.Int64
+			}
 		}
 		if macValid && fields.Action == "audit.resealed" && fields.UserID.Valid {
 			row := CheckpointRow{ID: fields.ID, Scope: "instance", ActorID: fields.UserID.String, CreatedAt: fields.CreatedAt, Seq: seq.Int64, PrevHash: prev.String, Payload: fields.Metadata.String, KeyID: keyID, Version: version}

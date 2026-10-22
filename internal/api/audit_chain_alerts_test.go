@@ -153,3 +153,39 @@ func TestAuditResealAlertsAdmins(t *testing.T) {
 		})
 	}
 }
+
+// On-demand verification that finds a defect behind an authentic tail (here
+// post_upgrade_invalid) alerts too; appends never ran into it.
+func TestAuditInstanceVerifyAlertsAdmins(t *testing.T) {
+	f := newInstanceFixture(t)
+	defer f.r.Shutdown()
+	writer := journal.NewWriter(f.db, newTestLogger(), journal.WriterOptions{FlushInterval: time.Hour})
+	defer writer.Close()
+	f.r.journal = writer
+	for range 3 {
+		if err := auditInstance(t.Context(), nil, f.db, "fixture.history", "instance", "", "", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	execOrFatal(t, f.db, `UPDATE instance_audit_logs SET metadata='{"tampered":true}' WHERE chain_seq=2`)
+	rr := f.do(f.boss, "GET", "/api/v1/admin/instance/audit/verify", "")
+	var verdict struct {
+		OK               bool   `json:"ok"`
+		HistoricalStatus string `json:"historical_status"`
+		BrokenSeq        int64  `json:"broken_seq"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &verdict); err != nil || rr.Code != 200 || verdict.OK || verdict.HistoricalStatus != "post_upgrade_invalid" || verdict.BrokenSeq != 2 {
+		t.Fatalf("verify: HTTP %d %+v %v", rr.Code, verdict, err)
+	}
+	drainAlerts(t)
+	if chained, fallback := breakEvents(t, f.db, "chain_break:instance:seq:2"); chained != 1 || fallback != 0 {
+		t.Fatalf("incident events chained=%d fallback=%d, want one chained", chained, fallback)
+	}
+	var reason string
+	if err := f.db.QueryRow(`SELECT json_extract(metadata,'$.reason') FROM instance_audit_logs WHERE action='audit.chain_break_detected'`).Scan(&reason); err != nil || reason[:len("post_upgrade_invalid")] != "post_upgrade_invalid" {
+		t.Fatalf("incident reason %q %v", reason, err)
+	}
+	if n := adminAlerts(t, f.db, "boss", "chain_break:instance:seq:2"); n != 1 {
+		t.Fatalf("instance admin inbox items=%d, want 1", n)
+	}
+}

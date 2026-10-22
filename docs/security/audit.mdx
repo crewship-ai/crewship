@@ -375,8 +375,10 @@ count, and entries still held at shutdown are logged as lost.
 #### Alerts on chain breaks and reseals
 
 A detected break — an append refused by a workspace or instance chain tail, an
-instance audit row failing its check while the audit log is listed, or breaks
-reported by `journal verify` — and every OWNER reseal reach the instance admins:
+instance audit row failing its check while the audit log is listed, or a defect
+reported by `crewship journal verify` or `crewship admin instance audit verify`
+(including `post_upgrade_invalid`, whose verdict class leads the recorded
+reason) — and every OWNER reseal reach the instance admins:
 
 - **Instance audit event.** A break records `audit.chain_break_detected`
   (entity `audit_chain`, one event per incident: scope, workspace, seq), chained

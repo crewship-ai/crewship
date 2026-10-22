@@ -1202,6 +1202,9 @@ func (h *InstanceAdminHandler) AuditVerify(w http.ResponseWriter, r *http.Reques
 		replyInternalError(w, h.logger, "verify instance audit", err)
 		return
 	}
+	if result.BrokenSeq > 0 {
+		raiseAuditChainIncident(r.Context(), auditChainIncident{Kind: "chain_break", Scope: "instance", Seq: result.BrokenSeq, Reason: auditIncidentReason(result)})
+	}
 	writeJSON(w, http.StatusOK, result)
 }
 
