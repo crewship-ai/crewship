@@ -17,31 +17,47 @@ import (
 // chained journal on the writer transaction that makes the change. The legacy
 // audit_logs table is unchained, and WriteAuditLog/auditFromRequest write it
 // best effort after the change has committed. This test scans production Go
-// under internal/ and cmd/ so a new legacy-only writer for an access event
-// cannot land silently:
+// under internal/ and cmd/, call site by call site, so a new legacy-only
+// writer for an access event cannot land silently, even in a file that is
+// chained elsewhere:
 //
-//   - A file with a direct `INSERT INTO audit_logs` must also append the chain
-//     (appendAuthorizationAudit / appendSettingsAudit / AppendTx), or be listed
-//     in legacyAuditInsertFiles with the reason it is not an access change.
-//   - A best-effort WriteAuditLog/auditFromRequest call whose action names an
-//     access concept fails unless that action is listed in
-//     operationalAccessActions with its reason. A call with a non-literal
-//     action must be listed in dynamicAuditActionSites.
+//   - Every `INSERT INTO audit_logs` must sit in a function that itself
+//     appends the chain (appendAuthorizationAudit / appendSettingsAudit /
+//     appendAgentAudit / AppendTx), or that function must be listed in
+//     legacyAuditInsertSites with the reason it is not an access change.
+//   - A best-effort WriteAuditLog/auditFromRequest call fails when its action
+//     names an access concept (accessActionPattern), or when its entity type
+//     has privilege-bearing fields (privilegeFieldsByEntity) and its metadata
+//     names one of them or cannot be read statically. Either is allowed only
+//     with a per-site entry in reviewedAuditSites. A call with a computed
+//     action or entity type must be listed in dynamicAuditActionSites.
 //
 // Adding an entry is a deliberate act that has to be justified in review.
-var legacyAuditInsertFiles = map[string]string{
-	"internal/api/internal_handler.go":               "WriteAuditLog itself: the best-effort writer this guard polices at its call sites",
-	"internal/api/pages_private_metadata_read.go":    "read-access record (OWNER reading a private Page); fail-closed in the read transaction, no access changes",
-	"internal/api/pages_private_audience.go":         "read-access record (OWNER reading a private Page); written on the read transaction, no access changes",
-	"internal/chataudience/private_artifact_read.go": "read-access record (OWNER reading a private chat artifact); conditional insert re-checks authority, no access changes",
-	"internal/api/agent_persona.go":                  "persona.suggest_pending proposal record read by the inbox; a pending suggestion changes no access",
+var legacyAuditInsertSites = map[string]string{
+	"internal/api/internal_handler.go:WriteAuditLog":                             "the best-effort writer this guard polices at its call sites",
+	"internal/api/pages_private_metadata_read.go:appendPrivateReadAudit":         "read-access record (OWNER reading a private Page); fail-closed in the read transaction, no access changes",
+	"internal/api/pages_private_audience.go:recordPrivateOwnerAccess":            "read-access record (OWNER reading a private Page); written on the read transaction, no access changes",
+	"internal/chataudience/private_artifact_read.go:CanReadArtifactConversation": "read-access record (OWNER reading a private chat artifact); conditional insert re-checks authority, no access changes",
+	"internal/api/agent_persona.go:SuggestAgentPersona":                          "persona.suggest_pending proposal record read by the inbox; a pending suggestion changes no access",
 }
 
-// Actions that match accessActionPattern but do not change who may access what.
-var operationalAccessActions = map[string]string{
-	"credential_folder.create":          "a new folder is empty; its policy applies to no credential until one is filed, which is audited on the credential path",
-	"credential_folder.delete":          "only an empty folder can be deleted; no credential's reveal policy or tier changes",
-	"credential.security_level.clamped": "post-restore normalization record; the restore only ever tightens an undefined tier to the strictest one",
+// Entity types whose rows carry fields that decide what someone may reach.
+// A best-effort audit of such an entity that records one of these fields is
+// recording a permission change outside its transaction.
+var privilegeFieldsByEntity = map[string][]string{
+	"AGENT":             {"tool_profile", "mcp_config_json", "crew_id", "agent_role"},
+	"CREDENTIAL_FOLDER": {"reveal_policy", "min_security_level", "default_security_level", "parent_id"},
+}
+
+// Best-effort sites (file:function:action) that the rules above flag and that
+// have been reviewed as changing no access.
+var reviewedAuditSites = map[string]string{
+	"internal/api/credential_folders.go:Create:credential_folder.create":  "a new folder is empty; its policy applies to no credential until one is filed, which is audited on the credential path",
+	"internal/api/credential_folders.go:Delete:credential_folder.delete":  "only an empty folder can be deleted; no credential's reveal policy or tier changes",
+	"internal/api/backup.go:Restore:credential.security_level.clamped":    "post-restore normalization record; the restore only ever tightens an undefined tier to the strictest one",
+	"internal/api/agents_approve_hire.go:ApproveHire:agent.hire_approved": "crew_id identifies the crew the hire already joined (chained as agent.hired); approval changes only its review status",
+	"internal/api/agents_approve_hire.go:emit:<computed>":                 "agent.hire_approved / agent.hire_denied via the approvals queue; crew_id is context, membership was chained as agent.hired",
+	"internal/api/internal_status.go:CreateAgent:agent.created":           "KNOWN GAP (#3945): agent-created persistent agent with crew membership; to be chained in its insert transaction",
 }
 
 // Call sites (file:enclosing function) that pass a computed action. Each one
@@ -56,7 +72,7 @@ var dynamicAuditActionSites = map[string]string{
 
 var accessActionPattern = regexp.MustCompile(`(?i)role|member|grant|permission|polic|access|crew_link|capabilit|privilege|origin_binding|invit|share|acl|owner|credential_folder|security_level|reveal`)
 
-var chainedAppendPattern = regexp.MustCompile(`appendAuthorizationAudit\(|appendSettingsAudit\(|\.AppendTx\(|journal\.AppendTx\(`)
+var chainedAppendPattern = regexp.MustCompile(`appendAuthorizationAudit\(|appendSettingsAudit\(|appendAgentAudit\(|\.AppendTx\(|journal\.AppendTx\(`)
 
 var auditLogsInsertPattern = regexp.MustCompile(`(?is)insert\s+into\s+audit_logs\b`)
 
@@ -66,7 +82,7 @@ func TestAuditLogsWritersAreChainedForAccessChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	var problems []string
-	seenDynamic := map[string]bool{}
+	seen := map[string]bool{}
 	for _, dir := range []string{"internal", "cmd"} {
 		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d os.DirEntry, err error) error {
 			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
@@ -78,73 +94,164 @@ func TestAuditLogsWritersAreChainedForAccessChanges(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			if auditLogsInsertPattern.Match(src) {
-				if _, listed := legacyAuditInsertFiles[rel]; !listed && !chainedAppendPattern.Match(src) {
-					problems = append(problems, rel+": inserts into audit_logs without appending the chained journal; append it in the same transaction, or list the file with its reason")
-				}
-			}
-			fset := token.NewFileSet()
-			file, err := parser.ParseFile(fset, path, src, 0)
-			if err != nil {
-				return err
-			}
-			for _, decl := range file.Decls {
-				fn, ok := decl.(*ast.FuncDecl)
-				if !ok || fn.Body == nil {
-					continue
-				}
-				ast.Inspect(fn.Body, func(n ast.Node) bool {
-					call, ok := n.(*ast.CallExpr)
-					if !ok {
-						return true
-					}
-					index := -1
-					switch name := calleeName(call.Fun); name {
-					case "WriteAuditLog":
-						index = 3
-					case "auditFromRequest":
-						index = 2
-					}
-					if index < 0 || len(call.Args) <= index {
-						return true
-					}
-					site := rel + ":" + fn.Name.Name
-					lit, ok := call.Args[index].(*ast.BasicLit)
-					if !ok || lit.Kind != token.STRING {
-						seenDynamic[site] = true
-						if _, listed := dynamicAuditActionSites[site]; !listed {
-							problems = append(problems, fset.Position(call.Pos()).String()+": best-effort audit with a computed action; list "+site+" with its reason")
-						}
-						return true
-					}
-					action, _ := strconv.Unquote(lit.Value)
-					if _, listed := operationalAccessActions[action]; accessActionPattern.MatchString(action) && !listed {
-						problems = append(problems, fset.Position(call.Pos()).String()+": access action "+strconv.Quote(action)+" is written best effort to audit_logs only; use appendSettingsAudit on the change's transaction")
-					}
-					return true
-				})
-			}
-			return nil
+			fileProblems, err := auditGuardFile(path, rel, src, seen)
+			problems = append(problems, fileProblems...)
+			return err
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 	for site := range dynamicAuditActionSites {
-		if !seenDynamic[site] {
+		if !seen["dynamic:"+site] {
 			problems = append(problems, "stale dynamicAuditActionSites entry: "+site)
 		}
 	}
-	for rel := range legacyAuditInsertFiles {
-		src, err := os.ReadFile(filepath.Join(root, rel))
-		if err != nil || !auditLogsInsertPattern.Match(src) {
-			problems = append(problems, "stale legacyAuditInsertFiles entry: "+rel)
+	for site := range legacyAuditInsertSites {
+		if !seen["insert:"+site] {
+			problems = append(problems, "stale legacyAuditInsertSites entry: "+site)
+		}
+	}
+	for site := range reviewedAuditSites {
+		if !seen["reviewed:"+site] {
+			problems = append(problems, "stale reviewedAuditSites entry: "+site)
 		}
 	}
 	sort.Strings(problems)
 	for _, p := range problems {
 		t.Error(p)
 	}
+}
+
+// auditGuardFile applies the guard's rules to one source file. seen collects
+// the allowlist entries the file used, so stale ones can be reported.
+func auditGuardFile(path, rel string, src []byte, seen map[string]bool) ([]string, error) {
+	var problems []string
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, path, src, 0)
+	if err != nil {
+		return nil, err
+	}
+	// An insert outside any function (a package-level query) has no
+	// transaction of its own to check: it is always a problem.
+	for _, decl := range file.Decls {
+		if _, ok := decl.(*ast.FuncDecl); ok {
+			continue
+		}
+		ast.Inspect(decl, func(n ast.Node) bool {
+			if lit, ok := n.(*ast.BasicLit); ok && lit.Kind == token.STRING && auditLogsInsertPattern.MatchString(lit.Value) {
+				problems = append(problems, fset.Position(lit.Pos()).String()+": package-level audit_logs insert; write it inside the function that appends the chain")
+			}
+			return true
+		})
+	}
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Body == nil {
+			continue
+		}
+		fnSite := rel + ":" + fn.Name.Name
+		body := string(src[fset.Position(fn.Body.Pos()).Offset:fset.Position(fn.Body.End()).Offset])
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			if lit, ok := n.(*ast.BasicLit); ok && lit.Kind == token.STRING && auditLogsInsertPattern.MatchString(lit.Value) {
+				seen["insert:"+fnSite] = true
+				if _, listed := legacyAuditInsertSites[fnSite]; !listed && !chainedAppendPattern.MatchString(body) {
+					problems = append(problems, fset.Position(lit.Pos()).String()+": inserts into audit_logs in "+fnSite+" without appending the chained journal there; append it in the same transaction, or list the site with its reason")
+				}
+				return true
+			}
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			index := -1
+			switch name := calleeName(call.Fun); name {
+			case "WriteAuditLog":
+				index = 3
+			case "auditFromRequest":
+				index = 2
+			}
+			if index < 0 || len(call.Args) <= index+2 {
+				return true
+			}
+			pos := fset.Position(call.Pos()).String()
+			action, actionOK := stringLiteral(call.Args[index])
+			entity, entityOK := stringLiteral(call.Args[index+1])
+			if !actionOK || !entityOK {
+				seen["dynamic:"+fnSite] = true
+				if _, listed := dynamicAuditActionSites[fnSite]; !listed {
+					problems = append(problems, pos+": best-effort audit with a computed action or entity; list "+fnSite+" with its reason")
+				}
+			}
+			if !actionOK {
+				action = "<computed>"
+			}
+			site := fnSite + ":" + action
+			var reasons []string
+			if actionOK && accessActionPattern.MatchString(action) {
+				reasons = append(reasons, "access action "+strconv.Quote(action))
+			}
+			if fields, ok := privilegeFieldsByEntity[entity]; ok {
+				metadata := call.Args[len(call.Args)-1]
+				if keys, static := literalMapKeys(metadata); !static {
+					reasons = append(reasons, entity+" audit with metadata that cannot be read statically")
+				} else {
+					for _, f := range fields {
+						if keys[f] {
+							reasons = append(reasons, entity+" privilege field "+strconv.Quote(f))
+						}
+					}
+				}
+			}
+			if len(reasons) == 0 {
+				return true
+			}
+			seen["reviewed:"+site] = true
+			if _, listed := reviewedAuditSites[site]; !listed {
+				problems = append(problems, pos+": "+strings.Join(reasons, ", ")+" written best effort to audit_logs only ("+site+"); append it on the change's transaction")
+			}
+			return true
+		})
+	}
+	return problems, nil
+}
+
+func stringLiteral(e ast.Expr) (string, bool) {
+	lit, ok := e.(*ast.BasicLit)
+	if !ok || lit.Kind != token.STRING {
+		return "", false
+	}
+	s, err := strconv.Unquote(lit.Value)
+	return s, err == nil
+}
+
+// literalMapKeys returns the string keys of a map composite literal, or
+// static=false when the metadata is anything else (a variable, a call) whose
+// keys the guard cannot see. nil metadata records nothing.
+func literalMapKeys(e ast.Expr) (keys map[string]bool, static bool) {
+	if id, ok := e.(*ast.Ident); ok && id.Name == "nil" {
+		return map[string]bool{}, true
+	}
+	lit, ok := e.(*ast.CompositeLit)
+	if !ok {
+		return nil, false
+	}
+	if _, isMap := lit.Type.(*ast.MapType); !isMap {
+		return nil, false
+	}
+	keys = map[string]bool{}
+	for _, elt := range lit.Elts {
+		kv, ok := elt.(*ast.KeyValueExpr)
+		if !ok {
+			return nil, false
+		}
+		k, ok := stringLiteral(kv.Key)
+		if !ok {
+			return nil, false
+		}
+		keys[k] = true
+	}
+	return keys, true
 }
 
 func calleeName(fun ast.Expr) string {
@@ -155,4 +262,36 @@ func calleeName(fun ast.Expr) string {
 		return f.Sel.Name
 	}
 	return ""
+}
+
+// The guard judges each call site on its own: a file that appends the chain in
+// one function must not hide an unchained insert in another, and an AGENT
+// audit is judged by the fields it records, not only its action name.
+func TestAuditGuardJudgesEachCallSite(t *testing.T) {
+	const header = "package x\n\n"
+	tests := []struct {
+		name, src string
+		problems  int
+	}{
+		{"chained insert", `func a(tx T) { tx.Exec("INSERT INTO audit_logs(id) VALUES(?)"); appendAgentAudit(tx) }`, 0},
+		{"second unchained insert in a chained file", `func a(tx T) { tx.Exec("INSERT INTO audit_logs(id) VALUES(?)"); appendAgentAudit(tx) }
+func b(db D) { db.Exec("INSERT INTO audit_logs(id) VALUES(?)") }`, 1},
+		{"package-level insert", "const q = `INSERT INTO audit_logs(id) VALUES(?)`", 1},
+		{"agent rename", `func a() { WriteAuditLog(c, db, j, "update", "AGENT", id, u, w, map[string]any{"name": n}) }`, 0},
+		{"agent privilege field under a neutral action", `func a() { WriteAuditLog(c, db, j, "update", "AGENT", id, u, w, map[string]any{"tool_profile": p}) }`, 1},
+		{"agent metadata the guard cannot read", `func a() { WriteAuditLog(c, db, j, "update", "AGENT", id, u, w, changes) }`, 1},
+		{"access action on another entity", `func a() { auditFromRequest(r, db, "member.role.update", "WORKSPACE", id, nil) }`, 1},
+		{"computed entity", `func a() { auditFromRequest(r, db, "update", kind, id, nil) }`, 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := auditGuardFile("x.go", "internal/x/x.go", []byte(header+tc.src), map[string]bool{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != tc.problems {
+				t.Fatalf("problems = %d, want %d: %v", len(got), tc.problems, got)
+			}
+		})
+	}
 }

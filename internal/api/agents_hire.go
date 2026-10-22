@@ -211,6 +211,12 @@ func (h *AgentHandler) Hire(w http.ResponseWriter, r *http.Request) {
 		llmModelArg = &model
 	}
 
+	user := UserFromContext(r.Context())
+	userID := ""
+	if user != nil {
+		userID = user.ID
+	}
+
 	if !h.insertHireAgent(w, r, hireInsert{
 		agentID:       agentID,
 		crewID:        crewID,
@@ -225,14 +231,23 @@ func (h *AgentHandler) Hire(w http.ResponseWriter, r *http.Request) {
 		hireReason:    hireReason,
 		createdAt:     createdAt,
 		maxAgents:     maxAgents,
+		userID:        userID,
+		audit: map[string]any{
+			"crew_id":        crewID,
+			"crew_slug":      crewSlug,
+			"template_slug":  req.TemplateSlug,
+			"ttl_minutes":    ttlMin,
+			"reason":         req.Reason,
+			"model":          model,
+			"parent_lead":    parentLeadID,
+			"decision":       string(decision),
+			"autonomy_level": string(autonomyLevel),
+			"pending_review": decision == policy.DecisionInboxApprove,
+			"agent_role":     "AGENT",
+			"tool_profile":   "CODING",
+		},
 	}) {
 		return
-	}
-
-	user := UserFromContext(r.Context())
-	userID := ""
-	if user != nil {
-		userID = user.ID
 	}
 
 	// 7. Inbox + audit by decision.
@@ -250,19 +265,6 @@ func (h *AgentHandler) Hire(w http.ResponseWriter, r *http.Request) {
 	// compensating-deletes the agent above) can't leave an orphaned
 	// agent_credentials row. Best-effort: any failure is journalled, never fatal.
 	autoAssignCredentials(r.Context(), h.db, h.logger, h.journal, workspaceID, agentID, createdAt)
-
-	WriteAuditLog(r.Context(), h.db, h.journal, "agent.hired", "AGENT", agentID, userID, workspaceID, map[string]interface{}{
-		"crew_id":        crewID,
-		"crew_slug":      crewSlug,
-		"template_slug":  req.TemplateSlug,
-		"ttl_minutes":    ttlMin,
-		"reason":         req.Reason,
-		"model":          model,
-		"parent_lead":    parentLeadID,
-		"decision":       string(decision),
-		"autonomy_level": string(autonomyLevel),
-		"pending_review": pendingReview,
-	})
 
 	h.broadcastAgentEvent("agent.hired", workspaceID, map[string]string{
 		"id":        agentID,
@@ -446,6 +448,10 @@ type hireInsert struct {
 	hireReason    string
 	createdAt     string
 	maxAgents     int
+	// The actor and the agent.hired record, appended on the insert's
+	// transaction: the hire is a crew-membership change.
+	userID string
+	audit  map[string]any
 }
 
 // insertHireAgent runs the per-crew quota check + agent INSERT inside a
@@ -506,11 +512,51 @@ func (h *AgentHandler) insertHireAgent(w http.ResponseWriter, r *http.Request, i
 		replyInternalError(w, h.logger, "hire: insert agent", err)
 		return false
 	}
+	notify, err := appendAgentAudit(r.Context(), tx, h.journal, ins.workspaceID, ins.userID, "agent.hired", ins.agentID, ins.audit)
+	if err != nil {
+		replyInternalError(w, h.logger, "hire: audit", err)
+		return false
+	}
 	if err := tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "hire: commit tx", err)
 		return false
 	}
+	if notify != nil {
+		notify()
+	}
 	return true
+}
+
+// revertStagedHire undoes a hire whose required inbox or approval row could
+// not be written. The agent.hired record is already chained, so the removal
+// is chained too, in the same transaction as the deletes.
+func (h *AgentHandler) revertStagedHire(r *http.Request, workspaceID, agentID, inboxID, userID, cause string) {
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		h.logger.Error("hire: begin compensating delete", "error", err, "agent_id", agentID)
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+	if inboxID != "" {
+		if _, err := tx.ExecContext(r.Context(), `DELETE FROM inbox_items WHERE id = ?`, inboxID); err != nil {
+			h.logger.Error("hire: compensating inbox delete", "error", err, "inbox_id", inboxID)
+		}
+	}
+	if _, err := tx.ExecContext(r.Context(), `DELETE FROM agents WHERE id = ? AND workspace_id = ?`, agentID, workspaceID); err != nil {
+		h.logger.Error("hire: compensating delete", "error", err, "agent_id", agentID)
+		return
+	}
+	notify, err := appendAgentAudit(r.Context(), tx, h.journal, workspaceID, userID, "agent.hire_reverted", agentID, map[string]any{"cause": cause})
+	if err == nil {
+		err = tx.Commit()
+	}
+	if err != nil {
+		h.logger.Error("hire: compensating delete not committed", "error", err, "agent_id", agentID)
+		return
+	}
+	if notify != nil {
+		notify()
+	}
 }
 
 // dispatchHireInbox writes the per-decision inbox item (blocking
@@ -546,12 +592,7 @@ func (h *AgentHandler) dispatchHireInbox(w http.ResponseWriter, r *http.Request,
 			// trip the UNIQUE(workspace_id, slug) constraint and so
 			// quota stays consistent. The tx was already committed
 			// above, so issue a compensating DELETE here.
-			if _, derr := h.db.ExecContext(r.Context(),
-				`DELETE FROM agents WHERE id = ? AND workspace_id = ?`,
-				agentID, workspaceID); derr != nil {
-				h.logger.Error("hire: compensating delete after inbox failure",
-					"error", derr, "agent_id", agentID)
-			}
+			h.revertStagedHire(r, workspaceID, agentID, "", userID, "inbox_write_failed")
 			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return "", "", false, 0, false
 		}
@@ -603,17 +644,7 @@ func (h *AgentHandler) dispatchHireInbox(w http.ResponseWriter, r *http.Request,
 		if aerr != nil {
 			h.logger.Error("hire: enqueue approvals row failed — compensating delete of staged hire",
 				"error", aerr, "agent_id", agentID, "inbox_id", inboxID)
-			if _, derr := h.db.ExecContext(r.Context(),
-				`DELETE FROM inbox_items WHERE id = ?`, inboxID); derr != nil {
-				h.logger.Error("hire: compensating inbox delete after enqueue failure",
-					"error", derr, "inbox_id", inboxID)
-			}
-			if _, derr := h.db.ExecContext(r.Context(),
-				`DELETE FROM agents WHERE id = ? AND workspace_id = ?`,
-				agentID, workspaceID); derr != nil {
-				h.logger.Error("hire: compensating delete after enqueue failure",
-					"error", derr, "agent_id", agentID)
-			}
+			h.revertStagedHire(r, workspaceID, agentID, inboxID, userID, "approval_enqueue_failed")
 			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return "", "", false, 0, false
 		}
@@ -951,23 +982,18 @@ func (h *AgentHandler) Rehire(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
-	if err := tx.Commit(); err != nil {
-		h.logger.Error("rehire: commit tx", "error", err, "agent_id", agentID)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-
 	user := UserFromContext(r.Context())
 	userID := ""
 	if user != nil {
 		userID = user.ID
 	}
-
 	priorExpiredAt := ""
 	if oldExpiredAt.Valid {
 		priorExpiredAt = oldExpiredAt.String
 	}
-	WriteAuditLog(r.Context(), h.db, h.journal, "agent.rehired", "AGENT", agentID, userID, workspaceID, map[string]interface{}{
+	// A rehire restores (or extends) crew membership: chained in the same
+	// transaction, and an audit failure rolls the rehire back.
+	notify, err := appendAgentAudit(r.Context(), tx, h.journal, workspaceID, userID, "agent.rehired", agentID, map[string]any{
 		"reason":           req.Reason,
 		"ttl_minutes":      ttlMin,
 		"prior_expired_at": priorExpiredAt,
@@ -977,6 +1003,18 @@ func (h *AgentHandler) Rehire(w http.ResponseWriter, r *http.Request) {
 		"decision":         string(decision),
 		"autonomy_level":   string(autonomyLevel),
 	})
+	if err != nil {
+		replyInternalError(w, h.logger, "rehire: audit", err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		h.logger.Error("rehire: commit tx", "error", err, "agent_id", agentID)
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	if notify != nil {
+		notify()
+	}
 
 	h.broadcastAgentEvent("agent.rehired", workspaceID, map[string]string{
 		"id":         agentID,
