@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -88,7 +89,7 @@ func TestWorkerSocketAuthenticationBoundsAndCapacity(t *testing.T) {
 	if calls.Load() != 1 {
 		t.Fatal("capacity overflow executed work")
 	}
-	// Cancellation must not release a physical slot until the runner actually returns.
+	// Unapproved commands must not acquire a physical slot.
 	if _, err := client.Run(t.Context(), []byte(`{}`), Command{Kind: "file.open"}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("allowlist: %v", err)
 	}
@@ -168,3 +169,45 @@ func TestWorkerClientBoundedResponseAndNoRedirect(t *testing.T) {
 type zeroReader struct{}
 
 func (zeroReader) Read(p []byte) (int, error) { clear(p); return len(p), nil }
+
+func TestWorkerUnconfirmedCleanupQuarantinesUntilServiceRestart(t *testing.T) {
+	dir, err := os.MkdirTemp("", "workbook-quarantine-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	secret := strings.Repeat("s", 64)
+	token := filepath.Join(dir, "token")
+	if err := os.WriteFile(token, []byte(secret), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	handler, err := NewWorkerHandler(secret, runnerFunc(func(context.Context, []byte, Command) (EngineResult, error) {
+		calls.Add(1)
+		return EngineResult{}, fmt.Errorf("%w: cleanup unconfirmed", ErrEngineUnavailable)
+	}), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(dir, "worker.sock")
+	stop, err := documents.ServePrivateUnix(socket, handler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop(context.Background())
+	client, err := NewWorkerClient(socket, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := client.Run(t.Context(), []byte(`{}`), Command{Kind: "import", Snapshot: json.RawMessage(`{}`)}); !errors.Is(err, ErrEngineUnavailable) {
+			t.Fatalf("unsafe cleanup outcome: %v", err)
+		}
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("work started after cleanup uncertainty: %d", calls.Load())
+	}
+	if err := client.Health(t.Context()); !errors.Is(err, ErrEngineUnavailable) {
+		t.Fatalf("quarantined worker appeared ready: %v", err)
+	}
+}
