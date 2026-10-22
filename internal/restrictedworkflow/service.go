@@ -276,6 +276,10 @@ func (s *Service) admit(ctx context.Context, user, workspace, slug string, suppl
 			return receipt, ErrDenied
 		}
 	}
+	// Deferral is treated like scheduling, which v1 publications refuse.
+	if graph.Publication != nil && delay != 0 {
+		return receipt, ErrPublishedDeferral
+	}
 	pageID := sql.NullString{}
 	pageAction, pageHash, source := "", "", "manual"
 	if page != nil {

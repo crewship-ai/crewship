@@ -2427,11 +2427,13 @@ crewship routine run ROUTINE_SLUG --inputs '{"task":"..."}' --wait
 ```
 
 A Guest with Run on the routine and on its recorded agents starts a bounded
-manual run of the published version; the publisher's frozen grants must still
-be live. Logging out does not stop an accepted run. Revoked grants, membership
-removal, suspension, an administrator revoking the user's sessions, a grant
-issuer losing authority, or the routine being withdrawn stop it before its next
-step, and so does the 30-minute run limit. A stopped run's `--wait` exits
+manual run of the published version; the publisher's frozen grants and the
+recorded provider credentials must still be current. Logging out does not stop
+an accepted run. Revoked grants, membership removal, suspension, an
+administrator revoking the user's sessions (even after the user logged out), a
+grant issuer losing authority, a rotated agent credential, or the routine being
+withdrawn stop it before its next step, and so does the 30-minute run limit.
+`--delay` is refused (422) for published routines. A stopped run's `--wait` exits
 nonzero without printing a result. Schedules, webhooks, nested calls and Page
 actions cannot start a published routine.
 

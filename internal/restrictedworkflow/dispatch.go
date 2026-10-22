@@ -15,6 +15,9 @@ import (
 )
 
 func (s *Service) checkJob(ctx context.Context, q pipeline.PageActionQuery, j job, handle string) error {
+	if g, err := decodeGraph(j); err == nil && g.Publication != nil {
+		return s.checkPublishedJob(ctx, q, j, handle, g, boundary{})
+	}
 	expires, err := time.Parse(time.RFC3339Nano, j.Expires)
 	if err != nil || ((j.State == "pending" || j.State == "running") && !time.Now().Before(expires)) {
 		return ErrDenied
@@ -147,6 +150,18 @@ func (s *Service) executeAssignment(ctx context.Context, a dispatch.Assignment, 
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	g, _ := decodeGraph(j)
+	published := g.Publication != nil
+	if published {
+		// The immutable run limit also bounds an in-flight provider call.
+		deadline, err := time.Parse(time.RFC3339Nano, j.Expires) // tsformat:allow: read-only deadline parsing
+		if err != nil {
+			return ErrDenied
+		}
+		var stop context.CancelFunc
+		runCtx, stop = context.WithDeadline(runCtx, deadline)
+		defer stop()
+	}
 	monitorDone := make(chan struct{})
 	defer close(monitorDone)
 	go func(monitored job) {
@@ -159,7 +174,9 @@ func (s *Service) executeAssignment(ctx context.Context, a dispatch.Assignment, 
 			case <-runCtx.Done():
 				return
 			case <-ticker.C:
-				if s.checkJob(runCtx, s.db, monitored, handle) != nil || s.checkOwnership(runCtx, s.db, a) != nil {
+				// Published runs check authority at step boundaries, in one
+				// query before each provider call; the tick only guards the lease.
+				if (!published && s.checkJob(runCtx, s.db, monitored, handle) != nil) || s.checkOwnership(runCtx, s.db, a) != nil {
 					cancel()
 					return
 				}

@@ -89,22 +89,16 @@ func (s *Service) checkGraph(ctx context.Context, q interface {
 			}
 		} else {
 			seenRecipes[r.ID] = r.Hash
+			// Published graphs are checked by checkPublishedJob only.
 			if g.Publication != nil {
-				// A published v1 graph is a single root of direct leaves.
-				if depth != 1 || r.ID != j.Pipeline {
-					return ErrDenied
-				}
-				if err := s.checkPublishedRecipe(ctx, q, j.Workspace, j.Principal, j.Created, r, *g.Publication); err != nil {
-					return err
-				}
-			} else {
-				current, err := loadLegacyGraphRecipe(ctx, q, j.Workspace, r.ID)
-				if err != nil {
-					return err
-				}
-				if current.Raw != r.Raw || current.Crew != r.Crew {
-					return ErrDenied
-				}
+				return ErrDenied
+			}
+			current, err := loadLegacyGraphRecipe(ctx, q, j.Workspace, r.ID)
+			if err != nil {
+				return err
+			}
+			if current.Raw != r.Raw || current.Crew != r.Crew {
+				return ErrDenied
 			}
 			var one int
 			if stored && q.QueryRowContext(ctx, `SELECT 1 FROM restricted_workflow_recipe_bindings WHERE job_id=? AND pipeline_id=? AND recipe_hash=? AND recipe_json=? AND author_crew_id IS ?`, j.ID, r.ID, r.Hash, r.Raw, r.Crew).Scan(&one) != nil {
@@ -113,9 +107,6 @@ func (s *Service) checkGraph(ctx context.Context, q interface {
 		}
 		for _, step := range r.Steps {
 			if step.Child != nil {
-				if g.Publication != nil {
-					return ErrDenied
-				}
 				if err := visit(step.Child, depth+1); err != nil {
 					return err
 				}

@@ -31,30 +31,46 @@ live trusted OWNER/ADMIN issuer. A run-only Guest can invoke another Guest's
 publication within both sets of grants.
 
 Run authority belongs to those grants and the accounts, not to a browser
-session or CLI token: logging out does not stop an accepted run. Before every
-step, on each streamed chunk and on the existing 50 ms run monitor, one
-composite query rechecks the exact HEAD publication, every frozen binding and
-whether an administrator revoked the caller's or publisher's sessions
-(`admin_revoke`/`admin_invalidate`) after acceptance; the existing private-job
-check covers the caller's own grants, membership revision and suspension. A
-failed check stops the run before the next step starts; no further provider
-request is made. Recorded provider expiry in the manifest is not used; provider
-slots keep their existing live expiry checks.
+session or CLI token: logging out does not stop an accepted run. Every
+administrator session revocation (`POST /api/v1/admin/users/{userId}/sessions/revoke-all`,
+single-session revoke and host-side `crewship admin invalidate-sessions`) also
+writes a durable `users.access_revoked_at` marker in the same transaction, so a
+user who had already logged out is still stopped.
 
-A published run has a hard 30-minute limit measured from its scheduled start
-(`delay_seconds`), fixed when it is accepted. Moving HEAD (republish or
-rollback) also stops an older run, as a changed recipe does for legacy runs.
-Results stay private to the run's caller; other Guests and the publisher receive
-the opaque 404.
+At every step boundary, immediately before each provider call, ONE composite
+query rechecks the whole authority of the run: the origin attempt, member
+revision and account, private chat and agent profile, the caller's grants, the
+exact HEAD publication and every frozen authoring/execution binding (same grant,
+publisher membership and live trusted OWNER/ADMIN issuer), the revocation marker
+of the caller and publisher, the current provider declaration of every recorded
+agent (credential, grant, credential revision, model and profile must equal the
+manifest, so a rotated credential stops the run), the frozen recipe and provider
+slots, the dispatch lease and the run's parent attempt. A failed check stops the
+run before the next step; no further provider request is made. Published runs do
+not poll authority between boundaries; the existing lease monitor still cancels
+a run whose dispatch ownership is lost, and the run's deadline cancels an
+in-flight provider call. The manifest's recorded grant/key expiry is not used;
+provider slots keep their existing live expiry checks.
+
+A published run has a hard 30-minute limit from its acceptance, fixed when it
+is accepted. Deferred start is refused: `delay_seconds` other than 0 returns
+HTTP 422 for a published routine. Moving HEAD (republish or rollback) also stops
+an older run, as a changed recipe does for legacy runs. Results stay private to
+the run's caller; other Guests and the publisher receive the opaque 404. A
+completed run's receipt is also hidden once its authority is later revoked;
+this is accepted, the run itself is unaffected.
 
 Acceptance appends a chained `audit.entity_created` journal event
 (`action: published_run_started`) with the run, routine, version, version ID,
 authority fingerprint and publisher. A stop appends `audit.entity_updated`
 (`action: published_run_stopped`) in the same transaction as the failed state,
 with `reason` one of `grant_revoked`, `membership_changed`, `account_suspended`,
-`sessions_revoked`, `issuer_authority_lost`, `unpublished`,
+`sessions_revoked`, `issuer_authority_lost`, `provider_changed`, `unpublished`,
 `publication_changed`, `max_duration`, `authority_changed` or
-`execution_failed`. Events carry no inputs or outputs.
+`execution_failed`. Events carry no inputs or outputs. Exception: stopping
+never waits for the audit writer. If the stop event cannot be appended, the
+failed state still commits without it and the failure is logged; the start
+event, by contrast, is required for admission.
 
 ## Authorized routine catalog
 

@@ -11,9 +11,12 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/access"
+	"github.com/crewship-ai/crewship/internal/dispatch"
+	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/restricteddispatch"
 	"github.com/crewship-ai/crewship/internal/tsformat"
+	"github.com/crewship-ai/crewship/internal/work"
 )
 
 // publishedFixture publishes the two-step fixture routine as Guest h1 through
@@ -146,8 +149,18 @@ func TestPublishedRoutineRunStopsAtNextStep(t *testing.T) {
 		{"suspend account", stopSuspended, func(t *testing.T, s *Service) {
 			mustExec(t, s, `UPDATE users SET suspended_at=? WHERE id='h1'`, tsformat.Format(time.Now()))
 		}, ""},
-		{"admin revokes sessions", stopSessions, func(t *testing.T, s *Service) {
-			mustExec(t, s, `INSERT INTO user_sessions(id,user_id,expires_at,revoked_at,revoked_reason) VALUES('forced','h1','2999-01-01T00:00:00Z',?,'admin_invalidate')`, time.Now().UTC().Format(time.RFC3339))
+		{"logout then admin revokes sessions", stopSessions, func(t *testing.T, s *Service) {
+			// The user logged out first, so no active session row remains;
+			// the administrator revocation's durable marker still stops the run.
+			mustExec(t, s, `INSERT INTO user_sessions(id,user_id,expires_at,revoked_at,revoked_reason) VALUES('browser','h1','2999-01-01T00:00:00Z',?,'logout')`, time.Now().UTC().Format(time.RFC3339))
+			mustExec(t, s, `UPDATE users SET access_revoked_at=? WHERE id='h1'`, tsformat.Format(time.Now()))
+		}, ""},
+		{"credential rotated", stopProvider, func(t *testing.T, s *Service) {
+			rotated, err := encryption.Encrypt("synthetic-rotated-workflow-key")
+			if err != nil {
+				t.Fatal(err)
+			}
+			mustExec(t, s, `UPDATE credentials SET encrypted_value=? WHERE id='key'`, rotated)
 		}, ""},
 		{"issuer loses authority", stopIssuer, func(t *testing.T, s *Service) {
 			mustExec(t, s, `UPDATE workspace_members SET role='MEMBER' WHERE id='mo'`)
@@ -217,6 +230,23 @@ func TestPublishedRoutineRunStopsAtNextStep(t *testing.T) {
 }
 
 func TestPublishedRoutineAdmissionRefusals(t *testing.T) {
+	t.Run("credential rotated after publication", func(t *testing.T) {
+		s, _ := publishedFixture(t)
+		rotated, err := encryption.Encrypt("synthetic-rotated-workflow-key")
+		if err != nil {
+			t.Fatal(err)
+		}
+		mustExec(t, s, `UPDATE credentials SET encrypted_value=? WHERE id='key'`, rotated)
+		if _, err := s.AdmitManual(t.Context(), "h1", "w", "private-work", map[string]any{"task": "x"}, "", 0); !errors.Is(err, ErrDenied) {
+			t.Fatalf("rotated credential admitted: %v", err)
+		}
+	})
+	t.Run("delayed start", func(t *testing.T) {
+		s, _ := publishedFixture(t)
+		if _, err := s.AdmitManual(t.Context(), "h1", "w", "private-work", map[string]any{"task": "x"}, "", time.Minute); !errors.Is(err, ErrPublishedDeferral) {
+			t.Fatalf("deferred published start admitted: %v", err)
+		}
+	})
 	t.Run("changed profile", func(t *testing.T) {
 		s, _ := publishedFixture(t)
 		mustExec(t, s, `UPDATE agents SET restricted_execution_profile='disabled' WHERE id='agent'`)
@@ -269,5 +299,47 @@ func mustExec(t *testing.T, s *Service, q string, args ...any) {
 	t.Helper()
 	if _, err := s.db.ExecContext(context.Background(), q, args...); err != nil {
 		t.Fatal(err)
+	}
+}
+
+type countingQuery struct {
+	q     rowQuery
+	calls int
+}
+
+func (c *countingQuery) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	c.calls++
+	return c.q.QueryRowContext(ctx, query, args...)
+}
+
+// The whole authority check of an accepted published run is one statement,
+// both for receipts and at an execution boundary with lease and parent.
+func TestPublishedRoutineAuthorityIsOneQuery(t *testing.T) {
+	s, _ := publishedFixture(t)
+	receipt, err := s.AdmitManual(t.Context(), "h1", "w", "private-work", map[string]any{"task": "published"}, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j, err := s.load(t.Context(), receipt.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle, err := encryption.Decrypt(j.Handle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	counter := &countingQuery{q: s.db}
+	if err = s.checkJob(t.Context(), counter, j, handle); err != nil || counter.calls != 1 {
+		t.Fatalf("receipt authority: err=%v queries=%d", err, counter.calls)
+	}
+	g, err := decodeGraph(j)
+	if err != nil {
+		t.Fatal(err)
+	}
+	counter.calls = 0
+	// A lease that does not exist is reported as stale ownership, still in one query.
+	err = s.checkPublishedJob(t.Context(), counter, j, handle, g, boundary{parent: j.Origin, assignment: &dispatch.Assignment{Item: &work.Item{ID: "absent"}, RunID: "absent"}})
+	if counter.calls != 1 || err == nil {
+		t.Fatalf("boundary authority: err=%v queries=%d", err, counter.calls)
 	}
 }
