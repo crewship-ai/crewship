@@ -86,9 +86,9 @@ func (e *fakeEngine) Prepare(ctx context.Context, b Binding, s State, c Command)
 	}
 	data := c.Snapshot
 	effects := []string{"*"}
-	if c.Kind == "cell.set" {
+	if c.Kind != "import" {
 		data = json.RawMessage(`{"sheets":[{"B2":"42"}]}`)
-		effects = []string{c.Sheet + "!" + c.Cell}
+		effects = commandTargets(c)
 	}
 	return NewCandidate(b, data, effects), nil
 }

@@ -18,6 +18,10 @@ func gridcraftSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	command["additionalProperties"] = false
 	mandate := obj(map[string]any{"mandate_id": str(), "run_id": str(), "base_rev": integer(1), "generation": integer(1), "targets": strings}, "mandate_id", "run_id", "base_rev", "generation", "targets")
 	mandate["additionalProperties"] = false
+	op := obj(map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"cell.set"}}, "sheet": str(), "cell": map[string]any{"type": "string", "pattern": "^[A-Z]{1,3}[1-9][0-9]{0,6}$"}, "input": map[string]any{"type": "string", "maxLength": 8192}}, "kind", "sheet", "cell", "input")
+	op["additionalProperties"] = false
+	edit := obj(map[string]any{"session_id": str(), "mutation_id": map[string]any{"type": "string", "description": "<session_id>:<seq>, stable across retries"}, "base_rev": integer(1), "generation": integer(1), "ops": map[string]any{"type": "array", "items": op, "minItems": 1, "maxItems": 64}}, "session_id", "mutation_id", "base_rev", "generation", "ops")
+	edit["additionalProperties"] = false
 	create := obj(map[string]any{"slug": str(), "name": str()}, "slug", "name")
 	create["additionalProperties"] = false
 	created := obj(map[string]any{"page_id": str(), "slug": str(), "name": str()}, "page_id", "slug", "name")
@@ -26,6 +30,7 @@ func gridcraftSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	base := "/api/v1/pages/{slug}/workbook"
 	routes["GET "+base] = DomainSchema{Response: ref("WorkbookState")}
 	routes["POST "+base+"/operations"] = DomainSchema{Request: request, RequestRequired: true, Response: ref("WorkbookReceipt")}
+	routes["POST "+base+"/edits"] = DomainSchema{Request: edit, RequestRequired: true, Response: ref("WorkbookReceipt")}
 	routes["GET "+base+"/operations/{mutation}"] = DomainSchema{Response: ref("WorkbookStatus")}
 	routes["POST "+base+"/mandates"] = DomainSchema{Request: mandate, RequestRequired: true, Response: ref("WorkbookMandate")}
 	routes["DELETE "+base+"/mandates/{mandate}"] = DomainSchema{Response: obj(map[string]any{"status": str()}, "status")}

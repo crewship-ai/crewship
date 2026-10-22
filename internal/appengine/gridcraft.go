@@ -73,7 +73,7 @@ func (g GridCraft) Prepare(ctx context.Context, b Binding, s State, c Command) (
 		return Candidate{}, err
 	}
 	effects := []string{"*"}
-	if c.Kind == "cell.set" {
+	if c.Kind == "cell.set" || c.Kind == "cells.set" {
 		original, err := decodeWorkbook(input)
 		if err != nil {
 			return Candidate{}, err
@@ -85,14 +85,14 @@ func (g GridCraft) Prepare(ctx context.Context, b Binding, s State, c Command) (
 		if err != nil {
 			return Candidate{}, err
 		}
-		target := c.Sheet + "!" + c.Cell
-		if err = checkWorkbookEffects(base, comparison, target, result.Recalc); err != nil {
+		targets := commandTargets(c)
+		if err = checkWorkbookEffects(base, comparison, targets, result.Recalc); err != nil {
 			return Candidate{}, err
 		}
-		// The mandate covers the authored target; verified recalculation is its
+		// The mandate covers the authored targets; verified recalculation is their
 		// consequence, not a separate effect. A semantic no-op still receives one
 		// durable operation receipt.
-		effects = []string{target}
+		effects = targets
 	}
 	canonical, err := json.Marshal(candidate)
 	if err != nil {
@@ -149,7 +149,11 @@ func (v *RecalcVerification) verified() bool {
 // cell may appear or disappear. A formula cell's value may change only when the
 // cell holds the same formula before and after, both values are plain results,
 // and the worker's independent full recalculation confirms the whole candidate.
-func checkWorkbookEffects(before, after map[string]any, target string, recalc *RecalcVerification) error {
+func checkWorkbookEffects(before, after map[string]any, targets []string, recalc *RecalcVerification) error {
+	target := map[string]bool{}
+	for _, t := range targets {
+		target[t] = true
+	}
 	a, err := extractCells(before)
 	if err != nil {
 		return err
@@ -165,7 +169,7 @@ func checkWorkbookEffects(before, after map[string]any, target string, recalc *R
 	}
 	derived := 0
 	for k, v := range b {
-		if k == target || reflect.DeepEqual(v, a[k]) {
+		if target[k] || reflect.DeepEqual(v, a[k]) {
 			continue
 		}
 		old, ok := a[k]
@@ -175,7 +179,7 @@ func checkWorkbookEffects(before, after map[string]any, target string, recalc *R
 		derived++
 	}
 	for k := range a {
-		if _, ok := b[k]; !ok && k != target {
+		if _, ok := b[k]; !ok && !target[k] {
 			return ErrEffects
 		}
 	}

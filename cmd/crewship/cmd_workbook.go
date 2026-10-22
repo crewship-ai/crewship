@@ -3,6 +3,7 @@ package main
 // POST /api/v1/workbooks workbook create
 // GET /api/v1/pages/{slug}/workbook workbook read
 // POST /api/v1/pages/{slug}/workbook/operations workbook import
+// POST /api/v1/pages/{slug}/workbook/edits workbook edit
 // GET /api/v1/pages/{slug}/workbook/operations/{mutation} workbook status
 // POST /api/v1/pages/{slug}/workbook/mandates workbook admit
 // DELETE /api/v1/pages/{slug}/workbook/mandates/{mandate} workbook revoke
@@ -48,7 +49,7 @@ func workbookInput(cmd *cobra.Command) ([]byte, error) {
 func newWorkbookCommand() *cobra.Command { return newWorkbookCommandWithTransport(nil) }
 func newWorkbookCommandWithTransport(transport http.RoundTripper) *cobra.Command {
 	root := &cobra.Command{Use: "workbook", Short: "Experimental offline workbook import and targeted agent operations", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() }}
-	for _, op := range []string{"read", "import", "status", "admit", "revoke"} {
+	for _, op := range []string{"read", "import", "edit", "status", "admit", "revoke"} {
 		operation := op
 		cmd := &cobra.Command{Use: operation + " <page-slug|@ID>", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 			if os.Getenv("CREWSHIP_AGENT_TOKEN") != "" {
@@ -57,7 +58,7 @@ func newWorkbookCommandWithTransport(transport http.RoundTripper) *cobra.Command
 			basePath := "/api/v1/pages/" + pagePathEscape(args[0]) + "/workbook"
 			var body []byte
 			var err error
-			if operation == "import" || operation == "admit" {
+			if operation == "import" || operation == "admit" || operation == "edit" {
 				body, err = workbookInput(cmd)
 				if err != nil {
 					return err
@@ -66,6 +67,15 @@ func newWorkbookCommandWithTransport(transport http.RoundTripper) *cobra.Command
 					var req appengine.Request
 					if appengine.DecodeStrict(body, &req) != nil || req.Command.Kind != "import" {
 						return errors.New("native workbook import packet required")
+					}
+				}
+				if operation == "edit" {
+					var edit appengine.Edit
+					if appengine.DecodeStrict(body, &edit) != nil {
+						return errors.New("workbook edit packet required")
+					}
+					if _, err = edit.Request(); err != nil {
+						return fmt.Errorf("workbook edit needs session_id, mutation_id \"<session_id>:<seq>\" and 1-%d cell.set ops on one sheet", appengine.MaxEditCells)
 					}
 				}
 			}
@@ -85,9 +95,14 @@ func newWorkbookCommandWithTransport(transport http.RoundTripper) *cobra.Command
 				response, err = client.Post(basePath+"/operations", json.RawMessage(body))
 			case "admit":
 				response, err = client.Post(basePath+"/mandates", json.RawMessage(body))
+			case "edit":
+				response, err = client.Post(basePath+"/edits", json.RawMessage(body))
 			}
 			if err != nil {
 				return err
+			}
+			if operation == "edit" && response.StatusCode == http.StatusConflict {
+				return printWorkbookConflict(cmd, response)
 			}
 			return printPageArtifactResponse(cmd, response)
 		}}
@@ -95,7 +110,7 @@ func newWorkbookCommandWithTransport(transport http.RoundTripper) *cobra.Command
 			cmd.Use += " <operation-id>"
 			cmd.Args = cobra.ExactArgs(2)
 		}
-		if op == "import" || op == "admit" {
+		if op == "import" || op == "admit" || op == "edit" {
 			cmd.Flags().String("file", "", "Exact JSON request; - reads stdin. Preserve IDs and preconditions on retry")
 		}
 		root.AddCommand(cmd)
@@ -167,5 +182,24 @@ func newWorkbookCommandWithTransport(transport http.RoundTripper) *cobra.Command
 	agent.Flags().String("file", "", "Retained agent read/apply/status JSON packet; - reads stdin")
 	root.AddCommand(agent)
 	return root
+}
+
+// printWorkbookConflict prints a rejected edit's body, which carries the head
+// revision and the server's values for conflicting cells, then exits 5.
+func printWorkbookConflict(cmd *cobra.Command, response *http.Response) error {
+	defer response.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	var body struct {
+		Error string `json:"error" yaml:"error"`
+	}
+	if err != nil || json.Unmarshal(raw, &body) != nil || body.Error == "" {
+		return cli.WithExitCode(errors.New("workbook edit conflict"), cli.ExitConflict)
+	}
+	formatter := cli.NewFormatter(cli.ResolveFormat(flagFormat, nil))
+	formatter.Writer = cmd.OutOrStdout()
+	if err = formatter.Machine(cli.RawJSON(raw)); err != nil {
+		return err
+	}
+	return cli.WithExitCode(fmt.Errorf("workbook edit rejected: %s", body.Error), cli.ExitConflict)
 }
 func init() { rootCmd.AddCommand(newWorkbookCommand()) }

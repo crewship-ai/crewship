@@ -5,8 +5,8 @@ The server runtime and agent tools are disabled by default. It is a narrow pilot
 not a collaborative editor or a dynamically installed application platform.
 
 The compiled Artifact format is `gridcraft-workbook`, schema 1, with execution
-profile `headless-worker/v1`. Native JSON imports and `cell.set` on the active
-sheet are implemented. Embedded UI, arbitrary engine commands, client sync,
+profile `headless-worker/v1`. Native JSON imports, `cell.set` and the atomic
+multi-cell `cells.set` on the active sheet are implemented. Embedded UI, arbitrary engine commands, client sync,
 shared-folder direct edits, proposals, export and restore are unavailable.
 
 An operator must install and qualify a persistent immutable worker image. Configure
@@ -78,7 +78,9 @@ run, Page revision/generation and target. It is not an ACL. The existing signed
 run capability, human chat principal, membership epochs, crew policy, ownership,
 Page version and private audience are checked transactionally on every use.
 The private chat is sealed before agent access. A revoked intent cannot be
-renewed, and a new run does not inherit it. Human edits are imports only.
+renewed, and a new run does not inherit it. The Page owner edits cells through
+`POST …/workbook/edits` (`cells.set`, up to 64 cells on one sheet, one engine
+run, mandate `human-edit`); other humans cannot edit.
 
 Public interface and examples: [`docs/cli/workbook.mdx`](../../docs/cli/workbook.mdx).
 

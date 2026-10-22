@@ -352,6 +352,7 @@ POST /api/v1/pages/{slug}/public roleSelf
 POST /api/v1/pages/{slug}/rollback roleSelf
 POST /api/v1/pages/{slug}/slides/initialize roleInline
 POST /api/v1/pages/{slug}/webhooks roleSelf
+POST /api/v1/pages/{slug}/workbook/edits roleInline
 POST /api/v1/pages/{slug}/workbook/mandates roleInline
 POST /api/v1/pages/{slug}/workbook/operations roleInline
 POST /api/v1/projects roleCreate

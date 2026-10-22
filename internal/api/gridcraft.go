@@ -50,6 +50,8 @@ func (r *Router) RegisterGridCraft(options appengine.Options, engine appengine.E
 	// openapi: responses 200,400,401,403,404,409,429,500,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/workbook/operations", roleInline, h.importFile)
 	// openapi: responses 200,400,401,403,404,409,429,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/workbook/edits", roleInline, h.edit)
+	// openapi: responses 200,400,401,403,404,409,429,500,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/workbook/operations/{mutation}", authed(wsCtx(http.HandlerFunc(h.status))))
 	// openapi: responses 200,400,401,403,404,409,429,500,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/workbook/mandates", roleInline, h.mandate)
@@ -313,6 +315,86 @@ func (h *gridcraftHTTP) importFile(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, result)
 }
+
+// edit commits one atomic human cell edit from a client session. Only the Page
+// owner may edit; the writer for cell-level concurrency is user and session.
+func (h *gridcraftHTTP) edit(w http.ResponseWriter, r *http.Request) {
+	artifactCommentHeaders(w)
+	k, err := h.humanKey(r, true)
+	if err != nil {
+		gridcraftError(w, err)
+		return
+	}
+	var body appengine.Edit
+	if err = decodeGridCraftBody(w, r, &body); err != nil {
+		gridcraftError(w, err)
+		return
+	}
+	req, err := body.Request()
+	if err != nil {
+		gridcraftError(w, err)
+		return
+	}
+	human := h.humanAuthority(r, k, true, nil)
+	authority := func(ctx context.Context, tx *sql.Tx) (appengine.Principal, error) {
+		p, err := human(ctx, tx)
+		if err != nil {
+			return appengine.Principal{}, err
+		}
+		p.MandateID = appengine.HumanEditMandate
+		return p, nil
+	}
+	result, err := h.operations.Apply(r.Context(), k, req, authority)
+	var precondition *appengine.PreconditionError
+	if errors.As(err, &precondition) {
+		h.writePrecondition(w, r, precondition)
+		return
+	}
+	if err != nil {
+		gridcraftError(w, err)
+		return
+	}
+	writeJSON(w, 200, result)
+}
+
+type gridcraftConflict struct {
+	Sheet      string `json:"sheet"`
+	Cell       string `json:"cell"`
+	Input      string `json:"input"`
+	Rev        int64  `json:"rev"`
+	ActorLabel string `json:"actor_label"`
+}
+
+// writePrecondition reports the server's values for conflicting cells. Writers
+// are shown only by display label, never by internal authority or session.
+func (h *gridcraftHTTP) writePrecondition(w http.ResponseWriter, r *http.Request, p *appengine.PreconditionError) {
+	labels := map[string]string{}
+	conflicts := make([]gridcraftConflict, 0, len(p.Conflicts))
+	for _, c := range p.Conflicts {
+		label, ok := labels[c.AuthorityID]
+		if !ok {
+			label = h.actorLabel(r.Context(), c.AuthorityID)
+			labels[c.AuthorityID] = label
+		}
+		conflicts = append(conflicts, gridcraftConflict{c.Sheet, c.Cell, c.Input, c.Rev, label})
+	}
+	writeJSON(w, 409, map[string]any{"error": "precondition_failed", "head_rev": p.HeadRev, "snapshot_required": p.SnapshotRequired, "conflicts": conflicts})
+}
+func (h *gridcraftHTTP) actorLabel(ctx context.Context, authority string) string {
+	var label sql.NullString
+	switch {
+	case strings.HasPrefix(authority, "user:"):
+		_ = h.pages.db.QueryRowContext(ctx, `SELECT nullif(full_name,'') FROM users WHERE id=?`, strings.TrimPrefix(authority, "user:")).Scan(&label)
+	case strings.HasPrefix(authority, "agent:"):
+		agent, _, _ := strings.Cut(strings.TrimPrefix(authority, "agent:"), ":")
+		_ = h.pages.db.QueryRowContext(ctx, `SELECT nullif(name,'') FROM agents WHERE id=?`, agent).Scan(&label)
+	}
+	if label.Valid {
+		return label.String
+	}
+	return "Another editor"
+}
+
 func (h *gridcraftHTTP) status(w http.ResponseWriter, r *http.Request) {
 	artifactCommentHeaders(w)
 	k, err := h.humanKey(r, false)
