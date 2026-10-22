@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { SaveEvent } from "@/lib/editor-lifecycle/save-state"
-import { BRIDGE_MAX_INPUT_BYTES, BRIDGE_MAX_MESSAGE_BYTES, BRIDGE_MAX_OPS, createWorkbookBridge, createWorkbookHttpTransport, parseCommits, parseFrameMessage, parseWorkbookSession, type HostMessage, type KillReason, type TransportResponse, type WorkbookTransport } from "./bridge"
+import { BRIDGE_MAX_INPUT_BYTES, EDITOR_FRAME_ATTRIBUTES, BRIDGE_MAX_MESSAGE_BYTES, BRIDGE_MAX_OPS, createWorkbookBridge, createWorkbookHttpTransport, parseCommits, parseFrameMessage, parseWorkbookSession, type HostMessage, type KillReason, type TransportResponse, type WorkbookTransport } from "./bridge"
 
 const SID = "ws_session1"
-const ORIGIN = "https://editor.test"
+/** The editor document is served with CSP `sandbox allow-scripts`: its origin is opaque. */
+const ORIGIN = "null"
 const DIGEST = "sha256:bundle"
 const session = { session_id: SID, actor_label: "Owner", rev: 41, generation: 1, protocol: 1, bundle_digest: DIGEST }
 
@@ -45,7 +46,7 @@ function setup(overrides: Partial<WorkbookTransport> = {}) {
   const events: SaveEvent[] = []
   const kills: { reason: KillReason; unsaved: number }[] = []
   const bridge = createWorkbookBridge({
-    editorOrigin: ORIGIN, session, frame: () => frame, transport, pageLabel: "Budget", clientId: "client-a",
+    session, frame: () => frame, transport, pageLabel: "Budget", clientId: "client-a",
     createChannel: () => ({ port1: port, port2: "port2" }), random: () => 1,
     onSaveEvent: event => events.push(event), onKill: kill => kills.push(kill),
   })
@@ -59,18 +60,18 @@ function setup(overrides: Partial<WorkbookTransport> = {}) {
 }
 
 describe("handshake", () => {
-  it("connects only our frame on the editor origin with the expected bundle", async () => {
+  it("connects only our sandboxed frame with the expected bundle", async () => {
     const t = setup()
-    t.hello(undefined, "https://evil.test")
-    t.hello(undefined, ORIGIN, { postMessage: vi.fn() })
     t.hello({ type: "other" })
     expect(t.frame.postMessage).not.toHaveBeenCalled()
     expect(t.bridge.phase).toBe("waiting")
 
     t.hello(); await flush()
+    // An opaque origin cannot be named as a target: "*" goes to the verified window object only.
+    expect(t.frame.postMessage).toHaveBeenCalledTimes(1)
     expect(t.frame.postMessage).toHaveBeenCalledWith(
       { type: "gridcraft:connect", protocol: 1, session: "client-a", page_label: "Budget", rev: 41, generation: 1, client_id: "client-a" },
-      ORIGIN, ["port2"],
+      "*", ["port2"],
     )
     // The session id never reaches the frame.
     expect(JSON.stringify(t.frame.postMessage.mock.calls)).not.toContain(SID)
@@ -82,9 +83,39 @@ describe("handshake", () => {
     expect(t.events).toContainEqual({ type: "opened", canWrite: true })
   })
 
+  it("ignores a null-origin hello from another window", async () => {
+    const t = setup()
+    const other = { postMessage: vi.fn() }
+    t.hello(undefined, "null", other)
+    t.hello(undefined, "null", null)
+    await flush()
+    expect(t.frame.postMessage).not.toHaveBeenCalled()
+    expect(other.postMessage).not.toHaveBeenCalled()
+    expect(t.bridge.phase).toBe("waiting")
+    expect(t.kills).toEqual([])
+  })
+
+  it("ignores an unexpected non-null origin from another window", async () => {
+    const t = setup()
+    t.hello(undefined, "https://evil.test", { postMessage: vi.fn() })
+    await flush()
+    expect(t.frame.postMessage).not.toHaveBeenCalled()
+    expect(t.bridge.phase).toBe("waiting")
+  })
+
+  it("kills the session when our frame speaks from a real origin (it is not sandboxed)", async () => {
+    const t = setup()
+    t.hello(undefined, "https://editor.test")
+    t.hello(undefined, "https://crewship.test")
+    await flush()
+    expect(t.frame.postMessage).not.toHaveBeenCalled()
+    expect(t.kills).toEqual([{ reason: "handshake", unsaved: 0 }])
+  })
+
   it.each([
     ["a wrong protocol", { type: "gridcraft:hello", protocol: 2, bundle: DIGEST }],
-    ["an unknown bundle digest", { type: "gridcraft:hello", protocol: 1, bundle: "sha256:other" }],
+    ["a wrong bundle digest", { type: "gridcraft:hello", protocol: 1, bundle: "sha256:other" }],
+    ["a missing bundle digest", { type: "gridcraft:hello", protocol: 1 }],
     ["extra fields", { type: "gridcraft:hello", protocol: 1, bundle: DIGEST, token: "x" }],
   ])("kills the session on %s", async (_, data) => {
     const t = setup()
@@ -95,16 +126,36 @@ describe("handshake", () => {
     expect(t.transport.snapshot).not.toHaveBeenCalled()
   })
 
-  it("treats a second hello as a reloaded frame", async () => {
+  it("rejects a second hello: connect is sent once", async () => {
     const t = setup()
     await t.connect()
     t.hello()
+    await flush()
+    expect(t.frame.postMessage).toHaveBeenCalledTimes(1)
     expect(t.kills).toEqual([{ reason: "handshake", unsaved: 0 }])
     expect(t.port.close).toHaveBeenCalled()
   })
 
-  it("refuses a wildcard editor origin", () => {
-    expect(() => createWorkbookBridge({ editorOrigin: "*", session, frame: () => null, transport: {} as WorkbookTransport, pageLabel: "", clientId: "" })).toThrow()
+  it("rejects any window message from the frame after connect: the port is the only channel", async () => {
+    const t = setup()
+    await t.connect()
+    t.bridge.handleWindowMessage({ origin: "null", source: t.frame, data: JSON.stringify(mutation(1, 41, [["B3", "1"]])) })
+    expect(t.kills).toEqual([{ reason: "handshake", unsaved: 0 }])
+    expect(t.transport.edit).not.toHaveBeenCalled()
+  })
+
+  it("ignores window messages from other windows after connect", async () => {
+    const t = setup()
+    await t.connect()
+    t.bridge.handleWindowMessage({ origin: "null", source: { postMessage: vi.fn() }, data: { type: "gridcraft:hello", protocol: 1, bundle: DIGEST } })
+    t.bridge.handleWindowMessage({ origin: "https://evil.test", source: null, data: "x" })
+    expect(t.kills).toEqual([])
+    expect(t.bridge.phase).toBe("live")
+  })
+
+  it("describes the frame the host must create", () => {
+    expect(EDITOR_FRAME_ATTRIBUTES).toEqual({ sandbox: "allow-scripts", credentialless: true, referrerPolicy: "no-referrer" })
+    expect(EDITOR_FRAME_ATTRIBUTES.sandbox).not.toContain("allow-same-origin")
   })
 })
 

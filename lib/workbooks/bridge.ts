@@ -4,9 +4,13 @@
  * The editor runs in a frame on its own origin and is untrusted input, exactly like an HTTP
  * client. This module owns everything between that frame and the server:
  *
- * - Handshake: only `gridcraft:hello` from the expected editor origin AND our own frame window is
- *   considered; a wrong protocol or bundle digest kills the session. The answer transfers a
- *   private `MessagePort`; every later message travels over it as a JSON string.
+ * - Handshake: the editor document is served with CSP `sandbox allow-scripts` and framed with
+ *   `EDITOR_FRAME_ATTRIBUTES`, so its origin is opaque and every message from it carries
+ *   `origin === "null"`. A "null" origin alone proves nothing (any sandboxed document has it), so
+ *   only `gridcraft:hello` whose `source` is our own frame window is considered, and a wrong
+ *   protocol or bundle digest kills the session. The answer transfers a private `MessagePort`
+ *   once; every later message travels over it as a JSON string, and any further window message
+ *   from the frame kills the session.
  * - Every inbound port message is validated (size, protocol, exact keys, ops) before anything
  *   reaches the server. A malformed envelope kills the session; malformed ops are refused.
  * - The frame never learns the session id: the host turns the frame's monotonic `seq` into
@@ -125,6 +129,15 @@ export interface FrameMutation { seq: number; base_rev: number; ops: CellOp[] }
 export type FrameMessage =
   | { type: "mutation"; mutation: FrameMutation }
   | { type: "resume"; last_rev: number; pending: FrameMutation[] }
+
+/**
+ * How the host must create the editor frame: scripts only, no `allow-same-origin` (the origin
+ * stays opaque, so the frame has no cookies, storage or same-origin reach into anything),
+ * a credentialless load and no referrer.
+ */
+export const EDITOR_FRAME_ATTRIBUTES = Object.freeze({ sandbox: "allow-scripts", credentialless: true, referrerPolicy: "no-referrer" } as const)
+/** `MessageEvent.origin` of a document with an opaque origin. */
+export const OPAQUE_ORIGIN = "null"
 
 export type KillReason = "handshake" | "protocol" | "access" | "generation" | "closed"
 
@@ -247,8 +260,6 @@ export interface FrameWindow { postMessage(message: unknown, targetOrigin: strin
 export interface WindowMessage { origin: string; source: unknown; data: unknown }
 
 export interface WorkbookBridgeOptions {
-  /** Exact origin of the editor frame, e.g. `https://editor.example`. Never "*". */
-  editorOrigin: string
   /** The session the server opened for this frame. */
   session: WorkbookSession
   /** The frame's window (`iframe.contentWindow`); messages from any other source are ignored. */
@@ -346,8 +357,7 @@ function editFailure(response: TransportResponse): BridgeFailure {
 }
 
 export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBridge {
-  const { session, transport, editorOrigin } = options
-  if (!editorOrigin || editorOrigin === "*" || editorOrigin === "null") throw new Error("workbook bridge: an exact editor origin is required")
+  const { session, transport } = options
   const timers = options.timers ?? { now: () => Date.now(), setTimeout: (run, ms) => setTimeout(run, ms), clearTimeout: handle => clearTimeout(handle as ReturnType<typeof setTimeout>) }
   const emit = (event: SaveEvent) => { if (phase !== "killed" || event.type === "denied") options.onSaveEvent?.(event) }
   const mutationPrefix = `${session.session_id}:`
@@ -672,9 +682,17 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
     port = channel.port1
     port.onmessage = onPortMessage
     port.start?.()
+    // The target origin must be "*": an opaque origin cannot be named, and "null" matches nothing.
+    // It is acceptable only here and only because:
+    // - `frame` is the exact window object whose hello was just verified (our iframe's
+    //   contentWindow), and postMessage delivers to that window alone, never to another frame;
+    // - this call runs synchronously in the same task that verified the hello;
+    // - the host page's CSP `frame-src` admits only the editor origin into that frame, so even a
+    //   frame that navigated itself right after its hello holds an editor-origin document.
+    // Nothing else is ever posted with "*"; all later traffic uses the transferred port.
     frame.postMessage(
       { type: "gridcraft:connect", protocol: BRIDGE_PROTOCOL, session: options.frameNonce ?? options.clientId, page_label: options.pageLabel, rev: session.rev, generation: session.generation, client_id: options.clientId },
-      editorOrigin,
+      "*",
       [channel.port2],
     )
     phase = "live"
@@ -694,12 +712,15 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
     handleWindowMessage(event) {
       if (phase === "killed") return
       const frame = options.frame()
-      // Only our own frame on the editor origin is heard at all.
-      if (!frame || event.origin !== editorOrigin || event.source !== frame) return
+      // Only our own frame window is heard at all; every other window, whatever its origin, is ignored.
+      if (!frame || event.source !== frame) return
+      // Our frame must be sandboxed (opaque origin); a real origin means it is not.
+      if (event.origin !== OPAQUE_ORIGIN) { kill("handshake"); return }
+      // After connect the port is the only channel: a second hello (a reloaded frame that lost its
+      // state) or any other window message from the frame ends the session.
+      if (phase !== "waiting") { kill("handshake"); return }
       const data = event.data
       if (!object(data) || data.type !== "gridcraft:hello") return
-      // A second hello means the frame reloaded and lost its state: start over with a new frame.
-      if (phase !== "waiting") { kill("handshake"); return }
       if (!shaped(data, ["type", "protocol", "bundle"]) || data.protocol !== BRIDGE_PROTOCOL || data.bundle !== session.bundle_digest) { kill("handshake"); return }
       void connect(frame)
     },
