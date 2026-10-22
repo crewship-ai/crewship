@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestGridCraftSurfaceDefaultOffAndRefusesLegacyCredential(t *testing.T) {
@@ -58,5 +59,27 @@ func TestGridCraftMCPKeepsSignedRunAndOriginalMutationOnRetry(t *testing.T) {
 	}
 	if len(bodies) != 2 || bodies[0] != bodies[1] || !strings.Contains(bodies[0], `"base_rev":1`) || !strings.Contains(bodies[0], `"mutation_id":"original-edit"`) {
 		t.Fatalf("request was renewed: %v", bodies)
+	}
+}
+
+func TestGridCraftHostReceiptCanOutliveMemoryIPCBudget(t *testing.T) {
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-time.After(10100 * time.Millisecond):
+		case <-r.Context().Done():
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"mutation_id":"retained","rev":2}`))
+	}))
+	defer host.Close()
+	s := newRoutineMCPTestServer(t, &IPCConfig{GridCraftEnabled: true, BaseURL: host.URL, Token: "fixture", WorkspaceID: "ws"})
+	r := httptest.NewRequest("POST", "/", nil)
+	response, err := s.sendBoundedHostRequest(r, "POST", "/api/v1/internal/gridcraft", []byte(`{}`), 1024, "agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.status != 200 || !strings.Contains(string(response.body), `"mutation_id":"retained"`) {
+		t.Fatalf("receipt lost: %#v", response)
 	}
 }

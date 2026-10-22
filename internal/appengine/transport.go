@@ -45,7 +45,7 @@ func NewWorkerClient(socket, tokenFile string) (*WorkerClient, error) {
 		return nil, err
 	}
 	tr := &http.Transport{Proxy: nil, DisableKeepAlives: true, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
+		return dialPrivateWorker(ctx, socket)
 	}}
 	return &WorkerClient{socket: socket, tokenFile: tokenFile, client: &http.Client{Transport: tr, Timeout: 25 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
@@ -66,11 +66,13 @@ func (c *WorkerClient) Run(ctx context.Context, input []byte, command Command) (
 	// Import snapshot travels once, as the input, rather than duplicating its
 	// potentially large JSON value in both fields of the service envelope.
 	command.Snapshot = nil
-	body, err := json.Marshal(WorkerRequest{Snapshot: input, Command: command})
-	if err != nil {
+	var body bytes.Buffer
+	enc := json.NewEncoder(&body)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(WorkerRequest{Snapshot: input, Command: command}); err != nil {
 		return EngineResult{}, ErrInvalid
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://worker/v1/candidate", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://worker/v1/candidate", &body)
 	if err != nil {
 		return EngineResult{}, ErrInvalid
 	}
@@ -84,19 +86,25 @@ func (c *WorkerClient) Run(ctx context.Context, input []byte, command Command) (
 	if resp.StatusCode == http.StatusTooManyRequests {
 		return EngineResult{}, ErrCapacity
 	}
+	if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusRequestEntityTooLarge || resp.StatusCode == http.StatusUnprocessableEntity {
+		return EngineResult{}, ErrInvalid
+	}
 	if resp.StatusCode != http.StatusOK {
 		return EngineResult{}, ErrEngineUnavailable
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, workerResponseLimit+1))
-	if err != nil || len(raw) > workerResponseLimit {
+	if err != nil {
 		return EngineResult{}, ErrEngineUnavailable
+	}
+	if len(raw) > workerResponseLimit {
+		return EngineResult{}, ErrInvalid
 	}
 	var result EngineResult
 	if err := DecodeStrict(raw, &result); err != nil {
 		return EngineResult{}, ErrEngineUnavailable
 	}
 	if len(result.Base) > MaxSnapshotBytes || len(result.Result) > MaxSnapshotBytes {
-		return EngineResult{}, ErrEngineUnavailable
+		return EngineResult{}, ErrInvalid
 	}
 	return result, nil
 }
@@ -163,6 +171,9 @@ func NewWorkerHandler(secret string, runner Runner, maxWorkers int) (http.Handle
 				quarantined.Store(true)
 			}
 			status := http.StatusUnprocessableEntity
+			if errors.Is(err, ErrEngineUnavailable) {
+				status = http.StatusServiceUnavailable
+			}
 			if errors.Is(err, ErrCapacity) {
 				status = http.StatusTooManyRequests
 			}
@@ -174,7 +185,9 @@ func NewWorkerHandler(secret string, runner Runner, maxWorkers int) (http.Handle
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(result)
+		enc := json.NewEncoder(w)
+		enc.SetEscapeHTML(false)
+		_ = enc.Encode(result)
 	}), nil
 }
 

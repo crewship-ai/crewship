@@ -159,7 +159,11 @@ func TestWorkerClientBoundedResponseAndNoRedirect(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := client.Run(t.Context(), []byte(`{}`), Command{Kind: "import", Snapshot: json.RawMessage(`{}`)}); !errors.Is(err, ErrEngineUnavailable) {
+			want := ErrEngineUnavailable
+			if scenario == "overflow" {
+				want = ErrInvalid
+			}
+			if _, err := client.Run(t.Context(), []byte(`{}`), Command{Kind: "import", Snapshot: json.RawMessage(`{}`)}); !errors.Is(err, want) {
 				t.Fatalf("unsafe response accepted: %v", err)
 			}
 		})
@@ -209,5 +213,91 @@ func TestWorkerUnconfirmedCleanupQuarantinesUntilServiceRestart(t *testing.T) {
 	}
 	if err := client.Health(t.Context()); !errors.Is(err, ErrEngineUnavailable) {
 		t.Fatalf("quarantined worker appeared ready: %v", err)
+	}
+}
+
+func TestWorkerHTMLSnapshotNearLimitPreservesWireSize(t *testing.T) {
+	dir, err := os.MkdirTemp("", "workbook-html-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	token := filepath.Join(dir, "token")
+	secret := strings.Repeat("s", 64)
+	if err := os.WriteFile(token, []byte(secret), 0600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := []byte(`{"value":"` + strings.Repeat("<>&", (MaxSnapshotBytes-32)/3) + `"}`)
+	handler, err := NewWorkerHandler(secret, runnerFunc(func(_ context.Context, in []byte, _ Command) (EngineResult, error) {
+		return EngineResult{Base: in, Result: in}, nil
+	}), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(dir, "worker.sock")
+	stop, err := documents.ServePrivateUnix(socket, handler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop(context.Background())
+	client, err := NewWorkerClient(socket, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.Run(t.Context(), snapshot, Command{Kind: "import", Snapshot: snapshot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(result.Result) != string(snapshot) {
+		t.Fatal("snapshot changed during transport")
+	}
+}
+
+func TestWorkerClientRejectsWritableOrSubstitutedSocketBeforeSendingSecret(t *testing.T) {
+	for _, scenario := range []string{"writable-directory", "writable-socket", "symlink-socket"} {
+		t.Run(scenario, func(t *testing.T) {
+			dir, err := os.MkdirTemp("", "workbook-peer-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.RemoveAll(dir)
+			token := filepath.Join(dir, "token")
+			if err := os.WriteFile(token, []byte(strings.Repeat("s", 64)), 0600); err != nil {
+				t.Fatal(err)
+			}
+			socket := filepath.Join(dir, "worker.sock")
+			var calls atomic.Int32
+			stop, err := documents.ServePrivateUnix(socket, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1); w.WriteHeader(204) }))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer stop(context.Background())
+			switch scenario {
+			case "writable-directory":
+				if err := os.Chmod(dir, 0770); err != nil {
+					t.Fatal(err)
+				}
+			case "writable-socket":
+				if err := os.Chmod(socket, 0666); err != nil {
+					t.Fatal(err)
+				}
+			case "symlink-socket":
+				alias := filepath.Join(dir, "alias.sock")
+				if err := os.Symlink(socket, alias); err != nil {
+					t.Fatal(err)
+				}
+				socket = alias
+			}
+			client, err := NewWorkerClient(socket, token)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := client.Health(t.Context()); !errors.Is(err, ErrEngineUnavailable) {
+				t.Fatalf("unsafe socket accepted: %v", err)
+			}
+			if calls.Load() != 0 {
+				t.Fatal("secret sent to unsafe listener")
+			}
+		})
 	}
 }
