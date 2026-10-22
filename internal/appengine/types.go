@@ -16,6 +16,10 @@ import (
 )
 
 const MaxSnapshotBytes = 1 << 20
+
+// MaxEngineOutputBytes bounds a raw engine file before compaction. The engine
+// writes indented JSON, several times larger than the stored compact snapshot.
+const MaxEngineOutputBytes = 4 * MaxSnapshotBytes
 const SchemaVersion = 1
 
 var (

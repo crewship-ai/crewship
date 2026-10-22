@@ -39,7 +39,9 @@ Import a native workbook with an immutable request envelope:
 The `snapshot` above is a placeholder: supply a valid workbook exported by the
 pinned GridCraft version. For an existing workbook, retain the read revision and
 generation as preconditions. Humans change workbook contents by importing files.
-The server rejects incomplete or unsupported workbook files.
+The server rejects incomplete or unsupported workbook files. A stored workbook
+is limited to 1 MiB of compact JSON (roughly 10,000 simple cells); the engine's
+indented working files may be up to four times larger.
 
 To authorize an already running agent to change one cell, the current human
 owner submits a retained mandate:

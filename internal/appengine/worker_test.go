@@ -1,11 +1,14 @@
 package appengine
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/crewship-ai/crewship/internal/database"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 )
 
@@ -194,5 +197,98 @@ func TestRealGridCraftRecalcVerificationDetectsTamperedValues(t *testing.T) {
 				t.Fatalf("verification=%+v", got)
 			}
 		})
+	}
+}
+
+// largeWorkbook fills the blank fixture with n numeric cells in ten columns.
+func largeWorkbook(t *testing.T, n int) []byte {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/blank-workbook.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workbook map[string]any
+	if err = json.Unmarshal(raw, &workbook); err != nil {
+		t.Fatal(err)
+	}
+	bands := map[string]any{}
+	for i := 0; i < n; i++ {
+		row, col := i/10, i%10
+		band := strconv.Itoa(row / 64)
+		if bands[band] == nil {
+			bands[band] = map[string]any{"rows": map[string]any{}}
+		}
+		rows := bands[band].(map[string]any)["rows"].(map[string]any)
+		if rows[strconv.Itoa(row)] == nil {
+			rows[strconv.Itoa(row)] = map[string]any{}
+		}
+		rows[strconv.Itoa(row)].(map[string]any)[strconv.Itoa(col)] = map[string]any{"value": map[string]any{"t": "Number", "v": json.Number(strconv.Itoa(i) + ".5")}, "formula": nil, "style": 0}
+	}
+	workbook["sheets"].([]any)[0].(map[string]any)["cells"] = map[string]any{"bands": bands, "len": n}
+	out, err := json.Marshal(workbook)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// The snapshot limit bounds what Go stores (compact JSON), not the engine's
+// pretty-printed file, which is several times larger for the same workbook.
+func TestEngineOutputLimitAppliesToCompactSnapshot(t *testing.T) {
+	compact := largeWorkbook(t, 6000)
+	var pretty bytes.Buffer
+	if err := json.Indent(&pretty, compact, "", "    "); err != nil {
+		t.Fatal(err)
+	}
+	if len(compact) >= MaxSnapshotBytes || pretty.Len() <= MaxSnapshotBytes || pretty.Len() > MaxEngineOutputBytes {
+		t.Fatalf("fixture sizes compact=%d pretty=%d", len(compact), pretty.Len())
+	}
+	oversized := largeWorkbook(t, 20000)
+	if len(oversized) <= MaxSnapshotBytes {
+		t.Fatalf("oversized fixture %d", len(oversized))
+	}
+	dir := t.TempDir()
+	write := func(name string, data []byte) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	got, err := readBounded(write("pretty.json", pretty.Bytes()))
+	if err != nil || !bytes.Equal(got, compact) {
+		t.Fatalf("pretty within compact limit: len=%d err=%v", len(got), err)
+	}
+	if _, err = readBounded(write("oversized.json", oversized)); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("compact over limit: %v", err)
+	}
+	if _, err = readBounded(write("raw.json", append(pretty.Bytes(), bytes.Repeat([]byte(" "), MaxEngineOutputBytes)...))); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("raw over limit: %v", err)
+	}
+	if _, err = readBounded(write("broken.json", []byte(`{"sheets":`))); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("malformed: %v", err)
+	}
+}
+
+// A 6k-cell sheet stays editable through the pinned engine even though its
+// pretty-printed engine output exceeds the stored snapshot limit.
+func TestRealGridCraftLargeSheetWithinCompactLimit(t *testing.T) {
+	binary := os.Getenv("CREWSHIP_TEST_GRIDCRAFT_BINARY")
+	if binary == "" {
+		t.Skip("set CREWSHIP_TEST_GRIDCRAFT_BINARY for the pinned engine size contract")
+	}
+	raw := largeWorkbook(t, 6000)
+	engine := GridCraft{Runner: localFixtureRunner{binary, t.TempDir()}}
+	b := Binding{Engine: engine.Identity()}
+	imported, err := engine.Prepare(t.Context(), b, State{}, Command{Kind: "import", Snapshot: raw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited, err := engine.Prepare(t.Context(), b, State{Snapshot: imported.Snapshot}, Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "42"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(edited.Snapshot) > MaxSnapshotBytes || len(edited.Effects) != 1 || edited.Effects[0] != "Sheet1!B2" {
+		t.Fatalf("size=%d effects=%v", len(edited.Snapshot), edited.Effects)
 	}
 }

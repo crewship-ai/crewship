@@ -98,6 +98,10 @@ func (g GridCraft) Prepare(ctx context.Context, b Binding, s State, c Command) (
 	if err != nil {
 		return Candidate{}, err
 	}
+	// Re-encoding may escape characters; the stored form must still fit.
+	if len(canonical) > MaxSnapshotBytes {
+		return Candidate{}, ErrInvalid
+	}
 	return NewCandidate(b, canonical, effects), nil
 }
 func decodeWorkbook(raw []byte) (map[string]any, error) {

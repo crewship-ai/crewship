@@ -108,20 +108,28 @@ func RunGridCraftWorker(ctx context.Context, binary, scratch string, input []byt
 	}
 	return EngineResult{Base: normalized, Result: data, Recalc: recalc}, nil
 }
+
+// readBounded reads an engine file within MaxEngineOutputBytes and returns its
+// compact form. MaxSnapshotBytes bounds that compact form, which is what the
+// host stores, rather than the engine's indented output.
 func readBounded(path string) ([]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	b, err := io.ReadAll(io.LimitReader(f, MaxSnapshotBytes+1))
+	b, err := io.ReadAll(io.LimitReader(f, MaxEngineOutputBytes+1))
 	if err != nil {
 		return nil, err
 	}
-	if len(b) > MaxSnapshotBytes {
+	if len(b) > MaxEngineOutputBytes {
 		return nil, ErrInvalid
 	}
-	return b, nil
+	var compact bytes.Buffer
+	if err = json.Compact(&compact, b); err != nil || compact.Len() > MaxSnapshotBytes {
+		return nil, ErrInvalid
+	}
+	return compact.Bytes(), nil
 }
 
 type WorkerRequest struct {
