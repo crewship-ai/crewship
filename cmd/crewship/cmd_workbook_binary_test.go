@@ -70,6 +70,15 @@ func TestWorkbookHumanBinary(t *testing.T) {
 		}
 		return out
 	}
+	created := run("", "workbook", "create", "created-workbook", "--name", "Created workbook")
+	createdRetry := run("", "workbook", "create", "created-workbook", "--name", "Created workbook")
+	var page struct {
+		PageID string `json:"page_id"`
+	}
+	if json.Unmarshal(createdRetry, &page) != nil || page.PageID == "" || !strings.Contains(string(created), page.PageID) {
+		t.Fatalf("create %s retry %s", created, createdRetry)
+	}
+	run(`{"mutation_id":"created-import","mandate_id":"human-import","base_rev":0,"generation":0,"command":{"kind":"import","snapshot":{"sheets":[{}]}}}`, "workbook", "import", "created-workbook", "--file", "-")
 	body := `{"mutation_id":"binary-import","mandate_id":"human-import","base_rev":0,"generation":0,"command":{"kind":"import","snapshot":{"sheets":[{}]}}}`
 	first := run(body, "workbook", "import", "@workbook-binary-page", "--file", "-")
 	retry := run(body, "workbook", "import", "@workbook-binary-page", "--file", "-")

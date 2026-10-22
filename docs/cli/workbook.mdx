@@ -9,6 +9,7 @@ They support personal, human-owned private Pages and native GridCraft JSON.
 There is no embedded spreadsheet editor or collaborative editing in this pilot.
 
 ```bash
+crewship workbook create my-book --name "My book"
 crewship workbook import @PAGE_ID --file import.json
 crewship workbook read @PAGE_ID
 crewship workbook status @PAGE_ID import-1
@@ -16,6 +17,11 @@ crewship workbook admit @PAGE_ID --file mandate.json
 crewship workbook revoke @PAGE_ID mandate-1
 crewship workbook agent --file packet.json
 ```
+
+First create the empty personal private Page that the workbook is imported into.
+Only its author (and an audited workspace OWNER) can read it. Repeating the same
+slug and name returns the same still-empty Page; any other slug reuse is a
+conflict, and an existing Page is never converted.
 
 Import a native workbook with an immutable request envelope:
 
@@ -62,6 +68,7 @@ API equivalents:
 
 | Method | Path | CLI |
 | --- | --- | --- |
+| POST | `/api/v1/workbooks` | `workbook create` |
 | GET | `/api/v1/pages/{slug}/workbook` | `workbook read` |
 | POST | `/api/v1/pages/{slug}/workbook/operations` | `workbook import` |
 | GET | `/api/v1/pages/{slug}/workbook/operations/{mutation}` | `workbook status` |
@@ -82,6 +89,11 @@ remains pending until a qualified live transport is implemented. Unknown
 outcomes require querying status or retrying the original packet. Do not refresh
 its base revision automatically. Conflicts, revocation, an effect outside the
 mandate and exhausted worker capacity reject the candidate without a new revision.
+
+## `crewship workbook create <page-slug>`
+
+`--name <name>` (required) names the new empty personal private Page. Returns
+`page_id`, `slug` and `name`; `201` on creation, `200` on an identical retry.
 
 ## `crewship workbook read <page-slug|@ID>`
 

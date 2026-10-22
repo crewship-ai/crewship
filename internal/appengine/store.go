@@ -372,6 +372,17 @@ func eligibleNewWorkbook(ctx context.Context, tx *sql.Tx, k Key) error {
 	return nil
 }
 
+// PageHasNoContent reports whether a Page holds neither a workbook nor any
+// other content format, so it may still become a new workbook.
+func PageHasNoContent(ctx context.Context, tx *sql.Tx, pageID string) (bool, error) {
+	var workbook bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM gridcraft_heads WHERE page_id=?)`, pageID).Scan(&workbook); err != nil || workbook {
+		return false, err
+	}
+	occupied, err := hasOtherContent(ctx, tx, pageID)
+	return !occupied, err
+}
+
 func hasOtherContent(ctx context.Context, tx *sql.Tx, pageID string) (bool, error) {
 	for _, table := range []string{"documents", "slides_heads", "page_panels", "page_project_drafts", "page_project_live", "page_artifacts", "page_boards"} {
 		var installed, occupied bool

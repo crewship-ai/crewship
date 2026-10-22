@@ -344,3 +344,43 @@ func TestGridCraftWorkbookPreventsDocumentAndSlidesInitialization(t *testing.T) 
 		})
 	}
 }
+
+func TestGridCraftHumanCreatesEmptyPrivateWorkbookPage(t *testing.T) {
+	f := gridcraftInstanceFixture(t)
+	create := func(token, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		return f.do(token, "POST", "/api/v1/workbooks?workspace_id=ws-old", body)
+	}
+	body := `{"slug":"pilot-book","name":"Pilot book"}`
+	wantCode(t, create(f.boss, body), 404, "default off")
+	f.r.RegisterGridCraft(appengine.Options{Enabled: true}, gridcraftFixtureEngine{})
+	first := create(f.boss, body)
+	wantCode(t, first, 201, "create private workbook page")
+	var created struct {
+		PageID string `json:"page_id"`
+		Slug   string `json:"slug"`
+	}
+	if err := json.Unmarshal(first.Body.Bytes(), &created); err != nil || created.PageID == "" || created.Slug != "pilot-book" {
+		t.Fatalf("created=%+v err=%v body=%s", created, err, first.Body.String())
+	}
+	var owner string
+	var private int
+	if err := f.db.QueryRow(`SELECT owner_user_id,private_audience FROM pages WHERE id=? AND folder_id IS NULL AND owner_crew_id IS NULL`, created.PageID).Scan(&owner, &private); err != nil || owner != "boss" || private != 1 {
+		t.Fatalf("owner=%q private=%d err=%v", owner, private, err)
+	}
+	retry := create(f.boss, body)
+	wantCode(t, retry, 200, "identical retry returns the same empty page")
+	if !strings.Contains(retry.Body.String(), created.PageID) {
+		t.Fatalf("retry body=%s", retry.Body.String())
+	}
+	wantCode(t, create(f.wsAdmin, body), 409, "another user cannot claim the slug")
+	wantCode(t, create(f.boss, `{"slug":"pilot-book","name":"Renamed"}`), 409, "different name is a different request")
+	wantCode(t, create(f.boss, `{"slug":"Bad Slug","name":"x"}`), 400, "invalid slug")
+	wantCode(t, create(f.boss, `{"slug":"ok-slug","name":"x","extra":1}`), 400, "unknown field")
+	wmSeedPage(t, f.db, "ws-old", "shared-page", "shared-page", "Shared", "boss", "")
+	wantCode(t, create(f.boss, `{"slug":"shared-page","name":"Shared"}`), 409, "existing non-private page is never converted")
+	importBody := `{"mutation_id":"import-1","mandate_id":"human-import","base_rev":0,"generation":0,"command":{"kind":"import","snapshot":{"sheets":[{}]}}}`
+	wantCode(t, f.do(f.boss, "POST", "/api/v1/pages/pilot-book/workbook/operations?workspace_id=ws-old", importBody), 200, "created page accepts import")
+	wantCode(t, create(f.boss, body), 409, "a page with a workbook is no longer an empty create result")
+	wantCode(t, f.do(f.wsAdmin, "GET", "/api/v1/pages/pilot-book/workbook?workspace_id=ws-old", ""), 404, "private to its author")
+}

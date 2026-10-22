@@ -1,5 +1,6 @@
 package main
 
+// POST /api/v1/workbooks workbook create
 // GET /api/v1/pages/{slug}/workbook workbook read
 // POST /api/v1/pages/{slug}/workbook/operations workbook import
 // GET /api/v1/pages/{slug}/workbook/operations/{mutation} workbook status
@@ -99,6 +100,24 @@ func newWorkbookCommandWithTransport(transport http.RoundTripper) *cobra.Command
 		}
 		root.AddCommand(cmd)
 	}
+	create := &cobra.Command{Use: "create <page-slug>", Short: "Create the empty personal private Page a workbook is imported into", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		if os.Getenv("CREWSHIP_AGENT_TOKEN") != "" {
+			return errors.New("human workbook operations require a human credential; use workbook agent for an admitted run")
+		}
+		name, _ := cmd.Flags().GetString("name")
+		client, err := pageClient()
+		if err != nil {
+			return err
+		}
+		response, err := client.Post("/api/v1/workbooks", map[string]string{"slug": args[0], "name": name})
+		if err != nil {
+			return err
+		}
+		return printPageArtifactResponse(cmd, response)
+	}}
+	create.Flags().String("name", "", "Page name; repeat the same slug and name to retry safely")
+	_ = create.MarkFlagRequired("name")
+	root.AddCommand(create)
 	agent := &cobra.Command{Use: "agent", Short: "Send a retained read/apply/status packet through the protected run sidecar", Args: cobra.NoArgs, PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 		for _, key := range []string{"config", "server", "profile", "workspace", "server-allow-mismatch"} {
 			if cmd.Flags().Changed(key) || cmd.InheritedFlags().Changed(key) {
