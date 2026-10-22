@@ -31,16 +31,30 @@ also holds physical worker slots until computation and cleanup return; an expire
 lease alone does not free global, workspace or artifact capacity. The persistent worker also enforces physical capacity across application
 restarts. Its managed container restart discards all private candidate scratch.
 
-Concurrency is per cell. A cell mutation whose `base_rev` is behind the head is
-computed on the head and committed when the generation matches, no import lies
-in between, it lags at most 256 revisions and no other writer changed one of its
-target cells since its base. A writer is the authority, plus the client
-`session_id` for a human, so two windows of one person are distinct writers. A
-rejection carries the head revision, whether a fresh snapshot is required and
-the conflicting cells. If the head moves while a candidate is computed, the
-commit fails with `precondition_failed` and the same request may be retried.
-An agent mandate keeps its original base revision and targets; it can still
-commit after a human changed other cells. Imports require the exact head.
+Concurrency is per written cell. A cell mutation whose `base_rev` is behind the
+head is computed on the head and committed when the generation matches, no
+import (or pruned history) lies in between, it lags at most 256 revisions and no
+other writer changed one of its target cells since its base. A writer is the
+authority, plus the client `session_id` for a human, so two windows of one
+person are distinct writers. A rejection carries the head revision, the
+conflicting cells with their input in the head, and `SnapshotRequired` whenever
+retrying the same request cannot succeed (generation, base ahead of head, stale
+import, gap or window). If the head moves while a candidate is computed, the
+commit fails with `precondition_failed` without either, and the same request may
+be retried. An agent mandate keeps its original base revision and targets; it
+can still commit after a human changed other cells. Imports require the exact
+head.
+
+The read set is not protected: a literal derived from another cell seen at
+`base_rev` commits even if that cell changed since, and a target write changes
+every dependent formula, including ones created after a mandate was admitted.
+Formulas themselves are always recalculated on the head. This is accepted for
+the pilot and documented in `docs/cli/workbook.mdx`.
+
+The rebase window is read and parsed in a separate, already authorized read
+transaction before the writer transaction; inside it only revisions committed
+since then are scanned, so a stale edit over large commands does not hold the
+database-wide write lock while parsing them.
 
 The engine computes outside the database transaction. The candidate binds the
 artifact, base revision, generation, command hash, mandate, pinned engine and
@@ -63,11 +77,19 @@ isolation alone does not.
 
 Go atomically stores head snapshot, immutable receipt, audit and outbox. Each
 audit row records the revision kind (`snapshot` for an import, `cells` for cell
-edits), its writer and the canonical command. History keeps a full snapshot only
+edits), its writer, the canonical command (JSON without HTML escaping, at most
+1 MiB) and the hash of the resulting snapshot. History keeps a full snapshot only
 for imports and every 50th revision (`gridcraft_revisions` checkpoints); the
-head is always a full snapshot. The history quota counts checkpoint snapshots
-and recorded commands (default 64 MiB) and at most 1000 checkpoints. Rows
-recorded before command history are treated as snapshot revisions.
+head is always a full snapshot. Any revision can be rebuilt from the nearest
+checkpoint at or below it by replaying the recorded cells with the pinned engine,
+and each step is verified against the recorded result hash (tested with the real
+engine). The history quota counts checkpoint snapshots and recorded commands
+(default 64 MiB) and at most 1000 checkpoints. Reaching it prunes history no
+rebase can use (before the newest checkpoint at least 256 revisions back); if
+that is not enough, the new revision becomes a checkpoint and all earlier
+commands are pruned. Pruned rows keep writer, receipt and result hash and are
+marked as snapshot revisions, like rows recorded before command history, so no
+mutation is rebased across them.
 Receipts require FULL synchronous storage and report `durability: node`.
 Delivery remains `pending`: no live broadcast/presence transport is installed.
 No receipt detail or replay fence is deleted by this module. A fresh candidate
@@ -80,7 +102,11 @@ Page version and private audience are checked transactionally on every use.
 The private chat is sealed before agent access. A revoked intent cannot be
 renewed, and a new run does not inherit it. The Page owner edits cells through
 `POST …/workbook/edits` (`cells.set`, up to 64 cells on one sheet, one engine
-run, mandate `human-edit`); other humans cannot edit.
+run, mandate `human-edit`); other humans cannot edit. Mandate IDs with the
+`human-` prefix are reserved and refused for agents. The adapter still applies
+the recalculation effect check to human edits, so a human edit that
+recalculates other cells of a workbook with volatile formulas, or whose
+recalculation cannot be verified, is refused with `effect_out_of_mandate`.
 
 Public interface and examples: [`docs/cli/workbook.mdx`](../../docs/cli/workbook.mdx).
 

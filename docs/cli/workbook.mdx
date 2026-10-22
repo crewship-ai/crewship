@@ -112,31 +112,66 @@ The Page owner edits cells with an atomic edit from one client session:
 ```
 
 An edit holds 1 to 64 `cell.set` operations on one sheet (the active sheet), each
-with an input of at most 8 KiB; it is committed entirely or not at all. The
-`mutation_id` is `<session_id>:<seq>` and must be retried with the same bytes;
-`session_id` is part of the request fingerprint. Concurrency is per cell: an
-edit whose `base_rev` is behind the current revision is applied to the current
-revision unless another writer (another session, another person or an agent)
-changed one of its cells since `base_rev`, an import happened in between, or it
-lags more than 256 revisions. Edits from the same session never conflict with
-each other. Formula cells are recalculated as described above. A rejected edit
-returns `409`:
+with an input of at most 8 KiB; it is committed entirely or not at all, and its
+recorded form may not exceed 1 MiB of JSON. The `mutation_id` is
+`<session_id>:<seq>` and must be retried with the same bytes; `session_id` is
+1 to 128 characters from `A-Z`, `a-z`, `0-9`, `_` and `-`, and is part of the
+request fingerprint. An import never carries a `session_id`.
+
+Concurrency is per written cell: an edit whose `base_rev` is behind the current
+revision is applied to the current revision unless another writer (another
+session, another person or an agent) changed one of its cells since `base_rev`,
+an import happened in between, or it lags more than 256 revisions. Edits from
+the same session never conflict with each other. Formula cells are recalculated
+as described above, also for the owner: an edit that recalculates other cells
+in a workbook with volatile functions, or whose recalculation cannot be
+verified, fails with `403 effect_out_of_mandate`.
+
+Only the cells an edit writes are checked, not the cells its inputs were derived
+from. If a client computes `B2` from the value of `C3` it saw at `base_rev`, and
+another writer has changed `C3` since, the edit still commits; formulas are
+always recalculated on the current revision, but a literal typed from an old
+value is not. In the same way an agent's write to its target also changes every
+formula that depends on it, including formulas the owner added after admitting
+the mandate, and two sessions can each write half of a circular reference, which
+the engine then reports as an error value. Clients that derive literals from
+other cells should send an edit based on the current revision or reread before
+committing; for agents, admit a mandate on the revision the instruction was
+given for and revoke it when that basis no longer holds.
+
+A rejected edit or import returns `409`:
 
 ```json
 {"error":"precondition_failed","head_rev":44,"snapshot_required":false,"conflicts":[{"sheet":"Sheet1","cell":"B5","input":"7","rev":43,"actor_label":"Ada"}]}
 ```
 
-`conflicts` lists the server's current input for each conflicting cell and who
-wrote it, by display name only. With `snapshot_required: true`, reread the
-workbook before editing again. A `409 precondition_failed` with no conflicts
-means the workbook changed while the edit was computed; retry the same packet.
+- `conflicts` lists each target cell that another writer changed since
+  `base_rev`, with the cell's input in the current revision, the revision that
+  wrote it and who wrote it, by display name only. Resolve the conflict and
+  send the result as a new edit with a new `mutation_id`.
+- `snapshot_required: true` means retrying the same packet can never succeed:
+  the generation differs, `base_rev` is ahead of the current revision, an import
+  or pruned history lies in between, the edit lags more than 256 revisions, or
+  an import was based on an older revision. Reread the workbook, then send a new
+  edit or import with a new `mutation_id`.
+- With no conflicts and `snapshot_required: false`, the workbook changed while
+  the edit was computed; retry the same packet unchanged.
+
 An agent mandate keeps its original base revision, so an agent can still change
 its target after the owner edited other cells, but not after someone else
-changed that target.
+changed that target. Mandate IDs starting with `human-` are reserved for human
+operations and rejected on admission.
 
 History stores a full snapshot for imports and every 50th revision, and the
-command of every revision. The history quota (`429 history_quota_exceeded`)
-counts those snapshots and commands.
+command and resulting snapshot hash of every revision, so any revision can be
+rebuilt from the nearest checkpoint with the pinned engine and verified. The
+history quota counts those snapshots and commands. When it is reached, the
+server drops history that no rebase can use: checkpoints and commands older than
+the newest checkpoint at least 256 revisions back. If the last 256 revisions do
+not fit either, the new revision becomes a checkpoint and all earlier commands
+are dropped; edits based on older revisions then get `snapshot_required`.
+Audit rows and receipts are kept. `429 history_quota_exceeded` remains only for
+a single revision whose snapshot and command alone exceed the quota.
 
 A receipt is immutable and confirms durable storage, with `durability: node`.
 Its status response separately reports delivery and the current head. Delivery
