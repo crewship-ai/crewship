@@ -105,6 +105,9 @@ func remainingAdminSystemSchemaCatalogV2() map[string]DomainSchema {
 		"breaks":           array(obj(map[string]any{"seq": integer(), "id": str(), "kind": str(), "reason": str()}, "seq", "id", "kind", "reason")),
 		"repairable_count": integer(), "repairable_truncated": boolean(),
 		"repairable": array(obj(map[string]any{"seq": integer(), "id": str(), "stored_priority": str(), "emit_priority": str()}, "seq", "id", "stored_priority", "emit_priority")),
+		// Instance chain only: security actions recorded outside the chain
+		// while its tail was broken.
+		"unchained_fallback": integer(),
 	}, "workspace_id", "ok", "count", "continuation_verified")
 	auditScope := func() map[string]any {
 		return map[string]any{"type": "string", "enum": []string{"workspace", "instance"}}
@@ -150,6 +153,7 @@ func remainingAdminSystemSchemaCatalogV2() map[string]DomainSchema {
 		"POST /api/v1/admin/keeper/findings/test":     {Request: json(map[string]any{"workspace_id": str(), "crew_id": str(), "reason": str()}), Response: obj(map[string]any{"inbox_item_id": str(), "recipients": array(obj(map[string]any{"user_id": str(), "email": str(), "name": str(), "role": str()}))})},
 		"POST /api/v1/admin/keeper/review/{slot}/run": {Request: json(map[string]any{"workspace_id": str(), "crew_id": str(), "agent_id": str(), "skill_id": str(), "tool_name": str(), "tool_args_snippet": str(), "recent_tool_calls": array(str()), "trigger": str(), "failure_snippet": str(), "prior_lesson": str()}), Response: obj(map[string]any{"slot": str(), "decision": str(), "reason": str(), "lesson": str(), "error": str(), "data": free()})},
 		"GET /api/v1/admin/journal/verify":            {Response: integrity},
+		"GET /api/v1/admin/instance/audit/verify":     {Response: integrity},
 		"GET /api/v1/admin/audit/head":                {Response: auditHead},
 		"POST /api/v1/admin/audit/reseal":             {Request: auditResealRequest, Response: auditReseal},
 		"GET /api/v1/admin/legacy-resources":          {Response: obj(map[string]any{"present": boolean()})},

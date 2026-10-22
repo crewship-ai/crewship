@@ -23921,6 +23921,108 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "break_count": {
+                      "type": "integer"
+                    },
+                    "breaks": {
+                      "items": {
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "seq": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "seq",
+                          "id",
+                          "kind",
+                          "reason"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "breaks_truncated": {
+                      "type": "boolean"
+                    },
+                    "broken_id": {
+                      "type": "string"
+                    },
+                    "broken_seq": {
+                      "type": "integer"
+                    },
+                    "checkpoints": {
+                      "type": "integer"
+                    },
+                    "continuation_verified": {
+                      "type": "boolean"
+                    },
+                    "count": {
+                      "type": "integer"
+                    },
+                    "historical_status": {
+                      "type": "string"
+                    },
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "repairable": {
+                      "items": {
+                        "properties": {
+                          "emit_priority": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "seq": {
+                            "type": "integer"
+                          },
+                          "stored_priority": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "seq",
+                          "id",
+                          "stored_priority",
+                          "emit_priority"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "repairable_count": {
+                      "type": "integer"
+                    },
+                    "repairable_truncated": {
+                      "type": "boolean"
+                    },
+                    "unchained_fallback": {
+                      "type": "integer"
+                    },
+                    "workspace_id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "workspace_id",
+                    "ok",
+                    "count",
+                    "continuation_verified"
+                  ],
                   "type": "object"
                 }
               }
@@ -37994,6 +38096,9 @@
                     },
                     "repairable_truncated": {
                       "type": "boolean"
+                    },
+                    "unchained_fallback": {
+                      "type": "integer"
                     },
                     "workspace_id": {
                       "type": "string"
