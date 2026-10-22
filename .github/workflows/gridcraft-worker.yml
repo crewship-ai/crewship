@@ -41,7 +41,11 @@ jobs:
           mkdir -p "$artifact"
           image_id="$(docker image inspect --format '{{.Id}}' "$image")"
           docker save --output "$artifact/image.tar" "$image_id"
-          SOURCE_SHA="$REVIEWED_SHA" IMAGE_ID="$image_id" ARTIFACT_DIR="$artifact" python3 - <<'PY'
+          # The image declares its worker protocol and engine pin offline; the
+          # smoke test above proved the running worker enforces the same pair.
+          docker run --rm --pull=never --network=none --read-only --cap-drop=ALL \
+            --security-opt=no-new-privileges --user="$(id -u):$(id -g)" "$image_id" --contract > "$RUNNER_TEMP/gridcraft-contract.json"
+          SOURCE_SHA="$REVIEWED_SHA" IMAGE_ID="$image_id" ARTIFACT_DIR="$artifact" CONTRACT="$RUNNER_TEMP/gridcraft-contract.json" python3 - <<'PY'
           import hashlib, json, os, subprocess
           from pathlib import Path
           directory = Path(os.environ['ARTIFACT_DIR'])
@@ -53,6 +57,10 @@ jobs:
                          context_tree=subprocess.check_output(['git', 'rev-parse', 'HEAD^{tree}'], text=True).strip(),
                          image_id=os.environ['IMAGE_ID'], archive_sha256=digest.hexdigest(),
                          run_id=int(os.environ['GITHUB_RUN_ID']), run_attempt=int(os.environ['GITHUB_RUN_ATTEMPT']))
+          contract = json.loads(Path(os.environ['CONTRACT']).read_text())
+          assert set(contract) == {'protocol', 'engine_sha256'} and type(contract['protocol']) is int and contract['protocol'] > 0
+          assert len(contract['engine_sha256']) == 64 and set(contract['engine_sha256']) <= set('0123456789abcdef')
+          receipt.update(protocol=contract['protocol'], engine_sha256=contract['engine_sha256'])
           (directory / 'receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
           PY
           echo "source_sha=$REVIEWED_SHA" >> "$GITHUB_OUTPUT"

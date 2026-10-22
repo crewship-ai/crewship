@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -30,6 +31,10 @@ func run() error {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		return client.Health(ctx)
+	}
+	if len(os.Args) == 2 && os.Args[1] == "--contract" {
+		// Offline declaration for the qualification receipt; reads nothing.
+		return json.NewEncoder(os.Stdout).Encode(appengine.WorkerImageContract())
 	}
 	if len(os.Args) != 1 {
 		return fmt.Errorf("invalid worker arguments")

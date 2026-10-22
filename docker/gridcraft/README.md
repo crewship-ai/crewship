@@ -86,3 +86,24 @@ The listener is `/run/worker/service.sock`; authenticated requests use
 Only native JSON imports and `cell.set` on the active sheet are implemented.
 Formula recalculation changing another cell is rejected as a known limitation.
 Generic commands, file paths, UI control and arbitrary MCP calls are unavailable.
+
+## Worker protocol contract
+
+The host and the worker may come from different source revisions. They agree
+on a versioned contract instead: `GridCraftWorkerProtocol` (currently 1) plus
+the pinned engine SHA-256. Every authenticated request carries
+`X-Crewship-Gridcraft-Protocol` and `X-Crewship-Gridcraft-Engine`. The worker
+refuses a host outside its accepted protocol range or with another engine pin
+(`412`) before admitting work, and discloses its own contract only after
+authentication. The application treats a worker that declares no contract, or
+an incompatible one, as unavailable, even if it returned a result.
+
+`crewship-gridcraft-worker --contract` prints the image's offline declaration
+(`{"protocol": N, "engine_sha256": "..."}`); qualification records it in
+`receipt.json` as `protocol` and `engine_sha256`, after the smoke test has
+proven the running worker enforces the same pair. The application binary
+embeds its accepted range and engine pin as one fixed text record
+(`crewship-gridcraft-host-contract/v1;protocol-min=…;protocol-max=…;engine-sha256=…`),
+so an operator launcher can check compatibility by reading the released
+binary as data, without executing it and without any network endpoint.
+Bump the protocol for any incompatible envelope, command or snapshot change.
