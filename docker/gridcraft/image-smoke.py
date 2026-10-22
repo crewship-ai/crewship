@@ -15,10 +15,14 @@ def docker(*args):
 
 
 class UnixHTTP(http.client.HTTPConnection):
+    def __init__(self, path):
+        super().__init__('worker')
+        self.socket_path = path
+
     def connect(self):
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.sock.settimeout(25)
-        self.sock.connect(self.host)
+        self.sock.connect(self.socket_path)
 
 
 def main():
