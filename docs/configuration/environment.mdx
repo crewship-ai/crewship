@@ -622,30 +622,46 @@ operator-pinned bundles. All of it is off by default.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CREWSHIP_GRIDCRAFT_EDITOR_ENABLED` | `false` | Literal `true` or `1` serves the editor. Requires `CREWSHIP_GRIDCRAFT_ENABLED`. |
-| `CREWSHIP_EDITOR_RUNTIME_ORIGIN` | *(unset)* | HTTPS origin of the editor, e.g. `https://editor.example.org` for `https://studio.example.test`. Its host must differ from the Studio host and the Page runtime host on every port, and it must not appear in `CREWSHIP_ALLOWED_ORIGINS`. Once set, that host serves only editor bundles: the API, the UI and probes return 404 there, even while the editor is disabled. |
+| `CREWSHIP_EDITOR_RUNTIME_ORIGIN` | *(unset)* | HTTPS origin of the editor, e.g. `https://editor.example.org` for `https://studio.example.test`. Its host must be a subdomain (not an apex, no trailing dot), must differ from the Studio host and the Page runtime host and must not be a parent of either, and it must not appear in `CREWSHIP_ALLOWED_ORIGINS`. Once set, that host (any case, port or trailing dot) serves only editor bundles: the API, the UI and probes return 404 there, even while the editor is disabled. |
 | `CREWSHIP_EDITOR_RUNTIME_DEVELOPMENT_SAME_SITE` | `false` | Development only. Literal `true` permits a sibling subdomain of Studio (`https://editor.example.test`). Without it the editor origin must be on a different site. The origin itself is never shared with Studio. |
-| `CREWSHIP_GRIDCRAFT_EDITOR_BUNDLE_DIR` | *(unset)* | Clean absolute directory holding one `<digest>/` directory per bundle, each with a `manifest.json` (`{"files":{"<path>":"<sha256>"}}`). |
-| `CREWSHIP_GRIDCRAFT_EDITOR_BUNDLES` | *(unset)* | Comma-separated allowlist of lowercase hex SHA-256 digests of each bundle's `index.html`. Removing a digest stops serving it after restart. |
+| `CREWSHIP_GRIDCRAFT_EDITOR_BUNDLE_DIR` | *(unset)* | Clean absolute directory holding one `<digest>/` directory per bundle, each with a `manifest.json` (`{"files":{"<path>":"<sha256>"}}`) that lists `index.html`. |
+| `CREWSHIP_GRIDCRAFT_EDITOR_BUNDLES` | *(unset)* | Comma-separated allowlist (at most 4) of lowercase hex SHA-256 digests of each bundle's exact `manifest.json` bytes. The manifest pins every file, so the digest pins the whole bundle. Removing a digest stops serving it after restart. |
 
-At startup each allowlisted bundle is read once. The `index.html` digest must
-equal the pin and every file must match its manifest digest. Symlinks and paths
-that leave the bundle directory are refused. A bundle that fails is not served
-and the error is logged. Files are served from memory at
-`/b/<digest>/<path>`. Every response carries a fixed policy set by the server,
-not the bundle:
+At startup each allowlisted bundle is read once: `manifest.json` must hash to
+the pin and every file must match its manifest digest. A symlink as a bundle
+file and paths that leave the bundle directory are refused; content is checked
+by hash either way. A bundle that fails is not served and the error is logged.
+Files are served from memory at `/b/<digest>/<path>`.
+
+The editor document runs **sandboxed**: its policy ends in
+`sandbox allow-scripts`, so it has an opaque origin. Even on a sibling
+subdomain of Studio it cannot read or set cookies, use storage, navigate the top
+window, open popups or submit forms. Because of the opaque origin, sources name
+the editor origin explicitly rather than `'self'`, and assets are sent with
+`Access-Control-Allow-Origin: *` (never with credentials; the bundle is public,
+constant code). Inline scripts in `index.html`, such as a Trunk module
+bootstrap, are allowed only by their SHA-256 hash, computed from the verified
+file; there is no `'unsafe-inline'` script. Every response carries:
 
 ```
-Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'none'; child-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors <Studio origin>
+Content-Security-Policy: default-src 'none'; script-src <editor origin> 'wasm-unsafe-eval' [inline script hashes, index.html only]; style-src <editor origin> 'unsafe-inline'; img-src <editor origin> data: blob:; font-src <editor origin>; connect-src <editor origin>; worker-src 'none'; child-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors <Studio origin>; sandbox allow-scripts
 Cross-Origin-Resource-Policy: same-origin
 Cross-Origin-Opener-Policy: same-origin
 Origin-Agent-Cluster: ?1
 Referrer-Policy: no-referrer
 X-Content-Type-Options: nosniff
+Strict-Transport-Security: max-age=31536000
 Permissions-Policy: camera=(), microphone=(), geolocation=(), clipboard-read=(), usb=(), serial=(), hid=()
 Cache-Control: no-store                                  (index.html)
-Cache-Control: public, max-age=31536000, immutable      (other files)
+Cache-Control: public, max-age=31536000, immutable      (other files, with Access-Control-Allow-Origin: *)
 ```
 
-`'wasm-unsafe-eval'` is granted only on the editor origin. The editor host
-never reads or sets cookies. While the editor is enabled, Studio adds the editor
-origin to `frame-src` only on Page routes (`/pages/<slug>`).
+Keep `Cross-Origin-Resource-Policy: same-origin`: under Studio's
+`Cross-Origin-Embedder-Policy: credentialless` it means the document can be
+framed only through a `credentialless` iframe. `'wasm-unsafe-eval'` is granted
+only on the editor origin. The editor host never reads or sets cookies.
+
+While the editor is enabled, Studio adds the editor origin to `frame-src` of
+every UI document. The UI routes on the client, so a policy scoped to one route
+would not follow navigation. Only this one origin is added, and `frame-src`
+controls what Studio frames, not who may frame Studio.

@@ -24,7 +24,7 @@ func frameSrcOf(policy string) string {
 	return ""
 }
 
-func TestEditorOriginWidensFrameSrcOnlyOnPagesWhenEnabled(t *testing.T) {
+func TestEditorOriginWidensFrameSrcOfEveryUIDocumentWhenEnabled(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })
 	const editor = "https://editor.example.test"
 	for _, tc := range []struct {
@@ -33,8 +33,10 @@ func TestEditorOriginWidensFrameSrcOnlyOnPagesWhenEnabled(t *testing.T) {
 	}{
 		{"disabled", "", "/pages/budget", false},
 		{"workbook page", editor, "/pages/budget", true},
-		{"other ui route", editor, "/chat", false},
-		{"pages index", editor, "/pages", false},
+		// The UI routes on the client, so a document loaded on /chat may
+		// later show a workbook Page; the policy belongs to the document.
+		{"other ui route", editor, "/chat", true},
+		{"root", editor, "/", true},
 		{"api", editor, "/api/v1/pages/budget/workbook", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -71,10 +73,12 @@ func TestEditorOriginServesNothingWhileDisabled(t *testing.T) {
 	dir := t.TempDir()
 	index := []byte("<!doctype html>")
 	sum := sha256.Sum256(index)
-	digest := hex.EncodeToString(sum[:])
+	manifest := []byte(`{"files":{"index.html":"` + hex.EncodeToString(sum[:]) + `"}}`)
+	pin := sha256.Sum256(manifest)
+	digest := hex.EncodeToString(pin[:])
 	os.MkdirAll(filepath.Join(dir, digest), 0o755)
 	os.WriteFile(filepath.Join(dir, digest, "index.html"), index, 0o644)
-	os.WriteFile(filepath.Join(dir, digest, "manifest.json"), []byte(`{"files":{"index.html":"`+digest+`"}}`), 0o644)
+	os.WriteFile(filepath.Join(dir, digest, "manifest.json"), manifest, 0o644)
 	cfg.GridCraft = config.GridCraftConfig{EditorOrigin: "https://editor.example.test", EditorBundleDir: dir, EditorBundles: []string{digest}}
 	main := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(299) })
 	for _, enabled := range []bool{false, true} {
@@ -87,5 +91,17 @@ func TestEditorOriginServesNothingWhileDisabled(t *testing.T) {
 		if want := map[bool]int{false: 404, true: 200}[enabled]; w.Code != want {
 			t.Fatalf("enabled=%v status %d want %d", enabled, w.Code, want)
 		}
+	}
+}
+
+func TestUnparsableEditorOriginFailsClosed(t *testing.T) {
+	cfg := config.Default()
+	cfg.Auth.NextjsURL = "https://studio.example.test"
+	cfg.GridCraft = config.GridCraftConfig{EditorOrigin: "https://editor.example.test/path?x"}
+	main := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(299) })
+	w := httptest.NewRecorder()
+	editororigin.Gate(newEditorOrigin(cfg, slog.Default()), main).ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
+	if w.Code != 404 {
+		t.Fatalf("misconfigured editor origin let the application through: %d", w.Code)
 	}
 }

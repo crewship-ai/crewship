@@ -21,6 +21,12 @@ func newEditorOrigin(cfg *config.Config, logger *slog.Logger) *editororigin.Hand
 		o.BundleDir, o.Bundles = g.EditorBundleDir, g.EditorBundles
 	}
 	h, err := editororigin.New(o)
+	if h == nil {
+		// Config validation refuses this; if it is ever bypassed, fail
+		// closed: an unmatchable editor host must not fall into the app.
+		logger.Error("gridcraft editor origin unusable; refusing every request", "error", err)
+		return editororigin.Deny()
+	}
 	if err != nil {
 		// Unverified bundles are not served; the host stays isolated.
 		logger.Error("gridcraft editor bundle refused", "error", err)

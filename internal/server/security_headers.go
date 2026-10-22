@@ -34,8 +34,12 @@ func securityHeadersMiddleware(next http.Handler, pageRuntimeOrigin ...string) h
 type securityHeaderOptions struct {
 	pageRuntimeOrigin string
 	// editorOrigin is the embedded workbook editor origin, set only while the
-	// editor is enabled. It is framed only from Page routes (/pages/<slug>),
-	// never from the rest of the UI.
+	// editor is enabled. It is added to frame-src of every UI document: the
+	// policy belongs to the document, and the UI routes on the client, so a
+	// document first loaded on /chat may later show a workbook Page. Widening
+	// is limited to this one operator-configured origin, whose document is
+	// CSP-sandboxed and holds no credential; frame-src governs only what
+	// Studio frames, not who may frame Studio (frame-ancestors stays 'none').
 	editorOrigin string
 }
 
@@ -52,10 +56,7 @@ func appendFrameSrc(frameSrc, origin string) string {
 func securityHeadersMiddlewareWith(next http.Handler, o securityHeaderOptions) http.Handler {
 	editorFrameSrc := editororigin.FrameSrc(o.editorOrigin)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		frameSrc := appendFrameSrc(pages.FrameSrcDirective(), o.pageRuntimeOrigin)
-		if editorFrameSrc != "" && strings.HasPrefix(r.URL.Path, "/pages/") && len(r.URL.Path) > len("/pages/") {
-			frameSrc = appendFrameSrc(frameSrc, editorFrameSrc)
-		}
+		frameSrc := appendFrameSrc(appendFrameSrc(pages.FrameSrcDirective(), o.pageRuntimeOrigin), editorFrameSrc)
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")

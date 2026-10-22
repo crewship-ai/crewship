@@ -2,6 +2,7 @@ package editororigin
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -18,13 +19,19 @@ const (
 )
 
 // writeBundle lays out <dir>/<digest>/{files,manifest.json} the way the
-// operator's install step does and returns the digest of index.html.
+// operator's install step does and returns the pin: the sha256 of the exact
+// manifest.json bytes, which in turn pins every file.
 func writeBundle(t *testing.T, dir string, files map[string]string) string {
 	t.Helper()
-	sum := sha256.Sum256([]byte(files["index.html"]))
+	manifest := map[string]any{"source_commit": "0123456789abcdef0123456789abcdef01234567", "files": map[string]string{}}
+	for name, body := range files {
+		s := sha256.Sum256([]byte(body))
+		manifest["files"].(map[string]string)[name] = hex.EncodeToString(s[:])
+	}
+	raw, _ := json.Marshal(manifest)
+	sum := sha256.Sum256(raw)
 	digest := hex.EncodeToString(sum[:])
 	root := filepath.Join(dir, digest)
-	manifest := map[string]any{"source_commit": "0123456789abcdef0123456789abcdef01234567", "files": map[string]string{}}
 	for name, body := range files {
 		p := filepath.Join(root, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
@@ -33,21 +40,25 @@ func writeBundle(t *testing.T, dir string, files map[string]string) string {
 		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		s := sha256.Sum256([]byte(body))
-		manifest["files"].(map[string]string)[name] = hex.EncodeToString(s[:])
 	}
-	raw, _ := json.Marshal(manifest)
 	if err := os.WriteFile(filepath.Join(root, "manifest.json"), raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return digest
 }
 
+const bootstrap = "import init from './app.js';init()"
+
+func scriptHash(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+}
+
 func fixture(t *testing.T) (*Handler, string) {
 	t.Helper()
 	dir := t.TempDir()
 	digest := writeBundle(t, dir, map[string]string{
-		"index.html":        "<!doctype html><script src=app.js></script>",
+		"index.html":        `<!doctype html><script type="module">` + bootstrap + `</script><script src="app.js"></script>`,
 		"app.js":            "console.log(1)",
 		"app_bg.wasm":       "\x00asm",
 		"assets/font.woff2": "font",
@@ -70,7 +81,13 @@ func serve(h http.Handler, method, host, path string, header ...string) *httptes
 	return w
 }
 
-const wantCSP = "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'none'; child-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors " + studio
+// The bundle runs in an opaque origin (CSP sandbox without allow-same-origin),
+// so every source names the editor origin explicitly instead of 'self'.
+func policy(extraScript string) string {
+	return "default-src 'none'; script-src " + editor + " 'wasm-unsafe-eval'" + extraScript + "; style-src " + editor + " 'unsafe-inline'; img-src " + editor + " data: blob:; font-src " + editor + "; connect-src " + editor + "; worker-src 'none'; child-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors " + studio + "; sandbox allow-scripts"
+}
+
+var wantCSP = policy("")
 
 func TestEditorOriginServesAllowlistedBundleOnlyOnEditorHost(t *testing.T) {
 	h, digest := fixture(t)
@@ -88,9 +105,13 @@ func TestEditorOriginServesAllowlistedBundleOnlyOnEditorHost(t *testing.T) {
 		{"head", "HEAD", "editor.example.test", "/b/" + digest + "/app.js", 200, false},
 		{"host is case insensitive", "GET", "EDITOR.example.test", "/b/" + digest + "/index.html", 200, false},
 		{"explicit default port", "GET", "editor.example.test:443", "/b/" + digest + "/index.html", 200, false},
+		// Odd variants of the editor host fail closed into the editor handler,
+		// never into the application.
+		{"other port", "GET", "editor.example.test:8443", "/api/v1/auth/session", 404, false},
+		{"trailing dot", "GET", "editor.example.test.", "/api/v1/auth/session", 404, false},
+		{"trailing dot and port", "GET", "Editor.Example.Test.:80", "/", 404, false},
 		{"wrong host never serves bundle", "GET", "studio.example.test", "/b/" + digest + "/index.html", 299, true},
 		{"lookalike host", "GET", "editor.example.test.evil.test", "/b/" + digest + "/index.html", 299, true},
-		{"other port is another origin", "GET", "editor.example.test:8443", "/b/" + digest + "/index.html", 299, true},
 		{"unknown digest", "GET", "editor.example.test", "/b/" + unknown + "/index.html", 404, false},
 		{"uppercase digest is not the pin", "GET", "editor.example.test", "/b/" + strings.ToUpper(digest) + "/index.html", 404, false},
 		{"manifest is not served", "GET", "editor.example.test", "/b/" + digest + "/manifest.json", 404, false},
@@ -109,8 +130,8 @@ func TestEditorOriginServesAllowlistedBundleOnlyOnEditorHost(t *testing.T) {
 			if (w.Header().Get("X-Main") == "1") != tc.main {
 				t.Fatalf("reached main app = %v", !tc.main)
 			}
-			if !tc.main && w.Header().Get("Content-Security-Policy") != wantCSP {
-				t.Fatalf("editor response without editor CSP: %q", w.Header().Get("Content-Security-Policy"))
+			if !tc.main && !strings.HasSuffix(w.Header().Get("Content-Security-Policy"), "; sandbox allow-scripts") {
+				t.Fatalf("editor response without sandboxed editor CSP: %q", w.Header().Get("Content-Security-Policy"))
 			}
 		})
 	}
@@ -119,47 +140,62 @@ func TestEditorOriginServesAllowlistedBundleOnlyOnEditorHost(t *testing.T) {
 func TestEditorOriginHeadersAreExact(t *testing.T) {
 	h, digest := fixture(t)
 	common := map[string]string{
-		"Content-Security-Policy":      wantCSP,
 		"Cross-Origin-Resource-Policy": "same-origin",
 		"Cross-Origin-Opener-Policy":   "same-origin",
 		"Origin-Agent-Cluster":         "?1",
 		"Referrer-Policy":              "no-referrer",
 		"X-Content-Type-Options":       "nosniff",
+		"Strict-Transport-Security":    "max-age=31536000",
 		"Permissions-Policy":           "camera=(), microphone=(), geolocation=(), clipboard-read=(), usb=(), serial=(), hid=()",
 	}
 	for _, tc := range []struct {
-		file, contentType, cache string
+		file, contentType, cache, csp, acao string
 	}{
-		{"index.html", "text/html; charset=utf-8", "no-store"},
-		{"app.js", "text/javascript; charset=utf-8", "public, max-age=31536000, immutable"},
-		{"app_bg.wasm", "application/wasm", "public, max-age=31536000, immutable"},
-		{"assets/font.woff2", "font/woff2", "public, max-age=31536000, immutable"},
+		// The document is sandboxed and never readable cross-origin.
+		{"index.html", "text/html; charset=utf-8", "no-store", policy(" " + scriptHash(bootstrap)), ""},
+		// The opaque-origin document fetches assets in CORS mode; they are
+		// public constant code, so any origin may read them without credentials.
+		{"app.js", "text/javascript; charset=utf-8", "public, max-age=31536000, immutable", wantCSP, "*"},
+		{"app_bg.wasm", "application/wasm", "public, max-age=31536000, immutable", wantCSP, "*"},
+		{"assets/font.woff2", "font/woff2", "public, max-age=31536000, immutable", wantCSP, "*"},
 	} {
 		t.Run(tc.file, func(t *testing.T) {
 			// A browser on a sibling subdomain may attach same-site cookies;
 			// they must not change anything and nothing may be set back.
-			w := serve(h, "GET", "editor.example.test", "/b/"+digest+"/"+tc.file+"?host=authority&parent_origin=x", "Cookie", "authjs.session-token=secret")
+			w := serve(h, "GET", "editor.example.test", "/b/"+digest+"/"+tc.file+"?host=authority&parent_origin=x", "Cookie", "authjs.session-token=secret", "Origin", "null")
 			if w.Code != 200 {
 				t.Fatal(w.Code)
 			}
-			want := map[string]string{"Content-Type": tc.contentType, "Cache-Control": tc.cache}
+			want := map[string]string{"Content-Type": tc.contentType, "Cache-Control": tc.cache, "Content-Security-Policy": tc.csp}
 			for k, v := range common {
 				want[k] = v
+			}
+			if tc.acao != "" {
+				want["Access-Control-Allow-Origin"] = tc.acao
 			}
 			for k, v := range want {
 				if got := w.Header().Values(k); len(got) != 1 || got[0] != v {
 					t.Errorf("%s = %q, want %q", k, got, v)
 				}
 			}
-			for _, forbidden := range []string{"Set-Cookie", "X-Frame-Options", "Access-Control-Allow-Origin", "Access-Control-Allow-Credentials"} {
-				if w.Header().Get(forbidden) != "" {
-					t.Errorf("unexpected %s", forbidden)
+			forbidden := []string{"Set-Cookie", "X-Frame-Options", "Access-Control-Allow-Credentials"}
+			if tc.acao == "" {
+				forbidden = append(forbidden, "Access-Control-Allow-Origin")
+			}
+			for _, f := range forbidden {
+				if w.Header().Get(f) != "" {
+					t.Errorf("unexpected %s", f)
+				}
+			}
+			for _, unsafe := range []string{"'unsafe-eval'", "allow-same-origin", "allow-top-navigation", "allow-popups", "allow-forms", "'self'"} {
+				if strings.Contains(w.Header().Get("Content-Security-Policy"), unsafe) {
+					t.Errorf("CSP contains %s", unsafe)
 				}
 			}
 		})
 	}
 	w := serve(h, "GET", "editor.example.test", "/b/"+strings.Repeat("0", 64)+"/index.html")
-	if w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Set-Cookie") != "" {
+	if w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Set-Cookie") != "" || w.Header().Get("Content-Security-Policy") != wantCSP {
 		t.Fatalf("404 headers: %v", w.Header())
 	}
 	if strings.Contains(w.Body.String(), "example.test") {
@@ -167,8 +203,28 @@ func TestEditorOriginHeadersAreExact(t *testing.T) {
 	}
 }
 
+func TestInlineScriptsAreAllowedOnlyByHash(t *testing.T) {
+	for _, tc := range []struct {
+		name, html string
+		want       []string
+	}{
+		{"trunk module bootstrap", `<html><head><script type="module">` + bootstrap + `</script></head></html>`, []string{scriptHash(bootstrap)}},
+		{"external only", `<script src="app.js"></script>`, nil},
+		{"two inline, uppercase tag", "<SCRIPT>a()</SCRIPT><script>\nb()\n</script>", []string{scriptHash("a()"), scriptHash("\nb()\n")}},
+		{"duplicate once", "<script>a()</script><script>a()</script>", []string{scriptHash("a()")}},
+		{"json data is not a script source", `<script type="application/json">{"x":1}</script>`, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := inlineScriptHashes([]byte(tc.html))
+			if strings.Join(got, " ") != strings.Join(tc.want, " ") {
+				t.Fatalf("hashes %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestEditorCSPGrantsWasmOnlyOnEditorOrigin(t *testing.T) {
-	if !strings.Contains(wantCSP, "'wasm-unsafe-eval'") || strings.Contains(wantCSP, "'unsafe-eval'") {
+	if !strings.Contains(wantCSP, "'wasm-unsafe-eval'") || strings.Contains(wantCSP, "'unsafe-eval'") || strings.Contains(wantCSP, "'unsafe-inline';") && strings.Contains(wantCSP, "script-src 'unsafe-inline'") {
 		t.Fatal("fixture policy drifted")
 	}
 	if got := FrameSrc(""); got != "" {
@@ -188,17 +244,27 @@ func TestBundleIntegrityIsVerifiedBeforeServing(t *testing.T) {
 			os.WriteFile(filepath.Join(root, digest, "index.html"), []byte("tampered"), 0o644)
 			return []string{digest}
 		}},
-		{"asset changed after manifest", func(t *testing.T, root, digest string) []string {
-			os.WriteFile(filepath.Join(root, digest, "app.js"), []byte("tampered"), 0o644)
+		// Rewriting a file together with its manifest line changes the
+		// manifest digest, which is the pin.
+		{"asset and manifest rewritten consistently", func(t *testing.T, root, digest string) []string {
+			body := "evil()"
+			os.WriteFile(filepath.Join(root, digest, "app.js"), []byte(body), 0o644)
+			raw, _ := os.ReadFile(filepath.Join(root, digest, "manifest.json"))
+			var m map[string]any
+			json.Unmarshal(raw, &m)
+			s := sha256.Sum256([]byte(body))
+			m["files"].(map[string]any)["app.js"] = hex.EncodeToString(s[:])
+			raw, _ = json.Marshal(m)
+			os.WriteFile(filepath.Join(root, digest, "manifest.json"), raw, 0o644)
+			return []string{digest}
+		}},
+		{"manifest reformatted", func(t *testing.T, root, digest string) []string {
+			raw, _ := os.ReadFile(filepath.Join(root, digest, "manifest.json"))
+			os.WriteFile(filepath.Join(root, digest, "manifest.json"), append(raw, '\n'), 0o644)
 			return []string{digest}
 		}},
 		{"missing manifest", func(t *testing.T, root, digest string) []string {
 			os.Remove(filepath.Join(root, digest, "manifest.json"))
-			return []string{digest}
-		}},
-		{"manifest escapes bundle", func(t *testing.T, root, digest string) []string {
-			raw, _ := json.Marshal(map[string]any{"files": map[string]string{"index.html": digest, "../x": digest}})
-			os.WriteFile(filepath.Join(root, digest, "manifest.json"), raw, 0o644)
 			return []string{digest}
 		}},
 		{"symlink out of bundle", func(t *testing.T, root, digest string) []string {
@@ -211,6 +277,9 @@ func TestBundleIntegrityIsVerifiedBeforeServing(t *testing.T) {
 			return []string{digest}
 		}},
 		{"malformed digest", func(t *testing.T, root, digest string) []string { return []string{"../" + digest} }},
+		{"too many pins", func(t *testing.T, root, digest string) []string {
+			return []string{digest, strings.Repeat("1", 64), strings.Repeat("2", 64), strings.Repeat("3", 64), strings.Repeat("4", 64)}
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -223,10 +292,15 @@ func TestBundleIntegrityIsVerifiedBeforeServing(t *testing.T) {
 			if h == nil {
 				t.Fatal("rejected bundle must still leave a host-isolating handler")
 			}
-			if w := serve(h, "GET", "editor.example.test", "/b/"+digest+"/index.html"); w.Code != 404 {
+			if w := serve(h, "GET", "editor.example.test", "/b/"+digest+"/index.html"); w.Code != 404 && tc.name != "too many pins" {
 				t.Fatalf("unverified bundle served: %d", w.Code)
 			}
 		})
+	}
+	root := t.TempDir()
+	digest := writeBundle(t, root, map[string]string{"app.js": "1"})
+	if _, err := New(Options{Origin: editor, StudioOrigin: studio, BundleDir: root, Bundles: []string{digest}}); err == nil {
+		t.Fatal("bundle without index.html accepted")
 	}
 }
 
@@ -242,6 +316,12 @@ func TestValidateOriginRefusesSharedOrigins(t *testing.T) {
 		{"equals studio", studio, runtime, true, false},
 		{"studio host other port", "https://studio.example.test:8443", runtime, true, false},
 		{"studio host case", "https://STUDIO.example.test", runtime, true, false},
+		{"studio host trailing dot", "https://studio.example.test.", runtime, true, false},
+		{"trailing dot", "https://editor.example.test.", runtime, true, false},
+		{"apex parent of studio", "https://example.test", runtime, true, false},
+		{"apex of another site", "https://example.org", runtime, false, false},
+		{"parent of page runtime", "https://editor.apps.example.net", "https://x.editor.apps.example.net", false, false},
+		{"single label", "https://localhost", runtime, true, false},
 		{"equals page runtime", runtime, runtime, false, false},
 		{"page runtime host other port", "https://apps.example.net:9443", runtime, false, false},
 		{"equals same-origin dev page runtime", studio, studio, true, false},
@@ -275,5 +355,17 @@ func TestDisabledGateStillIsolatesEditorHost(t *testing.T) {
 	}
 	if w := serve(Gate(h, main), "GET", "editor.example.test", "/api/v1/auth/session"); w.Code != 404 {
 		t.Fatalf("editor host reached main app: %d", w.Code)
+	}
+	// Without a usable Studio origin nothing may frame the editor.
+	h, err = New(Options{Origin: editor, StudioOrigin: "not an origin"})
+	if h == nil || err == nil {
+		t.Fatal("invalid Studio origin must still isolate the host and report")
+	}
+	if w := serve(Gate(h, main), "GET", "editor.example.test", "/"); w.Code != 404 || !strings.Contains(w.Header().Get("Content-Security-Policy"), "frame-ancestors 'none'") {
+		t.Fatalf("status %d csp %q", w.Code, w.Header().Get("Content-Security-Policy"))
+	}
+	// An unparsable editor origin cannot be matched by host; Deny closes everything.
+	if w := serve(Gate(Deny(), main), "GET", "studio.example.test", "/"); w.Code != 404 {
+		t.Fatalf("deny gate reached main app: %d", w.Code)
 	}
 }
