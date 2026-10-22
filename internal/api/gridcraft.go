@@ -156,6 +156,11 @@ type gridcraftCreated struct {
 	Name   string `json:"name"`
 }
 
+// maxEmptyWorkbookPages bounds the empty private Pages one author may stage,
+// so nobody can exhaust the shared workspace Page limit with Pages that
+// administrators cannot see.
+const maxEmptyWorkbookPages = 5
+
 // create stages the empty personal private Page a human then imports into.
 // The slug is the idempotency key: an identical retry by the same author
 // returns the same still-empty Page; anything else is a conflict, and an
@@ -173,12 +178,14 @@ func (h *gridcraftHTTP) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req gridcraftCreate
-	if err := decodeGridCraftBody(w, r, &req); err != nil {
-		gridcraftError(w, err)
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	raw, err := io.ReadAll(r.Body)
+	if err != nil || appengine.DecodeStrict(raw, &req) != nil {
+		gridcraftError(w, appengine.ErrInvalid)
 		return
 	}
 	spec := pages.Document{APIVersion: pages.DocumentAPIVersion, Kind: pages.DocumentKind, Metadata: pages.Metadata{Slug: req.Slug, Name: req.Name}}
-	if spec.ValidateEmpty() != nil {
+	if spec.ValidateEmpty() != nil || len(req.Name) > 200 {
 		gridcraftError(w, appengine.ErrInvalid)
 		return
 	}
@@ -194,7 +201,7 @@ func (h *gridcraftHTTP) create(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 	if validateContentHumanCredential(r, tx, "pages:write") != nil {
-		gridcraftError(w, appengine.ErrForbidden)
+		replyError(w, 403, "Forbidden")
 		return
 	}
 	var existing gridcraftCreated
@@ -224,7 +231,16 @@ func (h *gridcraftHTTP) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if count >= pages.MaxPagesPerWorkspace {
-		gridcraftError(w, appengine.ErrQuota)
+		replyError(w, 409, "workspace page limit reached")
+		return
+	}
+	var staged int
+	if err = tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM pages p WHERE p.workspace_id=? AND p.owner_user_id=? AND p.private_audience=1 AND p.created_by_agent_id IS NULL AND NOT EXISTS(SELECT 1 FROM gridcraft_heads g WHERE g.page_id=p.id) AND NOT EXISTS(SELECT 1 FROM documents d WHERE d.page_id=p.id) AND NOT EXISTS(SELECT 1 FROM slides_heads s WHERE s.page_id=p.id)`, wsID, user.ID).Scan(&staged); err != nil {
+		gridcraftError(w, err)
+		return
+	}
+	if staged >= maxEmptyWorkbookPages {
+		replyError(w, 409, "too many empty workbook pages; import into or delete one first")
 		return
 	}
 	pageID, stamp := generateCUID(), tsformat.Format(time.Now())

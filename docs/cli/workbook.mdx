@@ -21,7 +21,9 @@ crewship workbook agent --file packet.json
 First create the empty personal private Page that the workbook is imported into.
 Only its author (and an audited workspace OWNER) can read it. Repeating the same
 slug and name returns the same still-empty Page; any other slug reuse is a
-conflict, and an existing Page is never converted.
+conflict, and an existing Page is never converted. One author may hold at most
+five empty workbook Pages at a time. A member who owns a private Page can be
+removed from the workspace only by an OWNER, who chooses a successor.
 
 Import a native workbook with an immutable request envelope:
 

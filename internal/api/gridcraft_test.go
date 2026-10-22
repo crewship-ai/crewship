@@ -383,4 +383,16 @@ func TestGridCraftHumanCreatesEmptyPrivateWorkbookPage(t *testing.T) {
 	wantCode(t, f.do(f.boss, "POST", "/api/v1/pages/pilot-book/workbook/operations?workspace_id=ws-old", importBody), 200, "created page accepts import")
 	wantCode(t, create(f.boss, body), 409, "a page with a workbook is no longer an empty create result")
 	wantCode(t, f.do(f.wsAdmin, "GET", "/api/v1/pages/pilot-book/workbook?workspace_id=ws-old", ""), 404, "private to its author")
+	listed := f.do(f.wsAdmin, "GET", "/api/v1/pages?workspace_id=ws-old", "")
+	if strings.Contains(listed.Body.String(), "pilot-book") || strings.Contains(listed.Body.String(), created.PageID) {
+		t.Fatalf("admin page list exposes the private workbook page: %s", listed.Body.String())
+	}
+	wantCode(t, create(f.boss, `{"slug":"long-name","name":"`+strings.Repeat("n", 201)+`"}`), 400, "name length bound")
+	for i := 0; i < maxEmptyWorkbookPages; i++ {
+		wantCode(t, create(f.boss, fmt.Sprintf(`{"slug":"empty-%d","name":"Empty"}`, i)), 201, "staged empty page")
+	}
+	wantCode(t, create(f.boss, `{"slug":"one-too-many","name":"Empty"}`), 409, "per-author empty page bound")
+	wantCode(t, create(f.boss, `{"slug":"empty-0","name":"Empty"}`), 200, "retry within the bound stays idempotent")
+	mustExec(t, f.db, `UPDATE cli_tokens SET revoked_at='2026-01-01T00:00:00Z' WHERE token_hash=?`, sha256Hex(f.boss))
+	wantCode(t, create(f.boss, `{"slug":"after-revoke","name":"x"}`), 401, "revoked credential")
 }
