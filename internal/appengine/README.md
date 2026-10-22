@@ -34,9 +34,21 @@ restarts. Its managed container restart discards all private candidate scratch.
 The engine computes outside the database transaction. The candidate binds the
 artifact, base revision, generation, command hash, mandate, pinned engine and
 result hash. Concrete cell effects must fit the mandate. The GridCraft adapter
-also compares the entire reopened workbook: changes outside the target cell,
-including formula recalculation elsewhere, are rejected conservatively. An
-engine pin identifies trusted format semantics; isolation alone does not.
+also compares the entire reopened workbook, separating authored data (input
+value, formula, style and every other field) from derived data (the computed
+value of a formula cell). Outside the target cell, authored data must be
+identical and no cell may be added or removed. A formula cell's value may change
+only when its formula is unchanged and both values are plain numbers, text,
+booleans or errors. The worker then reruns the pinned engine's cached-value
+oracle (`check --tolerance 0`) in a fresh process: it recomputes every formula
+from scratch and the candidate is rejected unless all formula cells are checked
+and match exactly. Volatile functions such as `NOW()` cannot be confirmed, so a
+workbook containing them rejects any edit that recalculates another cell. The
+receipt's effects list only the mandated target. The host verifies the authored
+diff itself but trusts the worker's report and the engine's formula semantics:
+the oracle is a second, independent evaluation by the same pinned engine, not a
+different implementation. An engine pin identifies trusted format semantics;
+isolation alone does not.
 
 Go atomically stores snapshot, revision, immutable receipt, audit and outbox.
 Receipts require FULL synchronous storage and report `durability: node`.

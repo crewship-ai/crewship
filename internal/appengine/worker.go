@@ -1,10 +1,12 @@
 package appengine
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -87,7 +89,7 @@ func RunGridCraftWorker(ctx context.Context, binary, scratch string, input []byt
 		return EngineResult{}, err
 	}
 	if c.Kind == "import" {
-		return EngineResult{normalized, normalized}, nil
+		return EngineResult{Base: normalized, Result: normalized}, nil
 	}
 	params, err := json.Marshal(map[string]string{"cell": c.Cell, "input": c.Input})
 	if err != nil {
@@ -100,7 +102,11 @@ func RunGridCraftWorker(ctx context.Context, binary, scratch string, input []byt
 	if err != nil {
 		return EngineResult{}, err
 	}
-	return EngineResult{normalized, data}, nil
+	recalc, err := verifyRecalc(ctx, binary, dir, filepath.Base(resultPath))
+	if err != nil {
+		return EngineResult{}, err
+	}
+	return EngineResult{Base: normalized, Result: data, Recalc: recalc}, nil
 }
 func readBounded(path string) ([]byte, error) {
 	f, err := os.Open(path)
@@ -142,4 +148,59 @@ func ServeGridCraftWorker(ctx context.Context, binary, scratch string, in io.Rea
 		return err
 	}
 	return json.NewEncoder(out).Encode(result)
+}
+
+const recalcReportLimit = 1 << 20
+
+// verifyRecalc runs the engine's cached-value oracle over a candidate file in a
+// fresh process: every formula is recomputed from scratch and compared exactly
+// with the value stored by the incremental edit. The caller has already pinned
+// the binary digest. Exit status 1 only reports differences; the parsed report
+// decides, and any other failure or malformed report rejects the candidate.
+func verifyRecalc(ctx context.Context, binary, dir, name string) (*RecalcVerification, error) {
+	var out bytes.Buffer
+	cmd := exec.CommandContext(ctx, binary, "check", name, "--json", "--tolerance", "0", "--max-report", "1")
+	cmd.Dir = dir
+	cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + dir, "TMPDIR=" + dir}
+	cmd.WaitDelay = 2 * time.Second
+	cmd.Stdout = &limitedBuffer{buf: &out, limit: recalcReportLimit}
+	cmd.Stderr = io.Discard
+	if err := cmd.Run(); err != nil {
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+			return nil, fmt.Errorf("workbook recalculation check failed: %w", err)
+		}
+	}
+	var report struct {
+		Schema string `json:"schema"`
+		Files  []struct {
+			Opened bool    `json:"opened"`
+			Error  *string `json:"error"`
+			Calc   struct {
+				FormulaCells int  `json:"formulaCells"`
+				Checked      int  `json:"checked"`
+				Mismatched   int  `json:"mismatched"`
+				NoOracle     int  `json:"noOracle"`
+				Volatile     int  `json:"volatile"`
+				StaleCache   bool `json:"staleCache"`
+			} `json:"calc"`
+		} `json:"files"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil || report.Schema != "gridcraft-check/1" || len(report.Files) != 1 || !report.Files[0].Opened || report.Files[0].Error != nil {
+		return nil, fmt.Errorf("%w: unreadable recalculation report", ErrCandidate)
+	}
+	c := report.Files[0].Calc
+	return &RecalcVerification{FormulaCells: c.FormulaCells, Checked: c.Checked, Mismatched: c.Mismatched, NoOracle: c.NoOracle, Volatile: c.Volatile, StaleCache: c.StaleCache}, nil
+}
+
+type limitedBuffer struct {
+	buf   *bytes.Buffer
+	limit int
+}
+
+func (w *limitedBuffer) Write(p []byte) (int, error) {
+	if w.buf.Len()+len(p) > w.limit {
+		return 0, ErrInvalid
+	}
+	return w.buf.Write(p)
 }

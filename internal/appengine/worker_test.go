@@ -3,7 +3,6 @@ package appengine
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"github.com/crewship-ai/crewship/internal/database"
 	"os"
 	"path/filepath"
@@ -77,9 +76,10 @@ func TestRealGridCraftImportEditRestartAndRetry(t *testing.T) {
 	}
 }
 
-// Known pilot limitation: the complete diff cannot yet distinguish direct
-// mandated effects from trusted engine-derived formula recalculation.
-func TestRealGridCraftDependentFormulaIsKnownLimitation(t *testing.T) {
+// The pinned engine recalculates a dependent chain after a mandated input edit.
+// Only the authored target is a mandated effect; C9 and D9 are accepted because
+// their formulas are unchanged and a fresh full recalculation confirms them.
+func TestRealGridCraftDependentFormulaRecalculation(t *testing.T) {
 	binary := os.Getenv("CREWSHIP_TEST_GRIDCRAFT_BINARY")
 	if binary == "" {
 		t.Skip("set CREWSHIP_TEST_GRIDCRAFT_BINARY for the pinned formula engine contract")
@@ -89,17 +89,110 @@ func TestRealGridCraftDependentFormulaIsKnownLimitation(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner := localFixtureRunner{binary, t.TempDir()}
-	base, err := runner.Run(t.Context(), raw, Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	formula, err := runner.Run(t.Context(), base.Result, Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "C9", Input: "=B2*2"})
-	if err != nil {
-		t.Fatal(err)
+	snapshot := json.RawMessage(raw)
+	for _, step := range []Command{
+		{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "1"},
+		{Kind: "cell.set", Sheet: "Sheet1", Cell: "C9", Input: "=B2*2"},
+		{Kind: "cell.set", Sheet: "Sheet1", Cell: "D9", Input: "=C9+1"},
+	} {
+		out, err := runner.Run(t.Context(), snapshot, step)
+		if err != nil {
+			t.Fatal(err)
+		}
+		snapshot = out.Result
 	}
 	engine := GridCraft{Runner: runner}
-	_, err = engine.Prepare(t.Context(), Binding{Engine: engine.Identity()}, State{Snapshot: formula.Result}, Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "42"})
-	if !errors.Is(err, ErrEffects) {
-		t.Fatalf("expected known dependent formula limitation, got %v", err)
+	b := Binding{Engine: engine.Identity()}
+	candidate, err := engine.Prepare(t.Context(), b, State{Snapshot: snapshot}, Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "42"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidate.Effects) != 1 || candidate.Effects[0] != "Sheet1!B2" {
+		t.Fatalf("effects=%v", candidate.Effects)
+	}
+	workbook, err := decodeWorkbook(candidate.Snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cells, err := extractCells(workbook)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for address, want := range map[string]float64{"Sheet1!B2": 42, "Sheet1!C9": 84, "Sheet1!D9": 85} {
+		value, _ := cells[address].(map[string]any)["value"].(map[string]any)["v"].(json.Number).Float64()
+		if value != want {
+			t.Fatalf("%s=%v want %v", address, value, want)
+		}
+	}
+	// A mandate for C9 may replace its formula and recalculate D9.
+	_, err = engine.Prepare(t.Context(), b, State{Snapshot: candidate.Snapshot}, Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "C9", Input: "=B2*3"})
+	if err != nil {
+		t.Fatalf("C9 mandate may change C9 and recalculate D9: %v", err)
+	}
+}
+
+// The worker's verification recomputes from scratch, so a candidate whose cached
+// dependent values were altered after the edit is reported, including a chain
+// altered consistently.
+func TestRealGridCraftRecalcVerificationDetectsTamperedValues(t *testing.T) {
+	binary := os.Getenv("CREWSHIP_TEST_GRIDCRAFT_BINARY")
+	if binary == "" {
+		t.Skip("set CREWSHIP_TEST_GRIDCRAFT_BINARY for the pinned formula engine contract")
+	}
+	raw, err := os.ReadFile("testdata/blank-workbook.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := localFixtureRunner{binary, t.TempDir()}
+	snapshot := json.RawMessage(raw)
+	for _, step := range []Command{
+		{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "42"},
+		{Kind: "cell.set", Sheet: "Sheet1", Cell: "C9", Input: "=B2*2"},
+		{Kind: "cell.set", Sheet: "Sheet1", Cell: "D9", Input: "=C9+1"},
+	} {
+		out, err := runner.Run(t.Context(), snapshot, step)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out.Recalc == nil || out.Recalc.Mismatched != 0 || (step.Cell != "B2" && !out.Recalc.verified()) {
+			t.Fatalf("honest candidate not verified: %+v", out.Recalc)
+		}
+		snapshot = out.Result
+	}
+	for _, test := range []struct {
+		name    string
+		values  map[string]string
+		wantBad int
+	}{
+		{"honest", nil, 0},
+		{"dependent", map[string]string{"2": `{"t":"Number","v":85.0}`}, 1},
+		{"consistent chain", map[string]string{"2": `{"t":"Number","v":85.0}`, "3": `{"t":"Number","v":86.0}`}, 2},
+		{"type", map[string]string{"3": `{"t":"Text","v":"85"}`}, 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var workbook map[string]any
+			if err := json.Unmarshal(snapshot, &workbook); err != nil {
+				t.Fatal(err)
+			}
+			row := workbook["sheets"].([]any)[0].(map[string]any)["cells"].(map[string]any)["bands"].(map[string]any)["0"].(map[string]any)["rows"].(map[string]any)["8"].(map[string]any)
+			for col, value := range test.values {
+				row[col].(map[string]any)["value"] = json.RawMessage(value)
+			}
+			data, err := json.Marshal(workbook)
+			if err != nil {
+				t.Fatal(err)
+			}
+			dir := t.TempDir()
+			if err = os.WriteFile(filepath.Join(dir, "candidate.json"), data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			got, err := verifyRecalc(t.Context(), binary, dir, "candidate.json")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Mismatched != test.wantBad || got.verified() != (test.wantBad == 0) || got.FormulaCells != 2 {
+				t.Fatalf("verification=%+v", got)
+			}
+		})
 	}
 }

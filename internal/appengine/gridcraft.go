@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"sort"
 	"strconv"
 )
 
@@ -17,8 +16,21 @@ const GridCraftBinarySHA256 = "000100860eb14b641da48e5e0d2dcd6dcc5ddcd65a4b267a0
 // EngineResult includes the canonical reloaded base as well as the candidate.
 // The host refuses changes introduced by reopening a supposedly confirmed file.
 type EngineResult struct {
-	Base   json.RawMessage `json:"base"`
-	Result json.RawMessage `json:"result"`
+	Base   json.RawMessage     `json:"base"`
+	Result json.RawMessage     `json:"result"`
+	Recalc *RecalcVerification `json:"recalc,omitempty"`
+}
+
+// RecalcVerification is the worker's independent full recalculation of the
+// candidate: a fresh engine process recomputes every formula from scratch and
+// compares it with the cached value the incremental edit produced.
+type RecalcVerification struct {
+	FormulaCells int  `json:"formula_cells"`
+	Checked      int  `json:"checked"`
+	Mismatched   int  `json:"mismatched"`
+	NoOracle     int  `json:"no_oracle"`
+	Volatile     int  `json:"volatile"`
+	StaleCache   bool `json:"stale_cache"`
 }
 type Runner interface {
 	Run(context.Context, []byte, Command) (EngineResult, error)
@@ -73,20 +85,14 @@ func (g GridCraft) Prepare(ctx context.Context, b Binding, s State, c Command) (
 		if err != nil {
 			return Candidate{}, err
 		}
-		effects, err = workbookEffects(base, comparison)
-		if err != nil {
+		target := c.Sheet + "!" + c.Cell
+		if err = checkWorkbookEffects(base, comparison, target, result.Recalc); err != nil {
 			return Candidate{}, err
 		}
-		target := c.Sheet + "!" + c.Cell
-		for _, effect := range effects {
-			if effect != target {
-				return Candidate{}, ErrEffects
-			}
-		}
-		// A semantic no-op still receives one durable operation receipt.
-		if len(effects) == 0 {
-			effects = []string{target}
-		}
+		// The mandate covers the authored target; verified recalculation is its
+		// consequence, not a separate effect. A semantic no-op still receives one
+		// durable operation receipt.
+		effects = []string{target}
 	}
 	canonical, err := json.Marshal(candidate)
 	if err != nil {
@@ -126,37 +132,101 @@ func decodeWorkbook(raw []byte) (map[string]any, error) {
 	}
 	return v, nil
 }
-func workbookEffects(before, after map[string]any) ([]string, error) {
+
+// verified reports whether a full recalculation confirmed every formula value.
+// Volatile or unverifiable formulas cannot be confirmed, so they fail closed.
+func (v *RecalcVerification) verified() bool {
+	return v != nil && v.FormulaCells > 0 && v.Checked == v.FormulaCells && v.Mismatched == 0 && v.NoOracle == 0 && v.Volatile == 0 && !v.StaleCache
+}
+
+// checkWorkbookEffects separates authored data (input value, formula, style and
+// every other cell or workbook field) from derived data (the computed value of a
+// formula cell). Outside the target, authored data must stay identical and no
+// cell may appear or disappear. A formula cell's value may change only when the
+// cell holds the same formula before and after, both values are plain results,
+// and the worker's independent full recalculation confirms the whole candidate.
+func checkWorkbookEffects(before, after map[string]any, target string, recalc *RecalcVerification) error {
 	a, err := extractCells(before)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	b, err := extractCells(after)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	// extractCells removes cell stores so every remaining field, including sheet
 	// order, styles, names, properties, charts and protection must stay identical.
 	if !reflect.DeepEqual(before, after) {
-		return nil, ErrEffects
+		return ErrEffects
 	}
-	changed := map[string]bool{}
-	for k, v := range a {
-		if !reflect.DeepEqual(v, b[k]) {
-			changed[k] = true
-		}
-	}
+	derived := 0
 	for k, v := range b {
-		if !reflect.DeepEqual(v, a[k]) {
-			changed[k] = true
+		if k == target || reflect.DeepEqual(v, a[k]) {
+			continue
+		}
+		old, ok := a[k]
+		if !ok || !recalculated(old, v) {
+			return ErrEffects
+		}
+		derived++
+	}
+	for k := range a {
+		if _, ok := b[k]; !ok && k != target {
+			return ErrEffects
 		}
 	}
-	result := make([]string, 0, len(changed))
-	for k := range changed {
-		result = append(result, k)
+	if derived > 0 && !recalc.verified() {
+		return ErrEffects
 	}
-	sort.Strings(result)
-	return result, nil
+	return nil
+}
+
+// recalculated reports whether two cells differ only in the computed value of an
+// unchanged formula.
+func recalculated(before, after any) bool {
+	x, ok := before.(map[string]any)
+	if !ok {
+		return false
+	}
+	y, ok := after.(map[string]any)
+	if !ok || len(x) != len(y) {
+		return false
+	}
+	if _, ok := x["formula"].(map[string]any); !ok {
+		return false
+	}
+	for k, v := range x {
+		w, ok := y[k]
+		if !ok {
+			return false
+		}
+		if k == "value" {
+			if !plainValue(v) || !plainValue(w) {
+				return false
+			}
+		} else if !reflect.DeepEqual(v, w) {
+			return false
+		}
+	}
+	return true
+}
+
+func plainValue(raw any) bool {
+	v, ok := raw.(map[string]any)
+	if !ok || len(v) != 2 {
+		return false
+	}
+	switch v["t"] {
+	case "Number":
+		_, ok = v["v"].(json.Number)
+	case "Text", "Error":
+		_, ok = v["v"].(string)
+	case "Bool":
+		_, ok = v["v"].(bool)
+	default:
+		ok = false
+	}
+	return ok
 }
 func extractCells(workbook map[string]any) (map[string]any, error) {
 	result := map[string]any{}
