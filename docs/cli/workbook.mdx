@@ -13,6 +13,17 @@ Opening a workbook Page in the web app shows a read-only preview of its sheets
 the window, re-reads it. Cell styles and number formats are not rendered, and a
 workbook Page cannot carry panels.
 
+An embedded editor is in development behind the workspace flag
+`gridcraft_editor` (off by default) and the server's editor session. With both
+on, the Page loads the editor from its own origin in a sandboxed,
+credentialless frame (Chromium only); the frame gets no cookies, tokens or
+session id, and talks to the Page only over one private message channel. The
+status reads **Saved** only after the server confirmed every edit, and leaving
+the Page with unconfirmed edits asks first. If the frame loads another
+document, answers the handshake from the wrong origin or with an unexpected
+bundle, or access is lost, the frame is removed and the Page falls back to the
+read-only preview, saying how many edits were not saved.
+
 ```bash
 crewship workbook create my-book --name "My book"
 crewship workbook import @PAGE_ID --file import.json

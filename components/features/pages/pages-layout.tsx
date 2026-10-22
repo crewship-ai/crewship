@@ -5,7 +5,7 @@ import { usePageCreationAccess, usePageFolderCreationAccess } from "@/hooks/use-
 import { PageApplicationView } from "./page-application"
 import { PageDocument } from "./page-document"
 import { PageSlides } from "./page-slides"
-import { PageWorkbook } from "./page-workbook"
+import { PageWorkbookSurface } from "./workbook-editor-host"
 import { slidesEditorMount } from "@/lib/feature-flags"
 import { DocumentCatalog } from "./document-catalog"
 import { PersonalDocumentSpace } from "./personal-document-space"
@@ -537,7 +537,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                     : <><PageSlides workspaceId={workspaceId} pageId={nativePageId} name={detail.page?.name} onDirtyChange={nav.setDirty} /><UnsentEditsLeaveDialog pending={nav.pending} onReturnFocus={focusNativeView} /></>
                 ) : nativeWorkbook ? (
                   detail.accessDenied || !nativePageId ? <p role="alert" className="p-6">Workbook unavailable</p>
-                    : <PageWorkbook key={`${workspaceId}:${nativePageId}`} workspaceId={workspaceId} pageId={nativePageId} name={detail.page?.name} />
+                    : <><PageWorkbookSurface key={`${workspaceId}:${nativePageId}`} workspaceId={workspaceId} pageId={nativePageId} name={detail.page?.name} onDirtyChange={nav.setDirty} /><UnsentEditsLeaveDialog pending={nav.pending} onReturnFocus={focusNativeView} /></>
                 ) : detail.page && !detail.loading && !detail.error ? (
                   <PageApplicationView key={`${workspaceId}:${selectedSlug}`} workspaceId={workspaceId} slug={selectedSlug} page={detail.raw} panels={showPanels} onAvailableChange={setApplicationAvailable} fallback={pageFallback} />
                 ) : pageFallback}

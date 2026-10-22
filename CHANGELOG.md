@@ -9,6 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Experimental embedded workbook editor host (off by default).** With the workspace flag `gridcraft_editor` and a server editor session, a workbook Page frames the editor from its own origin with exactly `sandbox="allow-scripts"`, `credentialless` and no referrer, checks the handshake (frame window, opaque origin, bundle digest), and ends the session and removes the frame on any later load of the frame. **Saved** appears only after a durable server receipt, and leaving with unconfirmed edits asks first. Otherwise the read-only preview stays.
 - **Experimental offline workbook operations** add a default-off GridCraft Artifact adapter, native-file imports and scoped agent cell edits with durable receipts, retry recovery and bounded worker admission. Runtime activation requires a qualified persistent digest-pinned worker reached over a private authenticated socket. Embedded editing, collaboration and portable workbook backup/restore are unavailable; affected workspace backups fail explicitly.
 - A Document or Slides page with edits the server has not accepted now asks before an in-app link leaves it (Keep editing or Leave anyway); the link used to do nothing and say nothing.
 - Replaying a Document creation submission after a lost reply no longer adds a duplicate human message or starts another run.

@@ -1,0 +1,336 @@
+import React from "react"
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { TransportResponse, WorkbookSession, WorkbookTransport } from "@/lib/workbooks/bridge"
+import type { WorkbookEditorClient } from "@/lib/workbooks/editor-client"
+import { PageWorkbookSurface, createEditorFrame, workbookSaveLabel } from "../workbook-editor-host"
+import { initialSaveState } from "@/lib/editor-lifecycle/save-state"
+
+const requests = vi.hoisted(() => vi.fn())
+vi.mock("@/lib/api-fetch", () => ({ apiFetch: requests, broadcastSessionExpired: vi.fn() }))
+
+const DIGEST = "b".repeat(64)
+const BUNDLE = "sha256:fake-editor"
+const EDITOR_URL = `https://editor.test/b/${DIGEST}/index.html`
+const SID = "ws_session_secret"
+const session: WorkbookSession = { session_id: SID, actor_label: "Owner", rev: 41, generation: 1, protocol: 1, bundle_digest: BUNDLE, editor_url: EDITOR_URL }
+const ok = (body: unknown): TransportResponse => ({ status: 200, body })
+const receipt = (seq: number, rev: number, durability = "node") => ok({
+  operation_key: { artifact_id: "page-1", authority_id: "user:u1", mutation_id: `${SID}:${seq}` }, outcome: "applied", rev, durability,
+})
+const mutation = (seq: number, base: number, cell: string, input: string) => JSON.stringify({ type: "mutation", protocol: 1, seq, base_rev: base, ops: [{ op: "cell.set", sheet: "Sheet1", cell, input }] })
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(done => { resolve = done })
+  return { promise, resolve }
+}
+
+// happy-dom has no credentialless iframes (Chromium reflects the attribute as a boolean property)
+// and loads no frame pages, so a connected frame gets a stand-in window whose postMessage is recorded.
+const credentiallessDescriptor = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "credentialless")
+const contentWindowDescriptor = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "contentWindow")
+type FakeWindow = { postMessage: ReturnType<typeof vi.fn> }
+let frameWindows = new WeakMap<HTMLIFrameElement, FakeWindow>()
+beforeEach(() => {
+  frameWindows = new WeakMap()
+  Object.defineProperty(HTMLIFrameElement.prototype, "credentialless", { configurable: true, get() { return (this as HTMLIFrameElement).hasAttribute("credentialless") } })
+  Object.defineProperty(HTMLIFrameElement.prototype, "contentWindow", { configurable: true, get() {
+    const frame = this as HTMLIFrameElement
+    if (!frame.isConnected) return null
+    let win = frameWindows.get(frame)
+    if (!win) frameWindows.set(frame, win = { postMessage: vi.fn() })
+    return win
+  } })
+  requests.mockImplementation(async () => new Response(JSON.stringify({ error: "Workbook not found" }), { status: 404 }))
+})
+const ports: MessagePort[] = []
+afterEach(() => {
+  for (const port of ports.splice(0)) port.close()
+  cleanup()
+  requests.mockReset()
+  if (contentWindowDescriptor) Object.defineProperty(HTMLIFrameElement.prototype, "contentWindow", contentWindowDescriptor)
+  if (credentiallessDescriptor) Object.defineProperty(HTMLIFrameElement.prototype, "credentialless", credentiallessDescriptor)
+  else delete (HTMLIFrameElement.prototype as { credentialless?: unknown }).credentialless
+})
+
+function setup(options: { enabled?: boolean; open?: Awaited<ReturnType<WorkbookEditorClient["openSession"]>>; transport?: Partial<WorkbookTransport>; head?: WorkbookEditorClient["head"] } = {}) {
+  const transport = {
+    snapshot: vi.fn(async () => ok({ schema_version: 1, rev: 41, generation: 1, snapshot: { sheets: [] } })),
+    edit: vi.fn(async (): Promise<TransportResponse> => ({ status: 500, body: null })),
+    commits: vi.fn(async (since: number) => ok({ head_rev: since, generation: 1, commits: [] })),
+    operation: vi.fn(async (): Promise<TransportResponse> => ({ status: 404, body: null })),
+    closeSession: vi.fn(async () => {}),
+    ...options.transport,
+  }
+  const client: WorkbookEditorClient = {
+    editorEnabled: vi.fn(async () => options.enabled ?? true),
+    openSession: vi.fn(async () => options.open ?? { ok: true as const, session }),
+    transport: vi.fn(() => transport),
+    head: vi.fn(options.head ?? (async () => ({ ok: true as const, head: { rev: 41, generation: 1 } }))),
+  }
+  const dirty: boolean[] = []
+  const view = render(<PageWorkbookSurface workspaceId="ws" pageId="page-1" name="Budget" client={client} onDirtyChange={value => dirty.push(value)} />)
+  const frame = () => document.querySelector<HTMLIFrameElement>("iframe")
+  /** The frame's window, with `postMessage` captured so the transferred port can be taken. */
+  const frameWindow = () => frame()!.contentWindow as unknown as FakeWindow
+  const load = () => act(async () => { frame()!.dispatchEvent(new Event("load")) })
+  const message = (data: unknown, { origin = "null", source = frameWindow() as unknown as MessageEventSource }: { origin?: string; source?: MessageEventSource } = {}) =>
+    act(async () => { window.dispatchEvent(new MessageEvent("message", { data, origin, source })) })
+  const hello = (bundle = BUNDLE) => message({ type: "gridcraft:hello", protocol: 1, bundle })
+  const fromFrame: unknown[] = []
+  let port: MessagePort | undefined
+  /** Load, hello, and the port the host transferred in connect. */
+  const connect = async () => {
+    await waitFor(() => expect(frame()).not.toBeNull())
+    const win = frameWindow()
+    await load()
+    await hello()
+    const calls = win.postMessage.mock.calls
+    expect(calls).toHaveLength(1)
+    port = (calls[0][2] as unknown as MessagePort[])[0]
+    ports.push(port)
+    port.onmessage = event => fromFrame.push(JSON.parse(event.data as string))
+    await waitFor(() => expect(fromFrame).toContainEqual({ type: "online", protocol: 1 }))
+    return { win, port }
+  }
+  const send = (data: string) => act(async () => { port!.postMessage(data) })
+  const status = () => screen.getByTestId("workbook-save-state").textContent
+  return { view, client, transport, frame, frameWindow, load, message, hello, connect, send, status, dirty, fromFrame }
+}
+
+describe("createEditorFrame", () => {
+  it("sets every attribute before src, and src last", () => {
+    const seen: Record<string, string | null>[] = []
+    const real = document.createElement("iframe")
+    Object.defineProperty(real, "src", { set() { seen.push({ sandbox: real.getAttribute("sandbox"), credentialless: real.getAttribute("credentialless"), referrerpolicy: real.getAttribute("referrerpolicy") }) } })
+    const doc = { createElement: () => real } as unknown as Document
+    expect(createEditorFrame(doc, EDITOR_URL, () => {})).toBe(real)
+    expect(seen).toEqual([{ sandbox: "allow-scripts", credentialless: "", referrerpolicy: "no-referrer" }])
+  })
+
+  it("refuses to assign src when the browser does not keep credentialless", () => {
+    Object.defineProperty(HTMLIFrameElement.prototype, "credentialless", { configurable: true, get: () => false })
+    const real = document.createElement("iframe")
+    const src = vi.fn()
+    Object.defineProperty(real, "src", { set: src })
+    expect(createEditorFrame({ createElement: () => real } as unknown as Document, EDITOR_URL, () => {})).toBeNull()
+    expect(src).not.toHaveBeenCalled()
+  })
+})
+
+describe("mounting", () => {
+  it("keeps the read-only preview while the flag is off", async () => {
+    const t = setup({ enabled: false })
+    await screen.findByText("Workbook unavailable")
+    expect(t.client.openSession).not.toHaveBeenCalled()
+    expect(t.frame()).toBeNull()
+  })
+
+  it("keeps the preview in a browser without credentialless frames", async () => {
+    delete (HTMLIFrameElement.prototype as { credentialless?: unknown }).credentialless
+    const t = setup()
+    await waitFor(() => expect(t.client.editorEnabled).toHaveBeenCalled())
+    await screen.findByText("Workbook unavailable")
+    expect(t.client.openSession).not.toHaveBeenCalled()
+  })
+
+  it("falls back to the preview when the server will not open a session", async () => {
+    const t = setup({ open: { ok: false, status: 503 } })
+    expect(await screen.findByTestId("workbook-editor-notice")).toHaveTextContent("The workbook editor is turned off. Showing the read-only preview.")
+    expect(t.frame()).toBeNull()
+  })
+
+  it.each([
+    ["the Studio origin", `${window.location.origin}/b/${DIGEST}/index.html`],
+    ["plain HTTP", `http://editor.test/b/${DIGEST}/index.html`],
+    ["no editor URL", undefined],
+  ])("never frames an editor at %s, and closes the session", async (_, editorUrl) => {
+    const t = setup({ open: { ok: true, session: { ...session, editor_url: editorUrl } } })
+    expect(await screen.findByText(/cannot be opened safely/)).toBeInTheDocument()
+    expect(t.frame()).toBeNull()
+    expect(t.transport.closeSession).toHaveBeenCalledTimes(1)
+  })
+
+  it("renders exactly the required frame attributes, with no session data in the URL", async () => {
+    const t = setup()
+    await waitFor(() => expect(t.frame()).not.toBeNull())
+    const frame = t.frame()!
+    expect(frame.getAttribute("sandbox")).toBe("allow-scripts")
+    expect(frame.hasAttribute("credentialless")).toBe(true)
+    expect(frame.getAttribute("referrerpolicy")).toBe("no-referrer")
+    expect(frame.getAttribute("src")).toBe(`${EDITOR_URL}?host=authority&parent_origin=${encodeURIComponent(window.location.origin)}&v=1`)
+    expect(frame.getAttribute("src")).not.toContain(SID)
+    expect(t.status()).toBe("Connecting…")
+  })
+})
+
+describe("handshake", () => {
+  it("connects our frame after its load and sends the port once, never the session id", async () => {
+    const t = setup()
+    const { win } = await t.connect()
+    const [connect, target] = win.postMessage.mock.calls[0]
+    expect(target).toBe("*")
+    expect(connect).toMatchObject({ type: "gridcraft:connect", protocol: 1, page_label: "Budget", rev: 41, generation: 1 })
+    expect(JSON.stringify(connect)).not.toContain(SID)
+    await waitFor(() => expect(t.status()).toBe("No unsaved changes"))
+  })
+
+  it("ignores a hello from another window", async () => {
+    const t = setup()
+    await waitFor(() => expect(t.frame()).not.toBeNull())
+    const win = t.frameWindow()
+    await t.load()
+    await t.message({ type: "gridcraft:hello", protocol: 1, bundle: BUNDLE }, { source: window as unknown as MessageEventSource })
+    expect(win.postMessage).not.toHaveBeenCalled()
+    expect(t.frame()).not.toBeNull()
+  })
+
+  it.each([
+    ["a real (non-sandboxed) origin", { origin: "https://editor.test" }, BUNDLE],
+    ["the host origin", { origin: window.location.origin }, BUNDLE],
+    ["a wrong bundle digest", {}, "sha256:other"],
+  ])("removes the frame on a hello from %s", async (_, from, bundle) => {
+    const t = setup()
+    await waitFor(() => expect(t.frame()).not.toBeNull())
+    const win = t.frameWindow()
+    await t.load()
+    await t.message({ type: "gridcraft:hello", protocol: 1, bundle }, from)
+    expect(win.postMessage).not.toHaveBeenCalled()
+    expect(t.frame()).toBeNull()
+    expect(screen.getByTestId("workbook-editor-notice")).toHaveTextContent("The editor was closed because its frame broke the protocol")
+    expect(t.transport.closeSession).toHaveBeenCalled()
+  })
+
+  it("removes the frame on a hello before its first load", async () => {
+    const t = setup()
+    await waitFor(() => expect(t.frame()).not.toBeNull())
+    const win = t.frameWindow()
+    await t.hello()
+    expect(win.postMessage).not.toHaveBeenCalled()
+    expect(t.frame()).toBeNull()
+  })
+
+  it("removes the frame on a second load before the hello", async () => {
+    const t = setup()
+    await waitFor(() => expect(t.frame()).not.toBeNull())
+    const win = t.frameWindow()
+    await t.load()
+    await t.load()
+    expect(t.frame()).toBeNull()
+    expect(win.postMessage).not.toHaveBeenCalled()
+  })
+
+  it("removes the frame when it loads another document after the handshake, and says what was lost", async () => {
+    const pending = deferred<TransportResponse>()
+    const t = setup({ transport: { edit: vi.fn(() => pending.promise) } })
+    const { win } = await t.connect()
+    await t.send(mutation(1, 41, "B3", "21"))
+    await waitFor(() => expect(t.status()).toBe("Saving…"))
+    const frame = t.frame()!
+    await act(async () => { frame.dispatchEvent(new Event("load")) })
+    expect(t.frame()).toBeNull()
+    expect(screen.getByTestId("workbook-editor-notice")).toHaveTextContent("1 change not saved")
+    // The port is never offered again.
+    expect(win.postMessage).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole("button", { name: "Open editor again" })).toBeInTheDocument()
+  })
+})
+
+describe("save state and leave guard", () => {
+  it("says Saved only after a durable server receipt, and guards leaving until then", async () => {
+    const pending = deferred<TransportResponse>()
+    const t = setup({ transport: { edit: vi.fn(() => pending.promise) } })
+    await t.connect()
+    await t.send(mutation(1, 41, "B3", "21"))
+    await waitFor(() => expect(t.status()).toBe("Saving…"))
+    expect(t.dirty.at(-1)).toBe(true)
+    const leave = new Event("beforeunload", { cancelable: true })
+    window.dispatchEvent(leave)
+    expect(leave.defaultPrevented).toBe(true)
+
+    await act(async () => { pending.resolve(receipt(1, 42)) })
+    await waitFor(() => expect(t.status()).toBe("Saved"))
+    expect(t.dirty.at(-1)).toBe(false)
+    const after = new Event("beforeunload", { cancelable: true })
+    window.dispatchEvent(after)
+    expect(after.defaultPrevented).toBe(false)
+    await waitFor(() => expect(t.fromFrame).toContainEqual({ type: "ack", protocol: 1, seq: 1, rev: 42 }))
+    expect(screen.getByText("Revision 42")).toBeInTheDocument()
+  })
+
+  it("never says Saved for a receipt that is not durable", async () => {
+    const t = setup({ transport: { edit: vi.fn(async () => receipt(1, 42, "memory")) } })
+    await t.connect()
+    await t.send(mutation(1, 41, "B3", "21"))
+    await waitFor(() => expect(t.transport.edit).toHaveBeenCalled())
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
+    expect(t.status()).not.toBe("Saved")
+    expect(t.dirty.at(-1)).toBe(true)
+  })
+
+  it("says Not saved with the server's value when the cell was changed by someone else", async () => {
+    const t = setup({
+      transport: {
+        edit: vi.fn(async () => ({ status: 409, body: { error: "precondition_failed", head_rev: 42, conflicts: [{ cell: "B2", input: "7", rev: 42, actor_label: "Agent Ada" }] } })),
+        commits: vi.fn(async () => ok({ head_rev: 42, generation: 1, commits: [{ rev: 42, kind: "cells", actor_label: "Agent Ada", own: false, ops: [{ sheet: "Sheet1", cell: "B2", input: "7" }] }] })),
+      },
+    })
+    await t.connect()
+    await t.send(mutation(1, 41, "B2", "mine"))
+    await waitFor(() => expect(t.status()).toBe("Not saved · a change was refused"))
+    expect(t.fromFrame).toContainEqual(expect.objectContaining({ type: "committed", rev: 42, ops: [{ op: "cell.set", sheet: "Sheet1", cell: "B2", input: "7" }] }))
+    expect(t.fromFrame).toContainEqual(expect.objectContaining({ type: "rejected", seq: 1, code: "precondition_failed", cells: [{ cell: "B2", input: "7", rev: 42, actor_label: "Agent Ada" }] }))
+    expect(t.dirty.at(-1)).toBe(false)
+  })
+
+  it("delivers a commit the head poll finds", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      let head = 41
+      const t = setup({
+        head: async () => ({ ok: true, head: { rev: head, generation: 1 } }),
+        transport: { commits: vi.fn(async (since: number) => ok({ head_rev: head, generation: 1, commits: since < 42 && head >= 42 ? [{ rev: 42, kind: "cells", actor_label: "Agent Ada", own: false, ops: [{ sheet: "Sheet1", cell: "B2", input: "99" }] }] : [] })) },
+      })
+      await t.connect()
+      head = 42
+      await act(async () => { await vi.advanceTimersByTimeAsync(2100) })
+      await waitFor(() => expect(t.fromFrame).toContainEqual({ type: "committed", protocol: 1, rev: 42, actor_label: "Agent Ada", ops: [{ op: "cell.set", sheet: "Sheet1", cell: "B2", input: "99" }] }))
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("removes the frame when access is lost", async () => {
+    const t = setup({ transport: { edit: vi.fn(async () => ({ status: 404, body: { error: "Workbook not found" } })) } })
+    await t.connect()
+    await t.send(mutation(1, 41, "B3", "21"))
+    await waitFor(() => expect(t.frame()).toBeNull())
+    expect(screen.getByTestId("workbook-editor-notice")).toHaveTextContent("Access lost · 1 change not saved")
+    expect(screen.queryByRole("button", { name: "Open editor again" })).toBeNull()
+  })
+
+  it("closes the session and removes the frame on unmount", async () => {
+    const t = setup()
+    await t.connect()
+    t.view.unmount()
+    expect(document.querySelector("iframe")).toBeNull()
+    await waitFor(() => expect(t.transport.closeSession).toHaveBeenCalledTimes(1))
+  })
+})
+
+describe("workbookSaveLabel", () => {
+  const opened = { ...initialSaveState, opened: true, canWrite: true }
+  it.each([
+    [initialSaveState, "Connecting…"],
+    [opened, "No unsaved changes"],
+    [{ ...opened, pending: 2 }, "Saving…"],
+    [{ ...opened, pending: 1, trouble: "offline" as const }, "Offline · 1 change not saved"],
+    [{ ...opened, pending: 1, trouble: "retrying" as const }, "Saving… · retrying"],
+    [{ ...opened, receipt: true }, "Saved"],
+    [{ ...opened, receipt: true, pending: 1 }, "Saving…"],
+    [{ ...opened, canWrite: false, trouble: "denied" as const }, "Access lost"],
+  ])("%j → %s", (state, label) => {
+    expect(workbookSaveLabel(state)).toBe(label)
+  })
+})
