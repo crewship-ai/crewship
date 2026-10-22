@@ -790,6 +790,39 @@ describe("idempotence and resume", () => {
   })
 })
 
+describe("catch-up after the editor already holds the head", () => {
+  it("an agent change arrived, then Enter on that cell: the 409 is answered and later commits and acks still arrive", async () => {
+    const conflict: TransportResponse = { status: 409, body: { error: "precondition_failed", head_rev: 42, snapshot_required: false, conflicts: [{ sheet: "Sheet1", cell: "B2", input: "7", rev: 42, actor_label: "Agent Ada" }] } }
+    const history = [remote(42, [["B2", "7"]]), remote(43, [["C9", "x"]]), own(44, 2, [["D1", "late"]])]
+    const t = setup({
+      edit: vi.fn(async (id: string) => id.endsWith(":1") ? conflict : receipt(2, 44)),
+      commits: vi.fn(async (since: number) => feed(Math.max(since, ...history.filter(c => c.rev <= headNow).map(c => c.rev)), history.filter(c => c.rev > since && c.rev <= headNow))),
+    })
+    let headNow = 42
+    await t.connect()
+    // The agent's change reaches the editor first.
+    t.bridge.notify({ rev: 42, generation: 1 })
+    await flush()
+    expect(t.types()).toEqual(["committed:42"])
+    // The person then presses Enter on the cell the agent changed, against the revision they opened it at.
+    t.send(mutation(1, 41, [["B2", "mine"]]))
+    await flush()
+    expect(t.toFrame().at(-1)).toEqual({ type: "rejected", protocol: 1, seq: 1, code: "precondition_failed", current_rev: 42, cells: [{ sheet: "Sheet1", cell: "B2", input: "7", rev: 42, actor_label: "Agent Ada" }] })
+    // Another agent commit: the feed must be read again and the editor must get it.
+    headNow = 43
+    t.bridge.notify({ rev: 43, generation: 1 })
+    await flush()
+    expect(t.types()).toEqual(["committed:42", "rejected", "committed:43"])
+    // And a later receipt beyond the head is held, then acknowledged after the feed delivered the gap.
+    headNow = 44
+    t.send(mutation(2, 43, [["D1", "late"]]))
+    await flush()
+    expect(t.types()).toEqual(["committed:42", "rejected", "committed:43", "ack:44"])
+    expect(t.bridge.confirmedRev).toBe(44)
+    expect(t.kills).toEqual([])
+  })
+})
+
 describe("HTTP transport", () => {
   it("calls the workbook API of one page without caching", async () => {
     const fetch = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }))

@@ -404,7 +404,7 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
   let epoch = 0
   let maxSeq = 0
   let wantRev = 0
-  let catching: Promise<void> | undefined
+  let catching: Promise<void> | undefined, catchRuns = 0
   let catchUpTimer: unknown, catchUpFailures = 0
   let driving = false, driveTimer: unknown
   /** Receipt revisions waiting for earlier revisions to reach the editor: rev → seq. */
@@ -517,11 +517,21 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
     catchUpTimer = timers.setTimeout(() => { catchUpTimer = undefined; void catchUp(0) }, ms)
   }
 
-  /** Reads the commits feed until the editor holds `rev` (and the head the feed reports). */
+  /**
+   * Reads the commits feed until the editor holds `rev` (and the head the feed reports). One read
+   * loop at a time; a call while it runs only raises the target. The loop starts after a tick, so
+   * `catching` is always set before the loop can finish and clear it: a loop that had nothing to
+   * do must never be left behind as a settled promise that later calls would wait on instead of
+   * reading the feed.
+   */
   function catchUp(rev: number): Promise<void> {
     wantRev = Math.max(wantRev, rev)
     if (phase !== "live") return Promise.resolve()
-    catching ??= (async () => {
+    if (catching) return catching
+    if (wantRev <= confirmedRev) return Promise.resolve()
+    const run = ++catchRuns
+    catching = (async () => {
+      await undefined
       try {
         while (phase === "live" && wantRev > confirmedRev) {
           const since = confirmedRev
@@ -553,7 +563,7 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
         }
         catchUpFailures = 0
       } finally {
-        catching = undefined
+        if (catchRuns === run) catching = undefined
       }
     })()
     return catching
