@@ -126,8 +126,14 @@ func transferDepartingUserPages(ctx context.Context, db *sql.DB, j journal.Emitt
 	defer func() { _ = tx.Rollback() }()
 
 	results, err := transferDepartingUserPagesTx(ctx, tx, wsID, userID)
-	if err != nil || len(results) == 0 {
-		return nil, err
+	if err != nil {
+		// A refused erasure opens custody of the subject's workbooks (see
+		// gridcraft_custody.go) once this transaction has let go.
+		_ = tx.Rollback()
+		return nil, recordRefusedDepartureCustody(ctx, db, actorID, wsID, userID, "erasure_refused", err)
+	}
+	if len(results) == 0 {
+		return nil, nil
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit pages transfer: %w", err)

@@ -67,6 +67,9 @@ func TestGridCraftDepartingOwnerWorkbookNeedsHumanSuccessor(t *testing.T) {
 			}
 			moved := f.do(f.boss, "POST", "/api/v1/workspaces/ws-old/page-ownership/custody-book-id"+q, `{"expected_owner_user_id":"ann","successor_user_id":"bob"}`)
 			wantCode(t, moved, 200, "custody transfer")
+			if n := gridcraftCount(t, f, `SELECT count(*) FROM audit_logs WHERE workspace_id='ws-old' AND user_id='boss' AND action='artifact.workbook_custody_transferred' AND entity_id='custody-book-id'`); n != 1 {
+				t.Fatalf("workbook custody transfer audit rows = %d, want 1", n)
+			}
 			wantCode(t, f.do(bob, "GET", "/api/v1/pages/custody-book/workbook"+q, ""), 200, "successor reads")
 			wantCode(t, f.do(bob, "POST", "/api/v1/pages/custody-book/workbook/operations"+q, gridcraftImportBody("bob-1", 1, 1)), 200, "successor writes")
 			wantCode(t, f.do(ann, "GET", "/api/v1/pages/custody-book/workbook"+q, ""), 404, "former owner")
@@ -197,4 +200,124 @@ func gridcraftServe(f *instanceFixture, req *http.Request) *httptest.ResponseRec
 	rr := httptest.NewRecorder()
 	f.r.ServeHTTP(rr, req)
 	return rr
+}
+
+// Workbook custody is not a way to take a workbook from a live member. The
+// custody listing and transfer offer a workbook only to a workspace OWNER and
+// only once its owner is no longer a live member: removed, suspended, or with
+// a refused removal or erasure pending. Every workbook custody transfer is
+// written to audit_logs in the same transaction.
+// Regression for review round 3, probes R3-1 (ADMIN took a live member's
+// published workbook, read it and deleted it) and R3-2 (OWNER handed a live
+// member's workbook to a third member).
+func TestGridCraftWorkbookCustodyOnlyForDepartedOwners(t *testing.T) {
+	q := "?workspace_id=ws-old"
+	list := "/api/v1/workspaces/ws-old/page-ownership" + q
+	transfer := "/api/v1/workspaces/ws-old/page-ownership/custody-book-id" + q
+	read := "/api/v1/pages/custody-book/workbook" + q
+	owner := func(t *testing.T, f *instanceFixture) string {
+		var id string
+		if err := f.db.QueryRow(`SELECT COALESCE(owner_user_id,'') FROM pages WHERE id='custody-book-id'`).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	transfers := func(t *testing.T, f *instanceFixture) int {
+		return gridcraftCount(t, f, `SELECT count(*) FROM audit_logs WHERE workspace_id='ws-old' AND action='artifact.workbook_custody_transferred' AND entity_type='page' AND entity_id='custody-book-id'`)
+	}
+	refuseLiveOwner := func(t *testing.T, f *instanceFixture, ann, bob string) {
+		t.Helper()
+		for name, token := range map[string]string{"ADMIN": f.wsAdmin, "OWNER": f.boss} {
+			listing := f.do(token, "GET", list, "")
+			wantCode(t, listing, 200, name+" custody listing")
+			if strings.Contains(listing.Body.String(), "custody-book") {
+				t.Fatalf("%s custody listing offers a live member's workbook: %s", name, listing.Body.String())
+			}
+		}
+		for name, body := range map[string]string{
+			"ADMIN to self": `{"expected_owner_user_id":"ann","successor_user_id":"wsadmin"}`,
+			"ADMIN to bob":  `{"expected_owner_user_id":"ann","successor_user_id":"bob"}`,
+		} {
+			if code := f.do(f.wsAdmin, "POST", transfer, body).Code; code != 403 && code != 404 {
+				t.Fatalf("%s transfer of a live member's workbook = %d, want refusal", name, code)
+			}
+		}
+		if code := f.do(f.boss, "POST", transfer, `{"expected_owner_user_id":"ann","successor_user_id":"bob"}`).Code; code != 403 && code != 404 {
+			t.Fatalf("OWNER transfer of a live member's workbook = %d, want refusal", code)
+		}
+		if got := owner(t, f); got != "ann" {
+			t.Fatalf("refused custody transfer moved the workbook to %q", got)
+		}
+		if n := transfers(t, f); n != 0 {
+			t.Fatalf("refused custody transfers wrote %d audit rows", n)
+		}
+		wantCode(t, f.do(f.wsAdmin, "GET", read, ""), 404, "ADMIN reads a live member's workbook")
+		if code := f.do(f.wsAdmin, "DELETE", "/api/v1/pages/custody-book"+q, "").Code; code != 403 && code != 404 {
+			t.Fatalf("ADMIN DELETE of a live member's workbook = %d, want refusal", code)
+		}
+		if n := gridcraftCount(t, f, `SELECT count(*) FROM gridcraft_heads WHERE page_id='custody-book-id'`); n != 1 {
+			t.Fatal("a refused custodian removed the workbook")
+		}
+		wantCode(t, f.do(ann, "GET", read, ""), 200, "owner keeps reading")
+		wantCode(t, f.do(bob, "GET", read, ""), 200, "editor keeps reading")
+	}
+	openCustody := func(t *testing.T, f *instanceFixture, ann, bob string) {
+		t.Helper()
+		// ADMIN is never a workbook custodian, even when custody is open.
+		listing := f.do(f.wsAdmin, "GET", list, "")
+		wantCode(t, listing, 200, "ADMIN custody listing")
+		if strings.Contains(listing.Body.String(), "custody-book") {
+			t.Fatalf("ADMIN custody listing offers a workbook: %s", listing.Body.String())
+		}
+		if code := f.do(f.wsAdmin, "POST", transfer, `{"expected_owner_user_id":"ann","successor_user_id":"wsadmin"}`).Code; code != 403 && code != 404 {
+			t.Fatalf("ADMIN transfer of a departing owner's workbook = %d, want refusal", code)
+		}
+		listing = f.do(f.boss, "GET", list, "")
+		wantCode(t, listing, 200, "OWNER custody listing")
+		if !strings.Contains(listing.Body.String(), `"type":"workbook"`) {
+			t.Fatalf("OWNER custody listing misses the departing owner's workbook: %s", listing.Body.String())
+		}
+		wantCode(t, f.do(f.boss, "POST", transfer, `{"expected_owner_user_id":"ann","successor_user_id":"bob"}`), 200, "OWNER custody transfer")
+		if got := owner(t, f); got != "bob" {
+			t.Fatalf("workbook owner after custody transfer = %q, want bob", got)
+		}
+		if n := gridcraftCount(t, f, `SELECT count(*) FROM audit_logs WHERE workspace_id='ws-old' AND user_id='boss' AND action='artifact.workbook_custody_transferred' AND entity_type='page' AND entity_id='custody-book-id' AND json_extract(metadata,'$.from_user_id')='ann' AND json_extract(metadata,'$.to_user_id')='bob'`); n != 1 {
+			t.Fatalf("workbook custody transfer audit rows = %d, want 1", n)
+		}
+		wantCode(t, f.do(bob, "GET", read, ""), 200, "successor reads")
+	}
+
+	t.Run("live owner keeps the workbook, refused removal opens custody", func(t *testing.T) {
+		f, ann, bob := gridcraftCustodyFixture(t, false)
+		wantCode(t, f.do(ann, "POST", "/api/v1/pages/custody-book/workbook/editors"+q, `{"editor":"bob@ex.com","publish":true}`), 200, "publish")
+		refuseLiveOwner(t, f, ann, bob)
+		var member string
+		if err := f.db.QueryRow(`SELECT id FROM workspace_members WHERE user_id='ann' AND workspace_id='ws-old'`).Scan(&member); err != nil {
+			t.Fatal(err)
+		}
+		removal := f.do(f.wsAdmin, "DELETE", "/api/v1/workspaces/ws-old/members/"+member+q, "")
+		wantCode(t, removal, 409, "removal of a workbook owner")
+		openCustody(t, f, ann, bob)
+		wantCode(t, f.do(f.wsAdmin, "DELETE", "/api/v1/workspaces/ws-old/members/"+member+q, ""), 200, "removal after custody transfer")
+	})
+	t.Run("a stale removal request does not open custody", func(t *testing.T) {
+		f, ann, bob := gridcraftCustodyFixture(t, false)
+		wantCode(t, f.do(ann, "POST", "/api/v1/pages/custody-book/workbook/editors"+q, `{"editor":"bob@ex.com","publish":true}`), 200, "publish")
+		mustExec(t, f.db, `INSERT INTO audit_logs(id,workspace_id,user_id,action,entity_type,entity_id,metadata,created_at) VALUES('old-request','ws-old','wsadmin','artifact.workbook_custody_requested','page','custody-book-id','{"owner_user_id":"ann"}','2020-01-01T00:00:00.000000000Z')`)
+		refuseLiveOwner(t, f, ann, bob)
+	})
+	t.Run("suspended owner", func(t *testing.T) {
+		f, ann, bob := gridcraftCustodyFixture(t, false)
+		// Private: editor grants issued by an owner who is no longer live do not
+		// count, so a published workbook's editors would not be successors.
+		mustExec(t, f.db, `UPDATE users SET suspended_at='2026-10-22T00:00:00Z' WHERE id='ann'`)
+		openCustody(t, f, ann, bob)
+	})
+	t.Run("owner no longer a member", func(t *testing.T) {
+		f, ann, bob := gridcraftCustodyFixture(t, false)
+		// Private: editor grants issued by an owner who is no longer live do not
+		// count, so a published workbook's editors would not be successors.
+		mustExec(t, f.db, `DELETE FROM workspace_members WHERE workspace_id='ws-old' AND user_id='ann'`)
+		openCustody(t, f, ann, bob)
+	})
 }

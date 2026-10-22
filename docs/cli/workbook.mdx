@@ -129,16 +129,36 @@ erased, the workbook is treated like the owner's other private outputs (Docs,
 Artifacts, Boards):
 
 1. The departure or erasure is refused with `409 page_ownership_transfer_required`,
-   and the response lists the workbook with `type: workbook`.
-2. A workspace administrator reviews it with
-   `crewship workspace page-ownership list` (a private workbook is listed only to
-   a workspace OWNER) and picks a human successor with
-   `crewship workspace page-ownership transfer`. The successor becomes the owner,
-   with the workbook's contents and the owner's rights. Editors named by the
-   previous owner lose access, because their grants were not issued by the new
-   owner; the new owner can share again. Agent mandates of the previous owner
-   stop working.
+   and the response lists the workbook with `type: workbook`. The refusal
+   opens the workbook's custody for 7 days and is recorded in the audit log as
+   `artifact.workbook_custody_requested`; retrying the departure or erasure
+   opens it again.
+2. A workspace **OWNER** reviews it with `crewship workspace page-ownership list`
+   and picks a human successor with `crewship workspace page-ownership transfer`.
+   Workspace admins never see or transfer workbooks in the custody listing, even
+   published ones. The successor becomes the owner, with the workbook's contents
+   and the owner's rights. Editors named by the previous owner lose access,
+   because their grants were not issued by the new owner; the new owner can
+   share again. Agent mandates of the previous owner stop working. Every
+   workbook custody transfer is recorded in the audit log as
+   `artifact.workbook_custody_transferred`, in the same transaction.
 3. The departure or erasure is then retried and succeeds.
+
+**Custody is not a way to take a workbook from an active member.** The custody
+listing offers a workbook, and a transfer succeeds, only while its owner is no
+longer an active member of the workspace:
+
+- the owner was removed from the workspace,
+- the owner's account is suspended or the owner became a restricted (Guest)
+  member: such an owner cannot use the workbook, so custody is open, exactly as
+  for the owner's other private outputs, and closes again when the suspension
+  or restriction is lifted, or
+- a removal or erasure of the owner was refused because of this workbook in
+  the last 7 days (step 1).
+
+Otherwise the transfer is refused (`403` for a workspace OWNER, `404` for
+anyone else) and only the owner can hand the workbook over, by sharing it or
+deleting it. The rule is checked again inside the transfer itself.
 
 **Who can delete a workbook after its owner leaves.** Normally nobody needs to:
 the successor owns it and may delete it. A workbook whose owner is no longer a
