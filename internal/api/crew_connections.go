@@ -10,12 +10,49 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 // CrewConnectionHandler manages connections between crews that enable cross-crew communication.
+// A link is an access grant (messaging and shared files), so every write
+// commits its chained audit on the same transaction (appendSettingsAudit).
 type CrewConnectionHandler struct {
-	db     *sql.DB
-	logger *slog.Logger
+	db      *sql.DB
+	logger  *slog.Logger
+	journal journal.Emitter
+}
+
+// crewLinkState is the access a link grants, as the audit's previous/current.
+func crewLinkState(ctx context.Context, q rowQuerier, ws, id string) (map[string]any, error) {
+	var from, to, direction, status, forward, reverse string
+	var version int64
+	err := q.QueryRowContext(ctx, `SELECT from_crew_id,to_crew_id,direction,status,forward_file_access,reverse_file_access,access_version FROM crew_connections WHERE id=? AND workspace_id=?`, id, ws).
+		Scan(&from, &to, &direction, &status, &forward, &reverse, &version)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"from_crew_id": from, "to_crew_id": to, "direction": direction, "status": status,
+		"forward_file_access": forward, "reverse_file_access": reverse, "access_version": version}, nil
+}
+
+// commitCrewLinkAudit appends the dual audit on tx, commits, then notifies.
+func (h *CrewConnectionHandler) commitCrewLinkAudit(r *http.Request, tx *sql.Tx, action, id string, previous, current map[string]any) error {
+	metadata := map[string]any{"current": current}
+	if previous != nil {
+		metadata["previous"] = previous
+	}
+	notify, err := appendSettingsAudit(r, tx, h.journal, action, "CREW_LINK", id, metadata)
+	if err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if notify != nil {
+		notify()
+	}
+	return nil
 }
 
 // NewCrewConnectionHandler creates a CrewConnectionHandler with the given database and logger.
@@ -153,9 +190,15 @@ func (h *CrewConnectionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	//     stored edge becomes bidirectional. Inserting instead would leave two
 	//     rows that each claim to be one-way while together meaning both ways
 	//     (UNIQUE(from,to) does not catch the reverse).
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		internalError(w, r, h.logger, "begin crew connection", err)
+		return
+	}
+	defer tx.Rollback()
 	var existingID, existingDir string
 	var reversed bool
-	err := h.db.QueryRowContext(r.Context(), `
+	err = tx.QueryRowContext(r.Context(), `
 		SELECT id, direction, from_crew_id <> ? FROM crew_connections
 		WHERE workspace_id = ?
 		  AND ((from_crew_id = ? AND to_crew_id = ?) OR (from_crew_id = ? AND to_crew_id = ?))`,
@@ -168,15 +211,26 @@ func (h *CrewConnectionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		if reversed {
 			direction = "bidirectional"
 		}
-		if _, err := h.db.ExecContext(r.Context(),
+		previous, err := crewLinkState(r.Context(), tx, wsID, existingID)
+		if err != nil {
+			internalError(w, r, h.logger, "read crew connection", err)
+			return
+		}
+		if _, err := tx.ExecContext(r.Context(),
 			`UPDATE crew_connections SET access_version=access_version+CASE WHEN direction<>? OR status<>'active' THEN 1 ELSE 0 END, direction = ?, status = 'active', updated_at = ? WHERE id = ?`,
 			direction, direction, now, existingID); err != nil {
 			internalError(w, r, h.logger, "update crew connection", err)
 			return
 		}
-		auditFromRequest(r, h.db, "crew_link.update", "CREW_LINK", existingID, map[string]interface{}{
-			"from_crew_id": req.FromCrewID, "to_crew_id": req.ToCrewID, "direction": direction,
-		})
+		current, err := crewLinkState(r.Context(), tx, wsID, existingID)
+		if err != nil {
+			internalError(w, r, h.logger, "read updated crew connection", err)
+			return
+		}
+		if err := h.commitCrewLinkAudit(r, tx, "crew_link.update", existingID, previous, current); err != nil {
+			internalError(w, r, h.logger, "audit crew connection", err)
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]string{"id": existingID})
 		return
 	case !errors.Is(err, sql.ErrNoRows):
@@ -185,7 +239,7 @@ func (h *CrewConnectionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := generateConnID()
-	if _, err := h.db.ExecContext(r.Context(), `
+	if _, err := tx.ExecContext(r.Context(), `
 		INSERT INTO crew_connections (id, workspace_id, from_crew_id, to_crew_id, direction, status, created_at, updated_at, forward_file_access, reverse_file_access)
 		VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
 		id, wsID, req.FromCrewID, req.ToCrewID, req.Direction, now, now, forwardAccess, reverseAccess); err != nil {
@@ -194,9 +248,15 @@ func (h *CrewConnectionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	auditFromRequest(r, h.db, "crew_link.create", "CREW_LINK", id, map[string]interface{}{
-		"from_crew_id": req.FromCrewID, "to_crew_id": req.ToCrewID, "direction": req.Direction,
-	})
+	current, err := crewLinkState(r.Context(), tx, wsID, id)
+	if err != nil {
+		internalError(w, r, h.logger, "read created crew connection", err)
+		return
+	}
+	if err := h.commitCrewLinkAudit(r, tx, "crew_link.create", id, nil, current); err != nil {
+		internalError(w, r, h.logger, "audit crew connection", err)
+		return
+	}
 
 	writeJSON(w, http.StatusCreated, map[string]string{"id": id})
 }
@@ -222,7 +282,18 @@ func (h *CrewConnectionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		query += ` AND access_version = ?`
 		args = append(args, version)
 	}
-	result, err := h.db.ExecContext(r.Context(), query, args...)
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		internalError(w, r, h.logger, "begin crew connection delete", err)
+		return
+	}
+	defer tx.Rollback()
+	previous, err := crewLinkState(r.Context(), tx, wsID, connID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		internalError(w, r, h.logger, "read crew connection", err)
+		return
+	}
+	result, err := tx.ExecContext(r.Context(), query, args...)
 	if err != nil {
 		internalError(w, r, h.logger, "delete crew connection", err)
 		return
@@ -231,7 +302,7 @@ func (h *CrewConnectionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if rows == 0 {
 		if versioned {
 			var exists bool
-			if err := h.db.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM crew_connections WHERE id=? AND workspace_id=?)`, connID, wsID).Scan(&exists); err != nil {
+			if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM crew_connections WHERE id=? AND workspace_id=?)`, connID, wsID).Scan(&exists); err != nil {
 				internalError(w, r, h.logger, "check crew connection version", err)
 				return
 			}
@@ -244,7 +315,10 @@ func (h *CrewConnectionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	auditFromRequest(r, h.db, "crew_link.delete", "CREW_LINK", connID, nil)
+	if err := h.commitCrewLinkAudit(r, tx, "crew_link.delete", connID, previous, map[string]any{"status": "deleted"}); err != nil {
+		internalError(w, r, h.logger, "audit crew connection delete", err)
+		return
+	}
 
 	w.WriteHeader(http.StatusNoContent)
 }

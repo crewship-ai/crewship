@@ -30,8 +30,14 @@ func (h *CrewConnectionHandler) UpdateFileAccess(w http.ResponseWriter, r *http.
 		return
 	}
 	id, ws := r.PathValue("connectionId"), WorkspaceIDFromContext(r.Context())
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		internalError(w, r, h.logger, "begin crew file access", err)
+		return
+	}
+	defer tx.Rollback()
 	var from, to string
-	err := h.db.QueryRowContext(r.Context(), `SELECT cc.from_crew_id, cc.to_crew_id
+	err = tx.QueryRowContext(r.Context(), `SELECT cc.from_crew_id, cc.to_crew_id
 		FROM crew_connections cc
 		JOIN crews a ON a.id=cc.from_crew_id AND a.workspace_id=cc.workspace_id AND a.deleted_at IS NULL
 		JOIN crews b ON b.id=cc.to_crew_id AND b.workspace_id=cc.workspace_id AND b.deleted_at IS NULL
@@ -51,8 +57,13 @@ func (h *CrewConnectionHandler) UpdateFileAccess(w http.ResponseWriter, r *http.
 		writeProblem(w, r, http.StatusBadRequest, "requester_crew_id must be a member of this connection")
 		return
 	}
+	previous, err := crewLinkState(r.Context(), tx, ws, id)
+	if err != nil {
+		internalError(w, r, h.logger, "read crew file access", err)
+		return
+	}
 	// The column is selected above from two constants, never request text.
-	res, err := h.db.ExecContext(r.Context(), `UPDATE crew_connections SET `+column+`=?,
+	res, err := tx.ExecContext(r.Context(), `UPDATE crew_connections SET `+column+`=?,
 		access_version=access_version+1, updated_at=? WHERE id=? AND workspace_id=? AND access_version=?`,
 		body.Level, tsformat.Format(time.Now()), id, ws, body.ExpectedVersion)
 	if err != nil {
@@ -68,9 +79,16 @@ func (h *CrewConnectionHandler) UpdateFileAccess(w http.ResponseWriter, r *http.
 		writeProblem(w, r, http.StatusConflict, "Connection changed; reload before changing access")
 		return
 	}
-	auditFromRequest(r, h.db, "crew_link.file_access", "CREW_LINK", id, map[string]interface{}{
-		"requester_crew_id": body.RequesterCrewID, "level": body.Level, "version": body.ExpectedVersion + 1,
-	})
+	current, err := crewLinkState(r.Context(), tx, ws, id)
+	if err != nil {
+		internalError(w, r, h.logger, "read changed crew file access", err)
+		return
+	}
+	current["requester_crew_id"] = body.RequesterCrewID
+	if err := h.commitCrewLinkAudit(r, tx, "crew_link.file_access", id, previous, current); err != nil {
+		internalError(w, r, h.logger, "audit crew file access", err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"level": body.Level, "access_version": body.ExpectedVersion + 1})
 }
 
