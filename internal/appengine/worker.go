@@ -33,6 +33,55 @@ type WorkerEngine struct {
 	Escaped func()
 	// digest overrides the pinned CLI digest in package tests only.
 	digest string
+	// pinned is the identity of the binary Verify hashed. Without it every
+	// candidate hashes the binary again.
+	pinned *engineIdentity
+}
+
+// Verify hashes the CLI against its pin once and records the file's identity.
+// The worker calls it at startup and refuses to serve if it fails. Afterwards
+// each candidate checks only that the identity is unchanged: any write,
+// replacement or metadata change of the file changes its inode, ctime or
+// size, and then the engine is unavailable until a restart verifies again.
+func (e *WorkerEngine) Verify() error {
+	id, err := e.hashBinary()
+	if err != nil {
+		return err
+	}
+	e.pinned = id
+	return nil
+}
+
+func (e WorkerEngine) verifiedIdentity() bool { return e.pinned != nil }
+
+// hashBinary checks the digest and the identity of the same open file, so the
+// identity describes exactly the content that was hashed.
+func (e WorkerEngine) hashBinary() (*engineIdentity, error) {
+	f, err := os.Open(e.Binary)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	before, err := fileIdentity(f)
+	if err != nil {
+		return nil, err
+	}
+	h := sha256.New()
+	if _, err = io.Copy(h, f); err != nil {
+		return nil, err
+	}
+	after, err := fileIdentity(f)
+	if err != nil {
+		return nil, err
+	}
+	want := GridCraftBinarySHA256
+	if e.digest != "" {
+		want = e.digest
+	}
+	if hex.EncodeToString(h.Sum(nil)) != want || before != after {
+		return nil, fmt.Errorf("%w: engine digest mismatch", ErrCandidate)
+	}
+	return &after, nil
 }
 
 // RunGridCraftWorker belongs inside the offline worker image. It is not a host
@@ -62,25 +111,13 @@ func (e WorkerEngine) Run(ctx context.Context, input []byte, c Command) (result 
 			return EngineResult{}, ErrInvalid
 		}
 	}
-	f, err := os.Open(e.Binary)
-	if err != nil {
+	if e.pinned != nil {
+		// Hashed once at startup; only confirm it is still that file.
+		if err := e.pinned.check(e.Binary); err != nil {
+			return EngineResult{}, err
+		}
+	} else if _, err := e.hashBinary(); err != nil {
 		return EngineResult{}, err
-	}
-	h := sha256.New()
-	_, err = io.Copy(h, f)
-	closeErr := f.Close()
-	if err != nil {
-		return EngineResult{}, err
-	}
-	if closeErr != nil {
-		return EngineResult{}, closeErr
-	}
-	want := GridCraftBinarySHA256
-	if e.digest != "" {
-		want = e.digest
-	}
-	if hex.EncodeToString(h.Sum(nil)) != want {
-		return EngineResult{}, fmt.Errorf("%w: engine digest mismatch", ErrCandidate)
 	}
 	dir, err := os.MkdirTemp(e.Scratch, "workbook-")
 	if err != nil {

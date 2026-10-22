@@ -78,6 +78,10 @@ func run() error {
 		Scratch: "/scratch",
 		Escaped: func() { escapeOnce.Do(func() { close(escaped) }) },
 	}
+	// Hash the pinned CLI once; candidates then only confirm its identity.
+	if err = engine.Verify(); err != nil {
+		return err
+	}
 	handler, err := appengine.NewWorkerHandler(secret, engine, capacity)
 	if err != nil {
 		return err

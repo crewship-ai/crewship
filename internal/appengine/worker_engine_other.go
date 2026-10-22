@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 )
 
 var errEngineSandboxPlatform = errors.New("engine sandbox requires Linux")
@@ -22,4 +23,14 @@ func (e WorkerEngine) execEngine(context.Context, string, []string) error {
 
 func readBounded(string) ([]byte, error) {
 	return nil, fmt.Errorf("%w: %v", ErrEngineUnavailable, errEngineSandboxPlatform)
+}
+
+type engineIdentity struct{}
+
+func fileIdentity(*os.File) (engineIdentity, error) {
+	return engineIdentity{}, errEngineSandboxPlatform
+}
+
+func (*engineIdentity) check(string) error {
+	return fmt.Errorf("%w: %v", ErrEngineUnavailable, errEngineSandboxPlatform)
 }

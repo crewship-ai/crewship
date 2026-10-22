@@ -292,6 +292,37 @@ func killEscapee(child procEntry, ownGroup int) {
 	}
 }
 
+// engineIdentity is what a change of the CLI file necessarily changes: a
+// replacement changes the device or inode, a write changes size, mtime and
+// ctime, and ctime cannot be set back by an unprivileged process.
+type engineIdentity struct {
+	dev, ino, size, mode, uid uint64
+	mtime, ctime              unix.Timespec
+}
+
+func identityOf(st *unix.Stat_t) engineIdentity {
+	return engineIdentity{dev: st.Dev, ino: st.Ino, size: uint64(st.Size), mode: uint64(st.Mode), uid: uint64(st.Uid), mtime: st.Mtim, ctime: st.Ctim}
+}
+
+func fileIdentity(f *os.File) (engineIdentity, error) {
+	var st unix.Stat_t
+	if err := unix.Fstat(int(f.Fd()), &st); err != nil {
+		return engineIdentity{}, err
+	}
+	return identityOf(&st), nil
+}
+
+// check confirms the path still names the verified file. It follows links as
+// exec does. A mismatch makes the engine unavailable: the worker is
+// quarantined and only a restart, which verifies the digest again, recovers.
+func (id *engineIdentity) check(path string) error {
+	var st unix.Stat_t
+	if err := unix.Stat(path, &st); err != nil || identityOf(&st) != *id {
+		return fmt.Errorf("%w: engine binary changed since it was verified", ErrEngineUnavailable)
+	}
+	return nil
+}
+
 // readBounded reads one engine output file. It never follows a link and
 // accepts only a regular file with a single name, so even a weakened sandbox
 // cannot make the output a view of a worker-private file.

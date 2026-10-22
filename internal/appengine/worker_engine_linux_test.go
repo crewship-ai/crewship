@@ -612,3 +612,92 @@ func TestRealGridCraftConcurrentCandidatesOnDifferentWorkbooks(t *testing.T) {
 		t.Fatalf("scratch survived: %v", files)
 	}
 }
+
+// The worker hashes the pinned CLI once at startup. Each candidate then only
+// checks that the file is still the one that was hashed; a changed binary is
+// refused before any engine process starts.
+func TestWorkerEngineVerifiesDigestOnceAndRefusesChangedBinary(t *testing.T) {
+	engine := fakeCLI(t, `cp "$src" "$dst"`)
+	wrong := engine
+	wrong.digest = strings.Repeat("0", 64)
+	if err := wrong.Verify(); !errors.Is(err, ErrCandidate) {
+		t.Fatalf("wrong digest must refuse to serve, got %v", err)
+	}
+	if err := engine.Verify(); err != nil {
+		t.Fatal(err)
+	}
+	if !engine.verifiedIdentity() {
+		t.Fatal("verified engine has no recorded identity")
+	}
+	if _, err := importBlank(t, t.Context(), engine); err != nil {
+		t.Fatalf("verified engine: %v", err)
+	}
+	// Same content, new file: the recorded identity no longer matches, and a
+	// changed identity is never re-trusted without a restart.
+	marker := filepath.Join(filepath.Dir(engine.Binary), "ran")
+	script := "#!/bin/sh\ntouch " + marker + "\n"
+	replacement := engine.Binary + ".new"
+	if err := os.WriteFile(replacement, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(replacement, engine.Binary); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := importBlank(t, t.Context(), engine); !errors.Is(err, ErrEngineUnavailable) {
+		t.Fatalf("replaced engine binary must fail closed, got %v", err)
+	}
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("replaced engine binary was executed")
+	}
+}
+
+// BenchmarkRealWorkerEngineCellSet measures one cell.set candidate on the
+// pinned CLI with the digest checked per candidate or once at startup.
+func BenchmarkRealWorkerEngineCellSet(b *testing.B) {
+	binary := os.Getenv("CREWSHIP_TEST_GRIDCRAFT_BINARY")
+	if binary == "" {
+		b.Skip("set CREWSHIP_TEST_GRIDCRAFT_BINARY to the pinned CLI")
+	}
+	if err := PrepareEngineSandbox(); err != nil {
+		b.Fatal(err)
+	}
+	raw, err := os.ReadFile("testdata/blank-workbook.json")
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Run("digest-only", func(b *testing.B) {
+		engine := WorkerEngine{Binary: binary}
+		for b.Loop() {
+			if _, err := engine.hashBinary(); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.Run("identity-check-only", func(b *testing.B) {
+		engine := WorkerEngine{Binary: binary}
+		if err := engine.Verify(); err != nil {
+			b.Fatal(err)
+		}
+		for b.Loop() {
+			if err := engine.pinned.check(binary); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	for _, mode := range []string{"hash-per-candidate", "verified-once"} {
+		b.Run(mode, func(b *testing.B) {
+			engine := WorkerEngine{Binary: binary, Scratch: b.TempDir()}
+			if mode == "verified-once" {
+				if err := engine.Verify(); err != nil {
+					b.Fatal(err)
+				}
+			}
+			command := Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "42"}
+			for b.Loop() {
+				if _, err := engine.Run(b.Context(), raw, command); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}

@@ -36,7 +36,11 @@ contains no shell, package manager or interpreter.
 ## Engine containment
 
 The CLI is treated as untrusted code. The worker reads the secret once at
-startup and keeps it in memory. Each CLI execution:
+startup and keeps it in memory. It also verifies the CLI's SHA-256 pin once at
+startup and refuses to serve on a mismatch. Each candidate then checks that the
+file still has the verified identity (device, inode, size, mode, owner, mtime,
+ctime); any change makes the worker unavailable until a restart verifies the
+digest again. Each CLI execution:
 
 - starts with an empty environment except `PATH`, `HOME` and `TMPDIR` set to
   its own candidate directory, without the secret in environment or arguments,
