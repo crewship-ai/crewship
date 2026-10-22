@@ -18,7 +18,7 @@ const policySchema = resourcePolicySchema
 type Policy = z.infer<typeof policySchema>
 type Right = z.infer<typeof rightSchema>
 const directorySchema = z.array(z.object({ id: z.string(), name: z.string() }))
-const operations = { agent: ["discover", "chat", "run", "delegate"], project: ["list", "read", "contribute", "manage", "delete_issues", "write", "delete"], routine: ["view", "results", "run", "edit"] }
+const operations = { agent: ["discover", "chat", "run", "delegate"], project: ["list", "read", "contribute", "manage", "delete_issues", "write", "delete"], routine: ["view", "results", "run", "edit", "publish"] }
 
 export function MemberResourceAccess({ workspaceId, memberId, label, role, onSaved }: {
   workspaceId: string; memberId: string; label: string; role: string
@@ -78,6 +78,7 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
   const save = useMutation({
     onMutate: () => onPolicySaveStarted(),
     mutationFn: async () => {
+      if (invalidPublish) throw new Error("Publish requires Edit on the same routine")
       const response = await apiFetch(url, { method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ membership_id: policy.membership_id, revision: policy.revision, mode, rights: mode === "trusted" ? [] : rights,
           ...(mode === "restricted" && reissue.length ? {reissue: reissue.filter(r => rights.some(right => rightKey(right) === rightKey(r)))} : {}) }) })
@@ -99,8 +100,9 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
   // per grant added or removed. A conflict keeps the draft but blocks Save
   // until the current policy is reloaded.
   const pending = changeCount(policy, mode, rights) + (mode === "restricted" ? reissue.filter(r => rights.some(right => rightKey(right) === rightKey(r))).length : 0)
+  const invalidPublish = mode === "restricted" && rights.some(right => right.kind === "routine" && right.operation === "publish" && !rights.some(edit => edit.kind === "routine" && edit.id === right.id && edit.operation === "edit"))
   usePageSave({
-    label: `Resource access for ${label}`, count: pending, canSave: !conflict && !presetBusy, saving: save.isPending || presetBusy,
+    label: `Resource access for ${label}`, count: pending, canSave: !conflict && !presetBusy && !invalidPublish, saving: save.isPending || presetBusy,
     save: () => save.mutateAsync(),
     discard: () => { setMode(policy.mode); setRights(policy.rights); setReissue([]) },
   })
@@ -134,6 +136,7 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
         <Button size="sm" variant="ghost" className="coarse:h-[44px]" disabled={save.isPending || presetBusy || conflict} onClick={() => setRights(rights.filter((_, row) => row !== index))}
           aria-label={`Remove ${right.kind} ${right.id} ${right.operation}`}>Remove</Button>
       </li>)}</ul>
+      {invalidPublish && <p role="alert">Publish requires Edit on the same routine. Add Edit or remove Publish before saving.</p>}
       {rights.length === 0 && <p>No resource operations are granted.</p>}
       <div className="flex flex-wrap gap-2">
         <select aria-label="Resource kind" className={selectClass} value={kind} disabled={save.isPending || presetBusy || conflict} onChange={event => {

@@ -15492,6 +15492,10 @@
           "can_edit": {
             "type": "boolean"
           },
+          "can_publish": {
+            "description": "Current Publish permission with View, Edit and token scope; the publication endpoint rechecks authority and the exact saved revision.",
+            "type": "boolean"
+          },
           "definition": {
             "additionalProperties": true,
             "type": "object"
@@ -15517,7 +15521,8 @@
           "name",
           "description",
           "definition",
-          "can_edit"
+          "can_edit",
+          "can_publish"
         ],
         "type": "object"
       },

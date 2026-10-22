@@ -30,6 +30,24 @@ function mockPolicy() {
 }
 afterEach(() => { cleanup(); fetchMock.mockReset(); toastError.mockReset() })
 describe("member resource access", () => {
+  it("requires an explicit Edit grant before saving Publish without adding View or Run", async () => {
+    mockPolicy(); show(); fireEvent.click(screen.getByRole("button", { name: "Edit resource access" }))
+    fireEvent.change(await screen.findByLabelText("Resource kind"), { target: { value: "routine" } })
+    await screen.findByRole("option", { name: "Other agent" })
+    fireEvent.change(screen.getByLabelText("Resource"), { target: { value: "agent-2" } })
+    fireEvent.change(screen.getByLabelText("Resource operation"), { target: { value: "publish" } })
+    fireEvent.click(screen.getByRole("button", { name: "Add grant" }))
+    expect(screen.getByText(/Publish requires Edit on the same routine/)).toBeVisible()
+    expect(saveButton()).toBeDisabled()
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(0)
+    fireEvent.change(screen.getByLabelText("Resource operation"), { target: { value: "edit" } })
+    fireEvent.click(screen.getByRole("button", { name: "Add grant" }))
+    expect(saveButton()).toBeEnabled()
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(1))
+    const [, init] = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT")!
+    expect(JSON.parse(init.body).rights).toEqual([...policy.rights, { kind: "routine", id: "agent-2", operation: "publish" }, { kind: "routine", id: "agent-2", operation: "edit" }])
+  })
   it("loads only the selected membership after opening and saves explicit deny-all with the original revision", async () => {
     mockPolicy(); show()
     expect(fetchMock).not.toHaveBeenCalled()

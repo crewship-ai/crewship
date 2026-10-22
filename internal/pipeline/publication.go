@@ -15,6 +15,10 @@ import (
 // stale draft revision. The caller must explicitly remove the trigger first.
 var ErrPublicationHasTriggers = errors.New("publication requires removing existing triggers")
 
+// ErrPublicationHasCallers refuses publishing a routine that saved routines
+// already reach through call_pipeline; nested calls cannot run bounded authority.
+var ErrPublicationHasCallers = errors.New("publication requires removing call_pipeline steps that target this routine")
+
 // PublishDraftIn consumes an authorized draft; its caller owns the writer, live
 // authorization, audit and commit. The stored identity cannot authorize execution.
 func (s *Store) PublishDraftIn(ctx context.Context, tx *sql.Tx, publisher string, draft Draft, canonical []byte, fingerprint string) (int, error) {
@@ -51,6 +55,19 @@ func (s *Store) PublishDraftIn(ctx context.Context, tx *sql.Tx, publisher string
 	}
 	if triggers {
 		return 0, ErrPublicationHasTriggers
+	}
+	// Saving a caller already refuses a published target; this is the reverse
+	// order. Publication is rare, so one bounded scan of this workspace's live
+	// recipes (any nesting depth) is acceptable inside the writer.
+	var callers bool
+	err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pipelines p, json_tree(CASE WHEN json_valid(p.definition_json) THEN p.definition_json ELSE '{}' END) t
+ WHERE p.workspace_id=? AND p.id!=? AND p.deleted_at IS NULL
+ AND t.type='object' AND json_extract(t.value,'$.type')='call_pipeline' AND json_extract(t.value,'$.pipeline_slug')=?)`, draft.WorkspaceID, draft.BasePipelineID, draft.Slug).Scan(&callers)
+	if err != nil {
+		return 0, err
+	}
+	if callers {
+		return 0, ErrPublicationHasCallers
 	}
 	raw, hash := string(content.Definition), definitionHash(string(content.Definition))
 	var version int

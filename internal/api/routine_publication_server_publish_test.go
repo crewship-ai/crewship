@@ -299,7 +299,7 @@ func TestRoutineServerPublicationDeduplicatesExactIdentity(t *testing.T) {
 }
 
 func TestRoutineServerPublicationRefusalRollsBack(t *testing.T) {
-	for _, scenario := range []string{"stale", "missing-view", "missing-edit", "missing-publish", "missing-agent-run", "invalid-origin", "operational-error", "audit-abort", "audit-ignore", "schedule", "webhook"} {
+	for _, scenario := range []string{"stale", "missing-view", "missing-edit", "missing-publish", "missing-agent-run", "invalid-origin", "operational-error", "audit-abort", "audit-ignore", "schedule", "webhook", "caller", "nested-caller"} {
 		t.Run(scenario, func(t *testing.T) {
 			f := newServerPublicationHTTPFixture(t)
 			want := 404
@@ -334,6 +334,15 @@ func TestRoutineServerPublicationRefusalRollsBack(t *testing.T) {
 			case "webhook":
 				execOrFatal(t, f.db, `INSERT INTO pipeline_webhooks(id,workspace_id,name,target_pipeline_id,token) VALUES('publish-webhook',?,'Existing webhook','publish-routine','synthetic-inert-token')`, f.workspace)
 				want = 422
+			case "caller", "nested-caller":
+				// A saved trusted caller already reaches this routine by slug;
+				// publication must not hand it bounded authority afterwards.
+				caller := `{"dsl_version":"1.0","name":"caller","steps":[{"id":"call","type":"call_pipeline","pipeline_slug":"publish-routine"}]}`
+				if scenario == "nested-caller" {
+					caller = `{"dsl_version":"1.0","name":"caller","steps":[{"id":"each","type":"foreach","body":{"id":"call","type":"call_pipeline","pipeline_slug":"publish-routine"}}]}`
+				}
+				execOrFatal(t, f.db, `INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash,status) VALUES('publish-caller',?,'publish-caller','Caller',?,'caller-hash','active')`, f.workspace, caller)
+				want = 422
 			}
 			var notifications atomic.Int32
 			f.writer.AddReadObserver(func(entries []journal.Entry) {
@@ -344,7 +353,10 @@ func TestRoutineServerPublicationRefusalRollsBack(t *testing.T) {
 				}
 			})
 			before := f.snapshot(t)
-			f.call(f.publisherToken, "POST", f.path+"/publish", f.request(), want)
+			refused := f.call(f.publisherToken, "POST", f.path+"/publish", f.request(), want)
+			if strings.HasSuffix(scenario, "caller") && !strings.Contains(refused.Body.String(), "call_pipeline") {
+				t.Fatalf("refusal does not explain the caller: %s", refused.Body.String())
+			}
 			if after := f.snapshot(t); after != before {
 				t.Fatal("refused publication changed content/archive/draft/audit")
 			}

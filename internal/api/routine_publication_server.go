@@ -118,6 +118,10 @@ func (r *Router) routinePublicationPublish(w http.ResponseWriter, req *http.Requ
 			replyError(w, http.StatusUnprocessableEntity, "Remove existing routine triggers before publishing this v1 routine")
 			return
 		}
+		if errors.Is(err, pipeline.ErrPublicationHasCallers) {
+			replyError(w, http.StatusUnprocessableEntity, "Other routines call this routine with call_pipeline. Remove those steps before publishing this v1 routine")
+			return
+		}
 		if errors.Is(err, restrictedworkflow.ErrDenied) {
 			err = access.ErrDenied
 		}
