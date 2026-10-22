@@ -165,6 +165,11 @@ RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
     -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE} -X github.com/crewship-ai/crewship/internal/crashreport.DSN=${SENTRY_DSN}" \
     -o /crewship ./cmd/crewship
+# The workbook test barrier exists only in binaries built with the
+# crewship_testbarrier tag. No image may carry it, whatever build args or
+# GOFLAGS were used; the same guard checks every release archive.
+COPY scripts/check-no-test-barrier.sh /usr/local/bin/check-no-test-barrier
+RUN sh /usr/local/bin/check-no-test-barrier /crewship /crewship-sidecar
 
 # -- Runner --
 # The docker CLI (page builds, devcontainer images) comes from Docker's static

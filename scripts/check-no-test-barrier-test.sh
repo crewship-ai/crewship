@@ -41,3 +41,7 @@ expect 1 "tagged binary fails" -- "$CHECK" "$TMP/tagged"
 expect 1 "tag among other tags fails" -- "$CHECK" "$TMP/multi"
 expect 1 "one tagged binary fails the whole set" -- "$CHECK" "$TMP/clean" "$TMP/tagged"
 expect 1 "no Go binary is not a pass" -- "$CHECK" "$TMP/empty"
+expect 1 "missing path is not a pass" -- "$CHECK" "$TMP/absent"
+# The Docker build stage runs it under a POSIX shell, not bash.
+expect 0 "POSIX sh: untagged binary passes" -- sh "$CHECK" "$TMP/clean/app"
+expect 1 "POSIX sh: tagged binary fails" -- sh "$CHECK" "$TMP/clean/app" "$TMP/tagged/app"
