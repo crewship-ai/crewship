@@ -35,7 +35,13 @@ session or CLI token: logging out does not stop an accepted run. Every
 administrator session revocation (`POST /api/v1/admin/users/{userId}/sessions/revoke-all`,
 single-session revoke and host-side `crewship admin invalidate-sessions`) also
 writes a durable `users.access_revoked_at` marker in the same transaction, so a
-user who had already logged out is still stopped.
+user who had already logged out is still stopped. Account recovery (web password
+reset and host-side `crewship admin reset-password`) and instance suspension
+write the same marker; reactivating the account does not revive runs accepted
+before it. A voluntary password change that signs out other sessions is treated
+like logout and does not stop runs. The acceptance time of a run is taken
+before admission reads any authority, so a revocation or withdrawal that lands
+during admission refuses it.
 
 At every step boundary, immediately before each provider call, ONE composite
 query rechecks the whole authority of the run: the origin attempt, member
@@ -47,9 +53,11 @@ agent (credential, grant, credential revision, model and profile must equal the
 manifest, so a rotated credential stops the run), the frozen recipe and provider
 slots, the dispatch lease and the run's parent attempt. A failed check stops the
 run before the next step; no further provider request is made. Published runs do
-not poll authority between boundaries; the existing lease monitor still cancels
-a run whose dispatch ownership is lost, and the run's deadline cancels an
-in-flight provider call. The manifest's recorded grant/key expiry is not used;
+not poll authority between boundaries: a provider call already in flight when
+authority is revoked finishes (bounded by its step timeout, capped at 5 minutes
+for published routines, and by the run deadline) and its output is discarded
+with the stopped run. The existing lease monitor still cancels a run whose
+dispatch ownership is lost. The manifest's recorded grant/key expiry is not used;
 provider slots keep their existing live expiry checks.
 
 A published run has a hard limit from its acceptance, fixed when it is
@@ -57,7 +65,12 @@ accepted: the workspace's `guest_routine_max_run_minutes` (1-240, default 30),
 set by OWNER/ADMIN through `PATCH /api/v1/workspaces/{workspaceId}`.
 Withdrawing the publication (`POST .../restricted-routine-library/{routineId}/unpublish`,
 Publish holder or OWNER/ADMIN) refuses new runs and stops running ones with
-reason `unpublished`; republishing clears it. Deferred start is refused: `delay_seconds` other than 0 returns
+reason `unpublished`. It also advances the routine's publication revision, so a
+draft based on the withdrawn publication must be reloaded (409) before it can be
+published. Republishing clears the withdrawal for new runs only: the durable
+`publication_last_withdrawn_at` is never cleared, so runs accepted before the
+withdrawal stay stopped even when an identical republish reuses the same
+version. Deferred start is refused: `delay_seconds` other than 0 returns
 HTTP 422 for a published routine. Moving HEAD (republish or rollback) also stops
 an older run, as a changed recipe does for legacy runs. Results stay private to
 the run's caller; other Guests and the publisher receive the opaque 404. A

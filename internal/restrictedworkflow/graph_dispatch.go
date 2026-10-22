@@ -230,6 +230,11 @@ func (s *Service) executeGraph(ctx context.Context, j job, originHandle string, 
 				if step.TimeoutSec > 0 {
 					timeout = time.Duration(step.TimeoutSec) * time.Second
 				}
+				// A published step cannot outlive a revocation by more than
+				// the default step bound.
+				if g.Publication != nil && timeout > 5*time.Minute {
+					timeout = 5 * time.Minute
+				}
 				stepCtx, stop = context.WithTimeout(runCtx, timeout)
 			}
 			if node.Child != nil {

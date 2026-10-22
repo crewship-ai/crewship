@@ -149,6 +149,15 @@ func TestPasswordMutationAtomicAudit(t *testing.T) {
 				if count != wantCount {
 					t.Errorf("chained password audit=%d want=%d", count, wantCount)
 				}
+				// Recovery stops accepted Guest-published runs; a voluntary
+				// change is treated like logout and must not.
+				var marked bool
+				if err := h.db.QueryRow(`SELECT access_revoked_at IS NOT NULL FROM users WHERE id=?`, user).Scan(&marked); err != nil {
+					t.Fatal(err)
+				}
+				if marked != (door == "reset" && fault == "none") {
+					t.Errorf("access revocation marker=%v for %s/%s", marked, door, fault)
+				}
 				if door == "reset" {
 					if err := h.db.QueryRow(`SELECT COUNT(*) FROM verification_tokens WHERE token=?`, hashResetToken("atomic-reset-fixture")).Scan(&count); err != nil {
 						t.Fatal(err)

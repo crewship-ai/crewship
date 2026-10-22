@@ -297,6 +297,12 @@ func TestInstanceSuspend(t *testing.T) {
 	if accountSuspended(t.Context(), f.db, "carol") {
 		t.Error("still suspended")
 	}
+	// Reactivation keeps the durable marker: runs accepted before the
+	// suspension stay stopped even if both happened between two steps.
+	var marked bool
+	if err := f.db.QueryRow(`SELECT access_revoked_at IS NOT NULL FROM users WHERE id='carol'`).Scan(&marked); err != nil || !marked {
+		t.Errorf("suspension did not record the access revocation marker: %v", err)
+	}
 	if !f.audited("instance.user_suspended") || !f.audited("instance.user_reactivated") {
 		t.Error("suspend/reactivate not audited")
 	}

@@ -256,7 +256,7 @@ func (r *Router) routinePublicationUnpublish(w http.ResponseWriter, req *http.Re
 		return
 	}
 	stamp := tsformat.Format(time.Now())
-	result, err := tx.ExecContext(req.Context(), `UPDATE pipelines SET publication_withdrawn_at=? WHERE id=? AND workspace_id=? AND deleted_at IS NULL AND publication_withdrawn_at IS NULL AND publication_authority_fingerprint=? AND head_version=?`, stamp, routine, workspace, fingerprint, head)
+	result, err := tx.ExecContext(req.Context(), `UPDATE pipelines SET publication_withdrawn_at=?,publication_last_withdrawn_at=?,publication_revision=publication_revision+1 WHERE id=? AND workspace_id=? AND deleted_at IS NULL AND publication_withdrawn_at IS NULL AND publication_authority_fingerprint=? AND head_version=?`, stamp, stamp, routine, workspace, fingerprint, head)
 	if err != nil {
 		guestRoutineDraftError(w, err)
 		return
@@ -275,7 +275,7 @@ func (r *Router) routinePublicationUnpublish(w http.ResponseWriter, req *http.Re
 		return
 	}
 	var retained bool
-	err = tx.QueryRowContext(req.Context(), `SELECT EXISTS(SELECT 1 FROM pipelines WHERE id=? AND workspace_id=? AND deleted_at IS NULL AND publication_withdrawn_at=? AND publication_authority_fingerprint=? AND head_version=?)`, routine, workspace, stamp, fingerprint, head).Scan(&retained)
+	err = tx.QueryRowContext(req.Context(), `SELECT EXISTS(SELECT 1 FROM pipelines WHERE id=? AND workspace_id=? AND deleted_at IS NULL AND publication_withdrawn_at=? AND publication_last_withdrawn_at=? AND publication_authority_fingerprint=? AND head_version=?)`, routine, workspace, stamp, stamp, fingerprint, head).Scan(&retained)
 	if err != nil || !retained {
 		guestRoutineDraftError(w, errors.Join(err, errors.New("withdrawal was not retained")))
 		return

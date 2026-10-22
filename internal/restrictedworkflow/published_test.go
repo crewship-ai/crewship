@@ -358,3 +358,39 @@ func TestPublishedRoutineAuthorityIsOneQuery(t *testing.T) {
 		t.Fatalf("boundary authority: err=%v queries=%d", err, counter.calls)
 	}
 }
+
+// An identical republish reuses the same version row and clears the current
+// withdrawal, but runs accepted before the withdrawal must stay stopped.
+func TestPublishedRoutineIdenticalRepublishDoesNotReviveRuns(t *testing.T) {
+	s, runner := publishedFixture(t)
+	starts := 0
+	base := runner.StartSession
+	runner.StartSession = func(ctx context.Context, handle string) (restricteddispatch.TextSession, error) {
+		starts++
+		return base(ctx, handle)
+	}
+	old, err := s.AdmitManual(t.Context(), "h1", "w", "private-work", map[string]any{"task": "before"}, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withdrawn := tsformat.Format(time.Now())
+	mustExec(t, s, `UPDATE pipelines SET publication_withdrawn_at=?,publication_last_withdrawn_at=? WHERE id='routine'`, withdrawn, withdrawn)
+	// The same head version becomes current again, as PublishDraftIn's dedup does.
+	mustExec(t, s, `UPDATE pipelines SET publication_withdrawn_at=NULL WHERE id='routine'`)
+	if worked, err := s.DispatchNext(t.Context()); !worked || err == nil || starts != 0 {
+		t.Fatalf("withdrawn run revived by identical republish: worked=%v err=%v starts=%d", worked, err, starts)
+	}
+	if stopped := publishedJournal(t, s, old.ID, "published_run_stopped"); len(stopped) != 1 || stopped[0] != stopUnpublished {
+		t.Fatalf("stop audit = %v", stopped)
+	}
+	fresh, err := s.AdmitManual(t.Context(), "h1", "w", "private-work", map[string]any{"task": "after"}, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if worked, err := s.DispatchNext(t.Context()); !worked || err != nil {
+		t.Fatalf("run accepted after republish: worked=%v err=%v", worked, err)
+	}
+	if result, err := s.Result(t.Context(), "h1", "w", fresh.ID); err != nil || result.State != "completed" {
+		t.Fatalf("post-republish run %+v %v", result, err)
+	}
+}

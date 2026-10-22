@@ -2747,5 +2747,8 @@ new runs are refused and running ones stop before their next step. The change
 and its chained audit event (`action: unpublish`) commit together. A routine
 without a current Guest publication, or one already withdrawn, returns 409;
 missing or unauthorized routines return 404 and a request body returns 400.
-Publishing a reviewed shared draft again clears the withdrawal. Responses use
+Withdrawal advances `publication_revision`, so a shared draft based on the
+withdrawn publication returns 409 on publish until it is reloaded. Publishing a
+reviewed shared draft again makes the routine runnable for new runs; runs
+accepted before the withdrawal stay stopped. Responses use
 `Cache-Control: no-store`.

@@ -152,7 +152,8 @@ func (s *Service) compilePublishedGraph(ctx context.Context, user, workspace str
 // and execution grant bindings. Parameters: pipeline, workspace, fingerprint,
 // version ID, version.
 const publishedCTE = `WITH m AS (
- SELECT v.definition_json AS raw,p.author_crew_id AS crew,v.publication_authority_json AS manifest
+ SELECT v.definition_json AS raw,p.author_crew_id AS crew,v.publication_authority_json AS manifest,
+ COALESCE(p.publication_last_withdrawn_at,'') AS withdrawn
  FROM main.pipelines p JOIN main.pipeline_versions v ON v.pipeline_id=p.id AND v.version=p.head_version
  WHERE p.id=? AND p.workspace_id=? AND p.deleted_at IS NULL AND p.status='active' AND p.publication_withdrawn_at IS NULL
  AND typeof(p.publication_authority_fingerprint)='text' AND p.publication_authority_fingerprint=?
@@ -167,7 +168,7 @@ b AS (SELECT e.value AS t FROM m,json_each(m.manifest,'$.authoring') e
 // marker of the caller and publisher; and the current provider declaration
 // of every recorded agent. Parameters: principal, publisher, agents JSON,
 // workspace.
-const publishedColumns = `m.raw,m.crew,m.manifest,(SELECT count(*) FROM b),(SELECT count(*) FROM b
+const publishedColumns = `m.raw,m.crew,m.manifest,m.withdrawn,(SELECT count(*) FROM b),(SELECT count(*) FROM b
  JOIN main.live_access_grants g ON g.id=json_extract(b.t,'$[6]') AND g.member_id=json_extract(b.t,'$[2]')
  AND g.created_by=json_extract(b.t,'$[7]') AND g.resource_kind=json_extract(b.t,'$[3]')
  AND COALESCE(g.agent_id,g.project_id,g.routine_id)=json_extract(b.t,'$[4]') AND g.operation=json_extract(b.t,'$[5]')
@@ -183,13 +184,13 @@ const publishedColumns = `m.raw,m.crew,m.manifest,(SELECT count(*) FROM b),(SELE
   AND c.security_level IN (1,2) AND ac.env_var_name='OPENAI_API_KEY')`
 
 type publishedState struct {
-	raw, manifest, marker, providers string
-	crew                             sql.NullString
-	total, live                      int
+	raw, manifest, marker, providers, withdrawn string
+	crew                                        sql.NullString
+	total, live                                 int
 }
 
 func (st *publishedState) targets() []any {
-	return []any{&st.raw, &st.crew, &st.manifest, &st.total, &st.live, &st.marker, &st.providers}
+	return []any{&st.raw, &st.crew, &st.manifest, &st.withdrawn, &st.total, &st.live, &st.marker, &st.providers}
 }
 
 func publishedArgs(r *graphRecipe, workspace, principal string, ref publishedRef, agents string) []any {
@@ -225,6 +226,11 @@ func (st publishedState) verify(r *graphRecipe, ref publishedRef, accepted strin
 		return ErrDenied
 	}
 	if accepted != "" && st.marker != "" && st.marker >= accepted {
+		return ErrDenied
+	}
+	// A withdrawal after acceptance stays final even if an identical
+	// republish later makes the same version current again.
+	if accepted != "" && st.withdrawn != "" && st.withdrawn >= accepted {
 		return ErrDenied
 	}
 	manifest, err := access.DecodePublicationAuthority([]byte(st.manifest), ref.Fingerprint)
@@ -399,14 +405,14 @@ func publishedStopReason(ctx context.Context, tx *sql.Tx, j job, g frozenGraph) 
 	ref := g.Publication
 	var unpublished, changed, suspended, membership, sessions bool
 	err := tx.QueryRowContext(ctx, `SELECT
- NOT EXISTS(SELECT 1 FROM pipelines WHERE id=? AND deleted_at IS NULL AND status='active' AND publication_withdrawn_at IS NULL),
+ NOT EXISTS(SELECT 1 FROM pipelines WHERE id=? AND deleted_at IS NULL AND status='active' AND publication_withdrawn_at IS NULL AND (publication_last_withdrawn_at IS NULL OR publication_last_withdrawn_at<?)),
  NOT EXISTS(SELECT 1 FROM pipelines p JOIN pipeline_versions v ON v.pipeline_id=p.id AND v.version=p.head_version
   WHERE p.id=? AND p.publication_authority_fingerprint=? AND v.id=?),
  EXISTS(SELECT 1 FROM users WHERE id IN (?,?) AND suspended_at IS NOT NULL),
  NOT EXISTS(SELECT 1 FROM workspace_members WHERE id=? AND user_id=? AND access_mode='restricted')
   OR NOT EXISTS(SELECT 1 FROM workspace_members WHERE id=? AND user_id=? AND access_mode='restricted'),
  EXISTS(SELECT 1 FROM users WHERE id IN (?,?) AND access_revoked_at>=?)`,
-		j.Pipeline, j.Pipeline, ref.Fingerprint, ref.VersionID, j.Principal, ref.Publisher, j.Member, j.Principal, ref.Membership, ref.Publisher,
+		j.Pipeline, j.Created, j.Pipeline, ref.Fingerprint, ref.VersionID, j.Principal, ref.Publisher, j.Member, j.Principal, ref.Membership, ref.Publisher,
 		j.Principal, ref.Publisher, j.Created).Scan(&unpublished, &changed, &suspended, &membership, &sessions)
 	if err != nil {
 		return stopAuthorityChanged

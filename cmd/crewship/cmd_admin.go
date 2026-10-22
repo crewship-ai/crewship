@@ -661,6 +661,10 @@ func runAdminResetPassword(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("revoke sessions rows affected: %w", err)
 	}
+	// Account recovery also stops accepted Guest-published runs.
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET access_revoked_at = ? WHERE id = ?`, tsformat.Format(time.Now()), userID); err != nil {
+		return fmt.Errorf("record access revocation: %w", err)
+	}
 
 	// Local recovery shares the configured instance chain and final password /
 	// session acknowledgement with the HTTP writer, inside this same commit.

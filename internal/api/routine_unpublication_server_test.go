@@ -22,6 +22,15 @@ func TestRoutineUnpublicationWithdrawsAndRepublishClears(t *testing.T) {
 	if body := f.call(f.publisherToken, "POST", unpublish, map[string]any{"x": 1}, 400).Body.String(); !strings.Contains(body, "no request body") {
 		t.Fatalf("unpublish accepted a body: %s", body)
 	}
+	// A draft based on the current publication becomes stale on withdrawal.
+	var stale guestRoutineDraft
+	if err := json.Unmarshal(f.call(f.publisherToken, "GET", f.path, nil, 200).Body.Bytes(), &stale); err != nil {
+		t.Fatal(err)
+	}
+	f.call(f.publisherToken, "PUT", f.path, stale.guestRoutineDraftContent, 200)
+	if err := json.Unmarshal(f.call(f.publisherToken, "GET", f.path, nil, 200).Body.Bytes(), &stale); err != nil {
+		t.Fatal(err)
+	}
 	response := f.call(f.publisherToken, "POST", unpublish, nil, 200)
 	if response.Header().Get("Cache-Control") != "no-store" {
 		t.Fatal("unpublish response may be cached")
@@ -45,6 +54,10 @@ func TestRoutineUnpublicationWithdrawsAndRepublishClears(t *testing.T) {
 		t.Fatal("audit chain invalid", err)
 	}
 	f.call(f.publisherToken, "POST", unpublish, nil, 409)
+	stalePublish := f.request()
+	stalePublish["draft_id"], stalePublish["revision"], stalePublish["base_revision"] = stale.DraftID, stale.Revision, stale.BaseRevision
+	f.call(f.publisherToken, "POST", f.path+"/publish", stalePublish, 409)
+	execOrFatal(t, f.db, `DELETE FROM pipeline_drafts WHERE id=?`, stale.DraftID)
 
 	// Republishing a reviewed draft makes the publication current again.
 	var fresh guestRoutineDraft
@@ -58,8 +71,15 @@ func TestRoutineUnpublicationWithdrawsAndRepublishClears(t *testing.T) {
 	f.draft = fresh
 	f.call(f.publisherToken, "POST", f.path+"/publish", f.request(), 200)
 	var cleared bool
-	if err := f.db.QueryRow(`SELECT publication_withdrawn_at IS NULL FROM pipelines WHERE id='publish-routine'`).Scan(&cleared); err != nil || !cleared {
+	var last string
+	var head int
+	if err := f.db.QueryRow(`SELECT publication_withdrawn_at IS NULL,COALESCE(publication_last_withdrawn_at,''),head_version FROM pipelines WHERE id='publish-routine'`).Scan(&cleared, &last, &head); err != nil || !cleared {
 		t.Fatalf("republish kept the withdrawal: %v", err)
+	}
+	// The identical content deduplicates to the same version; the durable
+	// last withdrawal survives so earlier runs stay stopped.
+	if head != withdrawn.Version || last != withdrawn.WithdrawnAt {
+		t.Fatalf("identical republish: head=%d last=%q want %d %q", head, last, withdrawn.Version, withdrawn.WithdrawnAt)
 	}
 	// A trusted workspace OWNER may also withdraw it.
 	f.call(f.ownerToken, "POST", unpublish, nil, 200)

@@ -224,6 +224,9 @@ func (s *Service) admit(ctx context.Context, user, workspace, slug string, suppl
 		return Receipt{}, ErrDenied
 	}
 	var receipt Receipt
+	// Acceptance time is taken before any authority is read, so a
+	// revocation or withdrawal during admission is >= it and refuses the run.
+	acceptedAt := tsformat.Format(time.Now())
 	store := access.Store{DB: s.db}
 	m, err := store.Membership(ctx, user, workspace)
 	if err != nil || m.Mode != "restricted" {
@@ -364,7 +367,7 @@ func (s *Service) admit(ctx context.Context, user, workspace, slug string, suppl
 			return receipt, err
 		}
 	}
-	j := job{ID: id(), Workspace: workspace, Principal: user, Member: m.ID, Revision: m.Revision, Pipeline: pipelineID, RecipeHash: recipeHash, Recipe: recipe, Agent: agent, Profile: profile, Chat: chatID, Origin: origin.ID, Handle: ciphertext, Idempotency: idempotency, Source: source, Page: pageID, PageAction: pageAction, PageHash: pageHash, Inputs: string(rawInputs), Rights: string(rawRights), SourceFacet: facet, State: "pending", Created: tsformat.Format(time.Now()), FireAt: tsformat.Format(time.Now().Add(delay)), Expires: tsformat.Format(time.Now().Add(delay + lifetime))}
+	j := job{ID: id(), Workspace: workspace, Principal: user, Member: m.ID, Revision: m.Revision, Pipeline: pipelineID, RecipeHash: recipeHash, Recipe: recipe, Agent: agent, Profile: profile, Chat: chatID, Origin: origin.ID, Handle: ciphertext, Idempotency: idempotency, Source: source, Page: pageID, PageAction: pageAction, PageHash: pageHash, Inputs: string(rawInputs), Rights: string(rawRights), SourceFacet: facet, State: "pending", Created: acceptedAt, FireAt: tsformat.Format(time.Now().Add(delay)), Expires: tsformat.Format(time.Now().Add(delay + lifetime))}
 	j.Graph, j.GraphHash, j.Proofs = string(rawGraph), graphHash, "{}"
 	if prepared != nil {
 		prepared.job = j
