@@ -78,11 +78,16 @@ func (c *WorkerClient) Run(ctx context.Context, input []byte, command Command) (
 	}
 	req.Header.Set(workerServiceHeader, secret)
 	req.Header.Set("Content-Type", "application/json")
+	setContractHeaders(req.Header)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return EngineResult{}, ErrEngineUnavailable
 	}
 	defer resp.Body.Close()
+	// An incompatible or undeclared worker is unavailable, whatever it answered.
+	if !hostAccepts(resp.Header) {
+		return EngineResult{}, ErrEngineUnavailable
+	}
 	if resp.StatusCode == http.StatusTooManyRequests {
 		return EngineResult{}, ErrCapacity
 	}
@@ -121,6 +126,13 @@ func NewWorkerHandler(secret string, runner Runner, maxWorkers int) (http.Handle
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if subtle.ConstantTimeCompare([]byte(r.Header.Get(workerServiceHeader)), []byte(secret)) != 1 {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		// The contract is disclosed only to an authenticated host, and an
+		// incompatible host is refused before any work is admitted.
+		setContractHeaders(w.Header())
+		if !peerCompatible(workerContract, r.Header) {
+			http.Error(w, "incompatible host protocol", http.StatusPreconditionFailed)
 			return
 		}
 		if quarantined.Load() {
@@ -209,12 +221,13 @@ func (c *WorkerClient) Health(ctx context.Context) error {
 		return ErrInvalid
 	}
 	req.Header.Set(workerServiceHeader, secret)
+	setContractHeaders(req.Header)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return ErrEngineUnavailable
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
+	if resp.StatusCode != http.StatusNoContent || !hostAccepts(resp.Header) {
 		return ErrEngineUnavailable
 	}
 	return nil

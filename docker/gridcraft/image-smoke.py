@@ -89,6 +89,15 @@ def main():
     assert info['Config']['User'] == '1000:1000'
     assert info['Os'] == 'linux' and info['Architecture'] == 'amd64'
     assert os.getuid() != 0, 'qualification must use a non-root worker identity'
+    contract = json.loads(docker('run', '--rm', '--pull=never', '--network=none', '--read-only', '--cap-drop=ALL',
+                                 '--security-opt=no-new-privileges', '--user=' + str(os.getuid()) + ':' + str(os.getgid()),
+                                 image, '--contract'))
+    assert set(contract) == {'protocol', 'protocol_min', 'protocol_max', 'engine_sha256'}, 'worker contract shape'
+    protocol, engine = contract['protocol'], contract['engine_sha256']
+    accepted = (contract['protocol_min'], contract['protocol_max'])
+    assert all(type(v) is int and 1 <= v <= 9999 for v in (protocol, *accepted)), 'worker protocol bounds'
+    assert accepted[0] <= protocol <= accepted[1], 'worker must accept its own protocol'
+    assert isinstance(engine, str) and len(engine) == 64 and all(c in '0123456789abcdef' for c in engine), 'engine pin'
     name = 'gridcraft-ci-' + secrets.token_hex(8)
     with tempfile.TemporaryDirectory(prefix='gridcraft-ci-') as root:
         path = Path(root)
@@ -129,17 +138,33 @@ def main():
             assert all(option in scratch.split(',') for option in ('noexec', 'nosuid', 'nodev', 'size=32m', 'mode=0700'))
             native = json.loads(Path('internal/appengine/testdata/blank-workbook.json').read_text())
 
-            def candidate(snapshot, command, bearer=secret):
+            def candidate(snapshot, command, bearer=secret, host_protocol=str(protocol), host_engine=engine):
                 conn = UnixHTTP(str(socket_path))
                 try:
-                    conn.request('POST', '/v1/candidate', json.dumps({'snapshot': snapshot, 'command': command}),
-                                 {'X-Crewship-Worker-Service': bearer, 'Content-Type': 'application/json'})
+                    headers = {'X-Crewship-Worker-Service': bearer, 'Content-Type': 'application/json'}
+                    if host_protocol is not None:
+                        headers['X-Crewship-Gridcraft-Protocol'] = host_protocol
+                    if host_engine is not None:
+                        headers['X-Crewship-Gridcraft-Engine'] = host_engine
+                    conn.request('POST', '/v1/candidate', json.dumps({'snapshot': snapshot, 'command': command}), headers)
                     response = conn.getresponse()
-                    return response.status, response.read()
+                    declared = (response.getheader('X-Crewship-Gridcraft-Protocol'), response.getheader('X-Crewship-Gridcraft-Engine'))
+                    body = response.read()
+                    if response.status != 401:
+                        # The running worker declares the same contract as the receipt.
+                        assert declared == (str(protocol), engine), 'worker handshake differs from its declared contract'
+                    else:
+                        assert declared == (None, None), 'contract disclosed before authentication'
+                    return response.status, body
                 finally:
                     conn.close()
 
             assert candidate(native, {'kind': 'import'}, 'invalid')[0] == 401
+            # The worker refuses a host without, or outside, its protocol contract.
+            assert candidate(native, {'kind': 'import'}, host_protocol=None)[0] == 412
+            assert candidate(native, {'kind': 'import'}, host_protocol=str(accepted[1] + 1))[0] == 412
+            assert candidate(native, {'kind': 'import'}, host_protocol=str(accepted[0] - 1))[0] == 412
+            assert candidate(native, {'kind': 'import'}, host_engine='0' * 64)[0] == 412
             assert candidate(native, {'kind': 'file.open'})[0] == 400
             status, imported = candidate(native, {'kind': 'import'})
             assert status == 200, 'import failed'
@@ -181,7 +206,7 @@ def main():
             assert not os.path.lexists(proc / 'root' / 'data' / 'crewship.db')
             for tool in ('bin/sh', 'bin/bash', 'usr/bin/node', 'usr/bin/env'):
                 assert not os.path.lexists(proc / 'root' / tool), tool + ' must not be in the worker image'
-            print('PASS: private authenticated worker, real import/edit, narrow commands, bounded offline container, '
+            print('PASS: protocol', protocol, 'handshake, private authenticated worker, real import/edit, narrow commands, bounded offline container, '
                   'traced launcher with engine limits, OOM preference and seccomp, '
                   'scratch cleanup, no surviving engine process, no shell or interpreter')
         finally:

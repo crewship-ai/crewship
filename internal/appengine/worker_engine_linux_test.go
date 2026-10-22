@@ -251,6 +251,7 @@ func TestWorkerHandlerQuarantinesAfterEngineEscape(t *testing.T) {
 	request := func(method, path, body string) int {
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
 		req.Header.Set(workerServiceHeader, secret)
+		setContractHeaders(req.Header)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 		return rec.Code
