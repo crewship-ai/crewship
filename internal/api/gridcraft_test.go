@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -14,7 +15,9 @@ import (
 	"github.com/crewship-ai/crewship/internal/appengine"
 	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
+	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
@@ -217,5 +220,93 @@ func TestGridCraftNormalPoolCannotClaimNodeDurability(t *testing.T) {
 		if err := f.db.QueryRow("SELECT count(*) FROM " + table).Scan(&count); err != nil || count != 0 {
 			t.Fatalf("non-durable %s changed: %d %v", table, count, err)
 		}
+	}
+}
+
+func TestGridCraftAdmitsOrdinaryHumanRunWithoutDocsIntent(t *testing.T) {
+	for _, scenario := range []string{"ordinary", "no-human-receipt", "terminal", "message-author", "stale-chat"} {
+		t.Run(scenario, func(t *testing.T) {
+			rig := pagesTransferSetupWithDB(t, gridcraftFullDB(t))
+			f := newArtifactPrincipalFixtureWithRig(t, rig)
+			mustExec(t, rig.db, `UPDATE chats SET visibility='private' WHERE id=?`, f.a.ChatID)
+			receipt, err := chataudience.CaptureTrusted(t.Context(), rig.db, f.a.ChatID, f.a.HumanUserID, nil)
+			if err != nil || receipt == nil {
+				t.Fatalf("receipt: %v", err)
+			}
+			mustExec(t, rig.db, `INSERT INTO workspace_artifact_creation_policy(workspace_id,enabled,version,updated_at) VALUES(?,1,1,'2026-10-17T00:00:00Z')`, f.a.WorkspaceID)
+			mustExec(t, rig.db, `INSERT INTO workspace_artifact_creation_crews(workspace_id,crew_id) VALUES(?,?)`, f.a.WorkspaceID, f.a.CrewID)
+			writer := journal.NewWriter(rig.db, newTestLogger(), journal.WriterOptions{FlushSize: 1})
+			t.Cleanup(func() { _ = writer.Close() })
+			internal := NewInternalHandler(rig.db, "synthetic-host", newTestLogger())
+			internal.SetJournal(writer)
+			body := map[string]any{"id": f.a.RunID, "agent_id": f.a.AgentID, "workspace_id": f.a.WorkspaceID, "chat_id": f.a.ChatID, "trigger_type": "USER", "human_authority": receipt, "trigger_message_id": f.a.MessageID}
+			if scenario == "no-human-receipt" {
+				delete(body, "human_authority")
+				delete(body, "trigger_message_id")
+				body["metadata"] = map[string]any{"human_authority": receipt, "trigger_message_id": f.a.MessageID}
+			}
+			if scenario == "message-author" {
+				body["trigger_message_id"] = "principal-other-human-message"
+			}
+			raw, _ := json.Marshal(body)
+			started := httptest.NewRecorder()
+			internal.CreateRun(started, httptest.NewRequest("POST", "/api/v1/internal/runs", bytes.NewReader(raw)))
+			wantCode(t, started, 201, "ordinary host run start")
+			var principals int
+			if err := rig.db.QueryRow(`SELECT count(*) FROM artifact_run_principals`).Scan(&principals); err != nil || principals != 0 {
+				t.Fatalf("ordinary run unexpectedly requires Docs binding: %d %v", principals, err)
+			}
+			wmSeedPage(t, rig.db, f.a.WorkspaceID, "ordinary-workbook", "ordinary-workbook", "Workbook", f.a.HumanUserID, "")
+			mustExec(t, rig.db, `UPDATE pages SET private_audience=1 WHERE id='ordinary-workbook'`)
+			f.pages.artifactMasterToken = "synthetic-ordinary-workbook-master"
+			store := appengine.New(rig.db, appengine.Options{Enabled: true})
+			engine := &gridcraftBlockingEngine{}
+			h := &gridcraftHTTP{pages: f.pages, store: store, engine: engine, operations: artifacts.NewGridCraftAdapter(store, engine, true)}
+			credential := mintTokenFor(t, rig.db, f.a.HumanUserID, "ordinary-workbook-cli")
+			human := func(body string) *http.Request {
+				request := httptest.NewRequest("POST", "/", strings.NewReader(body))
+				request.Header.Set("Authorization", "Bearer "+credential)
+				ctx := context.WithValue(request.Context(), ctxUser, &AuthUser{ID: f.a.HumanUserID})
+				ctx = context.WithValue(ctx, ctxWorkspaceID, f.a.WorkspaceID)
+				ctx = context.WithValue(ctx, ctxAuthKind, AuthKindCLIToken)
+				request = request.WithContext(ctx)
+				request.SetPathValue("slug", "@ordinary-workbook")
+				return request
+			}
+			imported := httptest.NewRecorder()
+			h.importFile(imported, human(`{"mutation_id":"ordinary-import","mandate_id":"human-import","base_rev":0,"generation":0,"command":{"kind":"import","snapshot":{"sheets":[{}]}}}`))
+			wantCode(t, imported, 200, "ordinary workbook import")
+			switch scenario {
+			case "terminal":
+				_, err := writer.EmitSync(t.Context(), journal.Entry{ID: "ordinary-run-completed", WorkspaceID: f.a.WorkspaceID, AgentID: f.a.AgentID, CrewID: f.a.CrewID, Type: journal.EntryRunCompleted, TraceID: f.a.RunID, ActorType: journal.ActorSystem, Summary: "done"})
+				if err != nil {
+					t.Fatal(err)
+				}
+
+			case "stale-chat":
+				mustExec(t, rig.db, `UPDATE chats SET authority_revision=authority_revision+1 WHERE id=?`, f.a.ChatID)
+			}
+			grant := httptest.NewRecorder()
+			h.mandate(grant, human(fmt.Sprintf(`{"mandate_id":"ordinary-cell","run_id":%q,"base_rev":1,"generation":1,"targets":["Sheet1!B2"]}`, f.a.RunID)))
+			if scenario != "ordinary" {
+				wantCode(t, grant, 404, "invalid ordinary authority refused")
+				for _, table := range []string{"artifact_run_principals", "gridcraft_intents"} {
+					var n int
+					if err := rig.db.QueryRow("SELECT count(*) FROM " + table).Scan(&n); err != nil || n != 0 {
+						t.Fatalf("rejected admission persisted %s: %d %v", table, n, err)
+					}
+				}
+				return
+			}
+			wantCode(t, grant, 200, "explicit ordinary human mandate")
+			token := internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(f.pages.artifactMasterToken, f.a.WorkspaceID, f.a.CrewID), f.a.WorkspaceID, f.a.AgentID, f.a.RunID)
+			applied := httptest.NewRecorder()
+			h.agent(applied, documentDraftRequest(f, token, "POST", `{"action":"apply","artifact_id":"ordinary-workbook","mandate_id":"ordinary-cell","request":{"mutation_id":"ordinary-agent-edit","mandate_id":"ordinary-cell","base_rev":1,"generation":1,"command":{"kind":"cell.set","sheet":"Sheet1","cell":"B2","input":"42"}}}`))
+			wantCode(t, applied, 200, "ordinary signed agent operation")
+			var docsIntents int
+			if err := rig.db.QueryRow(`SELECT count(*) FROM document_creation_consents`).Scan(&docsIntents); err != nil || docsIntents != 0 {
+				t.Fatalf("workbook created Docs consent: %d %v", docsIntents, err)
+			}
+		})
 	}
 }
