@@ -14,6 +14,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/appengine"
 	"github.com/crewship-ai/crewship/internal/artifacts"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -249,6 +250,13 @@ func (h *gridcraftHTTP) mandate(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := context.WithValue(r.Context(), pageAuthReaderKey{}, tx)
 	a, err := h.run(ctx, tx, req.RunID, k.WorkspaceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = h.retainOrdinaryHumanRun(r, tx, req.RunID, k.WorkspaceID, p.AuthorityID)
+		if err == nil {
+			a, err = h.run(ctx, tx, req.RunID, k.WorkspaceID)
+		}
+	}
+
 	if err != nil || p.AuthorityID != "user:"+a.HumanUserID || h.pages.checkArtifactRunPrincipal(ctx, &a) != nil || !h.pages.artifactAgentPolicyAllows(ctx, a.WorkspaceID, a.CrewID) {
 		gridcraftError(w, appengine.ErrForbidden)
 		return
@@ -304,6 +312,22 @@ func (h *gridcraftHTTP) mandate(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, req)
 }
+
+// Explicit human workbook admission may retain an ordinary host-dispatched
+// chat run. It uses only the original durable run receipt, never caller/agent
+// metadata, and adds no consent or admission behavior to the Docs subsystem.
+func (h *gridcraftHTTP) retainOrdinaryHumanRun(r *http.Request, tx *sql.Tx, run, workspace, authority string) error {
+	var agent, crew string
+	if err := tx.QueryRowContext(r.Context(), `SELECT agent_id,crew_id FROM journal_entries WHERE trace_id=? AND workspace_id=? AND entry_type='run.started' AND json_extract(payload,'$.host_admitted')=1 AND json_extract(payload,'$.trigger_type')='USER'`, run, workspace).Scan(&agent, &crew); err != nil {
+		return appengine.ErrForbidden
+	}
+	origin, err := runauthority.Resolve(r.Context(), tx, run, agent, workspace)
+	if err != nil || origin.HumanAuthority == nil || origin.ChatOriginID != "" || origin.TriggerMessageID == "" || authority != "user:"+origin.HumanAuthority.UserID {
+		return appengine.ErrForbidden
+	}
+	return captureArtifactChatPrincipalQuery(r, tx, run, workspace, agent, crew, origin.ChatID, origin.TriggerMessageID, origin.HumanAuthority)
+}
+
 func (h *gridcraftHTTP) run(ctx context.Context, tx *sql.Tx, run, workspace string) (a artifactRunAuthority, err error) {
 	err = tx.QueryRowContext(ctx, `SELECT run_id,workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id FROM artifact_run_principals WHERE run_id=? AND workspace_id=?`, run, workspace).Scan(&a.RunID, &a.WorkspaceID, &a.AgentID, &a.CrewID, &a.HumanUserID, &a.ChatID, &a.MessageID)
 	return
