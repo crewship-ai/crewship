@@ -42,6 +42,12 @@ expect 1 "tag among other tags fails" -- "$CHECK" "$TMP/multi"
 expect 1 "one tagged binary fails the whole set" -- "$CHECK" "$TMP/clean" "$TMP/tagged"
 expect 1 "no Go binary is not a pass" -- "$CHECK" "$TMP/empty"
 expect 1 "missing path is not a pass" -- "$CHECK" "$TMP/absent"
+# A file named explicitly must be checked, never skipped.
+cp "$TMP/clean/app" "$TMP/unreadable"; chmod 000 "$TMP/unreadable"
+expect 1 "explicit non-Go file fails" -- "$CHECK" "$TMP/clean/app" "$TMP/empty/readme.txt"
+if [ "$(id -u)" -ne 0 ]; then
+  expect 1 "explicit unreadable file fails" -- "$CHECK" "$TMP/clean/app" "$TMP/unreadable"
+fi
 # The Docker build stage runs it under a POSIX shell, not bash.
 expect 0 "POSIX sh: untagged binary passes" -- sh "$CHECK" "$TMP/clean/app"
 expect 1 "POSIX sh: tagged binary fails" -- sh "$CHECK" "$TMP/clean/app" "$TMP/tagged/app"
