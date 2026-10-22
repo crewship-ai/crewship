@@ -14,6 +14,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/appengine"
 	"github.com/crewship-ai/crewship/internal/artifacts"
+	"github.com/crewship-ai/crewship/internal/pages"
 	"github.com/crewship-ai/crewship/internal/runauthority"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
@@ -42,6 +43,8 @@ func (r *Router) RegisterGridCraft(options appengine.Options, engine appengine.E
 	internalAuth := func(next http.Handler) http.Handler {
 		return r.internalHandler.requireInternal(withHostChatOrigin(next))
 	}
+	// openapi: responses 200,201,400,401,403,404,409,429,500,503
+	r.authedMut("POST", "/api/v1/workbooks", roleInline, h.create)
 	// openapi: responses 200,400,401,403,404,409,429,500,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/workbook", authed(wsCtx(http.HandlerFunc(h.read))))
 	// openapi: responses 200,400,401,403,404,409,429,500,503
@@ -141,6 +144,126 @@ func (h *gridcraftHTTP) humanKey(r *http.Request, write bool) (appengine.Key, er
 	_, err = h.humanAuthority(r, k, write, nil)(r.Context(), tx)
 	return k, err
 }
+
+type gridcraftCreate struct {
+	Slug string `json:"slug"`
+	Name string `json:"name"`
+}
+
+type gridcraftCreated struct {
+	PageID string `json:"page_id"`
+	Slug   string `json:"slug"`
+	Name   string `json:"name"`
+}
+
+// maxEmptyWorkbookPages bounds the empty private Pages one author may stage,
+// so nobody can exhaust the shared workspace Page limit with Pages that
+// administrators cannot see.
+const maxEmptyWorkbookPages = 5
+
+// create stages the empty personal private Page a human then imports into.
+// The slug is the idempotency key: an identical retry by the same author
+// returns the same still-empty Page; anything else is a conflict, and an
+// existing Page is never converted to a private workbook Page.
+func (h *gridcraftHTTP) create(w http.ResponseWriter, r *http.Request) {
+	artifactCommentHeaders(w)
+	user := UserFromContext(r.Context())
+	if agent, _ := pageGrantCallerIsAgent(r); user == nil || agent || projectAgentFrom(r.Context()) != nil {
+		gridcraftError(w, appengine.ErrForbidden)
+		return
+	}
+	wsID := WorkspaceIDFromContext(r.Context())
+	if !requireRoleOrCapabilityOrForbid(w, r, h.pages.logger, h.pages.db, wsID, user.ID,
+		RoleFromContext(r.Context()), CapabilityPageCreate, "page.create", "page:new", "create") {
+		return
+	}
+	var req gridcraftCreate
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	raw, err := io.ReadAll(r.Body)
+	if err != nil || appengine.DecodeStrict(raw, &req) != nil {
+		gridcraftError(w, appengine.ErrInvalid)
+		return
+	}
+	spec := pages.Document{APIVersion: pages.DocumentAPIVersion, Kind: pages.DocumentKind, Metadata: pages.Metadata{Slug: req.Slug, Name: req.Name}}
+	if spec.ValidateEmpty() != nil || len(req.Name) > 200 {
+		gridcraftError(w, appengine.ErrInvalid)
+		return
+	}
+	specJSON, err := json.Marshal(spec)
+	if err != nil {
+		gridcraftError(w, err)
+		return
+	}
+	tx, err := h.pages.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		gridcraftError(w, err)
+		return
+	}
+	defer tx.Rollback()
+	if validateContentHumanCredential(r, tx, "pages:write") != nil {
+		replyError(w, 403, "Forbidden")
+		return
+	}
+	var existing gridcraftCreated
+	var owner, name string
+	var private bool
+	err = tx.QueryRowContext(r.Context(), `SELECT id,coalesce(owner_user_id,''),name,private_audience=1 AND folder_id IS NULL AND owner_crew_id IS NULL FROM pages WHERE workspace_id=? AND slug=?`, wsID, req.Slug).Scan(&existing.PageID, &owner, &name, &private)
+	switch {
+	case err == nil:
+		empty, emptyErr := appengine.PageHasNoContent(r.Context(), tx, existing.PageID)
+		if emptyErr != nil {
+			gridcraftError(w, emptyErr)
+			return
+		}
+		if owner != user.ID || !private || name != req.Name || !empty {
+			replyError(w, 409, "conflict")
+			return
+		}
+		writeJSON(w, 200, gridcraftCreated{PageID: existing.PageID, Slug: req.Slug, Name: req.Name})
+		return
+	case !errors.Is(err, sql.ErrNoRows):
+		gridcraftError(w, err)
+		return
+	}
+	var count int
+	if err = tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM pages WHERE workspace_id=?`, wsID).Scan(&count); err != nil {
+		gridcraftError(w, err)
+		return
+	}
+	if count >= pages.MaxPagesPerWorkspace {
+		replyError(w, 409, "workspace page limit reached")
+		return
+	}
+	var staged int
+	if err = tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM pages p WHERE p.workspace_id=? AND p.owner_user_id=? AND p.private_audience=1 AND p.created_by_agent_id IS NULL AND NOT EXISTS(SELECT 1 FROM gridcraft_heads g WHERE g.page_id=p.id) AND NOT EXISTS(SELECT 1 FROM documents d WHERE d.page_id=p.id) AND NOT EXISTS(SELECT 1 FROM slides_heads s WHERE s.page_id=p.id)`, wsID, user.ID).Scan(&staged); err != nil {
+		gridcraftError(w, err)
+		return
+	}
+	if staged >= maxEmptyWorkbookPages {
+		replyError(w, 409, "too many empty workbook pages; import into or delete one first")
+		return
+	}
+	pageID, stamp := generateCUID(), tsformat.Format(time.Now())
+	if _, err = tx.ExecContext(r.Context(), `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json,created_at,updated_at,private_audience) VALUES(?,?,?,?,?,?,?,?,1)`, pageID, wsID, req.Slug, req.Name, user.ID, string(specJSON), stamp, stamp); err != nil {
+		if isUniqueViolation(err) {
+			replyError(w, 409, "conflict")
+			return
+		}
+		gridcraftError(w, err)
+		return
+	}
+	if err = insertPageVersion(r.Context(), tx, pageID, 1, string(specJSON), user.ID, stamp); err != nil {
+		gridcraftError(w, err)
+		return
+	}
+	if err = tx.Commit(); err != nil {
+		gridcraftError(w, err)
+		return
+	}
+	broadcastWorkspaceEvent(h.pages.hub, wsID, "page.updated", map[string]any{})
+	writeJSON(w, 201, gridcraftCreated{PageID: pageID, Slug: req.Slug, Name: req.Name})
+}
+
 func (h *gridcraftHTTP) read(w http.ResponseWriter, r *http.Request) {
 	artifactCommentHeaders(w)
 	k, err := h.humanKey(r, false)

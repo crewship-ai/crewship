@@ -18,7 +18,11 @@ func gridcraftSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	command["additionalProperties"] = false
 	mandate := obj(map[string]any{"mandate_id": str(), "run_id": str(), "base_rev": integer(1), "generation": integer(1), "targets": strings}, "mandate_id", "run_id", "base_rev", "generation", "targets")
 	mandate["additionalProperties"] = false
+	create := obj(map[string]any{"slug": str(), "name": str()}, "slug", "name")
+	create["additionalProperties"] = false
+	created := obj(map[string]any{"page_id": str(), "slug": str(), "name": str()}, "page_id", "slug", "name")
 	routes := map[string]DomainSchema{}
+	routes["POST /api/v1/workbooks"] = DomainSchema{Request: create, RequestRequired: true, Response: created}
 	base := "/api/v1/pages/{slug}/workbook"
 	routes["GET "+base] = DomainSchema{Response: ref("WorkbookState")}
 	routes["POST "+base+"/operations"] = DomainSchema{Request: request, RequestRequired: true, Response: ref("WorkbookReceipt")}
@@ -27,6 +31,9 @@ func gridcraftSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	routes["DELETE "+base+"/mandates/{mandate}"] = DomainSchema{Response: obj(map[string]any{"status": str()}, "status")}
 	for key, c := range routes {
 		c.SuccessStatuses = []string{"200"}
+		if key == "POST /api/v1/workbooks" {
+			c.SuccessStatuses = []string{"200", "201"}
+		}
 		c.ErrorStatuses = []string{"400", "401", "403", "404", "409", "429", "500", "503"}
 		c.SuccessHeaders = map[string]any{"Cache-Control": map[string]any{"schema": map[string]any{"type": "string", "enum": []string{"no-store"}}}}
 		routes[key] = c

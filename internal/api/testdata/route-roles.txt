@@ -368,6 +368,7 @@ POST /api/v1/triage-rules roleCreate
 POST /api/v1/triage/process roleCreate
 POST /api/v1/users/me/avatar roleSelf
 POST /api/v1/users/me/password roleSelf
+POST /api/v1/workbooks roleInline
 POST /api/v1/workflow-templates roleCreate
 POST /api/v1/workspaces roleSelf
 POST /api/v1/workspaces/{workspaceId}/invitations roleManage
