@@ -68,6 +68,9 @@ func gridcraftError(w http.ResponseWriter, err error) {
 	}
 	code, message := 500, "Workbook operation failed"
 	switch {
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		// Still authorized, but the call was interrupted (the caller left).
+		code, message = 503, "Workbook unavailable"
 	case errors.Is(err, appengine.ErrForbidden), errors.Is(err, appengine.ErrNotFound):
 		code, message = 404, "Workbook not found"
 	case errors.Is(err, appengine.ErrInvalid), errors.Is(err, appengine.ErrCandidate):
@@ -103,17 +106,8 @@ func (h *gridcraftHTTP) humanAuthority(r *http.Request, k appengine.Key, write b
 		if user == nil || agent || projectAgentFrom(ctx) != nil || ctx.Value(artifactRunKey{}) != nil {
 			return appengine.Principal{}, appengine.ErrForbidden
 		}
-		scope := "pages:read"
-		if write {
-			scope = "pages:write"
-		}
-		if err := validateContentHumanCredential(request, tx, scope); err != nil {
-			if errors.Is(err, errContentCredentialScope) {
-				return appengine.Principal{}, appengine.ErrForbidden
-			}
-			// The middleware admitted this credential, so it was revoked or
-			// expired while the request ran: report that, not a missing Page.
-			return appengine.Principal{}, appengine.ErrUnauthenticated
+		if err := gridcraftCredential(request, tx, write); err != nil {
+			return appengine.Principal{}, err
 		}
 		viewer, err := h.pages.livePrivatePageReader(ctx, k.WorkspaceID, user.ID)
 		if err != nil || viewer == nil {
@@ -137,20 +131,48 @@ func (h *gridcraftHTTP) humanAuthority(r *http.Request, k appengine.Key, write b
 		return appengine.Principal{AuthorityID: "user:" + user.ID, MandateID: "human-import", Targets: []string{"*"}}, nil
 	}
 }
+
+// gridcraftCredential rechecks the human credential inside the operation's
+// transaction. Only a credential that is actually revoked or expired becomes
+// ErrUnauthenticated (401): the middleware admitted it, so it was lost while
+// the request ran. A missing scope or a storage failure while reading the
+// credential keeps the hidden refusal, so a busy database never signs a user
+// out.
+func gridcraftCredential(r *http.Request, tx *sql.Tx, write bool) error {
+	scope := "pages:read"
+	if write {
+		scope = "pages:write"
+	}
+	err := validateContentHumanCredential(r, tx, scope)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, errInvalidCLIToken), errors.Is(err, errContentCredentialNotCurrent):
+		return appengine.ErrUnauthenticated
+	default:
+		return appengine.ErrForbidden
+	}
+}
+
 func (h *gridcraftHTTP) humanKey(r *http.Request, write bool) (appengine.Key, error) {
 	k := appengine.Key{WorkspaceID: WorkspaceIDFromContext(r.Context())}
 	column, ref := "slug", r.PathValue("slug")
 	if strings.HasPrefix(ref, "@") {
 		column, ref = "id", strings.TrimPrefix(ref, "@")
 	}
-	if h.pages.db.QueryRowContext(r.Context(), "SELECT id FROM pages WHERE workspace_id=? AND "+column+"=?", k.WorkspaceID, ref).Scan(&k.PageID) != nil {
-		return k, appengine.ErrForbidden
-	}
 	tx, err := h.pages.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		return k, err
 	}
 	defer tx.Rollback()
+	// Credential before the slug lookup: a revoked credential gets the same
+	// answer whether or not the Page exists.
+	if err = gridcraftCredential(r, tx, write); err != nil {
+		return k, err
+	}
+	if tx.QueryRowContext(r.Context(), "SELECT id FROM pages WHERE workspace_id=? AND "+column+"=?", k.WorkspaceID, ref).Scan(&k.PageID) != nil {
+		return k, appengine.ErrForbidden
+	}
 	_, err = h.humanAuthority(r, k, write, nil)(r.Context(), tx)
 	return k, err
 }
