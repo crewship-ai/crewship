@@ -18,6 +18,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/slides"
 	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
@@ -307,6 +308,39 @@ func TestGridCraftAdmitsOrdinaryHumanRunWithoutDocsIntent(t *testing.T) {
 			if err := rig.db.QueryRow(`SELECT count(*) FROM document_creation_consents`).Scan(&docsIntents); err != nil || docsIntents != 0 {
 				t.Fatalf("workbook created Docs consent: %d %v", docsIntents, err)
 			}
+		})
+	}
+}
+
+// Initializing another format must not hide committed workbook data, even when
+// the workbook routes are subsequently disabled.
+func TestGridCraftWorkbookPreventsDocumentAndSlidesInitialization(t *testing.T) {
+	for _, kind := range []string{"document", "slides"} {
+		t.Run(kind, func(t *testing.T) {
+			f := gridcraftInstanceFixture(t)
+			wmSeedPage(t, f.db, "ws-old", "workbook-exclusive", "workbook-exclusive", "Workbook", "boss", "")
+			mustExec(t, f.db, `UPDATE pages SET private_audience=1 WHERE id='workbook-exclusive'`)
+			f.r.RegisterGridCraft(appengine.Options{Enabled: true}, gridcraftFixtureEngine{})
+			base := "/api/v1/pages/workbook-exclusive/workbook"
+			body := `{"mutation_id":"import-exclusive","mandate_id":"human-import","command":{"kind":"import","snapshot":{"sheets":[{}]}}}`
+			wantCode(t, f.do(f.boss, "POST", base+"/operations?workspace_id=ws-old", body), 200, "import")
+			if kind == "slides" {
+				f.r.RegisterSlidesHuman(true)
+				init := humanSlidesJSON(t, slides.InitializeRequest{PageID: "workbook-exclusive", SchemaVersion: 1, MutationID: "other-format", Deck: humanSlidesDeck(t, "workbook-exclusive")})
+				wantCode(t, f.do(f.boss, "POST", "/api/v1/pages/workbook-exclusive/slides/initialize?workspace_id=ws-old", init), 404, "workbook excludes slides")
+			} else {
+				authority, err := f.r.DocumentAuthority(t.Context(), strings.Repeat("s", 64))
+				if err != nil {
+					t.Fatal(err)
+				}
+				req := httptest.NewRequest("POST", "/internal/docs/v1/workbook-exclusive/initialize?workspace_id=ws-old", strings.NewReader(`{"id":"document-init","fingerprint":"document-init","schema":3,"snapshot":"c25hcHNob3Q=","blocks":[]}`))
+				req.Header.Set("Authorization", "Bearer "+f.boss)
+				req.Header.Set("X-Crewship-Docs-Service", strings.Repeat("s", 64))
+				w := httptest.NewRecorder()
+				authority.ServeHTTP(w, req)
+				wantCode(t, w, 403, "workbook excludes document")
+			}
+			wantCode(t, f.do(f.boss, "GET", base+"?workspace_id=ws-old", ""), 200, "workbook remains readable")
 		})
 	}
 }

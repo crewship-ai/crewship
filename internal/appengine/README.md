@@ -57,3 +57,15 @@ Tests use migrated real SQLite databases, synthetic fixtures, production Router
 and a real CLI binary. Set `CREWSHIP_TEST_GRIDCRAFT_BINARY` to the pinned upstream
 CLI to execute the opt-in real-engine contract. That test uses synthetic input
 in a local process; it does not attest the deployed sandbox or a live model run.
+
+The qualified worker transport requires Linux. Before sending the service
+secret, the client checks a real private socket directory (0700 or 0750), a
+0600 socket, ownership by the application service UID and the connected peer's
+kernel UID. It fails closed on other platforms. This does not distinguish two
+processes running under the same UID; deployment isolation remains necessary.
+
+Docs and Slides human initialization reject an attached workbook in their
+existing authority transactions, even when workbook routes are disabled.
+Workbook transactions reject all other installed content formats, including
+boards and HTML artifacts. Existing corrupt mixed-format pages fail closed;
+this pilot does not include a repair or deletion workflow for such pages.

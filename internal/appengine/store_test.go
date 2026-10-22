@@ -445,3 +445,26 @@ func TestExpiredLeaseDoesNotFreeStillRunningWorker(t *testing.T) {
 		})
 	}
 }
+
+func TestWorkbookRejectsAttachedBoardOrArtifact(t *testing.T) {
+	for _, table := range []string{"page_boards", "page_artifacts"} {
+		t.Run(table, func(t *testing.T) {
+			s, db, a, k := fixture(t)
+			e := &fakeEngine{}
+			imported(t, s, a, k, e)
+			// These formats are independently installed on some hosts.
+			if _, err := db.Exec("CREATE TABLE " + table + " (page_id TEXT PRIMARY KEY)"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec("INSERT INTO "+table+" (page_id) VALUES (?)", k.PageID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.Read(t.Context(), k, a); !errors.Is(err, ErrForbidden) {
+				t.Fatalf("conflicting workbook readable: %v", err)
+			}
+			if _, err := s.Execute(t.Context(), k, edit(), a, e); !errors.Is(err, ErrForbidden) {
+				t.Fatalf("conflicting workbook mutable: %v", err)
+			}
+		})
+	}
+}

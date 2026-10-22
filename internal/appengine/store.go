@@ -69,10 +69,11 @@ func (s *Store) tx(ctx context.Context, k Key, a Authorize, fn func(*sql.Tx, Pri
 	if !bounded(p.AuthorityID) || !bounded(p.MandateID) || len(p.Targets) == 0 {
 		return ErrForbidden
 	}
-	// Only workbook operations are refused when another domain attaches content.
-	// Do not install triggers on Docs, Slides, or Page application tables.
-	var occupied bool
-	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM documents WHERE page_id=?) OR EXISTS(SELECT 1 FROM slides_heads WHERE page_id=?) OR EXISTS(SELECT 1 FROM page_panels WHERE page_id=?) OR EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=?) OR EXISTS(SELECT 1 FROM page_project_live WHERE page_id=?)`, k.PageID, k.PageID, k.PageID, k.PageID, k.PageID).Scan(&occupied); err != nil {
+	// Every attached format is checked in the same writer-fenced transaction.
+	// Reciprocal human initialization uses its existing authority checks rather
+	// than triggers on another format's tables.
+	occupied, err := hasOtherContent(ctx, tx, k.PageID)
+	if err != nil {
 		return err
 	}
 	if occupied {
@@ -361,21 +362,32 @@ func eligibleNewWorkbook(ctx context.Context, tx *sql.Tx, k Key) error {
 	if !eligible {
 		return ErrForbidden
 	}
+	occupied, err := hasOtherContent(ctx, tx, k.PageID)
+	if err != nil {
+		return err
+	}
+	if occupied {
+		return ErrInvalid
+	}
+	return nil
+}
+
+func hasOtherContent(ctx context.Context, tx *sql.Tx, pageID string) (bool, error) {
 	for _, table := range []string{"documents", "slides_heads", "page_panels", "page_project_drafts", "page_project_live", "page_artifacts", "page_boards"} {
 		var installed, occupied bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name=? COLLATE NOCASE)`, table).Scan(&installed); err != nil {
-			return err
+			return false, err
 		}
 		if installed {
-			if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM "+table+" WHERE page_id=?)", k.PageID).Scan(&occupied); err != nil {
-				return err
+			if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM "+table+" WHERE page_id=?)", pageID).Scan(&occupied); err != nil {
+				return false, err
 			}
 			if occupied {
-				return ErrInvalid
+				return true, nil
 			}
 		}
 	}
-	return nil
+	return false, nil
 }
 
 // A lease fences commits, but its expiry does not prove the old process has

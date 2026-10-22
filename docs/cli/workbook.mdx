@@ -35,9 +35,13 @@ owner submits a retained mandate:
 {"mandate_id":"mandate-1","run_id":"RUN_ID","base_rev":1,"generation":1,"targets":["Sheet1!B2"]}
 ```
 
-The run must have an existing live human chat principal and permitted crew
-policy. The host binds the instruction to that run and current Page version,
-seals the private chat and rechecks current authority on every operation. The
+The run must be a live host-admitted USER run with its original human-authority
+receipt, owned by the admitting human, in that human's private chat and allowed
+by the current crew policy. Admit can capture its principal from that original
+receipt; a pre-existing principal is not required. It seals the chat through
+`private_artifact_author_user_id`, and the principal expires one hour after
+admission. The host binds the instruction to that run and current Page version
+and rechecks current authority on every operation. The
 mandate permits one original base; another instruction requires another mandate.
 It cannot authorize another run or expand to a different cell through a reread.
 
