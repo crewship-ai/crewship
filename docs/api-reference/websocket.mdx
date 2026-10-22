@@ -408,7 +408,7 @@ shares its access rule with `crew`. File-change events are broadcast on the
 
 | Event Type | Description | Payload |
 |---|---|---|
-| `workbook.committed` | A workbook revision was confirmed durably (experimental live workbook editing). Sent once per revision; a revision whose push was lost to a crash is sent by a sweeper within seconds. Carries no cell content: read the revision through `GET /api/v1/pages/{slug}/workbook/commits?since=` under your own current access, and use that after a reconnect or a revision gap | `{ page_id, rev, generation, kind, cells }` |
+| `workbook.committed` | A workbook revision was confirmed durably (experimental live workbook editing). Sent at most once per revision, and only while the live editor is on for the workspace; a push can be lost (a dropped connection, a restart), so treat it as a hint. Carries no cell content: read the revision through `GET /api/v1/pages/{slug}/workbook/commits?since=` under your own current access, and use that after a reconnect or a revision gap | `{ page_id, rev, generation, kind, cells }` |
 
 `kind` is `cells` or `snapshot` (an import: reread the workbook); `cells` is the
 number of cells the revision wrote. Access to the private workbook Page is

@@ -109,13 +109,15 @@ API equivalents:
 | POST | Protected sidecar workbook transport (crew transport and signed run) | `workbook agent` |
 
 Status codes: `200` confirms the response (`201` for a new editor session);
-`400` rejects an invalid request; `401` requires a current human credential, or
-reports `session_expired`; `403` rejects effects outside a mandate; `404` hides
-missing or inaccessible workbooks and sessions; `409` reports a conflict, stale
-candidate or operation in progress; `410` reports a commits range outside the
-retained history; `429` reports capacity/history limits; `500` reports storage
-failure; `503` reports an unavailable experimental runtime, or
-`gridcraft_editor_disabled`.
+`400` rejects an invalid request; `401` requires a current human credential;
+`403` rejects effects outside a mandate; `404` hides missing or inaccessible
+workbooks and sessions; `409` reports a conflict, stale candidate, operation in
+progress, or `editor_session_expired`; `410` reports a commits range outside the
+retained history; `429` reports capacity/history limits, or
+`too_many_editor_sessions` with `Retry-After`; `500` reports storage failure;
+`503` reports an unavailable experimental runtime, or
+`gridcraft_editor_disabled`. A `401` always concerns the sign-in or token
+itself, never an editor session.
 Every endpoint requires current authorization and returns `Cache-Control: no-store`.
 
 ### Live editing
@@ -141,14 +143,27 @@ crewship workbook session open @PAGE_ID
 
 The session ID is 128 random bits. It is bound to its user, the credential that
 opened it (the sign-in session in the web app, the token for the CLI), the Page
-and the workbook generation. It expires after 12 hours and never later than
-that credential; `--renew SESSION_ID` (a body `{"session_id":"…"}`) renews a
-live session of yours with the same ID, so a host can renew it as a heartbeat.
+and the workbook generation. In the web app the session follows the sign-in,
+not the short-lived access token: an access token refreshed from the same
+sign-in keeps using it.
+
+A session expires 15 minutes after it was last used or renewed. A confirmed
+edit renews it (at most once every 5 minutes), and so does a heartbeat:
+`--renew SESSION_ID` (a body `{"session_id":"…"}`) renews a live session of
+yours with the same ID and returns its new `expires_at`. A host should send a
+heartbeat every 5 minutes while its editor is open, and close the session when
+the editor goes away. A session never lives longer than 12 hours from opening,
+nor beyond the sign-in session or token that opened it; `expires_at` already
+reflects all of these limits.
 An optional `"protocol":1` names the editor bridge protocol; any other value is
 refused. `bundle_digest` and `editor_url` name the editor bundle a host may
 frame; while no editor origin is configured the digest is empty, no URL is sent,
-and a host must not frame anything. One user may hold 32 live sessions per Page.
-`workbook session close` ends a session; closing it again succeeds.
+and a host must not frame anything (it should close the session it opened).
+One user may hold 32 live sessions per Page; a 33rd is
+`429 {"error":"too_many_editor_sessions"}` with `Retry-After` set to the seconds
+until the first one expires. Sessions that are never closed stop counting once
+they expire. `workbook session close` ends a session; closing it again
+succeeds.
 
 The Page owner then edits cells with an atomic edit from one live session:
 
@@ -156,11 +171,14 @@ The Page owner then edits cells with an atomic edit from one live session:
 {"session_id":"ws_3q2-7wJmQk6xE0t9a1bZlA","mutation_id":"ws_3q2-7wJmQk6xE0t9a1bZlA:17","base_rev":41,"generation":1,"ops":[{"kind":"cell.set","sheet":"Sheet1","cell":"B5","input":"draft"}]}
 ```
 
-A session that was never opened, belongs to someone else, to another Page or was
-opened with another credential is `404`. An expired or closed session, or one
-opened for an older generation, is `401 {"error":"session_expired"}`: open a new
-session, check the outcome of unanswered edits with `workbook status`, and send
-those without a receipt again under the new session with new mutation IDs.
+A session that was never opened, belongs to someone else or to another Page is
+`404`. An expired or closed session, one opened for an older generation, or
+your own session opened with another credential (another sign-in or token) is
+`409 {"error":"editor_session_expired"}`, for edits and heartbeats alike: open
+a new session, check the outcome of unanswered edits with `workbook status`,
+and send those without a receipt again under the new session with new mutation
+IDs. It is deliberately not a `401`, which clients treat as an expired
+sign-in.
 
 An edit holds 1 to 64 `cell.set` operations on one sheet (the active sheet), each
 with an input of at most 8 KiB; it is committed entirely or not at all, and its
@@ -252,7 +270,13 @@ most `--limit` (1 to 200, default 100) per call:
 ```
 
 It needs the same access as `workbook read`; a workspace OWNER reading another
-member's workbook is audited. `own` marks your revisions, and only those carry
+member's workbook is audited. An agent (`workbook_commits`) reads the feed only
+from its mandate's base revision on: a `since` below it answers `410` with
+`min_since` set to that base revision, so history from before the mandate,
+such as an input that was overwritten, is never shown to it. After the base
+revision the agent sees every changed cell, just as `workbook_read` shows it
+the whole current workbook; a mandate limits what an agent may write, not
+what it may read. `own` marks your revisions, and only those carry
 `session_id` and `mutation_id`; other writers appear by display name only.
 `kind: "snapshot"` is an import: reread the workbook. Continue from the last
 `rev` until it equals `head_rev`. When history was pruned (see above) the feed
@@ -261,18 +285,24 @@ the head, answers `410 {"error":"snapshot_required","head_rev":…,"generation":
 (the CLI prints it and exits with status 5); reread the workbook and continue
 from its revision.
 
-Every confirmed revision is also pushed once on the Page's realtime channel
-`page:{pageId}` as `workbook.committed` with
-`{page_id, rev, generation, kind, cells}` (`cells` is the number of cells
-written), never cell content; subscribers read the content through the feed.
-The push is sent after the revision is durable and access is rechecked before
-every frame. A revision whose push was lost to a crash is pushed by a sweeper
-within seconds, and a client that reconnects or sees a revision gap reads the
-feed from its last revision.
+While the live editor is on for the workspace, every confirmed revision is
+also pushed on the Page's realtime channel `page:{pageId}` as
+`workbook.committed` with `{page_id, rev, generation, kind, cells}` (`cells` is
+the number of cells written), never cell content; subscribers read the content
+through the feed. The push is sent after the revision is durable, off the
+response path, and access is rechecked before every frame. Delivery is at most
+once: a push can be lost (a dropped connection, a restart after the revision
+was claimed for its push), and is not repeated. A client treats the push as a
+hint and reads the feed from its last revision after a reconnect, after a
+revision gap and when it regains focus. Revisions committed while the editor
+is off are never pushed later. Turning the editor off does not push a
+`session_closed` frame yet; open editors learn it from the next edit, feed read
+or heartbeat (`503 gridcraft_editor_disabled`).
 
 A receipt is immutable and confirms durable storage, with `durability: node`.
 Its status response separately reports delivery (`pending` until the revision
-was pushed, then `sent`) and the current head. Unknown
+was claimed for its push, then `sent`; `sent` does not prove that any client
+received it) and the current head. Unknown
 outcomes require querying status or retrying the original packet. Do not refresh
 its base revision automatically. Conflicts, revocation, an effect outside the
 mandate and exhausted worker capacity reject the candidate without a new revision.
