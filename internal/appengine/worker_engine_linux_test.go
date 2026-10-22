@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -28,6 +29,18 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, "engine sandbox:", err)
 		os.Exit(126)
 	}
+	if len(os.Args) == 4 && os.Args[1] == testLeaveGroupFlag {
+		// Stands in for a CLI descendant that moves to a new process group
+		// inside the engine's session (setpgid), then lingers.
+		if err := syscall.Setpgid(0, 0); err != nil {
+			os.Exit(90)
+		}
+		if err := os.WriteFile(os.Args[3], nil, 0600); err != nil {
+			os.Exit(91)
+		}
+		_ = syscall.Exec("/usr/bin/sleep", []string{"sleep", os.Args[2]}, nil)
+		os.Exit(92)
+	}
 	os.Exit(m.Run())
 }
 
@@ -36,6 +49,9 @@ func TestMain(m *testing.M) {
 func fakeCLI(t *testing.T, body string) WorkerEngine {
 	t.Helper()
 	if err := PrepareEngineSandbox(); err != nil {
+		if os.Getenv("CI") != "" {
+			t.Fatalf("engine sandbox unavailable in CI, containment would be unverified: %v", err)
+		}
 		t.Skipf("engine sandbox unavailable on this kernel: %v", err)
 	}
 	dir := t.TempDir()
@@ -46,6 +62,22 @@ func fakeCLI(t *testing.T, body string) WorkerEngine {
 	}
 	sum := sha256.Sum256([]byte(script))
 	return WorkerEngine{Binary: binary, Scratch: t.TempDir(), ReadOnly: []string{dir}, digest: hex.EncodeToString(sum[:])}
+}
+
+const testLeaveGroupFlag = "--test-leave-group"
+
+// leaveGroupScript starts a descendant that leaves the engine's process group
+// but stays in its session, and waits until it has done so.
+func leaveGroupScript(t *testing.T, engine *WorkerEngine, marker string) string {
+	t.Helper()
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine.ReadOnly = append(engine.ReadOnly, filepath.Dir(self))
+	return fmt.Sprintf(`%q %s %s "$TMPDIR/left" </dev/null >/dev/null 2>&1 &
+while [ ! -e "$TMPDIR/left" ]; do sleep 0.01; done
+cp "$src" "$dst"`, self, testLeaveGroupFlag, marker)
 }
 
 // sleepMarker returns a unique sleep duration so test processes can be found
@@ -258,5 +290,325 @@ cp "$src" "$dst"`, secret, socketDir, placeholder)
 	}
 	if got, _ := os.ReadFile(otherCandidate); string(got) != `{"private":true}` {
 		t.Fatalf("engine tampered with another candidate: %q", got)
+	}
+}
+
+// gatedScript blocks until gate exists, so a test can keep a candidate in
+// flight while another candidate finishes and is swept.
+func gatedScript(gate, rest string) string {
+	return fmt.Sprintf("while [ ! -e %q ]; do sleep 0.01; done\n%s", gate, rest)
+}
+
+func gateDir(t *testing.T, engines ...*WorkerEngine) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, engine := range engines {
+		engine.ReadOnly = append(engine.ReadOnly, dir)
+	}
+	return filepath.Join(dir, "open")
+}
+
+func openGate(t *testing.T, gate string) {
+	t.Helper()
+	if err := os.WriteFile(gate, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Concurrent healthy candidates whose in-group leftovers die during another
+// candidate's sweep must not be mistaken for escapes.
+func TestWorkerEngineConcurrentHealthyRunsAreNotEscapes(t *testing.T) {
+	marker := sleepMarker(t)
+	engine := fakeCLI(t, `sleep `+marker+` </dev/null >/dev/null 2>&1 &
+sleep `+marker+` </dev/null >/dev/null 2>&1 &
+cp "$src" "$dst"`)
+	var escapes atomic.Int32
+	engine.Escaped = func() { escapes.Add(1) }
+	const parallel, rounds = 6, 8
+	errs := make(chan error, parallel*rounds)
+	var wg sync.WaitGroup
+	for range parallel {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range rounds {
+				result, err := importBlank(t, t.Context(), engine)
+				if err == nil && len(result.Result) == 0 {
+					err = errors.New("empty result")
+				}
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("healthy concurrent candidate failed: %v", err)
+		}
+	}
+	if escapes.Load() != 0 {
+		t.Fatalf("healthy concurrent candidates reported %d escapes", escapes.Load())
+	}
+	requireGone(t, marker)
+	if files, _ := filepath.Glob(filepath.Join(engine.Scratch, "workbook-*")); len(files) != 0 {
+		t.Fatalf("scratch survived: %v", files)
+	}
+}
+
+// A crashing candidate fails alone; the concurrent healthy one succeeds.
+func TestWorkerEngineCrashFailsOnlyItsOwnCandidate(t *testing.T) {
+	marker := sleepMarker(t)
+	good := fakeCLI(t, `cp "$src" "$dst"`)
+	bad := fakeCLI(t, `sleep `+marker+` </dev/null >/dev/null 2>&1 &
+kill -SEGV $$`)
+	gate := gateDir(t, &good)
+	good = fakeCLI2(t, good, gatedScript(gate, `sleep `+marker+` </dev/null >/dev/null 2>&1 &
+cp "$src" "$dst"`))
+	var escapes atomic.Int32
+	good.Escaped = func() { escapes.Add(1) }
+	bad.Escaped = good.Escaped
+	goodDone := make(chan error, 1)
+	go func() { _, err := importBlank(t, t.Context(), good); goodDone <- err }()
+	if _, err := importBlank(t, t.Context(), bad); err == nil || errors.Is(err, ErrEngineUnavailable) {
+		t.Fatalf("crashed candidate must fail as a candidate error, got %v", err)
+	}
+	openGate(t, gate)
+	if err := <-goodDone; err != nil {
+		t.Fatalf("healthy candidate failed because another crashed: %v", err)
+	}
+	if escapes.Load() != 0 {
+		t.Fatalf("a crash is not an escape; hook called %d times", escapes.Load())
+	}
+	requireGone(t, marker)
+}
+
+// A descendant that leaves its process group but stays in the candidate's
+// session is attributed to that candidate only: it fails and the worker is
+// told to exit, while a concurrent healthy candidate still succeeds.
+func TestWorkerEngineAttributedEscapeFailsOnlyItsCandidate(t *testing.T) {
+	for _, order := range []string{"healthy-after", "together"} {
+		t.Run(order, func(t *testing.T) {
+			marker := sleepMarker(t)
+			bad := fakeCLI(t, "")
+			bad = fakeCLI2(t, bad, leaveGroupScript(t, &bad, marker))
+			good := fakeCLI(t, "")
+			gate := gateDir(t, &good)
+			body := `sleep ` + marker + ` </dev/null >/dev/null 2>&1 &
+cp "$src" "$dst"`
+			if order == "healthy-after" {
+				body = gatedScript(gate, body)
+			}
+			good = fakeCLI2(t, good, body)
+			good.Scratch = bad.Scratch
+			var escapes atomic.Int32
+			bad.Escaped = func() { escapes.Add(1) }
+			var goodEscapes atomic.Int32
+			good.Escaped = func() { goodEscapes.Add(1) }
+			for range 5 {
+				goodDone := make(chan error, 1)
+				go func() { _, err := importBlank(t, t.Context(), good); goodDone <- err }()
+				_, err := importBlank(t, t.Context(), bad)
+				if !errors.Is(err, ErrEngineEscaped) {
+					t.Fatalf("escaping candidate must fail closed, got %v", err)
+				}
+				openGate(t, gate)
+				if err := <-goodDone; err != nil {
+					t.Fatalf("healthy candidate failed for another candidate's escape: %v", err)
+				}
+				_ = os.Remove(gate)
+			}
+			if escapes.Load() != 5 || goodEscapes.Load() != 0 {
+				t.Fatalf("escape hook: bad %d (want 5), healthy %d (want 0)", escapes.Load(), goodEscapes.Load())
+			}
+			requireGone(t, marker)
+		})
+	}
+}
+
+// A descendant that starts its own session cannot be attributed to a
+// candidate. The worker then fails every candidate in flight closed (it is
+// about to exit anyway) rather than return output an escaped process could
+// have influenced.
+func TestWorkerEngineUnattributedEscapeFailsEveryCandidateInFlight(t *testing.T) {
+	marker := sleepMarker(t)
+	bad := fakeCLI(t, detachScript(marker))
+	good := fakeCLI(t, "")
+	gate := gateDir(t, &good)
+	good = fakeCLI2(t, good, gatedScript(gate, `cp "$src" "$dst"`))
+	var escapes atomic.Int32
+	bad.Escaped = func() { escapes.Add(1) }
+	good.Escaped = bad.Escaped
+	goodDone := make(chan error, 1)
+	go func() { _, err := importBlank(t, t.Context(), good); goodDone <- err }()
+	// Let the healthy candidate start before the escape is detected.
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if dirs, _ := filepath.Glob(filepath.Join(good.Scratch, "workbook-*")); len(dirs) == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("healthy candidate did not start")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if _, err := importBlank(t, t.Context(), bad); !errors.Is(err, ErrEngineEscaped) {
+		t.Fatalf("escaping candidate must fail closed, got %v", err)
+	}
+	openGate(t, gate)
+	if err := <-goodDone; !errors.Is(err, ErrEngineEscaped) {
+		t.Fatalf("candidate in flight during an unattributed escape must fail closed, got %v", err)
+	}
+	if escapes.Load() == 0 {
+		t.Fatal("worker exit hook not called")
+	}
+	requireGone(t, marker)
+}
+
+// Capacity N admits N concurrent candidates; candidate N+1 is refused
+// before any scratch or engine process exists.
+func TestWorkerHandlerCapacityNRunsConcurrentlyAndRefusesNPlusOne(t *testing.T) {
+	const capacity = 3
+	engine := fakeCLI(t, "")
+	gate := gateDir(t, &engine)
+	engine = fakeCLI2(t, engine, gatedScript(gate, `cp "$src" "$dst"`))
+	secret := strings.Repeat("c", 64)
+	handler, err := NewWorkerHandler(secret, engine, capacity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := `{"snapshot":` + string(blankWorkbook(t)) + `,"command":{"kind":"import"}}`
+	request := func() int {
+		req := httptest.NewRequest(http.MethodPost, "/v1/candidate", strings.NewReader(body))
+		req.Header.Set(workerServiceHeader, secret)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	codes := make(chan int, capacity)
+	for range capacity {
+		go func() { codes <- request() }()
+	}
+	scratch := func() int {
+		dirs, _ := filepath.Glob(filepath.Join(engine.Scratch, "workbook-*"))
+		return len(dirs)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for scratch() != capacity {
+		if time.Now().After(deadline) {
+			openGate(t, gate)
+			t.Fatalf("%d of %d candidates started", scratch(), capacity)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if code := request(); code != http.StatusTooManyRequests {
+		openGate(t, gate)
+		t.Fatalf("candidate past capacity: status %d, want 429", code)
+	}
+	if n := scratch(); n != capacity {
+		openGate(t, gate)
+		t.Fatalf("refused candidate left hidden work: %d candidate dirs", n)
+	}
+	openGate(t, gate)
+	for range capacity {
+		if code := <-codes; code != http.StatusOK {
+			t.Fatalf("admitted candidate status %d", code)
+		}
+	}
+	if code := request(); code != http.StatusOK {
+		t.Fatalf("capacity not returned: %d", code)
+	}
+}
+
+// The worker reads engine output without following links, and only from a
+// regular file with a single link, so a weakened sandbox cannot turn the
+// output path into a read of a worker-private file.
+func TestReadBoundedRejectsLinksAndSpecialFiles(t *testing.T) {
+	dir := t.TempDir()
+	private := filepath.Join(dir, "service-token")
+	if err := os.WriteFile(private, []byte("secret"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	symlink, hardlink, fifo, regular := filepath.Join(dir, "sym.json"), filepath.Join(dir, "hard.json"), filepath.Join(dir, "fifo.json"), filepath.Join(dir, "ok.json")
+	if err := os.Symlink(private, symlink); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(private, hardlink); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(fifo, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(regular, []byte(`{}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{symlink, hardlink, fifo, dir} {
+		if b, err := readBounded(path); err == nil {
+			t.Fatalf("%s read as engine output: %q", filepath.Base(path), b)
+		}
+	}
+	if b, err := readBounded(regular); err != nil || string(b) != `{}` {
+		t.Fatalf("regular output: %q %v", b, err)
+	}
+}
+
+// fakeCLI2 rewrites an engine's fake CLI body while keeping its scratch and
+// read-only roots, so a test can add roots before choosing the script.
+func fakeCLI2(t *testing.T, engine WorkerEngine, body string) WorkerEngine {
+	t.Helper()
+	script := "#!/bin/sh\nset -u\nsrc=\"$3\"\ndst=\"$5\"\n" + body + "\n"
+	if err := os.WriteFile(engine.Binary, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(script))
+	engine.digest = hex.EncodeToString(sum[:])
+	return engine
+}
+
+// The pinned CLI runs concurrently on different workbooks under the sandbox,
+// each candidate in its own scratch, with no survivor and no escape.
+func TestRealGridCraftConcurrentCandidatesOnDifferentWorkbooks(t *testing.T) {
+	binary := os.Getenv("CREWSHIP_TEST_GRIDCRAFT_BINARY")
+	if binary == "" {
+		t.Skip("set CREWSHIP_TEST_GRIDCRAFT_BINARY to the pinned CLI to execute real engine concurrency")
+	}
+	if err := PrepareEngineSandbox(); err != nil {
+		t.Fatalf("engine sandbox unavailable: %v", err)
+	}
+	var escapes atomic.Int32
+	engine := WorkerEngine{Binary: binary, Scratch: t.TempDir(), Escaped: func() { escapes.Add(1) }}
+	raw := blankWorkbook(t)
+	const parallel = 4
+	errs := make(chan error, parallel)
+	for i := range parallel {
+		go func() {
+			base, err := engine.Run(t.Context(), raw, Command{Kind: "import", Snapshot: raw})
+			if err != nil {
+				errs <- fmt.Errorf("import %d: %w", i, err)
+				return
+			}
+			input := fmt.Sprint(100 + i)
+			edited, err := engine.Run(t.Context(), base.Result, Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: input})
+			if err != nil {
+				errs <- fmt.Errorf("edit %d: %w", i, err)
+				return
+			}
+			if !strings.Contains(string(edited.Result), input) {
+				errs <- fmt.Errorf("edit %d: result lacks its own value", i)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	for range parallel {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if escapes.Load() != 0 {
+		t.Fatalf("real engine reported %d escapes", escapes.Load())
+	}
+	if files, _ := filepath.Glob(filepath.Join(engine.Scratch, "workbook-*")); len(files) != 0 {
+		t.Fatalf("scratch survived: %v", files)
 	}
 }

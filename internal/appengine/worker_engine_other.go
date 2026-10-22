@@ -19,3 +19,7 @@ func ExecEngineSandbox([]string) error { return errEngineSandboxPlatform }
 func (e WorkerEngine) execEngine(context.Context, string, []string) error {
 	return fmt.Errorf("%w: %v", ErrEngineUnavailable, errEngineSandboxPlatform)
 }
+
+func readBounded(string) ([]byte, error) {
+	return nil, fmt.Errorf("%w: %v", ErrEngineUnavailable, errEngineSandboxPlatform)
+}

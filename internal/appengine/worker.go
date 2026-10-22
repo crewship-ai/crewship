@@ -120,21 +120,6 @@ func (e WorkerEngine) Run(ctx context.Context, input []byte, c Command) (result 
 	}
 	return EngineResult{normalized, data}, nil
 }
-func readBounded(path string) ([]byte, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	b, err := io.ReadAll(io.LimitReader(f, MaxSnapshotBytes+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(b) > MaxSnapshotBytes {
-		return nil, ErrInvalid
-	}
-	return b, nil
-}
 
 type WorkerRequest struct {
 	Snapshot json.RawMessage `json:"snapshot"`

@@ -50,15 +50,36 @@ startup and keeps it in memory. Each CLI execution:
   ptrace the worker, or use TCP. Landlock needs no capability and works under
   `no-new-privileges` with Docker's default seccomp profile. If the kernel
   lacks Landlock, the worker refuses to start; there is no unconfined fallback;
-- runs in its own process group. After every execution (success, error,
-  timeout or cancellation) the whole group is killed with `SIGKILL` and reaped.
+- runs in its own session and process group. After every execution (success,
+  error, timeout or cancellation) the whole group is killed with `SIGKILL` and
+  reaped.
 
 The worker is PID 1 and a child subreaper, so every orphaned engine descendant
-is reparented to it. After each execution it inspects its children in `/proc`.
-Any process that left the engine's process group (`setsid`, `setpgid`, double
-fork) is killed. The worker then becomes unavailable and exits non-zero, which
-ends the container's PID namespace and every process in it, so the supervisor
-starts a clean container and socket.
+is reparented to it. After each execution it inspects its children in `/proc`
+and attributes them by session: processes of other executions still in flight
+are left to their own sweep, so concurrent candidates never see each other's
+dying processes as escapes. A process that left its group but kept the
+execution's session (`setpgid`) is that candidate's escape. A process in a new
+session (`setsid`) cannot be attributed, so every candidate in flight fails
+closed. Escaped processes are killed. The worker then becomes unavailable and
+exits non-zero, which ends the container's PID namespace and every process in
+it, so the supervisor starts a clean container and socket. The worker reads
+engine output only from a regular, single-link file opened without following
+links.
+
+## Concurrency
+
+`CREWSHIP_GRIDCRAFT_WORKER_CAPACITY` sets how many candidates run at once
+(default 2, 1 to 8). A request past capacity gets `429` before any scratch or
+engine process exists. Each candidate has its own scratch directory and
+Landlock write scope; a crashing candidate fails alone. One writer per
+workbook is enforced by the application, which admits at most one candidate per
+artifact. The default fits the profile above. Each concurrent candidate needs
+about 64 MiB of memory (request buffers, a transient launcher, the CLI, and
+scratch) and up to 8 PIDs (the PID limit counts threads). For capacity N, set
+memory to at least 128 MiB + N × 64 MiB, PIDs to at least 16 + N × 8, and
+`/scratch` to at least N × 4 MiB. The application's `max_workers` should not
+exceed the worker capacity, or candidates are refused with `capacity_exhausted`.
 
 Residual risk, accepted for the default-off pilot:
 

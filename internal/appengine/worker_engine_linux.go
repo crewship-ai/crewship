@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"runtime"
@@ -37,13 +38,25 @@ var engineDevices = map[string]uint64{
 var (
 	subreaperOnce sync.Once
 	subreaperErr  error
-	// engineGroups holds the process groups of engine executions that are
-	// still running, so a concurrent sweep does not mistake them for escapes.
-	engineGroups = struct {
+	// engineRuns holds every engine execution from start until its sweep is
+	// complete, keyed by its session ID. Each execution runs in its own session,
+	// so a concurrent sweep can attribute any descendant that kept the session,
+	// and never mistakes another execution's dying processes for an escape.
+	// The lock also covers starting executions and reading /proc, so a sweep
+	// never sees a child between fork and setsid.
+	engineRuns = struct {
 		sync.Mutex
-		live map[int]struct{}
-	}{live: map[int]struct{}{}}
+		live map[int]*engineRun
+	}{live: map[int]*engineRun{}}
 )
+
+type engineRun struct {
+	session int
+	// escaped is set when a process of this execution left its process group,
+	// or when a process no execution can be attributed to appeared while this
+	// execution was in flight.
+	escaped bool
+}
 
 // PrepareEngineSandbox verifies the kernel can confine the engine and makes
 // this process the reaper of every engine descendant. The worker calls it at
@@ -77,46 +90,78 @@ func (e WorkerEngine) execEngine(ctx context.Context, dir string, args []string)
 		argv = append(argv, "--ro", root)
 	}
 	argv = append(append(argv, "--", e.Binary), args...)
-	cmd := exec.CommandContext(ctx, launcher, argv...)
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("workbook engine execution failed: %w", err)
+	}
+	cmd := exec.Command(launcher, argv...)
 	cmd.Dir = dir
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + dir, "TMPDIR=" + dir}
 	// The CLI prints file paths. Keep them inside the worker; protocol errors do
 	// not copy process output into API responses or private Artifact logs. Nil
 	// streams are /dev/null, so no pipe can keep Wait open after the group dies.
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, nil, nil
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGKILL}
-	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
-	cmd.WaitDelay = 2 * time.Second
+	// A new session (and so a new process group with the same ID) per
+	// execution: setpgid can move a descendant only within its session, so a
+	// descendant either keeps this session ID or calls setsid.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Pdeathsig: syscall.SIGKILL}
 
-	engineGroups.Lock()
+	run := &engineRun{}
+	engineRuns.Lock()
 	err := cmd.Start()
 	if err == nil {
-		engineGroups.live[cmd.Process.Pid] = struct{}{}
+		run.session = cmd.Process.Pid
+		engineRuns.live[run.session] = run
 	}
-	engineGroups.Unlock()
+	engineRuns.Unlock()
 	if err != nil {
 		return fmt.Errorf("workbook engine execution failed: %w", err)
 	}
-	group := cmd.Process.Pid
+	group := run.session
+	// Cancellation kills the group only while the leader has not exited. The
+	// leader stays unreaped until the sweep ends, so the ID cannot be reused.
+	var leader sync.Mutex
+	exited := false
+	stopCancel := context.AfterFunc(ctx, func() {
+		leader.Lock()
+		defer leader.Unlock()
+		if !exited {
+			_ = syscall.Kill(-group, syscall.SIGKILL)
+		}
+	})
 	// Wait for the leader to exit without reaping it: its PID, and so the
-	// group ID, cannot be reused until the whole group has been killed.
+	// session and group ID, cannot be reused until the sweep is complete.
 	waitErr := waitExitedNoReap(group)
+	leader.Lock()
+	exited = true
+	leader.Unlock()
+	stopCancel()
 	_ = syscall.Kill(-group, syscall.SIGKILL)
+	sweepErr := sweepEngineSurvivors(run)
+	// Reap the leader and deregister atomically: no other sweep can see the
+	// reaped session unregistered, and no new execution can reuse its ID while
+	// it is still registered.
+	engineRuns.Lock()
 	runErr := cmd.Wait()
-	engineGroups.Lock()
-	delete(engineGroups.live, group)
-	engineGroups.Unlock()
-	if err := sweepEngineSurvivors(group); err != nil {
+	delete(engineRuns.live, group)
+	escaped := run.escaped
+	engineRuns.Unlock()
+	if sweepErr != nil || escaped {
 		if e.Escaped != nil {
 			e.Escaped()
 		}
-		return err
+		if sweepErr != nil {
+			return sweepErr
+		}
+		return ErrEngineEscaped
 	}
 	if waitErr != nil {
 		return fmt.Errorf("%w: engine wait failed", ErrEngineUnavailable)
 	}
 	if runErr != nil {
 		return fmt.Errorf("workbook engine execution failed: %w", runErr)
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("workbook engine execution failed: %w", err)
 	}
 	return nil
 }
@@ -132,8 +177,8 @@ func waitExitedNoReap(pid int) error {
 }
 
 type procEntry struct {
-	pid, pgid int
-	zombie    bool
+	pid, pgid, session int
+	zombie             bool
 }
 
 // workerChildren lists this process's children from /proc. Because the worker
@@ -160,46 +205,62 @@ func workerChildren() ([]procEntry, error) {
 			return nil, fmt.Errorf("malformed /proc/%d/stat", pid)
 		}
 		fields := bytes.Fields(stat[end+2:])
-		if len(fields) < 3 {
+		if len(fields) < 4 {
 			return nil, fmt.Errorf("malformed /proc/%d/stat", pid)
 		}
 		ppid, err1 := strconv.Atoi(string(fields[1]))
 		pgid, err2 := strconv.Atoi(string(fields[2]))
-		if err1 != nil || err2 != nil {
+		session, err3 := strconv.Atoi(string(fields[3]))
+		if err1 != nil || err2 != nil || err3 != nil {
 			return nil, fmt.Errorf("malformed /proc/%d/stat", pid)
 		}
 		if ppid == self {
-			children = append(children, procEntry{pid: pid, pgid: pgid, zombie: fields[0][0] == 'Z' || fields[0][0] == 'X'})
+			children = append(children, procEntry{pid: pid, pgid: pgid, session: session, zombie: fields[0][0] == 'Z' || fields[0][0] == 'X'})
 		}
 	}
 	return children, nil
 }
 
-// sweepEngineSurvivors runs after the engine group was killed. Members of that
-// group are dying and are reaped. Any other child that does not belong to a
-// running engine left the group (setsid, setpgid): it is killed and reported
-// as an escape. Descendants reparented while killing are swept in later rounds.
-func sweepEngineSurvivors(group int) error {
+// sweepEngineSurvivors runs after the execution's group was killed, before
+// its leader is reaped. Every child of the worker is classified:
+//   - in another registered session: that execution's own sweep handles it;
+//   - in this session and group: dying, reaped here;
+//   - in this session but another group (setpgid): an escape of this
+//     execution only, killed;
+//   - in no registered session (setsid): not attributable, killed, and every
+//     execution in flight is marked escaped, so none returns output.
+//
+// Descendants reparented while killing are swept in later rounds. If this
+// execution's processes remain after the deadline it counts as an escape.
+func sweepEngineSurvivors(run *engineRun) error {
 	ownGroup := syscall.Getpgrp()
 	deadline := time.Now().Add(2 * time.Second)
-	escaped := false
 	for {
+		engineRuns.Lock()
 		children, err := workerChildren()
 		if err != nil {
+			run.escaped = true
+			engineRuns.Unlock()
 			return fmt.Errorf("%w: cannot verify engine processes", ErrEngineEscaped)
 		}
-		engineGroups.Lock()
 		pending := false
 		for _, child := range children {
-			if _, running := engineGroups.live[child.pgid]; running && child.pgid != group {
+			if child.pid == run.session {
+				continue // the unreaped leader; reaped after the sweep
+			}
+			if other, registered := engineRuns.live[child.session]; registered && other != run {
 				continue
 			}
-			if child.pgid != group {
-				escaped = true
-				_ = syscall.Kill(child.pid, syscall.SIGKILL)
-				if child.pgid == child.pid && child.pgid != ownGroup {
-					_ = syscall.Kill(-child.pgid, syscall.SIGKILL)
+			if child.session == run.session {
+				if child.pgid != run.session {
+					run.escaped = true
+					killEscapee(child, ownGroup)
 				}
+			} else {
+				for _, inFlight := range engineRuns.live {
+					inFlight.escaped = true
+				}
+				killEscapee(child, ownGroup)
 			}
 			if child.zombie {
 				var status unix.WaitStatus
@@ -207,20 +268,55 @@ func sweepEngineSurvivors(group int) error {
 			}
 			pending = true
 		}
-		engineGroups.Unlock()
+		engineRuns.Unlock()
 		if !pending {
-			break
+			return nil
 		}
 		if time.Now().After(deadline) {
-			escaped = true
-			break
+			engineRuns.Lock()
+			run.escaped = true
+			engineRuns.Unlock()
+			return nil
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	if escaped {
-		return ErrEngineEscaped
+}
+
+// killEscapee kills a process outside its execution's group, and its own
+// group when it leads one that is neither the worker's nor an execution's.
+// The caller holds engineRuns.
+func killEscapee(child procEntry, ownGroup int) {
+	_ = syscall.Kill(child.pid, syscall.SIGKILL)
+	if _, registered := engineRuns.live[child.pgid]; child.pgid == child.pid && child.pgid != ownGroup && !registered {
+		_ = syscall.Kill(-child.pgid, syscall.SIGKILL)
 	}
-	return nil
+}
+
+// readBounded reads one engine output file. It never follows a link and
+// accepts only a regular file with a single name, so even a weakened sandbox
+// cannot make the output a view of a worker-private file.
+func readBounded(path string) ([]byte, error) {
+	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC|unix.O_NOCTTY, 0)
+	if err != nil {
+		return nil, fmt.Errorf("%w: engine output unavailable", ErrCandidate)
+	}
+	f := os.NewFile(uintptr(fd), path)
+	defer f.Close()
+	var st unix.Stat_t
+	if err := unix.Fstat(fd, &st); err != nil {
+		return nil, err
+	}
+	if st.Mode&unix.S_IFMT != unix.S_IFREG || st.Nlink != 1 {
+		return nil, fmt.Errorf("%w: engine output is not a private regular file", ErrCandidate)
+	}
+	b, err := io.ReadAll(io.LimitReader(f, MaxSnapshotBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(b) > MaxSnapshotBytes {
+		return nil, ErrInvalid
+	}
+	return b, nil
 }
 
 // landlockRuleset is the kernel ABI v6 prefix of struct landlock_ruleset_attr.

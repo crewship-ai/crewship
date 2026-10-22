@@ -29,7 +29,8 @@ payload conflict. Unfinished reservations return `in_progress`; lease takeover
 increments a fencing token, so a displaced candidate cannot commit. The service
 also holds physical worker slots until computation and cleanup return; an expired
 lease alone does not free global, workspace or artifact capacity. The persistent worker also enforces physical capacity across application
-restarts. Its managed container restart discards all private candidate scratch.
+restarts; it runs several candidates concurrently only for different artifacts,
+because this admission keeps at most one candidate per artifact. Its managed container restart discards all private candidate scratch.
 
 The engine computes outside the database transaction. The candidate binds the
 artifact, base revision, generation, command hash, mandate, pinned engine and

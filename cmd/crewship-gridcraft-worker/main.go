@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -16,6 +17,28 @@ import (
 )
 
 var errEngineEscaped = errors.New("engine process outlived its candidate")
+
+// Concurrent candidates per worker. The default fits the documented container
+// profile (256 MiB, 32 PIDs); a higher value needs the larger profile listed in
+// docker/gridcraft/README.md. The hard bound keeps one environment's worker
+// from being configured past what one container can hold.
+const (
+	capacityEnv           = "CREWSHIP_GRIDCRAFT_WORKER_CAPACITY"
+	defaultWorkerCapacity = 2
+	maxWorkerCapacity     = 8
+)
+
+func workerCapacity(getenv func(string) string) (int, error) {
+	value := getenv(capacityEnv)
+	if value == "" {
+		return defaultWorkerCapacity, nil
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil || n < 1 || n > maxWorkerCapacity {
+		return 0, fmt.Errorf("%s must be an integer from 1 to %d", capacityEnv, maxWorkerCapacity)
+	}
+	return n, nil
+}
 
 func run() error {
 	if len(os.Args) > 1 && os.Args[1] == appengine.EngineSandboxFlag {
@@ -35,9 +58,13 @@ func run() error {
 		return fmt.Errorf("invalid worker arguments")
 	}
 
+	capacity, err := workerCapacity(os.Getenv)
+	if err != nil {
+		return err
+	}
 	// Refuse to serve unless every engine execution can be confined and every
 	// engine descendant is reparented to this process for the survivor sweep.
-	if err := appengine.PrepareEngineSandbox(); err != nil {
+	if err = appengine.PrepareEngineSandbox(); err != nil {
 		return err
 	}
 	secret, err := documents.ReadServiceSecret("/run/secrets/service-token")
@@ -51,7 +78,7 @@ func run() error {
 		Scratch: "/scratch",
 		Escaped: func() { escapeOnce.Do(func() { close(escaped) }) },
 	}
-	handler, err := appengine.NewWorkerHandler(secret, engine, 1)
+	handler, err := appengine.NewWorkerHandler(secret, engine, capacity)
 	if err != nil {
 		return err
 	}
