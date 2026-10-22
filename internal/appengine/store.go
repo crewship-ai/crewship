@@ -457,7 +457,9 @@ func (s *Store) prescan(ctx context.Context, k Key, r Request, a Authorize) *win
 	if !s.options.Enabled || a == nil || r.BaseRev < 1 || r.Command.Kind == "import" {
 		return nil
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	// ReadOnly matters: the database runs with _txlock=immediate, which makes
+	// every other transaction take the database-wide write lock at BEGIN.
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil
 	}
@@ -504,6 +506,16 @@ func (s *Store) admitBase(ctx context.Context, tx *sql.Tx, k Key, r Request, v S
 	w := pre
 	if w == nil || w.base != r.BaseRev || w.writer != writer || w.to > v.Rev {
 		w = newWindowScan(r, writer)
+	} else if w.to > w.base {
+		// A forced checkpoint may have pruned the prescanned rows since; the
+		// edit must then reread exactly as if it had scanned them here.
+		var pruned bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM gridcraft_audit WHERE page_id=? AND rev>? AND rev<=? AND kind!='cells')`, k.PageID, w.base, w.to).Scan(&pruned); err != nil {
+			return err
+		}
+		if pruned {
+			return reread
+		}
 	}
 	read, err := w.extend(ctx, tx, k.PageID, v.Rev)
 	if s.windowScanned != nil {

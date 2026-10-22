@@ -157,6 +157,20 @@ A rejected edit or import returns `409`:
 - With no conflicts and `snapshot_required: false`, the workbook changed while
   the edit was computed; retry the same packet unchanged.
 
+Other `409` codes:
+
+- `conflict`: the `mutation_id` was already used for a different request. A
+  retry with that id never succeeds; send the intended change with a new id.
+- `in_progress`: an operation with this `mutation_id` is still running. Wait
+  and query its status, or retry the same packet later.
+- `stale_generation`: the server's lease for this operation expired before it
+  could commit (for example after a restart). Retry the same packet.
+
+Agents get `precondition_failed` without `snapshot_required` or conflict
+details. Because a mandate is bound to its base revision, an agent that keeps
+getting `precondition_failed` for the same target should treat the mandate as
+no longer applicable and ask for a new one rather than retry indefinitely.
+
 An agent mandate keeps its original base revision, so an agent can still change
 its target after the owner edited other cells, but not after someone else
 changed that target. Mandate IDs starting with `human-` are reserved for human
