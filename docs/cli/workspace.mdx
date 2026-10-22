@@ -538,10 +538,13 @@ crewship workspace member access presets --format json
 
 Lists immutable definitions and hashes for the selected workspace using the administrative API catalog. JSON, YAML and NDJSON preserve the complete definitions and API field names; the table lists each explicit level. Listing changes no permissions; application uses preview and confirmation below.
 
-`routine-levels` v2 adds the `edit_publish` level (**Edit + Publish**). It manages
-only Edit and Publish, preserving existing View, Results and Run grants and
-their issuers. It does not add those other rights; publication still needs
-separate current View. The v1 definitions and hashes remain unchanged.
+`routine-levels` v2 manages only Edit and Publish, with the levels `none`
+(removes both), `edit` (keeps Edit, revokes Publish) and `edit_publish`
+(**Edit + Publish**). It preserves existing View, Results and Run grants and
+their issuers and does not add them; publication still needs separate current
+View. The v1 definitions and hashes remain unchanged. Saved choices are kept
+per preset version, so `access get` can show a v1 and a v2 record for the same
+routine. A v1 level without Edit is refused with 422 while Publish is held.
 
 Administrative `workspace member access get --format json` (or YAML) preserves the server's informational `preset_selections`, including API field names in this new metadata. Existing policy YAML keys remain unchanged. These saved labels are not effective permissions. Read-edit-set can round-trip the read-only metadata, but `access set` cannot create a selection through it; the server computes the returned choices from canonical state. The default table continues to show grant issuers and active/inactive rights.
 

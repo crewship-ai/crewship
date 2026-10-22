@@ -33,9 +33,10 @@ func PresetCatalog() []PresetDefinition {
 			{"view", []string{"list", "read"}}, {"contribute", []string{"list", "read", "contribute"}}, {"manage", []string{"list", "read", "contribute", "manage"}},
 		}},
 		// These rights are independent of View, Results and Run; preserve any
-		// existing shares and keep the shipped v1 definitions unchanged.
+		// existing shares and keep the shipped v1 definitions unchanged. The
+		// lower levels revoke Publish (and Edit) through the same reviewed flow.
 		{"routine-levels", 2, "routine", []string{"edit", "publish"}, []PresetLevel{
-			{"edit_publish", []string{"edit", "publish"}},
+			{"none", []string{}}, {"edit", []string{"edit"}}, {"edit_publish", []string{"edit", "publish"}},
 		}},
 	}
 }

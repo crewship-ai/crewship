@@ -931,19 +931,36 @@ requires live View and active account/issuers. Policy, invitation, provisioning
 and preset preview/apply reject Publish without Edit with 422 before writes.
 The v1 preset catalog is unchanged.
 
-The immutable `routine-levels` v2 `edit_publish` level explicitly manages only
-Edit and Publish. It adds neither View, Results nor Run; existing grants and
-their issuers remain orthogonal and unchanged unless explicitly reissued.
-Preview shows these consequences before the existing confirmation/apply flow.
-Routine Share and the person's Access card reject saving Publish without Edit.
+The immutable `routine-levels` v2 definition explicitly manages only Edit and
+Publish, with the ordered levels `none` (removes both), `edit` (keeps Edit,
+removes Publish) and `edit_publish` (**Edit + Publish**). It adds neither View,
+Results nor Run; existing grants and their issuers remain orthogonal and
+unchanged unless explicitly reissued. Preview shows these consequences, including
+a `PUBLISH_REVOKED` warning when Publish is removed, before the existing
+confirmation/apply flow. Revoking Publish therefore needs no raw policy replace.
 
-In Shared definitions, an editor saves the draft, selects **Validate saved
-draft**, then—with a current Publish hint—**Publish reviewed draft**. Both POSTs
-carry the saved draft ID/revision/base revision. Editing or saving again clears
-validation; unsaved content cannot be validated or published. A conflict or
-uncertain publication requires explicit reload/review without hidden retry.
-Hard access loss clears cached draft content. Publication acknowledges its
-version without starting a run. Hints never replace the endpoint's live checks.
+Saved preset choices are recorded per member, resource, preset and version.
+Applying v2 never rewrites a v1 record; each record stays `selected` only while
+its own managed operations match. A change to a record's managed operations
+deletes that record, so a v1 choice disappears when v2 removes Edit. A v1 level
+without Edit cannot be applied while Publish is held (422 `Publish requires
+Edit`); apply v2 `none` or `edit` first. Routine Share and the person's Access
+card reject saving Publish without Edit.
+
+In Shared definitions, an editor saves the draft, selects **Check saved draft
+structure**, then—with a current Publish hint—**Publish reviewed draft**. The
+check is the `structure_only` validation, not a test run. Both POSTs carry the
+saved draft ID/revision/base revision. Editing or saving again clears the check;
+unsaved content cannot be checked or published. A 422 refusal (unsupported
+steps or profiles, existing triggers, saved `call_pipeline` callers) shows the
+server's reason and changes nothing. A conflict or uncertain publication
+requires explicit reload/review without hidden retry. Hard access loss clears
+cached draft content. Publication acknowledges its version without starting a
+run. Hints never replace the endpoint's live checks.
+
+Publication refuses a routine that other saved routines target through
+`call_pipeline` (at any nesting depth), mirroring the existing refusal to save a
+caller of an already published routine.
 
 Publication archives retain physical authority across backup/restore. Generic
 Run, nested calls and trigger writers refuse bounded publication authority;

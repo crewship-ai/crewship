@@ -94,7 +94,8 @@ func (s Store) PlanPresetIn(ctx context.Context, tx *sql.Tx, actor, user, worksp
 	if administrator {
 		return result, ErrDenied
 	}
-	if err = resourceExists(ctx, tx, workspace, Right{req.Resource.Kind, req.Resource.ID, ops[0]}); err != nil {
+	// A removal level has no operations; every definition manages at least one.
+	if err = resourceExists(ctx, tx, workspace, Right{req.Resource.Kind, req.Resource.ID, d.ManagedOperations[0]}); err != nil {
 		return result, err
 	}
 	// Bind independent role/capability floors and account liveness, even when
@@ -220,7 +221,9 @@ func (s Store) PlanPresetIn(ctx context.Context, tx *sql.Tx, actor, user, worksp
 		return result, err
 	}
 	for _, choice := range selections {
-		if choice.Kind == d.Kind && choice.ResourceID == req.Resource.ID {
+		// Each preset version keeps its own record; another version's choice
+		// on the same resource is reported by the policy, not replaced here.
+		if choice.Kind == d.Kind && choice.ResourceID == req.Resource.ID && choice.PresetID == d.ID && choice.Version == d.Version {
 			result.CurrentSelection = &choice
 		}
 	}
@@ -243,6 +246,9 @@ func (s Store) PlanPresetIn(ctx context.Context, tx *sql.Tx, actor, user, worksp
 			result.Warnings = append(result.Warnings, PresetWarning{Code: "PUBLISH_GATES", Message: "Publish requires current View and Edit shares, active grant issuers and supported execution configuration. This preset adds neither View, Results nor Run and preserves their existing shares. Structural validation does not execute a test run."})
 		} else if slices.Contains(ops, "edit") {
 			result.Warnings = append(result.Warnings, PresetWarning{Code: "DRAFT_ONLY", Message: "Edit allows draft changes, never publication."})
+		}
+		if _, held := before[Right{d.Kind, req.Resource.ID, "publish"}]; held && !desired[Right{d.Kind, req.Resource.ID, "publish"}] {
+			result.Warnings = append(result.Warnings, PresetWarning{Code: "PUBLISH_REVOKED", Message: "Publish is removed. Already published versions stay unchanged; no run is started or stopped."})
 		}
 	} else if g, retained := before[Right{"project", req.Resource.ID, "delete_issues"}]; retained {
 		was, will := g.Live && live("read", false) && live("manage", false), g.Live && live("read", true) && live("manage", true)
