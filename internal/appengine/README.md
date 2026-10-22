@@ -35,9 +35,31 @@ because this admission keeps at most one candidate per artifact. Its managed con
 The engine computes outside the database transaction. The candidate binds the
 artifact, base revision, generation, command hash, mandate, pinned engine and
 result hash. Concrete cell effects must fit the mandate. The GridCraft adapter
-also compares the entire reopened workbook: changes outside the target cell,
-including formula recalculation elsewhere, are rejected conservatively. An
-engine pin identifies trusted format semantics; isolation alone does not.
+also compares the entire reopened workbook, separating authored data (input
+value, formula, style and every other field) from derived data (the computed
+value of a formula cell). Outside the target cell, authored data must be
+identical and no cell may be added or removed. A formula cell's value may change
+only when its formula is unchanged and both values are plain numbers, text,
+booleans or errors. The worker then reruns the pinned engine's cached-value
+oracle (`check --tolerance 0`) over exactly the bytes it returns, copied into
+a new private directory, and reports their SHA-256. The check is a confined
+engine execution like every other (Landlock write scope on that directory
+only, seccomp, resource limits, its own session swept afterwards), so no
+process of an earlier execution survives into it or can write its files; the
+report goes to an unlinked file the worker holds. The host
+requires the digest to match the result it received, counts formula cells
+itself and requires the report's count to match, and accepts derived changes
+only when every formula cell was checked and matched exactly. A formula in the
+target cell also requires a report with no mismatches. Volatile functions such
+as `NOW()` cannot be confirmed, and with iterative calculation enabled the
+oracle accepts any fixed point of a cycle, so such workbooks reject any edit
+that recalculates another cell. The receipt's effects list only the mandated
+target; the audit record adds the result digest, the recalculated cell count
+(and up to 100 addresses) and the report. The host verifies the authored diff
+itself but trusts the worker's report and the engine's formula semantics: the
+oracle is a second, independent evaluation by the same pinned engine, not a
+different implementation. An engine pin identifies trusted format semantics;
+isolation alone does not.
 
 Go atomically stores snapshot, revision, immutable receipt, audit and outbox.
 Receipts require FULL synchronous storage and report `durability: node`.
@@ -51,6 +73,11 @@ run capability, human chat principal, membership epochs, crew policy, ownership,
 Page version and private audience are checked transactionally on every use.
 The private chat is sealed before agent access. A revoked intent cannot be
 renewed, and a new run does not inherit it. Human edits are imports only.
+
+Deploy the application host before the worker image: the host decodes worker
+responses strictly, so an older host rejects the newer worker's recalculation
+report and every `cell.set` fails until the host is updated. An older worker
+without the report fails closed on the newer host for recalculated cells only.
 
 Public interface and examples: [`docs/cli/workbook.mdx`](../../docs/cli/workbook.mdx).
 

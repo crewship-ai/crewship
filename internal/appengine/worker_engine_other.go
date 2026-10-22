@@ -17,7 +17,7 @@ func PrepareEngineSandbox() error { return errEngineSandboxPlatform }
 // ExecEngineSandbox fails closed: the engine is only confined on Linux.
 func ExecEngineSandbox([]string) error { return errEngineSandboxPlatform }
 
-func (e WorkerEngine) execEngine(context.Context, string, []string) error {
+func (e WorkerEngine) execEngine(context.Context, string, *os.File, []string) error {
 	return fmt.Errorf("%w: %v", ErrEngineUnavailable, errEngineSandboxPlatform)
 }
 

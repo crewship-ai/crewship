@@ -5,6 +5,7 @@ package appengine
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -76,7 +77,10 @@ func PrepareEngineSandbox() error {
 	return subreaperErr
 }
 
-func (e WorkerEngine) execEngine(ctx context.Context, dir string, args []string) error {
+// execEngine runs one confined engine execution in dir. stdout, when not nil,
+// receives the engine's standard output; it must be a file the caller opened
+// and bounds (RLIMIT_FSIZE also caps it), never a pipe.
+func (e WorkerEngine) execEngine(ctx context.Context, dir string, stdout *os.File, args []string) error {
 	if err := PrepareEngineSandbox(); err != nil {
 		return fmt.Errorf("%w: engine sandbox unavailable", ErrEngineUnavailable)
 	}
@@ -104,6 +108,9 @@ func (e WorkerEngine) execEngine(ctx context.Context, dir string, args []string)
 	// not copy process output into API responses or private Artifact logs. Nil
 	// streams are /dev/null, so no pipe can keep Wait open after the group dies.
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, nil, nil
+	if stdout != nil {
+		cmd.Stdout = stdout
+	}
 	// A new session (and so a new process group with the same ID) per
 	// execution: setpgid can move a descendant only within its session, so a
 	// descendant either keeps this session ID or calls setsid.
@@ -344,9 +351,11 @@ func (id *engineIdentity) check(path string) error {
 	return nil
 }
 
-// readBounded reads one engine output file. It never follows a link and
-// accepts only a regular file with a single name, so even a weakened sandbox
-// cannot make the output a view of a worker-private file.
+// readBounded reads one engine output file within MaxEngineOutputBytes and
+// returns its compact form; MaxSnapshotBytes bounds that compact form, which is
+// what the host stores. It never follows a link and accepts only a regular
+// file with a single name, so even a weakened sandbox cannot make the output a
+// view of a worker-private file.
 func readBounded(path string) ([]byte, error) {
 	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC|unix.O_NOCTTY, 0)
 	if err != nil {
@@ -361,14 +370,18 @@ func readBounded(path string) ([]byte, error) {
 	if st.Mode&unix.S_IFMT != unix.S_IFREG || st.Nlink != 1 {
 		return nil, fmt.Errorf("%w: engine output is not a private regular file", ErrCandidate)
 	}
-	b, err := io.ReadAll(io.LimitReader(f, MaxSnapshotBytes+1))
+	b, err := io.ReadAll(io.LimitReader(f, MaxEngineOutputBytes+1))
 	if err != nil {
 		return nil, err
 	}
-	if len(b) > MaxSnapshotBytes {
+	if len(b) > MaxEngineOutputBytes {
 		return nil, ErrInvalid
 	}
-	return b, nil
+	var compact bytes.Buffer
+	if err = json.Compact(&compact, b); err != nil || compact.Len() > MaxSnapshotBytes {
+		return nil, ErrInvalid
+	}
+	return compact.Bytes(), nil
 }
 
 // landlockRuleset is the kernel ABI v6 prefix of struct landlock_ruleset_attr.

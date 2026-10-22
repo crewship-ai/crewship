@@ -468,3 +468,36 @@ func TestWorkbookRejectsAttachedBoardOrArtifact(t *testing.T) {
 		})
 	}
 }
+
+// The audit record keeps the receipt and adds the verified recalculation and the
+// stored result digest; the receipt and its effects stay unchanged.
+func TestAuditRecordsDerivedRecalculation(t *testing.T) {
+	s, db, a, k := fixture(t)
+	e := &fakeEngine{}
+	imported(t, s, a, k, e)
+	report := &RecalcVerification{FormulaCells: 2, Checked: 2, SHA256: "ab"}
+	e.prepare = func(_ context.Context, b Binding, _ State, _ Command) (Candidate, error) {
+		c := NewCandidate(b, json.RawMessage(`{"sheets":[{"B2":"42"}]}`), []string{"Sheet1!B2"})
+		c.Derived = &Derived{Count: 2, Cells: []string{"Sheet1!C9", "Sheet1!D9"}, Recalc: report}
+		return c, nil
+	}
+	receipt, err := s.Execute(t.Context(), k, edit(), a, e)
+	if err != nil || len(receipt.Effects) != 1 || receipt.Effects[0] != "Sheet1!B2" {
+		t.Fatalf("receipt=%+v err=%v", receipt, err)
+	}
+	var raw []byte
+	if err = db.QueryRow(`SELECT receipt FROM gridcraft_audit WHERE page_id=? AND rev=2`, k.PageID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var record struct {
+		Receipt
+		Derived      *Derived `json:"derived"`
+		ResultSHA256 string   `json:"result_sha256"`
+	}
+	if err = json.Unmarshal(raw, &record); err != nil {
+		t.Fatal(err)
+	}
+	if record.OperationKey != receipt.OperationKey || record.Derived == nil || record.Derived.Count != 2 || record.Derived.Recalc == nil || *record.Derived.Recalc != *report || record.ResultSHA256 != hash([]byte(`{"sheets":[{"B2":"42"}]}`)) {
+		t.Fatalf("audit=%s", raw)
+	}
+}

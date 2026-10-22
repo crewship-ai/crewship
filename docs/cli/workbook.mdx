@@ -39,7 +39,9 @@ Import a native workbook with an immutable request envelope:
 The `snapshot` above is a placeholder: supply a valid workbook exported by the
 pinned GridCraft version. For an existing workbook, retain the read revision and
 generation as preconditions. Humans change workbook contents by importing files.
-The server rejects incomplete or unsupported workbook files.
+The server rejects incomplete or unsupported workbook files. A stored workbook
+is limited to 1 MiB of compact JSON (roughly 10,000 simple cells); the engine's
+indented working files may be up to four times larger.
 
 To authorize an already running agent to change one cell, the current human
 owner submits a retained mandate:
@@ -57,6 +59,17 @@ admission. The host binds the instruction to that run and current Page version
 and rechecks current authority on every operation. The
 mandate permits one original base; another instruction requires another mandate.
 It cannot authorize another run or expand to a different cell through a reread.
+
+A mandate covers authored changes to its target cells only. When an edit makes
+the engine recalculate formulas elsewhere, those cells may change their computed
+value, but their formula text and style, every non-formula cell, and the set of
+cells must stay unchanged; otherwise the operation fails with
+`effect_out_of_mandate`. Recalculated values are accepted only after the worker
+recomputes every formula from scratch with the pinned engine and finds an exact
+match. Workbooks with volatile functions (for example `NOW()` or `RAND()`) or with
+iterative calculation enabled cannot be confirmed this way, so edits that
+recalculate other cells are rejected. The
+receipt's `effects` lists only the mandated target, not the recalculated cells.
 
 An agent retains this exact packet for apply and uncertain retries:
 

@@ -5,9 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 )
 
@@ -99,7 +101,8 @@ type EngineLimits struct {
 }
 
 // DefaultEngineLimits fit the documented container profile. The engine needs
-// about 10 MiB for a 1 MiB workbook; its outputs above 1 MiB are rejected.
+// about 10 MiB for a 1 MiB workbook; the worker rejects raw outputs above
+// MaxEngineOutputBytes (4 MiB) anyway.
 var DefaultEngineLimits = EngineLimits{AddressSpace: 256 << 20, FileSize: 4 << 20, CPUSeconds: 15}
 
 func (l EngineLimits) resolved() EngineLimits {
@@ -177,7 +180,7 @@ func (e WorkerEngine) Run(ctx context.Context, input []byte, c Command) (result 
 	if err = os.WriteFile(source, input, 0600); err != nil {
 		return EngineResult{}, err
 	}
-	run := func(args ...string) error { return e.execEngine(ctx, dir, args) }
+	run := func(args ...string) error { return e.execEngine(ctx, dir, nil, args) }
 	if err = run("run", "--in", source, "--out", base, "--quiet"); err != nil {
 		return EngineResult{}, err
 	}
@@ -186,7 +189,7 @@ func (e WorkerEngine) Run(ctx context.Context, input []byte, c Command) (result 
 		return EngineResult{}, err
 	}
 	if c.Kind == "import" {
-		return EngineResult{normalized, normalized}, nil
+		return EngineResult{Base: normalized, Result: normalized}, nil
 	}
 	params, err := json.Marshal(map[string]string{"cell": c.Cell, "input": c.Input})
 	if err != nil {
@@ -199,7 +202,11 @@ func (e WorkerEngine) Run(ctx context.Context, input []byte, c Command) (result 
 	if err != nil {
 		return EngineResult{}, err
 	}
-	return EngineResult{normalized, data}, nil
+	recalc, err := e.verifyRecalc(ctx, data)
+	if err != nil {
+		return EngineResult{}, err
+	}
+	return EngineResult{Base: normalized, Result: data, Recalc: recalc}, nil
 }
 
 type WorkerRequest struct {
@@ -225,5 +232,106 @@ func ServeGridCraftWorker(ctx context.Context, binary, scratch string, in io.Rea
 	if err != nil {
 		return err
 	}
-	return json.NewEncoder(out).Encode(result)
+	// Keep the candidate bytes exactly as checked; HTML escaping would change
+	// them and break the report's digest binding.
+	enc := json.NewEncoder(out)
+	enc.SetEscapeHTML(false)
+	return enc.Encode(result)
+}
+
+const recalcReportLimit = 1 << 20
+
+// verifyRecalc checks a candidate's recalculation in a confined execution.
+func verifyRecalc(ctx context.Context, binary, scratch string, data []byte) (*RecalcVerification, error) {
+	return WorkerEngine{Binary: binary, Scratch: scratch}.verifyRecalc(ctx, data)
+}
+
+// verifyRecalc runs the engine's cached-value oracle over a candidate in a
+// fresh, fully confined engine execution: every formula is recomputed from
+// scratch and compared exactly with the value stored by the incremental edit.
+// It uses the same sandbox as every other execution (Landlock write scope on
+// its own new directory beside the candidate's, seccomp, resource limits,
+// session sweep), so no earlier execution's process can survive into it or
+// reach its files. The report goes to an unlinked file only the worker and
+// this execution's stdout hold. Exit status 1 only reports differences; the
+// parsed report decides, and any other failure or malformed report rejects
+// the candidate.
+func (e WorkerEngine) verifyRecalc(ctx context.Context, data []byte) (result *RecalcVerification, err error) {
+	dir, err := os.MkdirTemp(e.Scratch, "check-")
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		cleanupErr := makeRemovable(dir)
+		if cleanupErr == nil {
+			cleanupErr = os.RemoveAll(dir)
+		}
+		if cleanupErr != nil {
+			if e.Escaped != nil {
+				e.Escaped()
+			}
+			result = nil
+			err = fmt.Errorf("%w: private scratch cleanup unconfirmed", ErrEngineUnavailable)
+		}
+	}()
+	if err = writeExclusive(filepath.Join(dir, "candidate.json"), data); err != nil {
+		return nil, err
+	}
+	report, err := os.CreateTemp(e.Scratch, "report-")
+	if err != nil {
+		return nil, err
+	}
+	defer report.Close()
+	if err = os.Remove(report.Name()); err != nil {
+		return nil, err
+	}
+	if err = e.execEngine(ctx, dir, report, []string{"check", "candidate.json", "--json", "--tolerance", "0", "--max-report", "1"}); err != nil {
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+			return nil, fmt.Errorf("workbook recalculation check failed: %w", err)
+		}
+	}
+	if _, err = report.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	out, err := io.ReadAll(io.LimitReader(report, recalcReportLimit+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(out) > recalcReportLimit {
+		return nil, ErrInvalid
+	}
+	var parsed struct {
+		Schema string `json:"schema"`
+		Files  []struct {
+			Opened bool    `json:"opened"`
+			Error  *string `json:"error"`
+			Calc   struct {
+				FormulaCells int  `json:"formulaCells"`
+				Checked      int  `json:"checked"`
+				Mismatched   int  `json:"mismatched"`
+				NoOracle     int  `json:"noOracle"`
+				Volatile     int  `json:"volatile"`
+				StaleCache   bool `json:"staleCache"`
+			} `json:"calc"`
+		} `json:"files"`
+	}
+	if err := json.Unmarshal(out, &parsed); err != nil || parsed.Schema != "gridcraft-check/1" || len(parsed.Files) != 1 || !parsed.Files[0].Opened || parsed.Files[0].Error != nil {
+		return nil, fmt.Errorf("%w: unreadable recalculation report", ErrCandidate)
+	}
+	c := parsed.Files[0].Calc
+	sum := sha256.Sum256(data)
+	return &RecalcVerification{FormulaCells: c.FormulaCells, Checked: c.Checked, Mismatched: c.Mismatched, NoOracle: c.NoOracle, Volatile: c.Volatile, StaleCache: c.StaleCache, SHA256: hex.EncodeToString(sum[:])}, nil
+}
+
+func writeExclusive(path string, data []byte) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(data)
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	return err
 }

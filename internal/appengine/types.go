@@ -16,6 +16,10 @@ import (
 )
 
 const MaxSnapshotBytes = 1 << 20
+
+// MaxEngineOutputBytes bounds a raw engine file before compaction. The engine
+// writes indented JSON, several times larger than the stored compact snapshot.
+const MaxEngineOutputBytes = 4 * MaxSnapshotBytes
 const SchemaVersion = 1
 
 var (
@@ -87,6 +91,8 @@ type Candidate struct {
 	Snapshot   json.RawMessage
 	ResultHash string
 	Effects    []string
+	// Derived is set when verified recalculation changed cells outside Effects.
+	Derived *Derived
 }
 type Receipt struct {
 	OperationKey OperationKey `json:"operation_key"`
@@ -116,7 +122,7 @@ type Options struct {
 
 func hash(data []byte) string { s := sha256.Sum256(data); return "sha256:" + hex.EncodeToString(s[:]) }
 func NewCandidate(b Binding, data json.RawMessage, effects []string) Candidate {
-	return Candidate{b, append(json.RawMessage(nil), data...), hash(data), append([]string(nil), effects...)}
+	return Candidate{Binding: b, Snapshot: append(json.RawMessage(nil), data...), ResultHash: hash(data), Effects: append([]string(nil), effects...)}
 }
 
 var cellPattern = regexp.MustCompile(`^[A-Z]{1,3}[1-9][0-9]{0,6}$`)

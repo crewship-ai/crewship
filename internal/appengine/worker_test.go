@@ -1,12 +1,16 @@
 package appengine
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"github.com/crewship-ai/crewship/internal/database"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 )
 
@@ -77,9 +81,10 @@ func TestRealGridCraftImportEditRestartAndRetry(t *testing.T) {
 	}
 }
 
-// Known pilot limitation: the complete diff cannot yet distinguish direct
-// mandated effects from trusted engine-derived formula recalculation.
-func TestRealGridCraftDependentFormulaIsKnownLimitation(t *testing.T) {
+// The pinned engine recalculates a dependent chain after a mandated input edit.
+// Only the authored target is a mandated effect; C9 and D9 are accepted because
+// their formulas are unchanged and a fresh full recalculation confirms them.
+func TestRealGridCraftDependentFormulaRecalculation(t *testing.T) {
 	binary := os.Getenv("CREWSHIP_TEST_GRIDCRAFT_BINARY")
 	if binary == "" {
 		t.Skip("set CREWSHIP_TEST_GRIDCRAFT_BINARY for the pinned formula engine contract")
@@ -89,17 +94,296 @@ func TestRealGridCraftDependentFormulaIsKnownLimitation(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner := localFixtureRunner{binary, t.TempDir()}
-	base, err := runner.Run(t.Context(), raw, Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	formula, err := runner.Run(t.Context(), base.Result, Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "C9", Input: "=B2*2"})
-	if err != nil {
-		t.Fatal(err)
+	snapshot := json.RawMessage(raw)
+	for _, step := range []Command{
+		{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "1"},
+		{Kind: "cell.set", Sheet: "Sheet1", Cell: "C9", Input: "=B2*2"},
+		{Kind: "cell.set", Sheet: "Sheet1", Cell: "D9", Input: "=C9+1"},
+	} {
+		out, err := runner.Run(t.Context(), snapshot, step)
+		if err != nil {
+			t.Fatal(err)
+		}
+		snapshot = out.Result
 	}
 	engine := GridCraft{Runner: runner}
-	_, err = engine.Prepare(t.Context(), Binding{Engine: engine.Identity()}, State{Snapshot: formula.Result}, Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "42"})
-	if !errors.Is(err, ErrEffects) {
-		t.Fatalf("expected known dependent formula limitation, got %v", err)
+	b := Binding{Engine: engine.Identity()}
+	candidate, err := engine.Prepare(t.Context(), b, State{Snapshot: snapshot}, Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "42"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidate.Effects) != 1 || candidate.Effects[0] != "Sheet1!B2" {
+		t.Fatalf("effects=%v", candidate.Effects)
+	}
+	workbook, err := decodeWorkbook(candidate.Snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cells, err := extractCells(workbook)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for address, want := range map[string]float64{"Sheet1!B2": 42, "Sheet1!C9": 84, "Sheet1!D9": 85} {
+		value, _ := cells[address].(map[string]any)["value"].(map[string]any)["v"].(json.Number).Float64()
+		if value != want {
+			t.Fatalf("%s=%v want %v", address, value, want)
+		}
+	}
+	// A mandate for C9 may replace its formula and recalculate D9.
+	_, err = engine.Prepare(t.Context(), b, State{Snapshot: candidate.Snapshot}, Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "C9", Input: "=B2*3"})
+	if err != nil {
+		t.Fatalf("C9 mandate may change C9 and recalculate D9: %v", err)
+	}
+}
+
+// The worker's verification recomputes from scratch, so a candidate whose cached
+// dependent values were altered after the edit is reported, including a chain
+// altered consistently.
+func TestRealGridCraftRecalcVerificationDetectsTamperedValues(t *testing.T) {
+	binary := os.Getenv("CREWSHIP_TEST_GRIDCRAFT_BINARY")
+	if binary == "" {
+		t.Skip("set CREWSHIP_TEST_GRIDCRAFT_BINARY for the pinned formula engine contract")
+	}
+	raw, err := os.ReadFile("testdata/blank-workbook.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := localFixtureRunner{binary, t.TempDir()}
+	snapshot := json.RawMessage(raw)
+	for _, step := range []Command{
+		{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "42"},
+		{Kind: "cell.set", Sheet: "Sheet1", Cell: "C9", Input: "=B2*2"},
+		{Kind: "cell.set", Sheet: "Sheet1", Cell: "D9", Input: "=C9+1"},
+	} {
+		out, err := runner.Run(t.Context(), snapshot, step)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out.Recalc == nil || out.Recalc.Mismatched != 0 || (step.Cell != "B2" && !out.Recalc.verified()) {
+			t.Fatalf("honest candidate not verified: %+v", out.Recalc)
+		}
+		snapshot = out.Result
+	}
+	for _, test := range []struct {
+		name    string
+		values  map[string]string
+		wantBad int
+	}{
+		{"honest", nil, 0},
+		{"dependent", map[string]string{"2": `{"t":"Number","v":85.0}`}, 1},
+		{"consistent chain", map[string]string{"2": `{"t":"Number","v":85.0}`, "3": `{"t":"Number","v":86.0}`}, 2},
+		{"type", map[string]string{"3": `{"t":"Text","v":"85"}`}, 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var workbook map[string]any
+			if err := json.Unmarshal(snapshot, &workbook); err != nil {
+				t.Fatal(err)
+			}
+			row := workbook["sheets"].([]any)[0].(map[string]any)["cells"].(map[string]any)["bands"].(map[string]any)["0"].(map[string]any)["rows"].(map[string]any)["8"].(map[string]any)
+			for col, value := range test.values {
+				row[col].(map[string]any)["value"] = json.RawMessage(value)
+			}
+			data, err := json.Marshal(workbook)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := verifyRecalc(t.Context(), binary, t.TempDir(), data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sum := sha256.Sum256(data)
+			if got.Mismatched != test.wantBad || got.verified() != (test.wantBad == 0) || got.FormulaCells != 2 || got.SHA256 != hex.EncodeToString(sum[:]) {
+				t.Fatalf("verification=%+v", got)
+			}
+		})
+	}
+}
+
+// largeWorkbook fills the blank fixture with n numeric cells in ten columns.
+func largeWorkbook(t *testing.T, n int) []byte {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/blank-workbook.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workbook map[string]any
+	if err = json.Unmarshal(raw, &workbook); err != nil {
+		t.Fatal(err)
+	}
+	bands := map[string]any{}
+	for i := 0; i < n; i++ {
+		row, col := i/10, i%10
+		band := strconv.Itoa(row / 64)
+		if bands[band] == nil {
+			bands[band] = map[string]any{"rows": map[string]any{}}
+		}
+		rows := bands[band].(map[string]any)["rows"].(map[string]any)
+		if rows[strconv.Itoa(row)] == nil {
+			rows[strconv.Itoa(row)] = map[string]any{}
+		}
+		rows[strconv.Itoa(row)].(map[string]any)[strconv.Itoa(col)] = map[string]any{"value": map[string]any{"t": "Number", "v": json.Number(strconv.Itoa(i) + ".5")}, "formula": nil, "style": 0}
+	}
+	workbook["sheets"].([]any)[0].(map[string]any)["cells"] = map[string]any{"bands": bands, "len": n}
+	out, err := json.Marshal(workbook)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// The snapshot limit bounds what Go stores (compact JSON), not the engine's
+// pretty-printed file, which is several times larger for the same workbook.
+func TestEngineOutputLimitAppliesToCompactSnapshot(t *testing.T) {
+	compact := largeWorkbook(t, 6000)
+	var pretty bytes.Buffer
+	if err := json.Indent(&pretty, compact, "", "    "); err != nil {
+		t.Fatal(err)
+	}
+	if len(compact) >= MaxSnapshotBytes || pretty.Len() <= MaxSnapshotBytes || pretty.Len() > MaxEngineOutputBytes {
+		t.Fatalf("fixture sizes compact=%d pretty=%d", len(compact), pretty.Len())
+	}
+	oversized := largeWorkbook(t, 20000)
+	if len(oversized) <= MaxSnapshotBytes {
+		t.Fatalf("oversized fixture %d", len(oversized))
+	}
+	dir := t.TempDir()
+	write := func(name string, data []byte) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	got, err := readBounded(write("pretty.json", pretty.Bytes()))
+	if err != nil || !bytes.Equal(got, compact) {
+		t.Fatalf("pretty within compact limit: len=%d err=%v", len(got), err)
+	}
+	if _, err = readBounded(write("oversized.json", oversized)); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("compact over limit: %v", err)
+	}
+	if _, err = readBounded(write("raw.json", append(pretty.Bytes(), bytes.Repeat([]byte(" "), MaxEngineOutputBytes)...))); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("raw over limit: %v", err)
+	}
+	if _, err = readBounded(write("broken.json", []byte(`{"sheets":`))); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("malformed: %v", err)
+	}
+}
+
+// A 6k-cell sheet stays editable through the pinned engine even though its
+// pretty-printed engine output exceeds the stored snapshot limit.
+func TestRealGridCraftLargeSheetWithinCompactLimit(t *testing.T) {
+	binary := os.Getenv("CREWSHIP_TEST_GRIDCRAFT_BINARY")
+	if binary == "" {
+		t.Skip("set CREWSHIP_TEST_GRIDCRAFT_BINARY for the pinned engine size contract")
+	}
+	raw := largeWorkbook(t, 6000)
+	engine := GridCraft{Runner: localFixtureRunner{binary, t.TempDir()}}
+	b := Binding{Engine: engine.Identity()}
+	imported, err := engine.Prepare(t.Context(), b, State{}, Command{Kind: "import", Snapshot: raw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited, err := engine.Prepare(t.Context(), b, State{Snapshot: imported.Snapshot}, Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "42"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(edited.Snapshot) > MaxSnapshotBytes || len(edited.Effects) != 1 || edited.Effects[0] != "Sheet1!B2" {
+		t.Fatalf("size=%d effects=%v", len(edited.Snapshot), edited.Effects)
+	}
+}
+
+// The worker's report names the exact bytes it returns, checked from a fresh
+// private directory rather than the engine's own output file.
+func TestRealGridCraftReportBindsReturnedBytes(t *testing.T) {
+	binary := os.Getenv("CREWSHIP_TEST_GRIDCRAFT_BINARY")
+	if binary == "" {
+		t.Skip("set CREWSHIP_TEST_GRIDCRAFT_BINARY for the pinned formula engine contract")
+	}
+	raw, err := os.ReadFile("testdata/blank-workbook.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scratch := t.TempDir()
+	out, err := RunGridCraftWorker(t.Context(), binary, scratch, raw, Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "C9", Input: "=B2*2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(out.Result)
+	if out.Recalc == nil || out.Recalc.SHA256 != hex.EncodeToString(sum[:]) || !out.Recalc.verified() {
+		t.Fatalf("report=%+v", out.Recalc)
+	}
+	if left, _ := filepath.Glob(filepath.Join(scratch, "*")); len(left) != 0 {
+		t.Fatalf("scratch survived: %v", left)
+	}
+}
+
+// With iterative calculation the oracle accepts any fixed point of a cycle, so a
+// forged consistent cycle passes it. The host must refuse derived changes there.
+func TestRealGridCraftIterativeCycleRejectsDerivedChanges(t *testing.T) {
+	binary := os.Getenv("CREWSHIP_TEST_GRIDCRAFT_BINARY")
+	if binary == "" {
+		t.Skip("set CREWSHIP_TEST_GRIDCRAFT_BINARY for the pinned formula engine contract")
+	}
+	raw, err := os.ReadFile("testdata/blank-workbook.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var blank map[string]any
+	if err = json.Unmarshal(raw, &blank); err != nil {
+		t.Fatal(err)
+	}
+	blank["calc"].(map[string]any)["iterative"] = true
+	snapshot, err := json.Marshal(blank)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := localFixtureRunner{binary, t.TempDir()}
+	for _, step := range []Command{
+		{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "1"},
+		{Kind: "cell.set", Sheet: "Sheet1", Cell: "C9", Input: "=B2*2"},
+		{Kind: "cell.set", Sheet: "Sheet1", Cell: "D1", Input: "=E1"},
+		{Kind: "cell.set", Sheet: "Sheet1", Cell: "E1", Input: "=D1"},
+		{Kind: "cell.set", Sheet: "Sheet1", Cell: "F1", Input: "=D1*1000"},
+	} {
+		out, err := runner.Run(t.Context(), snapshot, step)
+		if err != nil {
+			t.Fatal(err)
+		}
+		snapshot = out.Result
+	}
+	engine := GridCraft{Runner: runner}
+	b := Binding{Engine: engine.Identity()}
+	// An honest dependent recalculation is refused under iterative calculation.
+	if _, err = engine.Prepare(t.Context(), b, State{Snapshot: snapshot}, Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "42"}); !errors.Is(err, ErrEffects) {
+		t.Fatalf("iterative recalculation: %v", err)
+	}
+	// A forged fixed point passes the oracle itself...
+	var workbook map[string]any
+	if err = json.Unmarshal(snapshot, &workbook); err != nil {
+		t.Fatal(err)
+	}
+	row := workbook["sheets"].([]any)[0].(map[string]any)["cells"].(map[string]any)["bands"].(map[string]any)["0"].(map[string]any)["rows"].(map[string]any)["0"].(map[string]any)
+	for col, value := range map[string]string{"3": "123456", "4": "123456", "5": "123456000"} {
+		row[col].(map[string]any)["value"] = map[string]any{"t": "Number", "v": json.Number(value)}
+	}
+	forged, err := json.Marshal(workbook)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := verifyRecalc(t.Context(), binary, t.TempDir(), forged)
+	if err != nil || !report.verified() {
+		t.Fatalf("expected the oracle to accept the forged fixed point: %+v %v", report, err)
+	}
+	// ...so the adapter must refuse it even with a matching report.
+	forging := runnerFunc(func(ctx context.Context, in []byte, c Command) (EngineResult, error) {
+		out, err := runner.Run(ctx, in, c)
+		if err != nil {
+			return out, err
+		}
+		return EngineResult{Base: out.Base, Result: forged, Recalc: report}, nil
+	})
+	engine = GridCraft{Runner: forging}
+	if _, err = engine.Prepare(t.Context(), b, State{Snapshot: snapshot}, Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "1"}); !errors.Is(err, ErrEffects) {
+		t.Fatalf("forged fixed point: %v", err)
 	}
 }

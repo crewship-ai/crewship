@@ -3,6 +3,8 @@ package appengine
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -17,8 +19,30 @@ const GridCraftBinarySHA256 = "000100860eb14b641da48e5e0d2dcd6dcc5ddcd65a4b267a0
 // EngineResult includes the canonical reloaded base as well as the candidate.
 // The host refuses changes introduced by reopening a supposedly confirmed file.
 type EngineResult struct {
-	Base   json.RawMessage `json:"base"`
-	Result json.RawMessage `json:"result"`
+	Base   json.RawMessage     `json:"base"`
+	Result json.RawMessage     `json:"result"`
+	Recalc *RecalcVerification `json:"recalc,omitempty"`
+}
+
+// RecalcVerification is the worker's independent full recalculation of the
+// candidate: a fresh engine process recomputes every formula from scratch and
+// compares it with the cached value the incremental edit produced.
+type RecalcVerification struct {
+	FormulaCells int    `json:"formula_cells"`
+	Checked      int    `json:"checked"`
+	Mismatched   int    `json:"mismatched"`
+	NoOracle     int    `json:"no_oracle"`
+	Volatile     int    `json:"volatile"`
+	StaleCache   bool   `json:"stale_cache"`
+	SHA256       string `json:"sha256"`
+}
+
+// Derived records formula values recalculated outside the mandated target. It
+// is audit evidence, never a mandated effect.
+type Derived struct {
+	Count  int                 `json:"count"`
+	Cells  []string            `json:"cells"`
+	Recalc *RecalcVerification `json:"recalc,omitempty"`
 }
 type Runner interface {
 	Run(context.Context, []byte, Command) (EngineResult, error)
@@ -61,6 +85,7 @@ func (g GridCraft) Prepare(ctx context.Context, b Binding, s State, c Command) (
 		return Candidate{}, err
 	}
 	effects := []string{"*"}
+	var derived *Derived
 	if c.Kind == "cell.set" {
 		original, err := decodeWorkbook(input)
 		if err != nil {
@@ -73,26 +98,27 @@ func (g GridCraft) Prepare(ctx context.Context, b Binding, s State, c Command) (
 		if err != nil {
 			return Candidate{}, err
 		}
-		effects, err = workbookEffects(base, comparison)
+		target := c.Sheet + "!" + c.Cell
+		derived, err = checkWorkbookEffects(base, comparison, target, result.Result, result.Recalc)
 		if err != nil {
 			return Candidate{}, err
 		}
-		target := c.Sheet + "!" + c.Cell
-		for _, effect := range effects {
-			if effect != target {
-				return Candidate{}, ErrEffects
-			}
-		}
-		// A semantic no-op still receives one durable operation receipt.
-		if len(effects) == 0 {
-			effects = []string{target}
-		}
+		// The mandate covers the authored target; verified recalculation is its
+		// consequence, not a separate effect. A semantic no-op still receives one
+		// durable operation receipt.
+		effects = []string{target}
 	}
 	canonical, err := json.Marshal(candidate)
 	if err != nil {
 		return Candidate{}, err
 	}
-	return NewCandidate(b, canonical, effects), nil
+	// Re-encoding may escape characters; the stored form must still fit.
+	if len(canonical) > MaxSnapshotBytes {
+		return Candidate{}, ErrInvalid
+	}
+	prepared := NewCandidate(b, canonical, effects)
+	prepared.Derived = derived
+	return prepared, nil
 }
 func decodeWorkbook(raw []byte) (map[string]any, error) {
 	if len(raw) == 0 || len(raw) > MaxSnapshotBytes {
@@ -126,7 +152,25 @@ func decodeWorkbook(raw []byte) (map[string]any, error) {
 	}
 	return v, nil
 }
-func workbookEffects(before, after map[string]any) ([]string, error) {
+
+// verified reports whether a full recalculation confirmed every formula value.
+// Volatile or unverifiable formulas cannot be confirmed, so they fail closed.
+func (v *RecalcVerification) verified() bool {
+	return v != nil && v.FormulaCells > 0 && v.Checked == v.FormulaCells && v.Mismatched == 0 && v.NoOracle == 0 && v.Volatile == 0 && !v.StaleCache
+}
+
+// maxDerivedAudit bounds the recalculated addresses kept in an audit record;
+// the count is always complete.
+const maxDerivedAudit = 100
+
+// checkWorkbookEffects separates authored data (input value, formula, style and
+// every other cell or workbook field) from derived data (the computed value of a
+// formula cell). Outside the target, authored data must stay identical and no
+// cell may appear or disappear. A formula cell's value may change only when the
+// cell holds the same formula before and after and both values are plain
+// results. Such derived changes, and any formula in the target itself, need the
+// worker's full recalculation report for exactly these result bytes.
+func checkWorkbookEffects(before, after map[string]any, target string, raw []byte, recalc *RecalcVerification) (*Derived, error) {
 	a, err := extractCells(before)
 	if err != nil {
 		return nil, err
@@ -136,27 +180,116 @@ func workbookEffects(before, after map[string]any) ([]string, error) {
 		return nil, err
 	}
 	// extractCells removes cell stores so every remaining field, including sheet
-	// order, styles, names, properties, charts and protection must stay identical.
+	// order, styles, names, properties, charts, protection and calc settings
+	// must stay identical.
 	if !reflect.DeepEqual(before, after) {
 		return nil, ErrEffects
 	}
-	changed := map[string]bool{}
-	for k, v := range a {
-		if !reflect.DeepEqual(v, b[k]) {
-			changed[k] = true
-		}
-	}
+	var derived []string
+	formulas := 0
 	for k, v := range b {
-		if !reflect.DeepEqual(v, a[k]) {
-			changed[k] = true
+		if isFormulaCell(v) {
+			formulas++
+		}
+		if k == target || reflect.DeepEqual(v, a[k]) {
+			continue
+		}
+		old, ok := a[k]
+		if !ok || !recalculated(old, v) {
+			return nil, ErrEffects
+		}
+		derived = append(derived, k)
+	}
+	for k := range a {
+		if _, ok := b[k]; !ok && k != target {
+			return nil, ErrEffects
 		}
 	}
-	result := make([]string, 0, len(changed))
-	for k := range changed {
-		result = append(result, k)
+	targetFormula := isFormulaCell(b[target])
+	if len(derived) == 0 && !targetFormula {
+		return nil, nil
 	}
-	sort.Strings(result)
-	return result, nil
+	// The report must describe exactly these bytes and the formulas the host
+	// itself counted in them.
+	sum := sha256.Sum256(raw)
+	if recalc == nil || recalc.SHA256 != hex.EncodeToString(sum[:]) || recalc.FormulaCells != formulas || recalc.Mismatched != 0 {
+		return nil, ErrEffects
+	}
+	if len(derived) == 0 {
+		return nil, nil
+	}
+	// Under iterative calculation a cycle has many fixed points and the oracle
+	// accepts any of them, so derived values cannot be confirmed. Settings the
+	// host cannot read count as iterative.
+	if calc, _ := after["calc"].(map[string]any); calc == nil || calc["iterative"] != false {
+		return nil, ErrEffects
+	}
+	if !recalc.verified() {
+		return nil, ErrEffects
+	}
+	sort.Strings(derived)
+	record := &Derived{Count: len(derived), Cells: derived, Recalc: recalc}
+	if len(derived) > maxDerivedAudit {
+		record.Cells = derived[:maxDerivedAudit]
+	}
+	return record, nil
+}
+
+func isFormulaCell(cell any) bool {
+	c, ok := cell.(map[string]any)
+	if !ok {
+		return false
+	}
+	_, ok = c["formula"].(map[string]any)
+	return ok
+}
+
+// recalculated reports whether two cells differ only in the computed value of an
+// unchanged formula.
+func recalculated(before, after any) bool {
+	x, ok := before.(map[string]any)
+	if !ok {
+		return false
+	}
+	y, ok := after.(map[string]any)
+	if !ok || len(x) != len(y) {
+		return false
+	}
+	if _, ok := x["formula"].(map[string]any); !ok {
+		return false
+	}
+	for k, v := range x {
+		w, ok := y[k]
+		if !ok {
+			return false
+		}
+		if k == "value" {
+			if !plainValue(v) || !plainValue(w) {
+				return false
+			}
+		} else if !reflect.DeepEqual(v, w) {
+			return false
+		}
+	}
+	return true
+}
+
+func plainValue(raw any) bool {
+	v, ok := raw.(map[string]any)
+	if !ok || len(v) != 2 {
+		return false
+	}
+	switch v["t"] {
+	case "Number":
+		_, ok = v["v"].(json.Number)
+	case "Text", "Error":
+		_, ok = v["v"].(string)
+	case "Bool":
+		_, ok = v["v"].(bool)
+	default:
+		ok = false
+	}
+	return ok
 }
 func extractCells(workbook map[string]any) (map[string]any, error) {
 	result := map[string]any{}
@@ -174,7 +307,7 @@ func extractCells(workbook map[string]any) (map[string]any, error) {
 		count := 0
 		for bandKey, rawBand := range bands {
 			band, err := strconv.Atoi(bandKey)
-			if err != nil || band < 0 {
+			if err != nil || band < 0 || strconv.Itoa(band) != bandKey {
 				return nil, ErrInvalid
 			}
 			obj, ok := rawBand.(map[string]any)
@@ -187,7 +320,7 @@ func extractCells(workbook map[string]any) (map[string]any, error) {
 			}
 			for rowKey, rawRow := range rows {
 				row, err := strconv.Atoi(rowKey)
-				if err != nil || row < 0 || row >= 1048576 || row/64 != band {
+				if err != nil || strconv.Itoa(row) != rowKey || row < 0 || row >= 1048576 || row/64 != band {
 					return nil, ErrInvalid
 				}
 				cols, ok := rawRow.(map[string]any)
@@ -196,7 +329,7 @@ func extractCells(workbook map[string]any) (map[string]any, error) {
 				}
 				for colKey, cell := range cols {
 					col, err := strconv.Atoi(colKey)
-					if err != nil || col < 0 || col >= 16384 {
+					if err != nil || strconv.Itoa(col) != colKey || col < 0 || col >= 16384 {
 						return nil, ErrInvalid
 					}
 					result[name+"!"+columnName(col)+strconv.Itoa(row+1)] = cell

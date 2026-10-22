@@ -282,13 +282,19 @@ func (s *Store) Execute(ctx context.Context, k Key, r Request, a Authorize, e En
 		if err != nil {
 			return err
 		}
+		// The audit keeps the receipt and adds the stored result digest and any
+		// verified recalculation outside the mandated effects.
+		auditBytes, err := json.Marshal(auditRecord{Receipt: receipt, ResultSHA256: c.ResultHash, Derived: c.Derived})
+		if err != nil {
+			return err
+		}
 		if _, err = tx.ExecContext(ctx, `INSERT INTO gridcraft_heads(page_id,workspace_id,schema_version,head_rev,generation,snapshot) VALUES(?,?,?,?,?,?) ON CONFLICT(page_id) DO UPDATE SET head_rev=excluded.head_rev,snapshot=excluded.snapshot`, k.PageID, k.WorkspaceID, SchemaVersion, rev, generation, []byte(c.Snapshot)); err != nil {
 			return err
 		}
 		if _, err = tx.ExecContext(ctx, `INSERT INTO gridcraft_revisions(page_id,rev,snapshot) VALUES(?,?,?)`, k.PageID, rev, []byte(c.Snapshot)); err != nil {
 			return err
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO gridcraft_audit(page_id,rev,authority_id,mutation_id,mandate_id,base_rev,receipt) VALUES(?,?,?,?,?,?,?)`, k.PageID, rev, p.AuthorityID, r.MutationID, p.MandateID, r.BaseRev, receiptBytes); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO gridcraft_audit(page_id,rev,authority_id,mutation_id,mandate_id,base_rev,receipt) VALUES(?,?,?,?,?,?,?)`, k.PageID, rev, p.AuthorityID, r.MutationID, p.MandateID, r.BaseRev, auditBytes); err != nil {
 			return err
 		}
 		if _, err = tx.ExecContext(ctx, `INSERT INTO gridcraft_outbox(page_id,rev) VALUES(?,?)`, k.PageID, rev); err != nil {
@@ -425,4 +431,10 @@ func (s *Store) releaseLiveWorker(k Key) {
 		delete(s.workspaceWorkers, k.WorkspaceID)
 	}
 	delete(s.artifactWorkers, k)
+}
+
+type auditRecord struct {
+	Receipt
+	ResultSHA256 string   `json:"result_sha256"`
+	Derived      *Derived `json:"derived,omitempty"`
 }

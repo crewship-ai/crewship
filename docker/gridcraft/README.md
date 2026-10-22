@@ -105,7 +105,8 @@ profile above. Each concurrent candidate needs
 about 64 MiB of memory (request buffers, a transient launcher, the CLI, and
 scratch) and up to 8 PIDs (the PID limit counts threads). For capacity N, set
 memory to at least 128 MiB + N × 64 MiB, PIDs to at least 16 + N × 8, and
-`/scratch` to at least N × 4 MiB. The application's `max_workers` should not
+`/scratch` to at least N × 12 MiB (engine outputs are read up to 4 MiB before
+compaction, plus the recalculation check copy). The application's `max_workers` should not
 exceed the worker capacity, or candidates are refused with `capacity_exhausted`.
 
 Residual risk, accepted for the default-off pilot:
