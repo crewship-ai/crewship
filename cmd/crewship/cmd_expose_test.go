@@ -28,10 +28,14 @@ func saveCLIState(t *testing.T) {
 	origCfg := cliCfg
 	origServer := flagServer
 	origWorkspace := flagWorkspace
+	// --format is global too: a test that selects an output format must not
+	// override cliCfg.Format for whichever test runs next under -shuffle.
+	origFormat := flagFormat
 	t.Cleanup(func() {
 		cliCfg = origCfg
 		flagServer = origServer
 		flagWorkspace = origWorkspace
+		flagFormat = origFormat
 	})
 	for _, key := range []string{"CREWSHIP_SERVER", "CREWSHIP_WORKSPACE", "CREWSHIP_TOKEN", "CREWSHIP_PROFILE"} {
 		key := key
