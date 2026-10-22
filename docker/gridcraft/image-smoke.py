@@ -34,9 +34,11 @@ def main():
     contract = json.loads(docker('run', '--rm', '--pull=never', '--network=none', '--read-only', '--cap-drop=ALL',
                                  '--security-opt=no-new-privileges', '--user=' + str(os.getuid()) + ':' + str(os.getgid()),
                                  image, '--contract'))
-    assert set(contract) == {'protocol', 'engine_sha256'}, 'worker contract shape'
+    assert set(contract) == {'protocol', 'protocol_min', 'protocol_max', 'engine_sha256'}, 'worker contract shape'
     protocol, engine = contract['protocol'], contract['engine_sha256']
-    assert type(protocol) is int and 1 <= protocol <= 9999, 'worker protocol'
+    accepted = (contract['protocol_min'], contract['protocol_max'])
+    assert all(type(v) is int and 1 <= v <= 9999 for v in (protocol, *accepted)), 'worker protocol bounds'
+    assert accepted[0] <= protocol <= accepted[1], 'worker must accept its own protocol'
     assert isinstance(engine, str) and len(engine) == 64 and all(c in '0123456789abcdef' for c in engine), 'engine pin'
     name = 'gridcraft-ci-' + secrets.token_hex(8)
     with tempfile.TemporaryDirectory(prefix='gridcraft-ci-') as root:
@@ -102,7 +104,8 @@ def main():
             assert candidate(native, {'kind': 'import'}, 'invalid')[0] == 401
             # The worker refuses a host without, or outside, its protocol contract.
             assert candidate(native, {'kind': 'import'}, host_protocol=None)[0] == 412
-            assert candidate(native, {'kind': 'import'}, host_protocol=str(protocol + 1000))[0] == 412
+            assert candidate(native, {'kind': 'import'}, host_protocol=str(accepted[1] + 1))[0] == 412
+            assert candidate(native, {'kind': 'import'}, host_protocol=str(accepted[0] - 1))[0] == 412
             assert candidate(native, {'kind': 'import'}, host_engine='0' * 64)[0] == 412
             assert candidate(native, {'kind': 'file.open'})[0] == 400
             status, imported = candidate(native, {'kind': 'import'})

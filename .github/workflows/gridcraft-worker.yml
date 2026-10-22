@@ -58,9 +58,11 @@ jobs:
                          image_id=os.environ['IMAGE_ID'], archive_sha256=digest.hexdigest(),
                          run_id=int(os.environ['GITHUB_RUN_ID']), run_attempt=int(os.environ['GITHUB_RUN_ATTEMPT']))
           contract = json.loads(Path(os.environ['CONTRACT']).read_text())
-          assert set(contract) == {'protocol', 'engine_sha256'} and type(contract['protocol']) is int and contract['protocol'] > 0
+          assert set(contract) == {'protocol', 'protocol_min', 'protocol_max', 'engine_sha256'}
+          versions = (contract['protocol_min'], contract['protocol'], contract['protocol_max'])
+          assert all(type(v) is int and 1 <= v <= 9999 for v in versions) and versions == tuple(sorted(versions))
           assert len(contract['engine_sha256']) == 64 and set(contract['engine_sha256']) <= set('0123456789abcdef')
-          receipt.update(protocol=contract['protocol'], engine_sha256=contract['engine_sha256'])
+          receipt.update(contract)
           (directory / 'receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
           PY
           echo "source_sha=$REVIEWED_SHA" >> "$GITHUB_OUTPUT"

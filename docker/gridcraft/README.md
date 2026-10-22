@@ -98,12 +98,20 @@ refuses a host outside its accepted protocol range or with another engine pin
 authentication. The application treats a worker that declares no contract, or
 an incompatible one, as unavailable, even if it returned a result.
 
+These headers check compatibility; they are not authentication. The service
+token authenticates the host to the worker only. The worker does not prove its
+identity to the host: any process able to listen on the private socket path
+(the shared service/application UID) could answer with valid-looking headers.
+Socket directory custody and the peer checks before sending the token are the
+protection, as before.
+
 `crewship-gridcraft-worker --contract` prints the image's offline declaration
-(`{"protocol": N, "engine_sha256": "..."}`); qualification records it in
-`receipt.json` as `protocol` and `engine_sha256`, after the smoke test has
-proven the running worker enforces the same pair. The application binary
-embeds its accepted range and engine pin as one fixed text record
-(`crewship-gridcraft-host-contract/v1;protocol-min=…;protocol-max=…;engine-sha256=…`),
+(`{"protocol": N, "protocol_min": A, "protocol_max": B, "engine_sha256": "..."}`:
+the protocol it speaks, the host protocols it accepts and its engine pin);
+qualification records these four fields in `receipt.json`, after the smoke test
+has proven the running worker enforces them. The application binary embeds its
+own protocol, accepted range and engine pin as one fixed text record
+(`crewship-gridcraft-host-contract/v1;protocol=…;protocol-min=…;protocol-max=…;engine-sha256=…`),
 so an operator launcher can check compatibility by reading the released
 binary as data, without executing it and without any network endpoint.
 Bump the protocol for any incompatible envelope, command or snapshot change.

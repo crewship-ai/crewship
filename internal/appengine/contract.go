@@ -30,18 +30,23 @@ const (
 // embedded verbatim in the application binary. An operator launcher reads it
 // from the released, checksum-verified binary as data (nothing is executed)
 // and starts a qualified worker image only when the image's protocol is in
-// this range and its engine pin equals this one. It is not served over any
+// this range, the image accepts this build's own protocol, and its engine pin
+// equals this one. It is not served over any
 // network endpoint. The host's own handshake is derived from the same text,
 // so the declaration and the enforcement cannot diverge.
-const gridCraftHostContract = "\x00crewship-gridcraft-host-contract/v1;protocol-min=1;protocol-max=1;engine-sha256=" + GridCraftBinarySHA256 + "\x00"
+//
+// The launcher requires the record name to occur exactly once in the binary,
+// so no other non-test string may contain it verbatim (the parser below
+// spells it with a character class for that reason).
+const gridCraftHostContract = "\x00crewship-gridcraft-host-contract/v1;protocol=1;protocol-min=1;protocol-max=1;engine-sha256=" + GridCraftBinarySHA256 + "\x00"
 
-var hostContractPattern = regexp.MustCompile(`^\x00crewship-gridcraft-host-contract/v1;protocol-min=([1-9][0-9]{0,3});protocol-max=([1-9][0-9]{0,3});engine-sha256=([0-9a-f]{64})\x00$`)
+var hostContractPattern = regexp.MustCompile(`^\x00crewship-gridcraft-host-contract[/]v1;protocol=([1-9][0-9]{0,3});protocol-min=([1-9][0-9]{0,3});protocol-max=([1-9][0-9]{0,3});engine-sha256=([0-9a-f]{64})\x00$`)
 
-// WorkerContract is one side's declaration of the protocol range it accepts
-// and the engine pin it carries.
+// WorkerContract is one side's declaration of the protocol it speaks, the
+// peer protocol range it accepts and the engine pin it carries.
 type WorkerContract struct {
-	ProtocolMin, ProtocolMax int
-	EngineSHA256             string
+	Protocol, ProtocolMin, ProtocolMax int
+	EngineSHA256                       string
 }
 
 func parseHostContract(text string) (WorkerContract, bool) {
@@ -49,12 +54,13 @@ func parseHostContract(text string) (WorkerContract, bool) {
 	if m == nil {
 		return WorkerContract{}, false
 	}
-	lo, _ := strconv.Atoi(m[1])
-	hi, _ := strconv.Atoi(m[2])
-	if lo > hi {
+	own, _ := strconv.Atoi(m[1])
+	lo, _ := strconv.Atoi(m[2])
+	hi, _ := strconv.Atoi(m[3])
+	if lo > hi || own < lo || own > hi {
 		return WorkerContract{}, false
 	}
-	return WorkerContract{ProtocolMin: lo, ProtocolMax: hi, EngineSHA256: m[3]}, true
+	return WorkerContract{Protocol: own, ProtocolMin: lo, ProtocolMax: hi, EngineSHA256: m[4]}, true
 }
 
 // hostContract is what WorkerClient enforces; a malformed declaration makes
@@ -62,7 +68,7 @@ func parseHostContract(text string) (WorkerContract, bool) {
 var hostContract, hostContractValid = parseHostContract(gridCraftHostContract)
 
 // workerContract is what the worker handler enforces on the host.
-var workerContract = WorkerContract{ProtocolMin: GridCraftWorkerProtocolMin, ProtocolMax: GridCraftWorkerProtocolMax, EngineSHA256: GridCraftBinarySHA256}
+var workerContract = WorkerContract{Protocol: GridCraftWorkerProtocol, ProtocolMin: GridCraftWorkerProtocolMin, ProtocolMax: GridCraftWorkerProtocolMax, EngineSHA256: GridCraftBinarySHA256}
 
 var protocolValue = regexp.MustCompile(`^[1-9][0-9]{0,3}$`)
 
@@ -95,9 +101,15 @@ func peerCompatible(c WorkerContract, h http.Header) bool {
 }
 
 // WorkerImageContract is what a worker image declares for its qualification
-// receipt: the protocol it speaks and the engine pin it carries.
+// receipt: the protocol it speaks, the host protocol range it accepts and the
+// engine pin it carries, so a launcher can check both directions.
 func WorkerImageContract() map[string]any {
-	return map[string]any{"protocol": GridCraftWorkerProtocol, "engine_sha256": GridCraftBinarySHA256}
+	return map[string]any{
+		"protocol":      workerContract.Protocol,
+		"protocol_min":  workerContract.ProtocolMin,
+		"protocol_max":  workerContract.ProtocolMax,
+		"engine_sha256": workerContract.EngineSHA256,
+	}
 }
 
 func hostAccepts(h http.Header) bool { return hostContractValid && peerCompatible(hostContract, h) }
