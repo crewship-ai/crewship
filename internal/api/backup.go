@@ -391,7 +391,11 @@ type restoreRequest struct {
 	// workspace has a new CUID but the same slug — --replace clears
 	// the conflicting target so the bundle lands with original IDs.
 	Replace bool `json:"replace,omitempty"`
-	DryRun  bool `json:"dry_run,omitempty"`
+	// DiscardWorkbooks acknowledges that Replace destroys the target's
+	// workbooks, which no bundle contains. Without it Replace refuses (409)
+	// a target holding any workbook. Only valid together with Replace.
+	DiscardWorkbooks bool `json:"discard_workbooks,omitempty"`
+	DryRun           bool `json:"dry_run,omitempty"`
 	// FilesOnly lands ONLY the per-crew container filesystem state, into
 	// the crews of the caller's current workspace. It is step 3 of the
 	// disaster-recovery flow, and it is authorised by the provenance row
@@ -421,6 +425,10 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Path == "" {
 		replyError(w, http.StatusBadRequest, "path required")
+		return
+	}
+	if req.DiscardWorkbooks && !req.Replace {
+		replyError(w, http.StatusBadRequest, "discard_workbooks applies only to replace")
 		return
 	}
 	if err := validateBackupPath(req.Path); err != nil {
@@ -489,6 +497,7 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		AsWorkspace:               req.AsWorkspace,
 		AsCrew:                    req.AsCrew,
 		Replace:                   req.Replace,
+		DiscardWorkbooks:          req.DiscardWorkbooks,
 		DryRun:                    req.DryRun,
 		FilesOnly:                 req.FilesOnly,
 		ResumeWorkspaceID:         workspaceID,
@@ -1014,7 +1023,8 @@ func statusForBackupError(err error) int {
 		return http.StatusForbidden
 	case errors.Is(err, backup.ErrAgentRunning),
 		errors.Is(err, backup.ErrLockHeld),
-		errors.Is(err, backup.ErrPrivateArtifactTargetReplacement):
+		errors.Is(err, backup.ErrPrivateArtifactTargetReplacement),
+		errors.Is(err, backup.ErrWorkbookTargetReplacement):
 		return http.StatusConflict
 	case errors.Is(err, backup.ErrFormatTooNew),
 		errors.Is(err, backup.ErrFormatTooOld),

@@ -109,7 +109,7 @@ func operationalDomainSchemaCatalog() map[string]map[string]DomainSchema {
 		"GET /api/v1/admin/instance/backups/bundles/download": {Response: binary(), ResponseMedia: []string{"application/zstd"}},
 		"POST /api/v1/admin/backups/restore": {Request: jsonRequest(map[string]any{
 			"path": stringSchema(), "passphrase": stringSchema(), "identity": stringSchema(),
-			"as_workspace": stringSchema(), "as_crew": stringSchema(), "replace": boolSchema(), "dry_run": boolSchema(), "files_only": boolSchema(),
+			"as_workspace": stringSchema(), "as_crew": stringSchema(), "replace": boolSchema(), "discard_workbooks": boolSchema(), "dry_run": boolSchema(), "files_only": boolSchema(),
 		}), Response: anyObject()},
 		"POST /api/v1/admin/backups/rotate":    {Response: anyObject()},
 		"POST /api/v1/admin/backups/self-test": {Response: anyObject()},

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // ErrPrivateArtifactTargetReplacement prevents restored SQL from discarding
@@ -64,7 +65,7 @@ func rejectPrivateArtifactTargetReplacement(ctx context.Context, target privateA
 
 // Preflight before service maintenance or file preparation. The writer transaction
 // repeats this check immediately before deleting rows to close admission races.
-func rejectPrivateArtifactWorkspaceReplacement(ctx context.Context, db *sql.DB, bundleID, bundleSlug string) error {
+func rejectPrivateArtifactWorkspaceReplacement(ctx context.Context, db *sql.DB, bundleID, bundleSlug string, discardWorkbooks bool) error {
 	if bundleID == "" {
 		return fmt.Errorf("backup: --replace requires the bundle to carry a workspace row; this one does not")
 	}
@@ -77,7 +78,71 @@ func rejectPrivateArtifactWorkspaceReplacement(ctx context.Context, db *sql.DB, 
 	if err != nil || len(ids) == 0 {
 		return err
 	}
-	return rejectPrivateArtifactTargetReplacement(ctx, tx, ids)
+	if err := rejectPrivateArtifactTargetReplacement(ctx, tx, ids); err != nil {
+		return err
+	}
+	if discardWorkbooks {
+		return nil
+	}
+	workbooks, err := targetWorkbookPages(ctx, tx, ids)
+	if err != nil {
+		return err
+	}
+	if len(workbooks) > 0 {
+		return workbookReplacementError(workbooks)
+	}
+	return nil
+}
+
+// ErrWorkbookTargetReplacement refuses a replacement that would destroy
+// experimental workbooks. No bundle contains a workbook, so the loss would be
+// permanent; the operator acknowledges it with --discard-workbooks.
+var ErrWorkbookTargetReplacement = errors.New("backup: target workspace holds workbooks, which backups never contain; --replace would destroy them permanently")
+
+type workbookTargetQuerier interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+// targetWorkbookPages lists the slugs of the Pages holding a workbook in the
+// target workspaces. An installation without the workbook schema has none.
+func targetWorkbookPages(ctx context.Context, q workbookTargetQuerier, workspaceIDs []string) ([]string, error) {
+	var exists bool
+	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='gridcraft_heads')`).Scan(&exists); err != nil {
+		return nil, err
+	}
+	if !exists || len(workspaceIDs) == 0 {
+		return nil, nil
+	}
+	args := make([]any, len(workspaceIDs))
+	for i, id := range workspaceIDs {
+		args[i] = id
+	}
+	rows, err := q.QueryContext(ctx, `SELECT p.slug FROM gridcraft_heads h JOIN pages p ON p.id=h.page_id WHERE `+equalityOrIN("h.workspace_id", len(workspaceIDs))+` ORDER BY p.slug`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var slugs []string
+	for rows.Next() {
+		var slug string
+		if err := rows.Scan(&slug); err != nil {
+			return nil, err
+		}
+		slugs = append(slugs, slug)
+	}
+	return slugs, rows.Err()
+}
+
+func workbookReplacementError(slugs []string) error {
+	const shown = 20
+	named := slugs
+	more := ""
+	if len(named) > shown {
+		named = named[:shown]
+		more = fmt.Sprintf(" and %d more", len(slugs)-shown)
+	}
+	return fmt.Errorf("%w (workbook pages: %s%s). Save their contents first (crewship workbook read), restore under a new slug with --as-workspace, or acknowledge the loss with --discard-workbooks (API: discard_workbooks)", ErrWorkbookTargetReplacement, strings.Join(named, ", "), more)
 }
 
 // Recovery is offline. Inspect the existing database before prepareDataDir can

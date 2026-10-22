@@ -498,6 +498,9 @@
           "as_workspace": {
             "type": "string"
           },
+          "discard_workbooks": {
+            "type": "boolean"
+          },
           "dry_run": {
             "type": "boolean"
           },
