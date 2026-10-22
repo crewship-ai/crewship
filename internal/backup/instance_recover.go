@@ -866,7 +866,7 @@ func writeRecoveredSecrets(rep *RecoverReport, kit *RecoveryKit, dataDir string)
 			return err
 		}
 		if replaced != "" {
-			rep.Notes = append(rep.Notes, "the data dir's previous audit keyring was replaced by the bundle's and kept as "+replaced+"; entries it signed after the backup do not verify with the restored keyring")
+			rep.Notes = append(rep.Notes, "the data dir's previous audit keyring was replaced by the bundle's and kept as "+replaced)
 		}
 		kitLines = append(kitLines, journal.SigningKeysPathEnv+"="+auditPath)
 	}
