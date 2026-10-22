@@ -432,12 +432,12 @@ func (h *CredentialFolderHandler) Update(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	// The write, the loosening check and the member lift are one transaction:
-	// the effective policy is read back from the row as it will be, so a move
-	// that loosens it is rolled back before anyone could act on it.
-	before, err := loadFolderPolicy(r.Context(), h.db, ws, id)
-	if err != nil || before == nil {
-		replyInternalError(w, h.logger, "load folder policy", fmt.Errorf("before update: %v", err))
-		return
+	// the effective policy is read on it both before and after the write, so
+	// the check compares against the policy as it stands when the change
+	// commits (not a read another writer may have tightened since), and a
+	// move that loosens it is rolled back before anyone could act on it.
+	if folderUpdateBeforeTx != nil {
+		folderUpdateBeforeTx()
 	}
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
@@ -445,6 +445,11 @@ func (h *CredentialFolderHandler) Update(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	defer func() { _ = tx.Rollback() }()
+	before, err := loadFolderPolicy(r.Context(), tx, ws, id)
+	if err != nil || before == nil {
+		replyInternalError(w, h.logger, "load folder policy", fmt.Errorf("before update: %v", err))
+		return
+	}
 	previous, err := folderAccessState(r.Context(), tx, ws, id)
 	if err != nil {
 		replyInternalError(w, h.logger, "read credential folder access", err)
@@ -501,6 +506,10 @@ func (h *CredentialFolderHandler) Update(w http.ResponseWriter, r *http.Request)
 	}
 	h.reply(w, r, http.StatusOK, ws, id)
 }
+
+// folderUpdateBeforeTx lets a test interleave a concurrent writer between the
+// request's pre-transaction reads and its writer transaction.
+var folderUpdateBeforeTx func()
 
 const msgFolderMoveLoosens = "This move would loosen the reveal policy or tier floor the folder's secrets are held to; that needs OWNER or ADMIN"
 
