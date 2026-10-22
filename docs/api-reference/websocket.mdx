@@ -185,6 +185,7 @@ Channels follow the format `type:id`. Access is validated against database membe
 | `mission` | `mission:{missionId}` | Member of mission's workspace | Mission status updates |
 | `keeper` | `keeper:{workspaceId}` | Workspace member | Keeper credential access events |
 | `files` | `files:{crewId}` | Member of crew's workspace | File change events |
+| `page` | `page:{pageId}` | Workspace member; for a private Page only its owner or a workspace OWNER, rechecked before every frame | Page refresh hints and workbook revisions |
 | `providers` | `providers` | Any authenticated user | Provider status updates |
 
 ---
@@ -402,6 +403,17 @@ The `files:{crewId}` channel exists for subscription (file change events) and
 shares its access rule with `crew`. File-change events are broadcast on the
 `crew:{crewId}` channel as `file.event`.
 </Note>
+
+### Page Channel (`page:{pageId}`)
+
+| Event Type | Description | Payload |
+|---|---|---|
+| `workbook.committed` | A workbook revision was confirmed durably (experimental live workbook editing). Sent once per revision; a revision whose push was lost to a crash is sent by a sweeper within seconds. Carries no cell content: read the revision through `GET /api/v1/pages/{slug}/workbook/commits?since=` under your own current access, and use that after a reconnect or a revision gap | `{ page_id, rev, generation, kind, cells }` |
+
+`kind` is `cells` or `snapshot` (an import: reread the workbook); `cells` is the
+number of cells the revision wrote. Access to the private workbook Page is
+rechecked before every frame, so a frame is never delivered after the
+recipient lost access.
 
 ### Mission Channel (`mission:{id}`)
 
