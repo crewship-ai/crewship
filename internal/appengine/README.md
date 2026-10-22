@@ -79,7 +79,15 @@ built with `-tags crewship_testbarrier` can park operations, and only when:
 
 - `CREWSHIP_GRIDCRAFT_TEST_BARRIER_DIR` is a clean absolute path to a real
   directory with mode `0700` owned by the service user, and
-- `CREWSHIP_GRIDCRAFT_TEST_BARRIER_SLOT` is `dev1`..`dev4`.
+- `CREWSHIP_GRIDCRAFT_TEST_BARRIER_SLOT` is `dev1`..`dev4`, and
+- the operator marker `/etc/crewship/test-barrier-<slot>.enabled` exists for
+  exactly that slot: a regular file (not a symlink) owned by root, not
+  writable by group or others, while the service itself does not run as root.
+
+The environment is self-asserted; the marker is not. Provisioning creates it
+only on development hosts (for example an Ansible task with `owner: root`,
+`mode: "0644"`, guarded by the slot inventory) and must assert it is absent on
+stage and production, together with the two environment variables.
 
 Any other slot (including `stage` and `prod`) or an unsafe directory stops the
 server at startup. While active, startup logs a warning and `/healthz` carries
@@ -95,5 +103,11 @@ candidate binding, authority and effects, and the barrier never returns
 success in place of a commit.
 
 Release and nightly packaging run `scripts/check-no-test-barrier.sh dist`,
-which fails if any built Go binary carries the tag. Tagged tests:
+and the image's backend build stage runs it on the binaries it builds; both
+fail if a Go binary carries the tag. Tagged tests:
 `go test -tags crewship_testbarrier ./internal/appengine/ ./internal/server/`.
+
+Harness notes: takeover scenarios must use a different `mutation_id`, since
+park files are keyed by artifact, authority and mutation id. Calls through
+the agent IPC path have a 30 s write timeout, so park those for less than
+that or expect a dropped response instead of a status code.

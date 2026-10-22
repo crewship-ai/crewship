@@ -6,6 +6,7 @@ import (
 	"context"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -17,6 +18,11 @@ func TestTaggedBarrierRefusesStageAndAdvertisesOnDev(t *testing.T) {
 	if err := os.Chmod(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	marker := t.TempDir()
+	if err := os.WriteFile(filepath.Join(marker, "test-barrier-dev2.enabled"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(appengine.SetTestBarrierMarkerForTest(marker, os.Getuid(), func() int { return os.Getuid() + 1 }))
 	t.Setenv(appengine.TestBarrierDirEnv, dir)
 	t.Cleanup(func() {
 		os.Unsetenv(appengine.TestBarrierDirEnv)

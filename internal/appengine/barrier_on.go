@@ -22,6 +22,31 @@ const barrierCompiledIn = true
 // lease so a parked operation can deliberately outlive its lease.
 const barrierMaxPark = 45 * time.Second
 
+// The operator, not the service, decides which slot may run a barrier: a
+// marker file /etc/crewship/test-barrier-<slot>.enabled, owned by root and not
+// writable by group or others, managed by provisioning on development slots
+// only. A service running as root could write it itself and is refused.
+var (
+	barrierMarkerDir   = "/etc/crewship"
+	barrierMarkerOwner = 0
+	barrierServiceUID  = os.Geteuid
+)
+
+// SetTestBarrierMarkerForTest points the marker check at a test directory and
+// owner, because tests cannot create root-owned files. It exists only in
+// tagged builds and returns a function restoring the fixed values.
+func SetTestBarrierMarkerForTest(dir string, owner int, serviceUID func() int) (restore func()) {
+	barrierState.mu.Lock()
+	defer barrierState.mu.Unlock()
+	oldDir, oldOwner, oldUID := barrierMarkerDir, barrierMarkerOwner, barrierServiceUID
+	barrierMarkerDir, barrierMarkerOwner, barrierServiceUID = dir, owner, serviceUID
+	return func() {
+		barrierState.mu.Lock()
+		defer barrierState.mu.Unlock()
+		barrierMarkerDir, barrierMarkerOwner, barrierServiceUID = oldDir, oldOwner, oldUID
+	}
+}
+
 var barrierState struct {
 	mu   sync.RWMutex
 	dir  string
@@ -41,10 +66,14 @@ func ConfigureTestBarrier() (bool, error) {
 	if dir == "" {
 		return false, nil
 	}
-	switch slot := os.Getenv(TestBarrierSlotEnv); slot {
+	slot := os.Getenv(TestBarrierSlotEnv)
+	switch slot {
 	case "dev1", "dev2", "dev3", "dev4":
 	default:
 		return false, fmt.Errorf("gridcraft test barrier refused on slot %q: only dev1..dev4", slot)
+	}
+	if err := checkBarrierMarker(slot); err != nil {
+		return false, err
 	}
 	if !filepath.IsAbs(dir) || filepath.Clean(dir) != dir {
 		return false, fmt.Errorf("gridcraft test barrier directory must be a clean absolute path")
@@ -125,4 +154,22 @@ func testBarrier(ctx context.Context, point barrierPoint, k Key, authority, muta
 			}
 		}
 	}
+}
+
+// checkBarrierMarker requires the operator's marker for exactly this slot.
+// Called with barrierState.mu held.
+func checkBarrierMarker(slot string) error {
+	marker := filepath.Join(barrierMarkerDir, "test-barrier-"+slot+".enabled")
+	if barrierServiceUID() == barrierMarkerOwner {
+		return fmt.Errorf("gridcraft test barrier refused: the service must not run as the owner of %s", marker)
+	}
+	info, err := os.Lstat(marker)
+	if err != nil {
+		return fmt.Errorf("gridcraft test barrier refused: operator marker %s: %w", marker, err)
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o022 != 0 || !ok || int(stat.Uid) != barrierMarkerOwner {
+		return fmt.Errorf("gridcraft test barrier refused: %s must be a regular file owned by uid %d and not writable by group or others", marker, barrierMarkerOwner)
+	}
+	return nil
 }
