@@ -61,6 +61,11 @@ func (r *Router) RegisterGridCraft(options appengine.Options, engine appengine.E
 	r.mux.Handle("POST /api/v1/internal/gridcraft", internalAuth(http.HandlerFunc(h.agent)))
 }
 func gridcraftError(w http.ResponseWriter, err error) {
+	if errors.Is(err, appengine.ErrUnauthenticated) {
+		// Same wire shape as the auth middleware gives the next request.
+		writeAuthError(w, http.StatusUnauthorized, reasonSessionInvalid)
+		return
+	}
 	code, message := 500, "Workbook operation failed"
 	switch {
 	case errors.Is(err, appengine.ErrForbidden), errors.Is(err, appengine.ErrNotFound):
@@ -102,8 +107,13 @@ func (h *gridcraftHTTP) humanAuthority(r *http.Request, k appengine.Key, write b
 		if write {
 			scope = "pages:write"
 		}
-		if validateContentHumanCredential(request, tx, scope) != nil {
-			return appengine.Principal{}, appengine.ErrForbidden
+		if err := validateContentHumanCredential(request, tx, scope); err != nil {
+			if errors.Is(err, errContentCredentialScope) {
+				return appengine.Principal{}, appengine.ErrForbidden
+			}
+			// The middleware admitted this credential, so it was revoked or
+			// expired while the request ran: report that, not a missing Page.
+			return appengine.Principal{}, appengine.ErrUnauthenticated
 		}
 		viewer, err := h.pages.livePrivatePageReader(ctx, k.WorkspaceID, user.ID)
 		if err != nil || viewer == nil {

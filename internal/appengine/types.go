@@ -34,6 +34,10 @@ var (
 	ErrQuota             = errors.New("workbook history quota exceeded")
 )
 
+// ErrUnauthenticated means the caller's credential itself stopped being valid,
+// for example a token revoked while its operation was running.
+var ErrUnauthenticated = errors.New("workbook credential no longer valid")
+
 type Key struct {
 	WorkspaceID string `json:"workspace_id"`
 	PageID      string `json:"artifact_id"`

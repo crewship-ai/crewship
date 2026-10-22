@@ -229,10 +229,10 @@ func (s *Store) Execute(ctx context.Context, k Key, r Request, a Authorize, e En
 	defer cancel()
 	c, err := e.Prepare(candidateCtx, res.binding, res.state, r.Command)
 	if err != nil {
-		return Receipt{}, err
+		return Receipt{}, s.interrupted(ctx, k, a, err)
 	}
 	if err = candidateCtx.Err(); err != nil {
-		return Receipt{}, err
+		return Receipt{}, s.interrupted(ctx, k, a, err)
 	}
 	var receipt Receipt
 	err = s.tx(ctx, k, a, func(tx *sql.Tx, p Principal) error {
@@ -297,7 +297,29 @@ func (s *Store) Execute(ctx context.Context, k Key, r Request, a Authorize, e En
 		_, err = tx.ExecContext(ctx, `UPDATE gridcraft_operations SET state='applied',receipt=?,lease_until=0 WHERE workspace_id=? AND page_id=? AND authority_id=? AND mutation_id=? AND token=?`, receiptBytes, k.WorkspaceID, k.PageID, p.AuthorityID, r.MutationID, res.token)
 		return err
 	})
-	return receipt, err
+	if err != nil {
+		return Receipt{}, s.interrupted(ctx, k, a, err)
+	}
+	return receipt, nil
+}
+
+// interrupted classifies a failure that happened after the request context
+// ended. Revoking a credential cancels its in-flight request, which engine
+// transports report as unavailable; the caller must instead learn that its
+// authority is gone. Authorization is re-evaluated on a detached, bounded
+// context purely to choose the error: nothing is written or granted.
+func (s *Store) interrupted(ctx context.Context, k Key, a Authorize, err error) error {
+	if ctx.Err() == nil {
+		return err
+	}
+	check, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	authErr := s.tx(check, k, a, func(*sql.Tx, Principal) error { return nil })
+	if errors.Is(authErr, ErrUnauthenticated) || errors.Is(authErr, ErrForbidden) || errors.Is(authErr, ErrNotFound) {
+		return authErr
+	}
+	// Still authorized: the caller went away. Do not blame the engine for it.
+	return fmt.Errorf("%w: operation interrupted: %v", ctx.Err(), err)
 }
 func (s *Store) release(k Key, r Request, res reservation) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

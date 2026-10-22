@@ -408,3 +408,38 @@ func TestGridCraftHumanCreatesEmptyPrivateWorkbookPage(t *testing.T) {
 	mustExec(t, f.db, `UPDATE cli_tokens SET revoked_at='2026-01-01T00:00:00Z' WHERE token_hash=?`, sha256Hex(f.boss))
 	wantCode(t, create(f.boss, `{"slug":"after-revoke","name":"x"}`), 401, "revoked credential")
 }
+
+// revokingEngine models the isolated worker client: a cancelled request context
+// surfaces as an unavailable engine, exactly as WorkerClient.Run reports it.
+type revokingEngine struct{ during func() }
+
+func (*revokingEngine) Identity() string { return "revoking-fixture@1" }
+func (e *revokingEngine) Prepare(ctx context.Context, _ appengine.Binding, _ appengine.State, _ appengine.Command) (appengine.Candidate, error) {
+	e.during()
+	<-ctx.Done()
+	return appengine.Candidate{}, appengine.ErrEngineUnavailable
+}
+
+// Revoking the caller's CLI token while its import runs cancels the request.
+// The write must not happen, and the caller must learn that its credential was
+// revoked, not that the workbook engine is unavailable.
+func TestGridCraftTokenRevokedDuringImportReportsAuthorizationLoss(t *testing.T) {
+	f := gridcraftInstanceFixture(t)
+	wmSeedPage(t, f.db, "ws-old", "revoked-import", "revoked-import", "Workbook", "boss", "")
+	mustExec(t, f.db, `UPDATE pages SET private_audience=1 WHERE id='revoked-import'`)
+	var tokenID string
+	if err := f.db.QueryRow(`SELECT id FROM cli_tokens WHERE token_hash=?`, sha256Hex(f.boss)).Scan(&tokenID); err != nil {
+		t.Fatal(err)
+	}
+	f.r.RegisterGridCraft(appengine.Options{Enabled: true}, &revokingEngine{during: func() {
+		// Same order as the revoke endpoint: durable revocation, then notify.
+		mustExec(t, f.db, `UPDATE cli_tokens SET revoked_at='2026-01-01T00:00:00Z' WHERE id=?`, tokenID)
+		f.r.authMw.streams.NotifyTokenRevoked(tokenID)
+	}})
+	body := `{"mutation_id":"revoked-import","mandate_id":"human-import","base_rev":0,"generation":0,"command":{"kind":"import","snapshot":{"sheets":[{}]}}}`
+	wantCode(t, f.do(f.boss, "POST", "/api/v1/pages/revoked-import/workbook/operations?workspace_id=ws-old", body), 401, "token revoked during import")
+	var n int
+	if err := f.db.QueryRow(`SELECT count(*) FROM gridcraft_revisions`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("revoked import committed: %d %v", n, err)
+	}
+}
