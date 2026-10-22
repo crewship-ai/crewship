@@ -179,7 +179,8 @@ describe("mounting", () => {
   })
 
   it.each([
-    ["the Studio origin", `${window.location.origin}/b/${DIGEST}/index.html`],
+    ["the Studio origin outside the same-host editor path", `${window.location.origin}/b/${DIGEST}/index.html`],
+    ["another path of the Studio origin", `${window.location.origin}/_editor/b/${DIGEST}/../../../api/index.html`],
     ["plain HTTP", `http://editor.test/b/${DIGEST}/index.html`],
     ["no editor URL", undefined],
     ["another bundle than the session's pin", `https://editor.test/b/${"e".repeat(64)}/index.html`],

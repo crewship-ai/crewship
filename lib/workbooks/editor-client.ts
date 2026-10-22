@@ -148,12 +148,16 @@ export function flagEnabled(body: unknown, key: string): boolean {
 }
 
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"])
+/** Where the server serves the editor on the Studio origin when no editor origin is configured. */
+export const SAME_HOST_PREFIX = "/_editor"
 
 /**
  * The `src` of the editor frame, or null when the server's `editor_url` is not one the host may
- * frame: HTTPS (plain HTTP only on loopback outside production builds), no credentials, exactly
- * the path `/b/<bundleDigest>/index.html` of the session's own bundle pin, and never the host's own
- * origin (an editor in the Studio origin could lift its own sandbox). The pin is plain lowercase hex
+ * frame: HTTPS (plain HTTP only on loopback outside production builds), no credentials, and the
+ * session's own bundle pin in the path: `/b/<bundleDigest>/index.html` on a dedicated editor
+ * origin, or, on the host's own origin, only `/_editor/b/<bundleDigest>/index.html` (the zero-config
+ * default), which the server sandboxes and which is the only path in Studio's `frame-src`. No other
+ * path of the host's origin is ever framed. The pin is plain lowercase hex
  * SHA-256 of the bundle manifest, as the editor origin serves it and the editor's hello names it;
  * an empty pin (no editor origin configured) or any other spelling frames nothing. Whatever query
  * the server sent is replaced: the frame gets the bridge mode and the host origin, nothing else.
@@ -170,7 +174,8 @@ export function editorFrameSrc(
   try { url = new URL(editorUrl) } catch { return null }
   if (url.username || url.password) return null
   if (url.protocol !== "https:" && !(allowLoopbackHttp && url.protocol === "http:" && LOOPBACK.has(url.hostname))) return null
-  if (url.origin === hostOrigin || url.pathname !== `/b/${bundleDigest}/index.html`) return null
+  const path = url.origin === hostOrigin ? `${SAME_HOST_PREFIX}/b/${bundleDigest}/index.html` : `/b/${bundleDigest}/index.html`
+  if (url.pathname !== path) return null
   url.search = ""
   url.hash = ""
   url.searchParams.set("host", "authority")

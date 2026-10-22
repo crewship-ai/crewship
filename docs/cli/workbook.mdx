@@ -15,8 +15,10 @@ workbook Page cannot carry panels.
 
 An embedded editor is in development behind the workspace flag
 `gridcraft_editor` (off by default) and the server's editor session. With both
-on, the Page loads the editor from its own origin in a sandboxed,
-credentialless frame (Chromium only); the frame gets no cookies, tokens or
+on, the Page loads the editor in a sandboxed, credentialless frame, served
+under `/_editor/b/` of the web app's own address by default or from a
+dedicated editor origin when one is configured, and always running in an
+opaque origin (Chromium only); the frame gets no cookies, tokens or
 session id, and talks to the Page only over one private message channel. The
 status reads **Saved** only after the server confirmed every edit, and leaving
 the Page with unconfirmed edits asks first. An edit the server answers without

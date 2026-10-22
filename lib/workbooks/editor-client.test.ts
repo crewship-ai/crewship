@@ -43,7 +43,17 @@ describe("editorFrameSrc", () => {
   it.each([
     ["no URL", undefined],
     ["not a URL", "editor"],
-    ["the host's own origin", `${HOST}/b/${DIGEST}/index.html`],
+    ["the host's own origin outside the same-host editor path", `${HOST}/b/${DIGEST}/index.html`],
+    ["another file under the same-host editor path", `${HOST}/_editor/b/${DIGEST}/app.js`],
+    ["an encoded traversal under the same-host editor path", `${HOST}/_editor/b/..%2f${DIGEST}/index.html`],
+    ["an encoded prefix", `${HOST}/%5Feditor/b/${DIGEST}/index.html`],
+    ["an upper-case prefix", `${HOST}/_EDITOR/b/${DIGEST}/index.html`],
+    ["a doubled slash", `${HOST}//_editor/b/${DIGEST}/index.html`],
+    ["a short digest under the same-host editor path", `${HOST}/_editor/b/${DIGEST.slice(1)}/index.html`],
+    ["a long digest under the same-host editor path", `${HOST}/_editor/b/${DIGEST}a/index.html`],
+    ["another bundle under the same-host editor path", `${HOST}/_editor/b/${"e".repeat(64)}/index.html`],
+    ["a traversal out of the same-host editor path", `${HOST}/_editor/b/${DIGEST}/../../api/v1/index.html`],
+    ["the same-host path on a dedicated editor origin", `https://editor.test/_editor/b/${DIGEST}/index.html`],
     ["credentials in the URL", `https://u:p@editor.test/b/${DIGEST}/index.html`],
     ["an unpinned path", "https://editor.test/index.html"],
     ["a short digest", "https://editor.test/b/abc/index.html"],
@@ -53,6 +63,14 @@ describe("editorFrameSrc", () => {
     ["another bundle than the session's pin", `https://editor.test/b/${"e".repeat(64)}/index.html`],
   ])("refuses %s", (_, url) => {
     expect(editorFrameSrc(url, DIGEST, HOST)).toBeNull()
+  })
+
+  it("frames the zero-config editor on the host's own origin only under its same-host path", () => {
+    expect(editorFrameSrc(`${HOST}/_editor/b/${DIGEST}/index.html?token=x`, DIGEST, HOST)).toBe(`${HOST}/_editor/b/${DIGEST}/index.html?host=authority&parent_origin=${encodeURIComponent(HOST)}&v=1`)
+    // Plain HTTP for the same host only on loopback outside production builds, like a dedicated origin.
+    expect(editorFrameSrc(`http://127.0.0.1:3000/_editor/b/${DIGEST}/index.html`, DIGEST, "http://127.0.0.1:3000")).toContain("/_editor/b/")
+    expect(editorFrameSrc(`http://studio.test/_editor/b/${DIGEST}/index.html`, DIGEST, "http://studio.test")).toBeNull()
+    expect(editorFrameSrc(`${HOST}/_editor/b/${DIGEST}/index.html`, "", HOST)).toBeNull()
   })
 
   it.each([

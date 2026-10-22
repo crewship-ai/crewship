@@ -1,7 +1,8 @@
 /**
  * Host side of the embedded workbook editor bridge (protocol 1).
  *
- * The editor runs in a frame on its own origin and is untrusted input, exactly like an HTTP
+ * The editor runs in a sandboxed frame (served from a dedicated editor origin, or by default under
+ * `/_editor/b/` of the Studio origin, always in an opaque origin) and is untrusted input, exactly like an HTTP
  * client. This module owns everything between that frame and the server:
  *
  * - Handshake: the editor document is served with CSP `sandbox allow-scripts` and framed with
@@ -895,8 +896,9 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
     // - `frame` is the exact window object whose hello was just verified (our iframe's
     //   contentWindow), and postMessage delivers to that window alone, never to another frame;
     // - this call runs synchronously in the same task that verified the hello;
-    // - the host page's CSP `frame-src` admits only the editor origin into that frame, so even a
-    //   frame that navigated itself right after its hello holds an editor-origin document.
+    // - the host page's CSP `frame-src` admits only the editor (the dedicated editor origin, or
+    //   only the `/_editor/b/` path of the Studio origin, which the server always sandboxes), so
+    //   even a frame that navigated itself right after its hello holds a sandboxed editor document.
     // Nothing else is ever posted with "*"; all later traffic uses the transferred port.
     frame.postMessage(
       { type: "gridcraft:connect", protocol: BRIDGE_PROTOCOL, session: options.frameNonce ?? options.clientId, page_label: options.pageLabel, rev: session.rev, generation: session.generation, client_id: options.clientId },
