@@ -529,33 +529,11 @@ func (h *AgentHandler) insertHireAgent(w http.ResponseWriter, r *http.Request, i
 
 // revertStagedHire undoes a hire whose required inbox or approval row could
 // not be written. The agent.hired record is already chained, so the removal
-// is chained too, in the same transaction as the deletes.
+// is chained too (agent.hire_reverted), detached from the request's
+// cancellation (revertCreatedAgent).
 func (h *AgentHandler) revertStagedHire(r *http.Request, workspaceID, agentID, inboxID, userID, cause string) {
-	tx, err := h.db.BeginTx(r.Context(), nil)
-	if err != nil {
-		h.logger.Error("hire: begin compensating delete", "error", err, "agent_id", agentID)
-		return
-	}
-	defer func() { _ = tx.Rollback() }()
-	if inboxID != "" {
-		if _, err := tx.ExecContext(r.Context(), `DELETE FROM inbox_items WHERE id = ?`, inboxID); err != nil {
-			h.logger.Error("hire: compensating inbox delete", "error", err, "inbox_id", inboxID)
-		}
-	}
-	if _, err := tx.ExecContext(r.Context(), `DELETE FROM agents WHERE id = ? AND workspace_id = ?`, agentID, workspaceID); err != nil {
-		h.logger.Error("hire: compensating delete", "error", err, "agent_id", agentID)
-		return
-	}
-	notify, err := appendAgentAudit(r.Context(), tx, h.journal, workspaceID, userID, "agent.hire_reverted", agentID, map[string]any{"cause": cause})
-	if err == nil {
-		err = tx.Commit()
-	}
-	if err != nil {
+	if err := revertCreatedAgent(r.Context(), h.db, h.journal, workspaceID, agentID, inboxID, userID, "agent.hire_reverted", cause); err != nil {
 		h.logger.Error("hire: compensating delete not committed", "error", err, "agent_id", agentID)
-		return
-	}
-	if notify != nil {
-		notify()
 	}
 }
 

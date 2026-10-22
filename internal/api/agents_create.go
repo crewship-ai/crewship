@@ -281,7 +281,15 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		createdByUserID = sql.NullString{String: callerUserID, Valid: true}
 	}
 
-	_, err = h.db.ExecContext(r.Context(), `
+	// The new agent's crew, role and tool profile are what it may reach: the
+	// insert and its chained audit commit together.
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		replyInternalError(w, h.logger, "begin agent create", err)
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+	_, err = tx.ExecContext(r.Context(), `
 		INSERT INTO agents (id, crew_id, workspace_id, name, slug, description, role_title,
 			agent_role, lead_mode, status, cli_adapter, llm_provider, llm_model, system_prompt_legacy,
 			avatar_seed, avatar_style, timeout_seconds, tool_profile, memory_enabled,
@@ -309,9 +317,25 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	WriteAuditLog(r.Context(), h.db, h.journal, "create", "AGENT", agentID, callerUserID, workspaceID, map[string]interface{}{
-		"name": req.Name, "slug": req.Slug, "cli_adapter": req.CLIAdapter,
+	current, err := agentPrivileges(r.Context(), tx, workspaceID, agentID)
+	if err != nil {
+		replyInternalError(w, h.logger, "read created agent privileges", err)
+		return
+	}
+	notify, err := appendAgentAudit(r.Context(), tx, h.journal, workspaceID, callerUserID, "create", agentID, map[string]any{
+		"name": req.Name, "slug": req.Slug, "cli_adapter": req.CLIAdapter, "current": current,
 	})
+	if err != nil {
+		replyInternalError(w, h.logger, "audit agent create", err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "commit agent create", err)
+		return
+	}
+	if notify != nil {
+		notify()
+	}
 	// The crew's image must be able to run this agent: rebuild it when it
 	// was not verified for the adapter's CLI (agents_adapter_rebuild.go).
 	if req.CrewID != nil && *req.CrewID != "" {

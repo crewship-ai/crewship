@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path"
 	"sort"
 	"strings"
@@ -57,6 +58,50 @@ func appendAgentAudit(ctx context.Context, tx *sql.Tx, emitter journal.Emitter, 
 	})
 }
 
+// revertAgentTimeout bounds a compensating removal that has outlived its
+// request.
+const revertAgentTimeout = 30 * time.Second
+
+// revertCreatedAgent removes an agent whose creation was committed (and
+// chained) but whose required follow-up row could not be written, and chains
+// the removal in the same transaction. It runs detached from the request's
+// cancellation: a client that disconnects mid-request must not leave a live
+// agent behind without its revert record.
+func revertCreatedAgent(parent context.Context, db *sql.DB, emitter journal.Emitter, workspaceID, agentID, inboxID, userID, action, cause string) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), revertAgentTimeout)
+	defer cancel()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if inboxID != "" {
+		// Best effort inside the transaction: a missing inbox row must not
+		// keep the agent alive.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM inbox_items WHERE id = ?`, inboxID); err != nil {
+			slog.Warn("compensating inbox delete", "error", err, "inbox_id", inboxID)
+		}
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM agents WHERE id = ? AND workspace_id = ?`, agentID, workspaceID)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil || n != 1 {
+		return errors.Join(err, errors.New("compensated agent not found"))
+	}
+	notify, err := appendAgentAudit(ctx, tx, emitter, workspaceID, userID, action, agentID, map[string]any{"cause": cause})
+	if err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if notify != nil {
+		notify()
+	}
+	return nil
+}
+
 // agentPrivileges is the access-relevant part of an agent row as the audit
 // records it. The MCP configuration appears only in its redacted form.
 func agentPrivileges(ctx context.Context, tx *sql.Tx, workspaceID, agentID string) (map[string]any, error) {
@@ -102,9 +147,14 @@ func mcpConfigAudit(raw string) any {
 		} else if transport == "" && s.URL != "" {
 			transport = "http"
 		}
+		// Leading NAME=value assignments ("TOKEN=abc npx ...") are values,
+		// not the executable: record only the first token that is not one.
 		command := ""
-		if fields := strings.Fields(s.Command); len(fields) > 0 {
-			command = path.Base(fields[0])
+		for _, field := range strings.Fields(s.Command) {
+			if !strings.Contains(field, "=") {
+				command = path.Base(field)
+				break
+			}
 		}
 		servers = append(servers, map[string]any{"name": name, "transport": transport, "command": command,
 			"env_keys": auditKeyNames(s.Env), "header_keys": auditKeyNames(s.Headers)})

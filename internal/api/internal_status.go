@@ -553,7 +553,15 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		initialStatus = "PENDING_REVIEW"
 	}
 
-	_, err := h.db.ExecContext(r.Context(), `
+	// The new agent's crew membership, role and tool profile commit with
+	// their chained audit; an audit failure creates nothing.
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		replyInternalError(w, h.logger, "begin internal create agent", err)
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+	_, err = tx.ExecContext(r.Context(), `
 		INSERT INTO agents (id, workspace_id, crew_id, name, slug, description, role_title, agent_role,
 			cli_adapter, llm_provider, llm_model, tool_profile, system_prompt_legacy, status,
 			timeout_seconds, memory_enabled, webhook_secret, created_at, updated_at)
@@ -567,6 +575,30 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("internal create agent", "error", err)
 		replyError(w, http.StatusInternalServerError, "failed to create agent")
 		return
+	}
+	audit := gate.auditFields()
+	audit["name"] = body.Name
+	audit["slug"] = body.Slug
+	audit["crew_id"] = body.CrewID
+	audit["initial_status"] = initialStatus
+	audit["pending_review"] = gate.held()
+	current, err := agentPrivileges(r.Context(), tx, wsID, agentID)
+	if err != nil {
+		replyInternalError(w, h.logger, "read created agent privileges", err)
+		return
+	}
+	audit["current"] = current
+	notify, err := appendAgentAudit(r.Context(), tx, h.journal, wsID, "", "agent.created", agentID, audit)
+	if err != nil {
+		replyInternalError(w, h.logger, "audit internal create agent", err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "commit internal create agent", err)
+		return
+	}
+	if notify != nil {
+		notify()
 	}
 
 	status := http.StatusCreated
@@ -602,8 +634,7 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		if herr != nil {
 			h.logger.Error("internal create agent: autonomy hold failed — compensating delete",
 				"agent_id", agentID, "error", herr)
-			if _, derr := h.db.ExecContext(r.Context(),
-				`DELETE FROM agents WHERE id = ? AND workspace_id = ?`, agentID, wsID); derr != nil {
+			if derr := revertCreatedAgent(r.Context(), h.db, h.journal, wsID, agentID, "", "", "agent.create_reverted", "autonomy_hold_failed"); derr != nil {
 				h.logger.Error("internal create agent: compensating delete failed",
 					"agent_id", agentID, "error", derr)
 			}
@@ -624,14 +655,6 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	// compensating-deletes the agent above) cannot strand an
 	// agent_credentials row pointing at a deleted agent.
 	autoAssignCredentials(r.Context(), h.db, h.logger, h.journal, wsID, agentID, now)
-
-	audit := gate.auditFields()
-	audit["name"] = body.Name
-	audit["slug"] = body.Slug
-	audit["crew_id"] = body.CrewID
-	audit["initial_status"] = initialStatus
-	audit["pending_review"] = gate.held()
-	WriteAuditLog(r.Context(), h.db, h.journal, "agent.created", "AGENT", agentID, "", wsID, audit)
 
 	h.logger.Info("agent created via coordinator", "agent_id", agentID, "name", body.Name,
 		"crew_id", body.CrewID, "decision", string(gate.Decision), "status", initialStatus)
