@@ -68,7 +68,8 @@ cells must stay unchanged; otherwise the operation fails with
 recomputes every formula from scratch with the pinned engine and finds an exact
 match. Workbooks with volatile functions (for example `NOW()` or `RAND()`) or with
 iterative calculation enabled cannot be confirmed this way, so edits that
-recalculate other cells are rejected. The
+recalculate other cells are rejected; with iterative calculation, entering a
+formula is rejected too. The
 receipt's `effects` lists only the mandated target, not the recalculated cells.
 
 An agent retains this exact packet for apply and uncertain retries:

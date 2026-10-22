@@ -215,14 +215,15 @@ func checkWorkbookEffects(before, after map[string]any, target string, raw []byt
 	if recalc == nil || recalc.SHA256 != hex.EncodeToString(sum[:]) || recalc.FormulaCells != formulas || recalc.Mismatched != 0 {
 		return nil, ErrEffects
 	}
-	if len(derived) == 0 {
-		return nil, nil
-	}
-	// Under iterative calculation a cycle has many fixed points and the oracle
-	// accepts any of them, so derived values cannot be confirmed. Settings the
-	// host cannot read count as iterative.
+	// Under iterative calculation a cycle, including a target formula that
+	// refers to itself, has many fixed points and the oracle accepts any of
+	// them, so neither derived values nor a target formula can be confirmed.
+	// Settings the host cannot read count as iterative.
 	if calc, _ := after["calc"].(map[string]any); calc == nil || calc["iterative"] != false {
 		return nil, ErrEffects
+	}
+	if len(derived) == 0 {
+		return nil, nil
 	}
 	if !recalc.verified() {
 		return nil, ErrEffects
