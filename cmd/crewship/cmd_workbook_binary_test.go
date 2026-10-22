@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http/httptest"
@@ -20,7 +21,14 @@ import (
 type binaryWorkbookEngine struct{}
 
 func (binaryWorkbookEngine) Identity() string { return "binary-fixture@1" }
-func (binaryWorkbookEngine) Prepare(_ context.Context, b appengine.Binding, _ appengine.State, c appengine.Command) (appengine.Candidate, error) {
+func (binaryWorkbookEngine) Prepare(_ context.Context, b appengine.Binding, s appengine.State, c appengine.Command) (appengine.Candidate, error) {
+	if c.Kind == "cells.set" {
+		var effects []string
+		for _, cell := range c.Cells {
+			effects = append(effects, cell.Sheet+"!"+cell.Cell)
+		}
+		return appengine.NewCandidate(b, s.Snapshot, effects), nil
+	}
 	return appengine.NewCandidate(b, c.Snapshot, []string{"*"}), nil
 }
 func TestWorkbookHumanBinary(t *testing.T) {
@@ -108,4 +116,31 @@ func TestWorkbookHumanBinary(t *testing.T) {
 	}
 	run(`{"mandate_id":"binary-mandate","run_id":"workbook-run","base_rev":1,"generation":1,"targets":["Sheet1!B2"]}`, "workbook", "admit", "@workbook-binary-page", "--file", "-")
 	run("", "workbook", "revoke", "@workbook-binary-page", "binary-mandate")
+
+	// Human cell edits from two client sessions of the owner.
+	edit := `{"session_id":"w1","mutation_id":"w1:1","base_rev":1,"generation":1,"ops":[{"kind":"cell.set","sheet":"Sheet1","cell":"B5","input":"draft"}]}`
+	edited := run(edit, "workbook", "edit", "@workbook-binary-page", "--file", "-")
+	if retried := run(edit, "workbook", "edit", "@workbook-binary-page", "--file", "-"); string(retried) != string(edited) {
+		t.Fatalf("edit receipt changed: %s %s", edited, retried)
+	}
+	if json.Unmarshal(edited, &receipt) != nil || receipt.Rev != 2 || receipt.OperationKey.MutationID != "w1:1" {
+		t.Fatalf("edit receipt %s", edited)
+	}
+	cmd := exec.CommandContext(t.Context(), binary, "workbook", "edit", "@workbook-binary-page", "--file", "-")
+	cmd.Stdin = strings.NewReader(`{"session_id":"w2","mutation_id":"w2:1","base_rev":1,"generation":1,"ops":[{"kind":"cell.set","sheet":"Sheet1","cell":"B5","input":"mine"}]}`)
+	for _, v := range os.Environ() {
+		if !strings.HasPrefix(v, "CREWSHIP_") {
+			cmd.Env = append(cmd.Env, v)
+		}
+	}
+	cmd.Env = append(cmd.Env, "CREWSHIP_CONFIG="+cfg, "CREWSHIP_NO_SLUG_CACHE=1", "NO_COLOR=1")
+	var stdout strings.Builder
+	cmd.Stdout = &stdout
+	err = cmd.Run()
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 5 || !strings.Contains(stdout.String(), `"conflicts"`) || !strings.Contains(stdout.String(), `"draft"`) {
+		t.Fatalf("conflict exit=%v out=%s", err, stdout.String())
+	}
+	run(`{"session_id":"w2","mutation_id":"w2:2","base_rev":1,"generation":1,"ops":[{"kind":"cell.set","sheet":"Sheet1","cell":"C5","input":"other"}]}`, "workbook", "edit", "@workbook-binary-page", "--file", "-")
+	run("", "workbook", "status", "@workbook-binary-page", "w2:2")
 }

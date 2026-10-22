@@ -134,14 +134,18 @@ func (e WorkerEngine) Run(ctx context.Context, input []byte, c Command) (result 
 	if err != nil {
 		return EngineResult{}, err
 	}
-	if c.Kind == "cell.set" {
+	sheet := c.Sheet
+	if c.Kind == "cells.set" {
+		sheet = c.Cells[0].Sheet
+	}
+	if c.Kind != "import" {
 		index, ok := workbook["active_sheet"].(json.Number)
 		if !ok {
 			return EngineResult{}, ErrInvalid
 		}
 		n, err := index.Int64()
 		sheets := workbook["sheets"].([]any)
-		if err != nil || n < 0 || n >= int64(len(sheets)) || sheets[n].(map[string]any)["name"] != c.Sheet {
+		if err != nil || n < 0 || n >= int64(len(sheets)) || sheets[n].(map[string]any)["name"] != sheet {
 			return EngineResult{}, ErrInvalid
 		}
 	}
@@ -191,11 +195,20 @@ func (e WorkerEngine) Run(ctx context.Context, input []byte, c Command) (result 
 	if c.Kind == "import" {
 		return EngineResult{Base: normalized, Result: normalized}, nil
 	}
-	params, err := json.Marshal(map[string]string{"cell": c.Cell, "input": c.Input})
-	if err != nil {
-		return EngineResult{}, err
+	cells := c.Cells
+	if c.Kind == "cell.set" {
+		cells = []CellInput{{c.Sheet, c.Cell, c.Input}}
 	}
-	if err = run("run", "--in", base, "--cmd", "cell.set="+string(params), "--out", resultPath, "--quiet"); err != nil {
+	// All cells of one mutation are applied in a single engine run, atomically.
+	args := []string{"run", "--in", base}
+	for _, cell := range cells {
+		params, err := json.Marshal(map[string]string{"cell": cell.Cell, "input": cell.Input})
+		if err != nil {
+			return EngineResult{}, err
+		}
+		args = append(args, "--cmd", "cell.set="+string(params))
+	}
+	if err = run(append(args, "--out", resultPath, "--quiet")...); err != nil {
 		return EngineResult{}, err
 	}
 	data, err := readBounded(resultPath)

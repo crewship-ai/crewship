@@ -90,7 +90,7 @@ func TestWorkbookActualHostProcessDeathBeforeAndAfterCommit(t *testing.T) {
 				t.Fatalf("candidate reran after confirmed commit: %d", engine.calls.Load())
 			}
 			var count int
-			if err = db.QueryRow(`SELECT count(*) FROM gridcraft_revisions`).Scan(&count); err != nil || count != 2 {
+			if err = db.QueryRow(`SELECT count(*) FROM gridcraft_audit`).Scan(&count); err != nil || count != 2 {
 				t.Fatalf("duplicate revision=%d %v", count, err)
 			}
 		})

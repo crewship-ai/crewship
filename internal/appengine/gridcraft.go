@@ -86,7 +86,7 @@ func (g GridCraft) Prepare(ctx context.Context, b Binding, s State, c Command) (
 	}
 	effects := []string{"*"}
 	var derived *Derived
-	if c.Kind == "cell.set" {
+	if c.Kind == "cell.set" || c.Kind == "cells.set" {
 		original, err := decodeWorkbook(input)
 		if err != nil {
 			return Candidate{}, err
@@ -98,15 +98,15 @@ func (g GridCraft) Prepare(ctx context.Context, b Binding, s State, c Command) (
 		if err != nil {
 			return Candidate{}, err
 		}
-		target := c.Sheet + "!" + c.Cell
-		derived, err = checkWorkbookEffects(base, comparison, target, result.Result, result.Recalc)
+		targets := commandTargets(c)
+		derived, err = checkWorkbookEffects(base, comparison, targets, result.Result, result.Recalc)
 		if err != nil {
 			return Candidate{}, err
 		}
-		// The mandate covers the authored target; verified recalculation is its
+		// The mandate covers the authored targets; verified recalculation is their
 		// consequence, not a separate effect. A semantic no-op still receives one
 		// durable operation receipt.
-		effects = []string{target}
+		effects = targets
 	}
 	canonical, err := json.Marshal(candidate)
 	if err != nil {
@@ -168,9 +168,13 @@ const maxDerivedAudit = 100
 // formula cell). Outside the target, authored data must stay identical and no
 // cell may appear or disappear. A formula cell's value may change only when the
 // cell holds the same formula before and after and both values are plain
-// results. Such derived changes, and any formula in the target itself, need the
+// results. Such derived changes, and any formula in a target itself, need the
 // worker's full recalculation report for exactly these result bytes.
-func checkWorkbookEffects(before, after map[string]any, target string, raw []byte, recalc *RecalcVerification) (*Derived, error) {
+func checkWorkbookEffects(before, after map[string]any, targets []string, raw []byte, recalc *RecalcVerification) (*Derived, error) {
+	target := map[string]bool{}
+	for _, t := range targets {
+		target[t] = true
+	}
 	a, err := extractCells(before)
 	if err != nil {
 		return nil, err
@@ -191,7 +195,7 @@ func checkWorkbookEffects(before, after map[string]any, target string, raw []byt
 		if isFormulaCell(v) {
 			formulas++
 		}
-		if k == target || reflect.DeepEqual(v, a[k]) {
+		if target[k] || reflect.DeepEqual(v, a[k]) {
 			continue
 		}
 		old, ok := a[k]
@@ -201,11 +205,16 @@ func checkWorkbookEffects(before, after map[string]any, target string, raw []byt
 		derived = append(derived, k)
 	}
 	for k := range a {
-		if _, ok := b[k]; !ok && k != target {
+		if _, ok := b[k]; !ok && !target[k] {
 			return nil, ErrEffects
 		}
 	}
-	targetFormula := isFormulaCell(b[target])
+	targetFormula := false
+	for t := range target {
+		if isFormulaCell(b[t]) {
+			targetFormula = true
+		}
+	}
 	if len(derived) == 0 && !targetFormula {
 		return nil, nil
 	}

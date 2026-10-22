@@ -6,7 +6,8 @@ tag: Experimental
 
 The experimental `workbook` commands are disabled on the server by default.
 They support personal, human-owned private Pages and native GridCraft JSON.
-There is no embedded spreadsheet editor or collaborative editing in this pilot.
+There is no embedded spreadsheet editor in this pilot; the Page owner can edit
+cells from several client sessions through `workbook edit`.
 
 Opening a workbook Page in the web app shows a read-only preview of its sheets
 (values, with formulas as tooltips) and its revision; Refresh, or returning to
@@ -16,6 +17,7 @@ workbook Page cannot carry panels.
 ```bash
 crewship workbook create my-book --name "My book"
 crewship workbook import @PAGE_ID --file import.json
+crewship workbook edit @PAGE_ID --file edit.json
 crewship workbook read @PAGE_ID
 crewship workbook status @PAGE_ID import-1
 crewship workbook admit @PAGE_ID --file mandate.json
@@ -38,7 +40,7 @@ Import a native workbook with an immutable request envelope:
 
 The `snapshot` above is a placeholder: supply a valid workbook exported by the
 pinned GridCraft version. For an existing workbook, retain the read revision and
-generation as preconditions. Humans change workbook contents by importing files.
+generation as preconditions. An import always requires the current revision.
 The server rejects incomplete or unsupported workbook files. A stored workbook
 is limited to 1 MiB of compact JSON (roughly 10,000 simple cells); the engine's
 indented working files may be up to four times larger.
@@ -92,6 +94,7 @@ API equivalents:
 | POST | `/api/v1/workbooks` | `workbook create` |
 | GET | `/api/v1/pages/{slug}/workbook` | `workbook read` |
 | POST | `/api/v1/pages/{slug}/workbook/operations` | `workbook import` |
+| POST | `/api/v1/pages/{slug}/workbook/edits` | `workbook edit` |
 | GET | `/api/v1/pages/{slug}/workbook/operations/{mutation}` | `workbook status` |
 | POST | `/api/v1/pages/{slug}/workbook/mandates` | `workbook admit` |
 | DELETE | `/api/v1/pages/{slug}/workbook/mandates/{mandate}` | `workbook revoke` |
@@ -103,6 +106,88 @@ mandate; `404` hides missing or inaccessible workbooks; `409` reports a conflict
 stale candidate or operation in progress; `429` reports capacity/history limits;
 `500` reports storage failure; `503` reports an unavailable experimental runtime.
 Every endpoint requires current authorization and returns `Cache-Control: no-store`.
+
+The Page owner edits cells with an atomic edit from one client session:
+
+```json
+{"session_id":"s1","mutation_id":"s1:17","base_rev":41,"generation":1,"ops":[{"kind":"cell.set","sheet":"Sheet1","cell":"B5","input":"draft"}]}
+```
+
+An edit holds 1 to 64 `cell.set` operations on one sheet (the active sheet), each
+with an input of at most 8 KiB; it is committed entirely or not at all, and its
+recorded form may not exceed 1 MiB of JSON. The `mutation_id` is
+`<session_id>:<seq>` and must be retried with the same bytes; `session_id` is
+1 to 128 characters from `A-Z`, `a-z`, `0-9`, `_` and `-`, and is part of the
+request fingerprint. An import never carries a `session_id`.
+
+Concurrency is per written cell: an edit whose `base_rev` is behind the current
+revision is applied to the current revision unless another writer (another
+session, another person or an agent) changed one of its cells since `base_rev`,
+an import happened in between, or it lags more than 256 revisions. Edits from
+the same session never conflict with each other. Formula cells are recalculated
+as described above, also for the owner: an edit that recalculates other cells
+in a workbook with volatile functions, or whose recalculation cannot be
+verified, fails with `403 effect_out_of_mandate`.
+
+Only the cells an edit writes are checked, not the cells its inputs were derived
+from. If a client computes `B2` from the value of `C3` it saw at `base_rev`, and
+another writer has changed `C3` since, the edit still commits; formulas are
+always recalculated on the current revision, but a literal typed from an old
+value is not. In the same way an agent's write to its target also changes every
+formula that depends on it, including formulas the owner added after admitting
+the mandate, and two sessions can each write half of a circular reference, which
+the engine then reports as an error value. Clients that derive literals from
+other cells should send an edit based on the current revision or reread before
+committing; for agents, admit a mandate on the revision the instruction was
+given for and revoke it when that basis no longer holds.
+
+A rejected edit or import returns `409`:
+
+```json
+{"error":"precondition_failed","head_rev":44,"snapshot_required":false,"conflicts":[{"sheet":"Sheet1","cell":"B5","input":"7","rev":43,"actor_label":"Ada"}]}
+```
+
+- `conflicts` lists each target cell that another writer changed since
+  `base_rev`, with the cell's input in the current revision, the revision that
+  wrote it and who wrote it, by display name only. Resolve the conflict and
+  send the result as a new edit with a new `mutation_id`.
+- `snapshot_required: true` means retrying the same packet can never succeed:
+  the generation differs, `base_rev` is ahead of the current revision, an import
+  or pruned history lies in between, the edit lags more than 256 revisions, or
+  an import was based on an older revision. Reread the workbook, then send a new
+  edit or import with a new `mutation_id`.
+- With no conflicts and `snapshot_required: false`, the workbook changed while
+  the edit was computed; retry the same packet unchanged.
+
+Other `409` codes:
+
+- `conflict`: the `mutation_id` was already used for a different request. A
+  retry with that id never succeeds; send the intended change with a new id.
+- `in_progress`: an operation with this `mutation_id` is still running. Wait
+  and query its status, or retry the same packet later.
+- `stale_generation`: the server's lease for this operation expired before it
+  could commit (for example after a restart). Retry the same packet.
+
+Agents get `precondition_failed` without `snapshot_required` or conflict
+details. Because a mandate is bound to its base revision, an agent that keeps
+getting `precondition_failed` for the same target should treat the mandate as
+no longer applicable and ask for a new one rather than retry indefinitely.
+
+An agent mandate keeps its original base revision, so an agent can still change
+its target after the owner edited other cells, but not after someone else
+changed that target. Mandate IDs starting with `human-` are reserved for human
+operations and rejected on admission.
+
+History stores a full snapshot for imports and every 50th revision, and the
+command and resulting snapshot hash of every revision, so any revision can be
+rebuilt from the nearest checkpoint with the pinned engine and verified. The
+history quota counts those snapshots and commands. When it is reached, the
+server drops history that no rebase can use: checkpoints and commands older than
+the newest checkpoint at least 256 revisions back. If the last 256 revisions do
+not fit either, the new revision becomes a checkpoint and all earlier commands
+are dropped; edits based on older revisions then get `snapshot_required`.
+Audit rows and receipts are kept. `429 history_quota_exceeded` remains only for
+a single revision whose snapshot and command alone exceed the quota.
 
 A receipt is immutable and confirms durable storage, with `durability: node`.
 Its status response separately reports delivery and the current head. Delivery
@@ -123,6 +208,12 @@ Read the confirmed native snapshot and its revision/generation.
 ## `crewship workbook import <page-slug|@ID>`
 
 `--file <path|->` supplies the exact native import envelope. Retain it on retry.
+
+## `crewship workbook edit <page-slug|@ID>`
+
+`--file <path|->` supplies the exact edit packet. Retain it on retry. Only the
+Page owner may edit. On a conflict the command prints the `409` body and exits
+with status 5.
 
 ## `crewship workbook status <page-slug|@ID> <operation-id>`
 

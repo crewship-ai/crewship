@@ -86,9 +86,9 @@ func (e *fakeEngine) Prepare(ctx context.Context, b Binding, s State, c Command)
 	}
 	data := c.Snapshot
 	effects := []string{"*"}
-	if c.Kind == "cell.set" {
+	if c.Kind != "import" {
 		data = json.RawMessage(`{"sheets":[{"B2":"42"}]}`)
-		effects = []string{"Sheet1!B2"}
+		effects = commandTargets(c)
 	}
 	return NewCandidate(b, data, effects), nil
 }
@@ -132,9 +132,10 @@ func TestImportEditReopenAndExactRetryAfterHeadAdvanced(t *testing.T) {
 	if err != nil || state.Rev != 3 || string(state.Snapshot) != `{"sheets":[{"B2":"42"}]}` {
 		t.Fatalf("state=%+v err=%v", state, err)
 	}
-	for _, table := range []string{"gridcraft_revisions", "gridcraft_audit", "gridcraft_outbox"} {
+	// Cell commits between checkpoints keep commands, not snapshots.
+	for table, want := range map[string]int{"gridcraft_revisions": 1, "gridcraft_audit": 3, "gridcraft_outbox": 3} {
 		var count int
-		if err = db.QueryRow("SELECT count(*) FROM " + table).Scan(&count); err != nil || count != 3 {
+		if err = db.QueryRow("SELECT count(*) FROM " + table).Scan(&count); err != nil || count != want {
 			t.Fatalf("%s count=%d err=%v", table, count, err)
 		}
 	}
@@ -296,7 +297,7 @@ func TestExpiredReservationTakeoverFencesOldCandidate(t *testing.T) {
 		t.Fatalf("old candidate: %v", err)
 	}
 	var n int
-	if err := db.QueryRow(`SELECT count(*) FROM gridcraft_revisions`).Scan(&n); err != nil || n != 2 {
+	if err := db.QueryRow(`SELECT count(*) FROM gridcraft_audit`).Scan(&n); err != nil || n != 2 {
 		t.Fatalf("confirmed twice %d: %v", n, err)
 	}
 }
