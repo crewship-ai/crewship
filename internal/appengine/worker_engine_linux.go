@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"runtime/debug"
 	"strconv"
 	"sync"
 	"syscall"
@@ -90,10 +89,7 @@ func (e WorkerEngine) execEngine(ctx context.Context, dir string, args []string)
 		launcher = self
 	}
 	limits := e.Limits.resolved()
-	argv := []string{EngineSandboxFlag, "--rw", dir, "--ro", e.Binary,
-		"--as", strconv.FormatUint(limits.AddressSpace, 10),
-		"--fsize", strconv.FormatUint(limits.FileSize, 10),
-		"--cpu", strconv.FormatUint(limits.CPUSeconds, 10)}
+	argv := []string{EngineSandboxFlag, "--rw", dir, "--ro", e.Binary}
 	for _, root := range append(append([]string(nil), defaultEngineReadOnly...), e.ReadOnly...) {
 		argv = append(argv, "--ro", root)
 	}
@@ -111,9 +107,15 @@ func (e WorkerEngine) execEngine(ctx context.Context, dir string, args []string)
 	// A new session (and so a new process group with the same ID) per
 	// execution: setpgid can move a descendant only within its session, so a
 	// descendant either keeps this session ID or calls setsid.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Pdeathsig: syscall.SIGKILL}
+	// The launcher is traced only until it executes the engine: the worker
+	// then sets the engine's resource limits while it is stopped at exec,
+	// before it runs any instruction, and detaches. The Go launcher itself
+	// never runs under the engine's address space limit.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Pdeathsig: syscall.SIGKILL, Ptrace: true}
 
 	run := &engineRun{}
+	// ptrace requests must come from the thread that started the tracee.
+	runtime.LockOSThread()
 	engineRuns.Lock()
 	err := cmd.Start()
 	if err == nil {
@@ -122,9 +124,12 @@ func (e WorkerEngine) execEngine(ctx context.Context, dir string, args []string)
 	}
 	engineRuns.Unlock()
 	if err != nil {
+		runtime.UnlockOSThread()
 		return fmt.Errorf("workbook engine execution failed: %w", err)
 	}
 	group := run.session
+	limitErr := limitEngineAtExec(group, limits)
+	runtime.UnlockOSThread()
 	// Cancellation kills the group only while the leader has not exited. The
 	// leader stays unreaped until the sweep ends, so the ID cannot be reused.
 	var leader sync.Mutex
@@ -164,6 +169,10 @@ func (e WorkerEngine) execEngine(ctx context.Context, dir string, args []string)
 	}
 	if waitErr != nil {
 		return fmt.Errorf("%w: engine wait failed", ErrEngineUnavailable)
+	}
+	if limitErr != nil {
+		// The engine may have run without its limits; never use its output.
+		return fmt.Errorf("workbook engine execution failed: %w", limitErr)
 	}
 	if runErr != nil {
 		return fmt.Errorf("workbook engine execution failed: %w", runErr)
@@ -391,7 +400,6 @@ const landlockFileRights = unix.LANDLOCK_ACCESS_FS_EXECUTE | unix.LANDLOCK_ACCES
 func ExecEngineSandbox(args []string) error {
 	var rw string
 	var ro []string
-	var limits EngineLimits
 	for len(args) > 0 && args[0] != "--" {
 		if len(args) < 2 {
 			return errors.New("invalid engine sandbox arguments")
@@ -404,25 +412,12 @@ func ExecEngineSandbox(args []string) error {
 			rw = args[1]
 		case "--ro":
 			ro = append(ro, args[1])
-		case "--as", "--fsize", "--cpu":
-			n, err := strconv.ParseUint(args[1], 10, 64)
-			if err != nil || n == 0 {
-				return errors.New("invalid engine sandbox arguments")
-			}
-			switch args[0] {
-			case "--as":
-				limits.AddressSpace = n
-			case "--fsize":
-				limits.FileSize = n
-			default:
-				limits.CPUSeconds = n
-			}
 		default:
 			return errors.New("invalid engine sandbox arguments")
 		}
 		args = args[2:]
 	}
-	if rw == "" || len(args) < 2 || limits.AddressSpace == 0 || limits.FileSize == 0 || limits.CPUSeconds == 0 {
+	if rw == "" || len(args) < 2 {
 		return errors.New("invalid engine sandbox arguments")
 	}
 	binary, argv := args[1], args[1:]
@@ -498,48 +493,96 @@ func ExecEngineSandbox(args []string) error {
 	if err := installEngineSeccomp(); err != nil {
 		return err
 	}
-	return execWithLimits(binary, argv, os.Environ(), limits)
+	// Executed from the main thread, the only traced one (see init), so the
+	// worker sees the exec stop and sets the engine's limits.
+	return unix.Exec(binary, argv, os.Environ())
 }
 
-// execWithLimits applies the engine's resource limits and replaces the
-// process with the engine. The limits come last so the Go launcher never runs
-// under the engine's address space limit; between them and execve nothing
-// allocates and the garbage collector is off, so the runtime does not need
-// new mappings in that window.
-func execWithLimits(binary string, argv, env []string, limits EngineLimits) error {
-	path, err := syscall.BytePtrFromString(binary)
-	if err != nil {
-		return err
+// In launcher mode keep the main goroutine on the main thread: it is the
+// thread the worker traces, and the engine must be executed from it.
+func init() {
+	if len(os.Args) > 1 && os.Args[1] == EngineSandboxFlag {
+		runtime.LockOSThread()
 	}
-	argvp, err := syscall.SlicePtrFromStrings(argv)
-	if err != nil {
-		return err
-	}
-	envp, err := syscall.SlicePtrFromStrings(env)
-	if err != nil {
-		return err
-	}
-	resources := [...]struct {
-		resource int
-		limit    unix.Rlimit
-	}{
-		{unix.RLIMIT_AS, unix.Rlimit{Cur: limits.AddressSpace, Max: limits.AddressSpace}},
-		{unix.RLIMIT_FSIZE, unix.Rlimit{Cur: limits.FileSize, Max: limits.FileSize}},
-		{unix.RLIMIT_CPU, unix.Rlimit{Cur: limits.CPUSeconds, Max: limits.CPUSeconds}},
-		{unix.RLIMIT_CORE, unix.Rlimit{}},
-	}
-	debug.SetGCPercent(-1)
-	for i := range resources {
-		if _, _, errno := unix.RawSyscall6(unix.SYS_PRLIMIT64, 0, uintptr(resources[i].resource),
-			uintptr(unsafe.Pointer(&resources[i].limit)), 0, 0, 0); errno != 0 {
-			return fmt.Errorf("engine resource limit: %w", errno)
+}
+
+// waitChild mirrors the SIGCHLD part of siginfo_t (identical on amd64 and
+// arm64): signo, errno, code, padding, pid, uid, status.
+type waitChild struct {
+	signo, errno, code, _ int32
+	pid, uid, status      int32
+}
+
+// si_code values of a stopped child (CLD_TRAPPED, CLD_STOPPED).
+const cldTrapped, cldStopped = 4, 5
+
+var errEngineLimitsNotApplied = errors.New("engine resource limits not applied")
+
+// limitEngineAtExec follows the traced launcher to its execve of the engine.
+// At that stop no engine instruction has run; the worker applies the limits to
+// the stopped process and detaches. If the launcher exits instead, or the stop
+// is never seen, the limits are not proven and the execution must fail. The
+// caller holds the tracing thread. Exits are never reaped here.
+func limitEngineAtExec(pid int, limits EngineLimits) error {
+	optionsSet := false
+	for {
+		var info unix.Siginfo
+		if err := unix.Waitid(unix.P_PID, pid, &info, unix.WEXITED|unix.WSTOPPED|unix.WNOWAIT, nil); err != nil {
+			if errors.Is(err, unix.EINTR) {
+				continue
+			}
+			return err
+		}
+		child := (*waitChild)(unsafe.Pointer(&info))
+		if child.code != cldTrapped && child.code != cldStopped {
+			return errEngineLimitsNotApplied
+		}
+		// Consume the stop only; an exit stays for the caller to see.
+		if err := unix.Waitid(unix.P_PID, pid, &info, unix.WSTOPPED, nil); err != nil {
+			if errors.Is(err, unix.EINTR) {
+				continue
+			}
+			return err
+		}
+		status := int(child.status)
+		switch {
+		case !optionsSet && status == int(unix.SIGTRAP):
+			// The launcher's own exec. Report the next exec as an event and
+			// kill the tracee should the worker die while tracing.
+			if err := unix.PtraceSetOptions(pid, unix.PTRACE_O_TRACEEXEC|unix.PTRACE_O_EXITKILL); err != nil {
+				return err
+			}
+			optionsSet = true
+			if err := unix.PtraceCont(pid, 0); err != nil {
+				return err
+			}
+		case optionsSet && status == int(unix.SIGTRAP)|unix.PTRACE_EVENT_EXEC<<8:
+			for _, l := range []struct {
+				resource int
+				limit    uint64
+			}{
+				{unix.RLIMIT_AS, limits.AddressSpace},
+				{unix.RLIMIT_FSIZE, limits.FileSize},
+				{unix.RLIMIT_CPU, limits.CPUSeconds},
+				{unix.RLIMIT_CORE, 0},
+			} {
+				if err := unix.Prlimit(pid, l.resource, &unix.Rlimit{Cur: l.limit, Max: l.limit}, nil); err != nil {
+					return err
+				}
+			}
+			return unix.PtraceDetach(pid)
+		default:
+			// A signal for the launcher (for example Go runtime preemption):
+			// deliver it and keep following.
+			signal := status & 0xff
+			if status>>8 != 0 {
+				signal = 0
+			}
+			if err := unix.PtraceCont(pid, signal); err != nil {
+				return err
+			}
 		}
 	}
-	_, _, errno := unix.RawSyscall(unix.SYS_EXECVE, uintptr(unsafe.Pointer(path)),
-		uintptr(unsafe.Pointer(&argvp[0])), uintptr(unsafe.Pointer(&envp[0])))
-	runtime.KeepAlive(argvp)
-	runtime.KeepAlive(envp)
-	return fmt.Errorf("engine exec: %w", errno)
 }
 
 func landlockAllow(ruleset int, path string, access uint64, optional bool) error {

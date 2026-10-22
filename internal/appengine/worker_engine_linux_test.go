@@ -100,6 +100,14 @@ func sandboxProbe() int {
 		}
 		return 13
 	}
+	// x32 numbering (bit 30) on the native architecture is refused, not
+	// merely unimplemented.
+	if _, _, errno := unix.Syscall(0x40000000|unix.SYS_GETPID, 0, 0, 0); errno != unix.EPERM {
+		return 15
+	}
+	if !foreignArchRefused() {
+		return 16
+	}
 	// Ordinary process creation still works under the filter.
 	if err := exec.Command("/usr/bin/true").Run(); err != nil {
 		return 14
@@ -866,5 +874,42 @@ func BenchmarkRealWorkerEngineCellSet(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+// The worker sets the engine's limits while it is stopped at exec, so the Go
+// launcher never runs under them. Before that, a launcher lowering its own
+// address space limit crashed now and then with "cannot allocate memory",
+// mostly in race builds. Run many launcher executions to catch a regression.
+func TestWorkerEngineLauncherNeverRunsUnderEngineLimits(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long launcher loop")
+	}
+	engine := fakeCLI(t, `cp "$src" "$dst"`)
+	runs := 500
+	if os.Getenv("CREWSHIP_TEST_LAUNCHER_RUNS") != "" {
+		if _, err := fmt.Sscanf(os.Getenv("CREWSHIP_TEST_LAUNCHER_RUNS"), "%d", &runs); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const parallel = 4
+	var failures atomic.Int32
+	var first atomic.Value
+	var wg sync.WaitGroup
+	for w := range parallel {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := w; i < runs; i += parallel {
+				if _, err := importBlank(t, t.Context(), engine); err != nil {
+					failures.Add(1)
+					first.CompareAndSwap(nil, err.Error())
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	if n := failures.Load(); n != 0 {
+		t.Fatalf("%d of %d launcher executions failed; first: %v", n, runs, first.Load())
 	}
 }

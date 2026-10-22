@@ -59,7 +59,9 @@ and the digest is verified again. Each CLI execution:
   with namespace flags (`clone3` gets `ENOSYS`, so libc falls back to `clone`).
   No engine process can start a session or hide descendants from the worker.
   If seccomp is unavailable, the worker refuses to start;
-- has its own resource limits, inherited by its descendants: address space
+- has its own resource limits, inherited by its descendants (the worker
+  traces the launcher only until it executes the engine and sets the limits
+  while the engine is stopped at exec, before its first instruction): address space
   (`RLIMIT_AS`, default 256 MiB, `CREWSHIP_GRIDCRAFT_ENGINE_MEMORY_MIB`, 64 to
   4096), largest written file (`RLIMIT_FSIZE`, default 4 MiB,
   `CREWSHIP_GRIDCRAFT_ENGINE_FILE_MIB`, 2 to 32), CPU time (`RLIMIT_CPU`,
