@@ -80,6 +80,10 @@ type RecoverOptions struct {
 	// Force allows a non-empty data directory: its database is replaced and
 	// files the bundle carries are overwritten.
 	Force bool
+	// DiscardWorkbooks acknowledges that a forced recovery destroys every
+	// workbook in the target database; no bundle contains one. Without it a
+	// forced recovery over workbooks refuses (ErrWorkbookTargetReplacement).
+	DiscardWorkbooks bool
 	// Drill restores for a test only: no key files are written and auth keys
 	// are not rotated (the directory is thrown away); the kit stays in memory
 	// for the drill's checks. The report is recorded as kind drill.
@@ -195,7 +199,7 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport
 
 	// 2. The target.
 	if opts.Force {
-		if err := rejectPrivateArtifactRecoveryTarget(ctx, dataDir); err != nil {
+		if err := rejectPrivateArtifactRecoveryTarget(ctx, dataDir, opts.DiscardWorkbooks); err != nil {
 			return rep, err
 		}
 	}

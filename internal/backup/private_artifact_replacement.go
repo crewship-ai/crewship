@@ -97,57 +97,78 @@ func rejectPrivateArtifactWorkspaceReplacement(ctx context.Context, db *sql.DB, 
 // ErrWorkbookTargetReplacement refuses a replacement that would destroy
 // experimental workbooks. No bundle contains a workbook, so the loss would be
 // permanent; the operator acknowledges it with --discard-workbooks.
-var ErrWorkbookTargetReplacement = errors.New("backup: target workspace holds workbooks, which backups never contain; --replace would destroy them permanently")
+var ErrWorkbookTargetReplacement = errors.New("backup: target holds workbooks, which backups never contain")
 
 type workbookTargetQuerier interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
-// targetWorkbookPages lists the slugs of the Pages holding a workbook in the
+// targetWorkbookPages lists the IDs of the Pages holding a workbook in the
 // target workspaces. An installation without the workbook schema has none.
+// The IDs are opaque on purpose: a slug is usually derived from a private
+// workbook's title, and restore is an instance-admin operation.
 func targetWorkbookPages(ctx context.Context, q workbookTargetQuerier, workspaceIDs []string) ([]string, error) {
+	if len(workspaceIDs) == 0 {
+		return nil, nil
+	}
+	return workbookPageIDs(ctx, q, workspaceIDs)
+}
+
+// workbookPageIDs lists workbook Page IDs in workspaceIDs, or in the whole
+// database when workspaceIDs is empty (offline recovery replaces all of it).
+func workbookPageIDs(ctx context.Context, q workbookTargetQuerier, workspaceIDs []string) ([]string, error) {
 	var exists bool
 	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='gridcraft_heads')`).Scan(&exists); err != nil {
 		return nil, err
 	}
-	if !exists || len(workspaceIDs) == 0 {
+	if !exists {
 		return nil, nil
 	}
+	scope := "1=1"
 	args := make([]any, len(workspaceIDs))
-	for i, id := range workspaceIDs {
-		args[i] = id
+	if len(workspaceIDs) > 0 {
+		scope = equalityOrIN("h.workspace_id", len(workspaceIDs))
+		for i, id := range workspaceIDs {
+			args[i] = id
+		}
 	}
-	rows, err := q.QueryContext(ctx, `SELECT p.slug FROM gridcraft_heads h JOIN pages p ON p.id=h.page_id WHERE `+equalityOrIN("h.workspace_id", len(workspaceIDs))+` ORDER BY p.slug`, args...)
+	rows, err := q.QueryContext(ctx, `SELECT h.page_id FROM gridcraft_heads h WHERE `+scope+` ORDER BY h.page_id`, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var slugs []string
+	var ids []string
 	for rows.Next() {
-		var slug string
-		if err := rows.Scan(&slug); err != nil {
+		var id string
+		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
-		slugs = append(slugs, slug)
+		ids = append(ids, id)
 	}
-	return slugs, rows.Err()
+	return ids, rows.Err()
 }
 
-func workbookReplacementError(slugs []string) error {
+func workbookReplacementError(ids []string) error {
+	return workbookDestructionError(ids, "--replace", "restore under a new slug with --as-workspace, or acknowledge the loss with --discard-workbooks (API: discard_workbooks)")
+}
+
+func workbookDestructionError(ids []string, operation, remedy string) error {
 	const shown = 20
-	named := slugs
+	named := ids
 	more := ""
 	if len(named) > shown {
 		named = named[:shown]
-		more = fmt.Sprintf(" and %d more", len(slugs)-shown)
+		more = fmt.Sprintf(" and %d more", len(ids)-shown)
 	}
-	return fmt.Errorf("%w (workbook pages: %s%s). Save their contents first (crewship workbook read), restore under a new slug with --as-workspace, or acknowledge the loss with --discard-workbooks (API: discard_workbooks)", ErrWorkbookTargetReplacement, strings.Join(named, ", "), more)
+	return fmt.Errorf("%w; %s would destroy them (workbook page IDs: %s%s). Save their contents first (crewship workbook read), %s", ErrWorkbookTargetReplacement, operation, strings.Join(named, ", "), more, remedy)
 }
 
 // Recovery is offline. Inspect the existing database before prepareDataDir can
 // remove it; do not migrate it or follow a database symlink during this check.
-func rejectPrivateArtifactRecoveryTarget(ctx context.Context, dataDir string) error {
+// A forced recovery replaces the whole database, so every workbook on the
+// target would be lost unless discardWorkbooks acknowledges it.
+func rejectPrivateArtifactRecoveryTarget(ctx context.Context, dataDir string, discardWorkbooks bool) error {
 	path := filepath.Join(dataDir, "crewship.db")
 	info, err := os.Lstat(path)
 	if os.IsNotExist(err) {
@@ -173,6 +194,16 @@ func rejectPrivateArtifactRecoveryTarget(ctx context.Context, dataDir string) er
 			return err
 		}
 		return fmt.Errorf("%w: cannot verify target classification: %v", ErrPrivateArtifactTargetReplacement, err)
+	}
+	if discardWorkbooks {
+		return nil
+	}
+	workbooks, err := workbookPageIDs(ctx, target, nil)
+	if err != nil {
+		return fmt.Errorf("%w: cannot inspect target workbooks: %v", ErrWorkbookTargetReplacement, err)
+	}
+	if len(workbooks) > 0 {
+		return workbookDestructionError(workbooks, "recover --force", "or acknowledge the loss with --discard-workbooks")
 	}
 	return nil
 }
