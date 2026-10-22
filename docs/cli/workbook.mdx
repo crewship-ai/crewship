@@ -82,7 +82,11 @@ Publication is one-way. Removing the last editor does not make the Page private
 again.
 
 - **The editor is an ordinary Page grant** (`user`, `write`, issued by the owner).
-  `crewship page grants` lists it. `crewship page revoke <page> --user <email>`
+  `crewship workbook share` is the only way to create or renew it: the generic
+  `page grant --level write` is refused on a workbook page, so it can neither add
+  a second path to editor nor re-issue an editor's grant under another issuer.
+  `crewship page grants` lists it, and reports any write grant the current owner
+  did not issue as inert. `crewship page revoke <page> --user <email>`
   withdraws it, and the next request after that fails with `404`. Access is
   checked again inside every write transaction, so a grant revoked while a
   candidate is running commits nothing.
@@ -90,11 +94,23 @@ again.
   A workspace OWNER keeps the audited, read-only access. Workspace ADMIN role,
   folder access, crew, agent and workspace grants, `read` grants, and grants
   issued by anyone other than the current owner do not reach the contents.
-  The editor and admins see the Page name in listings. Other members do not.
+- **Who sees the name.** After publication the ordinary Page ACL decides who
+  sees the Page name and description, and workspace admins manage it too. At
+  publication that is the editors and workspace admins, but an admin can later
+  add a `read` grant (for example to the whole workspace) that shows the name to
+  more members. Such grants never reach the contents.
 - **The editor must be an active, unrestricted member.** A suspended, restricted
   or departed editor loses access, and so does every editor when the owner does.
-- **History is not shared.** Editors read the current head. Earlier revisions
-  and other people's operation status stay unavailable.
+- **History is not shared.** Editors read the full current workbook, including
+  every sheet and the revision number (so how many revisions it has had), but
+  not earlier revisions or other people's operation status. The Page's spec
+  versions (name and description history) stay readable only to the owner.
+- **Only the owner deletes, renames or rolls back the Page**, before and after
+  publication. Workbooks have no backup or archive, so workspace admins, the
+  workspace OWNER and editors are refused.
+- **Editors share the history quota.** Every import by an editor counts toward
+  the workbook's revision and size limits. When the quota is full, writes are
+  refused for everyone, including the owner.
 - **Agents need proposals.** Agent read, apply and status return
   `409 proposal_required` on a shared workbook. So does a new mandate.
   Workbooks do not support proposals yet, so there is no direct agent fallback.

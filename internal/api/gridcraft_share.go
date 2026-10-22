@@ -115,7 +115,7 @@ func (h *gridcraftHTTP) share(w http.ResponseWriter, r *http.Request) {
 	out := gridcraftShared{Page: rec.Slug, Editor: editorRef, EditorUserID: editorID}
 	if rec.PrivateAudience {
 		if !req.Publish {
-			replyError(w, http.StatusConflict, "publication_required: sharing ends this workbook's private audience; the editor and workspace admins will see its name, and the editor its current contents (not its history). Repeat with publish=true")
+			replyError(w, http.StatusConflict, "publication_required: sharing ends this workbook's private audience; the editor sees the full current workbook (every sheet and its revision number, not earlier revisions) and the ordinary Page ACL, which admins also manage, decides who sees its name. Repeat with publish=true")
 			return
 		}
 		stamp := tsformat.Format(time.Now())

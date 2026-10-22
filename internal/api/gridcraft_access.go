@@ -77,3 +77,16 @@ func (h *PageHandler) workbookHumanAccess(ctx context.Context, workspace, pageID
 	}
 	return nil, workbookNoAccess, appengine.ErrForbidden
 }
+
+// workbookPageRefusal is shown to anyone but the owner who tries to delete,
+// rename, roll back or read the spec history of a Page holding a workbook.
+const workbookPageRefusal = "only the workbook owner may delete, rename, roll back or read the history of this page; workbooks have no backup or archive"
+
+// workbookPageOwnerOnly keeps the lifecycle and metadata history of a Page
+// holding a workbook with its owner, before and after publication. Workbooks
+// are excluded from backups and have no archive, so an ADMIN, the workspace
+// OWNER or an editor deleting the Page would be an irreversible loss, and spec
+// versions from the private period must not become readable to others.
+func workbookPageOwnerOnly(rec *pageRecord, userID string) bool {
+	return !rec.HasWorkbook || rec.OwnerUserID == userID
+}

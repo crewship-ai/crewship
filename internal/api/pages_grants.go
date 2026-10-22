@@ -213,6 +213,14 @@ func (h *PageHandler) PutGrant(w http.ResponseWriter, r *http.Request) {
 			`a grant to everyone in the workspace carries "read" or "write", never "produce": a producer is one named subject, and everyone is not one`)
 		return
 	}
+	// A workbook editor is named only by its owner through `workbook share`,
+	// which checks the editor and keeps the owner as issuer. A generic write
+	// grant would be a second path to editor, or would silently re-anchor an
+	// existing editor's grant to another issuer and disable it.
+	if rec.HasWorkbook && req.Level == pageGrantWrite {
+		replyError(w, http.StatusConflict, "workbook editors are named by the owner with `crewship workbook share`; generic write grants are refused on a workbook page")
+		return
+	}
 	panels := trimPageGrantPanels(req.Panels)
 	if len(panels) > 0 && req.Level != pageGrantProduce {
 		replyError(w, http.StatusBadRequest, fmt.Sprintf(

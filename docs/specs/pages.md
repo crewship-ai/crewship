@@ -300,7 +300,10 @@ folders and legacy public links cannot silently publish a private artifact. Priv
 The only explicit publication path is the experimental workbook share
 (`docs/cli/workbook.mdx`). The owner confirms it, it is audited and one-way, and
 it names editors as owner-issued user `write` grants. Workbook contents remain
-limited to the owner, those editors, and the audited workspace OWNER.
+limited to the owner, those editors, and the audited workspace OWNER. Generic
+write grants are refused on a workbook Page, and a write grant not issued by
+its current owner is inert. Deleting, renaming, rolling back and reading spec
+versions of a workbook Page remain owner-only, because workbooks have no backup.
 Shared Page authorization and workspace-wide storage accounting are unchanged.
 Private read checks require a live account, workspace and membership. Guest
 catalogs omit unauthorized private outputs without failing the whole listing.

@@ -115,6 +115,10 @@ func (h *PageHandler) ListVersions(w http.ResponseWriter, r *http.Request) {
 			"only the page owner, a workspace admin, or a write grantee may read the history", "")
 		return
 	}
+	if !workbookPageOwnerOnly(rec, user.ID) {
+		h.refusePageAction(w, r, rec, workbookPageRefusal, "")
+		return
+	}
 
 	rows, err := h.pageAuthReader(r.Context()).QueryContext(r.Context(), `
 		SELECT v.seq, v.spec_json, v.created_at,
@@ -234,6 +238,10 @@ func (h *PageHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 	// the same gate PATCH runs (§7.1b rule 2).
 	if !h.mayEditSpec(r.Context(), wsID, user.ID, RoleFromContext(r.Context()), rec) {
 		h.refusePageAction(w, r, rec, "only the page owner, a workspace admin, or a write grantee may roll this page back", "")
+		return
+	}
+	if !workbookPageOwnerOnly(rec, user.ID) {
+		h.refusePageAction(w, r, rec, workbookPageRefusal, "")
 		return
 	}
 
