@@ -3,6 +3,7 @@ package backup_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/access"
@@ -32,7 +33,7 @@ func TestPresetSelectionsBackupHistoryAndForkWithoutAuthority(t *testing.T) {
 		} else {
 			routine = "preset-routine"
 		}
-		if _, err := db.Exec(`INSERT INTO access_preset_selections(id,workspace_id,member_id,resource_kind,project_id,routine_id,preset_id,preset_version,level,definition_hash,managed_operations,selected_by,selected_at) VALUES(?,'ws_e2e_1','preset-client-member',?,?,?,?,1,'view',?,?,'old-selector','original')`, d.ID, d.Kind, project, routine, d.ID, d.Hash(), string(managed)); err != nil {
+		if _, err := db.Exec(`INSERT INTO access_preset_selections(id,workspace_id,member_id,resource_kind,project_id,routine_id,preset_id,preset_version,level,definition_hash,managed_operations,selected_by,selected_at) VALUES(?,'ws_e2e_1','preset-client-member',?,?,?,?,?,?,?,?,'old-selector','original')`, fmt.Sprintf("%s-v%d", d.ID, d.Version), d.Kind, project, routine, d.ID, d.Version, d.Levels[len(d.Levels)-1].Level, d.Hash(), string(managed)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -40,7 +41,9 @@ func TestPresetSelectionsBackupHistoryAndForkWithoutAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(dump.Tables["access_preset_selections"]) != 2 {
+	// One explicit record per catalog version: later versions never replace
+	// an earlier version's record for the same member and resource.
+	if len(dump.Tables["access_preset_selections"]) != len(access.PresetCatalog()) {
 		t.Fatal("explicit choice history lost")
 	}
 	found := false

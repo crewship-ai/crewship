@@ -14,7 +14,7 @@ import (
 )
 
 // A Guest edits the shared collaborative draft, never the live recipe. The
-// trusted publication path must still test and review the exact draft revision.
+// publication path separately authorizes and reviews the exact draft revision.
 // Author identities, trigger activation, origin and gate overrides are absent.
 type guestRoutineDraftContent struct {
 	DraftID      string          `json:"draft_id"`
@@ -27,7 +27,8 @@ type guestRoutineDraftContent struct {
 
 type guestRoutineDraft struct {
 	guestRoutineDraftContent
-	CanEdit bool `json:"can_edit"`
+	CanEdit    bool `json:"can_edit"`
+	CanPublish bool `json:"can_publish"`
 }
 
 func guestRoutineDraftError(w http.ResponseWriter, err error) {
@@ -100,6 +101,15 @@ func (r *Router) restrictedRoutineDraft(w http.ResponseWriter, req *http.Request
 			return
 		}
 	}
+	canPublish := false
+	if canScope(req.Context(), "workspace:admin") {
+		publishErr := store.CheckIn(req.Context(), tx, user.ID, workspace, access.Right{Kind: "routine", ID: routineID, Operation: "publish"})
+		if publishErr != nil && !errors.Is(publishErr, access.ErrDenied) {
+			guestRoutineDraftError(w, publishErr)
+			return
+		}
+		canPublish = publishErr == nil
+	}
 	drafts := pipeline.NewStore(r.db)
 	current, err := drafts.GetDraftIn(req.Context(), tx, workspace, slug)
 	if err != nil {
@@ -126,7 +136,7 @@ func (r *Router) restrictedRoutineDraft(w http.ResponseWriter, req *http.Request
 		content.Description = &empty
 	}
 	if !write {
-		writeJSON(w, 200, guestRoutineDraft{guestRoutineDraftContent: content, CanEdit: canScope(req.Context(), "workspace:admin")})
+		writeJSON(w, 200, guestRoutineDraft{guestRoutineDraftContent: content, CanEdit: canScope(req.Context(), "workspace:admin"), CanPublish: canPublish})
 		return
 	}
 	if body.DraftID != current.ID || body.Revision != current.Revision || body.BaseRevision != current.BaseRevision {
@@ -163,5 +173,5 @@ func (r *Router) restrictedRoutineDraft(w http.ResponseWriter, req *http.Request
 		notify()
 	}
 	body.DraftID, body.Revision = saved.ID, saved.Revision
-	writeJSON(w, 200, guestRoutineDraft{guestRoutineDraftContent: body, CanEdit: true})
+	writeJSON(w, 200, guestRoutineDraft{guestRoutineDraftContent: body, CanEdit: true, CanPublish: canPublish})
 }

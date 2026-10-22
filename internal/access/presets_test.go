@@ -23,7 +23,7 @@ func TestPresetCatalogV1IsImmutableAndExplicit(t *testing.T) {
 			t.Fatal("v1 includes publication")
 		}
 	}
-	if _, ok := ResolvePreset("routine-levels", 2); ok {
+	if _, ok := ResolvePreset("routine-levels", 999); ok {
 		t.Fatal("unknown version silently resolved")
 	}
 }
@@ -198,5 +198,46 @@ func TestRoutinePresetInvalidatesBothChangedGrantTargets(t *testing.T) {
 	defer tx.Rollback()
 	if _, err := s.PresetSelectionsIn(t.Context(), tx, "h2", "h1", "w"); !errors.Is(err, ErrDenied) {
 		t.Fatalf("non-admin read selection provenance: %v", err)
+	}
+}
+
+func TestPresetSelectionVersionMigrationPreservesRecords(t *testing.T) {
+	s := fixture(t)
+	policy(t, s, "h1", Right{"project", "p1", "list"}, Right{"project", "p1", "read"})
+	for _, query := range []string{`DROP TRIGGER access_preset_grant_insert`, `DROP TRIGGER access_preset_grant_delete`, `DROP TRIGGER access_preset_grant_update`, `DROP TABLE access_preset_selections`} {
+		if _, err := s.DB.Exec(query); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, file := range []string{"20261017074413_access_preset_selections.sql", "20261022114610_access_preset_selection_versions.sql"} {
+		migration, err := os.ReadFile("../database/migrations/" + file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.DB.Exec(string(migration)); err != nil {
+			t.Fatalf("%s: %v", file, err)
+		}
+		if file[0:14] == "20261017074413" {
+			insertPreset(t, s, "m1", "project", "p1", "owner")
+		}
+	}
+	if rows := selections(t, s); len(rows) != 1 || rows[0].State != "selected" || rows[0].ID != "m1p1" || rows[0].SelectedAt != "2026-10-16T00:00:00Z" {
+		t.Fatalf("upgrade changed the saved record: %+v", rows)
+	}
+	// Another version on the same resource is a separate record; the same one is not.
+	if _, err := s.DB.Exec(`INSERT INTO access_preset_selections(id,workspace_id,member_id,resource_kind,project_id,preset_id,preset_version,level,definition_hash,managed_operations,selected_at) VALUES('v2','w','m1','project','p1','project-levels',2,'view','h','["list"]','now')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.Exec(`INSERT INTO access_preset_selections(id,workspace_id,member_id,resource_kind,project_id,preset_id,preset_version,level,definition_hash,managed_operations,selected_at) VALUES('dup','w','m1','project','p1','project-levels',1,'view','h','["list"]','now')`); err == nil {
+		t.Fatal("duplicate version record accepted")
+	}
+	if _, err := s.DB.Exec(`UPDATE access_preset_selections SET workspace_id='other' WHERE id='m1p1'`); err == nil {
+		t.Fatal("binding trigger lost")
+	}
+	if _, err := s.DB.Exec(`DELETE FROM access_grants WHERE member_id='m1' AND operation='list'`); err != nil {
+		t.Fatal(err)
+	}
+	if rows := selections(t, s); len(rows) != 0 {
+		t.Fatalf("grant trigger lost after rebuild: %+v", rows)
 	}
 }

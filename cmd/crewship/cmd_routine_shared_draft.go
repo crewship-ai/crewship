@@ -21,6 +21,7 @@ type sharedRoutineDraft struct {
 	Description  *string        `json:"description" yaml:"description"`
 	Definition   map[string]any `json:"definition" yaml:"definition"`
 	CanEdit      bool           `json:"can_edit" yaml:"can_edit"`
+	CanPublish   bool           `json:"can_publish" yaml:"can_publish"`
 }
 
 func newRoutineSharedDraftCommand() *cobra.Command {
@@ -52,7 +53,7 @@ func newRoutineSharedDraftCommand() *cobra.Command {
 		if snapshot.Revision == nil || *snapshot.Revision < 0 || snapshot.BaseRevision == nil || *snapshot.BaseRevision < 0 || snapshot.Description == nil || snapshot.Name == "" || snapshot.Definition == nil {
 			return fmt.Errorf("retain draft_id, revision and base_revision; supply name, description and a definition object")
 		}
-		// can_edit is a read-only hint in the returned snapshot. Authority is
+		// can_edit and can_publish are read-only hints in the returned snapshot. Authority is
 		// always rechecked by the server; neither a hidden GET nor a retry occurs.
 		body := map[string]any{"draft_id": snapshot.DraftID, "revision": *snapshot.Revision, "base_revision": *snapshot.BaseRevision, "name": snapshot.Name, "description": *snapshot.Description, "definition": snapshot.Definition}
 		return sharedRoutineDraftRequest(args[0], body)
@@ -98,7 +99,7 @@ func sharedRoutineDraftRequest(id string, body map[string]any) error {
 	if snapshot.Revision == nil || snapshot.BaseRevision == nil {
 		return fmt.Errorf("server returned an incomplete draft snapshot")
 	}
-	return newFormatter().Auto(snapshot, []string{"NAME", "DRAFT", "REVISION", "BASE", "EDIT"}, [][]string{{snapshot.Name, snapshot.DraftID, fmt.Sprint(*snapshot.Revision), fmt.Sprint(*snapshot.BaseRevision), fmt.Sprint(snapshot.CanEdit)}})
+	return newFormatter().Auto(snapshot, []string{"NAME", "DRAFT", "REVISION", "BASE", "EDIT", "PUBLISH"}, [][]string{{snapshot.Name, snapshot.DraftID, fmt.Sprint(*snapshot.Revision), fmt.Sprint(*snapshot.BaseRevision), fmt.Sprint(snapshot.CanEdit), fmt.Sprint(snapshot.CanPublish)}})
 }
 
 func init() { pipelineCmd.AddCommand(newRoutineSharedDraftCommand()) }
