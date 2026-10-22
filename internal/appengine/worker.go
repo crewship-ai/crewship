@@ -67,20 +67,7 @@ func RunGridCraftWorker(ctx context.Context, binary, scratch string, input []byt
 	if err = os.WriteFile(source, input, 0600); err != nil {
 		return EngineResult{}, err
 	}
-	run := func(args ...string) error {
-		cmd := exec.CommandContext(ctx, binary, args...)
-		cmd.Dir = dir
-		cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + dir, "TMPDIR=" + dir}
-		cmd.WaitDelay = 2 * time.Second
-		// The CLI prints file paths. Keep them inside the worker; protocol errors do
-		// not copy process output into API responses or private Artifact logs.
-		cmd.Stdout = io.Discard
-		cmd.Stderr = io.Discard
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("workbook engine execution failed: %w", err)
-		}
-		return nil
-	}
+	run := func(args ...string) error { return runEngineProcess(ctx, binary, dir, nil, args...) }
 	if err = run("run", "--in", source, "--out", base, "--quiet"); err != nil {
 		return EngineResult{}, err
 	}
@@ -102,7 +89,7 @@ func RunGridCraftWorker(ctx context.Context, binary, scratch string, input []byt
 	if err != nil {
 		return EngineResult{}, err
 	}
-	recalc, err := verifyRecalc(ctx, binary, dir, filepath.Base(resultPath))
+	recalc, err := verifyRecalc(ctx, binary, scratch, data)
 	if err != nil {
 		return EngineResult{}, err
 	}
@@ -155,7 +142,11 @@ func ServeGridCraftWorker(ctx context.Context, binary, scratch string, in io.Rea
 	if err != nil {
 		return err
 	}
-	return json.NewEncoder(out).Encode(result)
+	// Keep the candidate bytes exactly as checked; HTML escaping would change
+	// them and break the report's digest binding.
+	enc := json.NewEncoder(out)
+	enc.SetEscapeHTML(false)
+	return enc.Encode(result)
 }
 
 const recalcReportLimit = 1 << 20
@@ -165,21 +156,39 @@ const recalcReportLimit = 1 << 20
 // with the value stored by the incremental edit. The caller has already pinned
 // the binary digest. Exit status 1 only reports differences; the parsed report
 // decides, and any other failure or malformed report rejects the candidate.
-func verifyRecalc(ctx context.Context, binary, dir, name string) (*RecalcVerification, error) {
-	var out bytes.Buffer
-	cmd := exec.CommandContext(ctx, binary, "check", name, "--json", "--tolerance", "0", "--max-report", "1")
-	cmd.Dir = dir
-	cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + dir, "TMPDIR=" + dir}
-	cmd.WaitDelay = 2 * time.Second
-	cmd.Stdout = &limitedBuffer{buf: &out, limit: recalcReportLimit}
-	cmd.Stderr = io.Discard
-	if err := cmd.Run(); err != nil {
+func verifyRecalc(ctx context.Context, binary, scratch string, data []byte) (*RecalcVerification, error) {
+	// Check exactly the bytes being returned, from a fresh private directory the
+	// earlier engine executions never saw.
+	dir, err := os.MkdirTemp(scratch, "check-")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
+	if err = writeExclusive(filepath.Join(dir, "candidate.json"), data); err != nil {
+		return nil, err
+	}
+	report, err := os.OpenFile(filepath.Join(dir, "report.json"), os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return nil, err
+	}
+	defer report.Close()
+	if err = runEngineProcess(ctx, binary, dir, report, "check", "candidate.json", "--json", "--tolerance", "0", "--max-report", "1"); err != nil {
 		var exit *exec.ExitError
 		if !errors.As(err, &exit) || exit.ExitCode() != 1 {
 			return nil, fmt.Errorf("workbook recalculation check failed: %w", err)
 		}
 	}
-	var report struct {
+	if _, err = report.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	out, err := io.ReadAll(io.LimitReader(report, recalcReportLimit+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(out) > recalcReportLimit {
+		return nil, ErrInvalid
+	}
+	var parsed struct {
 		Schema string `json:"schema"`
 		Files  []struct {
 			Opened bool    `json:"opened"`
@@ -194,21 +203,47 @@ func verifyRecalc(ctx context.Context, binary, dir, name string) (*RecalcVerific
 			} `json:"calc"`
 		} `json:"files"`
 	}
-	if err := json.Unmarshal(out.Bytes(), &report); err != nil || report.Schema != "gridcraft-check/1" || len(report.Files) != 1 || !report.Files[0].Opened || report.Files[0].Error != nil {
+	if err := json.Unmarshal(out, &parsed); err != nil || parsed.Schema != "gridcraft-check/1" || len(parsed.Files) != 1 || !parsed.Files[0].Opened || parsed.Files[0].Error != nil {
 		return nil, fmt.Errorf("%w: unreadable recalculation report", ErrCandidate)
 	}
-	c := report.Files[0].Calc
-	return &RecalcVerification{FormulaCells: c.FormulaCells, Checked: c.Checked, Mismatched: c.Mismatched, NoOracle: c.NoOracle, Volatile: c.Volatile, StaleCache: c.StaleCache}, nil
+	c := parsed.Files[0].Calc
+	sum := sha256.Sum256(data)
+	return &RecalcVerification{FormulaCells: c.FormulaCells, Checked: c.Checked, Mismatched: c.Mismatched, NoOracle: c.NoOracle, Volatile: c.Volatile, StaleCache: c.StaleCache, SHA256: hex.EncodeToString(sum[:])}, nil
 }
 
-type limitedBuffer struct {
-	buf   *bytes.Buffer
-	limit int
-}
-
-func (w *limitedBuffer) Write(p []byte) (int, error) {
-	if w.buf.Len()+len(p) > w.limit {
-		return 0, ErrInvalid
+func writeExclusive(path string, data []byte) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return err
 	}
-	return w.buf.Write(p)
+	_, err = f.Write(data)
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	return err
+}
+
+// runEngineProcess runs one engine execution in its own process group and kills
+// the whole group afterwards, so nothing the engine started can outlive it and
+// touch scratch files later. Output goes to a file, not a pipe a surviving
+// descendant could hold open. (The confined worker engine keeps the same
+// contract: one group per execution, killed after every run.)
+func runEngineProcess(ctx context.Context, binary, dir string, stdout *os.File, args ...string) error {
+	cmd := exec.CommandContext(ctx, binary, args...)
+	cmd.Dir = dir
+	cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + dir, "TMPDIR=" + dir}
+	cmd.WaitDelay = 2 * time.Second
+	// The CLI prints file paths. Keep them inside the worker; protocol errors do
+	// not copy process output into API responses or private Artifact logs.
+	if stdout != nil {
+		cmd.Stdout = stdout
+	}
+	ownProcessGroup(cmd)
+	cmd.Cancel = func() error { killProcessGroup(cmd); return nil }
+	err := cmd.Run()
+	killProcessGroup(cmd)
+	if err != nil {
+		return fmt.Errorf("workbook engine execution failed: %w", err)
+	}
+	return nil
 }

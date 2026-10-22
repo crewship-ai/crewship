@@ -66,8 +66,9 @@ value, but their formula text and style, every non-formula cell, and the set of
 cells must stay unchanged; otherwise the operation fails with
 `effect_out_of_mandate`. Recalculated values are accepted only after the worker
 recomputes every formula from scratch with the pinned engine and finds an exact
-match. Workbooks with volatile functions (for example `NOW()` or `RAND()`) cannot
-be confirmed this way, so edits that recalculate other cells are rejected. The
+match. Workbooks with volatile functions (for example `NOW()` or `RAND()`) or with
+iterative calculation enabled cannot be confirmed this way, so edits that
+recalculate other cells are rejected. The
 receipt's `effects` lists only the mandated target, not the recalculated cells.
 
 An agent retains this exact packet for apply and uncertain retries:

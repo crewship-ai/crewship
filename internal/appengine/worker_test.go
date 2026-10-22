@@ -3,6 +3,8 @@ package appengine
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"github.com/crewship-ai/crewship/internal/database"
@@ -185,15 +187,12 @@ func TestRealGridCraftRecalcVerificationDetectsTamperedValues(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			dir := t.TempDir()
-			if err = os.WriteFile(filepath.Join(dir, "candidate.json"), data, 0600); err != nil {
-				t.Fatal(err)
-			}
-			got, err := verifyRecalc(t.Context(), binary, dir, "candidate.json")
+			got, err := verifyRecalc(t.Context(), binary, t.TempDir(), data)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got.Mismatched != test.wantBad || got.verified() != (test.wantBad == 0) || got.FormulaCells != 2 {
+			sum := sha256.Sum256(data)
+			if got.Mismatched != test.wantBad || got.verified() != (test.wantBad == 0) || got.FormulaCells != 2 || got.SHA256 != hex.EncodeToString(sum[:]) {
 				t.Fatalf("verification=%+v", got)
 			}
 		})
@@ -290,5 +289,101 @@ func TestRealGridCraftLargeSheetWithinCompactLimit(t *testing.T) {
 	}
 	if len(edited.Snapshot) > MaxSnapshotBytes || len(edited.Effects) != 1 || edited.Effects[0] != "Sheet1!B2" {
 		t.Fatalf("size=%d effects=%v", len(edited.Snapshot), edited.Effects)
+	}
+}
+
+// The worker's report names the exact bytes it returns, checked from a fresh
+// private directory rather than the engine's own output file.
+func TestRealGridCraftReportBindsReturnedBytes(t *testing.T) {
+	binary := os.Getenv("CREWSHIP_TEST_GRIDCRAFT_BINARY")
+	if binary == "" {
+		t.Skip("set CREWSHIP_TEST_GRIDCRAFT_BINARY for the pinned formula engine contract")
+	}
+	raw, err := os.ReadFile("testdata/blank-workbook.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scratch := t.TempDir()
+	out, err := RunGridCraftWorker(t.Context(), binary, scratch, raw, Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "C9", Input: "=B2*2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(out.Result)
+	if out.Recalc == nil || out.Recalc.SHA256 != hex.EncodeToString(sum[:]) || !out.Recalc.verified() {
+		t.Fatalf("report=%+v", out.Recalc)
+	}
+	if left, _ := filepath.Glob(filepath.Join(scratch, "*")); len(left) != 0 {
+		t.Fatalf("scratch survived: %v", left)
+	}
+}
+
+// With iterative calculation the oracle accepts any fixed point of a cycle, so a
+// forged consistent cycle passes it. The host must refuse derived changes there.
+func TestRealGridCraftIterativeCycleRejectsDerivedChanges(t *testing.T) {
+	binary := os.Getenv("CREWSHIP_TEST_GRIDCRAFT_BINARY")
+	if binary == "" {
+		t.Skip("set CREWSHIP_TEST_GRIDCRAFT_BINARY for the pinned formula engine contract")
+	}
+	raw, err := os.ReadFile("testdata/blank-workbook.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var blank map[string]any
+	if err = json.Unmarshal(raw, &blank); err != nil {
+		t.Fatal(err)
+	}
+	blank["calc"].(map[string]any)["iterative"] = true
+	snapshot, err := json.Marshal(blank)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := localFixtureRunner{binary, t.TempDir()}
+	for _, step := range []Command{
+		{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "1"},
+		{Kind: "cell.set", Sheet: "Sheet1", Cell: "C9", Input: "=B2*2"},
+		{Kind: "cell.set", Sheet: "Sheet1", Cell: "D1", Input: "=E1"},
+		{Kind: "cell.set", Sheet: "Sheet1", Cell: "E1", Input: "=D1"},
+		{Kind: "cell.set", Sheet: "Sheet1", Cell: "F1", Input: "=D1*1000"},
+	} {
+		out, err := runner.Run(t.Context(), snapshot, step)
+		if err != nil {
+			t.Fatal(err)
+		}
+		snapshot = out.Result
+	}
+	engine := GridCraft{Runner: runner}
+	b := Binding{Engine: engine.Identity()}
+	// An honest dependent recalculation is refused under iterative calculation.
+	if _, err = engine.Prepare(t.Context(), b, State{Snapshot: snapshot}, Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "42"}); !errors.Is(err, ErrEffects) {
+		t.Fatalf("iterative recalculation: %v", err)
+	}
+	// A forged fixed point passes the oracle itself...
+	var workbook map[string]any
+	if err = json.Unmarshal(snapshot, &workbook); err != nil {
+		t.Fatal(err)
+	}
+	row := workbook["sheets"].([]any)[0].(map[string]any)["cells"].(map[string]any)["bands"].(map[string]any)["0"].(map[string]any)["rows"].(map[string]any)["0"].(map[string]any)
+	for col, value := range map[string]string{"3": "123456", "4": "123456", "5": "123456000"} {
+		row[col].(map[string]any)["value"] = map[string]any{"t": "Number", "v": json.Number(value)}
+	}
+	forged, err := json.Marshal(workbook)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := verifyRecalc(t.Context(), binary, t.TempDir(), forged)
+	if err != nil || !report.verified() {
+		t.Fatalf("expected the oracle to accept the forged fixed point: %+v %v", report, err)
+	}
+	// ...so the adapter must refuse it even with a matching report.
+	forging := runnerFunc(func(ctx context.Context, in []byte, c Command) (EngineResult, error) {
+		out, err := runner.Run(ctx, in, c)
+		if err != nil {
+			return out, err
+		}
+		return EngineResult{Base: out.Base, Result: forged, Recalc: report}, nil
+	})
+	engine = GridCraft{Runner: forging}
+	if _, err = engine.Prepare(t.Context(), b, State{Snapshot: snapshot}, Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "1"}); !errors.Is(err, ErrEffects) {
+		t.Fatalf("forged fixed point: %v", err)
 	}
 }

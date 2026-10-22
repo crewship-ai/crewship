@@ -40,13 +40,20 @@ value of a formula cell). Outside the target cell, authored data must be
 identical and no cell may be added or removed. A formula cell's value may change
 only when its formula is unchanged and both values are plain numbers, text,
 booleans or errors. The worker then reruns the pinned engine's cached-value
-oracle (`check --tolerance 0`) in a fresh process: it recomputes every formula
-from scratch and the candidate is rejected unless all formula cells are checked
-and match exactly. Volatile functions such as `NOW()` cannot be confirmed, so a
-workbook containing them rejects any edit that recalculates another cell. The
-receipt's effects list only the mandated target. The host verifies the authored
-diff itself but trusts the worker's report and the engine's formula semantics:
-the oracle is a second, independent evaluation by the same pinned engine, not a
+oracle (`check --tolerance 0`) in a fresh process over exactly the bytes it
+returns, copied into a new private directory, and reports their SHA-256. Each
+engine execution runs in its own process group, killed afterwards. The host
+requires the digest to match the result it received, counts formula cells
+itself and requires the report's count to match, and accepts derived changes
+only when every formula cell was checked and matched exactly. A formula in the
+target cell also requires a report with no mismatches. Volatile functions such
+as `NOW()` cannot be confirmed, and with iterative calculation enabled the
+oracle accepts any fixed point of a cycle, so such workbooks reject any edit
+that recalculates another cell. The receipt's effects list only the mandated
+target; the audit record adds the result digest, the recalculated cell count
+(and up to 100 addresses) and the report. The host verifies the authored diff
+itself but trusts the worker's report and the engine's formula semantics: the
+oracle is a second, independent evaluation by the same pinned engine, not a
 different implementation. An engine pin identifies trusted format semantics;
 isolation alone does not.
 
@@ -62,6 +69,11 @@ run capability, human chat principal, membership epochs, crew policy, ownership,
 Page version and private audience are checked transactionally on every use.
 The private chat is sealed before agent access. A revoked intent cannot be
 renewed, and a new run does not inherit it. Human edits are imports only.
+
+Deploy the application host before the worker image: the host decodes worker
+responses strictly, so an older host rejects the newer worker's recalculation
+report and every `cell.set` fails until the host is updated. An older worker
+without the report fails closed on the newer host for recalculated cells only.
 
 Public interface and examples: [`docs/cli/workbook.mdx`](../../docs/cli/workbook.mdx).
 

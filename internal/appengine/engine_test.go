@@ -2,9 +2,12 @@ package appengine
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -50,7 +53,7 @@ func TestGridCraftDoesNotRunArbitraryCommands(t *testing.T) {
 }
 
 // recalcBook builds a single-sheet workbook from 0-based "row,col" keys.
-func recalcBook(t *testing.T, cells map[[2]int]string) json.RawMessage {
+func recalcBook(t *testing.T, cells map[[2]int]string, iterative ...bool) json.RawMessage {
 	t.Helper()
 	bands := map[string]map[string]map[string]map[string]json.RawMessage{}
 	for at, cell := range cells {
@@ -64,7 +67,7 @@ func recalcBook(t *testing.T, cells map[[2]int]string) json.RawMessage {
 		}
 		bands[band]["rows"][row][strconv.Itoa(at[1])] = json.RawMessage(cell)
 	}
-	raw, err := json.Marshal(map[string]any{"sheets": []any{map[string]any{"name": "Sheet1", "cells": map[string]any{"bands": bands, "len": len(cells)}}}, "styles": []any{"default"}})
+	raw, err := json.Marshal(map[string]any{"sheets": []any{map[string]any{"name": "Sheet1", "cells": map[string]any{"bands": bands, "len": len(cells)}}}, "styles": []any{"default"}, "calc": map[string]any{"iterative": len(iterative) > 0 && iterative[0]}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,36 +112,56 @@ func TestGridCraftEffectsSeparateAuthoredFromDerivedRecalculation(t *testing.T) 
 		result map[[2]int]string
 		recalc *RecalcVerification
 		want   error
+		// iterative enables iterative calculation in base and result.
+		iterative bool
 	}{
-		{"target only needs no verification", with(map[[2]int]string{b2: number("42")}), nil, nil},
-		{"dependent recalculated", with(map[[2]int]string{b2: number("42"), c9: formula("B2*2", "84")}), verified, nil},
-		{"chain of dependents", with(map[[2]int]string{b2: number("42"), c9: formula("B2*2", "84"), d9: formula("C9+1", "85")}), &RecalcVerification{FormulaCells: 2, Checked: 2}, nil},
-		{"error value recalculated", with(map[[2]int]string{b2: number("0"), c9: `{"value":{"t":"Error","v":"Div0"},"formula":{"text":"B2*2","array":null},"style":0}`}), verified, nil},
-		{"recalculation without verification", with(map[[2]int]string{b2: number("42"), c9: formula("B2*2", "84")}), nil, ErrEffects},
-		{"verification reports mismatch", with(map[[2]int]string{b2: number("42"), c9: formula("B2*2", "85")}), &RecalcVerification{FormulaCells: 2, Checked: 2, Mismatched: 1}, ErrEffects},
-		{"verification skipped volatile cells", with(map[[2]int]string{b2: number("42"), c9: formula("B2*2", "84")}), &RecalcVerification{FormulaCells: 2, Checked: 1, Volatile: 1}, ErrEffects},
-		{"verification without oracle", with(map[[2]int]string{b2: number("42"), c9: formula("B2*2", "84")}), &RecalcVerification{FormulaCells: 2, Checked: 1, NoOracle: 1}, ErrEffects},
-		{"verification stale cache", with(map[[2]int]string{b2: number("42"), c9: formula("B2*2", "84")}), &RecalcVerification{FormulaCells: 2, Checked: 2, StaleCache: true}, ErrEffects},
-		{"verification checked nothing", with(map[[2]int]string{b2: number("42"), c9: formula("B2*2", "84")}), &RecalcVerification{}, ErrEffects},
-		{"formula changed", with(map[[2]int]string{b2: number("42"), c9: formula("B2*3", "126")}), verified, ErrEffects},
-		{"formula array changed", with(map[[2]int]string{b2: number("42"), c9: `{"value":{"t":"Number","v":84},"formula":{"text":"B2*2","array":"C9:C9"},"style":0}`}), verified, ErrEffects},
-		{"non-formula changed", with(map[[2]int]string{b2: number("42"), d1: number("8")}), verified, ErrEffects},
-		{"formula cell turned into value", with(map[[2]int]string{b2: number("42"), c9: number("84")}), verified, ErrEffects},
-		{"value turned into formula", with(map[[2]int]string{b2: number("42"), d1: formula("B2*2", "84")}), verified, ErrEffects},
-		{"style changed outside", with(map[[2]int]string{b2: number("42"), c9: `{"value":{"t":"Number","v":84},"formula":{"text":"B2*2","array":null},"style":1}`}), verified, ErrEffects},
-		{"extra authored field outside", with(map[[2]int]string{b2: number("42"), c9: `{"value":{"t":"Number","v":84},"formula":{"text":"B2*2","array":null},"style":0,"note":"x"}`}), verified, ErrEffects},
-		{"unsupported derived value", with(map[[2]int]string{b2: number("42"), c9: `{"value":{"t":"Array","v":[84]},"formula":{"text":"B2*2","array":null},"style":0}`}), verified, ErrEffects},
-		{"derived value with extra field", with(map[[2]int]string{b2: number("42"), c9: `{"value":{"t":"Number","v":84,"x":1},"formula":{"text":"B2*2","array":null},"style":0}`}), verified, ErrEffects},
-		{"derived value type mismatch", with(map[[2]int]string{b2: number("42"), c9: `{"value":{"t":"Number","v":"84"},"formula":{"text":"B2*2","array":null},"style":0}`}), verified, ErrEffects},
-		{"cell added outside", with(map[[2]int]string{b2: number("42"), e1: number("1")}), verified, ErrEffects},
-		{"formula cell added outside", with(map[[2]int]string{b2: number("42"), e1: formula("B2*2", "84")}), verified, ErrEffects},
-		{"cell removed outside", with(map[[2]int]string{b2: number("42")}, d1), verified, ErrEffects},
-		{"formula cell removed outside", with(map[[2]int]string{b2: number("42")}, d9), verified, ErrEffects},
+		{"target only needs no verification", with(map[[2]int]string{b2: number("42")}), nil, nil, false},
+		{"dependent recalculated", with(map[[2]int]string{b2: number("42"), c9: formula("B2*2", "84")}), verified, nil, false},
+		{"chain of dependents", with(map[[2]int]string{b2: number("42"), c9: formula("B2*2", "84"), d9: formula("C9+1", "85")}), &RecalcVerification{FormulaCells: 2, Checked: 2}, nil, false},
+		{"error value recalculated", with(map[[2]int]string{b2: number("0"), c9: `{"value":{"t":"Error","v":"Div0"},"formula":{"text":"B2*2","array":null},"style":0}`}), verified, nil, false},
+		{"recalculation without verification", with(map[[2]int]string{b2: number("42"), c9: formula("B2*2", "84")}), nil, ErrEffects, false},
+		{"verification reports mismatch", with(map[[2]int]string{b2: number("42"), c9: formula("B2*2", "85")}), &RecalcVerification{FormulaCells: 2, Checked: 2, Mismatched: 1}, ErrEffects, false},
+		{"verification skipped volatile cells", with(map[[2]int]string{b2: number("42"), c9: formula("B2*2", "84")}), &RecalcVerification{FormulaCells: 2, Checked: 1, Volatile: 1}, ErrEffects, false},
+		{"verification without oracle", with(map[[2]int]string{b2: number("42"), c9: formula("B2*2", "84")}), &RecalcVerification{FormulaCells: 2, Checked: 1, NoOracle: 1}, ErrEffects, false},
+		{"verification stale cache", with(map[[2]int]string{b2: number("42"), c9: formula("B2*2", "84")}), &RecalcVerification{FormulaCells: 2, Checked: 2, StaleCache: true}, ErrEffects, false},
+		{"verification checked nothing", with(map[[2]int]string{b2: number("42"), c9: formula("B2*2", "84")}), &RecalcVerification{}, ErrEffects, false},
+		{"formula changed", with(map[[2]int]string{b2: number("42"), c9: formula("B2*3", "126")}), verified, ErrEffects, false},
+		{"formula array changed", with(map[[2]int]string{b2: number("42"), c9: `{"value":{"t":"Number","v":84},"formula":{"text":"B2*2","array":"C9:C9"},"style":0}`}), verified, ErrEffects, false},
+		{"non-formula changed", with(map[[2]int]string{b2: number("42"), d1: number("8")}), verified, ErrEffects, false},
+		{"formula cell turned into value", with(map[[2]int]string{b2: number("42"), c9: number("84")}), verified, ErrEffects, false},
+		{"value turned into formula", with(map[[2]int]string{b2: number("42"), d1: formula("B2*2", "84")}), verified, ErrEffects, false},
+		{"style changed outside", with(map[[2]int]string{b2: number("42"), c9: `{"value":{"t":"Number","v":84},"formula":{"text":"B2*2","array":null},"style":1}`}), verified, ErrEffects, false},
+		{"extra authored field outside", with(map[[2]int]string{b2: number("42"), c9: `{"value":{"t":"Number","v":84},"formula":{"text":"B2*2","array":null},"style":0,"note":"x"}`}), verified, ErrEffects, false},
+		{"unsupported derived value", with(map[[2]int]string{b2: number("42"), c9: `{"value":{"t":"Array","v":[84]},"formula":{"text":"B2*2","array":null},"style":0}`}), verified, ErrEffects, false},
+		{"derived value with extra field", with(map[[2]int]string{b2: number("42"), c9: `{"value":{"t":"Number","v":84,"x":1},"formula":{"text":"B2*2","array":null},"style":0}`}), verified, ErrEffects, false},
+		{"derived value type mismatch", with(map[[2]int]string{b2: number("42"), c9: `{"value":{"t":"Number","v":"84"},"formula":{"text":"B2*2","array":null},"style":0}`}), verified, ErrEffects, false},
+		{"cell added outside", with(map[[2]int]string{b2: number("42"), e1: number("1")}), verified, ErrEffects, false},
+		{"formula cell added outside", with(map[[2]int]string{b2: number("42"), e1: formula("B2*2", "84")}), verified, ErrEffects, false},
+		{"cell removed outside", with(map[[2]int]string{b2: number("42")}, d1), verified, ErrEffects, false},
+		{"formula cell removed outside", with(map[[2]int]string{b2: number("42")}, d9), verified, ErrEffects, false},
+		{"report for other bytes", with(map[[2]int]string{b2: number("42"), c9: formula("B2*2", "84")}), &RecalcVerification{FormulaCells: 2, Checked: 2, SHA256: strings.Repeat("0", 64)}, ErrEffects, false},
+		{"report formula count differs from candidate", with(map[[2]int]string{b2: number("42"), c9: formula("B2*2", "84")}), &RecalcVerification{FormulaCells: 3, Checked: 3}, ErrEffects, false},
+		{"iterative calculation accepts forged fixed points", with(map[[2]int]string{b2: number("42"), c9: formula("B2*2", "84")}), verified, ErrEffects, true},
+		{"iterative calculation without derived change", with(map[[2]int]string{b2: number("42")}), nil, nil, true},
+		{"target formula verified", with(map[[2]int]string{b2: formula("1+1", "2")}), &RecalcVerification{FormulaCells: 3, Checked: 3}, nil, false},
+		{"target formula mismatched", with(map[[2]int]string{b2: formula("1+1", "3")}), &RecalcVerification{FormulaCells: 3, Checked: 3, Mismatched: 1}, ErrEffects, false},
+		{"target formula without report", with(map[[2]int]string{b2: formula("1+1", "2")}), nil, ErrEffects, false},
+		{"target formula report for other bytes", with(map[[2]int]string{b2: formula("1+1", "2")}), &RecalcVerification{FormulaCells: 3, Checked: 3, SHA256: strings.Repeat("0", 64)}, ErrEffects, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			before := recalcBook(t, base)
+			before := recalcBook(t, base, test.iterative)
+			result := recalcBook(t, test.result, test.iterative)
+			var report *RecalcVerification
+			if test.recalc != nil {
+				copied := *test.recalc
+				if copied.SHA256 == "" {
+					sum := sha256.Sum256(result)
+					copied.SHA256 = hex.EncodeToString(sum[:])
+				}
+				report = &copied
+			}
 			engine := GridCraft{Runner: runnerFunc(func(context.Context, []byte, Command) (EngineResult, error) {
-				return EngineResult{Base: before, Result: recalcBook(t, test.result), Recalc: test.recalc}, nil
+				return EngineResult{Base: before, Result: result, Recalc: report}, nil
 			})}
 			candidate, err := engine.Prepare(t.Context(), Binding{Engine: engine.Identity()}, State{Snapshot: before}, Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "42"})
 			if !errors.Is(err, test.want) {
@@ -168,5 +191,50 @@ func TestEngineResultCarriesRecalcVerificationThroughStrictDecode(t *testing.T) 
 	var old EngineResult
 	if err = DecodeStrict([]byte(`{"base":{},"result":{}}`), &old); err != nil || old.Recalc.verified() {
 		t.Fatalf("old worker: %+v %v", old.Recalc, err)
+	}
+}
+
+// Band, row and column keys must be canonical decimal: aliases such as "01",
+// "+1" or "-0" would map two JSON keys onto one cell address.
+func TestGridCraftRejectsAliasedCellKeys(t *testing.T) {
+	cell := `{"value":{"t":"Number","v":1},"formula":null,"style":0}`
+	for _, test := range []struct{ name, band, row, col string }{
+		{"canonical", "0", "1", "1"},
+		{"row leading zero", "0", "01", "1"},
+		{"col plus", "0", "1", "+1"},
+		{"col minus zero", "0", "1", "-0"},
+		{"band leading zero", "00", "1", "1"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			raw := `{"sheets":[{"name":"Sheet1","cells":{"bands":{"` + test.band + `":{"rows":{"` + test.row + `":{"` + test.col + `":` + cell + `}}}},"len":1}}]}`
+			workbook, err := decodeWorkbook([]byte(raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = extractCells(workbook)
+			if canonical := test.name == "canonical"; canonical != (err == nil) {
+				t.Fatalf("err=%v", err)
+			}
+		})
+	}
+}
+
+// The candidate carries the verified recalculation for the audit record without
+// widening its mandated effects.
+func TestGridCraftCandidateRecordsDerivedRecalculation(t *testing.T) {
+	base := map[[2]int]string{{1, 1}: number("1"), {8, 2}: formula("B2*2", "2"), {8, 3}: formula("C9+1", "3")}
+	before := recalcBook(t, base)
+	result := recalcBook(t, map[[2]int]string{{1, 1}: number("42"), {8, 2}: formula("B2*2", "84"), {8, 3}: formula("C9+1", "85")})
+	sum := sha256.Sum256(result)
+	report := &RecalcVerification{FormulaCells: 2, Checked: 2, SHA256: hex.EncodeToString(sum[:])}
+	engine := GridCraft{Runner: runnerFunc(func(context.Context, []byte, Command) (EngineResult, error) {
+		return EngineResult{Base: before, Result: result, Recalc: report}, nil
+	})}
+	candidate, err := engine.Prepare(t.Context(), Binding{Engine: engine.Identity()}, State{Snapshot: before}, Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "42"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidate.Effects) != 1 || candidate.Derived == nil || candidate.Derived.Count != 2 || strings.Join(candidate.Derived.Cells, ",") != "Sheet1!C9,Sheet1!D9" || candidate.Derived.Recalc == nil || *candidate.Derived.Recalc != *report {
+		t.Fatalf("candidate=%+v derived=%+v", candidate.Effects, candidate.Derived)
 	}
 }
