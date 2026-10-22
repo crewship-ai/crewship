@@ -147,3 +147,29 @@ func TestRealGridCraftCellsSetOnFormulaSheet(t *testing.T) {
 		t.Fatalf("C9=%v D4=%q effects=%v", c9, d4, candidate.Effects)
 	}
 }
+
+// A session ID is an opaque client token from a small charset; it never
+// carries separators, whitespace or control characters into the writer.
+func TestEditSessionIDCharset(t *testing.T) {
+	for _, test := range []struct {
+		session string
+		ok      bool
+	}{
+		{"s1", true},
+		{"tab-7_Ab", true},
+		{"s#1", false},
+		{"s 1", false},
+		{"s\x01", false},
+		{"s/1", false},
+		{strings.Repeat("a", 129), false},
+	} {
+		edit := Edit{SessionID: test.session, MutationID: test.session + ":1", BaseRev: 1, Generation: 1, Ops: []EditOp{{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "1"}}}
+		if _, err := edit.Request(); (err == nil) != test.ok {
+			t.Errorf("edit session %q: %v", test.session, err)
+		}
+		r := Request{MutationID: "m", MandateID: "human-import", SessionID: test.session, BaseRev: 1, Generation: 1, Command: Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "1"}}
+		if err := r.validate(Key{"ws", "page"}); (err == nil) != test.ok {
+			t.Errorf("request session %q: %v", test.session, err)
+		}
+	}
+}

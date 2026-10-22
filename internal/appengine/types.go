@@ -157,8 +157,12 @@ func (c Command) validate() error {
 	return nil
 }
 
+// HumanMandatePrefix marks the mandates of human operations. Agent mandates
+// may not use it.
+const HumanMandatePrefix = "human-"
+
 // HumanEditMandate is the mandate of human cell edits, distinct from imports.
-const HumanEditMandate = "human-edit"
+const HumanEditMandate = HumanMandatePrefix + "edit"
 
 // EditOp is one operation of a human edit. Only "cell.set" is supported.
 type EditOp struct {
@@ -178,9 +182,14 @@ type Edit struct {
 	Ops        []EditOp `json:"ops"`
 }
 
+// sessionPattern bounds a client session ID to an opaque token. It never holds
+// the ":" that separates it from the sequence in a mutation ID, nor "#",
+// whitespace or control characters that would blur the recorded writer.
+var sessionPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+
 // Request maps an edit onto one atomic cells.set mutation.
 func (e Edit) Request() (Request, error) {
-	if len(e.SessionID) == 0 || len(e.SessionID) > 128 || strings.Contains(e.SessionID, ":") || !strings.HasPrefix(e.MutationID, e.SessionID+":") || len(e.MutationID) == len(e.SessionID)+1 || len(e.Ops) == 0 || len(e.Ops) > MaxEditCells {
+	if !sessionPattern.MatchString(e.SessionID) || !strings.HasPrefix(e.MutationID, e.SessionID+":") || len(e.MutationID) == len(e.SessionID)+1 || len(e.Ops) == 0 || len(e.Ops) > MaxEditCells {
 		return Request{}, ErrInvalid
 	}
 	cells := make([]CellInput, 0, len(e.Ops))
@@ -205,7 +214,7 @@ func validCell(sheet, cell, input string) bool {
 }
 func bounded(s string) bool { return len(s) > 0 && len(s) <= 256 }
 func (r Request) validate(k Key) error {
-	if !bounded(k.WorkspaceID) || !bounded(k.PageID) || !bounded(r.MutationID) || !bounded(r.MandateID) || len(r.SessionID) > 256 || r.BaseRev < 0 || r.Generation < 0 {
+	if !bounded(k.WorkspaceID) || !bounded(k.PageID) || !bounded(r.MutationID) || !bounded(r.MandateID) || (r.SessionID != "" && !sessionPattern.MatchString(r.SessionID)) || r.BaseRev < 0 || r.Generation < 0 {
 		return ErrInvalid
 	}
 	if r.BaseRev == 0 && (r.Command.Kind != "import" || r.Generation != 0) {
@@ -260,19 +269,40 @@ type commandRecord struct {
 	Cells []CellInput `json:"cells,omitempty"`
 }
 
+// MaxCommandBytes bounds one recorded command, like a stored snapshot.
+const MaxCommandBytes = MaxSnapshotBytes
+
+// recordCommand returns the canonical history form of a command. It is encoded
+// without HTML escaping, so "<", ">" and "&" in formulas are stored as written
+// and count once against the history quota.
 func recordCommand(c Command) (string, []byte, error) {
 	record := commandRecord{Kind: "snapshot"}
 	switch c.Kind {
 	case "import":
-	case "cell.set":
-		record = commandRecord{Kind: "cells", Cells: []CellInput{{c.Sheet, c.Cell, c.Input}}}
-	case "cells.set":
-		record = commandRecord{Kind: "cells", Cells: c.Cells}
+	case "cell.set", "cells.set":
+		record = commandRecord{Kind: "cells", Cells: commandCells(c)}
 	default:
 		return "", nil, ErrInvalid
 	}
-	data, err := json.Marshal(record)
-	return record.Kind, data, err
+	var buffer bytes.Buffer
+	encoder := json.NewEncoder(&buffer)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(record); err != nil {
+		return "", nil, err
+	}
+	data := bytes.TrimSuffix(buffer.Bytes(), []byte("\n"))
+	if len(data) > MaxCommandBytes {
+		return "", nil, ErrInvalid
+	}
+	return record.Kind, data, nil
+}
+
+// commandCells lists the authored cells of a cell command.
+func commandCells(c Command) []CellInput {
+	if c.Kind == "cell.set" {
+		return []CellInput{{c.Sheet, c.Cell, c.Input}}
+	}
+	return c.Cells
 }
 
 // MaxRebaseWindow bounds how many revisions a mutation may lag behind the head.

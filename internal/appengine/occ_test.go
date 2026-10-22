@@ -48,11 +48,19 @@ func TestCellLevelConcurrencyAgainstOtherWriters(t *testing.T) {
 			mutation: step{"owner", cellSet("b", "s2", "C3", 1)}, snapshot: true, wantErr: ErrPrecondition},
 		{name: "import still requires the current head",
 			before:   []step{{"owner", cellSet("a", "s1", "C3", 1)}},
-			mutation: step{"owner", Request{MutationID: "stale-import", MandateID: "human-import", BaseRev: 1, Generation: 1, Command: Command{Kind: "import", Snapshot: json.RawMessage(`{"sheets":[{}]}`)}}}, wantErr: ErrPrecondition},
+			mutation: step{"owner", Request{MutationID: "stale-import", MandateID: "human-import", BaseRev: 1, Generation: 1, Command: Command{Kind: "import", Snapshot: json.RawMessage(`{"sheets":[{}]}`)}}}, snapshot: true, wantErr: ErrPrecondition},
+		// Retrying the same packet can never succeed in these cases, so the
+		// client is told to reread instead of retrying.
 		{name: "base ahead of head",
-			mutation: step{"owner", cellSet("b", "s2", "C3", 2)}, wantErr: ErrPrecondition},
+			mutation: step{"owner", cellSet("b", "s2", "C3", 2)}, snapshot: true, wantErr: ErrPrecondition},
 		{name: "other generation",
-			mutation: step{"owner", func() Request { r := cellSet("b", "s2", "C3", 1); r.Generation = 2; return r }()}, wantErr: ErrPrecondition},
+			mutation: step{"owner", func() Request { r := cellSet("b", "s2", "C3", 1); r.Generation = 2; return r }()}, snapshot: true, wantErr: ErrPrecondition},
+		// A conflict reports the cell's input in the head, here the later own
+		// write, not the other writer's historical input.
+		{name: "conflict reports the input in head",
+			before:    []step{{"owner", cellSet("a", "s2", "B2", 1)}, {"owner", cellSet("c", "s1", "B2", 2)}},
+			mutation:  step{"owner", cellSet("d", "s1", "B2", 1)},
+			conflicts: []CellConflict{{Sheet: "Sheet1", Cell: "B2", Input: "c", Rev: 3, AuthorityID: "user:owner"}}, wantErr: ErrPrecondition},
 		{name: "agent after a human commit to another cell",
 			before:   []step{{"owner", cellSet("a", "s1", "C3", 1)}},
 			mutation: step{"agent", Request{MutationID: "agent-1", MandateID: "m", BaseRev: 1, Generation: 1, Command: Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "99"}}}, wantRev: 3},

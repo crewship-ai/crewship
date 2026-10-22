@@ -137,4 +137,15 @@ func TestCommandHistoryMigrationBackfillsExistingRows(t *testing.T) {
 	if _, err = db.Exec(`UPDATE gridcraft_audit SET command='not json' WHERE rev=1`); err == nil {
 		t.Fatal("non-JSON command accepted")
 	}
+	// Legacy rows have no result hash; a recorded hash is a sha256 digest.
+	var hashed int
+	if err = db.QueryRow(`SELECT count(*) FROM gridcraft_audit WHERE result_hash IS NOT NULL`).Scan(&hashed); err != nil || hashed != 0 {
+		t.Fatalf("legacy result hashes %d %v", hashed, err)
+	}
+	if _, err = db.Exec(`UPDATE gridcraft_audit SET result_hash='md5:x' WHERE rev=1`); err == nil {
+		t.Fatal("malformed result hash accepted")
+	}
+	if _, err = db.Exec(`UPDATE gridcraft_audit SET result_hash=? WHERE rev=1`, hash([]byte(`{"sheets":[]}`))); err != nil {
+		t.Fatalf("result hash rejected: %v", err)
+	}
 }
