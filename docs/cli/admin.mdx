@@ -146,6 +146,11 @@ is its own). The command never creates a keyring. When it finds none — or two
 different ones — it stops and asks for `CREWSHIP_AUDIT_KEYRING_PATH`; a
 `DATABASE_URL` alone never borrows the unrelated default `~/.crewship` keyring.
 
+The audit keyring it signs with is sealed at rest under the instance's master
+key. The command uses `ENCRYPTION_KEY` (and `ENCRYPTION_KEY_V<N>`,
+`CREWSHIP_ENCRYPTION_KEY_VERSION`) from its environment when set, otherwise
+the values in the data directory's `secrets.env`, as `crewship start` does.
+
 ```bash
 # Interactive: stdin prompt with hidden input (no shell-history leak)
 crewship admin reset-password --email admin@example.com --local

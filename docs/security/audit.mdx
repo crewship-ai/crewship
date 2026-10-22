@@ -348,6 +348,36 @@ private keyring outside the database. Normal server boot creates a random
 active key once in `<data-dir>/audit-keyring.json` with mode `0600`; it never
 overwrites an existing or invalid file.
 
+That app-owned keyring is sealed at rest: AES-256-GCM under a key derived with
+HKDF-SHA256 (purpose label `crewship audit keyring at rest v1`) from the current
+master key (`ENCRYPTION_KEY`, or `ENCRYPTION_KEY_V<N>` for
+`CREWSHIP_ENCRYPTION_KEY_VERSION=v<N>`). The file records which master-key
+version sealed it. At boot a plaintext keyring written by an older build, or
+one sealed under an older master-key version, is re-wrapped in place with the
+same keys. A keyring that does not open with the configured master key stops
+the boot and is left untouched — restore the master key rather than deleting
+the file.
+
+What sealing does and does not protect: on a default install the master key
+is in `<data-dir>/secrets.env`, right next to the keyring, so anyone who can
+read the whole data directory can still open it. Sealing protects copies that
+leave out `secrets.env` — file-level backups, snapshots or support bundles that
+take the keyring but not the secrets — and installs whose master key is
+injected from outside (systemd `EnvironmentFile`, a secret manager) rather than
+kept in the data directory. Treat the data directory as a whole as secret.
+
+**Rollback across this change.** Builds before sealing cannot read a sealed
+keyring and refuse to start. Before rolling back (including `crew rollback`)
+stop the server and run [`crewship audit export-keyring --plaintext`](/cli/audit#crewship-audit-export-keyring)
+to write the keys unsealed, put that file in place of `audit-keyring.json`,
+then start the older build; a newer build seals it again at its next start.
+Rolling back without that step is unsupported.
+
+Rotate the active signing key with [`crewship audit rotate-key`](/cli/audit#crewship-audit-rotate-key)
+instead of editing the file: it adds a random active key, keeps every earlier
+key for verification only, and records an `audit.signing_key_rotated` entry.
+The running server signs with its boot snapshot until it restarts.
+
 Legacy rows with both key columns NULL retain their original byte layout and
 verification derivation:
 
@@ -360,7 +390,8 @@ change an existing audit keyring or rewrite historical MACs. An attacker with
 database write access cannot recompute a valid MAC without its signing key.
 
 Operators may configure an external private keyring through
-`CREWSHIP_AUDIT_KEYRING_PATH` or YAML `audit.keyring_path`. It contains an
+`CREWSHIP_AUDIT_KEYRING_PATH` or YAML `audit.keyring_path`. Crewship reads it
+(plaintext or sealed) but never rewrites or rotates it. It contains an
 `active_key_id` and a `keys` array of `{id, key_b64}` records, with unique IDs
 and 32-byte keys. Rotate by choosing a new active ID and retaining every key
 needed to verify old rows. The process snapshots the keyring at boot; changes

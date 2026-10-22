@@ -21780,6 +21780,192 @@
         "x-crewship-read-only": false
       }
     },
+    "/api/v1/admin/audit/signing-keys/rotate": {
+      "post": {
+        "description": "Rotate admin audit signing keys (POST /api/v1/admin/audit/signing-keys/rotate).",
+        "operationId": "post_api_v1_admin_audit_signing-keys_rotate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "expected_active_key_id": {
+                    "description": "Optional: the reviewed current active key ID; a different one is a 409.",
+                    "maxLength": 64,
+                    "type": "string"
+                  },
+                  "reason": {
+                    "description": "Trimmed explanation, 8–512 UTF-8 bytes.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "active_key_id": {
+                      "type": "string"
+                    },
+                    "effective": {
+                      "description": "The running server keeps signing with its boot snapshot until it restarts.",
+                      "enum": [
+                        "next_start"
+                      ],
+                      "type": "string"
+                    },
+                    "previous_active_key_id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "previous_active_key_id",
+                    "active_key_id",
+                    "effective"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Rotate admin audit signing keys",
+        "tags": [
+          "admin"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
     "/api/v1/admin/backups": {
       "delete": {
         "description": "Delete admin backups (DELETE /api/v1/admin/backups).",

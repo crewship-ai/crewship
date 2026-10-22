@@ -38,18 +38,29 @@ func BootstrapSigningKeys(legacy []byte) *SigningKeys {
 // key generator. Explicit external configuration is read-only. The app-owned
 // default is published complete and exclusively, so concurrent boots load the
 // winner rather than overwrite keys. Invalid existing files are never repaired.
+// The app-owned default is sealed at rest: a plaintext file, or one sealed
+// under an older master-key version, is re-wrapped in place (same keys).
 func EnsureSigningKeys(dataDir, explicitPath string) (*SigningKeys, string, error) {
-	if explicitPath != "" {
+	path := ""
+	if filepath.IsAbs(dataDir) {
+		path = filepath.Join(dataDir, SigningKeysFile)
+	}
+	if explicitPath != "" && filepath.Clean(explicitPath) != path {
 		keys, err := LoadSigningKeys(explicitPath)
 		return keys, explicitPath, err
 	}
-	if !filepath.IsAbs(dataDir) {
+	if path == "" {
 		return nil, "", errors.New("audit keyring: absolute data directory required")
 	}
-	path := filepath.Join(dataDir, SigningKeysFile)
 	if _, err := os.Lstat(path); err == nil {
 		keys, err := LoadSigningKeys(path)
-		return keys, path, err
+		if err != nil {
+			return nil, "", err
+		}
+		if err := sealSigningKeysAtRest(dataDir, path); err != nil {
+			return nil, "", err
+		}
+		return keys, path, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, "", errors.New("audit keyring: cannot inspect default file")
 	}
@@ -67,6 +78,9 @@ func EnsureSigningKeys(dataDir, explicitPath string) (*SigningKeys, string, erro
 	}}
 	data, err := json.Marshal(document)
 	if err != nil {
+		return nil, "", err
+	}
+	if data, err = sealSigningKeys(data); err != nil {
 		return nil, "", err
 	}
 	if err := publishSigningKeys(dataDir, path, data); err != nil {
@@ -94,14 +108,15 @@ func CheckSigningKeysReplaceable(dataDir string) error {
 }
 
 // ReplaceSigningKeys installs the encrypted RecoveryKit's exact retained key
-// set as the app-owned keyring of dataDir. An identical keyring is kept as is.
-// A different one (a target that already booted mints its own) is never
-// deleted: it is hard-linked to <file>.replaced-<UTC time>, keeping its bytes
-// and mode, before the kit's keyring is renamed over it. It returns the
-// keyring path, the backup path ("" when nothing was replaced) and, when the
-// previous keyring could not be read, why ("" otherwise; it is kept as the
-// backup anyway).
-func ReplaceSigningKeys(dataDir string, data []byte, now time.Time) (string, string, string, error) {
+// set as the app-owned keyring of dataDir, sealed under the master key in the
+// environment (recovery runs it under the kit's keys). An identical keyring is
+// kept as is. A different one (a target that already booted mints its own) is
+// never deleted: it is kept as <file>.replaced-<UTC time>, re-sealed under the
+// same master key when previousMaster (the keys it was sealed with) opens it,
+// byte for byte otherwise. It returns the keyring path, the backup path ("" when
+// nothing was replaced) and, when the previous keyring could not be opened,
+// why ("" otherwise). Nothing is written in plaintext.
+func ReplaceSigningKeys(dataDir string, data []byte, now time.Time, previousMaster MasterKeyFunc) (string, string, string, error) {
 	if !filepath.IsAbs(dataDir) {
 		return "", "", "", errors.New("audit keyring: absolute data directory required")
 	}
@@ -116,36 +131,54 @@ func ReplaceSigningKeys(dataDir string, data []byte, now time.Time) (string, str
 	if err := CheckSigningKeysReplaceable(dataDir); err != nil {
 		return "", "", "", err
 	}
-	path, backup := filepath.Join(dataDir, SigningKeysFile), ""
-	previous := ""
+	path, backup, unreadable := filepath.Join(dataDir, SigningKeysFile), "", ""
 	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
-		if err := publishSigningKeys(dataDir, path, canonical); err != nil {
-			return "", "", "", err
-		}
-	} else if same, readErr := signingKeysFileEquals(path, canonical); !same {
-		if readErr != nil {
-			previous = readErr.Error()
-		}
-		backup = path + ".replaced-" + now.UTC().Format("20060102T150405.000000000Z")
-		if err := os.Link(path, backup); err != nil {
-			return "", "", "", errors.New("audit keyring: cannot keep a backup of the existing keyring")
-		}
-		temp, err := writePrivateTemp(dataDir, canonical)
+		sealed, err := sealSigningKeys(canonical)
 		if err != nil {
 			return "", "", "", err
 		}
-		defer os.Remove(temp)
-		if err := os.Rename(temp, path); err != nil {
-			return "", "", "", errors.New("audit keyring: cannot install the recovered keyring")
+		if err := publishSigningKeys(dataDir, path, sealed); err != nil {
+			return "", "", "", err
 		}
-		if err := syncDir(dataDir); err != nil {
+	} else if same, _ := signingKeysFileEquals(path, canonical); !same {
+		raw, err := readSigningKeysFile(path)
+		if err != nil {
+			return "", "", "", err
+		}
+		kept := raw
+		if previous, openErr := openPreviousSigningKeys(raw, previousMaster); openErr != nil {
+			unreadable = openErr.Error()
+		} else if kept, err = sealSigningKeys(previous); err != nil {
+			return "", "", "", err
+		}
+		backup = path + ".replaced-" + now.UTC().Format("20060102T150405.000000000Z")
+		if err := publishSigningKeysExclusive(dataDir, backup, kept); err != nil {
+			return "", "", "", errors.New("audit keyring: cannot keep a backup of the existing keyring")
+		}
+		if err := writeSigningKeysFile(dataDir, path, canonical); err != nil {
 			return "", "", "", err
 		}
 	}
 	if same, err := signingKeysFileEquals(path, canonical); err != nil || !same {
 		return "", "", "", errors.Join(err, errors.New("audit keyring: installed keyring differs from recovery kit"))
 	}
-	return path, backup, previous, nil
+	return path, backup, unreadable, nil
+}
+
+// openPreviousSigningKeys opens a keyring being replaced: plaintext, sealed
+// under the master key now in the environment, or under previousMaster.
+func openPreviousSigningKeys(raw []byte, previousMaster MasterKeyFunc) ([]byte, error) {
+	plain, _, err := openSigningKeys(raw)
+	if err != nil && previousMaster != nil {
+		plain, _, err = openSigningKeysWith(raw, previousMaster)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if _, err := ParseSigningKeys(plain); err != nil {
+		return nil, err
+	}
+	return plain, nil
 }
 
 func signingKeysFileEquals(path string, canonical []byte) (bool, error) {
@@ -161,12 +194,25 @@ func signingKeysFileEquals(path string, canonical []byte) (bool, error) {
 }
 
 func publishSigningKeys(dataDir, path string, data []byte) error {
+	err := publishSigningKeysExclusive(dataDir, path, data)
+	if errors.Is(err, os.ErrExist) {
+		return syncDir(dataDir)
+	}
+	return err
+}
+
+// publishSigningKeysExclusive links a complete private file at path, failing
+// with os.ErrExist rather than replacing anything already there.
+func publishSigningKeysExclusive(dataDir, path string, data []byte) error {
 	temp, err := writePrivateTemp(dataDir, data)
 	if err != nil {
 		return err
 	}
 	defer os.Remove(temp)
-	if err := os.Link(temp, path); err != nil && !errors.Is(err, os.ErrExist) {
+	if err := os.Link(temp, path); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return err
+		}
 		return errors.New("audit keyring: exclusive publication failed")
 	}
 	return syncDir(dataDir)
