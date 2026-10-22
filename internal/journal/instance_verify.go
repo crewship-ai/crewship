@@ -29,7 +29,9 @@ func VerifyInstanceAuditWithKeys(ctx context.Context, db chainReader, keys *Sign
 	expectedSeq := int64(1)
 	// historicalBad: a defect followed by an authentic row. It is history:
 	// reported here, never an obstacle to appending (only the tail is).
-	currentBad, provenBad, historicalBad, anchored, legacy, chained := false, false, false, false, false, false
+	// postBad: the defect is in a keyring-signed row or after a reseal — damage
+	// since the upgrade, reported as post_upgrade_invalid rather than history.
+	currentBad, provenBad, postBad, historicalBad, anchored, legacy, chained := false, false, false, false, false, false, false
 	for rows.Next() {
 		var fields InstanceAuditFields
 		var seq, version sql.NullInt64
@@ -53,6 +55,9 @@ func VerifyInstanceAuditWithKeys(ctx context.Context, db chainReader, keys *Sign
 		structural := !seq.Valid || seq.Int64 < 1 || !prev.Valid || !hash.Valid || seq.Int64 != expectedSeq || prev.String != previous
 		if structural || !macValid {
 			currentBad = true
+			if keyID.Valid || anchored {
+				postBad = true
+			}
 			if macErr == nil || errors.Is(macErr, ErrChainIntegrity) {
 				provenBad = true
 			}
@@ -75,16 +80,19 @@ func VerifyInstanceAuditWithKeys(ctx context.Context, db chainReader, keys *Sign
 				historicalBad = false
 				currentBad = false
 				provenBad = false
+				postBad = false
 				result.HistoricalStatus = status
 			}
 		}
 		if currentBad && !structural && macValid {
 			status := "historical_unverified"
-			if provenBad {
+			if postBad {
+				status = "post_upgrade_invalid"
+			} else if provenBad {
 				status = "historical_invalid"
 			}
 			result.HistoricalStatus = worseHistorical(result.HistoricalStatus, status)
-			historicalBad, currentBad, provenBad = true, false, false
+			historicalBad, currentBad, provenBad, postBad = true, false, false, false
 		}
 		expectedSeq = seq.Int64 + 1
 		previous = hash.String

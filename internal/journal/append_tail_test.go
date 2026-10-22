@@ -24,40 +24,54 @@ func countEntries(t *testing.T, db *sql.DB) int {
 	return n
 }
 
-// A defect behind an authentic tail is history: full verification reports it,
-// appends keep working. Before tail-only admission each case refused every
-// later audited write in the workspace (HTTP 500 after an upgrade).
+// A defect behind an authentic tail does not block appends; full verification
+// still reports it. Rows from before the keyring upgrade (legacy v1 MACs) are
+// inherited history (historical_*); a defect in a keyring-signed row is damage
+// since the upgrade (post_upgrade_invalid). Before tail-only admission each
+// case refused every later audited write in the workspace (HTTP 500).
 func TestAuditHistoricalDefectDoesNotBlockAppend(t *testing.T) {
 	cases := []struct {
-		name, change, historical string
+		name, change, want string
+		legacy             bool
 	}{
-		{"content tampered", "UPDATE journal_entries SET summary='changed' WHERE seq=2", "historical_invalid"},
-		{"retired key", "UPDATE journal_entries SET chain_key_id='missing-old-key' WHERE seq=2", "historical_unverified"},
-		{"legacy priority mismatch", "UPDATE journal_entries SET priority='pin' WHERE seq=2", "historical_unverified"},
-		{"retired key at genesis", "UPDATE journal_entries SET chain_key_id='missing-old-key' WHERE seq=1", "historical_unverified"},
+		{"legacy content tampered", "UPDATE journal_entries SET summary='changed' WHERE seq=2", "historical_invalid", true},
+		{"legacy priority mismatch", "UPDATE journal_entries SET priority='pin' WHERE seq=2", "historical_unverified", true},
+		{"signed content tampered", "UPDATE journal_entries SET summary='changed' WHERE seq=2", "post_upgrade_invalid", false},
+		{"signed retired key", "UPDATE journal_entries SET chain_key_id='missing-old-key' WHERE seq=2", "post_upgrade_invalid", false},
+		{"signed retired key at genesis", "UPDATE journal_entries SET chain_key_id='missing-old-key' WHERE seq=1", "post_upgrade_invalid", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			db := openTestDB(t)
 			defer db.Close()
+			if tc.legacy {
+				old := NewWriter(db, quietLogger(), WriterOptions{ChainKey: ChainKeyFromEnv()})
+				emitAuthentic(t, old, "ws_test", 3)
+				old.Close()
+			}
 			writer := NewWriter(db, quietLogger(), WriterOptions{})
 			defer writer.Close()
-			emitAuthentic(t, writer, "ws_test", 4)
+			signed := 4
+			if tc.legacy {
+				signed = 1 // the upgraded writer's first row is the authentic tail
+			}
+			emitAuthentic(t, writer, "ws_test", signed)
 			if _, err := db.Exec(tc.change); err != nil {
 				t.Fatal(err)
 			}
+			before := countEntries(t, db)
 			if _, err := writer.EmitSync(t.Context(), Entry{WorkspaceID: "ws_test", Type: EntryInvitationCreated, ActorType: ActorSystem, Summary: "After historical defect"}); err != nil {
 				t.Fatalf("historical defect blocked append: %v", err)
 			}
-			if n := countEntries(t, db); n != 5 {
+			if n := countEntries(t, db); n != before+1 {
 				t.Fatalf("append not committed: %d rows", n)
 			}
 			result, err := VerifyChain(t.Context(), db, "ws_test")
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result.OK || result.BreakCount == 0 || result.HistoricalStatus != tc.historical || !result.ContinuationVerified {
-				t.Fatalf("historical defect not reported as %s: %+v", tc.historical, result)
+			if result.OK || result.BreakCount == 0 || result.HistoricalStatus != tc.want || !result.ContinuationVerified {
+				t.Fatalf("defect not reported as %s: %+v", tc.want, result)
 			}
 		})
 	}
@@ -144,4 +158,69 @@ func mustPrepare(t *testing.T, e Entry) Entry {
 		t.Fatal(err)
 	}
 	return prepared
+}
+
+// A tail whose predecessor vanished without a signed compaction checkpoint is
+// an unexplained mid-chain delete next to the tail: refuse. A checkpoint that
+// covers the removed predecessor admits the append.
+func TestAuditTailPredecessorGap(t *testing.T) {
+	for _, checkpointed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "uncovered", true: "checkpointed"}[checkpointed], func(t *testing.T) {
+			db := openTestDB(t)
+			defer db.Close()
+			writer := NewWriter(db, quietLogger(), WriterOptions{})
+			defer writer.Close()
+			emitAuthentic(t, writer, "ws_test", 3)
+			var hash string
+			if err := db.QueryRow(`SELECT entry_hash FROM journal_entries WHERE seq=2`).Scan(&hash); err != nil {
+				t.Fatal(err)
+			}
+			tx, err := db.Begin()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if checkpointed {
+				if err := WriteChainCheckpoint(t.Context(), tx, ChainKeyFromEnv(), "ws_test", []RemovedEntry{{Seq: 2, Hash: hash}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := tx.Exec(`DELETE FROM journal_entries WHERE seq=2`); err != nil {
+				t.Fatal(err)
+			}
+			if err := tx.Commit(); err != nil {
+				t.Fatal(err)
+			}
+			_, err = writer.EmitSync(t.Context(), Entry{WorkspaceID: "ws_test", Type: EntryInvitationCreated, ActorType: ActorSystem, Summary: "After gap"})
+			if checkpointed && err != nil {
+				t.Fatalf("checkpointed predecessor refused: %v", err)
+			}
+			if !checkpointed && !errors.Is(err, ErrChainIntegrity) {
+				t.Fatalf("uncovered predecessor gap admitted: %v", err)
+			}
+		})
+	}
+}
+
+// A legacy tail damaged by the v166 backfill (priority_at_emit overwritten by
+// a pre-v166 pin) is refused, exactly as before tail-only admission: the old
+// path checked the tail's MAC strictly too. Its content stays reported as
+// repairable by full verification.
+func TestAuditBackfillDamagedLegacyTailRefused(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	old := NewWriter(db, quietLogger(), WriterOptions{ChainKey: ChainKeyFromEnv()})
+	emitAuthentic(t, old, "ws_test", 2)
+	old.Close()
+	if _, err := db.Exec(`UPDATE journal_entries SET priority='pin', priority_at_emit='pin' WHERE seq=2`); err != nil {
+		t.Fatal(err)
+	}
+	writer := NewWriter(db, quietLogger(), WriterOptions{})
+	defer writer.Close()
+	if _, err := writer.EmitSync(t.Context(), Entry{WorkspaceID: "ws_test", Type: EntryInvitationCreated, ActorType: ActorSystem, Summary: "After backfill"}); !errors.Is(err, ErrChainIntegrity) {
+		t.Fatalf("backfill-damaged tail: %v", err)
+	}
+	result, err := VerifyChain(t.Context(), db, "ws_test")
+	if err != nil || result.RepairableCount != 1 {
+		t.Fatalf("backfill damage not reported repairable: %+v %v", result, err)
+	}
 }

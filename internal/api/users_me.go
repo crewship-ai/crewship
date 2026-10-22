@@ -254,9 +254,9 @@ func (h *UserProfileHandler) ChangePassword(w http.ResponseWriter, r *http.Reque
 	tokensRevoked := int64(0)
 	var tokenIDs []string
 	if req.RevokeCLITokens {
-		tokenIDs, err = revokeCLITokensAuditedTx(withSecurityAuditFallback(r.Context()), tx, user.ID, user.ID, now)
+		tokenIDs, err = revokeCLITokensAuditedTx(r.Context(), tx, user.ID, user.ID, now)
 		if err != nil {
-			replyInternalError(w, h.logger, "revoke cli tokens: audit", err)
+			replyPasswordAuditError(w, h.logger, "revoke cli tokens: audit", err)
 			return
 		}
 		if err := ackCLITokenRevocationsTx(r.Context(), tx, tokenIDs, user.ID, now); err != nil {
@@ -266,7 +266,7 @@ func (h *UserProfileHandler) ChangePassword(w http.ResponseWriter, r *http.Reque
 		tokensRevoked = int64(len(tokenIDs))
 	}
 	if err := auditPasswordTx(r.Context(), tx, user.ID, "auth.password_changed", now, revoked, int(tokensRevoked)); err != nil {
-		replyInternalError(w, h.logger, "audit password change", err)
+		replyPasswordAuditError(w, h.logger, "audit password change", err)
 		return
 	}
 	if err := acknowledgePasswordSessions(r.Context(), tx, user.ID, string(newHash), user.SessionID, ids); err != nil {

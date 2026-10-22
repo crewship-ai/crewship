@@ -617,10 +617,13 @@ func VerifyChainWithKeys(ctx context.Context, db chainReader, workspaceID string
 	var expectedSeq int64 = 1
 
 	// segmentBroken/segmentProven describe defects since the last authentic
-	// row. An authentic row after them demotes them to history: they stay
-	// reported (OK=false, Breaks, historical_*), but the current segment that
-	// appends extend is the one after them.
-	segmentBroken, segmentProven := false, false
+	// row. An authentic row after them demotes them out of the current
+	// segment: they stay reported (OK=false, Breaks), but appends extend the
+	// segment after them. segmentPost marks a defect in a row written after
+	// the upgrade boundary — a keyring-signed (v2) row, or any row after the
+	// last OWNER checkpoint. That is not inherited history but damage since
+	// the upgrade, reported as post_upgrade_invalid.
+	segmentBroken, segmentProven, segmentPost := false, false, false
 	for rows.Next() {
 		f, prevHash, entryHash, livePriority, err := scanChainRow(rows)
 		if err != nil {
@@ -810,13 +813,18 @@ func VerifyChainWithKeys(ctx context.Context, db chainReader, workspaceID string
 
 		if res.BreakCount > rowBreaks {
 			segmentBroken = true
+			if !historical && (f.KeyID.Valid || anchor != nil) {
+				segmentPost = true
+			}
 		} else if segmentBroken {
 			status := "historical_unverified"
-			if segmentProven {
+			if segmentPost {
+				status = "post_upgrade_invalid"
+			} else if segmentProven {
 				status = "historical_invalid"
 			}
 			res.HistoricalStatus = worseHistorical(res.HistoricalStatus, status)
-			segmentBroken, segmentProven = false, false
+			segmentBroken, segmentProven, segmentPost = false, false, false
 			segmentBreakStart = res.BreakCount
 			res.provenFailure = false
 		}
@@ -1008,7 +1016,7 @@ func unresolvedReason(
 
 // historicalRank orders historical statuses from best to worst, so a later
 // finding never makes an earlier, worse one look better.
-var historicalRank = map[string]int{"": 0, "verified": 1, "legacy_unverified": 2, "historical_unverified": 3, "historical_invalid": 4}
+var historicalRank = map[string]int{"": 0, "verified": 1, "legacy_unverified": 2, "historical_unverified": 3, "historical_invalid": 4, "post_upgrade_invalid": 5}
 
 func worseHistorical(current, next string) string {
 	if historicalRank[next] > historicalRank[current] {

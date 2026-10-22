@@ -123,6 +123,7 @@ func (r *Router) registerAdminRoutes() {
 	r.authedInstance("DELETE", "/api/v1/admin/instance/workspaces/{workspaceId}", inst.DeleteWorkspace)
 	// openapi: responses 200,401,403,500
 	r.authedInstance("GET", "/api/v1/admin/instance/audit", inst.AuditLog)
+	r.authedInstance("GET", "/api/v1/admin/instance/audit/verify", inst.AuditVerify)
 
 	// Admin › Security across workspaces: the Keeper of every workspace, set for
 	// one, several or all of them (dry_run previews what a save overwrites),

@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"net/http"
 
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -27,12 +29,24 @@ func auditPasswordTx(ctx context.Context, tx *sql.Tx, user, action, now string, 
 	if err != nil {
 		return err
 	}
-	// Password change and reset end every other session: security-reducing.
-	return appendInstanceAuditTx(withSecurityAuditFallback(ctx), tx, journal.InstanceAuditFields{
+	// No unchained fallback: whoever sets the password gains access with it,
+	// so a broken chain tail refuses (replyPasswordAuditError says why).
+	return appendInstanceAuditTx(ctx, tx, journal.InstanceAuditFields{
 		ID: generateCUID(), UserID: sql.NullString{String: user, Valid: true}, Action: action,
 		EntityType: "user", EntityID: sql.NullString{String: user, Valid: true},
 		Metadata: sql.NullString{String: string(metadata), Valid: true}, CreatedAt: now,
 	})
+}
+
+// replyPasswordAuditError fails a web password change/reset closed. A broken
+// audit chain is reported as such (503), not as an anonymous server error.
+func replyPasswordAuditError(w http.ResponseWriter, logger *slog.Logger, op string, err error) {
+	if errors.Is(err, journal.ErrChainIntegrity) || errors.Is(err, journal.ErrSigningKeyUnavailable) {
+		logger.Error(op+": instance audit chain refused the record", "err", err)
+		replyError(w, http.StatusServiceUnavailable, "Passwords cannot be changed until an instance administrator repairs the audit trail.")
+		return
+	}
+	replyInternalError(w, logger, op, err)
 }
 
 func acknowledgePasswordTx(ctx context.Context, tx *sql.Tx, user, expected string) error {
@@ -81,6 +95,8 @@ func AuditLocalPasswordResetTx(ctx context.Context, tx *sql.Tx, userID, expected
 	if err != nil {
 		return err
 	}
+	// Host-side recovery is the operator's own incident response (shell
+	// access to the server already implies it), so it may fall back.
 	if err := appendInstanceAuditTx(withSecurityAuditFallback(ctx), tx, journal.InstanceAuditFields{ID: generateCUID(), Action: "auth.password_reset", EntityType: "user", EntityID: sql.NullString{String: userID, Valid: true}, Metadata: sql.NullString{String: string(metadata), Valid: true}, CreatedAt: now}); err != nil {
 		return err
 	}

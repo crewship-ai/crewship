@@ -702,6 +702,14 @@ the server's environment.
 | `--limit` | no | Rows to return, 100 by default, 500 at most. |
 | `--for` | no | One person (email) or workspace (slug). |
 
+### audit verify
+
+`GET /api/v1/admin/instance/audit/verify`. Verifies the whole instance audit
+chain on demand (audited writes check only its tail) and prints the verdict:
+OK, not clean with the `historical_status` of defects behind an authentic tail,
+or broken at the tail, plus the number of unchained fallback records. Exits
+non-zero unless every row verifies. `--format json` prints the raw result.
+
 ### keeper governance
 
 `GET /api/v1/admin/instance/keeper/governance`. What each workspace has

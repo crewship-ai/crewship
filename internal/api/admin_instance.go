@@ -1182,6 +1182,25 @@ func (h *InstanceAdminHandler) AuditLog(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, out)
 }
 
+// AuditVerify walks the whole instance audit chain on demand: read-only, on
+// the pool, never inside a writer transaction. Appends check only the tail,
+// so this (with the backup drill) is where history is verified. The result
+// carries historical_status, unchained_fallback and the first failure.
+// GET /api/v1/admin/instance/audit/verify
+func (h *InstanceAdminHandler) AuditVerify(w http.ResponseWriter, r *http.Request) {
+	keys, err := journal.SigningKeysForContext(r.Context())
+	if err != nil {
+		replyInternalError(w, h.logger, "load audit verification keys", err)
+		return
+	}
+	result, err := journal.VerifyInstanceAuditWithKeys(r.Context(), h.db, keys)
+	if err != nil {
+		replyInternalError(w, h.logger, "verify instance audit", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 // ── helpers ─────────────────────────────────────────────────────────────────
 
 func liveWorkspaceTx(ctx context.Context, tx *sql.Tx, wsID string) (bool, error) {

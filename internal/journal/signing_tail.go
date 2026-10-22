@@ -107,11 +107,25 @@ func verifyAppendTail(ctx context.Context, tx *sql.Tx, workspace string, keys *S
 		}
 		if !start.trusted && f.Seq < start.seq {
 			// The predecessor only supplies the link the old tail must match.
-			// Its own MAC is history; a compacted predecessor leaves no link.
+			// Its own MAC is history.
 			expectedSeq, expectedPrev, linked = f.Seq+1, hash, true
 			continue
 		}
-		if linked && (f.Seq != expectedSeq || prev != expectedPrev) {
+		if !linked {
+			// The old tail's predecessor is gone. Only a signed compaction
+			// checkpoint may account for it; an unexplained gap refuses.
+			// (Rare, so the checkpoint read stays off the common path.)
+			removed, _, _, err := loadCheckpointedRemovalsWithKeys(ctx, tx, keys, workspace)
+			if err != nil {
+				return err
+			}
+			hash, covered := removed[f.Seq-1]
+			if !covered {
+				return fmt.Errorf("journal: chain tail predecessor missing: %w", ErrChainIntegrity)
+			}
+			expectedSeq, expectedPrev = f.Seq, hash
+		}
+		if f.Seq != expectedSeq || prev != expectedPrev {
 			return tail
 		}
 		want, err := chainHashForKeys(keys, prev, f)

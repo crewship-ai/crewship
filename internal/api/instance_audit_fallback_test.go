@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,25 +36,39 @@ func instanceAuditRows(t *testing.T, db *sql.DB, action string) (chained, fallba
 }
 
 // Middle-of-history defects are reported by full verification and never block
-// an append; only a broken tail refuses (and writes nothing).
+// an append; only a broken tail refuses (and writes nothing). Rows from before
+// the keyring upgrade (legacy MACs) are inherited history; a defect in a
+// keyring-signed row is post_upgrade_invalid.
 func TestInstanceAuditAppendChecksTailOnly(t *testing.T) {
 	cases := []struct {
 		name, change string
 		seq          int
 		want         error
 		historical   string
+		legacy       bool
 	}{
-		{"middle content", "metadata='changed'", 2, nil, "historical_invalid"},
-		{"middle retired key", "chain_key_id='missing-old-key'", 2, nil, "historical_unverified"},
-		{"genesis content", "metadata='changed'", 1, nil, "historical_invalid"},
-		{"tail content", "metadata='changed'", 3, journal.ErrChainIntegrity, ""},
-		{"tail retired key", "chain_key_id='missing-tail-key'", 3, journal.ErrSigningKeyUnavailable, ""},
-		{"tail relinked", "prev_hash='forged'", 3, journal.ErrChainIntegrity, ""},
+		{"legacy middle content", "metadata='changed'", 2, nil, "historical_invalid", true},
+		{"legacy genesis content", "metadata='changed'", 1, nil, "historical_invalid", true},
+		{"signed middle content", "metadata='changed'", 2, nil, "post_upgrade_invalid", false},
+		{"signed middle retired key", "chain_key_id='missing-old-key'", 2, nil, "post_upgrade_invalid", false},
+		{"tail content", "metadata='changed'", 3, journal.ErrChainIntegrity, "", false},
+		{"tail retired key", "chain_key_id='missing-tail-key'", 3, journal.ErrSigningKeyUnavailable, "", false},
+		{"tail relinked", "prev_hash='forged'", 3, journal.ErrChainIntegrity, "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			db := setupTestDB(t)
+			history := t.Context()
+			if tc.legacy {
+				history = journal.WithSigningKeys(history, journal.LegacySigningKeys(journal.ChainKeyFromEnv()))
+			}
 			for range 3 {
+				if err := auditInstance(history, nil, db, "fixture.authentic", "instance", "", "", nil); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.legacy {
+				// The upgraded writer's first row is the authentic tail.
 				if err := auditInstance(t.Context(), nil, db, "fixture.authentic", "instance", "", "", nil); err != nil {
 					t.Fatal(err)
 				}
@@ -84,32 +99,35 @@ func TestInstanceAuditAppendChecksTailOnly(t *testing.T) {
 	}
 }
 
-// Revocations, suspension and password change/reset still complete when the
-// instance chain tail is broken; their record is a marked unchained fallback.
-// Token creation (access-granting) stays refused and leaves no record.
+// Revocations and suspension still complete when the instance chain tail is
+// broken; their record is a marked unchained fallback. Token creation and a
+// password change (whoever sets a password gains access with it) stay
+// refused and leave no record; the password change says why (503).
 func TestSecurityActionsSurviveBrokenInstanceTail(t *testing.T) {
 	cases := []struct {
 		door    string
 		actions []string
-		granted bool
+		refused int
 	}{
-		{"revoke", []string{"auth.cli_token_revoked"}, false},
-		{"password", []string{"auth.cli_token_revoked", "auth.password_changed"}, false},
-		{"suspend", []string{"auth.cli_token_revoked", "instance.user_suspended"}, false},
-		{"create", []string{"auth.cli_token_created"}, true},
+		{"revoke", []string{"auth.cli_token_revoked"}, 0},
+		{"suspend", []string{"auth.cli_token_revoked", "instance.user_suspended"}, 0},
+		{"password", []string{"auth.cli_token_revoked", "auth.password_changed"}, http.StatusServiceUnavailable},
+		{"create", []string{"auth.cli_token_created"}, http.StatusInternalServerError},
 	}
 	for _, tc := range cases {
 		t.Run(tc.door, func(t *testing.T) {
 			f := newTokenAuditFixture(t, tc.door)
 			breakInstanceAuditTail(t, f.db)
 			rr := f.invoke()
-			if tc.granted {
-				if rr.Code != http.StatusInternalServerError {
-					t.Fatalf("access-granting action bypassed broken chain: HTTP %d", rr.Code)
+			if tc.refused != 0 {
+				if rr.Code != tc.refused {
+					t.Fatalf("access-granting action with broken chain: HTTP %d want %d", rr.Code, tc.refused)
 				}
 				f.assertMutation(t, tc.door, false)
-				if chained, fallback := instanceAuditRows(t, f.db, tc.actions[0]); chained+fallback != 0 {
-					t.Fatal("refused grant left an audit record")
+				for _, action := range tc.actions {
+					if chained, fallback := instanceAuditRows(t, f.db, action); chained+fallback != 0 {
+						t.Fatalf("refused action left a %s record", action)
+					}
 				}
 				return
 			}
@@ -134,7 +152,9 @@ func TestSecurityActionsSurviveBrokenInstanceTail(t *testing.T) {
 	}
 }
 
-func TestPasswordResetSurvivesBrokenInstanceTail(t *testing.T) {
+// Web reset sets a password, so it fails closed with a clear 503 and changes
+// nothing; host-side local recovery (shell access to the server) falls back.
+func TestPasswordResetWithBrokenInstanceTail(t *testing.T) {
 	t.Run("web", func(t *testing.T) {
 		h, store, user := newProfileRig(t)
 		if _, err := store.Create(t.Context(), user, "stolen", "", time.Hour); err != nil {
@@ -145,15 +165,15 @@ func TestPasswordResetSurvivesBrokenInstanceTail(t *testing.T) {
 		breakInstanceAuditTail(t, h.db)
 		req, rr := covARPost("POST", "/api/v1/auth/reset", `{"token":"broken-tail-reset","new_password":"newpassword123"}`)
 		recovery.Reset(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("password reset held hostage by audit chain: HTTP %d %s", rr.Code, rr.Body.String())
+		if rr.Code != http.StatusServiceUnavailable || !strings.Contains(rr.Body.String(), "audit trail") {
+			t.Fatalf("web reset with broken chain: HTTP %d %s, want 503 naming the audit trail", rr.Code, rr.Body.String())
 		}
 		var active int
-		if err := h.db.QueryRow(`SELECT COUNT(*) FROM user_sessions WHERE user_id=? AND revoked_at IS NULL`, user).Scan(&active); err != nil || active != 0 {
-			t.Fatalf("reset left %d active sessions: %v", active, err)
+		if err := h.db.QueryRow(`SELECT COUNT(*) FROM user_sessions WHERE user_id=? AND revoked_at IS NULL`, user).Scan(&active); err != nil || active != 1 {
+			t.Fatalf("refused reset changed sessions: %d active %v", active, err)
 		}
-		if chained, fallback := instanceAuditRows(t, h.db, "auth.password_reset"); chained != 0 || fallback != 1 {
-			t.Fatalf("chained=%d fallback=%d, want one fallback row", chained, fallback)
+		if chained, fallback := instanceAuditRows(t, h.db, "auth.password_reset"); chained+fallback != 0 {
+			t.Fatalf("refused reset left a record: chained=%d fallback=%d", chained, fallback)
 		}
 	})
 	t.Run("local", func(t *testing.T) {

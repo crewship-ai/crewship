@@ -347,11 +347,23 @@ Defects further back — a modified or unverifiable middle row, a priority
 mismatch, unsigned pre-chain rows — are **historical**. They never block new
 appends. Whole-history verification (`crewship journal verify`, the instance
 audit verifier and the backup drill) still reports them: `ok` stays false, the
-breaks are listed, and `historical_status` is `historical_invalid` (proven
-mismatch) or `historical_unverified` (missing key or unresolved priority) once an
-authentic row follows them, with `continuation_verified` describing the segment
-after the last defect. Full verification never runs inside a writer transaction
-on a hot path.
+breaks are listed, and once an authentic row follows them `historical_status`
+says which kind they are, with `continuation_verified` describing the segment
+after the last defect:
+
+- `historical_invalid` (proven mismatch) or `historical_unverified` (missing key
+  or unresolved priority): the defect is in a row written before the keyring
+  upgrade (a legacy v1 MAC) or before the last OWNER reseal — inherited history.
+- `post_upgrade_invalid`: the defect is in a keyring-signed row, or after the
+  last reseal — damage since the upgrade. It does not block appends either, but
+  it is not history and should be investigated as an incident.
+
+The tail check also refuses when the tail's predecessor row is missing and no
+signed compaction checkpoint accounts for it. Full verification never runs
+inside a writer transaction on a hot path: run it on demand with
+`crewship journal verify` (workspace) and
+[`crewship admin instance audit verify`](/cli/admin#audit-verify) (instance), or
+through the backup drill.
 
 There is no new quarantine state; with a broken tail, audit-producing writes
 on that chain fail while reads and unrelated chains retain their own authority
@@ -646,9 +658,10 @@ plaintext dev mode retains the journal's documented keying limitation.
 ### Security actions with a broken instance chain tail
 
 Revoking a CLI token, revoking a person's sessions (one or all, by an instance
-admin), suspending an account, and changing or resetting a password (web reset
-and local `crewship admin reset-password` recovery) only remove access, so they are never held
-hostage by audit repair. When the instance chain tail does not authenticate,
+admin) and suspending an account only remove access, so they are never held
+hostage by audit repair. Local `crewship admin reset-password` recovery on the
+server host is the operator's own incident response and is treated the same
+way. When the instance chain tail does not authenticate,
 such an action still commits, and its audit row is written in the same
 transaction as an **unchained fallback**: no `chain_seq`, `prev_hash` or
 `entry_hash`, and `"audit_chain": "unchained_fallback"` added to its metadata.
@@ -656,7 +669,10 @@ The fallback row neither extends nor endorses the broken tail; the server logs
 an error for each one, and instance verification counts them
 (`unchained_fallback`) and never reports such a chain as OK. Every
 access-granting action (token creation, pairing, unlock, admin grants and the
-rest) stays refused until the tail is repaired by an explicit reseal. Any other
+rest) stays refused until the tail is repaired by an explicit reseal. That
+includes a password change and the web password reset: whoever sets a password
+gains access with it, so both fail closed with `503` and the message that the
+audit trail needs repair, and change nothing. Any other
 audit failure (for example a database error) still rolls the action back.
 
 Password changes and sibling-session revocation still precede the token/audit

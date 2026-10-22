@@ -380,7 +380,7 @@ func (h *RecoveryHandler) Reset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := auditPasswordTx(r.Context(), tx, userID, "auth.password_reset", now, len(ids), 0); err != nil {
-		replyInternalError(w, h.logger, "reset password: audit", err)
+		replyPasswordAuditError(w, h.logger, "reset password: audit", err)
 		return
 	}
 	if err := acknowledgePasswordSessions(r.Context(), tx, userID, string(hashed), "", ids); err != nil {
