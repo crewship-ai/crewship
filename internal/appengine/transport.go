@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/documents"
@@ -108,9 +109,14 @@ func NewWorkerHandler(secret string, runner Runner, maxWorkers int) (http.Handle
 		return nil, ErrInvalid
 	}
 	slots := make(chan struct{}, maxWorkers)
+	var quarantined atomic.Bool
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if subtle.ConstantTimeCompare([]byte(r.Header.Get(workerServiceHeader)), []byte(secret)) != 1 {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if quarantined.Load() {
+			http.Error(w, "worker unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		if r.Method == http.MethodGet && r.URL.Path == "/v1/health" && r.URL.RawQuery == "" {
@@ -145,10 +151,17 @@ func NewWorkerHandler(secret string, runner Runner, maxWorkers int) (http.Handle
 			http.Error(w, "capacity exhausted", http.StatusTooManyRequests)
 			return
 		}
+		if quarantined.Load() {
+			http.Error(w, "worker unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 		defer cancel()
 		result, err := runner.Run(ctx, request.Snapshot, request.Command)
 		if err != nil {
+			if errors.Is(err, ErrEngineUnavailable) {
+				quarantined.Store(true)
+			}
 			status := http.StatusUnprocessableEntity
 			if errors.Is(err, ErrCapacity) {
 				status = http.StatusTooManyRequests

@@ -16,7 +16,7 @@ import (
 // RunGridCraftWorker belongs inside the offline worker image. It is not a host
 // sandbox and must never be wired directly into the public server. Tests may
 // call it against a verified local binary with synthetic inputs only.
-func RunGridCraftWorker(ctx context.Context, binary, scratch string, input []byte, c Command) (EngineResult, error) {
+func RunGridCraftWorker(ctx context.Context, binary, scratch string, input []byte, c Command) (result EngineResult, err error) {
 	if err := c.validate(); err != nil {
 		return EngineResult{}, err
 	}
@@ -55,8 +55,13 @@ func RunGridCraftWorker(ctx context.Context, binary, scratch string, input []byt
 	if err != nil {
 		return EngineResult{}, err
 	}
-	defer os.RemoveAll(dir)
-	source, base, result := filepath.Join(dir, "source.json"), filepath.Join(dir, "base.json"), filepath.Join(dir, "candidate.json")
+	defer func() {
+		if cleanupErr := os.RemoveAll(dir); cleanupErr != nil {
+			result = EngineResult{}
+			err = fmt.Errorf("%w: private scratch cleanup unconfirmed", ErrEngineUnavailable)
+		}
+	}()
+	source, base, resultPath := filepath.Join(dir, "source.json"), filepath.Join(dir, "base.json"), filepath.Join(dir, "candidate.json")
 	if err = os.WriteFile(source, input, 0600); err != nil {
 		return EngineResult{}, err
 	}
@@ -88,10 +93,10 @@ func RunGridCraftWorker(ctx context.Context, binary, scratch string, input []byt
 	if err != nil {
 		return EngineResult{}, err
 	}
-	if err = run("run", "--in", base, "--cmd", "cell.set="+string(params), "--out", result, "--quiet"); err != nil {
+	if err = run("run", "--in", base, "--cmd", "cell.set="+string(params), "--out", resultPath, "--quiet"); err != nil {
 		return EngineResult{}, err
 	}
-	data, err := readBounded(result)
+	data, err := readBounded(resultPath)
 	if err != nil {
 		return EngineResult{}, err
 	}
