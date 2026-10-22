@@ -117920,6 +117920,10 @@
                             "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                             "type": "boolean"
                           },
+                          "has_workbook": {
+                            "description": "This Page holds a workbook (read through GET /api/v1/pages/{slug}/workbook). A workbook Page carries no panels.",
+                            "type": "boolean"
+                          },
                           "icon": {
                             "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
                             "type": "string"
@@ -119230,6 +119234,10 @@
                           "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                           "type": "boolean"
                         },
+                        "has_workbook": {
+                          "description": "This Page holds a workbook (read through GET /api/v1/pages/{slug}/workbook). A workbook Page carries no panels.",
+                          "type": "boolean"
+                        },
                         "icon": {
                           "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
                           "type": "string"
@@ -119566,6 +119574,10 @@
                         },
                         "has_project": {
                           "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
+                          "type": "boolean"
+                        },
+                        "has_workbook": {
+                          "description": "This Page holds a workbook (read through GET /api/v1/pages/{slug}/workbook). A workbook Page carries no panels.",
                           "type": "boolean"
                         },
                         "icon": {
@@ -119916,6 +119928,10 @@
                           },
                           "has_project": {
                             "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
+                            "type": "boolean"
+                          },
+                          "has_workbook": {
+                            "description": "This Page holds a workbook (read through GET /api/v1/pages/{slug}/workbook). A workbook Page carries no panels.",
                             "type": "boolean"
                           },
                           "icon": {
@@ -120352,6 +120368,10 @@
                         "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                         "type": "boolean"
                       },
+                      "has_workbook": {
+                        "description": "This Page holds a workbook (read through GET /api/v1/pages/{slug}/workbook). A workbook Page carries no panels.",
+                        "type": "boolean"
+                      },
                       "icon": {
                         "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
                         "type": "string"
@@ -120748,6 +120768,10 @@
                       "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                       "type": "boolean"
                     },
+                    "has_workbook": {
+                      "description": "This Page holds a workbook (read through GET /api/v1/pages/{slug}/workbook). A workbook Page carries no panels.",
+                      "type": "boolean"
+                    },
                     "icon": {
                       "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
                       "type": "string"
@@ -120965,6 +120989,10 @@
                     },
                     "has_project": {
                       "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
+                      "type": "boolean"
+                    },
+                    "has_workbook": {
+                      "description": "This Page holds a workbook (read through GET /api/v1/pages/{slug}/workbook). A workbook Page carries no panels.",
                       "type": "boolean"
                     },
                     "icon": {
@@ -121815,6 +121843,10 @@
                       "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                       "type": "boolean"
                     },
+                    "has_workbook": {
+                      "description": "This Page holds a workbook (read through GET /api/v1/pages/{slug}/workbook). A workbook Page carries no panels.",
+                      "type": "boolean"
+                    },
                     "icon": {
                       "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
                       "type": "string"
@@ -122032,6 +122064,10 @@
                     },
                     "has_project": {
                       "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
+                      "type": "boolean"
+                    },
+                    "has_workbook": {
+                      "description": "This Page holds a workbook (read through GET /api/v1/pages/{slug}/workbook). A workbook Page carries no panels.",
                       "type": "boolean"
                     },
                     "icon": {
@@ -122736,6 +122772,10 @@
                       "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                       "type": "boolean"
                     },
+                    "has_workbook": {
+                      "description": "This Page holds a workbook (read through GET /api/v1/pages/{slug}/workbook). A workbook Page carries no panels.",
+                      "type": "boolean"
+                    },
                     "icon": {
                       "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
                       "type": "string"
@@ -123215,6 +123255,10 @@
                     },
                     "has_project": {
                       "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
+                      "type": "boolean"
+                    },
+                    "has_workbook": {
+                      "description": "This Page holds a workbook (read through GET /api/v1/pages/{slug}/workbook). A workbook Page carries no panels.",
                       "type": "boolean"
                     },
                     "icon": {
@@ -133925,6 +133969,10 @@
                         },
                         "has_project": {
                           "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
+                          "type": "boolean"
+                        },
+                        "has_workbook": {
+                          "description": "This Page holds a workbook (read through GET /api/v1/pages/{slug}/workbook). A workbook Page carries no panels.",
                           "type": "boolean"
                         },
                         "icon": {
