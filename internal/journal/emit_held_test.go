@@ -14,6 +14,9 @@ import (
 func TestAuditBrokenTailHoldsBackgroundEntries(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()
+	// :memory: is per connection: a second pooled connection would be an
+	// empty database, so the background writer and the test share one.
+	db.SetMaxOpenConns(1)
 	writer := NewWriter(db, quietLogger(), WriterOptions{FlushInterval: 10 * time.Millisecond, HeldRetryInterval: 20 * time.Millisecond})
 	defer writer.Close()
 	var mu sync.Mutex
@@ -50,7 +53,9 @@ func TestAuditBrokenTailHoldsBackgroundEntries(t *testing.T) {
 	}
 	waitFor(t, func() bool {
 		var n int
-		_ = db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE workspace_id='unrelated'`).Scan(&n)
+		if err := db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE workspace_id='unrelated'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
 		return n == 1
 	})
 	time.Sleep(60 * time.Millisecond) // several retry ticks while still broken
@@ -69,7 +74,9 @@ func TestAuditBrokenTailHoldsBackgroundEntries(t *testing.T) {
 	}
 	waitFor(t, func() bool {
 		var n int
-		_ = db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE workspace_id='ws_test'`).Scan(&n)
+		if err := db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE workspace_id='ws_test'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
 		return n == 8
 	})
 	result, err := VerifyChain(t.Context(), db, "ws_test")
