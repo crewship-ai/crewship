@@ -3,9 +3,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -13,7 +15,13 @@ import (
 	"github.com/crewship-ai/crewship/internal/documents"
 )
 
+var errEngineEscaped = errors.New("engine process outlived its candidate")
+
 func run() error {
+	if len(os.Args) > 1 && os.Args[1] == appengine.EngineSandboxFlag {
+		// Internal launcher mode: confine this process, then exec the engine.
+		return appengine.ExecEngineSandbox(os.Args[2:])
+	}
 	if len(os.Args) == 2 && os.Args[1] == "--healthcheck" {
 		client, err := appengine.NewWorkerClient("/run/worker/service.sock", "/run/secrets/service-token")
 		if err != nil {
@@ -27,11 +35,23 @@ func run() error {
 		return fmt.Errorf("invalid worker arguments")
 	}
 
+	// Refuse to serve unless every engine execution can be confined and every
+	// engine descendant is reparented to this process for the survivor sweep.
+	if err := appengine.PrepareEngineSandbox(); err != nil {
+		return err
+	}
 	secret, err := documents.ReadServiceSecret("/run/secrets/service-token")
 	if err != nil {
 		return err
 	}
-	handler, err := appengine.NewWorkerHandler(secret, appengine.OfflineRunner{Binary: "/usr/local/bin/gridcraft-cli", Scratch: "/scratch"}, 1)
+	escaped := make(chan struct{})
+	var escapeOnce sync.Once
+	engine := appengine.WorkerEngine{
+		Binary:  "/usr/local/bin/gridcraft-cli",
+		Scratch: "/scratch",
+		Escaped: func() { escapeOnce.Do(func() { close(escaped) }) },
+	}
+	handler, err := appengine.NewWorkerHandler(secret, engine, 1)
 	if err != nil {
 		return err
 	}
@@ -41,14 +61,33 @@ func run() error {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer cancel()
-	<-ctx.Done()
-	drain, done := context.WithTimeout(context.Background(), 25*time.Second)
-	defer done()
-	return stop(drain)
+	return serve(ctx, escaped, stop)
 }
+
+// serve runs until shutdown or an engine escape. After an escape the handler
+// is already quarantined; the worker then exits non-zero so the supervisor
+// replaces the container, which ends its PID namespace and every process in it.
+func serve(ctx context.Context, escaped <-chan struct{}, stop func(context.Context) error) error {
+	select {
+	case <-ctx.Done():
+		drain, done := context.WithTimeout(context.Background(), 25*time.Second)
+		defer done()
+		return stop(drain)
+	case <-escaped:
+		drain, done := context.WithTimeout(context.Background(), 2*time.Second)
+		defer done()
+		_ = stop(drain)
+		return errEngineEscaped
+	}
+}
+
 func main() {
 	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, "workbook worker unavailable")
+		if errors.Is(err, errEngineEscaped) {
+			fmt.Fprintln(os.Stderr, "workbook worker stopping: engine process outlived its candidate")
+		} else {
+			fmt.Fprintln(os.Stderr, "workbook worker unavailable")
+		}
 		os.Exit(1)
 	}
 }

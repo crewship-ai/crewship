@@ -8,15 +8,42 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"time"
 )
+
+// EngineSandboxFlag is the worker binary's internal launcher mode. The worker
+// re-executes itself with it so the engine is confined before the pinned CLI
+// starts; it is not a public command.
+const EngineSandboxFlag = "--engine-sandbox"
+
+// WorkerEngine runs the pinned CLI for one candidate inside the offline worker
+// image. Every CLI execution runs confined in its own process group, the whole
+// group is killed after the execution, and any process that outlives it makes
+// the worker unavailable.
+type WorkerEngine struct {
+	Binary, Scratch string
+	// Launcher is the executable that implements EngineSandboxFlag. Empty
+	// means the current executable, which is the worker in its image.
+	Launcher string
+	// ReadOnly adds read/execute roots for the confined engine. The image
+	// needs none beyond the defaults; tests add their fixture directory.
+	ReadOnly []string
+	// Escaped is called when an engine process survived its candidate. The
+	// worker must then exit so the container and its PID namespace restart.
+	Escaped func()
+	// digest overrides the pinned CLI digest in package tests only.
+	digest string
+}
 
 // RunGridCraftWorker belongs inside the offline worker image. It is not a host
 // sandbox and must never be wired directly into the public server. Tests may
 // call it against a verified local binary with synthetic inputs only.
-func RunGridCraftWorker(ctx context.Context, binary, scratch string, input []byte, c Command) (result EngineResult, err error) {
+func RunGridCraftWorker(ctx context.Context, binary, scratch string, input []byte, c Command) (EngineResult, error) {
+	return WorkerEngine{Binary: binary, Scratch: scratch}.Run(ctx, input, c)
+}
+
+// Run validates and executes one candidate. There is no unconfined fallback.
+func (e WorkerEngine) Run(ctx context.Context, input []byte, c Command) (result EngineResult, err error) {
 	if err := c.validate(); err != nil {
 		return EngineResult{}, err
 	}
@@ -35,7 +62,7 @@ func RunGridCraftWorker(ctx context.Context, binary, scratch string, input []byt
 			return EngineResult{}, ErrInvalid
 		}
 	}
-	f, err := os.Open(binary)
+	f, err := os.Open(e.Binary)
 	if err != nil {
 		return EngineResult{}, err
 	}
@@ -48,10 +75,14 @@ func RunGridCraftWorker(ctx context.Context, binary, scratch string, input []byt
 	if closeErr != nil {
 		return EngineResult{}, closeErr
 	}
-	if hex.EncodeToString(h.Sum(nil)) != GridCraftBinarySHA256 {
+	want := GridCraftBinarySHA256
+	if e.digest != "" {
+		want = e.digest
+	}
+	if hex.EncodeToString(h.Sum(nil)) != want {
 		return EngineResult{}, fmt.Errorf("%w: engine digest mismatch", ErrCandidate)
 	}
-	dir, err := os.MkdirTemp(scratch, "workbook-")
+	dir, err := os.MkdirTemp(e.Scratch, "workbook-")
 	if err != nil {
 		return EngineResult{}, err
 	}
@@ -65,20 +96,7 @@ func RunGridCraftWorker(ctx context.Context, binary, scratch string, input []byt
 	if err = os.WriteFile(source, input, 0600); err != nil {
 		return EngineResult{}, err
 	}
-	run := func(args ...string) error {
-		cmd := exec.CommandContext(ctx, binary, args...)
-		cmd.Dir = dir
-		cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + dir, "TMPDIR=" + dir}
-		cmd.WaitDelay = 2 * time.Second
-		// The CLI prints file paths. Keep them inside the worker; protocol errors do
-		// not copy process output into API responses or private Artifact logs.
-		cmd.Stdout = io.Discard
-		cmd.Stderr = io.Discard
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("workbook engine execution failed: %w", err)
-		}
-		return nil
-	}
+	run := func(args ...string) error { return e.execEngine(ctx, dir, args) }
 	if err = run("run", "--in", source, "--out", base, "--quiet"); err != nil {
 		return EngineResult{}, err
 	}
