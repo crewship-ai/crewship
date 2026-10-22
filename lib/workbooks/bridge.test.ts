@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { SaveEvent } from "@/lib/editor-lifecycle/save-state"
-import { BRIDGE_MAX_INPUT_BYTES, EDITOR_FRAME_ATTRIBUTES, BRIDGE_MAX_MESSAGE_BYTES, BRIDGE_MAX_OPS, createWorkbookBridge, createWorkbookHttpTransport, parseCommits, parseFrameMessage, parseWorkbookSession, type HostMessage, type KillReason, type TransportResponse, type WorkbookTransport } from "./bridge"
+import { BRIDGE_HANDSHAKE_TIMEOUT_MS, BRIDGE_MAX_INPUT_BYTES, BRIDGE_MAX_UNCONFIRMED, EDITOR_FRAME_ATTRIBUTES, BRIDGE_MAX_MESSAGE_BYTES, BRIDGE_MAX_OPS, createWorkbookBridge, createWorkbookHttpTransport, parseCommits, parseFrameMessage, parseWorkbookSession, type HostMessage, type KillReason, type TransportResponse, type WorkbookTransport } from "./bridge"
 
 const SID = "ws_session1"
 /** The editor document is served with CSP `sandbox allow-scripts`: its origin is opaque. */
@@ -220,6 +220,54 @@ describe("handshake", () => {
   })
 })
 
+describe("connect failures and the handshake deadline", () => {
+  it.each([
+    ["a server error", async (): Promise<TransportResponse> => ({ status: 500, body: { error: "boom" } })],
+    ["a network failure", async (): Promise<TransportResponse> => { throw new TypeError("network") }],
+    ["an unreadable snapshot", async (): Promise<TransportResponse> => ok(null)],
+  ])("ends the session as a load failure when the snapshot read fails at connect (%s)", async (_, snapshot) => {
+    const t = setup({ snapshot: vi.fn(snapshot) })
+    t.hello(); await flush()
+    // Not "closed": that is an unmount, which the host never shows. This one must reach the UI.
+    expect(t.kills).toEqual([{ reason: "load", unsaved: 0 }])
+    expect(t.transport.closeSession).toHaveBeenCalledTimes(1)
+    expect(t.port.close).toHaveBeenCalled()
+  })
+
+  it("ends the session when the editor turned off before the snapshot read", async () => {
+    const t = setup({ snapshot: vi.fn(async (): Promise<TransportResponse> => ({ status: 503, body: { error: "gridcraft_editor_disabled" } })) })
+    t.hello(); await flush()
+    expect(t.kills).toEqual([{ reason: "disabled", unsaved: 0 }])
+  })
+
+  it("ends the session when the editor never says hello", async () => {
+    const t = setup()
+    await vi.advanceTimersByTimeAsync(BRIDGE_HANDSHAKE_TIMEOUT_MS - 1)
+    expect(t.kills).toEqual([])
+    await vi.advanceTimersByTimeAsync(1)
+    expect(t.kills).toEqual([{ reason: "timeout", unsaved: 0 }])
+    expect(t.transport.closeSession).toHaveBeenCalledTimes(1)
+    // A hello after the deadline is not heard.
+    t.hello(); await flush()
+    expect(t.frame.postMessage).not.toHaveBeenCalled()
+  })
+
+  it("ends the session when the snapshot read after the hello never answers", async () => {
+    const t = setup({ snapshot: vi.fn(() => new Promise<TransportResponse>(() => {})) })
+    t.hello(); await flush()
+    await vi.advanceTimersByTimeAsync(BRIDGE_HANDSHAKE_TIMEOUT_MS)
+    expect(t.kills).toEqual([{ reason: "timeout", unsaved: 0 }])
+  })
+
+  it("has no deadline once the editor is open", async () => {
+    const t = setup()
+    await t.connect()
+    await vi.advanceTimersByTimeAsync(BRIDGE_HANDSHAKE_TIMEOUT_MS * 4)
+    expect(t.kills).toEqual([])
+    expect(t.bridge.phase).toBe("live")
+  })
+})
+
 describe("inbound validation", () => {
   it.each([
     ["non-JSON", "{"],
@@ -286,8 +334,69 @@ describe("sending and receipts", () => {
     await flush()
     expect(t.toFrame()).toEqual([])
     expect(t.events.some(event => event.type === "ack")).toBe(false)
-    expect(t.events.at(-1)).toEqual({ type: "unconfirmed" })
+    expect(t.events.at(-1)).toMatchObject({ type: "transient-fail" })
     expect(t.bridge.pending).toBe(1)
+  })
+
+  it.each([
+    ["a non-durable receipt", receipt(1, 42, "memory")],
+    ["an unreadable body", ok(null)],
+    ["another shape", ok({ status: "ok" })],
+  ])("retries %s with the same mutation, asks for its status, then refuses it and sends later edits", async (_, answer) => {
+    const t = setup({ edit: vi.fn(async (id: string) => id === `${SID}:1` ? answer : receipt(2, 42)) })
+    await t.connect()
+    t.send(mutation(1, 41, [["B3", "21"]]))
+    t.send(mutation(2, 41, [["B4", "22"]]))
+    await vi.advanceTimersByTimeAsync(60_000)
+    const first = t.transport.edit.mock.calls.filter(([id]) => id === `${SID}:1`)
+    expect(first).toHaveLength(BRIDGE_MAX_UNCONFIRMED)
+    expect(new Set(first.map(([, body]) => body)).size).toBe(1)
+    // Each retry first asks whether the earlier attempt committed after all.
+    expect(t.transport.operation).toHaveBeenCalledTimes(BRIDGE_MAX_UNCONFIRMED - 1)
+    expect(t.toFrame()).toEqual([
+      { type: "rejected", protocol: 1, seq: 1, code: "not_confirmed", current_rev: 41, cells: [] },
+      { type: "ack", protocol: 1, seq: 2, rev: 42 },
+    ])
+    expect(t.events).toContainEqual({ type: "unconfirmed" })
+    expect(t.events.at(-1)).toEqual({ type: "ack", pending: 0 })
+    expect(t.bridge.pending).toBe(0)
+  })
+
+  it("settles a pending edit the feed shows committed, without waiting for its receipt", async () => {
+    const t = setup({
+      edit: vi.fn(async () => receipt(1, 42, "memory")),
+      commits: vi.fn(async (since: number) => since === 41 ? feed(42, [own(42, 1, [["B3", "21"]])]) : feed(since, [])),
+    })
+    await t.connect()
+    t.send(mutation(1, 41, [["B3", "21"]]))
+    await flush()
+    expect(t.bridge.pending).toBe(1)
+    t.bridge.notify({ rev: 42, generation: 1 })
+    await flush()
+    expect(t.types()).toEqual(["ack:42"])
+    expect(t.bridge.pending).toBe(0)
+    expect(t.events.at(-1)).toEqual({ type: "ack", pending: 0 })
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(t.transport.edit).toHaveBeenCalledTimes(1)
+    expect(t.types()).toEqual(["ack:42"])
+  })
+
+  it("delivers an edit it refused as unconfirmed when the feed later shows it committed", async () => {
+    let head = 41
+    const t = setup({
+      edit: vi.fn(async () => ok(null)),
+      commits: vi.fn(async (since: number) => since === 41 && head === 42 ? feed(42, [own(42, 1, [["B3", "21"]])]) : feed(since, [])),
+    })
+    await t.connect()
+    t.send(mutation(1, 41, [["B3", "21"]]))
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(t.types()).toEqual(["rejected"])
+    head = 42
+    t.bridge.notify({ rev: 42, generation: 1 })
+    await flush()
+    // The editor rolled the cell back on the refusal; it learns the committed value as a commit.
+    expect(t.toFrame().at(-1)).toEqual({ type: "committed", protocol: 1, rev: 42, actor_label: "Owner", ops: [{ op: "cell.set", sheet: "Sheet1", cell: "B3", input: "21" }] })
+    expect(t.bridge.confirmedRev).toBe(42)
   })
 
   it("does not accept a receipt for another mutation", async () => {
@@ -492,6 +601,33 @@ describe("conflicts and the busy artifact", () => {
     expect(t.transport.edit).toHaveBeenCalledTimes(1)
     expect(t.transport.commits).not.toHaveBeenCalled()
     expect(t.transport.closeSession).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["edit", "disabled", 503, { error: "gridcraft_editor_disabled" }],
+    ["edit", "expired", 401, { error: "session_expired" }],
+    ["commits", "disabled", 503, { error: "gridcraft_editor_disabled" }],
+  ] as const)("a refused %s (%s) ends the session for good instead of retrying", async (call, reason, status, body) => {
+    const refused = vi.fn(async (): Promise<TransportResponse> => ({ status, body }))
+    const t = setup(call === "edit" ? { edit: refused } : { commits: refused })
+    await t.connect()
+    if (call === "edit") t.send(mutation(1, 41, [["B3", "21"]]))
+    else t.bridge.notify({ rev: 42, generation: 1 })
+    await flush()
+    expect(t.kills).toEqual([{ reason, unsaved: call === "edit" ? 1 : 0 }])
+    expect(t.port.close).toHaveBeenCalled()
+    expect(t.transport.closeSession).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(refused).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps retrying a 503 that does not say the editor is off", async () => {
+    const t = setup({ edit: vi.fn(async (): Promise<TransportResponse> => ({ status: 503, body: { error: "Workbook unavailable" } })) })
+    await t.connect()
+    t.send(mutation(1, 41, [["B3", "21"]]))
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(t.kills).toEqual([])
+    expect(t.transport.edit.mock.calls.length).toBeGreaterThan(1)
   })
 
   it("a 401 from the commits feed kills the session too", async () => {

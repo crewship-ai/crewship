@@ -19,16 +19,22 @@
  * - The frame sees revisions strictly in order. A receipt or push beyond `confirmed + 1` first
  *   reads `commits?since=confirmed`; an `ack` waits until every earlier revision is delivered.
  * - "Saved" exists only for a receipt with `durability: "node"` (or a committed revision of our
- *   own in the commits feed, which is durable by construction).
+ *   own in the commits feed, which is durable by construction and settles the pending write).
+ *   A 200 without such a receipt is retried with the same mutation (after asking its status) a
+ *   bounded number of times, then refused as `not_confirmed`; later mutations still go out.
  * - 409 reconciles (catch up, then refuse with the server's cells, or retry the same mutation
- *   when the head merely moved), 429 on the artifact retries the same mutation, 401/403/404
- *   destroy the session and the port.
+ *   when the head merely moved), 429 on the artifact retries the same mutation. A refusal
+ *   (`editorRefusal`: lost access, an expired session, the editor turned off) destroys the
+ *   session and the port; nothing retries it.
+ * - The editor must say hello and receive its snapshot within `BRIDGE_HANDSHAKE_TIMEOUT_MS`, and
+ *   a failed snapshot read at connect ends the session as `load`; the host shows the preview.
  *
  * The server is reached only through `WorkbookTransport`, so tests need no server.
  */
 
 import type { SaveEvent } from "@/lib/editor-lifecycle/save-state"
 import { createWriteQueue, type Pacing, type QueuedWrite, type SendFailure, type Timers } from "@/lib/editor-lifecycle/write-queue"
+import { editorRefusal, type EditorRefusal } from "./editor-client"
 
 export const BRIDGE_PROTOCOL = 1
 /** Largest port message the host reads, in UTF-8 bytes. */
@@ -45,6 +51,10 @@ export const BRIDGE_COMMITS_LIMIT = 200
 export const BRIDGE_MAX_REBASES = 3
 /** Retry delay when a 429 carries no `retry_after_ms`. */
 export const BRIDGE_DEFAULT_RETRY_MS = 150
+/** Attempts of one mutation answered 200 without a durable receipt before it is refused as `not_confirmed`. */
+export const BRIDGE_MAX_UNCONFIRMED = 5
+/** From the bridge's creation until the editor said hello and holds its snapshot. */
+export const BRIDGE_HANDSHAKE_TIMEOUT_MS = 15_000
 /** Bridge pacing: a confirmed cell is sent at once, not on the document autosave cadence. */
 export const BRIDGE_PACING: Partial<Pacing> = { minGapMs: 0, baseDelayMs: 250, maxDelayMs: 10_000 }
 
@@ -140,7 +150,13 @@ export const EDITOR_FRAME_ATTRIBUTES = Object.freeze({ sandbox: "allow-scripts",
 /** `MessageEvent.origin` of a document with an opaque origin. */
 export const OPAQUE_ORIGIN = "null"
 
-export type KillReason = "handshake" | "protocol" | "access" | "generation" | "navigation" | "closed"
+/**
+ * Why a session ended. `closed` is the host's own unmount and is never shown; every other reason
+ * falls back to the read-only preview with a notice. `load`: the snapshot could not be read at
+ * connect. `timeout`: no hello (or no snapshot) within `BRIDGE_HANDSHAKE_TIMEOUT_MS`.
+ * `disabled`, `expired` and `access` are server refusals (`EditorRefusal`).
+ */
+export type KillReason = "handshake" | "protocol" | "generation" | "navigation" | "load" | "timeout" | EditorRefusal | "closed"
 
 // ---------------------------------------------------------------------------------------------
 // Validation
@@ -279,6 +295,8 @@ export interface WorkbookBridgeOptions {
   onSaveEvent?: (event: SaveEvent) => void
   /** The session is over: destroy the frame. `unsaved` writes never got a receipt. */
   onKill?: (kill: { reason: KillReason; unsaved: number }) => void
+  /** Tests only; defaults to `BRIDGE_HANDSHAKE_TIMEOUT_MS`. */
+  handshakeTimeoutMs?: number
 }
 
 export type BridgePhase = "waiting" | "connecting" | "live" | "killed"
@@ -304,7 +322,7 @@ export interface WorkbookBridge {
   /** The realtime connection came back: tell the editor, replay from the last revision, retry. */
   online(): void
   offline(): void
-  /** Ends the session (flag off, `session_closed`, unmount). */
+  /** Ends the session (a refusal the host learned of, `session_closed`, unmount). */
   close(reason?: KillReason): void
 }
 
@@ -318,6 +336,8 @@ interface BridgeWrite extends QueuedWrite {
   /** An attempt may have reached the server: ask for its status before sending again. */
   uncertain: boolean
   rebases: number
+  /** Attempts answered 200 without a durable receipt. */
+  unconfirmed: number
 }
 
 type Outcome = { type: "ack"; rev: number } | { type: "rejected"; message: HostMessage }
@@ -343,7 +363,8 @@ function retryAfter(body: unknown): number {
 function editFailure(response: TransportResponse): BridgeFailure {
   const { status, body } = response
   const error = object(body) && typeof body.error === "string" ? body.error : ""
-  if (status === 401 || status === 403 || status === 404) return new BridgeFailure({ kind: "denied" }, { action: "kill", reason: "access" })
+  const refusal = editorRefusal(response)
+  if (refusal) return new BridgeFailure({ kind: "denied" }, { action: "kill", reason: refusal })
   if (status === 400) return new BridgeFailure({ kind: "rejected" }, { action: "reject", code: "invalid_ops" })
   if (status === 410) return new BridgeFailure({ kind: "conflict" }, { action: "snapshot" })
   if (status === 409) {
@@ -372,6 +393,8 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
   const mutationPrefix = `${session.session_id}:`
 
   let phase: BridgePhase = "waiting"
+  /** Cleared once the editor holds its first snapshot; until then the session has a deadline. */
+  let handshakeTimer: unknown = timers.setTimeout(() => { handshakeTimer = undefined; kill("timeout") }, options.handshakeTimeoutMs ?? BRIDGE_HANDSHAKE_TIMEOUT_MS)
   /** Load events of the frame so far; the hello must follow exactly one. */
   let loads = 0
   let port: BridgePort | undefined
@@ -409,7 +432,7 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
     const unsaved = queue.size
     phase = "killed"
     queue.stop()
-    timers.clearTimeout(driveTimer); timers.clearTimeout(catchUpTimer)
+    timers.clearTimeout(driveTimer); timers.clearTimeout(catchUpTimer); timers.clearTimeout(handshakeTimer)
     held.clear()
     for (const write of queue.writes()) queue.remove(write.id)
     if (port) { port.onmessage = null; port.close(); port = undefined }
@@ -440,10 +463,23 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
     }
   }
 
+  /** Our own revision in the feed is durable: the write it came from is done, receipt or not. */
+  function settle(seq: number) {
+    const write = queue.writes().find(item => item.seq === seq)
+    if (!write) return
+    const wasHead = queue.head() === write
+    // The one in flight stays; its answer (or the next status check) finds it applied.
+    if (!queue.remove(write.id)) return
+    emit({ type: "ack", pending: queue.size })
+    if (wasHead) queue.resume() // its backoff or halt belonged to it alone
+    void drive()
+  }
+
   function deliverCommit(commit: Extract<WorkbookCommit, { kind: "cells" }>) {
     // A held receipt names the revision as ours even when the feed carries no ids.
     const seq = held.get(commit.rev) ?? ownSeq(commit)
-    if (seq !== undefined && known.get(seq)?.epoch === epoch) ackFrame(seq, commit.rev)
+    // An edit refused as unconfirmed may still have committed: the editor then needs its value.
+    if (seq !== undefined && known.get(seq)?.epoch === epoch && outcomes.get(seq)?.type !== "rejected") { ackFrame(seq, commit.rev); settle(seq) }
     else post({ type: "committed", protocol: 1, rev: commit.rev, actor_label: commit.actor_label, ops: commit.ops.map(op => ({ op: "cell.set", ...op })) })
     held.delete(commit.rev)
     confirmedRev = commit.rev
@@ -455,7 +491,8 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
     let response: TransportResponse
     try { response = await transport.snapshot() } catch { return false }
     if (phase === "killed") return false
-    if ([401, 403, 404].includes(response.status)) { kill("access"); return false }
+    const refusal = editorRefusal(response)
+    if (refusal) { kill(refusal); return false }
     const snapshot = response.status === 200 ? parseSnapshot(response.body) : null
     if (!snapshot) return false
     if (snapshot.generation !== session.generation) { kill("generation"); return false }
@@ -491,7 +528,8 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
           let response: TransportResponse
           try { response = await transport.commits(since, BRIDGE_COMMITS_LIMIT) } catch { scheduleCatchUp(); return }
           if (phase !== "live") return
-          if ([401, 403, 404].includes(response.status)) { kill("access"); return }
+          const refusal = editorRefusal(response)
+          if (refusal) { kill(refusal); return }
           if (response.status === 410) { if (!(await reloadSnapshot())) scheduleCatchUp(); continue }
           const feed = response.status === 200 ? parseCommits(response.body, since) : null
           if (!feed) { scheduleCatchUp(); return }
@@ -529,7 +567,9 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
       let status: TransportResponse | undefined
       try { status = await transport.operation(write.id) } catch { /* fall through to the retry */ }
       if (status) {
-        if (status.status === 401 || status.status === 403) fail({ kind: "denied" }, { action: "kill", reason: "access" })
+        // 404 here only means the mutation never arrived.
+        const refusal = status.status === 404 ? null : editorRefusal(status)
+        if (refusal) fail({ kind: "denied" }, { action: "kill", reason: refusal })
         if (status.status === 200 && object(status.body)) {
           const receipt = parseDurableReceipt(status.body.receipt, write.id)
           if (receipt) return receipt
@@ -544,10 +584,20 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
     throw editFailure(response)
   }
 
-  /** Accepts only a durable receipt for this exact mutation. */
+  /**
+   * Accepts only a durable receipt for this exact mutation. Anything else is retried with the
+   * same bytes (asking its status first) and, after `BRIDGE_MAX_UNCONFIRMED` attempts, refused
+   * as `not_confirmed` so the queue moves on to later mutations.
+   */
   function verify(result: unknown, write: BridgeWrite): boolean {
     const receipt = parseDurableReceipt(result, write.id)
-    if (!receipt) { write.uncertain = true; return fail({ kind: "unconfirmed" }, { action: "retry" }) }
+    if (!receipt) {
+      // The commits feed already showed it committed while this attempt was in flight.
+      if (outcomes.get(write.seq)?.type === "ack") return true
+      write.uncertain = true
+      if (++write.unconfirmed < BRIDGE_MAX_UNCONFIRMED) return fail({ kind: "transient" }, { action: "retry" })
+      return fail({ kind: "unconfirmed" }, { action: "reject", code: "not_confirmed" })
+    }
     if (write.epoch !== epoch || phase !== "live") return true
     const rev = receipt.rev
     if (rev <= confirmedRev) return true // the commits feed delivered it already
@@ -636,7 +686,7 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
     known.set(mutation.seq, { epoch, frameKey })
     const id = `${mutationPrefix}${mutation.seq}`
     const write: BridgeWrite = {
-      id, seq: mutation.seq, frameKey, epoch, attempted: false, uncertain: false, rebases: 0,
+      id, seq: mutation.seq, frameKey, epoch, attempted: false, uncertain: false, rebases: 0, unconfirmed: 0,
       body: JSON.stringify({ session_id: session.session_id, mutation_id: id, base_rev: mutation.base_rev, generation: session.generation, ops: mutation.ops.map(({ sheet, cell, input }) => ({ kind: "cell.set", sheet, cell, input })) }),
     }
     if (queue.size >= BRIDGE_MAX_PENDING) { reject(write, "too_many_pending"); return true }
@@ -708,9 +758,11 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
     )
     phase = "live"
     if (!(await reloadSnapshot())) {
-      if (phase === "live") kill("closed")
+      // Not "closed" (the host's own unmount, never shown): the host must fall back visibly.
+      if (phase === "live") kill("load")
       return
     }
+    timers.clearTimeout(handshakeTimer); handshakeTimer = undefined
     emit({ type: "opened", canWrite: true })
     post({ type: "online", protocol: 1 })
     if (wantRev > confirmedRev) void catchUp(0)

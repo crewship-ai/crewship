@@ -32,6 +32,16 @@ const api = {
   closed: [],
   /** While set, edits wait for it before answering. */
   hold: undefined,
+  /** The bundle the server currently qualifies; a renewal names it. */
+  bundle: BUNDLE,
+  /** "edits": edits answer 503 editor disabled; "all": every live-editing endpoint does. */
+  disabled: undefined,
+  /** The snapshot read answers 500. */
+  snapshotFails: false,
+  /** "memory": commit, but answer a non-durable receipt; "unreadable": commit nothing, answer 200 with no body. */
+  editMode: "normal",
+  /** Every edit request as received. */
+  editLog: [],
 }
 let sessionCount = 0
 
@@ -59,10 +69,21 @@ function gridcraftSnapshot() {
 
 const json = (response, status, body) => { response.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" }); response.end(body === undefined ? "" : JSON.stringify(body)) }
 const readBody = request => new Promise(resolve => { let data = ""; request.on("data", chunk => { data += chunk }); request.on("end", () => resolve(data)) })
+const DISABLED = { error: "gridcraft_editor_disabled" }
 
 async function workbookApi(request, response, path, query) {
-  if (path === "" && request.method === "GET") return json(response, 200, { schema_version: 1, rev: api.rev, generation: 1, snapshot: gridcraftSnapshot() })
+  if (path === "" && request.method === "GET") {
+    if (api.snapshotFails) return json(response, 500, { error: "Workbook operation failed" })
+    return json(response, 200, { schema_version: 1, rev: api.rev, generation: 1, snapshot: gridcraftSnapshot() })
+  }
+  if (api.disabled === "all" && (path.startsWith("/sessions") || path === "/edits" || path === "/commits")) return json(response, 503, DISABLED)
   if (path === "/sessions" && request.method === "POST") {
+    const renew = JSON.parse((await readBody(request)) || "{}").session_id
+    if (renew) {
+      // The heartbeat: same session, and the bundle the server qualifies now.
+      if (!api.sessions.has(renew)) return json(response, 401, { error: "session_expired" })
+      return json(response, 200, { session_id: renew, actor_label: "Owner", rev: api.rev, generation: 1, protocol: 1, bundle_digest: api.bundle, editor_url: `${editorOrigin}/b/${DIGEST}/index.html`, expires_at: "2099-01-01T00:00:00Z" })
+    }
     const id = `ws_mock${++sessionCount}`
     api.sessions.set(id, { open: true })
     api.opened++
@@ -73,7 +94,10 @@ async function workbookApi(request, response, path, query) {
   if (path === "/edits" && request.method === "POST") {
     const raw = await readBody(request)
     const edit = JSON.parse(raw)
+    api.editLog.push(edit)
     if (!api.sessions.has(edit.session_id)) return json(response, 404, { error: "Workbook not found" })
+    if (api.disabled === "edits") return json(response, 503, DISABLED)
+    if (api.editMode === "unreadable") { response.writeHead(200, { "content-type": "application/json" }); return response.end() }
     if (api.hold) await api.hold
     const known = api.receipts.get(edit.mutation_id)
     if (known) return json(response, 200, known)
@@ -83,7 +107,7 @@ async function workbookApi(request, response, path, query) {
     })
     if (conflicts.length) return json(response, 409, { error: "precondition_failed", head_rev: api.rev, conflicts })
     const rev = commit(edit.session_id, "Owner", edit.ops, { own: true, session_id: edit.session_id, mutation_id: edit.mutation_id })
-    const receipt = { operation_key: { artifact_id: PAGE, authority_id: "user:owner", mutation_id: edit.mutation_id }, outcome: "applied", rev, durability: "node", at: new Date().toISOString() }
+    const receipt = { operation_key: { artifact_id: PAGE, authority_id: "user:owner", mutation_id: edit.mutation_id }, outcome: "applied", rev, durability: api.editMode === "memory" ? "memory" : "node", at: new Date().toISOString() }
     api.receipts.set(edit.mutation_id, receipt)
     return json(response, 200, receipt)
   }
@@ -150,7 +174,7 @@ document.getElementById("commit").addEventListener("click", () => {
 })
 document.getElementById("away").addEventListener("click", () => { location.href = "next.html" })
 render()
-${mode === "early-hello" ? hello : mode === "renavigate" ? `addEventListener("load", () => setTimeout(() => { location.href = "next.html" }, 0))` : `addEventListener("load", () => setTimeout(() => { ${hello} }, 0))`}
+${mode === "silent" ? "" : mode === "early-hello" ? hello : mode === "renavigate" ? `addEventListener("load", () => setTimeout(() => { location.href = "next.html" }, 0))` : `addEventListener("load", () => setTimeout(() => { ${hello} }, 0))`}
 </script>`
 }
 
@@ -363,6 +387,118 @@ try {
     await page.close()
   }
   editorMode = "normal"
+
+  const notice = page => page.getByTestId("workbook-editor-notice")
+  const reasonOf = page => notice(page).getAttribute("data-reason")
+  const waitClosed = async (before, timeout = 3000) => {
+    for (const started = Date.now(); api.closed.length === before && Date.now() - started < timeout;) await new Promise(resolve => setTimeout(resolve, 50))
+    return api.closed.length - before
+  }
+  const editsFor = cell => api.editLog.filter(edit => edit.ops.some(op => op.cell === cell))
+
+  // 8. The snapshot cannot be read at connect: preview with a notice and a reopen button, never a
+  //    blank "Connecting…"; reopening works once the server answers again.
+  {
+    api.snapshotFails = true
+    const closedBefore = api.closed.length
+    const page = await open(contextA, "snapshot-failure")
+    await notice(page).waitFor()
+    assert.equal(await reasonOf(page), "load")
+    assert.equal(await page.locator("iframe").count(), 0)
+    assert.equal(await page.getByTestId("workbook-save-state").count(), 0, "no editor status line is left behind")
+    assert.equal(await waitClosed(closedBefore), 1)
+    const text = await notice(page).textContent()
+    api.snapshotFails = false
+    await page.getByRole("button", { name: "Open editor again" }).click()
+    const { state } = await waitEditor(page, s => s.connects === 1 && s.rev === api.rev)
+    step("snapshot-failure-falls-back", { reason: "load", notice: text, sessionClosed: true, reopenedRev: state.rev })
+    await page.close()
+  }
+
+  // 9. The editor never says hello: the handshake deadline ends the session and shows the preview.
+  {
+    editorMode = "silent"
+    const closedBefore = api.closed.length
+    const started = Date.now()
+    const page = await open(contextA, "silent")
+    await page.locator("iframe").waitFor()
+    await notice(page).waitFor({ timeout: 25_000 })
+    const ms = Date.now() - started
+    assert.equal(await reasonOf(page), "timeout")
+    assert.equal(await page.locator("iframe").count(), 0)
+    assert.equal(await waitClosed(closedBefore), 1)
+    assert.ok(ms >= 14_000, `timed out after ${ms} ms`)
+    await page.getByRole("button", { name: "Open editor again" }).waitFor()
+    await page.getByRole("table", { name: "Sheet Sheet1" }).waitFor()
+    step("handshake-timeout", { reason: "timeout", ms, frames: 0, sessionClosed: true })
+    await page.close()
+    editorMode = "normal"
+  }
+
+  // 10. The editor is turned off while open: an edit answered 503 editor-disabled is not retried,
+  //     and the head poll finds it on its own; both kill the frame and show the preview.
+  for (const [scope, cell] of [["edits", "C1"], ["all", null]]) {
+    const page = await open(contextA, `disabled-${scope}`)
+    await waitEditor(page, s => s.connects === 1)
+    const closedBefore = api.closed.length
+    api.disabled = scope
+    if (cell) await commitCell(page, cell, "x")
+    await notice(page).waitFor({ timeout: 5000 })
+    assert.equal(await reasonOf(page), "disabled")
+    assert.equal(await page.locator("iframe").count(), 0)
+    assert.equal(await page.getByRole("button", { name: "Open editor again" }).count(), 0)
+    await page.waitForTimeout(1500)
+    const attempts = cell ? editsFor(cell).length : 0
+    if (cell) assert.equal(attempts, 1, "a disabled editor is not retried")
+    await waitClosed(closedBefore)
+    step("editor-disabled-kills", { scope, reason: "disabled", attempts, frames: 0, notice: await notice(page).textContent() })
+    api.disabled = undefined
+    await page.close()
+  }
+
+  // 11. The bundle is revoked while open: the recheck on focus kills the frame.
+  {
+    const page = await open(contextA, "bundle-revoked")
+    await waitEditor(page, s => s.connects === 1)
+    api.bundle = "sha256:revoked-build"
+    for (let i = 0; i < 160 && await notice(page).count() === 0; i++) {
+      await page.evaluate(() => dispatchEvent(new Event("focus")))
+      await page.waitForTimeout(50)
+    }
+    assert.equal(await reasonOf(page), "disabled")
+    assert.equal(await page.locator("iframe").count(), 0)
+    step("bundle-revoked-kills", { reason: "disabled", frames: 0 })
+    api.bundle = BUNDLE
+    await page.close()
+  }
+
+  // 12. 200 without a durable receipt: a non-durable receipt is settled by the commits feed; an
+  //     unreadable answer is retried with the same mutation, then refused, and later edits still save.
+  {
+    const page = await open(contextA, "unconfirmed")
+    await waitEditor(page, s => s.connects === 1)
+    api.editMode = "memory"
+    await commitCell(page, "C2", "memory")
+    await page.getByText("Saved", { exact: true }).waitFor({ timeout: 8000 })
+    await waitEditor(page, s => s.acks.includes(1), 3000)
+    assert.equal(api.cells.C2, "memory")
+
+    api.editMode = "unreadable"
+    await commitCell(page, "C3", "lost")
+    const { state } = await waitEditor(page, s => s.rejected.some(r => r.code === "not_confirmed"), 15_000)
+    await page.getByText("Not saved · the server did not confirm a change").waitFor()
+    const c3 = editsFor("C3")
+    assert.equal(c3.length, 5)
+    assert.equal(new Set(c3.map(edit => edit.mutation_id)).size, 1, "every retry is the same mutation")
+
+    api.editMode = "normal"
+    await commitCell(page, "C4", "later")
+    await page.getByText("Saved", { exact: true }).waitFor({ timeout: 5000 })
+    assert.equal(api.cells.C4, "later")
+    assert.equal(await page.locator("iframe").count(), 1)
+    step("unconfirmed-bounded", { memorySettledByFeed: true, unreadableAttempts: c3.length, rejected: state.rejected.at(-1).code, laterEditSaved: true })
+    await page.close()
+  }
 
   // 7. Flag off: the read-only preview, no session, no frame.
   api.flag = false

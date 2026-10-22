@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest"
-import { WORKBOOK_EDITOR_FLAG, createWorkbookEditorClient, editorFrameSrc, flagEnabled } from "./editor-client"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { EDITOR_DISABLED_ERROR, SESSION_EXPIRED_ERROR, WORKBOOK_EDITOR_FLAG, createWorkbookEditorClient, editorFrameSrc, editorRefusal, flagEnabled } from "./editor-client"
 
 const DIGEST = "a".repeat(64)
 const HOST = "https://crewship.test"
@@ -27,9 +27,17 @@ describe("editorFrameSrc", () => {
     expect(src).toBe(`https://editor.test/b/${DIGEST}/index.html?host=authority&parent_origin=${encodeURIComponent(HOST)}&v=1`)
   })
 
-  it("allows plain HTTP on loopback only", () => {
+  afterEach(() => { vi.unstubAllEnvs() })
+
+  it("allows plain HTTP on loopback only, and only outside production builds", () => {
     expect(editorFrameSrc(`http://localhost:9000/b/${DIGEST}/index.html`, "http://127.0.0.1:3000")).toContain("http://localhost:9000/")
     expect(editorFrameSrc(`http://editor.test/b/${DIGEST}/index.html`, HOST)).toBeNull()
+    expect(editorFrameSrc(`http://localhost:9000/b/${DIGEST}/index.html`, "http://127.0.0.1:3000", { allowLoopbackHttp: false })).toBeNull()
+    vi.stubEnv("NODE_ENV", "production")
+    for (const host of ["localhost:9000", "127.0.0.1:9000", "[::1]:9000"]) expect(editorFrameSrc(`http://${host}/b/${DIGEST}/index.html`, "http://127.0.0.1:3000")).toBeNull()
+    expect(editorFrameSrc(`https://editor.test/b/${DIGEST}/index.html`, HOST)).not.toBeNull()
+    // An explicit test hook may still allow it.
+    expect(editorFrameSrc(`http://localhost:9000/b/${DIGEST}/index.html`, "http://127.0.0.1:3000", { allowLoopbackHttp: true })).toContain("http://localhost:9000/")
   })
 
   it.each([
@@ -44,6 +52,25 @@ describe("editorFrameSrc", () => {
     ["a javascript: URL", "javascript:alert(1)"],
   ])("refuses %s", (_, url) => {
     expect(editorFrameSrc(url, HOST)).toBeNull()
+  })
+})
+
+describe("editorRefusal", () => {
+  it.each([
+    [503, { error: EDITOR_DISABLED_ERROR }, "disabled"],
+    // Any other 503 (the workbook runtime itself) is transient.
+    [503, { error: "Workbook unavailable" }, null],
+    [503, null, null],
+    [401, { error: SESSION_EXPIRED_ERROR }, "expired"],
+    [401, { error: "unauthorized" }, "access"],
+    [401, null, "access"],
+    [403, { error: "effect_out_of_mandate" }, "access"],
+    [404, { error: "Workbook not found" }, "access"],
+    [409, { error: "in_progress" }, null],
+    [500, null, null],
+    [200, {}, null],
+  ])("%i %j → %s", (status, body, expected) => {
+    expect(editorRefusal({ status, body })).toBe(expected)
   })
 })
 
@@ -86,6 +113,48 @@ describe("createWorkbookEditorClient", () => {
     expect(fetch).toHaveBeenCalledWith("/api/v1/pages/%40p1/workbook/commits?workspace_id=w&since=7&limit=1", { cache: "no-store" })
     const refused = createWorkbookEditorClient({ workspaceId: "w", pageId: "p1", fetch: async () => respond(410, { error: "snapshot_required" }) })
     await expect(refused.head(1)).resolves.toEqual({ ok: false, status: 410 })
+  })
+
+  it("names the refusal of a head read: editor turned off, session over, access lost", async () => {
+    const head = (status: number, body: unknown) => createWorkbookEditorClient({ workspaceId: "w", pageId: "p1", fetch: async () => respond(status, body) }).head(1)
+    await expect(head(503, { error: EDITOR_DISABLED_ERROR })).resolves.toEqual({ ok: false, status: 503, refusal: "disabled" })
+    await expect(head(404, { error: "Workbook not found" })).resolves.toEqual({ ok: false, status: 404, refusal: "access" })
+    await expect(head(503, { error: "Workbook unavailable" })).resolves.toEqual({ ok: false, status: 503 })
+  })
+
+  describe("checkSession", () => {
+    const check = (respondWith: () => Promise<Response>) => {
+      const fetch = vi.fn(respondWith)
+      return { fetch, result: createWorkbookEditorClient({ workspaceId: "w", pageId: "p1", fetch }).checkSession(session) }
+    }
+
+    it("renews the live session and finds the same bundle", async () => {
+      const { fetch, result } = check(async () => respond(200, session))
+      await expect(result).resolves.toBe("live")
+      expect(fetch).toHaveBeenCalledWith("/api/v1/pages/%40p1/workbook/sessions?workspace_id=w", expect.objectContaining({ method: "POST", cache: "no-store", body: JSON.stringify({ session_id: "ws_s1", protocol: 1 }) }))
+    })
+
+    it.each([
+      ["another bundle", { ...session, bundle_digest: "sha256:other" }],
+      ["no bundle at all", { ...session, bundle_digest: "" }],
+    ])("calls the bundle revoked when the server now names %s", async (_, body) => {
+      await expect(check(async () => respond(200, body)).result).resolves.toBe("revoked")
+    })
+
+    it.each([
+      [503, { error: EDITOR_DISABLED_ERROR }, "disabled"],
+      [401, { error: SESSION_EXPIRED_ERROR }, "expired"],
+      [404, { error: "Workbook not found" }, "access"],
+      [503, { error: "Workbook unavailable" }, "unknown"],
+      [500, null, "unknown"],
+      [200, null, "unknown"],
+    ])("%i %j → %s", async (status, body, expected) => {
+      await expect(check(async () => respond(status, body)).result).resolves.toBe(expected)
+    })
+
+    it("knows nothing on a network failure", async () => {
+      await expect(check(async () => { throw new TypeError("offline") }).result).resolves.toBe("unknown")
+    })
   })
 
   it("closes the session it opened through the bridge transport", async () => {

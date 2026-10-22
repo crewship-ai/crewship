@@ -6,13 +6,15 @@ import { useRealtimeEventSafe } from "@/hooks/use-realtime"
 import { initialSaveState, losesWork, saveReducer, type SaveState } from "@/lib/editor-lifecycle/save-state"
 import { useLeaveGuard } from "@/lib/editor-lifecycle/use-leave-guard"
 import { EDITOR_FRAME_ATTRIBUTES, createWorkbookBridge, type FrameWindow, type KillReason, type WorkbookBridge } from "@/lib/workbooks/bridge"
-import { createWorkbookEditorClient, editorFrameSrc, type WorkbookEditorClient } from "@/lib/workbooks/editor-client"
+import { createWorkbookEditorClient, editorFrameSrc, type SessionCheck, type WorkbookEditorClient } from "@/lib/workbooks/editor-client"
 import { PageWorkbook } from "./page-workbook"
 
 /** How often the host reads the head revision while the editor is visible (the push backstop). */
 export const WORKBOOK_HEAD_POLL_MS = 2000
 /** New frames opened in a row after the workbook moved to a new generation. */
 export const WORKBOOK_GENERATION_REOPENS = 3
+/** Least time between two rechecks of the open session (focus, reconnect, back online). */
+export const WORKBOOK_SESSION_RECHECK_MS = 5000
 
 /** Why the editor is not (or no longer) showing. `closed` is an unmount and never reaches the UI. */
 export type EditorEnd =
@@ -64,11 +66,12 @@ export function workbookSaveLabel(state: SaveState): string {
     if (state.trouble === "offline") return `Offline · ${unsent}`
     if (state.trouble === "stuck") return `Not saved · server not answering · ${unsent}`
     if (state.trouble === "retrying" || state.trouble === "rate-limited") return "Saving… · retrying"
-    if (state.trouble === "rejected") return `Not saved · ${unsent}`
+    if (state.trouble === "rejected" || state.trouble === "unconfirmed") return `Not saved · ${unsent}`
     return "Saving…"
   }
   if (state.receipt) return "Saved"
   if (state.trouble === "rejected" || state.trouble === "conflict") return "Not saved · a change was refused"
+  if (state.trouble === "unconfirmed") return "Not saved · the server did not confirm a change"
   return "No unsaved changes"
 }
 
@@ -78,6 +81,10 @@ function endMessage(end: EditorEnd): { text: string; reopen: boolean } {
     case "unavailable": return { text: end.status === 503 ? "The workbook editor is turned off. Showing the read-only preview." : "The workbook editor is unavailable. Showing the read-only preview.", reopen: end.status === 0 || end.status >= 500 }
     case "config": return { text: "The workbook editor cannot be opened safely in this browser. Showing the read-only preview.", reopen: false }
     case "access": return { text: `Access lost${unsaved}`, reopen: false }
+    case "disabled": return { text: `The workbook editor is turned off${unsaved}. Showing the read-only preview.`, reopen: false }
+    case "expired": return { text: `The editor session ended${unsaved}. Open the editor again to continue.`, reopen: true }
+    case "load": return { text: `The workbook editor could not load the workbook${unsaved}. Showing the read-only preview.`, reopen: true }
+    case "timeout": return { text: "The workbook editor did not start. Showing the read-only preview.", reopen: true }
     case "generation": return { text: `This workbook changed version. Open the editor again to continue${unsaved}.`, reopen: true }
     default: return { text: `The editor was closed because its frame broke the protocol${unsaved}. Showing the read-only preview.`, reopen: true }
   }
@@ -136,7 +143,9 @@ export function PageWorkbookSurface({ workspaceId, pageId, name, onDirtyChange, 
 /**
  * The embedded editor: one frame session, one sandboxed frame, one bridge. The frame is created
  * only after the server opened the session, and is removed the moment the bridge ends the session
- * (navigation, broken protocol, lost access, new generation). Unsent edits hold a leave guard.
+ * (navigation, broken protocol, lost access, new generation, editor turned off, no handshake in
+ * time). Unsent edits hold a leave guard. On focus, reconnect and back online the host renews the
+ * session, which rechecks the flag and the qualified bundle.
  */
 export function WorkbookEditorHost({ client, name, onEnd, onDirtyChange }: {
   client: WorkbookEditorClient
@@ -161,19 +170,22 @@ export function WorkbookEditorHost({ client, name, onEnd, onDirtyChange }: {
     let timer: ReturnType<typeof setInterval> | undefined
     let polling = false
     let sessionGeneration = 0
+    let checkSession: (() => Promise<SessionCheck>) | undefined
+    let checking = false, checkedAt = -Infinity
 
     const onMessage = (event: MessageEvent) => bridge?.handleWindowMessage(event)
     const onLoad = () => bridge?.frameLoaded()
-    const online = () => bridge?.online()
+    const online = () => { bridge?.online(); void recheck() }
     const offline = () => bridge?.offline()
+    const onFocus = () => { void poll(); void recheck() }
     const detach = () => {
       if (timer !== undefined) clearInterval(timer)
       timer = undefined
       window.removeEventListener("message", onMessage)
       window.removeEventListener("online", online)
       window.removeEventListener("offline", offline)
-      document.removeEventListener("visibilitychange", poll)
-      window.removeEventListener("focus", poll)
+      document.removeEventListener("visibilitychange", onFocus)
+      window.removeEventListener("focus", onFocus)
       if (frame) { frame.removeEventListener("load", onLoad); frame.remove(); frame = null }
     }
     const finish = (end: EditorEnd) => {
@@ -191,14 +203,30 @@ export function WorkbookEditorHost({ client, name, onEnd, onDirtyChange }: {
         const result = await client.head(current.confirmedRev)
         if (current.phase !== "live") return
         if (result.ok) { current.notify(result.head); setRev(current.confirmedRev); return }
-        if ([401, 403, 404].includes(result.status)) current.close("access")
+        if (result.refusal) current.close(result.refusal)
         // Beyond the feed's window: the bridge reads the feed, gets 410 and reloads the snapshot.
         else if (result.status === 410) current.notify({ rev: current.confirmedRev + 1, generation: sessionGeneration })
       } finally {
         polling = false
       }
     }
-    pollRef.current = () => { void poll() }
+    /** Renews the session: the editor turned off, its bundle revoked or the session over ends it. */
+    async function recheck() {
+      const current = bridge
+      if (!current || !checkSession || current.phase !== "live" || checking || document.visibilityState === "hidden") return
+      const now = Date.now()
+      if (now - checkedAt < WORKBOOK_SESSION_RECHECK_MS) return
+      checking = true; checkedAt = now
+      try {
+        const result = await checkSession()
+        if (current.phase !== "live") return
+        if (result === "revoked") current.close("disabled")
+        else if (result !== "live" && result !== "unknown") current.close(result)
+      } finally {
+        checking = false
+      }
+    }
+    pollRef.current = () => { void poll(); void recheck() }
 
     void (async () => {
       const opened = await client.openSession()
@@ -209,6 +237,7 @@ export function WorkbookEditorHost({ client, name, onEnd, onDirtyChange }: {
       if (!opened.ok) { finish({ reason: "unavailable", status: opened.status }); return }
       const session = opened.session
       sessionGeneration = session.generation
+      checkSession = () => client.checkSession(session)
       const transport = client.transport(session)
       const src = editorFrameSrc(session.editor_url, window.location.origin)
       if (!src || !editorFrameSupported()) {
@@ -237,11 +266,16 @@ export function WorkbookEditorHost({ client, name, onEnd, onDirtyChange }: {
       bridgeRef.current = bridge
       window.addEventListener("message", onMessage)
       frame = createEditorFrame(document, src, onLoad)
-      if (!frame || !container.current) { bridge.close("handshake"); return }
+      if (!frame || !container.current) {
+        // The browser would not keep the isolation attributes: a configuration problem, not the frame's fault.
+        bridge.close("closed")
+        finish({ reason: "config" })
+        return
+      }
       window.addEventListener("online", online)
       window.addEventListener("offline", offline)
-      document.addEventListener("visibilitychange", poll)
-      window.addEventListener("focus", poll)
+      document.addEventListener("visibilitychange", onFocus)
+      window.addEventListener("focus", onFocus)
       timer = setInterval(() => { void poll() }, WORKBOOK_HEAD_POLL_MS)
       container.current.append(frame)
     })()

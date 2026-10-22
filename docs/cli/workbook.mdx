@@ -19,10 +19,16 @@ on, the Page loads the editor from its own origin in a sandboxed,
 credentialless frame (Chromium only); the frame gets no cookies, tokens or
 session id, and talks to the Page only over one private message channel. The
 status reads **Saved** only after the server confirmed every edit, and leaving
-the Page with unconfirmed edits asks first. If the frame loads another
+the Page with unconfirmed edits asks first. An edit the server answers without
+a durable receipt is retried with the same mutation ID a few times and then
+reported as not saved; later edits are still sent. If the frame loads another
 document, answers the handshake from the wrong origin or with an unexpected
-bundle, or access is lost, the frame is removed and the Page falls back to the
-read-only preview, saying how many edits were not saved.
+bundle, does not answer it within 15 seconds, the workbook cannot be read when
+the editor opens, access is lost, the session ends, or the editor is turned
+off (`503 gridcraft_editor_disabled`) or its bundle is withdrawn (rechecked
+when the window regains focus or reconnects), the frame is removed, the editor
+session is closed and the Page falls back to the read-only preview, saying how
+many edits were not saved.
 
 ```bash
 crewship workbook create my-book --name "My book"

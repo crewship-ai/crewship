@@ -1,7 +1,7 @@
 import React from "react"
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { TransportResponse, WorkbookSession, WorkbookTransport } from "@/lib/workbooks/bridge"
+import { BRIDGE_HANDSHAKE_TIMEOUT_MS, type TransportResponse, type WorkbookSession, type WorkbookTransport } from "@/lib/workbooks/bridge"
 import type { WorkbookEditorClient } from "@/lib/workbooks/editor-client"
 import { PageWorkbookSurface, createEditorFrame, workbookSaveLabel } from "../workbook-editor-host"
 import { initialSaveState } from "@/lib/editor-lifecycle/save-state"
@@ -54,7 +54,7 @@ afterEach(() => {
   else delete (HTMLIFrameElement.prototype as { credentialless?: unknown }).credentialless
 })
 
-function setup(options: { enabled?: boolean; open?: Awaited<ReturnType<WorkbookEditorClient["openSession"]>>; transport?: Partial<WorkbookTransport>; head?: WorkbookEditorClient["head"] } = {}) {
+function setup(options: { enabled?: boolean; open?: Awaited<ReturnType<WorkbookEditorClient["openSession"]>>; transport?: Partial<WorkbookTransport>; head?: WorkbookEditorClient["head"]; checkSession?: WorkbookEditorClient["checkSession"] } = {}) {
   const transport = {
     snapshot: vi.fn(async () => ok({ schema_version: 1, rev: 41, generation: 1, snapshot: { sheets: [] } })),
     edit: vi.fn(async (): Promise<TransportResponse> => ({ status: 500, body: null })),
@@ -68,6 +68,7 @@ function setup(options: { enabled?: boolean; open?: Awaited<ReturnType<WorkbookE
     openSession: vi.fn(async () => options.open ?? { ok: true as const, session }),
     transport: vi.fn(() => transport),
     head: vi.fn(options.head ?? (async () => ({ ok: true as const, head: { rev: 41, generation: 1 } }))),
+    checkSession: vi.fn(options.checkSession ?? (async () => "live" as const)),
   }
   const dirty: boolean[] = []
   const view = render(<PageWorkbookSurface workspaceId="ws" pageId="page-1" name="Budget" client={client} onDirtyChange={value => dirty.push(value)} />)
@@ -107,6 +108,16 @@ describe("createEditorFrame", () => {
     const doc = { createElement: () => real } as unknown as Document
     expect(createEditorFrame(doc, EDITOR_URL, () => {})).toBe(real)
     expect(seen).toEqual([{ sandbox: "allow-scripts", credentialless: "", referrerpolicy: "no-referrer" }])
+  })
+
+  it("shows the configuration message, not a protocol failure, when the frame attributes do not stick", async () => {
+    Object.defineProperty(HTMLIFrameElement.prototype, "credentialless", { configurable: true, get: () => false })
+    const t = setup()
+    expect(await screen.findByTestId("workbook-editor-notice")).toHaveTextContent("cannot be opened safely in this browser")
+    expect(screen.getByTestId("workbook-editor-notice")).toHaveAttribute("data-reason", "config")
+    expect(screen.queryByRole("button", { name: "Open editor again" })).toBeNull()
+    expect(t.frame()).toBeNull()
+    await waitFor(() => expect(t.transport.closeSession).toHaveBeenCalledTimes(1))
   })
 
   it("refuses to assign src when the browser does not keep credentialless", () => {
@@ -237,6 +248,91 @@ describe("handshake", () => {
   })
 })
 
+describe("failures fall back to the preview", () => {
+  it("shows the preview with a notice and a reopen button when the snapshot cannot be read at connect", async () => {
+    const t = setup({ transport: { snapshot: vi.fn(async () => ({ status: 500, body: { error: "boom" } })) } })
+    await waitFor(() => expect(t.frame()).not.toBeNull())
+    await t.load()
+    await t.hello()
+    const notice = await screen.findByTestId("workbook-editor-notice")
+    expect(notice).toHaveAttribute("data-reason", "load")
+    expect(notice).toHaveTextContent("could not load the workbook")
+    expect(screen.queryByText("Connecting…")).toBeNull()
+    expect(t.frame()).toBeNull()
+    expect(t.transport.closeSession).toHaveBeenCalledTimes(1)
+    expect(await screen.findByText("Workbook unavailable")).toBeInTheDocument() // the preview, here without data
+    await act(async () => { screen.getByRole("button", { name: "Open editor again" }).click() })
+    await waitFor(() => expect(t.client.openSession).toHaveBeenCalledTimes(2))
+  })
+
+  it("ends a session whose editor never says hello, and shows the preview", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const t = setup()
+      await waitFor(() => expect(t.frame()).not.toBeNull())
+      await t.load()
+      await act(async () => { await vi.advanceTimersByTimeAsync(BRIDGE_HANDSHAKE_TIMEOUT_MS) })
+      const notice = await screen.findByTestId("workbook-editor-notice")
+      expect(notice).toHaveAttribute("data-reason", "timeout")
+      expect(notice).toHaveTextContent("did not start")
+      expect(t.frame()).toBeNull()
+      expect(t.transport.closeSession).toHaveBeenCalledTimes(1)
+      expect(screen.getByRole("button", { name: "Open editor again" })).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("removes the frame when an edit finds the editor turned off, without retrying", async () => {
+    const t = setup({ transport: { edit: vi.fn(async () => ({ status: 503, body: { error: "gridcraft_editor_disabled" } })) } })
+    await t.connect()
+    await t.send(mutation(1, 41, "B3", "21"))
+    await waitFor(() => expect(t.frame()).toBeNull())
+    const notice = screen.getByTestId("workbook-editor-notice")
+    expect(notice).toHaveAttribute("data-reason", "disabled")
+    expect(notice).toHaveTextContent("The workbook editor is turned off · 1 change not saved. Showing the read-only preview.")
+    expect(screen.queryByRole("button", { name: "Open editor again" })).toBeNull()
+    expect(t.transport.edit).toHaveBeenCalledTimes(1)
+  })
+
+  it("removes the frame when the head poll finds the editor turned off", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const t = setup({ head: async () => ({ ok: false as const, status: 503, refusal: "disabled" as const }) })
+      await t.connect()
+      await act(async () => { await vi.advanceTimersByTimeAsync(2100) })
+      await waitFor(() => expect(t.frame()).toBeNull())
+      expect(screen.getByTestId("workbook-editor-notice")).toHaveAttribute("data-reason", "disabled")
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it.each([
+    ["revoked", "disabled"],
+    ["disabled", "disabled"],
+    ["expired", "expired"],
+    ["access", "access"],
+  ] as const)("rechecks the session on focus: %s ends the editor (%s)", async (check, reason) => {
+    const t = setup({ checkSession: async () => check })
+    await t.connect()
+    expect(t.client.checkSession).not.toHaveBeenCalled()
+    await act(async () => { window.dispatchEvent(new Event("focus")) })
+    await waitFor(() => expect(t.frame()).toBeNull())
+    expect(t.client.checkSession).toHaveBeenCalledWith(session)
+    expect(screen.getByTestId("workbook-editor-notice")).toHaveAttribute("data-reason", reason)
+  })
+
+  it("keeps the editor when the recheck cannot reach the server", async () => {
+    const t = setup({ checkSession: async () => "unknown" })
+    await t.connect()
+    await act(async () => { window.dispatchEvent(new Event("focus")) })
+    await act(async () => { window.dispatchEvent(new Event("online")) })
+    await waitFor(() => expect(t.client.checkSession).toHaveBeenCalled())
+    expect(t.frame()).not.toBeNull()
+  })
+})
+
 describe("save state and leave guard", () => {
   it("says Saved only after a durable server receipt, and guards leaving until then", async () => {
     const pending = deferred<TransportResponse>()
@@ -330,6 +426,8 @@ describe("workbookSaveLabel", () => {
     [{ ...opened, receipt: true }, "Saved"],
     [{ ...opened, receipt: true, pending: 1 }, "Saving…"],
     [{ ...opened, canWrite: false, trouble: "denied" as const }, "Access lost"],
+    [{ ...opened, pending: 1, trouble: "unconfirmed" as const }, "Not saved · 1 change not saved"],
+    [{ ...opened, trouble: "unconfirmed" as const }, "Not saved · the server did not confirm a change"],
   ])("%j → %s", (state, label) => {
     expect(workbookSaveLabel(state)).toBe(label)
   })
