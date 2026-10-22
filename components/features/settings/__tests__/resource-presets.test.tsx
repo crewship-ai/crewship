@@ -19,7 +19,7 @@ const catalog = { presets: ["project", "routine"].map(kind => ({ definition_hash
   managed_operations: kind === "project" ? ["list", "read", "contribute", "manage"] : ["view", "results", "run", "edit"],
   levels: kind === "project" ? [{ level: "view", operations: ["list", "read"] }, { level: "manage", operations: ["list", "read", "contribute", "manage"] }] : [{ level: "view", operations: ["view", "results"] }, { level: "edit", operations: ["view", "results", "run", "edit"] }],
 } })) }
-type Options = { policy?: ResourcePolicy; policyReadStatus?: number; policyReadResponse?: ResourcePolicy; previewStatus?: number; applyStatus?: number; corruptPreview?: boolean; applyThrows?: boolean }
+type Options = { policy?: ResourcePolicy; policyReadStatus?: number; policyReadResponse?: ResourcePolicy; previewStatus?: number; applyStatus?: number; corruptPreview?: boolean; applyThrows?: boolean; refusal?: string }
 function show(options: Options = {}) {
   const original = options.policy ?? policy
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
@@ -27,7 +27,7 @@ function show(options: Options = {}) {
     if (init?.method === "POST") {
       const input = JSON.parse(String(init.body))
       if (url.includes("/presets/preview")) {
-        if (options.previewStatus) return response({}, options.previewStatus)
+        if (options.previewStatus) return response(options.refusal ? { error: options.refusal } : {}, options.previewStatus)
         const kind = input.resource.kind
         const definition = catalog.presets.find(item => item.definition.kind === kind)!
         const operations = definition.definition.levels.find(item => item.level === input.level)!.operations
@@ -39,7 +39,7 @@ function show(options: Options = {}) {
         })
       }
       if (options.applyThrows) throw new Error("private response must never be displayed")
-      if (options.applyStatus) return response({}, options.applyStatus)
+      if (options.applyStatus) return response(options.refusal ? { error: options.refusal } : {}, options.applyStatus)
       const selection = input.selection
       const definition = catalog.presets.find(item => item.definition.kind === selection.resource.kind)!
       const operations = definition.definition.levels.find(item => item.level === selection.level)!.operations
@@ -321,4 +321,32 @@ it.each(["pending", "temporary-error"])("requires a fresh member read after A→
   expect(client.getQueryData<ResourcePolicy>(key)?.revision).toBe(15)
   expect(screen.queryByLabelText("Preset consequences")).toBeNull()
   expect(posts()).toHaveLength(2)
+})
+
+it.each(["preview", "apply"])("shows the server's reason when %s is refused with 422 and keeps the policy usable", async stage => {
+  const refusal = "Publish requires Edit on the same routine"
+  show(stage === "preview" ? { previewStatus: 422, refusal } : { applyStatus: 422, refusal }); await choose("routine", "view")
+  fireEvent.click(screen.getByRole("button", { name: "Preview preset" }))
+  if (stage === "apply") {
+    fireEvent.click(await screen.findByRole("checkbox", { name: "I reviewed these exact changes and consequences" }))
+    fireEvent.click(screen.getByRole("button", { name: "Apply confirmed preset" }))
+  }
+  expect(await screen.findByRole("alert")).toHaveTextContent(refusal)
+  expect(screen.queryByText(/could not be confirmed|Preview unavailable/)).toBeNull()
+  expect(screen.getByRole("button", { name: "Preview preset" })).toBeEnabled()
+  expect(success).not.toHaveBeenCalled()
+})
+it("shows each preset version's saved record and offers the v2 removal levels", async () => {
+  const v2 = { definition_hash: "routine-v2", definition: { preset_id: "routine-levels", version: 2, kind: "routine", managed_operations: ["edit", "publish"],
+    levels: [{ level: "none", operations: [] }, { level: "edit", operations: ["edit"] }, { level: "edit_publish", operations: ["edit", "publish"] }] } }
+  catalog.presets.push(v2 as typeof catalog.presets[number])
+  try {
+    const record = (version: number, level: string) => ({ id: `choice-${version}`, kind: "routine" as const, resource_id: "routine", preset_id: "routine-levels", version, level, definition_hash: `routine-v${version}`, selected_at: "2026-10-17T00:00:00Z", state: "selected" as const })
+    show({ policy: { ...policy, preset_selections: [record(1, "edit"), record(2, "edit_publish")] } }); await choose("routine", "view")
+    expect(screen.getByText("Saved edit v1 · selected — intent, not effective authority")).toBeVisible()
+    expect(screen.getByText("Saved Edit + Publish v2 · selected — intent, not effective authority")).toBeVisible()
+    expect(screen.getByRole("option", { name: "none v2 · removes edit + publish" })).toBeVisible()
+    expect(screen.getByRole("option", { name: "edit v2 · edit" })).toBeVisible()
+    expect(screen.getByRole("option", { name: "Edit + Publish v2 · edit + publish" })).toBeVisible()
+  } finally { catalog.presets.pop() }
 })
