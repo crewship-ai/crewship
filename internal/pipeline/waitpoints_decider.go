@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 // DeciderKind names WHO is trying to resolve a waitpoint. It is the one
@@ -91,16 +93,26 @@ func (s *SQLWaitpointStore) Decide(ctx context.Context, workspaceID, token strin
 	}
 }
 
-// recordRefusal writes the refused attempt to audit_logs. Best effort: a
-// failed audit write is logged and does not turn a refusal into anything
-// else. The row has no user_id (the actor is not a user) and names the
-// actor in metadata; the waitpoint's own status is read back so the record
-// states what the attempt left untouched.
+// SetAuditJournal wires the configured journal writer so a refused decision
+// appends the workspace chain with the configured key. Unwired stores use the
+// default-key transactional append.
+func (s *SQLWaitpointStore) SetAuditJournal(j journal.TransactionEmitter) {
+	s.auditJournal = j
+}
+
+// recordRefusal writes the refused attempt to audit_logs (Settings Audit
+// reads it) and to the chained journal, in one transaction: neither lands
+// without the other. Best effort as a whole: a failed audit is logged and
+// does not turn a refusal into anything else. The legacy row has no user_id
+// (the actor is not a user) and names the actor in metadata; the waitpoint's
+// own status is read back so the record states what the attempt left
+// untouched. The journal entry references the run and step, never the
+// callback token.
 func (s *SQLWaitpointStore) recordRefusal(ctx context.Context, workspaceID, token string, approved bool, decider WaitpointDecider) {
-	status, runID := "", ""
+	status, runID, stepID := "", "", ""
 	_ = s.db.QueryRowContext(ctx,
-		`SELECT status, pipeline_run_id FROM pipeline_waitpoints WHERE token = ? AND workspace_id = ?`,
-		token, workspaceID).Scan(&status, &runID)
+		`SELECT status, pipeline_run_id, step_id FROM pipeline_waitpoints WHERE token = ? AND workspace_id = ?`,
+		token, workspaceID).Scan(&status, &runID, &stepID)
 	if workspaceID == "" {
 		// The public callback resolves the token's own workspace before it
 		// reaches the door; a refusal with no workspace cannot satisfy the
@@ -109,19 +121,60 @@ func (s *SQLWaitpointStore) recordRefusal(ctx context.Context, workspaceID, toke
 			"token", token, "actor_kind", decider.Kind, "actor_id", decider.ID)
 		return
 	}
-	meta, _ := json.Marshal(map[string]any{
+	facts := map[string]any{
 		"actor_kind":       string(decider.Kind),
 		"actor_id":         decider.ID,
 		"attempted":        map[bool]string{true: "approve", false: "deny"}[approved],
 		"waitpoint_status": status,
 		"pipeline_run_id":  runID,
 		"reason":           "only a person or the token's external holder can decide a waitpoint",
-	})
-	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO audit_logs (id, workspace_id, user_id, action, entity_type, entity_id, metadata, created_at)
-		VALUES (lower(hex(randomblob(16))), ?, NULL, ?, 'waitpoint', ?, ?, ?)`,
-		workspaceID, AuditActionWaitpointDecisionRefused, token, string(meta), now); err != nil {
+	}
+	meta, _ := json.Marshal(facts)
+	if err := s.appendRefusalAudit(ctx, workspaceID, token, runID, stepID, decider, string(meta), facts); err != nil {
 		slog.Default().Warn("waitpoint decision refusal audit write failed", "error", err, "token", token)
 	}
+}
+
+func (s *SQLWaitpointStore) appendRefusalAudit(ctx context.Context, workspaceID, token, runID, stepID string, decider WaitpointDecider, meta string, facts map[string]any) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO audit_logs (id, workspace_id, user_id, action, entity_type, entity_id, metadata, created_at)
+		VALUES (lower(hex(randomblob(16))), ?, NULL, ?, 'waitpoint', ?, ?, ?)`,
+		workspaceID, AuditActionWaitpointDecisionRefused, token, meta, now); err != nil {
+		return err
+	}
+	actor := journal.ActorSystem
+	switch decider.Kind {
+	case DeciderAgent:
+		actor = journal.ActorAgent
+	case DeciderUser:
+		actor = journal.ActorUser
+	}
+	entry := journal.Entry{
+		WorkspaceID: workspaceID, Type: journal.EntryAuditEntityUpdated, Severity: journal.SeverityWarn,
+		ActorType: actor, ActorID: decider.ID, Summary: "Waitpoint decision refused",
+		Payload: map[string]any{"action": AuditActionWaitpointDecisionRefused, "entity_type": "waitpoint", "metadata": facts},
+		Refs:    map[string]any{"pipeline_run_id": runID, "step_id": stepID},
+	}
+	var notify func()
+	if s.auditJournal != nil {
+		notify, err = s.auditJournal.AppendTx(ctx, tx, entry)
+	} else {
+		notify, err = journal.AppendTx(ctx, tx, entry)
+	}
+	if err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if notify != nil {
+		notify()
+	}
+	return nil
 }
