@@ -611,4 +611,9 @@ independent qualification of a persistent operator-pinned worker. Set
 path and `CREWSHIP_GRIDCRAFT_SERVICE_TOKEN_FILE` to its regular mode-0600 secret
 file. These paths must differ and fit within 100 bytes. The application never
 launches containers or falls back to an unsandboxed executable.
+`CREWSHIP_GRIDCRAFT_EDITOR_ENABLED` enables live workbook editing (editor
+sessions, cell edits and the commits feed); default `false`, only `true` or `1`
+enables it, and it requires `CREWSHIP_GRIDCRAFT_ENABLED`. Each workspace must
+also turn on the feature flag `gridcraft_editor`, which is off by default and
+can be switched off again without a restart.
 See [workbook commands](/cli/workbook) for scope and request contracts.
