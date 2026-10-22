@@ -24,7 +24,7 @@ import (
 // one as a backup beside it, and leaves the directory untouched when it
 // refuses up front.
 func TestRecoverForceReplacesBootedAuditKeyring(t *testing.T) {
-	for _, target := range []string{"booted", "same_keyring", "unsafe_keyring"} {
+	for _, target := range []string{"booted", "same_keyring", "unreadable_keyring", "unsafe_keyring"} {
 		t.Run(target, func(t *testing.T) {
 			f := newInstanceFixture(t)
 			keys, path, err := journal.EnsureSigningKeys(t.TempDir(), "")
@@ -50,6 +50,10 @@ func TestRecoverForceReplacesBootedAuditKeyring(t *testing.T) {
 				}
 			case "same_keyring":
 				if _, err := backup.RecoverInstance(t.Context(), backup.RecoverOptions{BundlePath: created.Path, Identities: []age.Identity{f.identity}, DataDir: root}); err != nil {
+					t.Fatal(err)
+				}
+			case "unreadable_keyring":
+				if err := os.WriteFile(keyring, []byte("not a keyring"), 0o600); err != nil {
 					t.Fatal(err)
 				}
 			case "unsafe_keyring":
@@ -99,6 +103,9 @@ func TestRecoverForceReplacesBootedAuditKeyring(t *testing.T) {
 			} else {
 				if len(backups) != 1 {
 					t.Fatalf("replaced keyring backups=%v want one", backups)
+				}
+				if target == "unreadable_keyring" && !strings.Contains(strings.Join(restored.Warnings, "\n"), "could not be read") {
+					t.Errorf("recovery hid that the previous keyring was unreadable: %v", restored.Warnings)
 				}
 				kept, err := os.ReadFile(backups[0])
 				if err != nil || !bytes.Equal(kept, previous) {

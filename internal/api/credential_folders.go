@@ -39,6 +39,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 const (
@@ -57,8 +59,25 @@ func validFolderRevealPolicy(p string) bool {
 
 // CredentialFolderHandler serves /api/v1/credential-folders.
 type CredentialFolderHandler struct {
-	db     *sql.DB
-	logger *slog.Logger
+	db      *sql.DB
+	logger  *slog.Logger
+	journal journal.Emitter
+}
+
+// folderAccessState is a folder's access-relevant fields, own and effective,
+// for the audit's previous/current. Names and descriptions are not included.
+func folderAccessState(ctx context.Context, tx *sql.Tx, ws, id string) (map[string]any, error) {
+	f, err := scanCredentialFolder(tx.QueryRowContext(ctx, `SELECT `+credentialFolderCols+` FROM credential_folders WHERE id = ? AND workspace_id = ?`, id, ws))
+	if err != nil {
+		return nil, err
+	}
+	effective, err := loadFolderPolicy(ctx, tx, ws, id)
+	if err != nil || effective == nil {
+		return nil, errors.Join(err, errors.New("folder policy missing"))
+	}
+	return map[string]any{"parent_id": f.ParentID, "reveal_policy": f.RevealPolicy,
+		"min_security_level": f.MinSecurityLevel, "default_security_level": f.DefaultSecurityLevel,
+		"effective_reveal_policy": effective.revealPolicy, "effective_min_security_level": effective.minLevel}, nil
 }
 
 func NewCredentialFolderHandler(db *sql.DB, logger *slog.Logger) *CredentialFolderHandler {
@@ -426,6 +445,11 @@ func (h *CredentialFolderHandler) Update(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	defer func() { _ = tx.Rollback() }()
+	previous, err := folderAccessState(r.Context(), tx, ws, id)
+	if err != nil {
+		replyInternalError(w, h.logger, "read credential folder access", err)
+		return
+	}
 	q, args := ub.Build("credential_folders", "id = ? AND workspace_id = ?", id, ws)
 	if _, err := tx.ExecContext(r.Context(), q, args...); err != nil {
 		if folderNameConflict(err) {
@@ -453,15 +477,28 @@ func (h *CredentialFolderHandler) Update(w http.ResponseWriter, r *http.Request)
 		replyInternalError(w, h.logger, "raise folder members to floor", err)
 		return
 	}
+	current, err := folderAccessState(r.Context(), tx, ws, id)
+	if err != nil {
+		replyInternalError(w, h.logger, "read updated credential folder access", err)
+		return
+	}
+	meta := map[string]interface{}{"policy_changed": req.touchesPolicy() || req.ParentID.set, "previous": previous, "current": current}
+	if len(raised) > 0 {
+		meta["raised_to_floor"] = raised
+	}
+	// The policy change and its chained audit commit together (F1).
+	notify, err := appendSettingsAudit(r, tx, h.journal, "credential_folder.update", "CREDENTIAL_FOLDER", id, meta)
+	if err != nil {
+		replyInternalError(w, h.logger, "audit credential folder update", err)
+		return
+	}
 	if err := tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "commit credential folder update", err)
 		return
 	}
-	meta := map[string]interface{}{"policy_changed": req.touchesPolicy() || req.ParentID.set}
-	if len(raised) > 0 {
-		meta["raised_to_floor"] = raised
+	if notify != nil {
+		notify()
 	}
-	auditFromRequest(r, h.db, "credential_folder.update", "CREDENTIAL_FOLDER", id, meta)
 	h.reply(w, r, http.StatusOK, ws, id)
 }
 

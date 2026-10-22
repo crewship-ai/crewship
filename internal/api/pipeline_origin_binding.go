@@ -186,6 +186,7 @@ func (h *PipelineHandler) ClearOriginBinding(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	seen := map[string]bool{}
+	previousSchedules := map[string]string{}
 	for _, item := range in.Schedules {
 		want, valid := decodeExpectedOrigin(item.ExpectedOriginID)
 		if !valid || item.ID == "" || seen[item.ID] {
@@ -214,6 +215,7 @@ func (h *PipelineHandler) ClearOriginBinding(w http.ResponseWriter, r *http.Requ
 			replyError(w, 409, "origin_binding_conflict")
 			return
 		}
+		previousSchedules[item.ID] = actual
 	}
 	if _, err = tx.ExecContext(r.Context(), `UPDATE pipelines SET chat_origin_id=NULL WHERE id=?`, id); err != nil {
 		replyError(w, 500, "Could not clear binding")
@@ -231,14 +233,30 @@ func (h *PipelineHandler) ClearOriginBinding(w http.ResponseWriter, r *http.Requ
 			return
 		}
 	}
-	metadata, _ := json.Marshal(in)
-	if _, err = tx.ExecContext(r.Context(), `INSERT INTO audit_logs(id,workspace_id,user_id,action,entity_type,entity_id,metadata,created_at) VALUES(?,?,?,?,?,?,?,?)`, generateCUID(), WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context()).ID, "routine.origin_binding.clear", "pipeline", id, string(metadata), time.Now().UTC().Format(time.RFC3339)); err != nil {
+	// Clearing a binding removes the human authority a routine runs under:
+	// the clear and its chained audit (old origins, new none) commit together.
+	previous := map[string]any{"chat_origin_id": current, "schedules": previousSchedules}
+	nextSchedules := map[string]any{}
+	for scheduleID := range previousSchedules {
+		nextSchedules[scheduleID] = nil
+	}
+	next := map[string]any{"chat_origin_id": nil, "schedules": nextSchedules}
+	if in.Draft != nil {
+		previous["draft"] = map[string]any{"id": draftID, "revision": draftRevision, "chat_origin_id": draftOrigin}
+		next["draft"] = map[string]any{"id": draftID, "revision": draftRevision + 1, "chat_origin_id": nil}
+	}
+	notify, err := appendSettingsAudit(r, tx, h.policyJournal, "routine.origin_binding.clear", "pipeline", id,
+		map[string]any{"reason": in.Reason, "previous": previous, "current": next})
+	if err != nil {
 		replyError(w, 500, "Could not audit binding clear")
 		return
 	}
 	if err = tx.Commit(); err != nil {
 		replyError(w, 500, "Could not clear binding")
 		return
+	}
+	if notify != nil {
+		notify()
 	}
 	h.GetOriginBinding(w, r)
 }

@@ -861,12 +861,15 @@ func writeRecoveredSecrets(rep *RecoverReport, kit *RecoveryKit, dataDir string)
 		}
 	}
 	if kit != nil && len(kit.AuditKeyring) > 0 {
-		auditPath, replaced, err := journal.ReplaceSigningKeys(dataDir, kit.AuditKeyring, time.Now())
+		auditPath, replaced, unreadable, err := journal.ReplaceSigningKeys(dataDir, kit.AuditKeyring, time.Now())
 		if err != nil {
 			return err
 		}
 		if replaced != "" {
 			rep.Notes = append(rep.Notes, "the data dir's previous audit keyring was replaced by the bundle's and kept as "+replaced)
+		}
+		if unreadable != "" {
+			rep.Warnings = append(rep.Warnings, "the data dir's previous audit keyring could not be read ("+unreadable+"); it was kept unchanged as "+replaced)
 		}
 		kitLines = append(kitLines, journal.SigningKeysPathEnv+"="+auditPath)
 	}
