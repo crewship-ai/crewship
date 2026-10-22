@@ -63,6 +63,7 @@ type Command struct {
 type Request struct {
 	MutationID string  `json:"mutation_id"`
 	MandateID  string  `json:"mandate_id"`
+	SessionID  string  `json:"session_id,omitempty"`
 	BaseRev    int64   `json:"base_rev"`
 	Generation int64   `json:"generation"`
 	Command    Command `json:"command"`
@@ -142,7 +143,7 @@ func (c Command) validate() error {
 }
 func bounded(s string) bool { return len(s) > 0 && len(s) <= 256 }
 func (r Request) validate(k Key) error {
-	if !bounded(k.WorkspaceID) || !bounded(k.PageID) || !bounded(r.MutationID) || !bounded(r.MandateID) || r.BaseRev < 0 || r.Generation < 0 {
+	if !bounded(k.WorkspaceID) || !bounded(k.PageID) || !bounded(r.MutationID) || !bounded(r.MandateID) || len(r.SessionID) > 256 || r.BaseRev < 0 || r.Generation < 0 {
 		return ErrInvalid
 	}
 	if r.BaseRev == 0 && (r.Command.Kind != "import" || r.Generation != 0) {
@@ -203,8 +204,38 @@ func recordCommand(c Command) (string, []byte, error) {
 	return record.Kind, data, err
 }
 
-// writerOf identifies who wrote a revision for cell-level concurrency.
-func writerOf(p Principal, _ Request) string { return p.AuthorityID }
+// MaxRebaseWindow bounds how many revisions a mutation may lag behind the head.
+const MaxRebaseWindow = 256
+
+// CellConflict is a target cell another writer changed after the base revision.
+// AuthorityID is internal; the host renders only a display label.
+type CellConflict struct {
+	Sheet       string `json:"sheet"`
+	Cell        string `json:"cell"`
+	Input       string `json:"input"`
+	Rev         int64  `json:"rev"`
+	AuthorityID string `json:"-"`
+}
+
+// PreconditionError details a rejected base revision. It matches ErrPrecondition.
+type PreconditionError struct {
+	HeadRev          int64
+	SnapshotRequired bool
+	Conflicts        []CellConflict
+}
+
+func (e *PreconditionError) Error() string        { return ErrPrecondition.Error() }
+func (e *PreconditionError) Is(target error) bool { return target == ErrPrecondition }
+
+// writerOf identifies who wrote a revision for cell-level concurrency: the
+// authority, and for a human also the client session, so two windows of one
+// person (or two people) are distinct writers.
+func writerOf(p Principal, r Request) string {
+	if r.SessionID == "" {
+		return p.AuthorityID
+	}
+	return p.AuthorityID + "#session:" + r.SessionID
+}
 
 func payloadHash(k Key, r Request) (string, error) {
 	if len(r.Command.Snapshot) > 0 {

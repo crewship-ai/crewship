@@ -563,7 +563,8 @@ func (h *gridcraftHTTP) agent(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, 200, result)
 	case "apply":
-		if body.Request == nil || body.Request.Command.Kind != "cell.set" || body.MutationID != "" {
+		// An agent is one writer per mandate; client sessions are a human concept.
+		if body.Request == nil || body.Request.Command.Kind != "cell.set" || body.Request.SessionID != "" || body.MutationID != "" {
 			gridcraftError(w, appengine.ErrInvalid)
 			return
 		}

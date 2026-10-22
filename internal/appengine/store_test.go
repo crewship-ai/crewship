@@ -88,7 +88,7 @@ func (e *fakeEngine) Prepare(ctx context.Context, b Binding, s State, c Command)
 	effects := []string{"*"}
 	if c.Kind == "cell.set" {
 		data = json.RawMessage(`{"sheets":[{"B2":"42"}]}`)
-		effects = []string{"Sheet1!B2"}
+		effects = []string{c.Sheet + "!" + c.Cell}
 	}
 	return NewCandidate(b, data, effects), nil
 }

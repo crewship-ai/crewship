@@ -165,8 +165,8 @@ func (s *Store) reserve(ctx context.Context, k Key, r Request, a Authorize, e En
 		} else if err != nil {
 			return err
 		}
-		if v.Rev != r.BaseRev || v.Generation != r.Generation {
-			return ErrPrecondition
+		if err = admitBase(ctx, tx, k, r, v, writerOf(p, r)); err != nil {
+			return err
 		}
 		var total, workspace, artifact int
 		if err = tx.QueryRowContext(ctx, `SELECT count(*),coalesce(sum(workspace_id=?),0),coalesce(sum(workspace_id=? AND page_id=?),0) FROM gridcraft_operations WHERE state='in_progress' AND lease_until>?`, k.WorkspaceID, k.WorkspaceID, k.PageID, now.UnixMilli()).Scan(&total, &workspace, &artifact); err != nil {
@@ -253,8 +253,10 @@ func (s *Store) Execute(ctx context.Context, k Key, r Request, a Authorize, e En
 		} else if err != nil {
 			return err
 		}
-		if v.Rev != r.BaseRev || v.Generation != r.Generation {
-			return ErrPrecondition
+		// The candidate was computed on the head seen at reservation. If the
+		// head moved since, the client retries with the same mutation ID.
+		if v.Rev != res.state.Rev || v.Generation != res.state.Generation {
+			return &PreconditionError{HeadRev: v.Rev}
 		}
 		if c.Binding != res.binding || hash(c.Snapshot) != c.ResultHash || len(c.Snapshot) == 0 || len(c.Snapshot) > MaxSnapshotBytes || !json.Valid(c.Snapshot) {
 			return ErrCandidate
@@ -312,6 +314,90 @@ func (s *Store) Execute(ctx context.Context, k Key, r Request, a Authorize, e En
 	})
 	return receipt, err
 }
+
+// admitBase applies cell-level concurrency. A mutation whose base is behind the
+// head is rebased onto it only when the generation matches, the window holds no
+// import (snapshot revision), the window is at most MaxRebaseWindow revisions
+// and no other writer changed one of its target cells. Imports still require
+// the exact head.
+func admitBase(ctx context.Context, tx *sql.Tx, k Key, r Request, v State, writer string) error {
+	if v.Generation != r.Generation || r.BaseRev > v.Rev {
+		return &PreconditionError{HeadRev: v.Rev}
+	}
+	if r.BaseRev == v.Rev {
+		return nil
+	}
+	if r.Command.Kind == "import" {
+		return &PreconditionError{HeadRev: v.Rev}
+	}
+	if v.Rev-r.BaseRev > MaxRebaseWindow {
+		return &PreconditionError{HeadRev: v.Rev, SnapshotRequired: true}
+	}
+	_, record, err := recordCommand(r.Command)
+	if err != nil {
+		return err
+	}
+	var mine commandRecord
+	if err = json.Unmarshal(record, &mine); err != nil {
+		return err
+	}
+	targets := map[[2]string]bool{}
+	for _, c := range mine.Cells {
+		targets[[2]string{c.Sheet, c.Cell}] = true
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT rev,kind,writer,authority_id,command FROM gridcraft_audit WHERE page_id=? AND rev>? AND rev<=? ORDER BY rev`, k.PageID, r.BaseRev, v.Rev)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	latest := map[[2]string]CellConflict{}
+	var order [][2]string
+	seen := int64(0)
+	for rows.Next() {
+		var rev int64
+		var kind, other, authority string
+		var command []byte
+		if err = rows.Scan(&rev, &kind, &other, &authority, &command); err != nil {
+			return err
+		}
+		seen++
+		if kind != "cells" {
+			return &PreconditionError{HeadRev: v.Rev, SnapshotRequired: true}
+		}
+		var written commandRecord
+		if err = json.Unmarshal(command, &written); err != nil {
+			return err
+		}
+		if other == writer {
+			continue
+		}
+		for _, c := range written.Cells {
+			key := [2]string{c.Sheet, c.Cell}
+			if !targets[key] {
+				continue
+			}
+			if _, ok := latest[key]; !ok {
+				order = append(order, key)
+			}
+			latest[key] = CellConflict{Sheet: c.Sheet, Cell: c.Cell, Input: c.Input, Rev: rev, AuthorityID: authority}
+		}
+	}
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	if seen != v.Rev-r.BaseRev {
+		return &PreconditionError{HeadRev: v.Rev, SnapshotRequired: true}
+	}
+	if len(order) > 0 {
+		conflict := &PreconditionError{HeadRev: v.Rev}
+		for _, key := range order {
+			conflict.Conflicts = append(conflict.Conflicts, latest[key])
+		}
+		return conflict
+	}
+	return nil
+}
+
 func (s *Store) release(k Key, r Request, res reservation) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

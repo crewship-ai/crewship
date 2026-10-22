@@ -95,6 +95,7 @@ func TestGridCraftAgentRequiresRetainedMandateAndRevokesDuringCandidate(t *testi
 	applied := call(packet)
 	wantCode(t, applied, 200, "signed current run")
 	wantCode(t, call(packet), 200, "authorized retry")
+	wantCode(t, call(strings.Replace(packet, `"mutation_id":"agent-edit",`, `"mutation_id":"agent-session","session_id":"s1",`, 1)), 400, "agent cannot claim a client session")
 	// A different Page does not inherit this grant, even for the same human/run.
 	wantCode(t, call(strings.Replace(packet, "grid-agent-page", "other-page", 1)), 404, "Page bound")
 	secondGrant := httptest.NewRecorder()

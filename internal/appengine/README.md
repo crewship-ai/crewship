@@ -31,6 +31,17 @@ also holds physical worker slots until computation and cleanup return; an expire
 lease alone does not free global, workspace or artifact capacity. The persistent worker also enforces physical capacity across application
 restarts. Its managed container restart discards all private candidate scratch.
 
+Concurrency is per cell. A cell mutation whose `base_rev` is behind the head is
+computed on the head and committed when the generation matches, no import lies
+in between, it lags at most 256 revisions and no other writer changed one of its
+target cells since its base. A writer is the authority, plus the client
+`session_id` for a human, so two windows of one person are distinct writers. A
+rejection carries the head revision, whether a fresh snapshot is required and
+the conflicting cells. If the head moves while a candidate is computed, the
+commit fails with `precondition_failed` and the same request may be retried.
+An agent mandate keeps its original base revision and targets; it can still
+commit after a human changed other cells. Imports require the exact head.
+
 The engine computes outside the database transaction. The candidate binds the
 artifact, base revision, generation, command hash, mandate, pinned engine and
 result hash. Concrete cell effects must fit the mandate. The GridCraft adapter
