@@ -341,13 +341,15 @@ func (h *InstanceAdminHandler) Suspend(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "suspend", err)
 		return
 	}
-	ids, err := revokeCLITokensAuditedTx(ctx, tx, actor.ID, id, now)
+	// Suspension only removes access, so it proceeds with a broken chain tail.
+	auditCtx := withSecurityAuditFallback(ctx)
+	ids, err := revokeCLITokensAuditedTx(auditCtx, tx, actor.ID, id, now)
 	if err != nil {
 		replyInternalError(w, h.logger, "suspend: revoke CLI tokens and audit", err)
 		return
 	}
 	tokens := int64(len(ids))
-	if err := auditInstance(ctx, r, tx, "instance.user_suspended", "user", id, "", map[string]any{
+	if err := auditInstance(auditCtx, r, tx, "instance.user_suspended", "user", id, "", map[string]any{
 		"reason": req.Reason, "sessions_revoked": revoked, "cli_tokens_revoked": tokens,
 	}); err != nil {
 		replyInternalError(w, h.logger, "suspend: audit", err)

@@ -254,7 +254,7 @@ func (h *UserProfileHandler) ChangePassword(w http.ResponseWriter, r *http.Reque
 	tokensRevoked := int64(0)
 	var tokenIDs []string
 	if req.RevokeCLITokens {
-		tokenIDs, err = revokeCLITokensAuditedTx(r.Context(), tx, user.ID, user.ID, now)
+		tokenIDs, err = revokeCLITokensAuditedTx(withSecurityAuditFallback(r.Context()), tx, user.ID, user.ID, now)
 		if err != nil {
 			replyInternalError(w, h.logger, "revoke cli tokens: audit", err)
 			return

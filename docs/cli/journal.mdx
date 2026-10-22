@@ -211,8 +211,10 @@ the guarantee and what it does (and does not) cover.
 
 Current servers also return `continuation_verified` and `historical_status`. A valid new segment does not authenticate old history whose key
 is missing or whose integrity failed. Whole-history verification still exits
-non-zero in that case. Audit appends refuse an invalid chain inside their write
-transaction; missing keys, database contention and cancellation are
+non-zero in that case. A defect followed by authentic rows is reported as
+`historical_invalid` or `historical_unverified` with `continuation_verified`
+true; it does not block new entries. Audit appends check only the chain tail
+and refuse when the tail itself does not authenticate; missing keys, database contention and cancellation are
 not reported as proven tampering. After investigation, the current OWNER can
 use [`crewship audit reseal`](/cli/audit#crewship-audit-reseal) to record an
 explicit new segment without rewriting the old rows.

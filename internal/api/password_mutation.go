@@ -27,7 +27,8 @@ func auditPasswordTx(ctx context.Context, tx *sql.Tx, user, action, now string, 
 	if err != nil {
 		return err
 	}
-	return appendInstanceAuditTx(ctx, tx, journal.InstanceAuditFields{
+	// Password change and reset end every other session: security-reducing.
+	return appendInstanceAuditTx(withSecurityAuditFallback(ctx), tx, journal.InstanceAuditFields{
 		ID: generateCUID(), UserID: sql.NullString{String: user, Valid: true}, Action: action,
 		EntityType: "user", EntityID: sql.NullString{String: user, Valid: true},
 		Metadata: sql.NullString{String: string(metadata), Valid: true}, CreatedAt: now,
@@ -80,7 +81,7 @@ func AuditLocalPasswordResetTx(ctx context.Context, tx *sql.Tx, userID, expected
 	if err != nil {
 		return err
 	}
-	if err := appendInstanceAuditTx(ctx, tx, journal.InstanceAuditFields{ID: generateCUID(), Action: "auth.password_reset", EntityType: "user", EntityID: sql.NullString{String: userID, Valid: true}, Metadata: sql.NullString{String: string(metadata), Valid: true}, CreatedAt: now}); err != nil {
+	if err := appendInstanceAuditTx(withSecurityAuditFallback(ctx), tx, journal.InstanceAuditFields{ID: generateCUID(), Action: "auth.password_reset", EntityType: "user", EntityID: sql.NullString{String: userID, Valid: true}, Metadata: sql.NullString{String: string(metadata), Valid: true}, CreatedAt: now}); err != nil {
 		return err
 	}
 	if err := acknowledgePasswordTx(ctx, tx, userID, expectedHash); err != nil {

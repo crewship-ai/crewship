@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/hmac"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"log/slog"
 	"math"
 	"time"
 
@@ -35,6 +37,9 @@ func (p instanceAuditProof) integrity(f journal.InstanceAuditFields) string {
 }
 func (p instanceAuditProof) integrityWithKeys(keys *journal.SigningKeys, f journal.InstanceAuditFields) string {
 	if !p.seq.Valid && !p.prev.Valid && !p.hash.Valid {
+		if !p.keyID.Valid && !p.macVersion.Valid && journal.IsInstanceAuditFallback(f.Metadata) {
+			return journal.InstanceAuditFallbackValue
+		}
 		return "legacy_unverified"
 	}
 	if !p.seq.Valid || p.seq.Int64 < 1 || !p.prev.Valid || !p.hash.Valid {
@@ -59,8 +64,72 @@ func (p instanceAuditProof) integrityWithKeys(keys *journal.SigningKeys, f journ
 
 // appendInstanceAuditTx shares the mutation transaction. Production connections
 // serialize SQLite writers; do not acquire a separate mutex or run callbacks.
+//
+// Admission authenticates only the tail (its MAC under its own key and its link
+// to the predecessor) and the inserted row, through the unique chain_seq index:
+// constant cost, whatever the history. Older defects are history, reported by
+// journal.VerifyInstanceAuditWithKeys on demand; only a broken tail refuses.
+//
+// A broken tail refuses every append except a security-reducing action whose
+// context carries withSecurityAuditFallback: that one records an unchained
+// fallback row instead (see appendInstanceAuditFallbackTx).
 func appendInstanceAuditTx(ctx context.Context, tx *sql.Tx, f journal.InstanceAuditFields) error {
-	return appendInstanceAuditTxMode(ctx, tx, f, false)
+	err := appendInstanceAuditTxMode(ctx, tx, f, false)
+	var tail *instanceAuditTailError
+	if errors.As(err, &tail) && securityAuditFallback(ctx) {
+		return appendInstanceAuditFallbackTx(ctx, tx, f)
+	}
+	return err
+}
+
+// instanceAuditTailError is a refusal before anything was written, because
+// the chain tail does not authenticate. Only this refusal may fall back.
+type instanceAuditTailError struct{ cause error }
+
+func (e *instanceAuditTailError) Error() string {
+	return "instance audit chain tail: " + e.cause.Error()
+}
+func (e *instanceAuditTailError) Unwrap() error { return e.cause }
+
+type securityAuditFallbackKey struct{}
+
+// withSecurityAuditFallback marks ctx as a security-reducing action: CLI token
+// revocation, session revocation and password reset. Such an action must never
+// be held hostage by audit repair. Access-granting actions never carry it.
+func withSecurityAuditFallback(ctx context.Context) context.Context {
+	return context.WithValue(ctx, securityAuditFallbackKey{}, true)
+}
+
+func securityAuditFallback(ctx context.Context) bool {
+	marked, _ := ctx.Value(securityAuditFallbackKey{}).(bool)
+	return marked
+}
+
+// appendInstanceAuditFallbackTx records f without chain columns, its metadata
+// marked journal.InstanceAuditFallbackValue. It cannot extend or endorse the
+// broken tail, and verification reports it (UnchainedFallback, never OK). The
+// row commits in the action's own transaction, so the action and its record
+// stay atomic.
+func appendInstanceAuditFallbackTx(ctx context.Context, tx *sql.Tx, f journal.InstanceAuditFields) error {
+	mark := map[string]any{}
+	if f.Metadata.Valid && json.Unmarshal([]byte(f.Metadata.String), &mark) != nil {
+		mark = map[string]any{"original_metadata": f.Metadata.String}
+	}
+	mark[journal.InstanceAuditFallbackKey] = journal.InstanceAuditFallbackValue
+	raw, err := json.Marshal(mark)
+	if err != nil {
+		return err
+	}
+	f.Metadata = sql.NullString{String: string(raw), Valid: true}
+	res, err := tx.ExecContext(ctx, `INSERT INTO instance_audit_logs(id,user_id,action,entity_type,entity_id,target_workspace_id,metadata,ip_address,user_agent,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, f.ID, f.UserID, f.Action, f.EntityType, f.EntityID, f.TargetWorkspaceID, f.Metadata, f.IPAddress, f.UserAgent, f.CreatedAt)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil || n != 1 {
+		return errors.Join(err, errors.New("instance audit fallback: insert not acknowledged"))
+	}
+	slog.Default().Error("instance audit chain tail is broken; security action recorded as unchained fallback", "action", f.Action, "audit_id", f.ID)
+	return nil
 }
 
 func appendInstanceAuditTxMode(ctx context.Context, tx *sql.Tx, f journal.InstanceAuditFields, checkpoint bool) error {
@@ -77,14 +146,14 @@ func appendInstanceAuditTxMode(ctx context.Context, tx *sql.Tx, f journal.Instan
 		if !checkpoint {
 			integrity := proof.integrityWithKeys(keys, tail)
 			if integrity == "key_unavailable" {
-				return journal.ErrSigningKeyUnavailable
+				return &instanceAuditTailError{journal.ErrSigningKeyUnavailable}
 			}
 			if integrity != "entry_verified" {
-				return journal.ErrChainIntegrity
+				return &instanceAuditTailError{journal.ErrChainIntegrity}
 			}
 		}
 		if proof.seq.Int64 == math.MaxInt64 {
-			return journal.ErrChainIntegrity
+			return &instanceAuditTailError{journal.ErrChainIntegrity}
 		}
 		seq = proof.seq.Int64 + 1
 		prev = proof.hash.String
@@ -121,11 +190,7 @@ func appendInstanceAuditTxMode(ctx context.Context, tx *sql.Tx, f journal.Instan
 	if stored != f || !ack.seq.Valid || ack.seq.Int64 != seq || ack.prev.String != prev || ack.hash.String != hash || ack.keyID != keyID || ack.macVersion != version || ack.integrityWithKeys(keys, stored) != "entry_verified" {
 		return errors.New("instance audit: persisted row changed")
 	}
-	result, err := journal.VerifyInstanceAuditWithKeys(ctx, tx, keys)
-	if err != nil {
-		return err
-	}
-	return result.AppendError()
+	return nil
 }
 
 func appendInstanceAudit(ctx context.Context, target instanceAuditExecer, f journal.InstanceAuditFields) error {
