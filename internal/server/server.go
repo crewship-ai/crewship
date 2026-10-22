@@ -421,14 +421,11 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	// leak the actual API surface to a probing attacker.
 	mainHandler = pathTraversalRejectMiddleware(mainHandler)
 	// V-10: Wrap with security headers middleware
-	headerOptions := securityHeaderOptions{pageRuntimeOrigin: cfg.Storage.PageRuntimeOrigin}
 	editor := newEditorOrigin(cfg, logger)
-	if editor != nil && cfg.GridCraft.Enabled && cfg.GridCraft.EditorEnabled {
-		headerOptions.editorOrigin = cfg.GridCraft.EditorOrigin
-	}
-	mainHandler = securityHeadersMiddlewareWith(mainHandler, headerOptions)
-	// The editor host serves only allowlisted bundles under its own headers;
-	// it never reaches the API, the SPA or the Studio security headers.
+	mainHandler = securityHeadersMiddlewareWith(mainHandler, editorHeaderOptions(cfg, editor))
+	// The editor (its host, or its path prefix on the Studio origin) serves
+	// only allowlisted bundles under its own headers; it never reaches the
+	// API, the SPA, path cleaning or the Studio security headers.
 	mainHandler = editororigin.Gate(editor, mainHandler)
 	// Panic recovery is the OUTERMOST wrapper so it also catches panics
 	// inside securityHeadersMiddleware itself (rare but possible if a

@@ -615,15 +615,21 @@ See [workbook commands](/cli/workbook) for scope and request contracts.
 
 #### Embedded workbook editor origin
 
-The browser workbook editor is third-party code. It runs only in an iframe on
-its own origin, holds no Crewship credential and is served only from
-operator-pinned bundles. All of it is off by default.
+The browser workbook editor is third-party code. It runs only in a sandboxed
+iframe with an opaque origin, holds no Crewship credential and is served only
+from operator-pinned bundles. All of it is off by default.
+
+**Zero-config default.** With the editor enabled and no
+`CREWSHIP_EDITOR_RUNTIME_ORIGIN`, Crewship serves the editor on the Studio
+origin under `/_editor/b/<digest>/` (see [Same-host mode](#same-host-mode)).
+No DNS record, certificate or proxy route is needed. A dedicated origin is
+optional hardening on top.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CREWSHIP_GRIDCRAFT_EDITOR_ENABLED` | `false` | Literal `true` or `1` serves the editor. Requires `CREWSHIP_GRIDCRAFT_ENABLED`. |
-| `CREWSHIP_EDITOR_RUNTIME_ORIGIN` | *(unset)* | HTTPS origin of the editor, e.g. `https://editor.example.org` for `https://studio.example.test`. Its host must be a subdomain (not an apex, no trailing dot), must differ from the Studio host and the Page runtime host and must not be a parent of either, and it must not appear in `CREWSHIP_ALLOWED_ORIGINS`. Once set, that host (any case, port or trailing dot) serves only editor bundles: the API, the UI and probes return 404 there, even while the editor is disabled. |
-| `CREWSHIP_EDITOR_RUNTIME_DEVELOPMENT_SAME_SITE` | `false` | Development only. Literal `true` permits a sibling subdomain of Studio (`https://editor.example.test`). Without it the editor origin must be on a different site. The origin itself is never shared with Studio. |
+| `CREWSHIP_EDITOR_RUNTIME_ORIGIN` | *(unset: same-host mode)* | Optional hardening. HTTPS origin of a dedicated editor host, e.g. `https://editor.example.org` for `https://studio.example.test`. Its host must be a subdomain (not an apex, no trailing dot), must differ from the Studio host and the Page runtime host and must not be a parent of either, and it must not appear in `CREWSHIP_ALLOWED_ORIGINS`. Once set, that host (any case, port or trailing dot) serves only editor bundles: the API, the UI and probes return 404 there, even while the editor is disabled. |
+| `CREWSHIP_EDITOR_RUNTIME_DEVELOPMENT_SAME_SITE` | `false` | Literal `true` permits a dedicated origin on a sibling subdomain of Studio (`https://editor.example.test`). Without it a dedicated origin must be on a different site. The origin itself is never shared with Studio. Refused without `CREWSHIP_EDITOR_RUNTIME_ORIGIN`. |
 | `CREWSHIP_GRIDCRAFT_EDITOR_BUNDLE_DIR` | *(unset)* | Clean absolute directory holding one `<digest>/` directory per bundle, each with a `manifest.json` (`{"files":{"<path>":"<sha256>"}}`) that lists `index.html`. |
 | `CREWSHIP_GRIDCRAFT_EDITOR_BUNDLES` | *(unset)* | Comma-separated allowlist (at most 4) of lowercase hex SHA-256 digests of each bundle's exact `manifest.json` bytes. The manifest pins every file, so the digest pins the whole bundle. Removing a digest stops serving it after restart. |
 
@@ -680,3 +686,54 @@ While the editor is enabled, Studio adds the editor origin to `frame-src` of
 every UI document. The UI routes on the client, so a policy scoped to one route
 would not follow navigation. Only this one origin is added, and `frame-src`
 controls what Studio frames, not who may frame Studio.
+
+##### Same-host mode
+
+Without `CREWSHIP_EDITOR_RUNTIME_ORIGIN`, an enabled editor is served at
+`<Studio origin>/_editor/b/<digest>/<path>` with the headers above, where every
+`<editor origin>` source is the bundle path `<Studio origin>/_editor/b/`, never
+the bare Studio origin. Studio's `frame-src` likewise names only that path.
+Isolation then rests on:
+
+- **The opaque origin.** The server's `sandbox allow-scripts` applies whatever
+  the iframe says, so the editor cannot read or set Studio cookies, use
+  storage or service workers, open popups or navigate the top window.
+- **Path-scoped sources.** The editor cannot fetch, connect to or load
+  anything on the Studio origin outside `/_editor/b/`, so the Studio API is
+  unreachable. Because Studio frames only that path, a frame that navigates
+  itself cannot land on a Studio document, even if the host page drops the
+  `sandbox` attribute or adds `allow-same-origin`.
+- **One route for the prefix.** Every request whose path starts with
+  `/_editor` (any case, percent-encoded or with dot segments) is answered by
+  the editor handler and never reaches the API or the UI. Nothing under it
+  redirects, because a browser drops the path of a CSP source after a
+  redirect.
+- **Requests only a credentialless, sandboxed frame makes.** The editor
+  answers `403` to any request that carries a `Cookie` header, because an iframe
+  without `credentialless` sends Studio's cookies. This holds even where
+  Studio's `Cross-Origin-Embedder-Policy` is missing. `index.html` is served
+  only with `Sec-Fetch-Dest: iframe`. Other files are served only with
+  `Sec-Fetch-Site: cross-site`, which is what the opaque-origin document sends,
+  and never as a document. A Studio page therefore cannot load the third-party
+  code into the Studio origin. Responses carry
+  `Vary: Cookie, Sec-Fetch-Site, Sec-Fetch-Dest`.
+
+Same-host mode requires an HTTPS Studio origin; plain HTTP is allowed only on
+loopback. Same-host mode is refused when the Page runtime shares the Studio
+origin, because Studio would then frame its own whole origin, and when
+`CREWSHIP_ALLOWED_ORIGINS` contains `null`. In a local development setup with
+the Next.js dev server, `/_editor/*` is proxied to the backend like `/api/*`. A
+reverse proxy in front of Crewship must pass `/_editor/` to it unchanged,
+together with the `Cookie` and `Sec-Fetch-*` request headers.
+
+To check a deployment:
+`curl -sI -H 'Sec-Fetch-Dest: iframe' <Studio>/_editor/b/<digest>/index.html`
+must return `200` with a policy that ends in `sandbox allow-scripts`. The same
+request with `-H 'Cookie: x=1'` must return `403`.
+
+A dedicated origin adds a second, independent boundary: a real origin, which
+on a different site also means a separate browser process. Configure one where
+the deployment can provide it. A sibling subdomain needs
+`CREWSHIP_EDITOR_RUNTIME_DEVELOPMENT_SAME_SITE`. Crewship does not derive an
+editor subdomain on its own, because it cannot tell whether DNS, the
+certificate and the proxy cover that name.

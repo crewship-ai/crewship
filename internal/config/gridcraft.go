@@ -18,9 +18,12 @@ type GridCraftConfig struct {
 	MaxWorkers          int    `yaml:"max_workers"`
 	MaxWorkspaceWorkers int    `yaml:"max_workspace_workers"`
 
-	// The embedded workbook editor runs foreign code on its own origin
+	// The embedded workbook editor runs foreign code in a sandboxed frame
 	// (internal/editororigin). All of it is off unless EditorEnabled and
-	// Enabled are both set; EditorOrigin alone only isolates that host.
+	// Enabled are both set. Without EditorOrigin the editor is served under a
+	// path prefix of the Studio origin (zero-config default); EditorOrigin
+	// moves it to a dedicated host (optional hardening), and alone only
+	// isolates that host.
 	EditorEnabled             bool     `yaml:"editor_enabled"`
 	EditorOrigin              string   `yaml:"editor_origin"`
 	EditorDevelopmentSameSite bool     `yaml:"editor_development_same_site"` // Sibling subdomain of Studio; development only.
@@ -48,16 +51,21 @@ func validateGridCraftEditor(c *Config, allowedOrigins string) error {
 	if g.EditorEnabled && !g.Enabled {
 		return errors.New("gridcraft editor requires the gridcraft workbook engine")
 	}
+	var allowed []string
+	for _, item := range strings.Split(allowedOrigins, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			allowed = append(allowed, item)
+		}
+	}
 	if g.EditorEnabled && g.EditorOrigin == "" {
-		return errors.New("gridcraft editor requires an editor origin")
+		if g.EditorDevelopmentSameSite {
+			return errors.New("gridcraft editor: the sibling-subdomain exception applies only to a dedicated editor origin")
+		}
+		if err := editororigin.ValidateSameHost(c.PageStudioOrigin(), c.Storage.PageRuntimeOrigin, allowed); err != nil {
+			return fmt.Errorf("gridcraft editor: %w", err)
+		}
 	}
 	if g.EditorOrigin != "" {
-		var allowed []string
-		for _, item := range strings.Split(allowedOrigins, ",") {
-			if item = strings.TrimSpace(item); item != "" {
-				allowed = append(allowed, item)
-			}
-		}
 		if err := editororigin.ValidateOrigin(g.EditorOrigin, c.PageStudioOrigin(), c.Storage.PageRuntimeOrigin, g.EditorDevelopmentSameSite, allowed); err != nil {
 			return fmt.Errorf("gridcraft editor: %w", err)
 		}
