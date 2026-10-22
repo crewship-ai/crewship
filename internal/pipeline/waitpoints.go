@@ -15,6 +15,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/jitter"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/policy"
 )
 
@@ -43,6 +44,9 @@ import (
 // to schedule per-waitpoint timers.
 type SQLWaitpointStore struct {
 	db *sql.DB
+	// auditJournal, when wired, appends refusal audits with the configured
+	// chain key (waitpoints_decider.go).
+	auditJournal journal.TransactionEmitter
 
 	mu        sync.Mutex
 	listeners map[string]chan waitDecision

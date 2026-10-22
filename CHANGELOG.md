@@ -8,6 +8,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 (`0.x.0`); patch releases (`0.x.y`) are backwards-compatible fixes.
 
 ## [Unreleased]
+- **Crew links, the artifact creation policy, credential folder policy and routine origin clears roll back when their audit fails.** These access changes used to be recorded only in the unchained Settings Audit log, some of them after the change had already committed; each now appends the hash-chained journal in the same transaction, with previous and current values, and still writes the Settings Audit row. Refused waitpoint decisions are chained the same way without naming the callback token. The crew runtime privilege audit now also records `init` and mounts, alongside `privileged` and added capabilities.
+- ⚠️ **Behaviour change: first-run Setup is refused for MEMBER.** `POST /api/v1/onboarding/setup` now requires the OWNER, ADMIN or MANAGER role in the workspace; a MEMBER (or VIEWER) gets 403 Forbidden instead of creating the first crew. Ask a workspace owner or admin to run Setup, or to raise your role first.
 - A Document or Slides page with edits the server has not accepted now asks before an in-app link leaves it (Keep editing or Leave anyway); the link used to do nothing and say nothing.
 - Replaying a Document creation submission after a lost reply no longer adds a duplicate human message or starts another run.
 - Enter in a Document acts where the caret is shown: after a quick keyboard caret move such as Ctrl+End, it no longer splits the document where the caret was a moment before.
