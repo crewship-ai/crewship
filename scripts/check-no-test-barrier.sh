@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# check-no-test-barrier.sh — fail if any Go binary under the given paths was
+# built with the crewship_testbarrier tag. That tag compiles a test-only hook
+# that can park workbook operations; it must never reach a release.
+#
+#   scripts/check-no-test-barrier.sh dist            # every Go binary in dist
+#   scripts/check-no-test-barrier.sh path/to/crewship
+#
+# Reads build settings with `go version -m`. Non-Go files are skipped, but at
+# least one Go binary must be found, so a wrong path cannot pass silently.
+set -euo pipefail
+
+if [ $# -eq 0 ]; then
+  echo "usage: $0 PATH..." >&2
+  exit 2
+fi
+
+checked=0
+bad=0
+while IFS= read -r -d '' file; do
+  info="$(go version -m "$file" 2>/dev/null)" || continue
+  checked=$((checked + 1))
+  tags="$(printf '%s\n' "$info" | awk '$1 == "build" && $2 ~ /^-tags=/ { sub(/^-tags=/, "", $2); print $2 }')"
+  case ",$tags," in
+    *,crewship_testbarrier,*)
+      echo "FAIL  $file was built with -tags=$tags (test barrier compiled in)" >&2
+      bad=1 ;;
+  esac
+done < <(find "$@" -type f -print0)
+
+if [ "$checked" -eq 0 ]; then
+  echo "FAIL  no Go binaries found under: $*" >&2
+  exit 1
+fi
+if [ "$bad" -ne 0 ]; then
+  exit 1
+fi
+echo "ok  $checked Go binaries built without crewship_testbarrier"

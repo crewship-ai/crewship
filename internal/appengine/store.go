@@ -234,6 +234,11 @@ func (s *Store) Execute(ctx context.Context, k Key, r Request, a Authorize, e En
 	if err = candidateCtx.Err(); err != nil {
 		return Receipt{}, s.interrupted(ctx, k, a, err)
 	}
+	// Default-off test hook (build tag crewship_testbarrier). It only delays the
+	// commit below; every check in that transaction still runs afterwards.
+	if err = testBarrier(ctx, barrierPreCommit, k, res.principal.AuthorityID, r.MutationID); err != nil {
+		return Receipt{}, s.interrupted(ctx, k, a, err)
+	}
 	var receipt Receipt
 	err = s.tx(ctx, k, a, func(tx *sql.Tx, p Principal) error {
 		if !reflect.DeepEqual(p, res.principal) {
@@ -299,6 +304,10 @@ func (s *Store) Execute(ctx context.Context, k Key, r Request, a Authorize, e En
 	})
 	if err != nil {
 		return Receipt{}, s.interrupted(ctx, k, a, err)
+	}
+	if err = testBarrier(ctx, barrierPostCommit, k, res.principal.AuthorityID, r.MutationID); err != nil {
+		// Committed; only the acknowledgement is lost. A retry returns the receipt.
+		return Receipt{}, err
 	}
 	return receipt, nil
 }

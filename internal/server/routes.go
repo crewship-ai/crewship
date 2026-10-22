@@ -88,6 +88,7 @@ func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	if detail := s.episodicDetail(); detail != "" {
 		body["episodic_error"] = detail
 	}
+	addGridCraftTestBarrierHealth(body)
 	status := http.StatusOK
 	if s.writerOwnerCheck != nil {
 		body["writer_ownership"] = "held"

@@ -69,3 +69,31 @@ existing authority transactions, even when workbook routes are disabled.
 Workbook transactions reject all other installed content formats, including
 boards and HTML artifacts. Existing corrupt mixed-format pages fail closed;
 this pilot does not include a repair or deletion workflow for such pages.
+
+## Test barrier (development builds only)
+
+`Execute` has two hooks, `pre-commit` (after the candidate, before the commit
+transaction) and `post-commit` (after a durable commit, before the receipt is
+returned). In normal builds they are no-ops (`barrier_off.go`). Only a binary
+built with `-tags crewship_testbarrier` can park operations, and only when:
+
+- `CREWSHIP_GRIDCRAFT_TEST_BARRIER_DIR` is a clean absolute path to a real
+  directory with mode `0700` owned by the service user, and
+- `CREWSHIP_GRIDCRAFT_TEST_BARRIER_SLOT` is `dev1`..`dev4`.
+
+Any other slot (including `stage` and `prod`) or an unsafe directory stops the
+server at startup. While active, startup logs a warning and `/healthz` carries
+`"test_barrier": true`.
+
+Only mutation ids starting with `barrier-` park. At each point the host
+creates `<sha256(artifact|authority|mutation)>.<point>.parked` (`O_EXCL`,
+`0600`) and waits for the matching `.release` file, the end of the request
+context, or a hard 45 s cap, then removes both files and continues. A release
+written before the park is ignored; stale files are removed at startup. The
+barrier only adds delay: the commit still checks token, lease, base,
+candidate binding, authority and effects, and the barrier never returns
+success in place of a commit.
+
+Release and nightly packaging run `scripts/check-no-test-barrier.sh dist`,
+which fails if any built Go binary carries the tag. Tagged tests:
+`go test -tags crewship_testbarrier ./internal/appengine/ ./internal/server/`.
