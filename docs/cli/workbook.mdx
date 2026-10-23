@@ -27,7 +27,19 @@ the Page with unconfirmed edits asks first. An edit the server answers without
 a durable receipt is retried with the same mutation ID a few times and then
 reported as not saved; later edits are still sent. An edit the server refuses
 because its recalculation cannot be confirmed (`403 effect_out_of_mandate`) is
-reported as not saved, and the editor stays open. The Page checks its
+reported as not saved, and the editor stays open. A refused edit (another
+writer changed one of its cells, the workbook changed underneath it, its
+recalculation cannot be confirmed, or the server never confirmed it) stays on
+the Page with every cell it wrote, and with the other writer's value next to
+yours for each cell they changed, until you decide: **Keep mine** writes all
+of its cells again against the current revision; **Take theirs** keeps the
+other writer's value for the cells they changed and still saves your other
+cells of the same edit (with no such cell, **Discard mine** drops the edit).
+Until every refused edit is decided the status reads not saved, never
+**Saved**, and leaving the Page asks first. Reloading the workbook (for
+example after `410 snapshot_required`) keeps the open decisions, and a
+**Keep mine** that a reload overtakes before it was saved comes back to be
+decided again. The Page checks its
 editor session every minute while it is open and visible, and when the window
 regains focus or reconnects; the server renews the session only when less than
 10 minutes of it remain, so the frequent check is cheap and mainly notices
