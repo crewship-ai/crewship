@@ -94,3 +94,24 @@ are refused before any destination deletion/write. Fingerprints bind original
 scope; re-keying history, dropping it or presenting it as new-scope Saved would
 violate that identity. Qualified clone/import provenance belongs to the later
 recovery integration. No transformed restore support is claimed by this primitive.
+
+`CanonicalE3WireJSON` is an unused strict JSON/JCS resource primitive for the
+explicit negotiated `mooring-e3-bounded-json-v1` implementation profile: 262144
+raw and canonical body bytes, 64 container levels and 32768 structural tokens
+(opening braces/brackets, commas and colons outside strings). It retains generic
+protocol maxima; a larger task/checkpoint is unsupported on this profile until
+qualified transport support exists. Drafts must remain intact on refusal.
+`ValidWireIdentifier` uses 1–200 Unicode scalar values excluding NUL; application
+payload strings remain opaque. Version syntax validation does not negotiate
+support. Complete envelope schema, authentication, directions and scope checks
+remain separate prerequisites before dispatch. No route calls these helpers.
+
+`NewWireSchema` accepts a trusted public schema snapshot and audits the complete
+fixed Mooring schema vocabulary before construction: unknown keywords/patterns,
+remote/missing references and cycles fail closed even in unused branches or
+negations. The recursion bound is derived from the acyclic schema graph, not an
+unadvertised message work quota. `ValidateE3` returns canonical bytes after the
+bounded JSON and envelope shape pass. Shared semantic-negative fixtures remain
+shape-valid deliberately; authentication, direction allowlists, authority, cross-
+field equality, immutable membership/fingerprints and app effects still require
+separate enforcement. No runtime route uses this interpreter.

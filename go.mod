@@ -20,6 +20,7 @@ require (
 	github.com/google/nftables v0.3.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
+	github.com/gowebpki/jcs v1.0.2
 	github.com/grafana/pyroscope-go v1.4.3
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/klauspost/compress v1.20.3
@@ -91,7 +92,6 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
-	github.com/gowebpki/jcs v1.0.2
 	github.com/grafana/pyroscope-go/godeltaprof v0.1.11 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect

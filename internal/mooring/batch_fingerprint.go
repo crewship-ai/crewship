@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"strings"
 	"unicode/utf8"
 
 	"github.com/gowebpki/jcs"
@@ -121,7 +120,7 @@ func FingerprintAtomicJSON(raw []byte) (AtomicFingerprints, error) {
 	}
 	result := AtomicFingerprints{CanonicalInput: canonical, MembershipHash: canonicalDigest(canonical), Operations: make(map[string]string, len(shape.Operations))}
 	for _, op := range shape.Operations {
-		if len(op.ID) == 0 || len(op.ID) > 200 || strings.ContainsRune(op.ID, 0) {
+		if !ValidWireIdentifier(op.ID) {
 			return AtomicFingerprints{}, ErrCanonicalInput
 		}
 		if _, duplicate := result.Operations[op.ID]; duplicate {
