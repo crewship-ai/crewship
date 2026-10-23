@@ -304,35 +304,9 @@ func (s *Store) Execute(ctx context.Context, k Key, r Request, a Authorize, e En
 			return err
 		}
 		if !ok {
-			// A full quota is recoverable. First drop history that no rebase
-			// can reach: everything before the newest checkpoint at least
-			// MaxRebaseWindow revisions behind this one. If the window itself
-			// does not fit, this revision becomes a checkpoint and all earlier
-			// history is dropped; stale clients then reread the workbook.
-			var keep sql.NullInt64
-			if err = tx.QueryRowContext(ctx, `SELECT max(rev) FROM gridcraft_revisions WHERE page_id=? AND rev<=?`, k.PageID, rev-MaxRebaseWindow).Scan(&keep); err != nil {
-				return err
-			}
-			if keep.Valid {
-				if err = pruneHistory(ctx, tx, k.PageID, keep.Int64); err != nil {
-					return err
-				}
-				if ok, err = fits(); err != nil {
-					return err
-				}
-			}
-			if !ok {
-				checkpoint = true
-				if err = pruneHistory(ctx, tx, k.PageID, rev); err != nil {
-					return err
-				}
-				if ok, err = fits(); err != nil {
-					return err
-				}
-				if !ok {
-					return ErrQuota
-				}
-			}
+			// Confirmed history is retained until an explicit retention action.
+			// A write must never buy capacity by discarding earlier revisions.
+			return ErrQuota
 		}
 		generation := v.Generation
 		if generation == 0 {
@@ -430,8 +404,7 @@ func (s *Store) recheckAuthority(ctx context.Context, k Key, a Authorize) error 
 // checkpoints before keep and the commands of revisions up to keep. Audit rows
 // stay, with writer, receipt and result hash; a pruned row becomes a snapshot
 // revision (unknown cells), so a window scan that reaches it requires a reread.
-// Pruned revisions lie outside every rebase window when the quota allows it;
-// a forced checkpoint shortens the window instead of failing the commit.
+// This helper is never invoked by the commit path.
 func pruneHistory(ctx context.Context, tx *sql.Tx, page string, keep int64) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM gridcraft_revisions WHERE page_id=? AND rev<?`, page, keep); err != nil {
 		return err

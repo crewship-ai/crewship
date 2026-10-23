@@ -511,7 +511,7 @@ function editFailure(response: TransportResponse, sessionId: string): BridgeFail
     return new BridgeFailure({ kind: "rejected" }, { action: "reject", code: error === "precondition_failed" ? "precondition_failed" : "conflict" })
   }
   if (status === 429) {
-    if (error === "history_quota_exceeded") return new BridgeFailure({ kind: "rejected" }, { action: "reject", code: "history_quota_exceeded" })
+    if (error === "quota_exceeded" || error === "history_quota_exceeded") return new BridgeFailure({ kind: "rejected" }, { action: "reject", code: "history_quota_exceeded" })
     const artifact = object(body) && body.scope === "artifact"
     // Busy artifact: another write is committing right now. The same mutation goes again shortly.
     return new BridgeFailure({ kind: artifact ? "rate-limited" : "transient", retryAfterMs: retryAfter(body) }, { action: "retry" })
