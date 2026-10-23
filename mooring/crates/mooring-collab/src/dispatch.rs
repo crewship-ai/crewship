@@ -156,7 +156,7 @@ impl<A: PrepareAdapter> Registration<A> {
             _ => Err(invalid("unsupported private control")),
         }
     }
-    fn check_binding(&self, scope: &Scope, selected: &Versions) -> io::Result<()> {
+    pub(crate) fn check_binding(&self, scope: &Scope, selected: &Versions) -> io::Result<()> {
         if !protocol::wire::valid_identifier(&self.application_id)
             || scope.application_id != self.application_id
             || selected != &self.selected
@@ -167,7 +167,7 @@ impl<A: PrepareAdapter> Registration<A> {
     }
 }
 
-fn inventory_set(inventory: &[TargetIdentity]) -> io::Result<BTreeMap<&str, bool>> {
+pub(crate) fn inventory_set(inventory: &[TargetIdentity]) -> io::Result<BTreeMap<&str, bool>> {
     if inventory.len() > 65_536 {
         return Err(invalid("inventory limit"));
     }
@@ -184,22 +184,26 @@ fn inventory_set(inventory: &[TargetIdentity]) -> io::Result<BTreeMap<&str, bool
     Ok(targets)
 }
 fn rejection(failure: PreparedFailure, change: &AtomicChange) -> io::Result<AtomicPreparedOutcome> {
+    direct_failure(failure, change).map(AtomicPreparedOutcome::PreparedDirectFailure)
+}
+pub(crate) fn direct_failure(
+    failure: PreparedFailure,
+    change: &AtomicChange,
+) -> io::Result<PreparedDirectFailure> {
     let failure = failure
         .qualify(change)
         .map_err(|_| invalid("invalid prepared failure"))?;
-    Ok(AtomicPreparedOutcome::PreparedDirectFailure(
-        PreparedDirectFailure {
-            kind: PreparedDirectFailureKind::Failure,
-            op_id: failure.operation_id().into(),
-            reason: Rejection {
-                code: failure.code().clone(),
-                message: failure.message().into(),
-                root_op_id: None,
-                root_cause: None,
-                retry: RejectionRetry::NewOperationAfterRefresh,
-            },
+    Ok(PreparedDirectFailure {
+        kind: PreparedDirectFailureKind::Failure,
+        op_id: failure.operation_id().into(),
+        reason: Rejection {
+            code: failure.code().clone(),
+            message: failure.message().into(),
+            root_op_id: None,
+            root_cause: None,
+            retry: RejectionRetry::NewOperationAfterRefresh,
         },
-    ))
+    })
 }
 fn response_bytes(response: &impl serde::Serialize) -> io::Result<Vec<u8>> {
     let mut writer = BoundedWriter { bytes: Vec::new() };
@@ -210,11 +214,11 @@ fn response_bytes(response: &impl serde::Serialize) -> io::Result<Vec<u8>> {
         .map(|value| value.bytes().to_vec())
         .map_err(|_| invalid("control response limit or shape"))
 }
-fn invalid(message: &'static str) -> io::Error {
+pub(crate) fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
 }
 
-fn budget_check(value: &impl serde::Serialize) -> io::Result<()> {
+pub(crate) fn budget_check(value: &impl serde::Serialize) -> io::Result<()> {
     let mut writer = CountWriter(0);
     serde_json::to_writer(&mut writer, value).map_err(|_| invalid("candidate metadata limit"))
 }
@@ -232,8 +236,8 @@ impl io::Write for CountWriter {
         Ok(())
     }
 }
-struct BoundedWriter {
-    bytes: Vec<u8>,
+pub(crate) struct BoundedWriter {
+    pub(crate) bytes: Vec<u8>,
 }
 impl io::Write for BoundedWriter {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
