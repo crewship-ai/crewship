@@ -104,3 +104,43 @@ func waitFor(t *testing.T, cond func() bool) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// Fresh asynchronous entries cannot overtake older held entries after repair
+// but before the retry tick. Flush acknowledges the hold, not durability.
+func TestAuditHeldEntriesCannotBeOvertaken(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	writer := NewWriter(db, quietLogger(), WriterOptions{FlushInterval: time.Hour, HeldRetryInterval: time.Hour})
+	defer writer.Close()
+	emitAuthentic(t, writer, "ws_test", 3)
+	var original string
+	if err := db.QueryRow(`SELECT summary FROM journal_entries WHERE workspace_id='ws_test' AND seq=3`).Scan(&original); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE journal_entries SET summary='changed' WHERE workspace_id='ws_test' AND seq=3`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.Emit(t.Context(), Entry{WorkspaceID: "ws_test", Type: EntryInvitationCreated, ActorType: ActorSystem, Summary: "older held"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Flush(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE journal_entries SET summary=? WHERE workspace_id='ws_test' AND seq=3`, original); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.Emit(t.Context(), Entry{WorkspaceID: "ws_test", Type: EntryInvitationCreated, ActorType: ActorSystem, Summary: "fresh after repair"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Flush(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE workspace_id='ws_test'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 3 {
+		t.Fatalf("fresh entry overtook held history: rows=%d, want 3 until held retry", n)
+	}
+}

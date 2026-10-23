@@ -489,6 +489,29 @@ func (w *Writer) run() {
 		if len(batch) == 0 {
 			return
 		}
+		// A repaired tail can accept appends before the held retry tick.
+		// Queue fresh background entries behind that workspace's older held
+		// entries instead of letting them overtake the backlog.
+		if len(held) > 0 {
+			blocked := make(map[string]bool)
+			for _, e := range held {
+				blocked[e.WorkspaceID] = true
+			}
+			var waiting []Entry
+			ready := batch[:0]
+			for _, e := range batch {
+				if blocked[e.WorkspaceID] {
+					waiting = append(waiting, e)
+				} else {
+					ready = append(ready, e)
+				}
+			}
+			held = w.hold(held, waiting)
+			batch = ready
+			if len(batch) == 0 {
+				return
+			}
+		}
 		err := w.persistBatch(context.Background(), batch)
 		if err == nil {
 			persistFailures = 0
