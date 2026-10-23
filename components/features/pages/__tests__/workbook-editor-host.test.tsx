@@ -570,6 +570,59 @@ describe("save state and leave guard", () => {
     expect(edit.mock.calls.length).toBe(edits)
   })
 
+  const refusedOn = (cells: Record<string, string>) => vi.fn(async (_id: string, body: string): Promise<TransportResponse> => {
+    const cell = (JSON.parse(body) as { ops: { cell: string }[] }).ops[0].cell
+    return { status: 409, body: { error: "precondition_failed", head_rev: 42, conflicts: [{ sheet: "Sheet1", cell, input: cells[cell], rev: 42, actor_label: "Agent Ada" }] } }
+  })
+  const agentChanged = (cells: Record<string, string>) => vi.fn(async (since: number) => ok({ head_rev: 42, generation: 1, commits: since < 42 ? [{ rev: 42, kind: "cells", actor_label: "Agent Ada", own: false, ops: Object.entries(cells).map(([cell, input]) => ({ sheet: "Sheet1", cell, input })) }] : [] }))
+
+  it("take theirs on the only refused change returns to no unsaved changes and clears the editor's refusal", async () => {
+    const t = setup({ transport: { edit: refusedOn({ B4: "77" }), commits: agentChanged({ B4: "77" }), snapshot: vi.fn(async () => ok({ schema_version: 1, rev: 42, generation: 1, snapshot: { sheets: [] } })) } })
+    await t.connect()
+    await t.send(mutation(1, 41, "B4", "mine-B4"))
+    await waitFor(() => expect(t.status()).toBe("Not saved · a change was refused"))
+    const edits = t.transport.edit.mock.calls.length
+    await act(async () => { screen.getByRole("button", { name: "Take theirs" }).click() })
+    await waitFor(() => expect(t.status()).toBe("No unsaved changes"))
+    expect(screen.queryByTestId("workbook-draft-conflict")).toBeNull()
+    expect(t.transport.edit.mock.calls.length).toBe(edits)
+    // A fresh snapshot is the only message the editor clears its own refusal notice on.
+    await waitFor(() => expect(t.fromFrame.at(-1)).toEqual(expect.objectContaining({ type: "snapshot", rev: 42, discarded: [] })))
+  })
+
+  it("take theirs on one of two refused changes keeps the refused status for the other", async () => {
+    const t = setup({ transport: { edit: refusedOn({ B4: "77", C5: "88" }), commits: agentChanged({ B4: "77", C5: "88" }) } })
+    await t.connect()
+    await t.send(mutation(1, 41, "B4", "mine-B4"))
+    await t.send(mutation(2, 41, "C5", "mine-C5"))
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "Take theirs" })).toHaveLength(2))
+    const snapshots = t.transport.snapshot.mock.calls.length
+    await act(async () => { screen.getAllByRole("button", { name: "Take theirs" })[0].click() })
+    expect(screen.getAllByRole("button", { name: "Take theirs" })).toHaveLength(1)
+    expect(t.status()).toBe("Not saved · a change was refused")
+    expect(t.transport.snapshot.mock.calls.length).toBe(snapshots)
+    await act(async () => { screen.getByRole("button", { name: "Take theirs" }).click() })
+    await waitFor(() => expect(t.status()).toBe("No unsaved changes"))
+  })
+
+  it("drops conflict notices when the editor gets a fresh snapshot", async () => {
+    let pruned = false
+    const t = setup({
+      transport: {
+        edit: refusedOn({ B4: "77" }),
+        commits: vi.fn(async (since: number) => pruned ? { status: 410, body: { error: "snapshot_required", head_rev: 50 } } : agentChanged({ B4: "77" })(since)),
+        snapshot: vi.fn(async () => ok({ schema_version: 1, rev: pruned ? 50 : 41, generation: 1, snapshot: { sheets: [] } })),
+      },
+    })
+    await t.connect()
+    await t.send(mutation(1, 41, "B4", "mine-B4"))
+    await screen.findByTestId("workbook-draft-conflict")
+    pruned = true
+    await push("workbook.committed", { page_id: "page-1", rev: 50, generation: 1, kind: "cells", cells: 1 })
+    await waitFor(() => expect(t.fromFrame.at(-1)).toEqual(expect.objectContaining({ type: "snapshot", rev: 50 })))
+    await waitFor(() => expect(screen.queryByTestId("workbook-draft-conflict")).toBeNull())
+  })
+
   it("reads the commits feed on a workbook.committed push for its Page, and ignores other Pages", async () => {
     const t = setup({ transport: { commits: vi.fn(async (since: number) => ok({ head_rev: 42, generation: 1, commits: since < 42 ? [{ rev: 42, kind: "cells", actor_label: "Agent Ada", own: false, ops: [{ sheet: "Sheet1", cell: "B2", input: "99" }] }] : [] })) } })
     await t.connect()

@@ -67,6 +67,8 @@ export type SaveEvent =
   /** A 2xx that is not a verifiable receipt for this write. */
   | { type: "unconfirmed" }
   | { type: "denied" }
+  /** The person took the server's value for a refused change: nothing of it is unsent any more. */
+  | { type: "resolved" }
   /** `failed`: a journal write failed. `busy`: another tab owns the journal. */
   | { type: "storage-unavailable"; failed?: boolean; busy?: boolean }
   | { type: "reset" }
@@ -90,6 +92,8 @@ function next(state: SaveState, event: SaveEvent): SaveState {
     case "rejected": return failed("rejected")
     case "unconfirmed": return failed("unconfirmed")
     case "denied": return { ...failed("denied"), canWrite: false }
+    // Only a refusal ends this way, and only once nothing else is unsent; never a receipt.
+    case "resolved": return state.pending === 0 && (state.trouble === "conflict" || state.trouble === "rejected") ? { ...state, trouble: undefined } : state
     case "storage-unavailable": return { ...state, stored: false, journalFailed: state.journalFailed || Boolean(event.failed), busy: Boolean(event.busy), trouble: event.failed ? "storage" : state.trouble }
     case "reset": return initialSaveState
   }

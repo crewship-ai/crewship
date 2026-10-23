@@ -362,6 +362,11 @@ export function WorkbookEditorHost({ client, pageId, name, onEnd, onDirtyChange 
           if (disposed) return
           setConflicts(shown => keepOpenDrafts(shown, cells))
         },
+        // The editor holds new content: notices about what it replaced no longer apply.
+        onReload: () => {
+          if (disposed) return
+          setConflicts([])
+        },
         onKill: kill => {
           // The frame goes first: after a kill no document in it may hold anything of this session.
           detach()
@@ -414,8 +419,15 @@ export function WorkbookEditorHost({ client, pageId, name, onEnd, onDirtyChange 
       setConflicts(shown => shown.filter(other => other.key !== item.key))
     }
   }, [])
-  // The editor already shows the server's value: taking theirs only dismisses the notice.
-  const takeTheirs = React.useCallback((key: string) => setConflicts(shown => shown.filter(other => other.key !== key)), [])
+  // The editor already shows the server's value: taking theirs sends nothing. Once no other refused
+  // change is shown, the refusal is over: the status and the editor's own notice clear.
+  const conflictsRef = React.useRef(conflicts); conflictsRef.current = conflicts
+  const takeTheirs = React.useCallback((key: string) => {
+    const rest = conflictsRef.current.filter(other => other.key !== key)
+    conflictsRef.current = rest
+    setConflicts(shown => shown.filter(other => other.key !== key))
+    if (!rest.some(other => other.kind === "refused")) bridgeRef.current?.takeTheirs()
+  }, [])
 
   const label = workbookSaveLabel(save)
   return <section aria-label="Workbook page" className="flex min-h-0 flex-1 flex-col overflow-hidden">

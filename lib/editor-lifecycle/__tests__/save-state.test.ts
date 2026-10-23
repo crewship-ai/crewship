@@ -96,6 +96,17 @@ describe("DX-02: never saved without a verified receipt", () => {
     const state = run(opened, { type: "journal", writes: 0 })
     expect(saveReducer(state, { type: "journal", writes: 0 })).toBe(state)
   })
+  it("a refusal the person resolved by taking the server's value clears the trouble, without a receipt", () => {
+    for (const refusal of [{ type: "conflict" }, { type: "rejected" }] as SaveEvent[]) {
+      const state = run(opened, { type: "edit", pending: 1 }, { type: "send" }, refusal, { type: "recount", pending: 0 }, { type: "resolved" })
+      expect(state.trouble).toBeUndefined()
+      expect(state.receipt).toBe(false)
+    }
+  })
+  it("resolving keeps the trouble while work is still unsent or for other troubles", () => {
+    expect(run(opened, { type: "edit", pending: 2 }, { type: "conflict" }, { type: "resolved" }).trouble).toBe("conflict")
+    expect(run(opened, { type: "edit", pending: 1 }, { type: "offline" }, { type: "recount", pending: 0 }, { type: "resolved" }).trouble).toBe("offline")
+  })
 })
 
 describe("labels", () => {

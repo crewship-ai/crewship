@@ -33,7 +33,7 @@ beforeEach(() => { vi.useFakeTimers() })
 afterEach(() => { vi.useRealTimers() })
 
 /** `loaded`: the frame's first load event already happened, as it does before a real hello. */
-function setup(overrides: Partial<WorkbookTransport> = {}, { loaded = true, reopen, sessionOverride }: { loaded?: boolean; reopen?: WorkbookBridgeOptions["reopenSession"]; sessionOverride?: Partial<WorkbookSession> } = {}) {
+function setup(overrides: Partial<WorkbookTransport> = {}, { loaded = true, reopen, sessionOverride, onReload }: { loaded?: boolean; reopen?: WorkbookBridgeOptions["reopenSession"]; sessionOverride?: Partial<WorkbookSession>; onReload?: () => void } = {}) {
   const frame = { postMessage: vi.fn() }
   const port = { postMessage: vi.fn(), close: vi.fn(), start: vi.fn(), onmessage: null as ((event: { data: unknown }) => void) | null }
   const base: WorkbookTransport = {
@@ -51,7 +51,7 @@ function setup(overrides: Partial<WorkbookTransport> = {}, { loaded = true, reop
   const bridge = createWorkbookBridge({
     session: { ...session, ...sessionOverride }, frame: () => frame, transport, pageLabel: "Budget", clientId: "client-a", reopenSession: reopen,
     createChannel: () => ({ port1: port, port2: "port2" }), random: () => 1,
-    onSaveEvent: event => events.push(event), onKill: kill => kills.push(kill), onConflict: conflict => conflicts.push(conflict),
+    onSaveEvent: event => events.push(event), onKill: kill => kills.push(kill), onConflict: conflict => conflicts.push(conflict), onReload,
   })
   if (loaded) bridge.frameLoaded()
   const toFrame = (): HostMessage[] => port.postMessage.mock.calls.map(([data]) => JSON.parse(data as string))
@@ -823,9 +823,93 @@ describe("same-cell conflicts with an open draft", () => {
     expect(t.bridge.pending).toBe(0)
   })
 
+  const refusedOnce = () => {
+    const conflict: TransportResponse = { status: 409, body: { error: "precondition_failed", head_rev: 42, conflicts: [{ sheet: "Sheet1", cell: "B2", input: "7", rev: 42, actor_label: "Agent Ada" }] } }
+    return {
+      edit: vi.fn(async () => conflict),
+      commits: vi.fn(async (since: number) => feed(42, [remote(42, [["B2", "7"]])].filter(c => c.rev > since))),
+      snapshot: vi.fn(async () => ok({ schema_version: 1, rev: 42, generation: 1, snapshot: { sheets: ["head"] } })),
+    }
+  }
+
+  it("take theirs with nothing pending and no open draft: sends nothing, resolves the refusal and reloads the head so the editor drops its refusal", async () => {
+    const t = setup(refusedOnce())
+    await t.connect()
+    t.send(mutation(1, 41, [["B2", "mine"]]))
+    await flush()
+    const edits = t.transport.edit.mock.calls.length
+    const before = t.events.length
+    expect(t.bridge.takeTheirs()).toBe(true)
+    await flush()
+    expect(t.transport.edit.mock.calls.length).toBe(edits)
+    expect(t.events.slice(before)).toEqual([{ type: "resolved" }, { type: "recount", pending: 0 }])
+    expect(t.toFrame().at(-1)).toEqual({ type: "snapshot", protocol: 1, rev: 42, generation: 1, snapshot: { sheets: ["head"] }, discarded: [] })
+    expect(t.bridge.confirmedRev).toBe(42)
+    expect(t.kills).toEqual([])
+  })
+
+  it("take theirs with another cell editor open resolves the refusal but leaves the editor's document alone", async () => {
+    const t = setup(refusedOnce())
+    await t.connect()
+    t.send(mutation(1, 41, [["B2", "mine"]]))
+    await flush()
+    t.send({ type: "draft", protocol: 1, cells: [{ sheet: "Sheet1", cell: "C3" }] })
+    const snapshots = t.transport.snapshot.mock.calls.length
+    expect(t.bridge.takeTheirs()).toBe(true)
+    await flush()
+    expect(t.events.at(-1)).toEqual({ type: "resolved" })
+    expect(t.transport.snapshot.mock.calls.length).toBe(snapshots)
+    expect(t.types().at(-1)).not.toBe("snapshot")
+  })
+
+  it("take theirs while other edits are unsent resolves nothing and reloads nothing", async () => {
+    const pending = deferred<TransportResponse>()
+    const t = setup({ ...refusedOnce(), edit: vi.fn(async (id: string) => id === `${SID}:2` ? pending.promise : refusedOnce().edit()) })
+    await t.connect()
+    t.send(mutation(1, 41, [["B2", "mine"]]))
+    await flush()
+    t.send(mutation(2, 42, [["C9", "later"]]))
+    await flush()
+    const snapshots = t.transport.snapshot.mock.calls.length
+    expect(t.bridge.takeTheirs()).toBe(false)
+    await flush()
+    expect(t.events).not.toContainEqual({ type: "resolved" })
+    expect(t.transport.snapshot.mock.calls.length).toBe(snapshots)
+  })
+
+  it("take theirs never discards an edit made while the head is being read", async () => {
+    const head = deferred<TransportResponse>()
+    const base = refusedOnce()
+    let reading = false
+    const t = setup({ ...base, snapshot: vi.fn(async () => reading ? head.promise : base.snapshot()), edit: vi.fn(async (id: string) => id === `${SID}:2` ? receipt(2, 43) : base.edit()) })
+    await t.connect()
+    t.send(mutation(1, 41, [["B2", "mine"]]))
+    await flush()
+    reading = true
+    t.bridge.takeTheirs()
+    t.send(mutation(2, 42, [["C9", "later"]]))
+    head.resolve(ok({ schema_version: 1, rev: 42, generation: 1, snapshot: { sheets: [] } }))
+    await flush()
+    expect(t.types()).not.toContain("snapshot")
+    expect(t.transport.edit.mock.calls.map(([id]) => id)).toContain(`${SID}:2`)
+  })
+
+  it("tells the host when the editor got a fresh snapshot, so stale notices go", async () => {
+    const reloads: number[] = []
+    const t = setup({ commits: vi.fn(async (): Promise<TransportResponse> => ({ status: 410, body: { error: "snapshot_required", head_rev: 50 } })) }, { onReload: () => reloads.push(1) })
+    await t.connect()
+    reloads.length = 0
+    t.transport.snapshot.mockResolvedValueOnce(ok({ schema_version: 1, rev: 50, generation: 1, snapshot: {} }))
+    t.bridge.notify({ rev: 50, generation: 1 })
+    await flush()
+    expect(t.types().at(-1)).toBe("snapshot")
+    expect(reloads).toEqual([1])
+  })
+
   it("refuses keep mine for invalid cells or a session that is not live", async () => {
     const t = setup()
     expect(t.bridge.keepMine([{ sheet: "Sheet1", cell: "B2", input: "x" }])).toBe(false)
+    expect(t.bridge.takeTheirs()).toBe(false)
     await t.connect()
     expect(t.bridge.keepMine([])).toBe(false)
     expect(t.bridge.keepMine([{ sheet: "Sheet1", cell: "b2", input: "x" }])).toBe(false)

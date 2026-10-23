@@ -354,6 +354,8 @@ export interface WorkbookBridgeOptions {
   onConflict?: (conflict: DraftConflict) => void
   /** The editor reported which cells have an open draft now (after every `draft` message). */
   onDrafts?: (cells: CellRef[]) => void
+  /** The editor got a fresh snapshot: notices about the content it replaced no longer apply. */
+  onReload?: () => void
   /** The session is over: destroy the frame. `unsaved` writes never got a receipt. */
   onKill?: (kill: { reason: KillReason; unsaved: number }) => void
   /** Opens a new session after `editor_session_expired`; without it an expired session ends the editor. */
@@ -394,6 +396,13 @@ export interface WorkbookBridge {
    * one host edit. False when the session is not live or the cells are not valid ops.
    */
   keepMine(cells: { sheet: string; cell: string; input: string }[]): boolean
+  /**
+   * The person took the server's value for the last refused change: nothing is sent. With nothing
+   * unsent the refusal is resolved, and when no cell editor is open the editor reloads the head,
+   * the only message on which it drops its own refusal notice. False when the session is not live
+   * or other edits are unsent.
+   */
+  takeTheirs(): boolean
   /** Ends the session (a refusal the host learned of, `session_closed`, unmount). */
   close(reason?: KillReason): void
 }
@@ -586,16 +595,22 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
     flushHeld()
   }
 
-  /** Loads the head snapshot: queued edits made against the old content are discarded. */
-  async function reloadSnapshot(): Promise<boolean> {
+  /**
+   * Loads the head snapshot: queued edits made against the old content are discarded. `idle`: only
+   * while nothing is unsent and no cell editor is open, checked again once the head is read.
+   */
+  async function reloadSnapshot(idle = false): Promise<boolean> {
     let response: TransportResponse
     try { response = await transport.snapshot() } catch { return false }
     if (phase === "killed") return false
+    if (idle && (phase !== "live" || queue.size > 0 || drafts.size > 0 || catching)) return false
     const refusal = editorRefusal(response)
     if (refusal) { kill(refusal); return false }
     const snapshot = response.status === 200 ? parseSnapshot(response.body) : null
     if (!snapshot) return false
     if (snapshot.generation !== session.generation) { kill("generation"); return false }
+    // A revision the editor got while the head was read must not be taken back.
+    if (idle && snapshot.rev < confirmedRev) return false
     epoch++
     const head = queue.head()
     const discarded: number[] = []
@@ -607,6 +622,7 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
     confirmedRev = baseRev = snapshot.rev
     wantRev = Math.max(wantRev, snapshot.rev)
     post({ type: "snapshot", protocol: 1, rev: snapshot.rev, generation: snapshot.generation, snapshot: snapshot.snapshot, discarded })
+    options.onReload?.()
     return true
   }
 
@@ -1045,6 +1061,12 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
       })
       emit({ type: "edit", pending: queue.size })
       void drive()
+      return true
+    },
+    takeTheirs() {
+      if (phase !== "live" || queue.size > 0) return false
+      emit({ type: "resolved" })
+      if (drafts.size === 0 && !catching) void reloadSnapshot(true)
       return true
     },
     online() {
