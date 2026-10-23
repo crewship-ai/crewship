@@ -86,3 +86,21 @@ counter is `precondition_failed`, attributed to the actual operation. This initi
 `agent_confirmed_current` capability rejects causal stale and provisional reads;
 the shared context fixtures qualify only this pure intersection, not host commits
 or the remaining broader collaboration modes.
+
+
+The inactive Go human admission registry requires a real negotiated runtime and
+current canonical Page authority in the protected SQL writer. Opaque one-use
+join tickets retain the original source, member and permission epoch; reconnect
+never replaces those values. Opening or renewing a delivery gate also checks the
+current owner and original admission horizons. Expired registry entries never
+remove durable gate/barrier evidence.
+
+Every human store entry must use the complete-operation wrapper, with the
+shared ingress fence acquired before SQL and retained through commit and the
+bounded response decision. A caller binding or an escaped callback context is
+insufficient. Restore must separately suspend this shared fence, drain streams,
+retain outstanding delivery proof, and only then resume fresh admissions. No
+HTTP/WS route, application initialization, native participant dispatcher or
+restore hook installs this component yet. Registry unit tests use real SQL and
+FULL owner handles but explicitly synthetic runtime identities; actual process
+qualification is a separate integration requirement.

@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Mooring admission groundwork:** an inactive human registry preserves original Page authority, burns bounded join tickets once and opens current SQL delivery gates. Its store wrapper holds the restore fence through the complete operation.
+
 - **Mooring authorization groundwork:** an inactive human Page authority adapter checks current canonical grants, folder scope and original credential inside the protected writer transaction.
 
 - **Mooring admission preserves the original human credential.** Authenticated chat receipts retain the original user revocation fence and exact credential through run admission and retries; legacy receipts remain unfenced and cannot authorize the new Mooring admission path.
