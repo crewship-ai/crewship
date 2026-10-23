@@ -584,6 +584,116 @@
           "root_code": "dependency_cycle"
         }
       ]
+    },
+    {
+      "id": "distinct-scc-root-edge-membership",
+      "changes": [
+        {
+          "change_id": "A",
+          "operations": [
+            {
+              "op_id": "a1",
+              "dependencies": [
+                "c"
+              ]
+            },
+            {
+              "op_id": "a2",
+              "dependencies": [
+                "b"
+              ]
+            }
+          ]
+        },
+        {
+          "change_id": "B",
+          "operations": [
+            {
+              "op_id": "b",
+              "dependencies": [
+                "a2"
+              ]
+            }
+          ]
+        },
+        {
+          "change_id": "C",
+          "operations": [
+            {
+              "op_id": "c",
+              "dependencies": [
+                "d"
+              ]
+            }
+          ]
+        },
+        {
+          "change_id": "D",
+          "operations": [
+            {
+              "op_id": "d",
+              "dependencies": [
+                "c"
+              ]
+            }
+          ]
+        },
+        {
+          "change_id": "E",
+          "operations": [
+            {
+              "op_id": "e",
+              "dependencies": [
+                "a1"
+              ]
+            }
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "op_id": "a1",
+          "status": "rejected",
+          "code": "dependency_rejected",
+          "root_op_id": "a2",
+          "root_code": "dependency_cycle"
+        },
+        {
+          "op_id": "a2",
+          "status": "rejected",
+          "code": "dependency_cycle",
+          "root_op_id": "a2",
+          "root_code": "dependency_cycle"
+        },
+        {
+          "op_id": "b",
+          "status": "rejected",
+          "code": "dependency_cycle",
+          "root_op_id": "b",
+          "root_code": "dependency_cycle"
+        },
+        {
+          "op_id": "c",
+          "status": "rejected",
+          "code": "dependency_cycle",
+          "root_op_id": "c",
+          "root_code": "dependency_cycle"
+        },
+        {
+          "op_id": "d",
+          "status": "rejected",
+          "code": "dependency_cycle",
+          "root_op_id": "d",
+          "root_code": "dependency_cycle"
+        },
+        {
+          "op_id": "e",
+          "status": "rejected",
+          "code": "dependency_rejected",
+          "root_op_id": "a2",
+          "root_code": "dependency_cycle"
+        }
+      ]
     }
   ]
 }
