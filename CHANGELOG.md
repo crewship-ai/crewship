@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Mooring agent authorization groundwork:** dormant host-only task and mandate primitives intersect current human rights, an explicit agent grant and a fixed confirmed work attempt; fresh task IDs and original ingress stamps prevent queued-row or restore-context reuse. No content endpoint is enabled.
+
 - **Mooring authorization groundwork:** an inactive human Page authority adapter checks current canonical grants, folder scope and original credential inside the protected writer transaction.
 
 - **Mooring admission preserves the original human credential.** Authenticated chat receipts retain the original user revocation fence and exact credential through run admission and retries; legacy receipts remain unfenced and cannot authorize the new Mooring admission path.
