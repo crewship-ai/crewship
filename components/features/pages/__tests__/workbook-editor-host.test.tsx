@@ -487,6 +487,21 @@ describe("failures fall back to the preview", () => {
 })
 
 describe("save state and leave guard", () => {
+  it("guards an unsubmitted cell draft and does not call it saved", async () => {
+    const t = setup()
+    await t.connect()
+    await t.send(JSON.stringify({ type: "draft", protocol: 1, cells: [{ sheet: "Sheet1", cell: "B3" }] }))
+    await waitFor(() => expect(t.status()).toBe("Not saved · finish editing the cell"))
+    expect(t.dirty.at(-1)).toBe(true)
+    const leave = new Event("beforeunload", { cancelable: true })
+    window.dispatchEvent(leave)
+    expect(leave.defaultPrevented).toBe(true)
+    expect(t.transport.edit).not.toHaveBeenCalled()
+    await t.send(JSON.stringify({ type: "draft", protocol: 1, cells: [] }))
+    await waitFor(() => expect(t.dirty.at(-1)).toBe(false))
+    expect(t.status()).toBe("No unsaved changes")
+  })
+
   it("says Saved only after a durable server receipt, and guards leaving until then", async () => {
     const pending = deferred<TransportResponse>()
     const t = setup({ transport: { edit: vi.fn(() => pending.promise) } })
@@ -782,6 +797,12 @@ describe("save state and leave guard", () => {
 
 describe("workbookSaveLabel", () => {
   const opened = { ...initialSaveState, opened: true, canWrite: true }
+  it("a receipt cannot hide a later open draft", () => {
+    const saved = { ...opened, receipt: true }
+    expect(workbookSaveLabel(saved, 1)).toBe("Not saved · finish editing the cell")
+    expect(workbookSaveLabel({ ...saved, trouble: "offline" }, 1)).toBe("Offline · cell draft not saved")
+    expect(workbookSaveLabel(saved, 0)).toBe("Saved")
+  })
   it.each([
     [initialSaveState, "Connecting…"],
     [opened, "No unsaved changes"],

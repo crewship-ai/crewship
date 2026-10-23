@@ -72,7 +72,7 @@ export function createEditorFrame(doc: Document, src: string, onLoad: () => void
 }
 
 /** The one save status line. "Saved" only when a server receipt covers every edit. */
-export function workbookSaveLabel(state: SaveState): string {
+export function workbookSaveLabel(state: SaveState, drafts = 0): string {
   if (!state.opened) return "Connecting…"
   if (!state.canWrite || state.trouble === "denied") return "Access lost"
   // A refused change waits for the person's decision: never "Saved" or "No unsaved changes" meanwhile.
@@ -86,6 +86,7 @@ export function workbookSaveLabel(state: SaveState): string {
     return state.refused > 0 ? `Saving… · ${refused}` : "Saving…"
   }
   if (state.refused > 0) return state.trouble === "unconfirmed" ? "Not saved · the server did not confirm a change" : `Not saved · ${refused}`
+  if (drafts > 0) return state.trouble === "offline" ? "Offline · cell draft not saved" : "Not saved · finish editing the cell"
   if (state.receipt) return "Saved"
   if (state.trouble === "rejected" || state.trouble === "conflict") return "Not saved · a change was refused"
   if (state.trouble === "unconfirmed") return "Not saved · the server did not confirm a change"
@@ -299,6 +300,7 @@ export function WorkbookEditorHost({ client, pageId, name, onEnd, onDirtyChange 
   const container = React.useRef<HTMLDivElement>(null)
   const [save, dispatch] = React.useReducer(saveReducer, initialSaveState)
   const [rev, setRev] = React.useState<number>()
+  const [draftCount, setDraftCount] = React.useState(0)
   const [conflicts, setConflicts] = React.useState<ShownConflict[]>([])
   /** The bridge's open refusals: they survive reloads until the person decides each one. */
   const [refusals, setRefusals] = React.useState<Refusal[]>([])
@@ -317,7 +319,7 @@ export function WorkbookEditorHost({ client, pageId, name, onEnd, onDirtyChange 
   const realtimeStatus = useRealtimeStatusSafe()
   const pushesLive = React.useRef(false); pushesLive.current = realtimeStatus === "connected"
 
-  useLeaveGuard(losesWork(save), onDirtyChange)
+  useLeaveGuard(losesWork(save) || draftCount > 0, onDirtyChange)
 
   React.useEffect(() => {
     let disposed = false
@@ -438,6 +440,7 @@ export function WorkbookEditorHost({ client, pageId, name, onEnd, onDirtyChange 
         },
         onDrafts: cells => {
           if (disposed) return
+          setDraftCount(cells.length)
           setConflicts(shown => keepOpenDrafts(shown, cells))
         },
         // The editor holds new content: warnings about what it replaced no longer apply. Open
@@ -516,7 +519,7 @@ export function WorkbookEditorHost({ client, pageId, name, onEnd, onDirtyChange 
     else container.current?.querySelector("iframe")?.focus()
   }, [refusals, overflow])
 
-  const label = workbookSaveLabel(save)
+  const label = workbookSaveLabel(save, draftCount)
   return <section aria-label="Workbook page" className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
     <div className="grid h-24 shrink-0 grid-cols-[minmax(0,1fr)_auto] grid-rows-[1.25rem_minmax(0,1fr)] gap-x-3 border-b px-3 py-2">
       <h1 className="truncate font-semibold" title={name ?? "Workbook"}>{name ?? "Workbook"}</h1>
