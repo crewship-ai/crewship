@@ -1,11 +1,15 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
 )
 
@@ -256,5 +260,79 @@ func TestAuditAlertDoesNotReloadMissingBootKeys(t *testing.T) {
 	drainAlerts(t)
 	if chained, fallback := breakEvents(t, f.db, "chain_break:instance:seq:42"); chained+fallback != 0 {
 		t.Fatalf("nil boot snapshot reloaded environmental keys: %d/%d", chained, fallback)
+	}
+}
+
+type auditNoticeCounter struct{ count atomic.Int64 }
+
+func (n *auditNoticeCounter) NotifyInboxItem(_ context.Context, item inbox.Item) {
+	if item.Payload["subkind"] == SubkindAuditChainIncident {
+		n.count.Add(1)
+	}
+}
+
+// The real purge boundary deletes inbox rows. A delivery receipt must outlive
+// that projection, or every hourly replay creates another external alert.
+func TestAuditNoticePurgeDoesNotResend(t *testing.T) {
+	f := newInstanceFixture(t)
+	defer f.r.Shutdown()
+	writer := journal.NewWriter(f.db, newTestLogger(), journal.WriterOptions{FlushInterval: time.Hour})
+	defer writer.Close()
+	f.r.journal = writer
+	counter := &auditNoticeCounter{}
+	restore := inbox.SetExternalNotifierForTesting(counter)
+	defer restore()
+	inc := auditChainIncident{Kind: "chain_break", Scope: "instance", Seq: 42, Reason: "synthetic past incident"}
+	if fresh, err := f.r.auditAlerts.record(t.Context(), inc); err != nil || !fresh {
+		t.Fatalf("record: %v %v", fresh, err)
+	}
+	if err := f.r.verifyAuditHistories(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	drainAlerts(t)
+	if n := counter.count.Load(); n != 1 {
+		t.Fatalf("first external notices=%d", n)
+	}
+	req := httptest.NewRequest("DELETE", "/api/v1/inbox?kind=message", nil)
+	req.Header.Set("Authorization", "Bearer "+f.boss)
+	req.Header.Set("X-Workspace-ID", "ws-old")
+	rr := httptest.NewRecorder()
+	f.r.ServeHTTP(rr, req)
+	if rr.Code != 200 {
+		t.Fatalf("purge: %d %s", rr.Code, rr.Body.String())
+	}
+	for range 2 {
+		if err := f.r.verifyAuditHistories(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		drainAlerts(t)
+	}
+	if n := adminAlerts(t, f.db, "boss", inc.key()); n != 0 {
+		t.Fatalf("purged notice reappeared: %d", n)
+	}
+	if n := counter.count.Load(); n != 1 {
+		t.Fatalf("external notice resent after purge: %d", n)
+	}
+}
+
+func TestAuditNoticeReceiptFailureRollsBackInbox(t *testing.T) {
+	f := newInstanceFixture(t)
+	defer f.r.Shutdown()
+	inc := auditChainIncident{Kind: "chain_break", Scope: "instance", Seq: 42, Reason: "synthetic incident"}
+	execOrFatal(t, f.db, `CREATE TRIGGER reject_audit_delivery_receipt BEFORE INSERT ON instance_audit_notice_deliveries BEGIN SELECT RAISE(ABORT,'synthetic receipt failure'); END`)
+	f.r.auditAlerts.raise(t.Context(), inc)
+	drainAlerts(t)
+	if n := adminAlerts(t, f.db, "boss", inc.key()); n != 0 {
+		t.Fatalf("inbox committed without delivery receipt: %d", n)
+	}
+	execOrFatal(t, f.db, `DROP TRIGGER reject_audit_delivery_receipt`)
+	f.r.auditAlerts.raise(t.Context(), inc)
+	drainAlerts(t)
+	if n := adminAlerts(t, f.db, "boss", inc.key()); n != 1 {
+		t.Fatalf("failed delivery was not retried: %d", n)
+	}
+	var n int
+	if err := f.db.QueryRow(`SELECT COUNT(*) FROM instance_audit_notice_deliveries WHERE incident_key=? AND user_id='boss'`, inc.key()).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("receipt count=%d: %v", n, err)
 	}
 }

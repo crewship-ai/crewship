@@ -468,9 +468,13 @@ The alert is written by a background task after detection, never inside the
 writer transaction that detected it.
 Missing per-admin inbox notices are retried on later detection and by the
 periodic sweep from persisted incident/reseal events, including after restart.
-The inbox source deduplicates recipients; retries do not send external channels
-another notification for an existing inbox row. External fan-out follows inbox
-commit and retains the notification subsystem's delivery limits.
+A delivery receipt (`instance_audit_notice_deliveries`) commits atomically with
+each recipient's inbox projection. Receipts contain only the incident key, user
+ID and delivery time, survive inbox purge/retention, and are removed on physical
+user deletion. A handled notice is never resurrected or externally resent by a
+sweep after its inbox row is removed. Existing inbox projections are adopted
+without another external send. External fan-out follows commit and retains the
+notification subsystem's delivery limits.
 
 The server also verifies the full instance chain and every retained workspace
 journal at startup and hourly, using read snapshots outside writer transactions.

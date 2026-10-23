@@ -184,7 +184,7 @@ func (a *auditChainAlerter) notifyAdmins(ctx context.Context, inc auditChainInci
 			a.logger.Info("audit chain incident: instance admin belongs to no workspace, so has no inbox", "user", ad.Email, "key", inc.key())
 			continue
 		}
-		err := inbox.Insert(ctx, a.db, a.logger, inbox.Item{
+		err := a.deliver(ctx, ad.ID, inc.key(), inbox.Item{
 			WorkspaceID: ad.WorkspaceID, Kind: inbox.KindMessage, SourceID: "audit_chain:" + inc.key() + ":" + ad.ID,
 			TargetUserID: ad.ID, Title: title, BodyMD: body, SenderType: "system", SenderName: "Audit",
 			Priority: "high", Payload: payload, Category: notify.CategorySecurity, AttentionClass: inbox.AttentionRepair,
@@ -197,7 +197,8 @@ func (a *auditChainAlerter) notifyAdmins(ctx context.Context, inc auditChainInci
 
 // retryAuditNotices rebuilds missing inbox projections from durable incident
 // and reseal events, including after a process exit or a subsequently repaired
-// chain. Insert deduplicates per recipient and fans out only a new inbox row.
+// chain. Delivery receipts outlive inbox retention and prevent replay from
+// resurrecting a handled notice or sending its external notification again.
 func (r *Router) retryAuditNotices(ctx context.Context) error {
 	rows, err := r.db.QueryContext(ctx, `SELECT id,action,COALESCE(target_workspace_id,''),COALESCE(metadata,'{}') FROM instance_audit_logs WHERE entity_type='audit_chain' AND action IN ('audit.chain_break_detected','audit.resealed','audit.workspace_resealed') ORDER BY created_at,id`)
 	if err != nil {
@@ -220,8 +221,8 @@ func (r *Router) retryAuditNotices(ctx context.Context) error {
 			Checkpoint   journal.ResealCheckpoint `json:"checkpoint"`
 		}
 		if err := json.Unmarshal([]byte(raw), &data); err != nil {
-			rows.Close()
-			return err
+			r.logger.Error("audit chain incident: malformed replay metadata", "id", id, "err", err)
+			continue
 		}
 		inc := auditChainIncident{Kind: "chain_break", Scope: data.Scope, WorkspaceID: data.WorkspaceID, Seq: data.Seq, Reason: data.Reason}
 		if action == "audit.resealed" {
@@ -241,6 +242,45 @@ func (r *Router) retryAuditNotices(ctx context.Context) error {
 			return err
 		}
 		r.auditAlerts.notifyAdmins(ctx, inc)
+	}
+	return nil
+}
+
+// deliver commits the inbox projection and its independent delivery receipt
+// together. Inbox purge/retention must never reset delivery history. The fast
+// read avoids acquiring a writer for an already delivered incident; the second
+// check under the production BEGIN IMMEDIATE makes concurrent deliveries safe.
+func (a *auditChainAlerter) deliver(ctx context.Context, user, key string, item inbox.Item) error {
+	var delivered bool
+	const seen = `SELECT EXISTS(SELECT 1 FROM instance_audit_notice_deliveries WHERE incident_key=? AND user_id=?)`
+	if err := a.db.QueryRowContext(ctx, seen, key, user).Scan(&delivered); err != nil || delivered {
+		return err
+	}
+	tx, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	if err := tx.QueryRowContext(ctx, seen, key, user).Scan(&delivered); err != nil || delivered {
+		return err
+	}
+	// Existing projections from an earlier running version are adopted without
+	// another external send. Normal first delivery creates both rows atomically.
+	var existed bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM inbox_items WHERE kind=? AND source_id=?)`, item.Kind, item.SourceID).Scan(&existed); err != nil {
+		return err
+	}
+	if err := inbox.InsertTx(ctx, tx, a.logger, item); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO instance_audit_notice_deliveries(incident_key,user_id,delivered_at) VALUES(?,?,?)`, key, user, tsformat.Format(time.Now())); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if !existed {
+		inbox.NotifyExternalChannels(ctx, item)
 	}
 	return nil
 }
