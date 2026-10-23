@@ -168,6 +168,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mooring-collab"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "mooring-protocol",
+ "serde_json",
+]
+
+[[package]]
 name = "mooring-core"
 version = "0.1.0"
 dependencies = [
