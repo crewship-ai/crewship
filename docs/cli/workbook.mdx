@@ -461,6 +461,8 @@ independently of the write targets. A changed input or imported structure gives
 explicit empty object declares no data dependency, for example setting a
 constant. Unverifiable history fails closed. The pilot supports imports, cell
 writes and atomic multi-cell writes; row/column insertion is not supported.
+For a retry, retain the entire original request including its read-set and
+mutation ID; changing the read-set under that ID is a payload conflict.
 The native GridCraft path of `mooring agent` carries the same read-set. Other
 pilot adapters reject a read-set whose semantics they do not implement.
 
