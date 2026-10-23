@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"io"
-	"log/slog"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -29,16 +27,9 @@ func (c *ownerTestClock) Now() (string, time.Duration, error) {
 func (c *ownerTestClock) advance(d time.Duration) { c.mu.Lock(); defer c.mu.Unlock(); c.tick += d }
 func ownerFixture(t *testing.T) (*OwnerStore, *database.DB, *ownerTestClock, SessionKey) {
 	t.Helper()
-	db, e := database.Open("file:" + filepath.Join(t.TempDir(), "owners.db"))
-	if e != nil {
-		t.Fatal(e)
-	}
-	t.Cleanup(func() { db.Close() })
-	if e = database.Migrate(t.Context(), db.DB, slog.New(slog.NewTextHandler(io.Discard, nil))); e != nil {
-		t.Fatal(e)
-	}
+	db := openFullMooringFixture(t, filepath.Join(t.TempDir(), "owners.db"))
 	for _, q := range []string{`INSERT INTO users(id,email) VALUES('u','owner@example.test')`, `INSERT INTO workspaces(id,name,slug) VALUES('w','W','w')`, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES('p','w','p','P','u','{}')`} {
-		if _, e = db.Exec(q); e != nil {
+		if _, e := db.Exec(q); e != nil {
 			t.Fatal(e)
 		}
 	}
