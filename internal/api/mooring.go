@@ -17,6 +17,13 @@ import (
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
+const (
+	mooringCreated         journal.EntryType = "artifact.mooring_created"
+	mooringCommitted       journal.EntryType = "artifact.mooring_committed"
+	mooringMandateAdmitted journal.EntryType = "artifact.mooring_mandate_admitted"
+	mooringMandateRevoked  journal.EntryType = "artifact.mooring_mandate_revoked"
+)
+
 type mooringHTTP struct {
 	workbook *gridcraftHTTP
 	storage  artifacts.RevisionStorage[mooring.Key, mooring.Request, mooring.State, mooring.Receipt, mooring.Authorize]
@@ -160,7 +167,7 @@ func (m *mooringHTTP) create(w http.ResponseWriter, r *http.Request) {
 	}
 	var notify func()
 	if e == nil {
-		notify, e = m.audit(r, tx, ws, id, "created", user.ID, map[string]any{"app_id": req.AppID})
+		notify, e = m.audit(r, tx, ws, id, mooringCreated, user.ID, map[string]any{"app_id": req.AppID})
 	}
 	if e == nil {
 		e = m.createAuthority(r, tx, ws, user.ID)
@@ -266,7 +273,7 @@ func (m *mooringHTTP) commit(w http.ResponseWriter, r *http.Request, tx *sql.Tx,
 		actorID = strings.Split(strings.TrimPrefix(actor, "agent:"), ":")[0]
 	}
 	if e == nil && receipt.Rev > before.Rev {
-		notify, e = appendAuthorizationAudit(r.Context(), tx, m.workbook.pages.journal, journal.Entry{WorkspaceID: k.WorkspaceID, Type: "artifact.mooring_committed", ActorType: actorType, ActorID: actorID, Summary: "Mooring document committed", Payload: map[string]any{"page_id": k.PageID, "authority_id": actor, "mutation_id": req.MutationID, "rev": receipt.Rev, "payload_hash": receipt.PayloadHash}})
+		notify, e = appendAuthorizationAudit(r.Context(), tx, m.workbook.pages.journal, journal.Entry{WorkspaceID: k.WorkspaceID, Type: mooringCommitted, ActorType: actorType, ActorID: actorID, Summary: "Mooring document committed", Payload: map[string]any{"page_id": k.PageID, "authority_id": actor, "mutation_id": req.MutationID, "rev": receipt.Rev, "payload_hash": receipt.PayloadHash}})
 	}
 	if e == nil {
 		var current string
@@ -294,9 +301,9 @@ func (m *mooringHTTP) commit(w http.ResponseWriter, r *http.Request, tx *sql.Tx,
 	writeJSON(w, 200, receipt)
 }
 
-func (m *mooringHTTP) audit(r *http.Request, tx *sql.Tx, ws, page, action, user string, extra map[string]any) (func(), error) {
+func (m *mooringHTTP) audit(r *http.Request, tx *sql.Tx, ws, page string, eventType journal.EntryType, user string, extra map[string]any) (func(), error) {
 	extra["page_id"] = page
-	return appendAuthorizationAudit(r.Context(), tx, m.workbook.pages.journal, journal.Entry{WorkspaceID: ws, Type: journal.EntryType("artifact.mooring_" + action), ActorType: journal.ActorUser, ActorID: user, Summary: "Mooring document " + action, Payload: extra})
+	return appendAuthorizationAudit(r.Context(), tx, m.workbook.pages.journal, journal.Entry{WorkspaceID: ws, Type: eventType, ActorType: journal.ActorUser, ActorID: user, Summary: "Mooring document " + strings.TrimPrefix(string(eventType), "artifact.mooring_"), Payload: extra})
 }
 
 func (m *mooringHTTP) createAuthority(r *http.Request, tx *sql.Tx, ws, user string) error {

@@ -9,6 +9,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Mooring activity was missing from journal filters.** Creation, confirmed edits and agent mandate changes now use registered event types and appear in the Artifact activity group with matching icons.
+
+
 - **Selecting a workspace could leave the rest of the application unclickable.** Workspace rows now allow the menu to dismiss normally after selection, releasing its modal pointer lock before returning to Artifacts or another workspace screen.
 
 

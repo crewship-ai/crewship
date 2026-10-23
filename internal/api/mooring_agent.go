@@ -99,7 +99,7 @@ func (m *mooringHTTP) mandate(w http.ResponseWriter, r *http.Request) {
 	}
 	var notify func()
 	if _, e = tx.ExecContext(ctx, `UPDATE chats SET private_artifact_author_user_id=? WHERE id=?`, a.HumanUserID, a.ChatID); e == nil {
-		notify, e = m.audit(r, tx, k.WorkspaceID, k.PageID, "mandate_admitted", a.HumanUserID, map[string]any{"mandate_id": req.MandateID, "run_id": req.RunID, "command": req.Command, "base_rev": req.BaseRev, "generation": req.Generation})
+		notify, e = m.audit(r, tx, k.WorkspaceID, k.PageID, mooringMandateAdmitted, a.HumanUserID, map[string]any{"mandate_id": req.MandateID, "run_id": req.RunID, "command": req.Command, "base_rev": req.BaseRev, "generation": req.Generation})
 	}
 
 	if e == nil {
@@ -144,7 +144,7 @@ func (m *mooringHTTP) revoke(w http.ResponseWriter, r *http.Request) {
 	}
 	var notify func()
 	if e == nil {
-		notify, e = m.audit(r, tx, k.WorkspaceID, k.PageID, "mandate_revoked", UserFromContext(r.Context()).ID, map[string]any{"mandate_id": r.PathValue("mandate")})
+		notify, e = m.audit(r, tx, k.WorkspaceID, k.PageID, mooringMandateRevoked, UserFromContext(r.Context()).ID, map[string]any{"mandate_id": r.PathValue("mandate")})
 	}
 
 	if e == nil {
