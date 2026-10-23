@@ -65,13 +65,14 @@
  * The server is reached only through `WorkbookTransport`, so tests need no server.
  */
 
+import { MOORING_FRAME_ATTRIBUTES, MOORING_MAX_MESSAGE_BYTES, MOORING_PROTOCOL, bundleDigest, decodeMessage, verifyEditorHello, transferEditorPort } from "@/lib/mooring/channel"
 import type { SaveEvent } from "@/lib/editor-lifecycle/save-state"
 import { createWriteQueue, type Pacing, type QueuedWrite, type SendFailure, type Timers } from "@/lib/editor-lifecycle/write-queue"
 import { editorRefusal, type EditorRefusal } from "./editor-client"
 
-export const BRIDGE_PROTOCOL = 1
+export const BRIDGE_PROTOCOL = MOORING_PROTOCOL
 /** Largest port message the host reads, in UTF-8 bytes. */
-export const BRIDGE_MAX_MESSAGE_BYTES = 64 * 1024
+export const BRIDGE_MAX_MESSAGE_BYTES = MOORING_MAX_MESSAGE_BYTES
 /** Server limits for one human mutation (`cells.set`). */
 export const BRIDGE_MAX_OPS = 64
 export const BRIDGE_MAX_INPUT_BYTES = 8 * 1024
@@ -98,9 +99,8 @@ export const BRIDGE_REOPEN_SETTLE_MS = 60_000
 export const BRIDGE_PACING: Partial<Pacing> = { minGapMs: 0, baseDelayMs: 250, maxDelayMs: 10_000 }
 
 const CELL = /^[A-Z]{1,3}[1-9][0-9]{0,6}$/
-const BUNDLE_DIGEST = /^[0-9a-f]{64}$/
 /** A bundle pin as the server and the editor origin write it: plain lowercase hex SHA-256, no prefix. */
-export const isBundleDigest = (value: unknown): value is string => typeof value === "string" && BUNDLE_DIGEST.test(value)
+export const isBundleDigest = bundleDigest
 const encoder = new TextEncoder()
 const bytes = (text: string) => encoder.encode(text).length
 const object = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value)
@@ -211,7 +211,7 @@ export type DraftConflict = { kind: "changed"; sheet: string; cell: string; inpu
  * stays opaque, so the frame has no cookies, storage or same-origin reach into anything),
  * a credentialless load and no referrer.
  */
-export const EDITOR_FRAME_ATTRIBUTES = Object.freeze({ sandbox: "allow-scripts", credentialless: true, referrerPolicy: "no-referrer" } as const)
+export const EDITOR_FRAME_ATTRIBUTES = MOORING_FRAME_ATTRIBUTES
 /** `MessageEvent.origin` of a document with an opaque origin. */
 export const OPAQUE_ORIGIN = "null"
 
@@ -308,10 +308,8 @@ function parseMutation(value: unknown, withEnvelope: boolean): Parsed<FrameMutat
 
 /** Validates one port message from the editor. Never throws. */
 export function parseFrameMessage(data: unknown): Parsed<FrameMessage> {
-  if (typeof data !== "string" || bytes(data) > BRIDGE_MAX_MESSAGE_BYTES) return { ok: false, reason: "protocol" }
-  let value: unknown
-  try { value = JSON.parse(data) } catch { return { ok: false, reason: "protocol" } }
-  if (!object(value) || value.protocol !== BRIDGE_PROTOCOL) return { ok: false, reason: "protocol" }
+  const value = decodeMessage(data)
+  if (!value) return { ok: false, reason: "protocol" }
   if (value.type === "mutation") {
     const parsed = parseMutation(value, true)
     return parsed.ok ? { ok: true, value: { type: "mutation", mutation: parsed.value } } : parsed
@@ -1105,9 +1103,7 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
   async function connect(frame: FrameWindow) {
     phase = "connecting"
     const channel = options.createChannel ? options.createChannel() : (new MessageChannel() as unknown as { port1: BridgePort; port2: unknown })
-    port = channel.port1
-    port.onmessage = onPortMessage
-    port.start?.()
+
     // The target origin must be "*": an opaque origin cannot be named, and "null" matches nothing.
     // It is acceptable only here and only because:
     // - `frame` is the exact window object whose hello was just verified (our iframe's
@@ -1117,11 +1113,10 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
     //   only the `/_editor/b/` path of the Studio origin, which the server always sandboxes), so
     //   even a frame that navigated itself right after its hello holds a sandboxed editor document.
     // Nothing else is ever posted with "*"; all later traffic uses the transferred port.
-    frame.postMessage(
-      { type: "gridcraft:connect", protocol: BRIDGE_PROTOCOL, session: options.frameNonce ?? options.clientId, page_label: options.pageLabel, rev: session.rev, generation: session.generation, client_id: options.clientId },
-      "*",
-      [channel.port2],
-    )
+    port = transferEditorPort(frame, channel, "gridcraft", {
+      session: options.frameNonce ?? options.clientId, page_label: options.pageLabel,
+      rev: session.rev, generation: session.generation, client_id: options.clientId,
+    }, data => onPortMessage({ data }))
     phase = "live"
     if (!(await reloadSnapshot())) {
       // Not "closed" (the host's own unmount, never shown): the host must fall back visibly.
@@ -1144,22 +1139,10 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
     handleWindowMessage(event) {
       if (phase === "killed") return
       const frame = options.frame()
-      // Only our own frame window is heard at all; every other window, whatever its origin, is ignored.
-      if (!frame || event.source !== frame) return
-      // Our frame must be sandboxed (opaque origin); a real origin means it is not.
-      if (event.origin !== OPAQUE_ORIGIN) { kill("handshake"); return }
-      // After connect the port is the only channel: a second hello (a reloaded frame that lost its
-      // state) or any other window message from the frame ends the session.
-      if (phase !== "waiting") { kill("handshake"); return }
-      const data = event.data
-      if (!object(data) || data.type !== "gridcraft:hello") return
-      // No pin (no editor origin configured) or one written differently never matches: fail closed.
-      if (!shaped(data, ["type", "protocol", "bundle"]) || data.protocol !== BRIDGE_PROTOCOL || !isBundleDigest(session.bundle_digest)) { kill("handshake"); return }
-      // A well-formed hello from another bundle (or one that cannot name its own): the bundle pin is the cause.
-      if (data.bundle !== session.bundle_digest) { kill("bundle"); return }
-      // A hello before the frame's first load comes from a document the host has not seen load,
-      // and that load would later be indistinguishable from a navigation: refuse it, port unsent.
-      if (loads !== 1) { kill("handshake"); return }
+      const hello = verifyEditorHello(event, frame, { namespace: "gridcraft", bundle: session.bundle_digest, waiting: phase === "waiting", loads })
+      if (hello === null) return
+      if (hello !== "accept") { kill(hello); return }
+      if (!frame) return
       void connect(frame)
     },
     frameLoaded() {

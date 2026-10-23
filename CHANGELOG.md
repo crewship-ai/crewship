@@ -9,6 +9,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Application editors can share a small TypeScript protocol SDK.** The pilot adds a manifest-driven editor surface and a non-Rust reference editor with separate local drafts, live confirmed state and durable receipt status; GridCraft retains its existing conflict recovery on the shared capability channel.
+
+
 - Workbook publication, custody requests, explicit ownership transfers and orphan deletion now append their authorization audit atomically; failed audit writes roll back the access change.
 
 - Workbook conflict notices and save status keep the editor frame stationary, preserving rapid input during refusals, including on narrow screens.
