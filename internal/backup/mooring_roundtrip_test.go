@@ -2,8 +2,10 @@ package backup
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -51,15 +53,72 @@ func TestMooringBackupPreservesConfirmedStateWithoutRunMandates(t *testing.T) {
 	if _, e = source.Exec(`INSERT INTO mooring_session_owners(page_id,workspace_id,application_id,owner_id,generation,token_hash,boot_id,expires_ns) VALUES('mooring-portable',?,'hello','source-live-owner',7,?,'source-boot',9223372036854775807)`, workspace, bytes.Repeat([]byte{1}, 32)); e != nil {
 		t.Fatal(e)
 	}
+
+	if _, e := source.Exec(`INSERT INTO mooring_delivery_gates(id,page_id,workspace_id,application_id,participant_ref,owner_id,owner_generation,owner_token_hash,permission_version,boot_id,expires_ns,renewal_nonce) VALUES('source-live-gate','mooring-portable',?,'hello','source-live-participant','source-live-owner',7,?,'1','source-boot',9223372036854775807,'source-live-nonce')`, workspace, bytes.Repeat([]byte{2}, 32)); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := source.Exec(`INSERT INTO mooring_delivery_barriers(id,page_id,workspace_id,application_id,participant_ref,cutoff_ordinal) SELECT 'source-live-barrier',page_id,workspace_id,application_id,participant_ref,ordinal FROM mooring_delivery_gates WHERE id='source-live-gate'`); e != nil {
+		t.Fatal(e)
+	}
+	// Check both replacement entry points before exporting. Global/offline
+	// replacement and slug-matched workspace replacement must retain issued
+	// delivery evidence; unrelated workspaces remain eligible.
+	for _, ids := range [][]string{nil, {workspace}} {
+		if e := rejectMooringDeliveryTargetReplacement(t.Context(), source, ids); !errors.Is(e, ErrMooringDeliveryTargetReplacement) {
+			t.Fatal("issued delivery target accepted", ids, e)
+		}
+	}
+	if e := rejectMooringDeliveryTargetReplacement(t.Context(), source, []string{other}); e != nil {
+		t.Fatal("unrelated workspace refused", e)
+	}
+	var slug string
+	if e := source.QueryRow(`SELECT slug FROM workspaces WHERE id=?`, workspace).Scan(&slug); e != nil {
+		t.Fatal(e)
+	}
+	if e := rejectPrivateArtifactWorkspaceReplacement(t.Context(), source, "different-incoming-id", slug, true); !errors.Is(e, ErrMooringDeliveryTargetReplacement) {
+		t.Fatal("slug-matched delivery target accepted", e)
+	}
+	guardTx, e := source.BeginTx(t.Context(), nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = guardTx.Exec(`DELETE FROM mooring_delivery_gates`); e != nil {
+		t.Fatal(e)
+	}
+	if e = rejectMooringDeliveryTargetReplacement(t.Context(), guardTx, []string{workspace}); !errors.Is(e, ErrMooringDeliveryTargetReplacement) {
+		t.Fatal("barrier-only delivery evidence discarded", e)
+	}
+	if e = guardTx.Rollback(); e != nil {
+		t.Fatal(e)
+	}
 	dump, e := DumpWorkspace(t.Context(), source, workspace)
 	if e != nil {
 		t.Fatal(e)
 	}
-	if len(dump.Tables["mooring_documents"]) != 1 || len(dump.Tables["mooring_receipts"]) != 1 || len(dump.Tables["mooring_intents"]) != 0 || len(dump.Tables["mooring_session_owners"]) != 0 {
+	for name, incoming := range map[string]*DBDump{
+		"scope anchor":       {WorkspaceID: workspace},
+		"workspace row":      {Tables: map[string][]map[string]any{"workspaces": {{"id": workspace}}}},
+		"partial Page":       {Tables: map[string][]map[string]any{"pages": {{"id": "mooring-portable"}}}},
+		"scoped partial row": {Tables: map[string][]map[string]any{"page_grants": {{"workspace_id": workspace}}}},
+	} {
+		hookCalled := false
+		_, err := RestoreDumpTxHooks(t.Context(), source, incoming, &RestoreDumpHooks{PreInsert: func(context.Context, *sql.Tx) error {
+			hookCalled = true
+			return nil
+		}})
+		if !errors.Is(err, ErrMooringDeliveryTargetReplacement) || hookCalled {
+			t.Fatal("restore admission did not preserve delivery before hooks", name, err, hookCalled)
+		}
+	}
+	var issued int
+	if e := source.QueryRow(`SELECT COUNT(*) FROM mooring_delivery_gates WHERE id='source-live-gate'`).Scan(&issued); e != nil || issued != 1 {
+		t.Fatal("refused restores changed issued evidence", issued, e)
+	}
+	if len(dump.Tables["mooring_delivery_gates"]) != 0 || len(dump.Tables["mooring_delivery_barriers"]) != 0 || len(dump.Tables["mooring_documents"]) != 1 || len(dump.Tables["mooring_receipts"]) != 1 || len(dump.Tables["mooring_intents"]) != 0 || len(dump.Tables["mooring_session_owners"]) != 0 {
 		t.Fatalf("confirmed content omitted or live authority leaked: documents=%d receipts=%d intents=%d", len(dump.Tables["mooring_documents"]), len(dump.Tables["mooring_receipts"]), len(dump.Tables["mooring_intents"]))
 	}
 	raw, e := json.Marshal(dump)
-	if e != nil || strings.Contains(string(raw), "must not leak") || strings.Contains(string(raw), "source-live-run") || strings.Contains(string(raw), "source-live-owner") {
+	if e != nil || strings.Contains(string(raw), "must not leak") || strings.Contains(string(raw), "source-live-run") || strings.Contains(string(raw), "source-live-owner") || strings.Contains(string(raw), "source-live-gate") || strings.Contains(string(raw), "source-live-barrier") {
 		t.Fatal("backup crossed workspace or authority boundary", e)
 	}
 	destination := openMigratedDBCov(t)
