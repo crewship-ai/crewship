@@ -24,8 +24,10 @@ also compiles for WASM; a browser timer binding is still required there.
 Receiving a ready batch releases unsent capacity independently of a durable
 acknowledgement. A transport must separately bound inflight work, retain its
 draft journal, and reserve envelope bytes within the byte budget. Explicit
-`close()` returns all unsent changes, including after a clock failure. Dropping
-a scheduler stops its worker but discards that returned list; callers that need
+`close()` returns all unsent changes, including after a clock failure.
+`shutdown(&self)` wakes receive workers through a shared handle, allowing them
+to release their handles before an exclusive `close()` joins and returns work.
+Dropping a scheduler stops its worker but discards that returned list; callers that need
 ownership must close it explicitly and always retain drafts outside this queue.
 A native socket test sends two low-load batches before a delayed mock durable
 acknowledgement. This proves timer/handoff separation, not production transport

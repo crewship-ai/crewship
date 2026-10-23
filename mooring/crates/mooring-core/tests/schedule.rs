@@ -151,6 +151,40 @@ mod native {
         let mut scheduler = Arc::try_unwrap(scheduler).ok().unwrap();
         assert!(scheduler.close().is_empty());
     }
+    #[test]
+    fn shared_shutdown_wakes_long_wait_and_preserves_unsent_ownership_for_close() {
+        let scheduler = Arc::new(
+            Scheduler::new(Limits {
+                max_wait: Duration::from_secs(60),
+                ..Limits::default()
+            })
+            .unwrap(),
+        );
+        scheduler.enqueue(change(42, 1, 10)).unwrap();
+        let receiver = scheduler.clone();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let waiter = thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            let result = receiver.receive(Duration::from_secs(86_400));
+            done_tx.send(result).unwrap();
+        });
+        started_rx.recv().unwrap();
+        scheduler.shutdown();
+        assert_eq!(
+            done_rx.recv_timeout(Duration::from_secs(2)).unwrap(),
+            Err(Failure::Closed)
+        );
+        waiter.join().unwrap();
+        let rejected = scheduler.enqueue(change(43, 1, 10)).unwrap_err();
+        assert_eq!(rejected.reason, EnqueueReason::Closed);
+        assert_eq!(rejected.change.value, 43);
+        let mut scheduler = Arc::try_unwrap(scheduler).ok().unwrap();
+        let retained = scheduler.close();
+        assert_eq!(retained.len(), 1);
+        assert_eq!(retained[0].value, 42);
+        assert!(scheduler.close().is_empty());
+    }
     struct ScriptedClock {
         calls: AtomicUsize,
         regress: bool,

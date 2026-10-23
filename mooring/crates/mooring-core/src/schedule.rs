@@ -314,12 +314,16 @@ pub mod native {
                 };
             }
         }
+        /// Wake all receivers and stop the timer through a shared handle.
+        /// Unsent ownership stays in the queue until exclusive close() joins
+        /// the worker and returns it. Enqueue after shutdown returns its input.
+        pub fn shutdown(&self) {
+            let mut state = self.shared.lock();
+            state.closed = true;
+            self.shared.changed.notify_all();
+        }
         pub fn close(&mut self) -> Vec<Change<T>> {
-            {
-                let mut state = self.shared.lock();
-                state.closed = true;
-                self.shared.changed.notify_all();
-            }
+            self.shutdown();
             if let Some(worker) = self.worker.take() {
                 let _ = worker.join();
             }
