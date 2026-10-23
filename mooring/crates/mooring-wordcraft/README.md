@@ -126,3 +126,16 @@ The earlier v1 raw-delta structural validator now compiles only in tests. Its
 text-preservation checks are not full peer-format undo qualification; model-v2
 production code exposes no raw human update admission. No native WordApp command
 hook, browser human service or deployment is implied by these model regressions.
+
+### Causal agent preparation
+
+`CausalPrepareAdapter::prepare_atomic_causal` is a separate opt-in boundary. It
+qualifies every original observation and the complete restored inventory through
+`CausalContext`. The trusted host attests complete durable external history; the
+adapter additionally checks that earlier effects within the same atomic change
+are covered by its immutable dependency closure. It shares application mechanics
+with strict-current preparation, but never changes original observations or
+forwards between read policies. Unsupported human updates remain rejected.
+
+This pure method supplies candidates and effects only. It does not negotiate a
+private profile, authenticate host attestations, commit revisions, or emit Saved.
