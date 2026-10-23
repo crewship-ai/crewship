@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Mooring experimental 0.4 boundary envelopes (draft)",
-  "description": "Draft only. Authentication is outside this schema. participant_ref resolves to a host-authenticated identity scoped to this session. CommitResult only comes from the host. Changes share indivisible outcomes; semantic validation must enforce cross-field atomicity, unique IDs, total limits, dependency validity and version compatibility. Schema coverage does not claim runtime protocol conformance. Arbitrary application payloads are separately schema/semantics validated; per-message authentication and trust directions are normative in SPEC v0.4. Binary snapshot byte/asset/aggregate limits require semantic validation.",
+  "title": "Mooring experimental 0.4 boundary envelopes",
+  "description": "Draft only. Authentication is outside this schema. participant_ref resolves to a host-authenticated identity scoped to this session. CommitResult only comes from the host. Changes share indivisible outcomes; semantic validation must enforce cross-field atomicity, unique IDs, total limits, dependency validity and version compatibility. Schema coverage does not claim runtime protocol conformance. Arbitrary application payloads are separately schema/semantics validated; per-message authentication and trust directions are normative in SPEC v0.4. Binary snapshot byte/asset/aggregate limits require semantic validation. Messages introduced in 0.4 are proposed wire contracts, not implemented capabilities. x-direction annotations must become transport dispatch allowlists; schema validity alone is never authentication. Checkpoint/delta base64 pad bits, UTF-8 byte limits, ordering, identity, authorization, signature verification, per-op revision contiguity, and cross-message equality need semantic enforcement.",
   "oneOf": [
     {
       "$ref": "#/$defs/Hello"
@@ -86,13 +86,74 @@
     },
     {
       "$ref": "#/$defs/ProtocolError"
+    },
+    {
+      "$ref": "#/$defs/ManifestRequest"
+    },
+    {
+      "$ref": "#/$defs/ManifestResult"
+    },
+    {
+      "$ref": "#/$defs/LifecycleRequest"
+    },
+    {
+      "$ref": "#/$defs/LifecycleResult"
+    },
+    {
+      "$ref": "#/$defs/SessionJoin"
+    },
+    {
+      "$ref": "#/$defs/SessionJoined"
+    },
+    {
+      "$ref": "#/$defs/SessionLeave"
+    },
+    {
+      "$ref": "#/$defs/SubmitChanges"
+    },
+    {
+      "$ref": "#/$defs/ChangesReceived"
+    },
+    {
+      "$ref": "#/$defs/TaskSubmit"
+    },
+    {
+      "$ref": "#/$defs/ProposalRequest"
+    },
+    {
+      "$ref": "#/$defs/CollaborationUpdate"
+    },
+    {
+      "$ref": "#/$defs/DocumentUpdate"
+    },
+    {
+      "$ref": "#/$defs/AssetRequest"
+    },
+    {
+      "$ref": "#/$defs/AssetResult"
+    },
+    {
+      "$ref": "#/$defs/TicketValidationRequest"
+    },
+    {
+      "$ref": "#/$defs/TicketValidationResult"
+    },
+    {
+      "$ref": "#/$defs/RevocationNotice"
+    },
+    {
+      "$ref": "#/$defs/RuntimeReady"
     }
   ],
   "$defs": {
     "Counter": {
       "type": "string",
-      "pattern": "^(0|[1-9][0-9]{0,19})$",
-      "description": "Unsigned counter as decimal string; semantic validation must reject values exceeding u64."
+      "pattern": "^(0|[1-9][0-9]{0,18}|1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4]|18446744073709551615)$",
+      "description": "Canonical unsigned64 decimal string: 0..18446744073709551615 inclusive. Never parse through floating point.",
+      "maxLength": 20,
+      "not": {
+        "pattern": "[^0-9]"
+      }
     },
     "Scope": {
       "type": "object",
@@ -125,18 +186,27 @@
       "properties": {
         "protocol_version": {
           "type": "string",
-          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
-          "maxLength": 60
+          "pattern": "^(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})$",
+          "maxLength": 29,
+          "not": {
+            "pattern": "[^0-9.]"
+          }
         },
         "model_version": {
           "type": "string",
-          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
-          "maxLength": 60
+          "pattern": "^(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})$",
+          "maxLength": 29,
+          "not": {
+            "pattern": "[^0-9.]"
+          }
         },
         "engine_version": {
           "type": "string",
-          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
-          "maxLength": 60
+          "pattern": "^(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})$",
+          "maxLength": 29,
+          "not": {
+            "pattern": "[^0-9.]"
+          }
         }
       },
       "required": [
@@ -163,7 +233,8 @@
         "capacity_exhausted",
         "unknown_dependency",
         "dependency_cycle",
-        "unknown_outcome"
+        "unknown_outcome",
+        "task_cancelled"
       ]
     },
     "ReadPrecondition": {
@@ -196,8 +267,7 @@
           "maxLength": 200
         },
         "fingerprint": {
-          "type": "string",
-          "pattern": "^sha256:[0-9a-f]{64}$"
+          "$ref": "#/$defs/Digest"
         },
         "participant_ref": {
           "type": "string",
@@ -215,7 +285,8 @@
             "maxLength": 200
           },
           "minItems": 0,
-          "maxItems": 256
+          "maxItems": 256,
+          "uniqueItems": true
         },
         "read_preconditions": {
           "type": "array",
@@ -258,8 +329,12 @@
           "maxItems": 256
         },
         "membership_hash": {
+          "$ref": "#/$defs/Digest"
+        },
+        "task_id": {
           "type": "string",
-          "pattern": "^sha256:[0-9a-f]{64}$"
+          "minLength": 1,
+          "maxLength": 200
         }
       },
       "required": [
@@ -267,7 +342,8 @@
         "operations",
         "membership_hash"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "task_id, when present, is immutable membership input; task_submit requires it equal the outer task_id. Untasked human changes may omit it."
     },
     "Fence": {
       "type": "object",
@@ -311,7 +387,23 @@
               "maxLength": 200
             },
             "code": {
-              "$ref": "#/$defs/ErrorCode"
+              "enum": [
+                "precondition_failed",
+                "op_id_conflict",
+                "target_deleted",
+                "quota_exceeded",
+                "permission_revoked",
+                "forbidden",
+                "stale_owner",
+                "lease_expired",
+                "version_mismatch",
+                "invalid_request",
+                "atomic_change_too_large",
+                "capacity_exhausted",
+                "unknown_dependency",
+                "dependency_cycle",
+                "task_cancelled"
+              ]
             },
             "message": {
               "type": "string",
@@ -324,13 +416,42 @@
             "message"
           ],
           "additionalProperties": false
+        },
+        "retry": {
+          "enum": [
+            "do_not_retry",
+            "query_status",
+            "reconnect_then_query_status",
+            "new_operation_after_refresh"
+          ]
         }
       },
       "required": [
         "code",
-        "message"
+        "message",
+        "retry"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "dependency_rejected"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "required": [
+              "root_op_id",
+              "root_cause"
+            ]
+          }
+        }
+      ]
     },
     "OperationResult": {
       "oneOf": [
@@ -347,12 +468,25 @@
             },
             "revision": {
               "$ref": "#/$defs/Counter"
+            },
+            "issuer": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "durability": {
+              "enum": [
+                "node",
+                "replicated"
+              ]
             }
           },
           "required": [
             "op_id",
             "status",
-            "revision"
+            "revision",
+            "issuer",
+            "durability"
           ],
           "additionalProperties": false
         },
@@ -368,7 +502,14 @@
               "const": "rejected"
             },
             "reason": {
-              "$ref": "#/$defs/Rejection"
+              "$ref": "#/$defs/Rejection",
+              "not": {
+                "properties": {
+                  "code": {
+                    "const": "unknown_outcome"
+                  }
+                }
+              }
             }
           },
           "required": [
@@ -415,7 +556,71 @@
         "operations"
       ],
       "additionalProperties": false,
-      "description": "Saved: first_revision and last_revision REQUIRED, all operations saved and contiguous. Rejected: no revision range, all operations rejected. Cross-field semantics enforced by host validator."
+      "description": "Saved: first_revision and last_revision REQUIRED, all operations saved and contiguous. Rejected: no revision range, all operations rejected. Cross-field semantics enforced by host validator.",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "saved"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "first_revision",
+              "last_revision"
+            ],
+            "properties": {
+              "operations": {
+                "items": {
+                  "properties": {
+                    "status": {
+                      "const": "saved"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "else": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "first_revision"
+                  ]
+                },
+                {
+                  "required": [
+                    "last_revision"
+                  ]
+                }
+              ]
+            },
+            "properties": {
+              "operations": {
+                "items": {
+                  "properties": {
+                    "status": {
+                      "const": "rejected"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
     },
     "Hello": {
       "type": "object",
@@ -442,7 +647,8 @@
         "request_id",
         "supported"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "x-direction": "participant_to_authority_or_host_to_runtime"
     },
     "Welcome": {
       "type": "object",
@@ -468,6 +674,14 @@
         },
         "permission_version": {
           "$ref": "#/$defs/Counter"
+        },
+        "limits": {
+          "$ref": "#/$defs/WireLimits"
+        },
+        "issuer": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
         }
       },
       "required": [
@@ -476,9 +690,12 @@
         "selected",
         "scope",
         "participant_ref",
-        "permission_version"
+        "permission_version",
+        "limits",
+        "issuer"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "x-direction": "authority_to_participant"
     },
     "CommitBatch": {
       "type": "object",
@@ -527,7 +744,8 @@
         "expected_revision",
         "changes"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "x-direction": "runtime_to_host"
     },
     "CommitResult": {
       "type": "object",
@@ -550,10 +768,15 @@
           "$ref": "#/$defs/Counter"
         },
         "issuer": {
-          "const": "crewship"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
         },
         "durability": {
-          "const": "node"
+          "enum": [
+            "node",
+            "replicated"
+          ]
         },
         "changes": {
           "type": "array",
@@ -574,7 +797,8 @@
         "durability",
         "changes"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "x-direction": "host_to_runtime"
     },
     "StatusRequest": {
       "type": "object",
@@ -594,15 +818,21 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 200
+        },
+        "expected_fingerprint": {
+          "$ref": "#/$defs/Digest"
         }
       },
       "required": [
         "type",
         "request_id",
         "scope",
-        "op_id"
+        "op_id",
+        "expected_fingerprint"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "x-direction": "authenticated_requester_to_host",
+      "description": "Authenticate and authorize this scoped outcome before lookup. For an authorized stored outcome, compare immutable stored fingerprint with expected_fingerprint before returning saved/rejected; mismatch is op_id_conflict. No authorized stored outcome is unknown, never saved or rejected. Never expose outcome existence or fingerprint differences to unauthorized callers."
     },
     "StatusResult": {
       "type": "object",
@@ -650,7 +880,8 @@
         "scope",
         "result"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "x-direction": "host_to_authenticated_requester"
     },
     "Asset": {
       "type": "object",
@@ -661,8 +892,7 @@
           "maxLength": 200
         },
         "digest": {
-          "type": "string",
-          "pattern": "^sha256:[0-9a-f]{64}$"
+          "$ref": "#/$defs/Digest"
         },
         "size_bytes": {
           "$ref": "#/$defs/Counter"
@@ -703,11 +933,10 @@
         },
         "state": {
           "type": "string",
-          "maxLength": 8388608
+          "maxLength": 11184812
         },
         "digest": {
-          "type": "string",
-          "pattern": "^sha256:[0-9a-f]{64}$"
+          "$ref": "#/$defs/Digest"
         },
         "assets": {
           "type": "array",
@@ -729,7 +958,50 @@
         "digest",
         "assets"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "encoding": {
+                "const": "base64"
+              }
+            },
+            "required": [
+              "encoding"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+                "not": {
+                  "pattern": "[^A-Za-z0-9+/=]"
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "encoding": {
+                "const": "json"
+              }
+            },
+            "required": [
+              "encoding"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "maxLength": 8388608
+              }
+            }
+          }
+        }
+      ]
     },
     "Capabilities": {
       "type": "object",
@@ -789,7 +1061,8 @@
         "scope",
         "requested"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "x-direction": "participant_to_host"
     },
     "SessionTicket": {
       "type": "object",
@@ -827,7 +1100,7 @@
           "maxLength": 4096
         },
         "expires_in_ms": {
-          "$ref": "#/$defs/Counter"
+          "$ref": "#/$defs/PositiveCounter"
         },
         "versions": {
           "$ref": "#/$defs/Versions"
@@ -845,7 +1118,8 @@
         "expires_in_ms",
         "versions"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "x-direction": "host_to_participant"
     },
     "OwnerAcquire": {
       "type": "object",
@@ -865,15 +1139,22 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 200
+        },
+        "renewal_nonce": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
         }
       },
       "required": [
         "type",
         "request_id",
         "scope",
-        "runtime_ref"
+        "runtime_ref",
+        "renewal_nonce"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "x-direction": "runtime_to_host"
     },
     "OwnerRenew": {
       "type": "object",
@@ -896,6 +1177,14 @@
         },
         "fence": {
           "$ref": "#/$defs/Fence"
+        },
+        "renewal_nonce": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "permission_version": {
+          "$ref": "#/$defs/Counter"
         }
       },
       "required": [
@@ -903,9 +1192,12 @@
         "request_id",
         "scope",
         "session_id",
-        "fence"
+        "fence",
+        "renewal_nonce",
+        "permission_version"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "x-direction": "runtime_to_host"
     },
     "OwnerGrant": {
       "type": "object",
@@ -935,9 +1227,17 @@
           "$ref": "#/$defs/Fence"
         },
         "lease_duration_ms": {
-          "$ref": "#/$defs/Counter"
+          "$ref": "#/$defs/PositiveCounter"
         },
         "revision": {
+          "$ref": "#/$defs/Counter"
+        },
+        "renewal_nonce": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "permission_version": {
           "$ref": "#/$defs/Counter"
         }
       },
@@ -949,9 +1249,12 @@
         "runtime_ref",
         "fence",
         "lease_duration_ms",
-        "revision"
+        "revision",
+        "renewal_nonce",
+        "permission_version"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "x-direction": "host_to_runtime"
     },
     "DeliveryRenew": {
       "type": "object",
@@ -987,6 +1290,11 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 200
+        },
+        "gate_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
         }
       },
       "required": [
@@ -997,9 +1305,11 @@
         "participant_ref",
         "fence",
         "permission_version",
-        "renewal_nonce"
+        "renewal_nonce",
+        "gate_id"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "x-direction": "runtime_to_host"
     },
     "DeliveryGrant": {
       "type": "object",
@@ -1037,7 +1347,12 @@
           "maxLength": 200
         },
         "duration_ms": {
-          "$ref": "#/$defs/Counter"
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "gate_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
         }
       },
       "required": [
@@ -1049,9 +1364,11 @@
         "generation",
         "permission_version",
         "renewal_nonce",
-        "duration_ms"
+        "duration_ms",
+        "gate_id"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "x-direction": "host_to_runtime"
     },
     "SessionClosed": {
       "type": "object",
@@ -1090,6 +1407,11 @@
         },
         "reason": {
           "$ref": "#/$defs/Rejection"
+        },
+        "gate_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
         }
       },
       "required": [
@@ -1101,9 +1423,11 @@
         "generation",
         "permission_version",
         "barrier_id",
-        "reason"
+        "reason",
+        "gate_id"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "x-direction": "host_or_verified_runtime_to_participant"
     },
     "DeliveryBlocked": {
       "type": "object",
@@ -1136,6 +1460,20 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 200
+        },
+        "covered_gate_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "minItems": 0,
+          "maxItems": 4096,
+          "uniqueItems": true
+        },
+        "permission_version": {
+          "$ref": "#/$defs/Counter"
         }
       },
       "required": [
@@ -1145,9 +1483,13 @@
         "session_id",
         "participant_ref",
         "fence",
-        "barrier_id"
+        "barrier_id",
+        "covered_gate_ids",
+        "permission_version"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "x-direction": "runtime_to_host",
+      "description": "ACK covers the exact host-assigned gate set for this barrier, scope, permission version and runtime generation. Host must aggregate all required ACK sets or wait for every remaining lease expiry. One gate ACK is not all-path revocation."
     },
     "RevocationConfirmed": {
       "type": "object",
@@ -1177,10 +1519,10 @@
           "$ref": "#/$defs/Counter"
         },
         "read_blocked": {
-          "const": true
+          "type": "boolean"
         },
         "write_blocked": {
-          "const": true
+          "type": "boolean"
         }
       },
       "required": [
@@ -1193,7 +1535,24 @@
         "read_blocked",
         "write_blocked"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "x-direction": "host_to_authorized_controller",
+      "anyOf": [
+        {
+          "properties": {
+            "read_blocked": {
+              "const": true
+            }
+          }
+        },
+        {
+          "properties": {
+            "write_blocked": {
+              "const": true
+            }
+          }
+        }
+      ]
     },
     "ReadRequest": {
       "type": "object",
@@ -1219,13 +1578,14 @@
         },
         "cursor": {
           "type": "string",
-          "maxLength": 4096
+          "maxLength": 4096,
+          "minLength": 1
         },
         "query": {
           "type": "object"
         },
         "max_bytes": {
-          "$ref": "#/$defs/Counter"
+          "$ref": "#/$defs/PositiveCounter"
         }
       },
       "required": [
@@ -1235,7 +1595,22 @@
         "session_id",
         "max_bytes"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "cursor"
+            ]
+          },
+          "then": {
+            "required": [
+              "revision"
+            ]
+          }
+        }
+      ],
+      "x-direction": "participant_to_authority"
     },
     "ReadResult": {
       "type": "object",
@@ -1257,14 +1632,15 @@
         "items": {
           "type": "array",
           "items": {
-            "type": "object"
+            "$ref": "#/$defs/ReadItem"
           },
           "minItems": 0,
           "maxItems": 10000
         },
         "next_cursor": {
           "type": "string",
-          "maxLength": 4096
+          "maxLength": 4096,
+          "minLength": 1
         }
       },
       "required": [
@@ -1274,7 +1650,8 @@
         "revision",
         "items"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "x-direction": "authority_to_participant"
     },
     "CheckpointRequest": {
       "type": "object",
@@ -1300,7 +1677,8 @@
         "scope",
         "revision"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "x-direction": "authenticated_requester_to_host"
     },
     "CheckpointResult": {
       "type": "object",
@@ -1322,7 +1700,8 @@
         "request_id",
         "checkpoint"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "x-direction": "host_to_authenticated_requester"
     },
     "Presence": {
       "type": "object",
@@ -1349,7 +1728,7 @@
           "maxLength": 200
         },
         "ttl_ms": {
-          "$ref": "#/$defs/Counter"
+          "$ref": "#/$defs/PositiveCounter"
         },
         "view": {
           "type": "object"
@@ -1364,7 +1743,8 @@
         "ttl_ms",
         "view"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "x-direction": "participant_to_runtime_or_runtime_to_participant"
     },
     "TaskSummary": {
       "type": "object",
@@ -1391,19 +1771,125 @@
         "changes": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/ChangeResult"
+            "$ref": "#/$defs/TaskChangeState"
           },
           "minItems": 0,
           "maxItems": 4096
+        },
+        "participant_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "unresolved_change_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "minItems": 0,
+          "maxItems": 4096,
+          "uniqueItems": true
         }
       },
       "required": [
         "task_id",
         "allow_partial",
         "status",
-        "changes"
+        "changes",
+        "participant_ref",
+        "unresolved_change_ids"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "Exactly one state per admitted change. Saved/rejected use immutable ChangeResult; pending/running/cancelled/unknown use explicit TaskChangeState. unresolved_change_ids equals unknown state IDs, not merely pending work. No omitted changes or invented receipts.",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "saved"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "unresolved_change_ids": {
+                "maxItems": 0
+              },
+              "changes": {
+                "minItems": 1,
+                "items": {
+                  "properties": {
+                    "status": {
+                      "enum": [
+                        "saved"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "rejected"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "unresolved_change_ids": {
+                "maxItems": 0
+              },
+              "changes": {
+                "minItems": 1,
+                "items": {
+                  "properties": {
+                    "status": {
+                      "const": "rejected"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "allow_partial": {
+                "const": false
+              }
+            },
+            "required": [
+              "allow_partial"
+            ]
+          },
+          "then": {
+            "properties": {
+              "changes": {
+                "maxItems": 1
+              }
+            }
+          }
+        }
+      ]
     },
     "TaskStatus": {
       "type": "object",
@@ -1431,7 +1917,8 @@
         "scope",
         "task_id"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "x-direction": "participant_to_authority"
     },
     "TaskResult": {
       "type": "object",
@@ -1457,7 +1944,8 @@
         "scope",
         "task"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "x-direction": "authority_to_participant"
     },
     "TaskCancel": {
       "type": "object",
@@ -1485,7 +1973,8 @@
         "scope",
         "task_id"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "x-direction": "participant_to_authority"
     },
     "Proposal": {
       "type": "object",
@@ -1524,7 +2013,8 @@
         },
         "diff": {
           "type": "string",
-          "maxLength": 1000
+          "maxLength": 1000,
+          "description": "Bounded display summary. The complete immutable changes remain available; never truncate the authoritative change set to fit this summary."
         }
       },
       "required": [
@@ -1537,7 +2027,8 @@
         "changes",
         "diff"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "x-direction": "authority_to_participant"
     },
     "ProposalAccept": {
       "type": "object",
@@ -1575,7 +2066,8 @@
         "base_revision",
         "op_id"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "x-direction": "participant_to_authority"
     },
     "UndoRequest": {
       "type": "object",
@@ -1608,6 +2100,11 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 200
+        },
+        "target_change_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
         }
       },
       "required": [
@@ -1618,7 +2115,19 @@
         "base_revision",
         "op_id"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "not": {
+            "required": [
+              "task_id",
+              "target_change_id"
+            ]
+          }
+        }
+      ],
+      "description": "One own task_id, one own target_change_id, or neither for latest own complete undoable atomic change. Both selectors are invalid. Author is bound to authentication.",
+      "x-direction": "participant_to_authority"
     },
     "ProtocolError": {
       "type": "object",
@@ -1643,7 +2152,1346 @@
         "request_id",
         "reason"
       ],
+      "additionalProperties": false,
+      "x-direction": "authority_to_authenticated_requester"
+    },
+    "PositiveCounter": {
+      "$ref": "#/$defs/Counter",
+      "not": {
+        "const": "0"
+      }
+    },
+    "Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "maxLength": 71
+    },
+    "ReadItem": {
+      "type": "object",
+      "properties": {
+        "target_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "model_type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "revision": {
+          "$ref": "#/$defs/Counter"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "target_id",
+        "model_type",
+        "revision",
+        "data"
+      ],
       "additionalProperties": false
+    },
+    "WireLimits": {
+      "type": "object",
+      "properties": {
+        "max_frame_bytes": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "max_batch_bytes": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "max_batch_operations": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "max_atomic_operations": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "max_task_bytes": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "max_task_changes": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "max_read_bytes": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "max_checkpoint_bytes": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "max_delivery_ms": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "max_presence_ms": {
+          "$ref": "#/$defs/PositiveCounter"
+        }
+      },
+      "required": [
+        "max_frame_bytes",
+        "max_batch_bytes",
+        "max_batch_operations",
+        "max_atomic_operations",
+        "max_task_bytes",
+        "max_task_changes",
+        "max_read_bytes",
+        "max_checkpoint_bytes",
+        "max_delivery_ms",
+        "max_presence_ms"
+      ],
+      "additionalProperties": false
+    },
+    "CommandDeclaration": {
+      "type": "object",
+      "properties": {
+        "command_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "input_schema": {
+          "type": "object"
+        },
+        "result_schema": {
+          "type": "object"
+        },
+        "effect_scope": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "mutation": {
+          "type": "boolean"
+        },
+        "replayable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "command_id",
+        "input_schema",
+        "result_schema",
+        "effect_scope",
+        "mutation",
+        "replayable"
+      ],
+      "additionalProperties": false
+    },
+    "FormatDeclaration": {
+      "type": "object",
+      "properties": {
+        "format_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "model_versions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60
+          },
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true
+        },
+        "import_extensions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
+          },
+          "minItems": 0,
+          "maxItems": 128,
+          "uniqueItems": true
+        },
+        "export_extensions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
+          },
+          "minItems": 0,
+          "maxItems": 128,
+          "uniqueItems": true
+        },
+        "validator": {
+          "enum": [
+            "adapter",
+            "host",
+            "none"
+          ]
+        }
+      },
+      "required": [
+        "format_id",
+        "model_versions",
+        "import_extensions",
+        "export_extensions",
+        "validator"
+      ],
+      "additionalProperties": false
+    },
+    "RevocationGuarantee": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "enum": [
+            "delivery_lease",
+            "application_bound",
+            "none"
+          ]
+        },
+        "max_delay_ms": {
+          "$ref": "#/$defs/Counter"
+        }
+      },
+      "required": [
+        "mode",
+        "max_delay_ms"
+      ],
+      "additionalProperties": false
+    },
+    "StorageDeclaration": {
+      "type": "object",
+      "properties": {
+        "authority": {
+          "enum": [
+            "host",
+            "application"
+          ]
+        },
+        "durability": {
+          "enum": [
+            "none",
+            "process",
+            "node",
+            "replicated"
+          ]
+        },
+        "revocation": {
+          "$ref": "#/$defs/RevocationGuarantee"
+        }
+      },
+      "required": [
+        "authority",
+        "durability",
+        "revocation"
+      ],
+      "additionalProperties": false
+    },
+    "ApplicationManifest": {
+      "type": "object",
+      "properties": {
+        "application_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "package_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "package_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "connection_path": {
+          "enum": [
+            "A",
+            "B",
+            "C"
+          ]
+        },
+        "supported_versions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Versions"
+          },
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true
+        },
+        "formats": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FormatDeclaration"
+          },
+          "minItems": 1,
+          "maxItems": 128
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CommandDeclaration"
+          },
+          "minItems": 0,
+          "maxItems": 4096
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "minItems": 0,
+          "maxItems": 128,
+          "uniqueItems": true
+        },
+        "merge_models": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "properties",
+              "commands",
+              "yjs_text",
+              "application_server",
+              "exclusive"
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true
+        },
+        "presence_schema": {
+          "type": "object"
+        },
+        "storage": {
+          "$ref": "#/$defs/StorageDeclaration"
+        },
+        "input_fallback_allowed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "application_id",
+        "package_version",
+        "package_digest",
+        "connection_path",
+        "supported_versions",
+        "formats",
+        "commands",
+        "capabilities",
+        "merge_models",
+        "presence_schema",
+        "storage",
+        "input_fallback_allowed"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "connection_path": {
+                "const": "A"
+              }
+            },
+            "required": [
+              "connection_path"
+            ]
+          },
+          "then": {
+            "properties": {
+              "storage": {
+                "properties": {
+                  "authority": {
+                    "const": "host"
+                  },
+                  "durability": {
+                    "enum": [
+                      "node",
+                      "replicated"
+                    ]
+                  },
+                  "revocation": {
+                    "properties": {
+                      "mode": {
+                        "const": "delivery_lease"
+                      }
+                    }
+                  }
+                }
+              },
+              "input_fallback_allowed": {
+                "const": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "connection_path": {
+                "const": "B"
+              }
+            },
+            "required": [
+              "connection_path"
+            ]
+          },
+          "then": {
+            "properties": {
+              "input_fallback_allowed": {
+                "const": false
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ManifestRequest": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "manifest_request"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "application_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "application_id"
+      ],
+      "additionalProperties": false,
+      "x-direction": "host_to_runtime"
+    },
+    "ManifestResult": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "manifest_result"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "manifest": {
+          "$ref": "#/$defs/ApplicationManifest"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "manifest"
+      ],
+      "additionalProperties": false,
+      "x-direction": "runtime_to_host"
+    },
+    "LifecycleRequest": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "lifecycle_request"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "fence": {
+          "$ref": "#/$defs/Fence"
+        },
+        "action": {
+          "enum": [
+            "open",
+            "suspend",
+            "resume",
+            "close"
+          ]
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/Checkpoint"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "scope",
+        "session_id",
+        "fence",
+        "action"
+      ],
+      "additionalProperties": false,
+      "x-direction": "host_to_runtime"
+    },
+    "LifecycleResult": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "lifecycle_result"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "generation": {
+          "$ref": "#/$defs/Counter"
+        },
+        "state": {
+          "enum": [
+            "ready",
+            "suspended",
+            "closed"
+          ]
+        },
+        "revision": {
+          "$ref": "#/$defs/Counter"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "scope",
+        "session_id",
+        "generation",
+        "state",
+        "revision"
+      ],
+      "additionalProperties": false,
+      "x-direction": "runtime_to_host"
+    },
+    "SessionJoin": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_join"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "ticket": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "ticket",
+        "versions"
+      ],
+      "additionalProperties": false,
+      "x-direction": "participant_to_runtime"
+    },
+    "SessionJoined": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_joined"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "participant_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "generation": {
+          "$ref": "#/$defs/Counter"
+        },
+        "permission_version": {
+          "$ref": "#/$defs/Counter"
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        },
+        "gate_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "scope",
+        "session_id",
+        "participant_ref",
+        "generation",
+        "permission_version",
+        "versions",
+        "gate_id"
+      ],
+      "additionalProperties": false,
+      "x-direction": "runtime_to_participant"
+    },
+    "SessionLeave": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_leave"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "scope",
+        "session_id"
+      ],
+      "additionalProperties": false,
+      "x-direction": "participant_to_runtime"
+    },
+    "SubmitChanges": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "submit_changes"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AtomicChange"
+          },
+          "minItems": 1,
+          "maxItems": 256
+        },
+        "task_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "scope",
+        "session_id",
+        "versions",
+        "changes"
+      ],
+      "additionalProperties": false,
+      "x-direction": "participant_to_runtime"
+    },
+    "ChangesReceived": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "changes_received"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "change_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true
+        },
+        "state": {
+          "enum": [
+            "pending",
+            "synchronized"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "scope",
+        "session_id",
+        "change_ids",
+        "state"
+      ],
+      "additionalProperties": false,
+      "x-direction": "runtime_to_participant"
+    },
+    "TaskSubmit": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "task_submit"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        },
+        "task_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "allow_partial": {
+          "type": "boolean"
+        },
+        "mode": {
+          "enum": [
+            "suggest",
+            "direct"
+          ]
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AtomicChange"
+          },
+          "minItems": 1,
+          "maxItems": 4096
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "scope",
+        "session_id",
+        "versions",
+        "task_id",
+        "allow_partial",
+        "mode",
+        "changes"
+      ],
+      "additionalProperties": false,
+      "x-direction": "participant_to_runtime",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "allow_partial": {
+                "const": false
+              }
+            },
+            "required": [
+              "allow_partial"
+            ]
+          },
+          "then": {
+            "properties": {
+              "changes": {
+                "maxItems": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ProposalRequest": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "proposal_request"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "proposal_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "scope",
+        "proposal_id"
+      ],
+      "additionalProperties": false,
+      "x-direction": "participant_to_runtime"
+    },
+    "CollaborationUpdate": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "collaboration_update"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "generation": {
+          "$ref": "#/$defs/Counter"
+        },
+        "base_revision": {
+          "$ref": "#/$defs/Counter"
+        },
+        "change_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true
+        },
+        "encoding": {
+          "enum": [
+            "json",
+            "base64"
+          ]
+        },
+        "data": {
+          "type": "string",
+          "maxLength": 349528
+        },
+        "state": {
+          "const": "synchronized"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "scope",
+        "session_id",
+        "generation",
+        "base_revision",
+        "change_ids",
+        "encoding",
+        "data",
+        "state"
+      ],
+      "additionalProperties": false,
+      "x-direction": "runtime_to_participant"
+    },
+    "DocumentUpdate": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "document_update"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "generation": {
+          "$ref": "#/$defs/Counter"
+        },
+        "from_revision": {
+          "$ref": "#/$defs/Counter"
+        },
+        "to_revision": {
+          "$ref": "#/$defs/Counter"
+        },
+        "encoding": {
+          "enum": [
+            "json",
+            "base64"
+          ]
+        },
+        "data": {
+          "type": "string",
+          "maxLength": 11184812
+        },
+        "receipt": {
+          "$ref": "#/$defs/CommitResult"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "scope",
+        "session_id",
+        "generation",
+        "from_revision",
+        "to_revision",
+        "encoding",
+        "data",
+        "receipt"
+      ],
+      "additionalProperties": false,
+      "x-direction": "host_to_participant_via_runtime",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "encoding": {
+                "const": "json"
+              }
+            },
+            "required": [
+              "encoding"
+            ]
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "maxLength": 8388608
+              }
+            }
+          }
+        }
+      ]
+    },
+    "AssetRequest": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "asset_request"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "revision": {
+          "$ref": "#/$defs/Counter"
+        },
+        "asset_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "offset_bytes": {
+          "$ref": "#/$defs/Counter"
+        },
+        "max_bytes": {
+          "$ref": "#/$defs/PositiveCounter"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "scope",
+        "session_id",
+        "revision",
+        "asset_id",
+        "offset_bytes",
+        "max_bytes"
+      ],
+      "additionalProperties": false,
+      "x-direction": "participant_to_host"
+    },
+    "AssetResult": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "asset_result"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "revision": {
+          "$ref": "#/$defs/Counter"
+        },
+        "asset_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "offset_bytes": {
+          "$ref": "#/$defs/Counter"
+        },
+        "size_bytes": {
+          "$ref": "#/$defs/Counter"
+        },
+        "digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "data_base64": {
+          "type": "string",
+          "maxLength": 1398104,
+          "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+          "not": {
+            "pattern": "[^A-Za-z0-9+/=]"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "scope",
+        "revision",
+        "asset_id",
+        "offset_bytes",
+        "size_bytes",
+        "digest",
+        "data_base64"
+      ],
+      "additionalProperties": false,
+      "x-direction": "host_to_participant"
+    },
+    "TicketValidationRequest": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "ticket_validate"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "fence": {
+          "$ref": "#/$defs/Fence"
+        },
+        "ticket": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "validation_nonce": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "scope",
+        "session_id",
+        "fence",
+        "ticket",
+        "validation_nonce"
+      ],
+      "additionalProperties": false,
+      "x-direction": "runtime_to_host"
+    },
+    "TicketValidationResult": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "ticket_validated"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "generation": {
+          "$ref": "#/$defs/Counter"
+        },
+        "participant_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "permission_version": {
+          "$ref": "#/$defs/Counter"
+        },
+        "granted": {
+          "$ref": "#/$defs/Capabilities"
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        },
+        "expires_in_ms": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "validation_nonce": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "gate_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "scope",
+        "session_id",
+        "generation",
+        "participant_ref",
+        "permission_version",
+        "granted",
+        "versions",
+        "expires_in_ms",
+        "validation_nonce",
+        "gate_id"
+      ],
+      "additionalProperties": false,
+      "x-direction": "host_to_runtime"
+    },
+    "RevocationNotice": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "revocation_notice"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "generation": {
+          "$ref": "#/$defs/Counter"
+        },
+        "participant_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "permission_version": {
+          "$ref": "#/$defs/Counter"
+        },
+        "barrier_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "gate_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "minItems": 0,
+          "maxItems": 4096,
+          "uniqueItems": true
+        },
+        "block_read": {
+          "type": "boolean"
+        },
+        "block_write": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "scope",
+        "session_id",
+        "generation",
+        "participant_ref",
+        "permission_version",
+        "barrier_id",
+        "gate_ids",
+        "block_read",
+        "block_write"
+      ],
+      "additionalProperties": false,
+      "x-direction": "host_to_runtime",
+      "anyOf": [
+        {
+          "properties": {
+            "block_read": {
+              "const": true
+            }
+          }
+        },
+        {
+          "properties": {
+            "block_write": {
+              "const": true
+            }
+          }
+        }
+      ]
+    },
+    "TaskChangeState": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ChangeResult"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "change_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "status": {
+              "enum": [
+                "pending",
+                "running",
+                "cancelled",
+                "unknown"
+              ]
+            }
+          },
+          "required": [
+            "change_id",
+            "status"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "RuntimeReady": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "runtime_ready"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "selected": {
+          "$ref": "#/$defs/Versions"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "selected"
+      ],
+      "additionalProperties": false,
+      "x-direction": "runtime_to_host",
+      "description": "Version/readiness acknowledgement on the private inherited host RPC channel only. Carries no scope, participant identity, permissions, content or authority. Never a participant Welcome or durability receipt."
     }
-  }
+  },
+  "x-schema-version": "0.4.0"
 }

@@ -31,9 +31,17 @@ def named(name, node):
         return 'Counter', 'Counter', 'Counter'
     if 'oneOf' in node:
         variants = []
+        labels = []
         for i, choice in enumerate(node['oneOf']):
             variants.append(typed(name + 'Variant' + str(i + 1), choice))
-        rs.append(derive + '\n#[serde(untagged)]\npub enum ' + name + ' {\n' + '\n'.join(f'    Variant{i+1}({v[0]}),' for i, v in enumerate(variants)) + '\n}')
+            label = choice.get('$ref', '').removeprefix('#/$defs/')
+            if not label:
+                marker = choice.get('properties', {}).get('status', {}).get('const')
+                label = title(marker) if isinstance(marker, str) else f'Variant{i+1}'
+            if label in labels:
+                label = f'Variant{i+1}'
+            labels.append(label)
+        rs.append(derive + '\n#[serde(untagged)]\npub enum ' + name + ' {\n' + '\n'.join(f'    {label}({v[0]}),' for label, v in zip(labels, variants)) + '\n}')
         # The Go host validates/discriminates the union before interpreting it.
         go.append(f'type {name} = json.RawMessage')
         ts.append(f'export type {name} = ' + ' | '.join(v[2] for v in variants) + ';')

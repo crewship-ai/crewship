@@ -16,9 +16,9 @@ claim end-to-end latency or durable storage guarantees.
 From the repository root:
 
 ```sh
-crewship-heavy cargo test --manifest-path mooring/Cargo.toml --locked
-crewship-heavy cargo clippy --manifest-path mooring/Cargo.toml --all-targets --locked -- -D warnings
-crewship-heavy cargo build --manifest-path mooring/Cargo.toml --target wasm32-unknown-unknown --locked
+crewship-heavy cargo test --manifest-path mooring/Cargo.toml --config mooring/.cargo/config.toml --locked --offline
+crewship-heavy cargo clippy --manifest-path mooring/Cargo.toml --config mooring/.cargo/config.toml --all-targets --locked --offline -- -D warnings
+crewship-heavy cargo build --manifest-path mooring/Cargo.toml --target wasm32-unknown-unknown --config mooring/.cargo/config.toml --locked --offline
 ```
 
 Registry dependencies are pinned by the lockfile and vendored with license
