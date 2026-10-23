@@ -25,7 +25,7 @@ func (s *BatchStore) loadKnown(ctx context.Context, tx *sql.Tx, k SessionKey, ch
 			if err = json.Unmarshal([]byte(raw), &result); err != nil {
 				return nil, err
 			}
-			if len(result.Operations) != len(c.Operations) {
+			if !validStoredBatchChange(c, result) {
 				return nil, ErrInvalid
 			}
 			known[index] = result
@@ -121,6 +121,9 @@ func dependencyOutcome(ctx context.Context, tx *sql.Tx, page, id string) (*Batch
 	}
 	var result BatchOperationResult
 	err = json.Unmarshal([]byte(raw), &result)
+	if err == nil && (result.ID != id || !validStoredBatchOperation(result)) {
+		return nil, ErrInvalid
+	}
 	return &result, err
 }
 func (s *BatchStore) deniedReason(err error) (*BatchRejection, error) {
@@ -171,7 +174,6 @@ func (s *BatchStore) Commit(ctx context.Context, request BatchRequest) (BatchRes
 		if e != nil {
 			return e
 		}
-		plan := planBatch(changes, known)
 		if e = s.ledgerCapacity(ctx, tx, key.ArtifactID, changes, known); e != nil {
 			return e
 		}
@@ -179,6 +181,11 @@ func (s *BatchStore) Commit(ctx context.Context, request BatchRequest) (BatchRes
 		if e != nil {
 			return e
 		}
+		failures, e := s.preflightBatch(ctx, tx, key, changes, known, taskReasons, request.ExpectedRevision, revision)
+		if e != nil {
+			return e
+		}
+		plan := planBatch(changes, known, failures)
 		done := map[int]bool{}
 		outcomes := map[string]BatchOperationResult{}
 		for index, r := range known {
@@ -213,9 +220,11 @@ func (s *BatchStore) Commit(ctx context.Context, request BatchRequest) (BatchRes
 				return ErrInvalid
 			}
 			c := changes[next]
-			reason := plan.Initial[next]
-			if reason == nil {
-				reason = taskReasons[next]
+			var reason *BatchRejection
+			rootID := c.Operations[0].ID
+			if failure := plan.Initial[next]; failure != nil {
+				reason = failure.Reason
+				rootID = failure.OperationID
 			}
 			if reason == nil {
 				for _, op := range c.Operations {
@@ -231,6 +240,7 @@ func (s *BatchStore) Commit(ctx context.Context, request BatchRequest) (BatchRes
 							}
 							if stored == nil {
 								reason = batchReason("unknown_dependency")
+								rootID = op.ID
 								break
 							}
 							prior = *stored
@@ -264,6 +274,7 @@ func (s *BatchStore) Commit(ctx context.Context, request BatchRequest) (BatchRes
 				}
 				if reason == nil && denied != nil {
 					reason = denied
+					rootID = op.ID
 				}
 			}
 			var candidate []byte
@@ -276,7 +287,15 @@ func (s *BatchStore) Commit(ctx context.Context, request BatchRequest) (BatchRes
 				if e = json.Unmarshal(isolatedRaw, &isolated); e != nil {
 					return e
 				}
-				candidate, reason, e = s.config.Adapter.Apply(ctx, append([]byte(nil), checkpoint...), isolated)
+				var failure *PreparedFailure
+				candidate, failure, e = s.config.Adapter.Apply(ctx, append([]byte(nil), checkpoint...), isolated)
+				if failure != nil {
+					if !validPreparedFailure(c, failure) {
+						return ErrInvalid
+					}
+					reason = failure.Reason
+					rootID = failure.OperationID
+				}
 				if e != nil {
 					return e
 				}
@@ -314,7 +333,7 @@ func (s *BatchStore) Commit(ctx context.Context, request BatchRequest) (BatchRes
 			}
 			var stored BatchChangeResult
 			if reason != nil {
-				stored = rejectedBatchChange(c, reason)
+				stored = rejectedBatchChange(c, reason, rootID)
 			} else {
 				stored, e = savedBatchChange(c, rev)
 				if e != nil {
