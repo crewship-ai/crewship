@@ -189,3 +189,72 @@ func TestAuditInstanceVerifyAlertsAdmins(t *testing.T) {
 		t.Fatalf("instance admin inbox items=%d, want 1", n)
 	}
 }
+
+// A committed incident is not proof of inbox delivery. A later full sweep
+// retries missing per-admin notices after a delivery error, without duplicate
+// inbox rows on subsequent sweeps.
+func TestAuditIncidentRetriesFailedInboxDelivery(t *testing.T) {
+	f := newInstanceFixture(t)
+	defer f.r.Shutdown()
+	writer := journal.NewWriter(f.db, newTestLogger(), journal.WriterOptions{FlushInterval: time.Hour})
+	defer writer.Close()
+	f.r.journal = writer
+	for range 3 {
+		if err := auditInstance(t.Context(), nil, f.db, "fixture.history", "instance", "", "", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	execOrFatal(t, f.db, `UPDATE instance_audit_logs SET metadata='{"tampered":true}' WHERE chain_seq=2`)
+	execOrFatal(t, f.db, `CREATE TRIGGER reject_audit_notice BEFORE INSERT ON inbox_items WHEN json_extract(NEW.payload_json,'$.subkind')='audit_chain_incident' BEGIN SELECT RAISE(ABORT,'synthetic delivery failure'); END`)
+	if err := f.r.verifyAuditHistories(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	drainAlerts(t)
+	if chained, fallback := breakEvents(t, f.db, "chain_break:instance:seq:2"); chained+fallback != 1 {
+		t.Fatalf("incident did not commit: %d/%d", chained, fallback)
+	}
+	if n := adminAlerts(t, f.db, "boss", ""); n != 0 {
+		t.Fatalf("injected failure did not block delivery: %d", n)
+	}
+	execOrFatal(t, f.db, `DROP TRIGGER reject_audit_notice`)
+	for range 2 {
+		if err := f.r.verifyAuditHistories(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		drainAlerts(t)
+	}
+	if n := adminAlerts(t, f.db, "boss", ""); n != 1 {
+		t.Fatalf("delivery not retried/deduplicated: items=%d", n)
+	}
+}
+
+func TestAuditNoticeReplayAfterDetectionIsGone(t *testing.T) {
+	f := newInstanceFixture(t)
+	defer f.r.Shutdown()
+	writer := journal.NewWriter(f.db, newTestLogger(), journal.WriterOptions{FlushInterval: time.Hour})
+	defer writer.Close()
+	f.r.journal = writer
+	inc := auditChainIncident{Kind: "chain_break", Scope: "instance", Seq: 42, Reason: "synthetic past incident"}
+	if fresh, err := f.r.auditAlerts.record(t.Context(), inc); err != nil || !fresh {
+		t.Fatalf("record: %v %v", fresh, err)
+	}
+	// No current defect, and no in-memory delivery state. A fresh sweep must
+	// project the durable event, as after a restart in the commit/delivery gap.
+	if err := f.r.verifyAuditHistories(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	drainAlerts(t)
+	if n := adminAlerts(t, f.db, "boss", inc.key()); n != 1 {
+		t.Fatalf("missing replay: %d", n)
+	}
+}
+
+func TestAuditAlertDoesNotReloadMissingBootKeys(t *testing.T) {
+	f := newInstanceFixture(t)
+	defer f.r.Shutdown()
+	f.r.auditAlerts.raise(journal.WithSigningKeys(t.Context(), nil), auditChainIncident{Kind: "chain_break", Scope: "instance", Seq: 42, Reason: "missing boot keys"})
+	drainAlerts(t)
+	if chained, fallback := breakEvents(t, f.db, "chain_break:instance:seq:42"); chained+fallback != 0 {
+		t.Fatalf("nil boot snapshot reloaded environmental keys: %d/%d", chained, fallback)
+	}
+}

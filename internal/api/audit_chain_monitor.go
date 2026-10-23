@@ -116,5 +116,8 @@ func (r *Router) verifyAuditHistories(ctx context.Context) error {
 			return ctx.Err()
 		}
 	}
+	if err := r.retryAuditNotices(ctx); err != nil && first == nil {
+		first = err
+	}
 	return first
 }

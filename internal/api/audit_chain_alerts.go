@@ -98,15 +98,15 @@ func (a *auditChainAlerter) raise(ctx context.Context, inc auditChainIncident) {
 		return
 	}
 	a.logger.Error("audit chain incident", "kind", inc.Kind, "scope", inc.Scope, "workspace_id", inc.WorkspaceID, "seq", inc.Seq, "reason", inc.Reason)
-	keys, keyErr := journal.SigningKeysForContext(ctx)
+	keys, _ := journal.SigningKeysForContext(ctx)
 	done := beginBackgroundWork()
 	go func() {
 		defer done()
 		bg, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if keyErr == nil {
-			bg = journal.WithSigningKeys(bg, keys)
-		}
+		// A nil boot snapshot stays an explicit unavailable-key sentinel;
+		// never reload a different keyring from environment on this path.
+		bg = journal.WithSigningKeys(bg, keys)
 		if inc.Kind != "reseal" {
 			if inc.Scope == "workspace" && inc.Seq == 0 {
 				// The writer reports from inside its transaction; the refused
@@ -114,15 +114,18 @@ func (a *auditChainAlerter) raise(ctx context.Context, inc auditChainIncident) {
 				// it refuses appends, so the key stays stable.
 				_ = a.db.QueryRowContext(bg, `SELECT COALESCE(MAX(seq),0) FROM journal_entries WHERE workspace_id=? AND seq>0`, inc.WorkspaceID).Scan(&inc.Seq)
 			}
-			fresh, err := a.record(bg, inc)
+			_, err := a.record(bg, inc)
 			if err != nil {
 				a.logger.Error("audit chain incident: record instance audit event", "key", inc.key(), "err", err)
-			}
-			if !fresh {
 				return
 			}
 		}
-		a.notifyAdmins(bg, inc)
+		// An existing incident is not evidence of successful delivery. Give
+		// delivery its own budget and let the inbox source deduplicate it.
+		cancel()
+		delivery, stop := context.WithTimeout(context.Background(), 30*time.Second)
+		defer stop()
+		a.notifyAdmins(journal.WithSigningKeys(delivery, keys), inc)
 	}()
 }
 
@@ -181,10 +184,63 @@ func (a *auditChainAlerter) notifyAdmins(ctx context.Context, inc auditChainInci
 			a.logger.Info("audit chain incident: instance admin belongs to no workspace, so has no inbox", "user", ad.Email, "key", inc.key())
 			continue
 		}
-		_ = inbox.Upsert(ctx, a.db, a.logger, inbox.Item{
+		err := inbox.Insert(ctx, a.db, a.logger, inbox.Item{
 			WorkspaceID: ad.WorkspaceID, Kind: inbox.KindMessage, SourceID: "audit_chain:" + inc.key() + ":" + ad.ID,
 			TargetUserID: ad.ID, Title: title, BodyMD: body, SenderType: "system", SenderName: "Audit",
 			Priority: "high", Payload: payload, Category: notify.CategorySecurity, AttentionClass: inbox.AttentionRepair,
 		})
+		if err != nil {
+			a.logger.Error("audit chain incident: deliver inbox notice", "key", inc.key(), "user_id", ad.ID, "err", err)
+		}
 	}
+}
+
+// retryAuditNotices rebuilds missing inbox projections from durable incident
+// and reseal events, including after a process exit or a subsequently repaired
+// chain. Insert deduplicates per recipient and fans out only a new inbox row.
+func (r *Router) retryAuditNotices(ctx context.Context) error {
+	rows, err := r.db.QueryContext(ctx, `SELECT id,action,COALESCE(target_workspace_id,''),COALESCE(metadata,'{}') FROM instance_audit_logs WHERE entity_type='audit_chain' AND action IN ('audit.chain_break_detected','audit.resealed','audit.workspace_resealed') ORDER BY created_at,id`)
+	if err != nil {
+		return err
+	}
+	var incidents []auditChainIncident
+	for rows.Next() {
+		var id, action, workspace, raw string
+		if err := rows.Scan(&id, &action, &workspace, &raw); err != nil {
+			rows.Close()
+			return err
+		}
+		var data struct {
+			Scope        string                   `json:"scope"`
+			WorkspaceID  string                   `json:"workspace_id"`
+			Seq          int64                    `json:"seq"`
+			Reason       string                   `json:"reason"`
+			CheckpointID string                   `json:"checkpoint_id"`
+			OldTailSeq   int64                    `json:"old_tail_seq"`
+			Checkpoint   journal.ResealCheckpoint `json:"checkpoint"`
+		}
+		if err := json.Unmarshal([]byte(raw), &data); err != nil {
+			rows.Close()
+			return err
+		}
+		inc := auditChainIncident{Kind: "chain_break", Scope: data.Scope, WorkspaceID: data.WorkspaceID, Seq: data.Seq, Reason: data.Reason}
+		if action == "audit.resealed" {
+			inc = auditChainIncident{Kind: "reseal", Scope: "instance", CheckpointID: id, Seq: data.Checkpoint.OldTailSeq, Reason: data.Checkpoint.Reason}
+		} else if action == "audit.workspace_resealed" {
+			inc = auditChainIncident{Kind: "reseal", Scope: "workspace", WorkspaceID: workspace, CheckpointID: data.CheckpointID, Seq: data.OldTailSeq, Reason: data.Reason}
+		}
+		incidents = append(incidents, inc)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, inc := range incidents {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		r.auditAlerts.notifyAdmins(ctx, inc)
+	}
+	return nil
 }

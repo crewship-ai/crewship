@@ -439,7 +439,10 @@ workspace tail refuses are **held**, not dropped: the writer keeps them in
 order, retries each affected workspace every 30 seconds with one tail-only
 admission, and keeps committing every other workspace meanwhile. At most 10,000
 entries are held; past that the oldest are dropped with an ERROR naming the
-count, and entries still held at shutdown are logged as lost.
+count, and entries still held at shutdown are logged as lost. `Flush()` can
+return while broken-chain entries remain held; it is not proof of their
+durability. Fresh background entries for that workspace wait behind its
+backlog, including after repair but before the retry tick.
 
 #### Alerts on chain breaks and reseals
 
@@ -463,6 +466,11 @@ reason) — and every OWNER reseal reach the instance admins:
 
 The alert is written by a background task after detection, never inside the
 writer transaction that detected it.
+Missing per-admin inbox notices are retried on later detection and by the
+periodic sweep from persisted incident/reseal events, including after restart.
+The inbox source deduplicates recipients; retries do not send external channels
+another notification for an existing inbox row. External fan-out follows inbox
+commit and retains the notification subsystem's delivery limits.
 
 The server also verifies the full instance chain and every retained workspace
 journal at startup and hourly, using read snapshots outside writer transactions.
@@ -471,8 +479,9 @@ on the next sweep. `post_upgrade_invalid` raises the same deduplicated incident.
 Any `unchained_fallback > 0` raises a separate, stable seq-zero incident, even
 when the chained segment is healthy; the alert itself cannot generate an endless
 series of fallback incidents. Deleted workspaces with retained journal rows are
-included. No verification request or refused append is needed to detect history
-damage.
+included. No verification request or refused append is needed to detect these
+verifier-reported defects. Whole-database rollback, tail truncation and rows
+indistinguishable from pre-chain legacy history remain outside that guarantee.
 
 There is no new quarantine state; with a broken tail, audit-producing writes
 on that chain fail while reads and unrelated chains retain their own authority
