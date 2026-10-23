@@ -445,6 +445,19 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		return nil, err
 	}
 	defer func() { _ = extracted.Close() }()
+	// Refuse unqualified scope transformation or history collision before any
+	// destination admission, replacement, service import or database write.
+	if !opts.FilesOnly {
+		if opts.AsWorkspace != "" || opts.AsCrew != "" {
+			if err := rejectMooringCollaborationRemap(extracted.DBDump); err != nil {
+				return nil, err
+			}
+		}
+		if err := rejectMooringCollaborationCollision(ctx, db, extracted.DBDump); err != nil {
+			return nil, err
+		}
+	}
+
 	if err := runAdmissionBundlePreflight(ctx, db, extracted.DBDump, manifest.SchemaMigrationVersions, opts.ResumeWorkspaceID); err != nil {
 		return nil, err
 	}
