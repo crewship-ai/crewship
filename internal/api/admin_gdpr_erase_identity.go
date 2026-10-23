@@ -213,6 +213,12 @@ var identitySteps = []identityStep{
 	{key: "user_model_provenance_removed", deletes: true,
 		sql:  `DELETE FROM user_model_provenance WHERE workspace_id = ? AND user_id = ?`,
 		args: []identityArg{argWorkspace, argSubject}},
+	// Live workbook editor sessions: runtime state naming the subject and
+	// the sign-in or token that opened each one. The erasure ends any use
+	// of them, so they simply go.
+	{key: "gridcraft_sessions_removed", deletes: true,
+		sql:  `DELETE FROM gridcraft_sessions WHERE workspace_id = ? AND user_id = ?`,
+		args: []identityArg{argWorkspace, argSubject}},
 
 	// ── Capabilities — revoked ─────────────────────────────────────────
 	// invited_by is NOT NULL REFERENCES users(id): a pending invitation is
