@@ -45,7 +45,7 @@ func TestWireSchemaSharedCases(t *testing.T) {
 	}
 	for _, c := range f.Shapes {
 		t.Run(c.ID, func(t *testing.T) {
-			// These are generic shape fixtures, some deliberately exceed E3 frame.
+			// Validate generic subschemas independently of envelope admission.
 			normalized, err := CanonicalJSON(c.Message)
 			if err != nil {
 				t.Fatal(err)
