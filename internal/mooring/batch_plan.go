@@ -1,8 +1,9 @@
 package mooring
 
-// batchCycles returns exactly the vertices participating in a directed cycle,
-// not descendants. Inputs and adjacency lists have stable submission order.
-func batchCycles(edges [][]int) map[int]bool {
+// batchCycleComponents returns an SCC identity for exactly the vertices
+// participating in a directed cycle, not descendants. Stable input order fixes
+// traversal; callers compare identities rather than treating all cycles as one.
+func batchCycleComponents(edges [][]int) map[int]int {
 	// Tarjan's strongly connected components, including edges to vertices
 	// already visited but still on the SCC stack. A DFS backedge union alone
 	// misses vertices reached after another path turns their neighbor black.
@@ -10,7 +11,7 @@ func batchCycles(edges [][]int) map[int]bool {
 	index, low := make([]int, len(edges)), make([]int, len(edges))
 	onStack := make([]bool, len(edges))
 	stack := []int{}
-	cycles := map[int]bool{}
+	cycles := map[int]int{}
 	for i := range index {
 		index[i] = -1
 	}
@@ -55,7 +56,7 @@ func batchCycles(edges [][]int) map[int]bool {
 		}
 		if cyclic {
 			for _, member := range component {
-				cycles[member] = true
+				cycles[member] = v
 			}
 		}
 	}
@@ -65,6 +66,15 @@ func batchCycles(edges [][]int) map[int]bool {
 		}
 	}
 	return cycles
+}
+
+// batchCycles projects SCC membership when component identity is irrelevant.
+func batchCycles(edges [][]int) map[int]bool {
+	out := map[int]bool{}
+	for index := range batchCycleComponents(edges) {
+		out[index] = true
+	}
+	return out
 }
 
 type batchPlan struct {
@@ -104,18 +114,22 @@ func planBatch(changes []BatchChange, known map[int]BatchChangeResult, failures 
 			}
 		}
 	}
-	opCycles, changeCycles := batchCycles(opEdges), batchCycles(p.Edges)
+	opCycles, changeComponents := batchCycles(opEdges), batchCycleComponents(p.Edges)
 	for index, c := range changes {
 		if _, exists := known[index]; exists || failures[index] != nil {
 			continue
 		}
 		for _, op := range c.Operations {
 			cycle := opCycles[opIndex[op.ID]]
-			if changeCycles[index] {
+			if component, cyclic := changeComponents[index]; cyclic {
 				for _, dep := range op.Dependencies {
-					if other, ok := p.ByOperation[dep]; ok && other != index && changeCycles[other] {
-						cycle = true
-						break
+					if other, ok := p.ByOperation[dep]; ok && other != index {
+						// An edge into a DIFFERENT cyclic SCC cannot witness this
+						// change's own cycle or identify its actual failing member.
+						if targetComponent, exists := changeComponents[other]; exists && targetComponent == component {
+							cycle = true
+							break
+						}
 					}
 				}
 			}

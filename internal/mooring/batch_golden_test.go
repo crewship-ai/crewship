@@ -45,7 +45,7 @@ func TestBatchSharedResolutionVectors(t *testing.T) {
 	if err = json.Unmarshal(raw, &fixture); err != nil {
 		t.Fatal(err)
 	}
-	if len(fixture.Cases) != 11 {
+	if len(fixture.Cases) != 12 {
 		t.Fatal("shared fixture cases unexpectedly changed")
 	}
 	store, adapter, owners, _, original := batchFixture(t)
