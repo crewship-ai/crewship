@@ -52,7 +52,7 @@ func wholeBound(v any) bool {
 }
 func supportedWirePattern(p string) bool {
 	switch p {
-	case "\x00", "[^0-9.]", "[^0-9]", "[^A-Za-z0-9+/=]", `^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$`, `^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$`, `^sha256:[0-9a-f]{64}$`:
+	case `^(0|[1-9][0-9]?|1[0-9]{2}|2[0-4][0-9]|25[0-5])$`, "\x00", "[^0-9.]", "[^0-9]", "[^A-Za-z0-9+/=]", `^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$`, `^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$`, `^sha256:[0-9a-f]{64}$`:
 		return true
 	}
 	// Counter's exact frozen language; this is not an arbitrary-regex escape hatch.

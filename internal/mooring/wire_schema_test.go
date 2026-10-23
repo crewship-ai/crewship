@@ -3,6 +3,7 @@ package mooring
 import (
 	"encoding/json"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -115,5 +116,38 @@ func TestWireSchemaOpaqueApplicationStrings(t *testing.T) {
 	raw := []byte(`{"type":"presence","request_id":"r","scope":{"workspace_id":"w","artifact_id":"a","application_id":"app"},"session_id":"s","participant_ref":"p","ttl_ms":"1","view":{"op_id":"\u0000"}}`)
 	if _, err := s.ValidateE3(raw); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// This exact schema vocabulary extension does not select or admit a private
+// profile. Unrecognized patterns must still fail before envelope matching.
+func TestWireSchemaCanonicalCausalReadIndex(t *testing.T) {
+	const schema = `{"type":"string","pattern":"^(0|[1-9][0-9]?|1[0-9]{2}|2[0-4][0-9]|25[0-5])$","not":{"pattern":"[^0-9]"}}`
+	s, err := NewWireSchema([]byte(schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i <= 1000; i++ {
+		raw, err := json.Marshal(strconv.Itoa(i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = s.ValidateE3(raw)
+		if (err == nil) != (i <= 255) {
+			t.Fatalf("index%d: %v", i, err)
+		}
+	}
+	for _, value := range []any{"", "00", "01", "+1", "-1", "1.0", "1e0", " 1", "1 ", "1\n", "1\r\n", "1\u2028", "1\u2029", "١", "18446744073709551616", 1, nil} {
+		raw, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.ValidateE3(raw); err == nil {
+			t.Fatalf("noncanonical index accepted: %s", raw)
+		}
+	}
+	unknown := strings.Replace(schema, "25[0-5]", "25[0-6]", 1)
+	if _, err := NewWireSchema([]byte(unknown)); err == nil {
+		t.Fatal("nearby unsupported pattern accepted")
 	}
 }
