@@ -1072,6 +1072,16 @@ describe("same-cell conflicts with an open draft", () => {
     expect(t.state().refused).toBe(0)
   })
 
+  it.each(["access", "disabled", "generation"] as const)("counts an open unsubmitted draft when %s ends the session", async reason => {
+    const t = setup()
+    await t.connect()
+    t.send({ type: "draft", protocol: 1, cells: [{ sheet: "Sheet1", cell: "B2" }] })
+    t.bridge.close(reason)
+    expect(t.kills).toEqual([{ reason, unsaved: 1 }])
+    expect(t.port.close).toHaveBeenCalledOnce()
+    expect(t.transport.edit).not.toHaveBeenCalled()
+  })
+
   it("counts open refusals as unsaved when the session ends", async () => {
     const t = setup({ edit: vi.fn(async () => conflictOn("B2", "7")), commits: vi.fn(async (since: number) => feed(42, [remote(42, [["B2", "7"]])].filter(c => c.rev > since))) })
     await t.connect()

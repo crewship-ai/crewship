@@ -582,8 +582,9 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
 
   function kill(reason: KillReason) {
     if (phase === "killed") return
-    // An open refusal holds the person's values only here: they are lost with the session too.
-    const unsaved = queue.size + openRefusals() + overflow
+    // Open cell drafts have not reached the write queue; destroying the frame loses them too.
+    // This reports that loss honestly. It does not retain draft content after revocation.
+    const unsaved = queue.size + openRefusals() + overflow + drafts.size
     phase = "killed"
     queue.stop()
     timers.clearTimeout(driveTimer); timers.clearTimeout(catchUpTimer); timers.clearTimeout(handshakeTimer)
