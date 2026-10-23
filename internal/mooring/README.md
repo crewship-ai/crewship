@@ -70,3 +70,12 @@ rebinding a retry to a fresh timestamp could outlive that unchanged host expiry.
 The wire nonce-to-pending-renewal binding is not implemented by this store.
 There are no tickets, API/CLI routes, production identity callbacks or content
 dispatch paths in this slice; synthetic authority tests are not live RBAC proof.
+
+For an exclusive host-initiated dispatcher, `Runtime.Exchange` serializes whole
+request/reply pairs and bounds each exchange to five seconds or the caller's
+earlier deadline. Queued cancellation does not close an active caller's channel;
+cancellation during I/O or a transport error closes it so a late response cannot
+become another request's reply. Typed callers still validate shape, correlation,
+scope and every candidate before use. Do not mix this mode with direct RPC reads
+or unsolicited runtime requests; an asynchronous protocol needs a separate
+reviewed multiplexer. These operational timeouts are not delivery leases.

@@ -68,6 +68,17 @@ func TestMooringRuntimeHelper(t *testing.T) {
 		}
 		return
 	}
+	if mode == "echo" {
+		for {
+			frame, err := rpc.Read()
+			if err != nil {
+				return
+			}
+			if err = rpc.Write(frame); err != nil {
+				return
+			}
+		}
+	}
 	// The actual inherited socket remains alive until the parent closes it or
 	// cancellation kills the child. No test-only listener or mock Saved exists.
 	_, _ = io.Copy(io.Discard, conn)
@@ -76,6 +87,20 @@ func helperRuntime(t *testing.T, ctx context.Context, mode string) (*Runtime, er
 	t.Helper()
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMooringRuntimeHelper$", "--", "--mooring-test-mode", mode)
 	return startRuntime(ctx, RuntimeConfig{Versions: runtimeTestVersions}, cmd)
+}
+
+func TestRuntimeExchangeActualInheritedChild(t *testing.T) {
+	r, err := helperRuntime(t, t.Context(), "echo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	for _, request := range []string{`{"request_id":"one"}`, `{"request_id":"two","opaque":"český 😀"}`} {
+		response, err := r.Exchange(t.Context(), []byte(request))
+		if err != nil || string(response) != request {
+			t.Fatal("inherited child exchange failed", err)
+		}
+	}
 }
 func TestRuntimeDisabledStartsNothing(t *testing.T) {
 	_, err := StartRuntime(t.Context(), RuntimeConfig{Binary: "/does/not/exist"})
