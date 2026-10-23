@@ -2,8 +2,8 @@
 CREATE TABLE mooring_delivery_gates (
  ordinal INTEGER PRIMARY KEY AUTOINCREMENT,
  id TEXT NOT NULL UNIQUE,
- page_id TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
- workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+ page_id TEXT NOT NULL REFERENCES pages(id) ON DELETE RESTRICT,
+ workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE RESTRICT,
  application_id TEXT NOT NULL,
  participant_ref TEXT NOT NULL,
  owner_id TEXT NOT NULL,
@@ -19,8 +19,8 @@ CREATE TABLE mooring_delivery_gates (
 CREATE INDEX mooring_delivery_gates_scope ON mooring_delivery_gates(page_id, participant_ref);
 CREATE TABLE mooring_delivery_barriers (
  id TEXT PRIMARY KEY,
- page_id TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
- workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+ page_id TEXT NOT NULL REFERENCES pages(id) ON DELETE RESTRICT,
+ workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE RESTRICT,
  application_id TEXT NOT NULL,
  participant_ref TEXT NOT NULL,
  cutoff_ordinal INTEGER NOT NULL CHECK(cutoff_ordinal>0),
