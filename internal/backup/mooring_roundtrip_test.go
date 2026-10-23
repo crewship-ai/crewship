@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -56,6 +57,37 @@ func TestMooringBackupPreservesConfirmedStateWithoutRunMandates(t *testing.T) {
 		t.Fatal(e)
 	}
 	if _, e := source.Exec(`INSERT INTO mooring_delivery_barriers(id,page_id,workspace_id,application_id,participant_ref,cutoff_ordinal) SELECT 'source-live-barrier',page_id,workspace_id,application_id,participant_ref,ordinal FROM mooring_delivery_gates WHERE id='source-live-gate'`); e != nil {
+		t.Fatal(e)
+	}
+	// Check both replacement entry points before exporting. Global/offline
+	// replacement and slug-matched workspace replacement must retain issued
+	// delivery evidence; unrelated workspaces remain eligible.
+	for _, ids := range [][]string{nil, {workspace}} {
+		if e := rejectMooringDeliveryTargetReplacement(t.Context(), source, ids); !errors.Is(e, ErrMooringDeliveryTargetReplacement) {
+			t.Fatal("issued delivery target accepted", ids, e)
+		}
+	}
+	if e := rejectMooringDeliveryTargetReplacement(t.Context(), source, []string{other}); e != nil {
+		t.Fatal("unrelated workspace refused", e)
+	}
+	var slug string
+	if e := source.QueryRow(`SELECT slug FROM workspaces WHERE id=?`, workspace).Scan(&slug); e != nil {
+		t.Fatal(e)
+	}
+	if e := rejectPrivateArtifactWorkspaceReplacement(t.Context(), source, "different-incoming-id", slug, true); !errors.Is(e, ErrMooringDeliveryTargetReplacement) {
+		t.Fatal("slug-matched delivery target accepted", e)
+	}
+	guardTx, e := source.BeginTx(t.Context(), nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = guardTx.Exec(`DELETE FROM mooring_delivery_gates`); e != nil {
+		t.Fatal(e)
+	}
+	if e = rejectMooringDeliveryTargetReplacement(t.Context(), guardTx, []string{workspace}); !errors.Is(e, ErrMooringDeliveryTargetReplacement) {
+		t.Fatal("barrier-only delivery evidence discarded", e)
+	}
+	if e = guardTx.Rollback(); e != nil {
 		t.Fatal(e)
 	}
 	dump, e := DumpWorkspace(t.Context(), source, workspace)

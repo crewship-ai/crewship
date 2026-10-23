@@ -61,5 +61,12 @@ persistent status row. Otherwise completion waits for authenticated runtime
 blocked acknowledgements or every original issued expiry, including old owners.
 Portable backups omit runtime gates/barriers. Physical recovery closes gates
 and clears source acknowledgements while retaining issued expiry bounds.
+Replacing an existing target with issued delivery metadata is refused before
+deletion, including workspace slug matches and offline target replacement.
+Qualified retirement of this metadata remains future work.
+Renewing with the last nonce does not extend the host expiry. Integration must
+retain the original Rust pending renewal and send timestamp across retries;
+rebinding a retry to a fresh timestamp could outlive that unchanged host expiry.
+The wire nonce-to-pending-renewal binding is not implemented by this store.
 There are no tickets, API/CLI routes, production identity callbacks or content
 dispatch paths in this slice; synthetic authority tests are not live RBAC proof.
