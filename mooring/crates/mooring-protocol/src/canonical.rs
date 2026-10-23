@@ -166,7 +166,7 @@ pub fn fingerprint_atomic(
     let value = normalize(raw_change)?;
     let normalized: AtomicChange =
         serde_json::from_value(value.value).map_err(|_| CanonicalError::InvalidAtomic)?;
-    let valid_id = |id: &str| !id.is_empty() && id.chars().count() <= 200;
+    let valid_id = crate::wire::valid_identifier;
     if !valid_id(&scope.application_id)
         || !valid_id(&scope.workspace_id)
         || !valid_id(&scope.artifact_id)

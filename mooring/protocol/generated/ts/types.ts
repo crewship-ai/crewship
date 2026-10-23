@@ -6,9 +6,9 @@
 export type Counter = string;
 
 export interface Scope {
-  workspace_id: string;
-  artifact_id: string;
-  application_id: string;
+  workspace_id: Identifier;
+  artifact_id: Identifier;
+  application_id: Identifier;
 }
 
 export interface Versions {
@@ -20,26 +20,26 @@ export interface Versions {
 export type ErrorCode = "precondition_failed" | "op_id_conflict" | "dependency_rejected" | "target_deleted" | "quota_exceeded" | "permission_revoked" | "forbidden" | "stale_owner" | "lease_expired" | "version_mismatch" | "invalid_request" | "atomic_change_too_large" | "capacity_exhausted" | "unknown_dependency" | "dependency_cycle" | "unknown_outcome" | "task_cancelled";
 
 export interface ReadPrecondition {
-  target_id: string;
+  target_id: Identifier;
   revision: Counter;
   structure_revision?: Counter;
 }
 
 export interface Operation {
-  op_id: string;
+  op_id: Identifier;
   fingerprint: Digest;
-  participant_ref: string;
+  participant_ref: Identifier;
   base_revision: Counter;
-  dependencies: Array<string>;
+  dependencies: Array<Identifier>;
   read_preconditions: Array<ReadPrecondition>;
   payload: Record<string, unknown>;
 }
 
 export interface AtomicChange {
-  change_id: string;
+  change_id: Identifier;
   operations: Array<Operation>;
   membership_hash: Digest;
-  task_id?: string;
+  task_id?: Identifier;
 }
 
 export interface Fence {
@@ -50,7 +50,7 @@ export interface Fence {
 export type RejectionRootCauseCode = "precondition_failed" | "op_id_conflict" | "target_deleted" | "quota_exceeded" | "permission_revoked" | "forbidden" | "stale_owner" | "lease_expired" | "version_mismatch" | "invalid_request" | "atomic_change_too_large" | "capacity_exhausted" | "unknown_dependency" | "dependency_cycle" | "task_cancelled";
 
 export interface RejectionRootCause {
-  op_id: string;
+  op_id: Identifier;
   code: RejectionRootCauseCode;
   message: string;
 }
@@ -59,7 +59,7 @@ export type RejectionRetry = "do_not_retry" | "query_status" | "reconnect_then_q
 
 export interface Rejection {
   code: ErrorCode;
-  root_op_id?: string;
+  root_op_id?: Identifier;
   message: string;
   root_cause?: RejectionRootCause;
   retry: RejectionRetry;
@@ -70,17 +70,17 @@ export type OperationResultVariant1Status = "saved";
 export type OperationResultVariant1Durability = "node" | "replicated";
 
 export interface OperationResultVariant1 {
-  op_id: string;
+  op_id: Identifier;
   status: OperationResultVariant1Status;
   revision: Counter;
-  issuer: string;
+  issuer: Identifier;
   durability: OperationResultVariant1Durability;
 }
 
 export type OperationResultVariant2Status = "rejected";
 
 export interface OperationResultVariant2 {
-  op_id: string;
+  op_id: Identifier;
   status: OperationResultVariant2Status;
   reason: Rejection;
 }
@@ -90,7 +90,7 @@ export type OperationResult = OperationResultVariant1 | OperationResultVariant2;
 export type ChangeResultStatus = "saved" | "rejected";
 
 export interface ChangeResult {
-  change_id: string;
+  change_id: Identifier;
   status: ChangeResultStatus;
   operations: Array<OperationResult>;
   first_revision?: Counter;
@@ -101,7 +101,7 @@ export type HelloType = "hello";
 
 export interface Hello {
   type: HelloType;
-  request_id: string;
+  request_id: Identifier;
   supported: Array<Versions>;
 }
 
@@ -109,23 +109,23 @@ export type WelcomeType = "welcome";
 
 export interface Welcome {
   type: WelcomeType;
-  request_id: string;
+  request_id: Identifier;
   selected: Versions;
   scope: Scope;
-  participant_ref: string;
+  participant_ref: Identifier;
   permission_version: Counter;
   limits: WireLimits;
-  issuer: string;
+  issuer: Identifier;
 }
 
 export type CommitBatchType = "commit_batch";
 
 export interface CommitBatch {
   type: CommitBatchType;
-  request_id: string;
+  request_id: Identifier;
   versions: Versions;
   scope: Scope;
-  session_id: string;
+  session_id: Identifier;
   fence: Fence;
   expected_revision: Counter;
   changes: Array<AtomicChange>;
@@ -137,11 +137,11 @@ export type CommitResultDurability = "node" | "replicated";
 
 export interface CommitResult {
   type: CommitResultType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
   generation: Counter;
   revision: Counter;
-  issuer: string;
+  issuer: Identifier;
   durability: CommitResultDurability;
   changes: Array<ChangeResult>;
 }
@@ -150,9 +150,9 @@ export type StatusRequestType = "operation_status";
 
 export interface StatusRequest {
   type: StatusRequestType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  op_id: string;
+  op_id: Identifier;
   expected_fingerprint: Digest;
 }
 
@@ -161,7 +161,7 @@ export type StatusResultType = "operation_status_result";
 export type StatusResultResultVariant2Status = "unknown";
 
 export interface StatusResultResultVariant2 {
-  op_id: string;
+  op_id: Identifier;
   status: StatusResultResultVariant2Status;
 }
 
@@ -169,13 +169,13 @@ export type StatusResultResult = OperationResult | StatusResultResultVariant2;
 
 export interface StatusResult {
   type: StatusResultType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
   result: StatusResultResult;
 }
 
 export interface Asset {
-  asset_id: string;
+  asset_id: Identifier;
   digest: Digest;
   size_bytes: Counter;
 }
@@ -186,7 +186,7 @@ export interface Checkpoint {
   scope: Scope;
   revision: Counter;
   generation: Counter;
-  format_version: string;
+  format_version: Identifier;
   versions: Versions;
   encoding: CheckpointEncoding;
   state: string;
@@ -210,7 +210,7 @@ export type SessionTicketRequestType = "session_ticket_request";
 
 export interface SessionTicketRequest {
   type: SessionTicketRequestType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
   requested: Capabilities;
 }
@@ -219,10 +219,10 @@ export type SessionTicketType = "session_ticket";
 
 export interface SessionTicket {
   type: SessionTicketType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
-  participant_ref: string;
+  session_id: Identifier;
+  participant_ref: Identifier;
   permission_version: Counter;
   granted: Capabilities;
   ticket: string;
@@ -234,21 +234,21 @@ export type OwnerAcquireType = "owner_acquire";
 
 export interface OwnerAcquire {
   type: OwnerAcquireType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  runtime_ref: string;
-  renewal_nonce: string;
+  runtime_ref: Identifier;
+  renewal_nonce: Identifier;
 }
 
 export type OwnerRenewType = "owner_renew";
 
 export interface OwnerRenew {
   type: OwnerRenewType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
+  session_id: Identifier;
   fence: Fence;
-  renewal_nonce: string;
+  renewal_nonce: Identifier;
   permission_version: Counter;
 }
 
@@ -256,14 +256,14 @@ export type OwnerGrantType = "owner_grant";
 
 export interface OwnerGrant {
   type: OwnerGrantType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
-  runtime_ref: string;
+  session_id: Identifier;
+  runtime_ref: Identifier;
   fence: Fence;
   lease_duration_ms: PositiveCounter;
   revision: Counter;
-  renewal_nonce: string;
+  renewal_nonce: Identifier;
   permission_version: Counter;
 }
 
@@ -271,57 +271,57 @@ export type DeliveryRenewType = "delivery_renew";
 
 export interface DeliveryRenew {
   type: DeliveryRenewType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
-  participant_ref: string;
+  session_id: Identifier;
+  participant_ref: Identifier;
   fence: Fence;
   permission_version: Counter;
-  renewal_nonce: string;
-  gate_id: string;
+  renewal_nonce: Identifier;
+  gate_id: Identifier;
 }
 
 export type DeliveryGrantType = "delivery_grant";
 
 export interface DeliveryGrant {
   type: DeliveryGrantType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
-  participant_ref: string;
+  session_id: Identifier;
+  participant_ref: Identifier;
   generation: Counter;
   permission_version: Counter;
-  renewal_nonce: string;
+  renewal_nonce: Identifier;
   duration_ms: PositiveCounter;
-  gate_id: string;
+  gate_id: Identifier;
 }
 
 export type SessionClosedType = "session_closed";
 
 export interface SessionClosed {
   type: SessionClosedType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
-  participant_ref: string;
+  session_id: Identifier;
+  participant_ref: Identifier;
   generation: Counter;
   permission_version: Counter;
-  barrier_id: string;
+  barrier_id: Identifier;
   reason: Rejection;
-  gate_id: string;
+  gate_id: Identifier;
 }
 
 export type DeliveryBlockedType = "delivery_blocked";
 
 export interface DeliveryBlocked {
   type: DeliveryBlockedType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
-  participant_ref: string;
+  session_id: Identifier;
+  participant_ref: Identifier;
   fence: Fence;
-  barrier_id: string;
-  covered_gate_ids: Array<string>;
+  barrier_id: Identifier;
+  covered_gate_ids: Array<Identifier>;
   permission_version: Counter;
 }
 
@@ -329,10 +329,10 @@ export type RevocationConfirmedType = "revocation_confirmed";
 
 export interface RevocationConfirmed {
   type: RevocationConfirmedType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  participant_ref: string;
-  barrier_id: string;
+  participant_ref: Identifier;
+  barrier_id: Identifier;
   permission_version: Counter;
   read_blocked: boolean;
   write_blocked: boolean;
@@ -342,9 +342,9 @@ export type ReadRequestType = "read_request";
 
 export interface ReadRequest {
   type: ReadRequestType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
+  session_id: Identifier;
   revision?: Counter;
   cursor?: string;
   query?: Record<string, unknown>;
@@ -355,7 +355,7 @@ export type ReadResultType = "read_result";
 
 export interface ReadResult {
   type: ReadResultType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
   revision: Counter;
   items: Array<ReadItem>;
@@ -366,7 +366,7 @@ export type CheckpointRequestType = "checkpoint_request";
 
 export interface CheckpointRequest {
   type: CheckpointRequestType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
   revision: Counter;
 }
@@ -375,7 +375,7 @@ export type CheckpointResultType = "checkpoint_result";
 
 export interface CheckpointResult {
   type: CheckpointResultType;
-  request_id: string;
+  request_id: Identifier;
   checkpoint: Checkpoint;
 }
 
@@ -383,10 +383,10 @@ export type PresenceType = "presence";
 
 export interface Presence {
   type: PresenceType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
-  participant_ref: string;
+  session_id: Identifier;
+  participant_ref: Identifier;
   ttl_ms: PositiveCounter;
   view: Record<string, unknown>;
 }
@@ -394,28 +394,28 @@ export interface Presence {
 export type TaskSummaryStatus = "pending" | "running" | "saved" | "rejected" | "partial" | "cancelled" | "unknown";
 
 export interface TaskSummary {
-  task_id: string;
+  task_id: Identifier;
   allow_partial: boolean;
   status: TaskSummaryStatus;
   changes: Array<TaskChangeState>;
-  participant_ref: string;
-  unresolved_change_ids: Array<string>;
+  participant_ref: Identifier;
+  unresolved_change_ids: Array<Identifier>;
 }
 
 export type TaskStatusType = "task_status";
 
 export interface TaskStatus {
   type: TaskStatusType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  task_id: string;
+  task_id: Identifier;
 }
 
 export type TaskResultType = "task_result";
 
 export interface TaskResult {
   type: TaskResultType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
   task: TaskSummary;
 }
@@ -424,19 +424,19 @@ export type TaskCancelType = "task_cancel";
 
 export interface TaskCancel {
   type: TaskCancelType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  task_id: string;
+  task_id: Identifier;
 }
 
 export type ProposalType = "proposal";
 
 export interface Proposal {
   type: ProposalType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  proposal_id: string;
-  participant_ref: string;
+  proposal_id: Identifier;
+  participant_ref: Identifier;
   base_revision: Counter;
   changes: Array<AtomicChange>;
   diff: string;
@@ -446,31 +446,31 @@ export type ProposalAcceptType = "proposal_accept";
 
 export interface ProposalAccept {
   type: ProposalAcceptType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  proposal_id: string;
+  proposal_id: Identifier;
   base_revision: Counter;
-  op_id: string;
+  op_id: Identifier;
 }
 
 export type UndoRequestType = "undo_request";
 
 export interface UndoRequest {
   type: UndoRequestType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  task_id?: string;
-  participant_ref: string;
+  task_id?: Identifier;
+  participant_ref: Identifier;
   base_revision: Counter;
-  op_id: string;
-  target_change_id?: string;
+  op_id: Identifier;
+  target_change_id?: Identifier;
 }
 
 export type ProtocolErrorType = "protocol_error";
 
 export interface ProtocolError {
   type: ProtocolErrorType;
-  request_id: string;
+  request_id: Identifier;
   scope?: Scope;
   reason: Rejection;
 }
@@ -480,8 +480,8 @@ export type PositiveCounter = Counter;
 export type Digest = string;
 
 export interface ReadItem {
-  target_id: string;
-  model_type: string;
+  target_id: Identifier;
+  model_type: Identifier;
   revision: Counter;
   data: Record<string, unknown>;
 }
@@ -500,10 +500,10 @@ export interface WireLimits {
 }
 
 export interface CommandDeclaration {
-  command_id: string;
+  command_id: Identifier;
   input_schema: Record<string, unknown>;
   result_schema: Record<string, unknown>;
-  effect_scope: string;
+  effect_scope: Identifier;
   mutation: boolean;
   replayable: boolean;
 }
@@ -511,7 +511,7 @@ export interface CommandDeclaration {
 export type FormatDeclarationValidator = "adapter" | "host" | "none";
 
 export interface FormatDeclaration {
-  format_id: string;
+  format_id: Identifier;
   model_versions: Array<string>;
   import_extensions: Array<string>;
   export_extensions: Array<string>;
@@ -540,14 +540,14 @@ export type ApplicationManifestConnectionPath = "A" | "B" | "C";
 export type ApplicationManifestMergeModelsItem = "properties" | "commands" | "yjs_text" | "application_server" | "exclusive";
 
 export interface ApplicationManifest {
-  application_id: string;
+  application_id: Identifier;
   package_version: string;
   package_digest: Digest;
   connection_path: ApplicationManifestConnectionPath;
   supported_versions: Array<Versions>;
   formats: Array<FormatDeclaration>;
   commands: Array<CommandDeclaration>;
-  capabilities: Array<string>;
+  capabilities: Array<Identifier>;
   merge_models: Array<ApplicationManifestMergeModelsItem>;
   presence_schema: Record<string, unknown>;
   storage: StorageDeclaration;
@@ -558,15 +558,15 @@ export type ManifestRequestType = "manifest_request";
 
 export interface ManifestRequest {
   type: ManifestRequestType;
-  request_id: string;
-  application_id: string;
+  request_id: Identifier;
+  application_id: Identifier;
 }
 
 export type ManifestResultType = "manifest_result";
 
 export interface ManifestResult {
   type: ManifestResultType;
-  request_id: string;
+  request_id: Identifier;
   manifest: ApplicationManifest;
 }
 
@@ -576,9 +576,9 @@ export type LifecycleRequestAction = "open" | "suspend" | "resume" | "close";
 
 export interface LifecycleRequest {
   type: LifecycleRequestType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
+  session_id: Identifier;
   fence: Fence;
   action: LifecycleRequestAction;
   checkpoint?: Checkpoint;
@@ -590,9 +590,9 @@ export type LifecycleResultState = "ready" | "suspended" | "closed";
 
 export interface LifecycleResult {
   type: LifecycleResultType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
+  session_id: Identifier;
   generation: Counter;
   state: LifecycleResultState;
   revision: Counter;
@@ -602,7 +602,7 @@ export type SessionJoinType = "session_join";
 
 export interface SessionJoin {
   type: SessionJoinType;
-  request_id: string;
+  request_id: Identifier;
   ticket: string;
   versions: Versions;
 }
@@ -611,35 +611,35 @@ export type SessionJoinedType = "session_joined";
 
 export interface SessionJoined {
   type: SessionJoinedType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
-  participant_ref: string;
+  session_id: Identifier;
+  participant_ref: Identifier;
   generation: Counter;
   permission_version: Counter;
   versions: Versions;
-  gate_id: string;
+  gate_id: Identifier;
 }
 
 export type SessionLeaveType = "session_leave";
 
 export interface SessionLeave {
   type: SessionLeaveType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
+  session_id: Identifier;
 }
 
 export type SubmitChangesType = "submit_changes";
 
 export interface SubmitChanges {
   type: SubmitChangesType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
+  session_id: Identifier;
   versions: Versions;
   changes: Array<AtomicChange>;
-  task_id?: string;
+  task_id?: Identifier;
 }
 
 export type ChangesReceivedType = "changes_received";
@@ -648,10 +648,10 @@ export type ChangesReceivedState = "pending" | "synchronized";
 
 export interface ChangesReceived {
   type: ChangesReceivedType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
-  change_ids: Array<string>;
+  session_id: Identifier;
+  change_ids: Array<Identifier>;
   state: ChangesReceivedState;
 }
 
@@ -661,11 +661,11 @@ export type TaskSubmitMode = "suggest" | "direct";
 
 export interface TaskSubmit {
   type: TaskSubmitType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
+  session_id: Identifier;
   versions: Versions;
-  task_id: string;
+  task_id: Identifier;
   allow_partial: boolean;
   mode: TaskSubmitMode;
   changes: Array<AtomicChange>;
@@ -675,9 +675,9 @@ export type ProposalRequestType = "proposal_request";
 
 export interface ProposalRequest {
   type: ProposalRequestType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  proposal_id: string;
+  proposal_id: Identifier;
 }
 
 export type CollaborationUpdateType = "collaboration_update";
@@ -688,12 +688,12 @@ export type CollaborationUpdateState = "synchronized";
 
 export interface CollaborationUpdate {
   type: CollaborationUpdateType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
+  session_id: Identifier;
   generation: Counter;
   base_revision: Counter;
-  change_ids: Array<string>;
+  change_ids: Array<Identifier>;
   encoding: CollaborationUpdateEncoding;
   data: string;
   state: CollaborationUpdateState;
@@ -705,9 +705,9 @@ export type DocumentUpdateEncoding = "json" | "base64";
 
 export interface DocumentUpdate {
   type: DocumentUpdateType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
+  session_id: Identifier;
   generation: Counter;
   from_revision: Counter;
   to_revision: Counter;
@@ -720,11 +720,11 @@ export type AssetRequestType = "asset_request";
 
 export interface AssetRequest {
   type: AssetRequestType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
+  session_id: Identifier;
   revision: Counter;
-  asset_id: string;
+  asset_id: Identifier;
   offset_bytes: Counter;
   max_bytes: PositiveCounter;
 }
@@ -733,10 +733,10 @@ export type AssetResultType = "asset_result";
 
 export interface AssetResult {
   type: AssetResultType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
   revision: Counter;
-  asset_id: string;
+  asset_id: Identifier;
   offset_bytes: Counter;
   size_bytes: Counter;
   digest: Digest;
@@ -747,43 +747,43 @@ export type TicketValidationRequestType = "ticket_validate";
 
 export interface TicketValidationRequest {
   type: TicketValidationRequestType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
+  session_id: Identifier;
   fence: Fence;
   ticket: string;
-  validation_nonce: string;
+  validation_nonce: Identifier;
 }
 
 export type TicketValidationResultType = "ticket_validated";
 
 export interface TicketValidationResult {
   type: TicketValidationResultType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
+  session_id: Identifier;
   generation: Counter;
-  participant_ref: string;
+  participant_ref: Identifier;
   permission_version: Counter;
   granted: Capabilities;
   versions: Versions;
   expires_in_ms: PositiveCounter;
-  validation_nonce: string;
-  gate_id: string;
+  validation_nonce: Identifier;
+  gate_id: Identifier;
 }
 
 export type RevocationNoticeType = "revocation_notice";
 
 export interface RevocationNotice {
   type: RevocationNoticeType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
+  session_id: Identifier;
   generation: Counter;
-  participant_ref: string;
+  participant_ref: Identifier;
   permission_version: Counter;
-  barrier_id: string;
-  gate_ids: Array<string>;
+  barrier_id: Identifier;
+  gate_ids: Array<Identifier>;
   block_read: boolean;
   block_write: boolean;
 }
@@ -791,7 +791,7 @@ export interface RevocationNotice {
 export type TaskChangeStateVariant2Status = "pending" | "running" | "cancelled" | "unknown";
 
 export interface TaskChangeStateVariant2 {
-  change_id: string;
+  change_id: Identifier;
   status: TaskChangeStateVariant2Status;
 }
 
@@ -801,8 +801,10 @@ export type RuntimeReadyType = "runtime_ready";
 
 export interface RuntimeReady {
   type: RuntimeReadyType;
-  request_id: string;
+  request_id: Identifier;
   selected: Versions;
 }
+
+export type Identifier = string;
 
 export type Message = Hello | Welcome | CommitBatch | CommitResult | StatusRequest | StatusResult | SessionTicketRequest | SessionTicket | OwnerAcquire | OwnerRenew | OwnerGrant | DeliveryRenew | DeliveryGrant | SessionClosed | DeliveryBlocked | RevocationConfirmed | ReadRequest | ReadResult | CheckpointRequest | CheckpointResult | Presence | TaskStatus | TaskResult | TaskCancel | Proposal | ProposalAccept | UndoRequest | ProtocolError | ManifestRequest | ManifestResult | LifecycleRequest | LifecycleResult | SessionJoin | SessionJoined | SessionLeave | SubmitChanges | ChangesReceived | TaskSubmit | ProposalRequest | CollaborationUpdate | DocumentUpdate | AssetRequest | AssetResult | TicketValidationRequest | TicketValidationResult | RevocationNotice | RuntimeReady;

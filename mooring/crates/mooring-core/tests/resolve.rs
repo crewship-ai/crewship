@@ -1,5 +1,31 @@
 use mooring_core::resolve::*;
 use std::collections::BTreeMap;
+
+#[test]
+fn identifiers_use_unicode_scalar_limit_and_reject_nul() {
+    for (id, accepted) in [
+        ("😀".repeat(200), true),
+        ("😀".repeat(201), false),
+        ("a\0b".into(), false),
+    ] {
+        let operation = Operation {
+            op_id: id.clone(),
+            fingerprint: "fingerprint".into(),
+            dependencies: vec![],
+        };
+        let changes = [change(&id, vec![operation])];
+        assert_eq!(
+            plan(
+                &changes,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                Limits::default()
+            )
+            .is_ok(),
+            accepted
+        );
+    }
+}
 fn op(id: &str, deps: &[&str]) -> Operation {
     Operation {
         op_id: id.into(),

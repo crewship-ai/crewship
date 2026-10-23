@@ -13,6 +13,31 @@ the host must validate and discriminate them before use. Rust constants are
 single-valued types and Rust counters validate canonical decimal u64 strings.
 Go and TS counters remain strings and require equivalent validation at inputs.
 
+The separate Rust `wire::validate_bounded_envelope` helper strictly parses and
+JCS-normalizes a body, then validates the exact bundled schema vocabulary.
+It checks references, conditionals, unions, required fields, extra properties,
+string/array limits, uniqueness and the eight pinned pattern languages. Unknown
+schema keywords or patterns fail the vocabulary audit, including under `not`.
+It is an implementation of this schema subset, not an arbitrary-schema engine.
+
+`wire-profile-fixtures.json` defines the negotiated E3 small-frame profile:
+262144 raw and canonical UTF-8 bytes, container depth 64 and 32768 structural
+tokens (opening `{`/`[` and commas/colons outside strings). Resource preflight
+runs before JSON allocations. Generic checkpoint/frame maxima remain larger;
+this helper rejects larger bodies and cannot claim support for those paths.
+The companion `normalize_bounded` applies resources and strict JSON/JCS without
+interpreting application field names. Identifier fields permit 1–200 Unicode
+scalar values excluding NUL, without Unicode normalization; opaque payload
+strings retain their own application rules. Rust planner, client and fingerprint
+identifier admission use that same predicate. Version negotiation uses the
+frozen three-part, non-leading-zero, at-most-nine-digit component grammar.
+
+Shape validation does not authenticate sender direction, host issuer, scope,
+participant or gate; negotiate durability; establish contiguous saved revisions;
+verify canonical base64 pad bits; or validate adapter semantics and causal reads.
+Those checks must precede dispatch. The semantic fixtures continue to describe
+requirements, not execution evidence for those unimplemented integrations.
+
 `mooring_protocol::negotiate` initially accepts only an exact tuple of protocol,
 model and engine versions. Unsupported versions return `version_mismatch` before
 any document content. Minor/patch compatibility needs shared evidence before
