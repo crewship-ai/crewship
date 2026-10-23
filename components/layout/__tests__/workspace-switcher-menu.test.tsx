@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, cleanup } from "@testing-library/react"
+import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react"
 
 beforeEach(() => {
   cleanup()
@@ -54,6 +54,16 @@ describe("MobileWorkspaceSwitcher", () => {
     expect(screen.getAllByRole("menuitem").filter((i) => i.textContent?.endsWith("Personal account")).map((i) => i.textContent)).toEqual(["DDemo UserPersonal account"]) // initial, name, kind
     expect(screen.getByText("Ivana Viewer's Workspace").nextElementSibling).toHaveTextContent("Personal account · Owner")
     expect(screen.getByRole("menuitem", { name: "Account settings" })).toHaveAttribute("href", "/settings?tab=general")
+  })
+
+  it("dismisses the workspace menu and releases the modal pointer lock after selection", async () => {
+    role = "OWNER"
+    open()
+    const target = await screen.findByRole("menuitem", { name: /Acme/ })
+    expect(document.body.style.pointerEvents).toBe("none")
+    fireEvent.click(target)
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument())
+    expect(document.body.style.pointerEvents).toBe("")
   })
 
   it("names the real workspace instead of a placeholder", () => {
