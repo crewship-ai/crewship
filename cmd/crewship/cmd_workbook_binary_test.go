@@ -274,8 +274,7 @@ func TestWorkbookHumanBinary(t *testing.T) {
 		t.Fatalf("editor feed %s", out)
 	}
 	runAs(peerCfg, false, `{"mutation_id":"peer-import","mandate_id":"human-import","base_rev":4,"generation":1,"command":{"kind":"import","snapshot":{"sheets":[{}]}}}`, "workbook", "import", "@workbook-binary-page", "--file", "-")
-	// On the shared workbook only the owner admits a direct agent mandate, after
-	// publication and for one explicit cell; the rest needs a proposal.
+	// Shared workbook agent changes require proposals, even for the owner.
 	sharedMandate := func(id, target string) string {
 		return fmt.Sprintf(`{"mandate_id":%q,"run_id":"workbook-run","base_rev":5,"generation":1,"targets":[%q]}`, id, target)
 	}
@@ -285,10 +284,9 @@ func TestWorkbookHumanBinary(t *testing.T) {
 	if out := refused(5, sharedMandate("wildcard-mandate", "*"), "workbook", "admit", "@workbook-binary-page", "--file", "-"); !strings.Contains(out, "proposal_required") {
 		t.Fatalf("wildcard admit on shared: %s", out)
 	}
-	if out := run(sharedMandate("shared-mandate", "Sheet1!B2"), "workbook", "admit", "@workbook-binary-page", "--file", "-"); !strings.Contains(string(out), `"shared-mandate"`) {
-		t.Fatalf("owner admit after publication: %s", out)
+	if out := refused(5, sharedMandate("shared-mandate", "Sheet1!B2"), "workbook", "admit", "@workbook-binary-page", "--file", "-"); !strings.Contains(out, "proposal_required") {
+		t.Fatalf("shared owner mandate bypassed proposal requirement: %s", out)
 	}
-	run("", "workbook", "revoke", "@workbook-binary-page", "shared-mandate")
 	run("", "page", "revoke", "@workbook-binary-page", "--user", "workbook-peer@example.test")
 	runAs(peerCfg, true, "", "workbook", "read", "@workbook-binary-page")
 }

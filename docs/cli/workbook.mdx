@@ -205,21 +205,13 @@ again.
 - **Editors share the history quota.** Every import by an editor counts toward
   the workbook's revision and size limits. When the quota is full, writes are
   refused for everyone, including the owner.
-- **Agents need a fresh owner mandate.** With live workbook editing on (the
-  `gridcraft_editor` workspace flag), on a shared workbook an agent reads
-  and applies directly only under a mandate the **owner** admitted **after
-  publication**, for one explicit target cell (`workbook admit`). Its base
-  revision is at or above the published revision, it stays revocable with
-  `workbook revoke`, and per-cell concurrency applies as for every writer. Its
-  commits appear to editors under the agent's name (`actor_label` in the
-  commits feed and in `409 precondition_failed` conflicts). Everything else
-  returns `409 proposal_required`: a mandate admitted before publication
-  (publication revoked it), an admit by a named editor, a wildcard target (`*`)
-  and an agent import. Workbooks do not support proposals yet, so there is no
-  other direct agent path, and with `gridcraft_editor` off every agent read,
-  apply and admit on a shared workbook returns `409 proposal_required`. The
-  workspace OWNER reads a shared workbook only as an audited reader; its admit
-  is refused with `404`, like any other write it may not make.
+- **Shared changes require proposals.** Direct agent access and mandate admission
+  on a published workbook return `409 proposal_required`, including fresh owner
+  mandates and legacy mandates issued after publication. Proposal delivery is
+  not available yet; the editor flag does not authorize a direct fallback.
+  Private workbook mandates continue to work. The workspace OWNER reads a
+  shared workbook only as an audited reader and cannot admit a mandate for it.
+
 
 The Page must already hold an imported workbook. Only the owner may share it.
 
@@ -561,10 +553,9 @@ Read the original human operation receipt and current delivery/head information.
 ## `crewship workbook admit <page-slug|@ID>`
 
 `--file <path|->` supplies a retained human mandate for one live run and cell.
-Only the owner admits. On a shared workbook the owner admits after publication,
-with `base_rev` at the current head and one explicit cell; an editor's admit or
-a `*` target is refused with `409 proposal_required`, and so is every admit on
-a shared workbook while `gridcraft_editor` is off.
+Only the owner of a private workbook admits a mandate. Shared workbook
+admission returns `409 proposal_required`, even with live editing enabled.
+
 
 ## `crewship workbook revoke <page-slug|@ID> <operation-id>`
 

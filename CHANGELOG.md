@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- ⚠️ **Shared workbooks no longer accept direct agent mandates.** The experimental post-publication exception bypassed the required proposal path. New admissions and legacy mandate use now fail closed with `proposal_required`; proposal delivery remains unavailable. Private workbook mandates are unchanged.
+
 - **Workbook previews now explain why editing is unavailable.** A disabled workspace, unsupported browser, failed availability check or invalid editor configuration has a visible reason and next step. Failed availability checks can be retried without reloading the page.
 
 - **Workbook editor: edits saved during a reload no longer stay "Saving…".** When the workbook was reloaded (pruned history or an import) while a saved edit waited for earlier revisions, the editor was never told it was saved and kept showing it as unsaved, hiding later changes to that cell. Such an edit is now confirmed right after the reload, a repeated send gets the same confirmation without a second write, and a reload never takes the editor back behind a revision it already shows.

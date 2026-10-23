@@ -115,7 +115,7 @@ func gridcraftError(w http.ResponseWriter, err error) {
 	case errors.Is(err, appengine.ErrQuota):
 		code, message = 429, "history_quota_exceeded"
 	case errors.Is(err, errWorkbookProposalRequired):
-		code, message = 409, "proposal_required: this workbook is shared; an agent changes it directly only under a mandate its owner admitted after publication for one explicit cell, anything else needs a proposal, which workbooks do not support yet"
+		code, message = 409, "proposal_required: shared workbook changes require proposals; proposal delivery is not available yet"
 	case errors.Is(err, appengine.ErrDisabled), errors.Is(err, appengine.ErrEngineUnavailable):
 		code, message = 503, "Workbook unavailable"
 	}
@@ -566,13 +566,9 @@ func (h *gridcraftHTTP) mandate(w http.ResponseWriter, r *http.Request) {
 		gridcraftError(w, err)
 		return
 	}
-	// A shared workbook accepts a direct agent mandate only from its owner,
-	// bounded to an explicit cell. Anything else needs a proposal, which
-	// workbooks do not support yet. Publication revoked every mandate admitted
-	// before it, so a mandate admitted here is always post-publication. The
-	// shared path exists only with live workbook editing switched on.
+	// Shared content requires the approved proposal path, not a direct mandate.
 	wildcard := req.Targets[0] == "*"
-	if record == nil || access != workbookOwner || (!record.PrivateAudience && (wildcard || !h.editorOn(r.Context(), tx, k.WorkspaceID))) {
+	if record == nil || access != workbookOwner || !record.PrivateAudience {
 		gridcraftError(w, errWorkbookProposalRequired)
 		return
 	}
@@ -740,19 +736,8 @@ func (h *gridcraftHTTP) agent(w http.ResponseWriter, r *http.Request) {
 		rec, err := h.pages.loadPage(ctx, a.WorkspaceID, "@"+k.PageID)
 		shared := err == nil && !rec.PrivateAudience && rec.HasWorkbook && rec.OwnerUserID == a.HumanUserID && rec.OwnerCrewID == "" && rec.FolderID == ""
 		if shared {
-			// The run's human must still be the workbook owner by the
-			// ordinary human rule, and the mandate one the owner admitted
-			// after publication (sharedAgentMandate), with live workbook
-			// editing switched on.
-			if !h.editorOn(ctx, tx, a.WorkspaceID) {
-				return appengine.Principal{}, errWorkbookProposalRequired
-			}
-			if _, access, accessErr := h.pages.workbookHumanAccess(ctx, a.WorkspaceID, k.PageID, a.HumanUserID, true); accessErr != nil || access != workbookOwner {
-				return appengine.Principal{}, errWorkbookProposalRequired
-			}
-			if err = sharedAgentMandate(ctx, tx, k, body.MandateID, a); err != nil {
-				return appengine.Principal{}, err
-			}
+			// Recheck at use as well: legacy DIRECT mandates grant no shared access.
+			return appengine.Principal{}, errWorkbookProposalRequired
 		} else if err != nil || rec.OwnerUserID != a.HumanUserID || rec.OwnerCrewID != "" || !rec.PrivateAudience || rec.FolderID != "" || !h.pages.mayEditSpec(ctx, a.WorkspaceID, a.HumanUserID, role, rec) {
 			return appengine.Principal{}, appengine.ErrForbidden
 		}
@@ -775,13 +760,7 @@ func (h *gridcraftHTTP) agent(w http.ResponseWriter, r *http.Request) {
 		if json.Unmarshal([]byte(targets), &bounds) != nil {
 			return appengine.Principal{}, appengine.ErrForbidden
 		}
-		if shared {
-			for _, target := range bounds {
-				if target == "*" || target == "" {
-					return appengine.Principal{}, errWorkbookProposalRequired
-				}
-			}
-		}
+
 		// The mandate's base revision is also the agent's history floor: the
 		// commits feed never shows it what changed before the mandate.
 		return appengine.Principal{AuthorityID: "agent:" + a.AgentID + ":run:" + a.RunID + ":mandate:" + body.MandateID, MandateID: body.MandateID, Targets: bounds, HistoryFloor: base}, nil
