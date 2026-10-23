@@ -7,9 +7,12 @@ mod checkpoint_wire;
 pub mod command;
 /// Unqualified local-draft experiment; no human protocol capability.
 pub mod experimental_draft;
+/// Pure host-only current-frontier experiment; no advertised human capability.
+pub mod experimental_human_current;
 mod format;
 #[cfg(test)]
 mod human;
+mod human_current_wire;
 #[cfg(test)]
 mod human_decode;
 pub mod profile;
