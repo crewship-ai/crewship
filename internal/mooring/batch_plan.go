@@ -70,17 +70,16 @@ func batchCycles(edges [][]int) map[int]bool {
 type batchPlan struct {
 	ByOperation map[string]int
 	Edges       [][]int
-	Initial     map[int]*BatchRejection
+	Initial     map[int]*PreparedFailure
 }
 
-func planBatch(changes []BatchChange, known map[int]BatchChangeResult) batchPlan {
-	p := batchPlan{ByOperation: map[string]int{}, Edges: make([][]int, len(changes)), Initial: map[int]*BatchRejection{}}
+func planBatch(changes []BatchChange, known map[int]BatchChangeResult, failures map[int]*PreparedFailure) batchPlan {
+	p := batchPlan{ByOperation: batchOperationChanges(changes), Edges: make([][]int, len(changes)), Initial: failures}
 	opIndex := map[string]int{}
 	opChange := []int{}
 	opPosition := map[string]int{}
 	for i, c := range changes {
 		for j, op := range c.Operations {
-			p.ByOperation[op.ID] = i
 			opIndex[op.ID] = len(opChange)
 			opChange = append(opChange, i)
 			opPosition[op.ID] = j
@@ -88,7 +87,7 @@ func planBatch(changes []BatchChange, known map[int]BatchChangeResult) batchPlan
 	}
 	opEdges := make([][]int, len(opChange))
 	for i, c := range changes {
-		if _, exists := known[i]; exists {
+		if _, exists := known[i]; exists || failures[i] != nil {
 			continue
 		}
 		seen := map[int]bool{}
@@ -105,24 +104,38 @@ func planBatch(changes []BatchChange, known map[int]BatchChangeResult) batchPlan
 			}
 		}
 	}
-	for index := range batchCycles(opEdges) {
-		p.Initial[opChange[index]] = batchReason("dependency_cycle")
-	}
-	for index := range batchCycles(p.Edges) {
-		p.Initial[index] = batchReason("dependency_cycle")
-	}
-	for i, c := range changes {
-		if _, exists := known[i]; exists {
+	opCycles, changeCycles := batchCycles(opEdges), batchCycles(p.Edges)
+	for index, c := range changes {
+		if _, exists := known[index]; exists || failures[index] != nil {
 			continue
 		}
-		if p.Initial[i] != nil {
+		for _, op := range c.Operations {
+			cycle := opCycles[opIndex[op.ID]]
+			if changeCycles[index] {
+				for _, dep := range op.Dependencies {
+					if other, ok := p.ByOperation[dep]; ok && other != index && changeCycles[other] {
+						cycle = true
+						break
+					}
+				}
+			}
+			if cycle {
+				p.Initial[index] = &PreparedFailure{op.ID, batchReason("dependency_cycle")}
+				break
+			}
+		}
+		if p.Initial[index] != nil {
 			continue
 		}
 		for j, op := range c.Operations {
 			for _, dep := range op.Dependencies {
-				if index, ok := p.ByOperation[dep]; ok && index == i && opPosition[dep] >= j {
-					p.Initial[i] = batchReason("invalid_request")
+				if other, ok := p.ByOperation[dep]; ok && other == index && opPosition[dep] >= j {
+					p.Initial[index] = &PreparedFailure{op.ID, batchReason("invalid_request")}
+					break
 				}
+			}
+			if p.Initial[index] != nil {
+				break
 			}
 		}
 	}

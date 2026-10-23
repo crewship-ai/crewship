@@ -209,6 +209,9 @@ func (s *BatchStore) Status(ctx context.Context, key SessionKey, id, expectedFin
 		if err = json.Unmarshal([]byte(raw), &stored); err != nil {
 			return err
 		}
+		if stored.ID != id || !validStoredBatchOperation(stored) {
+			return ErrInvalid
+		}
 		result = &stored
 		return nil
 	})

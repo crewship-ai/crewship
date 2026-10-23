@@ -82,6 +82,13 @@ type BatchAccess struct {
 }
 type BatchAuthority func(context.Context, *sql.Tx, BatchAccess) error
 
+// PreparedFailure identifies the real failed immutable member. This is an
+// internal adapter decision, not a persisted/wire rejection or host receipt.
+type PreparedFailure struct {
+	OperationID string
+	Reason      *BatchRejection
+}
+
 // BatchAdapter is a qualified application boundary. Apply receives normalized
 // operation payloads and the latest accepted checkpoint. A rejection is only a
 // prepared decision until the host commits it durably. An error (including an
@@ -89,7 +96,7 @@ type BatchAuthority func(context.Context, *sql.Tx, BatchAccess) error
 // Implementations must not publish, issue Saved, or mutate external state here.
 type BatchAdapter interface {
 	ValidateCheckpoint(context.Context, []byte) error
-	Apply(context.Context, []byte, BatchChange) ([]byte, *BatchRejection, error)
+	Apply(context.Context, []byte, BatchChange) ([]byte, *PreparedFailure, error)
 }
 
 type BatchLimits struct {

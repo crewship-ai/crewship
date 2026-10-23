@@ -167,10 +167,14 @@ func validBatchRejection(r *BatchRejection) bool {
 	}
 	return batchTerminalCodes[r.Code] && r.RootCause == nil && r.RootOperationID == ""
 }
-func rejectedBatchChange(c BatchChange, reason *BatchRejection) BatchChangeResult {
+func rejectedBatchChange(c BatchChange, reason *BatchRejection, rootID string) BatchChangeResult {
 	out := BatchChangeResult{ID: c.ID, Status: "rejected", Operations: make([]BatchOperationResult, 0, len(c.Operations))}
 	for _, op := range c.Operations {
-		copy := *reason
+		projected := reason
+		if reason.Code != "dependency_rejected" && op.ID != rootID {
+			projected = dependencyReason(BatchOperationResult{ID: rootID, Status: "rejected", Reason: reason})
+		}
+		copy := *projected
 		if copy.RootCause != nil {
 			root := *copy.RootCause
 			copy.RootCause = &root
@@ -179,6 +183,18 @@ func rejectedBatchChange(c BatchChange, reason *BatchRejection) BatchChangeResul
 	}
 	return out
 }
+func validPreparedFailure(c BatchChange, p *PreparedFailure) bool {
+	if p == nil || !validBatchRejection(p.Reason) || p.Reason.Code == "dependency_rejected" {
+		return false
+	}
+	for _, op := range c.Operations {
+		if op.ID == p.OperationID {
+			return true
+		}
+	}
+	return false
+}
+
 func batchReason(code string) *BatchRejection {
 	return &BatchRejection{Code: code, Message: strings.ReplaceAll(code, "_", " "), Retry: "new_operation_after_refresh"}
 }
@@ -187,4 +203,48 @@ func batchRange(rev uint64, n int) (string, string, error) {
 		return "", "", ErrInvalid
 	}
 	return strconv.FormatUint(rev+1, 10), strconv.FormatUint(rev+uint64(n), 10), nil
+}
+
+func validStoredBatchOperation(op BatchOperationResult) bool {
+	if !batchID(op.ID) {
+		return false
+	}
+	if op.Status == "saved" {
+		revision, err := batchCounter(op.Revision)
+		return err == nil && revision > 0 && op.Reason == nil && op.Issuer == "crewship" && op.Durability == "node"
+	}
+	return op.Status == "rejected" && op.Revision == "" && op.Issuer == "" && op.Durability == "" && validBatchRejection(op.Reason)
+}
+func validStoredBatchChange(c BatchChange, r BatchChangeResult) bool {
+	if r.ID != c.ID || len(r.Operations) != len(c.Operations) {
+		return false
+	}
+	var first, last uint64
+	switch r.Status {
+	case "saved":
+		var err error
+		first, err = batchCounter(r.FirstRevision)
+		if err != nil || first == 0 {
+			return false
+		}
+		last, err = batchCounter(r.LastRevision)
+		if err != nil || last < first || last-first != uint64(len(c.Operations)-1) {
+			return false
+		}
+	case "rejected":
+		if r.FirstRevision != "" || r.LastRevision != "" {
+			return false
+		}
+	default:
+		return false
+	}
+	for i, op := range r.Operations {
+		if op.ID != c.Operations[i].ID || op.Status != r.Status || !validStoredBatchOperation(op) {
+			return false
+		}
+		if r.Status == "saved" && op.Revision != strconv.FormatUint(first+uint64(i), 10) {
+			return false
+		}
+	}
+	return true
 }

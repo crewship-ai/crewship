@@ -13,7 +13,7 @@ import (
 )
 
 type batchTestAdapter struct {
-	apply func(context.Context, []byte, BatchChange) ([]byte, *BatchRejection, error)
+	apply func(context.Context, []byte, BatchChange) ([]byte, *PreparedFailure, error)
 	calls atomic.Int64
 }
 
@@ -21,7 +21,7 @@ func (a *batchTestAdapter) ValidateCheckpoint(_ context.Context, b []byte) error
 	var n int
 	return json.Unmarshal(b, &n)
 }
-func (a *batchTestAdapter) Apply(ctx context.Context, b []byte, c BatchChange) ([]byte, *BatchRejection, error) {
+func (a *batchTestAdapter) Apply(ctx context.Context, b []byte, c BatchChange) ([]byte, *PreparedFailure, error) {
 	a.calls.Add(1)
 	if a.apply != nil {
 		return a.apply(ctx, b, c)
@@ -166,7 +166,7 @@ func TestBatchRevocationExpiryAndStorageFailure(t *testing.T) {
 				}
 				return nil
 			}
-			adapter.apply = func(_ context.Context, _ []byte, _ BatchChange) ([]byte, *BatchRejection, error) {
+			adapter.apply = func(_ context.Context, _ []byte, _ BatchChange) ([]byte, *PreparedFailure, error) {
 				if mode == "revoked" {
 					revoked = true
 				}
@@ -214,9 +214,9 @@ func TestBatchPartialDependenciesAndImmutableAdapterInput(t *testing.T) {
 	b := testBatchChange(t, lease.Key, "b", "", testBatchOp("b1", "a2"))
 	c := testBatchChange(t, lease.Key, "c", "", testBatchOp("c1", "b1"))
 	independent := testBatchChange(t, lease.Key, "independent", "", testBatchOp("i"))
-	adapter.apply = func(_ context.Context, state []byte, c BatchChange) ([]byte, *BatchRejection, error) {
+	adapter.apply = func(_ context.Context, state []byte, c BatchChange) ([]byte, *PreparedFailure, error) {
 		if c.ID == "a" {
-			return nil, batchReason("target_deleted"), nil
+			return nil, &PreparedFailure{OperationID: c.Operations[0].ID, Reason: batchReason("target_deleted")}, nil
 		}
 		if string(c.Operations[0].Payload) != `{"value":9007199254740992}` {
 			t.Error("adapter saw original unnormalized payload")
@@ -236,7 +236,7 @@ func TestBatchPartialDependenciesAndImmutableAdapterInput(t *testing.T) {
 	}
 	for _, index := range []int{0, 1} {
 		reason := result.Changes[index].Operations[0].Reason
-		if reason.Code != "dependency_rejected" || reason.RootOperationID != "a2" || reason.RootCause.Code != "target_deleted" {
+		if reason.Code != "dependency_rejected" || reason.RootOperationID != "a1" || reason.RootCause.Code != "target_deleted" {
 			t.Fatalf("lost original root: %+v", reason)
 		}
 	}
@@ -382,7 +382,7 @@ func TestBatchFinalAuthorityAfterAllExpensiveWork(t *testing.T) {
 	bOp.Participant = "B"
 	a := testBatchChange(t, lease.Key, "a", "", aOp)
 	b := testBatchChange(t, lease.Key, "b", "", bOp)
-	adapter.apply = func(_ context.Context, state []byte, c BatchChange) ([]byte, *BatchRejection, error) {
+	adapter.apply = func(_ context.Context, state []byte, c BatchChange) ([]byte, *PreparedFailure, error) {
 		if c.ID == "b" {
 			runTick.Store(2)
 		} // A's run/grant expires; owner remains valid.
