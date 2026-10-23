@@ -25,12 +25,28 @@ import (
 //     appends the chain (appendAuthorizationAudit / appendSettingsAudit /
 //     appendAgentAudit / AppendTx), or that function must be listed in
 //     legacyAuditInsertSites with the reason it is not an access change.
+//
 //   - A best-effort WriteAuditLog/auditFromRequest call fails when its action
 //     names an access concept (accessActionPattern), or when its entity type
 //     has privilege-bearing fields (privilegeFieldsByEntity) and its metadata
 //     names one of them or cannot be read statically. Either is allowed only
 //     with a per-site entry in reviewedAuditSites. A call with a computed
 //     action or entity type must be listed in dynamicAuditActionSites.
+//
+//   - A function that builds a journal.Entry literal with an authorization
+//     entry type (member.*, invitation.*, crew.member_changed, page.grant_*)
+//     and sends it with Emit/EmitSync, without a chained append in the same
+//     function, fails: Emit is buffered and outside the change's
+//     transaction.
+//
+// Coverage note: the Emit rule sees entry types written as a journal.Entry
+// literal. An entry whose Type is computed elsewhere is not seen; the one
+// such best-effort path today is the GDPR erasure's page-grant revocation
+// record (pages_erase_identity.go journalRevocations), which by design runs
+// after the erasure commits. Generic audit.entity_* emits are judged through
+// their WriteAuditLog/auditFromRequest call sites, and the ephemeral expiry
+// sweeper's agent.expired record follows the expires_at the chained
+// agent.hired/agent.rehired entry already fixed.
 //
 // Adding an entry is a deliberate act that has to be justified in review.
 var legacyAuditInsertSites = map[string]string{
@@ -57,7 +73,6 @@ var reviewedAuditSites = map[string]string{
 	"internal/api/backup.go:Restore:credential.security_level.clamped":    "post-restore normalization record; the restore only ever tightens an undefined tier to the strictest one",
 	"internal/api/agents_approve_hire.go:ApproveHire:agent.hire_approved": "crew_id identifies the crew the hire already joined (chained as agent.hired); approval changes only its review status",
 	"internal/api/agents_approve_hire.go:emit:<computed>":                 "agent.hire_approved / agent.hire_denied via the approvals queue; crew_id is context, membership was chained as agent.hired",
-	"internal/api/internal_status.go:CreateAgent:agent.created":           "KNOWN GAP (#3945): agent-created persistent agent with crew membership; to be chained in its insert transaction",
 }
 
 // Call sites (file:enclosing function) that pass a computed action. Each one
@@ -73,6 +88,14 @@ var dynamicAuditActionSites = map[string]string{
 var accessActionPattern = regexp.MustCompile(`(?i)role|member|grant|permission|polic|access|crew_link|capabilit|privilege|origin_binding|invit|share|acl|owner|credential_folder|security_level|reveal`)
 
 var chainedAppendPattern = regexp.MustCompile(`appendAuthorizationAudit\(|appendSettingsAudit\(|appendAgentAudit\(|\.AppendTx\(|journal\.AppendTx\(`)
+
+var authorizationEntryTypePattern = regexp.MustCompile(`^Entry(Member|Invitation|CrewMember|PageGrant)`)
+
+var bufferedEmitPattern = regexp.MustCompile(`\.Emit(Sync)?\(`)
+
+// Sites (file:function) that emit an authorization entry type without the
+// chain, each reviewed. Empty today.
+var unchainedAuthorizationEmitSites = map[string]string{}
 
 var auditLogsInsertPattern = regexp.MustCompile(`(?is)insert\s+into\s+audit_logs\b`)
 
@@ -110,6 +133,11 @@ func TestAuditLogsWritersAreChainedForAccessChanges(t *testing.T) {
 	for site := range legacyAuditInsertSites {
 		if !seen["insert:"+site] {
 			problems = append(problems, "stale legacyAuditInsertSites entry: "+site)
+		}
+	}
+	for site := range unchainedAuthorizationEmitSites {
+		if !seen["emit:"+site] {
+			problems = append(problems, "stale unchainedAuthorizationEmitSites entry: "+site)
 		}
 	}
 	for site := range reviewedAuditSites {
@@ -152,6 +180,12 @@ func auditGuardFile(path, rel string, src []byte, seen map[string]bool) ([]strin
 		}
 		fnSite := rel + ":" + fn.Name.Name
 		body := string(src[fset.Position(fn.Body.Pos()).Offset:fset.Position(fn.Body.End()).Offset])
+		if authorizationEntryLiteral(fn.Body) && bufferedEmitPattern.MatchString(body) && !chainedAppendPattern.MatchString(body) {
+			seen["emit:"+fnSite] = true
+			if _, listed := unchainedAuthorizationEmitSites[fnSite]; !listed {
+				problems = append(problems, fset.Position(fn.Pos()).String()+": "+fnSite+" emits an authorization journal entry outside the change's transaction; append it with AppendTx on that transaction")
+			}
+		}
 		ast.Inspect(fn.Body, func(n ast.Node) bool {
 			if lit, ok := n.(*ast.BasicLit); ok && lit.Kind == token.STRING && auditLogsInsertPattern.MatchString(lit.Value) {
 				seen["insert:"+fnSite] = true
@@ -214,6 +248,32 @@ func auditGuardFile(path, rel string, src []byte, seen map[string]bool) ([]strin
 		})
 	}
 	return problems, nil
+}
+
+// authorizationEntryLiteral reports whether body builds a journal.Entry whose
+// Type is an authorization entry type constant.
+func authorizationEntryLiteral(body ast.Node) bool {
+	found := false
+	ast.Inspect(body, func(n ast.Node) bool {
+		lit, ok := n.(*ast.CompositeLit)
+		if !ok || found {
+			return !found
+		}
+		if sel, ok := lit.Type.(*ast.SelectorExpr); !ok || sel.Sel.Name != "Entry" {
+			return true
+		}
+		for _, elt := range lit.Elts {
+			kv, ok := elt.(*ast.KeyValueExpr)
+			if !ok {
+				continue
+			}
+			if key, ok := kv.Key.(*ast.Ident); ok && key.Name == "Type" && authorizationEntryTypePattern.MatchString(calleeName(kv.Value)) {
+				found = true
+			}
+		}
+		return !found
+	})
+	return found
 }
 
 func stringLiteral(e ast.Expr) (string, bool) {
@@ -282,6 +342,9 @@ func b(db D) { db.Exec("INSERT INTO audit_logs(id) VALUES(?)") }`, 1},
 		{"agent metadata the guard cannot read", `func a() { WriteAuditLog(c, db, j, "update", "AGENT", id, u, w, changes) }`, 1},
 		{"access action on another entity", `func a() { auditFromRequest(r, db, "member.role.update", "WORKSPACE", id, nil) }`, 1},
 		{"computed entity", `func a() { auditFromRequest(r, db, "update", kind, id, nil) }`, 1},
+		{"buffered emit of a membership change", `func a() { j.Emit(c, journal.Entry{Type: journal.EntryMemberRoleChanged}) }`, 1},
+		{"membership entry appended on the transaction", `func a() { e := journal.Entry{Type: journal.EntryMemberRoleChanged}; journal.AppendTx(c, tx, e); j.Emit(c, other) }`, 0},
+		{"buffered emit of an operational entry", `func a() { j.Emit(c, journal.Entry{Type: journal.EntryAgentMentioned}) }`, 0},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -48,13 +48,19 @@ agent's previous and current privileges in the `update` entry; temporary hires
 are chained as `agent.hired`, `agent.rehired`, `agent.released` and, when a
 hire's required approval could not be staged and it is removed again,
 `agent.hire_reverted`. Every agent update is written this way, not only those
-that touch privileges.
+that touch privileges. Creating an agent (`create`, and `agent.created` when an
+agent creates one through the internal API) records its current privileges,
+and deleting one (`delete`) records the privileges it held. An internal create
+whose required review hold cannot be written is removed again and chained as
+`agent.create_reverted`. These removals finish even if the client disconnects.
+Paths that run on behalf of an agent, such as the internal hire and create,
+have no user: their records name a system actor.
 
 MCP configurations commonly carry API keys. The audit never stores an MCP
 configuration verbatim: it records, per server, the name, transport, the
-executable's base name and the **names** of its environment variables and
-headers. Arguments, URLs and every env/header value are left out. Before this
-change the agent `update` entry copied the request body, so `audit_logs`
+executable's base name (leading `NAME=value` assignments in the command are
+skipped) and the **names** of its environment variables and headers.
+Arguments, URLs and every env/header value are left out. Before this change the agent `update` entry copied the request body, so `audit_logs`
 metadata and journal payloads written by earlier versions may contain MCP
 configuration values; chained entries are not rewritten (that would break the
 chain), so treat any credential that was set through an agent's MCP
@@ -65,9 +71,11 @@ A source-scanning test (`internal/api/audit_logs_writer_guard_test.go`) checks
 every audit call site, not every file: each `audit_logs` insert must sit in a
 function that appends the chain, and a best-effort writer fails when its action
 names an access concept or when it records a privilege-bearing field of an
-`AGENT` or `CREDENTIAL_FOLDER` (or passes metadata it cannot read). The few
-legacy-only sites it allows are listed there, one per call site, with their
-reasons.
+`AGENT` or `CREDENTIAL_FOLDER` (or passes metadata it cannot read). It also
+fails a function that sends a membership, invitation or Page grant journal entry
+with the buffered `Emit` rather than appending it on the change's transaction.
+The few legacy-only sites it allows are listed there, one per call site, with
+their reasons, along with what the scan cannot see.
 
 ### Keeper Decision Auditing
 
