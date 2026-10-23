@@ -77,3 +77,12 @@ func TestGridCraftInterruptedOperationIsUnavailable(t *testing.T) {
 		t.Fatalf("got %d", w.Code)
 	}
 }
+
+// Quota refusal is an actionable terminal outcome, not transient capacity.
+func TestGridCraftHistoryQuotaReportsQuotaExceeded(t *testing.T) {
+	w := httptest.NewRecorder()
+	gridcraftError(w, appengine.ErrQuota)
+	if w.Code != http.StatusTooManyRequests || w.Body.String() != "{\"error\":\"quota_exceeded\"}\n" {
+		t.Fatalf("quota response: %d %s", w.Code, w.Body.String())
+	}
+}

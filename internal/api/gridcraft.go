@@ -116,7 +116,7 @@ func gridcraftError(w http.ResponseWriter, err error) {
 	case errors.Is(err, appengine.ErrCapacity):
 		code, message = 429, "capacity_exhausted"
 	case errors.Is(err, appengine.ErrQuota):
-		code, message = 429, "history_quota_exceeded"
+		code, message = 429, "quota_exceeded"
 	case errors.Is(err, errWorkbookProposalRequired):
 		code, message = 409, "proposal_required: shared workbook changes require proposals; proposal delivery is not available yet"
 	case errors.Is(err, appengine.ErrDisabled), errors.Is(err, appengine.ErrEngineUnavailable):

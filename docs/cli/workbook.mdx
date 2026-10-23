@@ -450,12 +450,10 @@ History stores a full snapshot for imports and every 50th revision, and the
 command and resulting snapshot hash of every revision, so any revision can be
 rebuilt from the nearest checkpoint with the pinned engine and verified. The
 history quota counts those snapshots and commands. When it is reached, the
-server drops history that no rebase can use: checkpoints and commands older than
-the newest checkpoint at least 256 revisions back. If the last 256 revisions do
-not fit either, the new revision becomes a checkpoint and all earlier commands
-are dropped; edits based on older revisions then get `snapshot_required`.
-Audit rows and receipts are kept. `429 history_quota_exceeded` remains only for
-a single revision whose snapshot and command alone exceed the quota.
+server rejects the write with `429 quota_exceeded`. The confirmed head, all
+previous checkpoints, commands, audit rows and receipts remain unchanged; an
+ordinary write never deletes history to make space. Retention requires an
+explicit operation.
 
 ### Commits feed and live push
 
