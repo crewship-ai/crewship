@@ -584,7 +584,10 @@ Choose an eligible successor from the list. The transfer takes effect immediatel
 and preserves content and grant records. A successor who has lost read access,
 or an owner changed since review, causes refusal instead of an automatic grant.
 Workspace administrator access is required. Instance administrator access alone
-does not grant access to private content metadata. Use `--format json` for
+does not grant access to private content metadata. Workbooks are listed and
+transferred only by a workspace OWNER, and only after their owner has left, is
+suspended, or a removal or erasure was refused because of the workbook; see
+[When the owner leaves](/cli/workbook#when-the-owner-leaves). Use `--format json` for
 machine-readable responses, including `next_cursor` when more results exist.
 
 Scoped CLI credentials need `workspace:admin` for both listing and transfer.

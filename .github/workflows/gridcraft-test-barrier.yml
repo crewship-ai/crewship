@@ -1,0 +1,52 @@
+name: GridCraft test barrier
+
+# The workbook test barrier is compiled only with the crewship_testbarrier
+# tag, so ordinary CI never builds it. This compiles, vets and tests the
+# tagged code, and runs the release guard's self-test, whenever the code it
+# covers changes. Not a required check; release and nightly packaging run the
+# guard itself.
+on:
+  pull_request:
+    paths:
+      - 'internal/appengine/**'
+      - 'internal/server/**'
+      - 'scripts/check-no-test-barrier*.sh'
+      - 'Dockerfile'
+      - '.github/workflows/gridcraft-test-barrier.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'internal/appengine/**'
+      - 'internal/server/**'
+      - 'scripts/check-no-test-barrier*.sh'
+      - 'Dockerfile'
+      - '.github/workflows/gridcraft-test-barrier.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+concurrency:
+  group: gridcraft-test-barrier-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  GO_VERSION: '1.27.3'
+
+jobs:
+  tagged:
+    name: Tagged barrier build, vet and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Vet tagged code
+        run: go vet -tags crewship_testbarrier ./internal/appengine/ ./internal/server/
+      - name: Tagged tests
+        timeout-minutes: 15
+        run: go test -count=1 -timeout 15m -tags crewship_testbarrier ./internal/appengine/ ./internal/server/
+      - name: Release guard self-test
+        run: bash scripts/check-no-test-barrier-test.sh

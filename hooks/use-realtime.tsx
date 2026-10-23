@@ -172,6 +172,13 @@ export type RealtimeEventType =
   // page can show the button as running; the run's progress then arrives as
   // pipeline.run.* on this same channel.
   | "page.action.dispatched"
+  // A workbook revision was confirmed (experimental live workbook editing).
+  // Broadcast on `page:{pageId}` with `{page_id, rev, generation, kind,
+  // cells}` and NO cell content: an open editor reads the revision through
+  // the commits feed under its own current access.
+  | "session_closed"
+  | "mooring.committed"
+  | "workbook.committed"
   // Feed-relevant journal rows forwarded by the journal→WS bridge
   // (internal/server/journal_ws_bridge.go), carrying the same serialized shape
   // the SSE stream serves (lib/types/journal.ts). NOTE: this is opt-in
@@ -321,6 +328,10 @@ export const VALID_REALTIME_TYPES: Set<string> = new Set([
   "page.panel.updated",
   "page.folder.updated",
   "page.action.dispatched",
+  // Live workbook push on `page:{pageId}`; revision numbers only.
+  "session_closed",
+  "mooring.committed",
+  "workbook.committed",
   // Journal entries forwarded by the journal→WS bridge on the opt-in
   // `journal:{workspaceId}` channel. Allowlisted so a future consumer's
   // subscription dispatches them; nothing subscribes to that channel yet, so

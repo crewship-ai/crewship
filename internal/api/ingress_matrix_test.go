@@ -92,6 +92,7 @@ func TestIngressAuthorizationMatrix(t *testing.T) {
 		t.Fatalf("NewRouter: %v", err)
 	}
 	r.RegisterSlidesHuman(true)
+	registerGridCraftTestRoutes(r)
 	validator, err := auth.NewJWTValidator(secret)
 	if err != nil {
 		t.Fatalf("NewJWTValidator: %v", err)

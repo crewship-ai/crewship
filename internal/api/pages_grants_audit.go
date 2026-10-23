@@ -146,6 +146,12 @@ func (h *PageHandler) commitPageGrantMutation(ctx context.Context, tx *sql.Tx, r
 		}
 		receipts = append(receipts, receipt{e.ID, native})
 	}
+	// Session closure is part of the mutation. Keep every added write before
+	// the final receipt, grant state, page identity and issuer validations.
+	closedUsers, err := h.closeRevokedWorkbookSessions(ctx, tx, changes[0].entry.WorkspaceID, rec)
+	if err != nil {
+		return err
+	}
 	// A later audit trigger must not erase/change an earlier event or undo the
 	// business mutation. Check all acknowledgments after the final append.
 	for _, receipt := range receipts {
@@ -192,6 +198,9 @@ func (h *PageHandler) commitPageGrantMutation(ctx context.Context, tx *sql.Tx, r
 	}
 	if err := tx.Commit(); err != nil {
 		return err
+	}
+	if rec.HasWorkbook && h.hub != nil {
+		h.hub.RecheckWorkbookAccess(ctx, rec.ID, closedUsers)
 	}
 	for _, publish := range notify {
 		publish()

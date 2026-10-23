@@ -22,7 +22,11 @@ type artifactPrincipalFixture struct {
 
 func newArtifactPrincipalFixture(t *testing.T) *artifactPrincipalFixture {
 	t.Helper()
-	r := pagesTransferSetup(t)
+	return newArtifactPrincipalFixtureWithRig(t, pagesTransferSetup(t))
+}
+
+func newArtifactPrincipalFixtureWithRig(t *testing.T, r *pagesTransferRig) *artifactPrincipalFixture {
+	t.Helper()
 	r.seedCrew(t, "principal-crew", "Crew", "principal-crew")
 	seedAgentRow(t, r.db, "principal-agent", r.wsID, "principal-crew", "Agent", "principal-agent", "AGENT")
 	mustExec(t, r.db, `INSERT INTO chats(id,workspace_id,agent_id,created_by,visibility) VALUES('principal-chat',?,'principal-agent',?,'group')`, r.wsID, r.userID)

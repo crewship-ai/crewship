@@ -752,6 +752,10 @@ func (h *PageHandler) BatchMoveFolderPages(w http.ResponseWriter, r *http.Reques
 			})
 			return
 		}
+		if !workbookPageOwnerOnly(rec, user.ID) {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": workbookFolderRefusal + "; nothing was moved", "page": rec.Slug})
+			return
+		}
 		if rec.PagesVersion != *item.PagesVersion {
 			h.writeFolderFenceConflict(w, r, wsID, viewer, rec, f, acl, "pages_version")
 			return
@@ -775,7 +779,7 @@ func (h *PageHandler) BatchMoveFolderPages(w http.ResponseWriter, r *http.Reques
 		if m.rec.FolderID == f.ID {
 			continue // already here: nothing changes, nothing bumps
 		}
-		res, err := tx.ExecContext(r.Context(), folderMoveStatement, f.ID, m.rec.ID, m.rec.PagesVersion, f.ID, f.ACLVersion)
+		res, err := tx.ExecContext(r.Context(), folderMoveStatement, f.ID, m.rec.ID, m.rec.PagesVersion, f.ID, f.ACLVersion, user.ID)
 		if err != nil {
 			replyInternalError(w, h.logger, "move page into folder", err)
 			return
@@ -814,12 +818,15 @@ func (h *PageHandler) BatchMoveFolderPages(w http.ResponseWriter, r *http.Reques
 // folderMoveStatement is the fenced UPDATE both the single move and the batch
 // run: the page's pages_version AND the folder's acl_version, in one
 // statement, so a move and an ACL change that interleave cannot both succeed
-// (§3/12). Arguments: folder id, page id, pages_version, folder id,
-// acl_version.
+// (§3/12). A Page holding a workbook moves only for its owner, which the
+// statement repeats so a workbook imported after the check is not filed by
+// anybody else. Arguments: folder id, page id, pages_version, folder id,
+// acl_version, acting user id.
 const folderMoveStatement = `
 	UPDATE pages SET folder_id = ?, pages_version = pages_version + 1
 	WHERE id = ? AND pages_version = ?
-	  AND EXISTS (SELECT 1 FROM page_folders WHERE id = ? AND acl_version = ?)`
+	  AND EXISTS (SELECT 1 FROM page_folders WHERE id = ? AND acl_version = ?)
+	  AND (owner_user_id = ? OR NOT EXISTS (SELECT 1 FROM gridcraft_heads WHERE page_id = pages.id))`
 
 // ── 5. My access — GET /api/v1/pages/{slug}/access/me ──────────────────────
 

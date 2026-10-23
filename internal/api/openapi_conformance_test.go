@@ -205,6 +205,7 @@ func TestOpenAPISpecMatchesRegisteredRoutes(t *testing.T) {
 		t.Fatalf("NewRouter: %v", err)
 	}
 	r.RegisterSlidesHuman(true)
+	registerGridCraftTestRoutes(r)
 
 	spec := loadGeneratedSpec(t)
 	registered := registeredPublicRoutes(r)
@@ -285,6 +286,7 @@ func TestRegisteredPathsRejectUnlistedMethods(t *testing.T) {
 		t.Fatalf("NewRouter: %v", err)
 	}
 	r.RegisterSlidesHuman(true)
+	registerGridCraftTestRoutes(r)
 
 	for _, shape := range r.mux.shapeOrder {
 		declared := r.mux.shapeMethods[shape]
@@ -376,6 +378,7 @@ func TestMethodGuard_DeclaredMethodsStillReachHandlers(t *testing.T) {
 		t.Fatalf("NewRouter: %v", err)
 	}
 	r.RegisterSlidesHuman(true)
+	registerGridCraftTestRoutes(r)
 
 	for _, shape := range r.mux.shapeOrder {
 		spelling := r.mux.shapeSpelling[shape]
