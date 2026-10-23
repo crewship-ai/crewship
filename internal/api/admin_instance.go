@@ -342,7 +342,7 @@ func (h *InstanceAdminHandler) Suspend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Durable: a suspension lifted before a run's next step still stops it.
-	if err := markAccessRevokedTx(ctx, tx, id); err != nil {
+	if err := MarkAccessRevokedTx(ctx, tx, id); err != nil {
 		replyInternalError(w, h.logger, "suspend: access revocation marker", err)
 		return
 	}

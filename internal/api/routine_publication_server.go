@@ -272,7 +272,7 @@ func (r *Router) routinePublicationUnpublish(w http.ResponseWriter, req *http.Re
 	notify, err := r.appendGuestIssueAudit(req.Context(), tx, journal.Entry{
 		WorkspaceID: workspace, Type: journal.EntryAuditEntityUpdated,
 		ActorType: journal.ActorUser, ActorID: user.ID, Summary: "Routine publication withdrawn",
-		Payload: map[string]any{"entity_type": "routine", "action": "unpublish", "pipeline_id": routine, "version": head, "authority_fingerprint": fingerprint},
+		Payload: map[string]any{"entity_type": "routine", "action": "unpublish", "pipeline_id": routine, "version": head, "authority_fingerprint": fingerprint, "withdrawn_at": stamp},
 	})
 	if err != nil {
 		guestRoutineDraftError(w, err)

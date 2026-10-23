@@ -47,7 +47,7 @@ func TestRoutineUnpublicationWithdrawsAndRepublishClears(t *testing.T) {
 	if err := f.db.QueryRow(`SELECT COUNT(*) FROM pipeline_versions WHERE pipeline_id='publish-routine' AND publication_authority_json IS NOT NULL`).Scan(&manifests); err != nil || manifests != 1 {
 		t.Fatalf("withdrawal changed the immutable archive: %d %v", manifests, err)
 	}
-	if err := f.db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE workspace_id=? AND json_extract(payload,'$.action')='unpublish' AND json_extract(payload,'$.pipeline_id')='publish-routine' AND actor_id='publish-user'`, f.workspace).Scan(&audits); err != nil || audits != 1 {
+	if err := f.db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE workspace_id=? AND json_extract(payload,'$.action')='unpublish' AND json_extract(payload,'$.pipeline_id')='publish-routine' AND json_extract(payload,'$.withdrawn_at')=? AND actor_id='publish-user'`, f.workspace, withdrawn.WithdrawnAt).Scan(&audits); err != nil || audits != 1 {
 		t.Fatalf("missing atomic unpublish audit: %d %v", audits, err)
 	}
 	if chain, err := journal.VerifyChain(t.Context(), f.db, f.workspace); err != nil || !chain.OK {

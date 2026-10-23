@@ -385,7 +385,7 @@ func (h *RecoveryHandler) Reset(w http.ResponseWriter, r *http.Request) {
 	}
 	// Account recovery also stops accepted Guest-published runs, unlike a
 	// voluntary password change, which is treated like logout.
-	if err := markAccessRevokedTx(r.Context(), tx, userID); err != nil {
+	if err := MarkAccessRevokedTx(r.Context(), tx, userID); err != nil {
 		replyInternalError(w, h.logger, "reset password: access revocation marker", err)
 		return
 	}

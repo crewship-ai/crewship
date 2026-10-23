@@ -19,7 +19,6 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/cli"
-	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // `crewship admin ...` is the operator-on-the-host recovery surface.
@@ -526,7 +525,7 @@ func runAdminInvalidateSessions(cmd *cobra.Command, _ []string) error {
 	}
 	// The durable marker also stops Guest-published runs accepted before
 	// this revocation, including when the user had no active session left.
-	if _, err = tx.ExecContext(ctx, `UPDATE users SET access_revoked_at = ? WHERE id = ?`, tsformat.Format(time.Now()), userID); err != nil {
+	if err = api.MarkAccessRevokedTx(ctx, tx, userID); err != nil {
 		return fmt.Errorf("record access revocation: %w", err)
 	}
 	if err = tx.Commit(); err != nil {
@@ -667,10 +666,7 @@ func runAdminResetPassword(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("revoke sessions rows affected: %w", err)
 	}
-	// Account recovery also stops accepted Guest-published runs.
-	if _, err := tx.ExecContext(ctx, `UPDATE users SET access_revoked_at = ? WHERE id = ?`, tsformat.Format(time.Now()), userID); err != nil {
-		return fmt.Errorf("record access revocation: %w", err)
-	}
+	// AuditLocalPasswordResetTx below also writes the access revocation marker.
 
 	// Every CLI token minted under the old password goes too: recovery proves
 	// control of the account, not of the credentials already handed out.
