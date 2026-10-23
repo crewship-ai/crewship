@@ -178,6 +178,10 @@ principal. No raw bearer is retained. Missing legacy provenance is preserved as
 missing and cannot be refreshed from a later run bearer or current user lookup.
 Bare legacy receipt capture remains unfenced even when a current user row can
 be resolved; only an original authenticated source creates the new user fence.
+Generic Docs/GridCraft retention and queued resume keep their ordinary run
+lifetime while preserving the original source and user fence. Original JWT
+expiry is enforced by strict Mooring capture/check, not made a generic run
+deadline. Initial source capture still requires a live exact credential.
 The API helpers validate the original row identity, current user/counter, status
 and explicit scope, and return the earlier original/current credential expiry.
 ADMIN references also bind the current bearer HMAC key identity. New scoped

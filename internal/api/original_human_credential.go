@@ -189,10 +189,10 @@ func (h *InternalHandler) originalHumanChatReceipt(ctx context.Context, chat, us
 	}
 	defer tx.Rollback()
 	ctx = auth.WithOriginalCredential(ctx, auth.OriginalCredential{})
-	if expected != nil && expected.SourceCredentialKind != "" {
-		original := expected.OriginalCredential()
-		source = &original
-	}
+	// Initial authentication must still be exact and current. A generic
+	// queued resume instead preserves its immutable expected receipt and
+	// revalidates its original user/member/chat fences below. Original JWT
+	// expiry is a strict Mooring admission limit, not a legacy run deadline.
 	if source != nil {
 		if source.UserID != user {
 			return nil, nil

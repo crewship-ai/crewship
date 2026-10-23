@@ -24,6 +24,8 @@ type artifactPrincipalQueryer interface {
 }
 
 func captureArtifactChatPrincipalQuery(r *http.Request, db artifactPrincipalQueryer, run, ws, agent, crew, chat, message string, receipt *chataudience.Receipt) error {
+	// Generic runs retain provenance without replacing their normal principal
+	// lifetime with the original JWT deadline. Mooring uses the strict wrapper.
 	if InternalTokenWorkspaceFromContext(r.Context()) != "" || InternalTokenCrewFromContext(r.Context()) != "" || receipt == nil || message == "" {
 		return errors.New("host human admission required")
 	}
@@ -33,11 +35,6 @@ func captureArtifactChatPrincipalQuery(r *http.Request, db artifactPrincipalQuer
 	}
 	if current == nil || current.WorkspaceID != ws || current.AgentID != agent {
 		return errors.New("human admission changed")
-	}
-	if receipt.SourceCredentialKind != "" {
-		if _, err := validateOriginalHumanCredential(r.Context(), db, receipt.OriginalCredential(), scopeSelf); err != nil {
-			return err
-		}
 	}
 	var n int
 	if err = db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM conversation_messages WHERE id=? AND session_id=? AND agent_id=? AND author_user_id=? AND role='user'`, message, chat, agent, receipt.UserID).Scan(&n); err != nil {
@@ -74,6 +71,9 @@ func captureOriginalUserArtifactPrincipalQuery(r *http.Request, db artifactPrinc
 	}
 	if current == nil || !receipt.OriginalCredential().Valid() {
 		return errors.New("original user authority required")
+	}
+	if _, err := validateOriginalHumanCredential(r.Context(), db, receipt.OriginalCredential(), scopeSelf); err != nil {
+		return err
 	}
 	return captureArtifactChatPrincipalQuery(r, db, run, ws, agent, crew, chat, message, receipt)
 }
@@ -125,16 +125,6 @@ func (h *PageHandler) checkArtifactRunPrincipal(ctx context.Context, a *artifact
 	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM artifact_run_principals p JOIN users human ON human.id=p.human_user_id AND human.suspended_at IS NULL AND (p.user_authority_revision='' OR p.user_authority_revision=CAST(human.authority_revision AS TEXT)) JOIN workspace_members wm ON wm.workspace_id=p.workspace_id AND wm.user_id=p.human_user_id AND wm.id=p.member_id AND wm.access_revision=p.member_revision JOIN chats c ON c.id=p.chat_id AND c.workspace_id=p.workspace_id AND c.agent_id=p.agent_id AND c.authority_generation=p.chat_generation AND c.authority_revision=p.chat_revision WHERE p.run_id=? AND NOT EXISTS(SELECT 1 FROM workspace_members WHERE user_id=p.human_user_id AND access_mode='restricted')`, a.RunID).Scan(&liveHuman); err != nil || liveHuman != 1 {
 		return errors.New("human chat authority changed")
 	}
-	credential, err := h.artifactPrincipalOriginalCredential(ctx, a)
-	if err != nil {
-		return err
-	}
-	if credential.Kind != "" || credential.ID != "" || credential.ExpiresAt != "" || credential.Binding != "" {
-		if _, err := validateOriginalHumanCredential(ctx, q, credential, scopeSelf); err != nil {
-			return err
-		}
-	}
-
 	var expiry string
 	if err := q.QueryRowContext(ctx, `SELECT p.expires_at FROM artifact_run_principals p JOIN workspaces w ON w.id=p.workspace_id AND w.deleted_at IS NULL JOIN crews cr ON cr.id=p.crew_id AND cr.workspace_id=p.workspace_id AND cr.deleted_at IS NULL JOIN agents ag ON ag.id=p.agent_id AND ag.workspace_id=p.workspace_id AND ag.crew_id=p.crew_id AND ag.deleted_at IS NULL AND ag.expired_at IS NULL WHERE p.run_id=? AND p.workspace_id=? AND p.agent_id=? AND p.crew_id=? AND p.human_user_id=?`, a.RunID, a.WorkspaceID, a.AgentID, a.CrewID, a.HumanUserID).Scan(&expiry); err != nil {
 		return errors.New("artifact principal missing")
@@ -144,7 +134,7 @@ func (h *PageHandler) checkArtifactRunPrincipal(ctx context.Context, a *artifact
 		return errors.New("artifact principal expired")
 	}
 	var started, ended int
-	err = q.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN entry_type='run.started' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop') THEN 1 ELSE 0 END),0) FROM journal_entries WHERE workspace_id=? AND agent_id=? AND trace_id=?`, a.WorkspaceID, a.AgentID, a.RunID).Scan(&started, &ended)
+	err := q.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN entry_type='run.started' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop') THEN 1 ELSE 0 END),0) FROM journal_entries WHERE workspace_id=? AND agent_id=? AND trace_id=?`, a.WorkspaceID, a.AgentID, a.RunID).Scan(&started, &ended)
 	if err != nil || started == 0 || ended != 0 {
 		return errors.New("artifact run is not live")
 	}
