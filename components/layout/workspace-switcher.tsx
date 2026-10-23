@@ -284,10 +284,10 @@ function WorkspaceRow({
 }) {
   return (
     <DropdownMenuItem
-      onSelect={(e) => {
-        e.preventDefault()
-        onSelect()
-      }}
+      // Let Radix finish selection and dismiss its modal layer. Preventing
+      // the default keeps the menu (and its body pointer lock) alive after
+      // the workspace's contents have changed underneath it.
+      onSelect={onSelect}
       className={cn("flex items-center gap-3 py-2", active && "bg-primary/5")}
     >
       <WorkspaceMark name={label} logoUrl={logoUrl}

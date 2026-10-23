@@ -9,6 +9,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Selecting a workspace could leave the rest of the application unclickable.** Workspace rows now allow the menu to dismiss normally after selection, releasing its modal pointer lock before returning to Artifacts or another workspace screen.
+
+
 - **Application editors can share a small TypeScript protocol SDK.** The pilot adds a manifest-driven editor surface and a non-Rust reference editor with separate local drafts, live confirmed state and durable receipt status; GridCraft retains its existing conflict recovery on the shared capability channel.
 
 
