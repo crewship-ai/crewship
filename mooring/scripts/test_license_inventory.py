@@ -3,6 +3,7 @@ import importlib.util
 import json
 from pathlib import Path
 import tempfile
+import subprocess
 import unittest
 
 spec = importlib.util.spec_from_file_location('inventory', Path(__file__).with_name('license-inventory.py'))
@@ -43,6 +44,35 @@ class IntegrityTest(unittest.TestCase):
             (nested / 'linked').symlink_to(source)
             with self.assertRaises(ValueError):
                 inventory.verify_checksums(directory, 'a' * 64)
+
+    def test_git_index_catches_present_but_ignored_and_staged_tampered_source(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repository = Path(temp)
+            def git(*args):
+                return subprocess.check_output(['git', '-C', str(repository), *args], stderr=subprocess.DEVNULL)
+            git('init', '-b', 'main')
+            (repository / '.gitignore').write_text('build/\n')
+            source = repository / 'mooring/vendor/example-1.0.0/build/build.rs'
+            source.parent.mkdir(parents=True)
+            source.write_text('verified build source')
+            digest = hashlib.sha256(source.read_bytes()).hexdigest()
+            expected = {str(source.relative_to(repository)): digest}
+            git('add', '.gitignore')
+            with self.assertRaises(ValueError):
+                inventory.verify_git_index(repository, expected)
+            git('add', '-f', '--', str(source.relative_to(repository)))
+            inventory.verify_git_index(repository, expected)
+            source.write_text('tampered build source')
+            git('add', '-f', '--', str(source.relative_to(repository)))
+            source.write_text('verified build source')
+            with self.assertRaises(ValueError):
+                inventory.verify_git_index(repository, expected)
+            git('add', '-f', '--', str(source.relative_to(repository)))
+            extra = source.parent / 'unrecorded.rs'
+            extra.write_text('unrecorded index entry')
+            git('add', '-f', '--', str(extra.relative_to(repository)))
+            with self.assertRaises(ValueError):
+                inventory.verify_git_index(repository, expected)
 
     def test_duplicate_json_keys_fail(self):
         with self.assertRaises(ValueError):
