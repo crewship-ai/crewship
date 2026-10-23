@@ -7,7 +7,7 @@ import (
 
 func TestCountersRemainStringsAndUnionRemainsObject(t *testing.T) {
 	var change ChangeResult
-	wire := `{"change_id":"c","status":"saved","operations":[{"op_id":"o","status":"saved","revision":"9007199254740993"}],"first_revision":"9007199254740993","last_revision":"9007199254740993"}`
+	wire := `{"change_id":"c","status":"saved","operations":[{"op_id":"o","status":"saved","revision":"9007199254740993","issuer":"test-host","durability":"node"}],"first_revision":"9007199254740993","last_revision":"9007199254740993"}`
 	if err := json.Unmarshal([]byte(wire), &change); err != nil {
 		t.Fatal(err)
 	}

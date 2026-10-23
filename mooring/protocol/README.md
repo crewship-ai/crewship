@@ -17,3 +17,12 @@ Go and TS counters remain strings and require equivalent validation at inputs.
 model and engine versions. Unsupported versions return `version_mismatch` before
 any document content. Minor/patch compatibility needs shared evidence before
 widening this policy. The Rust library is currently unused by deployed services.
+
+
+`conformance-fixtures.json` contains positive/negative JSON Schema Draft2020-12
+cases plus semantic rejection inputs. Shape-valid semantic fixtures are not
+proof that authentication, atomicity, revocation or persistence enforce their
+expected errors. `fingerprint-fixtures.json` defines required cross-language
+JCS golden vectors; the shape generator does not implement canonical hashing.
+Generic numeric payloads must be normalized to the specified binary64 model
+before adapter validation as well as before hashing.

@@ -40,6 +40,7 @@ const (
 	ErrorCodeUnknownDependency    ErrorCode = "unknown_dependency"
 	ErrorCodeDependencyCycle      ErrorCode = "dependency_cycle"
 	ErrorCodeUnknownOutcome       ErrorCode = "unknown_outcome"
+	ErrorCodeTaskCancelled        ErrorCode = "task_cancelled"
 )
 
 type ReadPrecondition struct {
@@ -50,7 +51,7 @@ type ReadPrecondition struct {
 
 type Operation struct {
 	OpID              string                     `json:"op_id"`
-	Fingerprint       string                     `json:"fingerprint"`
+	Fingerprint       Digest                     `json:"fingerprint"`
 	ParticipantRef    string                     `json:"participant_ref"`
 	BaseRevision      Counter                    `json:"base_revision"`
 	Dependencies      []string                   `json:"dependencies"`
@@ -61,7 +62,8 @@ type Operation struct {
 type AtomicChange struct {
 	ChangeID       string      `json:"change_id"`
 	Operations     []Operation `json:"operations"`
-	MembershipHash string      `json:"membership_hash"`
+	MembershipHash Digest      `json:"membership_hash"`
+	TaskID         *string     `json:"task_id,omitempty"`
 }
 
 type Fence struct {
@@ -69,17 +71,47 @@ type Fence struct {
 	Token      string  `json:"token"`
 }
 
+type RejectionRootCauseCode string
+
+const (
+	RejectionRootCauseCodePreconditionFailed   RejectionRootCauseCode = "precondition_failed"
+	RejectionRootCauseCodeOpIdConflict         RejectionRootCauseCode = "op_id_conflict"
+	RejectionRootCauseCodeTargetDeleted        RejectionRootCauseCode = "target_deleted"
+	RejectionRootCauseCodeQuotaExceeded        RejectionRootCauseCode = "quota_exceeded"
+	RejectionRootCauseCodePermissionRevoked    RejectionRootCauseCode = "permission_revoked"
+	RejectionRootCauseCodeForbidden            RejectionRootCauseCode = "forbidden"
+	RejectionRootCauseCodeStaleOwner           RejectionRootCauseCode = "stale_owner"
+	RejectionRootCauseCodeLeaseExpired         RejectionRootCauseCode = "lease_expired"
+	RejectionRootCauseCodeVersionMismatch      RejectionRootCauseCode = "version_mismatch"
+	RejectionRootCauseCodeInvalidRequest       RejectionRootCauseCode = "invalid_request"
+	RejectionRootCauseCodeAtomicChangeTooLarge RejectionRootCauseCode = "atomic_change_too_large"
+	RejectionRootCauseCodeCapacityExhausted    RejectionRootCauseCode = "capacity_exhausted"
+	RejectionRootCauseCodeUnknownDependency    RejectionRootCauseCode = "unknown_dependency"
+	RejectionRootCauseCodeDependencyCycle      RejectionRootCauseCode = "dependency_cycle"
+	RejectionRootCauseCodeTaskCancelled        RejectionRootCauseCode = "task_cancelled"
+)
+
 type RejectionRootCause struct {
-	OpID    string    `json:"op_id"`
-	Code    ErrorCode `json:"code"`
-	Message string    `json:"message"`
+	OpID    string                 `json:"op_id"`
+	Code    RejectionRootCauseCode `json:"code"`
+	Message string                 `json:"message"`
 }
+
+type RejectionRetry string
+
+const (
+	RejectionRetryDoNotRetry               RejectionRetry = "do_not_retry"
+	RejectionRetryQueryStatus              RejectionRetry = "query_status"
+	RejectionRetryReconnectThenQueryStatus RejectionRetry = "reconnect_then_query_status"
+	RejectionRetryNewOperationAfterRefresh RejectionRetry = "new_operation_after_refresh"
+)
 
 type Rejection struct {
 	Code      ErrorCode           `json:"code"`
 	RootOpID  *string             `json:"root_op_id,omitempty"`
 	Message   string              `json:"message"`
 	RootCause *RejectionRootCause `json:"root_cause,omitempty"`
+	Retry     RejectionRetry      `json:"retry"`
 }
 
 type OperationResultVariant1Status string
@@ -88,10 +120,19 @@ const (
 	OperationResultVariant1StatusSaved OperationResultVariant1Status = "saved"
 )
 
+type OperationResultVariant1Durability string
+
+const (
+	OperationResultVariant1DurabilityNode       OperationResultVariant1Durability = "node"
+	OperationResultVariant1DurabilityReplicated OperationResultVariant1Durability = "replicated"
+)
+
 type OperationResultVariant1 struct {
-	OpID     string                        `json:"op_id"`
-	Status   OperationResultVariant1Status `json:"status"`
-	Revision Counter                       `json:"revision"`
+	OpID       string                            `json:"op_id"`
+	Status     OperationResultVariant1Status     `json:"status"`
+	Revision   Counter                           `json:"revision"`
+	Issuer     string                            `json:"issuer"`
+	Durability OperationResultVariant1Durability `json:"durability"`
 }
 
 type OperationResultVariant2Status string
@@ -148,6 +189,8 @@ type Welcome struct {
 	Scope             Scope       `json:"scope"`
 	ParticipantRef    string      `json:"participant_ref"`
 	PermissionVersion Counter     `json:"permission_version"`
+	Limits            WireLimits  `json:"limits"`
+	Issuer            string      `json:"issuer"`
 }
 
 type CommitBatchType string
@@ -173,16 +216,11 @@ const (
 	CommitResultTypeCommitResult CommitResultType = "commit_result"
 )
 
-type CommitResultIssuer string
-
-const (
-	CommitResultIssuerCrewship CommitResultIssuer = "crewship"
-)
-
 type CommitResultDurability string
 
 const (
-	CommitResultDurabilityNode CommitResultDurability = "node"
+	CommitResultDurabilityNode       CommitResultDurability = "node"
+	CommitResultDurabilityReplicated CommitResultDurability = "replicated"
 )
 
 type CommitResult struct {
@@ -191,7 +229,7 @@ type CommitResult struct {
 	Scope      Scope                  `json:"scope"`
 	Generation Counter                `json:"generation"`
 	Revision   Counter                `json:"revision"`
-	Issuer     CommitResultIssuer     `json:"issuer"`
+	Issuer     string                 `json:"issuer"`
 	Durability CommitResultDurability `json:"durability"`
 	Changes    []ChangeResult         `json:"changes"`
 }
@@ -203,10 +241,11 @@ const (
 )
 
 type StatusRequest struct {
-	Type      StatusRequestType `json:"type"`
-	RequestID string            `json:"request_id"`
-	Scope     Scope             `json:"scope"`
-	OpID      string            `json:"op_id"`
+	Type                StatusRequestType `json:"type"`
+	RequestID           string            `json:"request_id"`
+	Scope               Scope             `json:"scope"`
+	OpID                string            `json:"op_id"`
+	ExpectedFingerprint Digest            `json:"expected_fingerprint"`
 }
 
 type StatusResultType string
@@ -237,7 +276,7 @@ type StatusResult struct {
 
 type Asset struct {
 	AssetID   string  `json:"asset_id"`
-	Digest    string  `json:"digest"`
+	Digest    Digest  `json:"digest"`
 	SizeBytes Counter `json:"size_bytes"`
 }
 
@@ -256,7 +295,7 @@ type Checkpoint struct {
 	Versions      Versions           `json:"versions"`
 	Encoding      CheckpointEncoding `json:"encoding"`
 	State         string             `json:"state"`
-	Digest        string             `json:"digest"`
+	Digest        Digest             `json:"digest"`
 	Assets        []Asset            `json:"assets"`
 }
 
@@ -300,7 +339,7 @@ type SessionTicket struct {
 	PermissionVersion Counter           `json:"permission_version"`
 	Granted           Capabilities      `json:"granted"`
 	Ticket            string            `json:"ticket"`
-	ExpiresInMs       Counter           `json:"expires_in_ms"`
+	ExpiresInMs       PositiveCounter   `json:"expires_in_ms"`
 	Versions          Versions          `json:"versions"`
 }
 
@@ -311,10 +350,11 @@ const (
 )
 
 type OwnerAcquire struct {
-	Type       OwnerAcquireType `json:"type"`
-	RequestID  string           `json:"request_id"`
-	Scope      Scope            `json:"scope"`
-	RuntimeRef string           `json:"runtime_ref"`
+	Type         OwnerAcquireType `json:"type"`
+	RequestID    string           `json:"request_id"`
+	Scope        Scope            `json:"scope"`
+	RuntimeRef   string           `json:"runtime_ref"`
+	RenewalNonce string           `json:"renewal_nonce"`
 }
 
 type OwnerRenewType string
@@ -324,11 +364,13 @@ const (
 )
 
 type OwnerRenew struct {
-	Type      OwnerRenewType `json:"type"`
-	RequestID string         `json:"request_id"`
-	Scope     Scope          `json:"scope"`
-	SessionID string         `json:"session_id"`
-	Fence     Fence          `json:"fence"`
+	Type              OwnerRenewType `json:"type"`
+	RequestID         string         `json:"request_id"`
+	Scope             Scope          `json:"scope"`
+	SessionID         string         `json:"session_id"`
+	Fence             Fence          `json:"fence"`
+	RenewalNonce      string         `json:"renewal_nonce"`
+	PermissionVersion Counter        `json:"permission_version"`
 }
 
 type OwnerGrantType string
@@ -338,14 +380,16 @@ const (
 )
 
 type OwnerGrant struct {
-	Type            OwnerGrantType `json:"type"`
-	RequestID       string         `json:"request_id"`
-	Scope           Scope          `json:"scope"`
-	SessionID       string         `json:"session_id"`
-	RuntimeRef      string         `json:"runtime_ref"`
-	Fence           Fence          `json:"fence"`
-	LeaseDurationMs Counter        `json:"lease_duration_ms"`
-	Revision        Counter        `json:"revision"`
+	Type              OwnerGrantType  `json:"type"`
+	RequestID         string          `json:"request_id"`
+	Scope             Scope           `json:"scope"`
+	SessionID         string          `json:"session_id"`
+	RuntimeRef        string          `json:"runtime_ref"`
+	Fence             Fence           `json:"fence"`
+	LeaseDurationMs   PositiveCounter `json:"lease_duration_ms"`
+	Revision          Counter         `json:"revision"`
+	RenewalNonce      string          `json:"renewal_nonce"`
+	PermissionVersion Counter         `json:"permission_version"`
 }
 
 type DeliveryRenewType string
@@ -363,6 +407,7 @@ type DeliveryRenew struct {
 	Fence             Fence             `json:"fence"`
 	PermissionVersion Counter           `json:"permission_version"`
 	RenewalNonce      string            `json:"renewal_nonce"`
+	GateID            string            `json:"gate_id"`
 }
 
 type DeliveryGrantType string
@@ -380,7 +425,8 @@ type DeliveryGrant struct {
 	Generation        Counter           `json:"generation"`
 	PermissionVersion Counter           `json:"permission_version"`
 	RenewalNonce      string            `json:"renewal_nonce"`
-	DurationMs        Counter           `json:"duration_ms"`
+	DurationMs        PositiveCounter   `json:"duration_ms"`
+	GateID            string            `json:"gate_id"`
 }
 
 type SessionClosedType string
@@ -399,6 +445,7 @@ type SessionClosed struct {
 	PermissionVersion Counter           `json:"permission_version"`
 	BarrierID         string            `json:"barrier_id"`
 	Reason            Rejection         `json:"reason"`
+	GateID            string            `json:"gate_id"`
 }
 
 type DeliveryBlockedType string
@@ -408,13 +455,15 @@ const (
 )
 
 type DeliveryBlocked struct {
-	Type           DeliveryBlockedType `json:"type"`
-	RequestID      string              `json:"request_id"`
-	Scope          Scope               `json:"scope"`
-	SessionID      string              `json:"session_id"`
-	ParticipantRef string              `json:"participant_ref"`
-	Fence          Fence               `json:"fence"`
-	BarrierID      string              `json:"barrier_id"`
+	Type              DeliveryBlockedType `json:"type"`
+	RequestID         string              `json:"request_id"`
+	Scope             Scope               `json:"scope"`
+	SessionID         string              `json:"session_id"`
+	ParticipantRef    string              `json:"participant_ref"`
+	Fence             Fence               `json:"fence"`
+	BarrierID         string              `json:"barrier_id"`
+	CoveredGateIds    []string            `json:"covered_gate_ids"`
+	PermissionVersion Counter             `json:"permission_version"`
 }
 
 type RevocationConfirmedType string
@@ -423,19 +472,15 @@ const (
 	RevocationConfirmedTypeRevocationConfirmed RevocationConfirmedType = "revocation_confirmed"
 )
 
-type RevocationConfirmedReadBlocked bool
-
-type RevocationConfirmedWriteBlocked bool
-
 type RevocationConfirmed struct {
-	Type              RevocationConfirmedType         `json:"type"`
-	RequestID         string                          `json:"request_id"`
-	Scope             Scope                           `json:"scope"`
-	ParticipantRef    string                          `json:"participant_ref"`
-	BarrierID         string                          `json:"barrier_id"`
-	PermissionVersion Counter                         `json:"permission_version"`
-	ReadBlocked       RevocationConfirmedReadBlocked  `json:"read_blocked"`
-	WriteBlocked      RevocationConfirmedWriteBlocked `json:"write_blocked"`
+	Type              RevocationConfirmedType `json:"type"`
+	RequestID         string                  `json:"request_id"`
+	Scope             Scope                   `json:"scope"`
+	ParticipantRef    string                  `json:"participant_ref"`
+	BarrierID         string                  `json:"barrier_id"`
+	PermissionVersion Counter                 `json:"permission_version"`
+	ReadBlocked       bool                    `json:"read_blocked"`
+	WriteBlocked      bool                    `json:"write_blocked"`
 }
 
 type ReadRequestType string
@@ -452,7 +497,7 @@ type ReadRequest struct {
 	Revision  *Counter                    `json:"revision,omitempty"`
 	Cursor    *string                     `json:"cursor,omitempty"`
 	Query     *map[string]json.RawMessage `json:"query,omitempty"`
-	MaxBytes  Counter                     `json:"max_bytes"`
+	MaxBytes  PositiveCounter             `json:"max_bytes"`
 }
 
 type ReadResultType string
@@ -462,12 +507,12 @@ const (
 )
 
 type ReadResult struct {
-	Type       ReadResultType               `json:"type"`
-	RequestID  string                       `json:"request_id"`
-	Scope      Scope                        `json:"scope"`
-	Revision   Counter                      `json:"revision"`
-	Items      []map[string]json.RawMessage `json:"items"`
-	NextCursor *string                      `json:"next_cursor,omitempty"`
+	Type       ReadResultType `json:"type"`
+	RequestID  string         `json:"request_id"`
+	Scope      Scope          `json:"scope"`
+	Revision   Counter        `json:"revision"`
+	Items      []ReadItem     `json:"items"`
+	NextCursor *string        `json:"next_cursor,omitempty"`
 }
 
 type CheckpointRequestType string
@@ -507,7 +552,7 @@ type Presence struct {
 	Scope          Scope                      `json:"scope"`
 	SessionID      string                     `json:"session_id"`
 	ParticipantRef string                     `json:"participant_ref"`
-	TTLMs          Counter                    `json:"ttl_ms"`
+	TTLMs          PositiveCounter            `json:"ttl_ms"`
 	View           map[string]json.RawMessage `json:"view"`
 }
 
@@ -524,10 +569,12 @@ const (
 )
 
 type TaskSummary struct {
-	TaskID       string            `json:"task_id"`
-	AllowPartial bool              `json:"allow_partial"`
-	Status       TaskSummaryStatus `json:"status"`
-	Changes      []ChangeResult    `json:"changes"`
+	TaskID              string            `json:"task_id"`
+	AllowPartial        bool              `json:"allow_partial"`
+	Status              TaskSummaryStatus `json:"status"`
+	Changes             []TaskChangeState `json:"changes"`
+	ParticipantRef      string            `json:"participant_ref"`
+	UnresolvedChangeIds []string          `json:"unresolved_change_ids"`
 }
 
 type TaskStatusType string
@@ -615,6 +662,7 @@ type UndoRequest struct {
 	ParticipantRef string          `json:"participant_ref"`
 	BaseRevision   Counter         `json:"base_revision"`
 	OpID           string          `json:"op_id"`
+	TargetChangeID *string         `json:"target_change_id,omitempty"`
 }
 
 type ProtocolErrorType string
@@ -628,6 +676,494 @@ type ProtocolError struct {
 	RequestID string            `json:"request_id"`
 	Scope     *Scope            `json:"scope,omitempty"`
 	Reason    Rejection         `json:"reason"`
+}
+
+type PositiveCounter Counter
+
+type Digest string
+
+type ReadItem struct {
+	TargetID  string                     `json:"target_id"`
+	ModelType string                     `json:"model_type"`
+	Revision  Counter                    `json:"revision"`
+	Data      map[string]json.RawMessage `json:"data"`
+}
+
+type WireLimits struct {
+	MaxFrameBytes       PositiveCounter `json:"max_frame_bytes"`
+	MaxBatchBytes       PositiveCounter `json:"max_batch_bytes"`
+	MaxBatchOperations  PositiveCounter `json:"max_batch_operations"`
+	MaxAtomicOperations PositiveCounter `json:"max_atomic_operations"`
+	MaxTaskBytes        PositiveCounter `json:"max_task_bytes"`
+	MaxTaskChanges      PositiveCounter `json:"max_task_changes"`
+	MaxReadBytes        PositiveCounter `json:"max_read_bytes"`
+	MaxCheckpointBytes  PositiveCounter `json:"max_checkpoint_bytes"`
+	MaxDeliveryMs       PositiveCounter `json:"max_delivery_ms"`
+	MaxPresenceMs       PositiveCounter `json:"max_presence_ms"`
+}
+
+type CommandDeclaration struct {
+	CommandID    string                     `json:"command_id"`
+	InputSchema  map[string]json.RawMessage `json:"input_schema"`
+	ResultSchema map[string]json.RawMessage `json:"result_schema"`
+	EffectScope  string                     `json:"effect_scope"`
+	Mutation     bool                       `json:"mutation"`
+	Replayable   bool                       `json:"replayable"`
+}
+
+type FormatDeclarationValidator string
+
+const (
+	FormatDeclarationValidatorAdapter FormatDeclarationValidator = "adapter"
+	FormatDeclarationValidatorHost    FormatDeclarationValidator = "host"
+	FormatDeclarationValidatorNone    FormatDeclarationValidator = "none"
+)
+
+type FormatDeclaration struct {
+	FormatID         string                     `json:"format_id"`
+	ModelVersions    []string                   `json:"model_versions"`
+	ImportExtensions []string                   `json:"import_extensions"`
+	ExportExtensions []string                   `json:"export_extensions"`
+	Validator        FormatDeclarationValidator `json:"validator"`
+}
+
+type RevocationGuaranteeMode string
+
+const (
+	RevocationGuaranteeModeDeliveryLease    RevocationGuaranteeMode = "delivery_lease"
+	RevocationGuaranteeModeApplicationBound RevocationGuaranteeMode = "application_bound"
+	RevocationGuaranteeModeNone             RevocationGuaranteeMode = "none"
+)
+
+type RevocationGuarantee struct {
+	Mode       RevocationGuaranteeMode `json:"mode"`
+	MaxDelayMs Counter                 `json:"max_delay_ms"`
+}
+
+type StorageDeclarationAuthority string
+
+const (
+	StorageDeclarationAuthorityHost        StorageDeclarationAuthority = "host"
+	StorageDeclarationAuthorityApplication StorageDeclarationAuthority = "application"
+)
+
+type StorageDeclarationDurability string
+
+const (
+	StorageDeclarationDurabilityNone       StorageDeclarationDurability = "none"
+	StorageDeclarationDurabilityProcess    StorageDeclarationDurability = "process"
+	StorageDeclarationDurabilityNode       StorageDeclarationDurability = "node"
+	StorageDeclarationDurabilityReplicated StorageDeclarationDurability = "replicated"
+)
+
+type StorageDeclaration struct {
+	Authority  StorageDeclarationAuthority  `json:"authority"`
+	Durability StorageDeclarationDurability `json:"durability"`
+	Revocation RevocationGuarantee          `json:"revocation"`
+}
+
+type ApplicationManifestConnectionPath string
+
+const (
+	ApplicationManifestConnectionPathA ApplicationManifestConnectionPath = "A"
+	ApplicationManifestConnectionPathB ApplicationManifestConnectionPath = "B"
+	ApplicationManifestConnectionPathC ApplicationManifestConnectionPath = "C"
+)
+
+type ApplicationManifestMergeModelsItem string
+
+const (
+	ApplicationManifestMergeModelsItemProperties        ApplicationManifestMergeModelsItem = "properties"
+	ApplicationManifestMergeModelsItemCommands          ApplicationManifestMergeModelsItem = "commands"
+	ApplicationManifestMergeModelsItemYjsText           ApplicationManifestMergeModelsItem = "yjs_text"
+	ApplicationManifestMergeModelsItemApplicationServer ApplicationManifestMergeModelsItem = "application_server"
+	ApplicationManifestMergeModelsItemExclusive         ApplicationManifestMergeModelsItem = "exclusive"
+)
+
+type ApplicationManifest struct {
+	ApplicationID        string                               `json:"application_id"`
+	PackageVersion       string                               `json:"package_version"`
+	PackageDigest        Digest                               `json:"package_digest"`
+	ConnectionPath       ApplicationManifestConnectionPath    `json:"connection_path"`
+	SupportedVersions    []Versions                           `json:"supported_versions"`
+	Formats              []FormatDeclaration                  `json:"formats"`
+	Commands             []CommandDeclaration                 `json:"commands"`
+	Capabilities         []string                             `json:"capabilities"`
+	MergeModels          []ApplicationManifestMergeModelsItem `json:"merge_models"`
+	PresenceSchema       map[string]json.RawMessage           `json:"presence_schema"`
+	Storage              StorageDeclaration                   `json:"storage"`
+	InputFallbackAllowed bool                                 `json:"input_fallback_allowed"`
+}
+
+type ManifestRequestType string
+
+const (
+	ManifestRequestTypeManifestRequest ManifestRequestType = "manifest_request"
+)
+
+type ManifestRequest struct {
+	Type          ManifestRequestType `json:"type"`
+	RequestID     string              `json:"request_id"`
+	ApplicationID string              `json:"application_id"`
+}
+
+type ManifestResultType string
+
+const (
+	ManifestResultTypeManifestResult ManifestResultType = "manifest_result"
+)
+
+type ManifestResult struct {
+	Type      ManifestResultType  `json:"type"`
+	RequestID string              `json:"request_id"`
+	Manifest  ApplicationManifest `json:"manifest"`
+}
+
+type LifecycleRequestType string
+
+const (
+	LifecycleRequestTypeLifecycleRequest LifecycleRequestType = "lifecycle_request"
+)
+
+type LifecycleRequestAction string
+
+const (
+	LifecycleRequestActionOpen    LifecycleRequestAction = "open"
+	LifecycleRequestActionSuspend LifecycleRequestAction = "suspend"
+	LifecycleRequestActionResume  LifecycleRequestAction = "resume"
+	LifecycleRequestActionClose   LifecycleRequestAction = "close"
+)
+
+type LifecycleRequest struct {
+	Type       LifecycleRequestType   `json:"type"`
+	RequestID  string                 `json:"request_id"`
+	Scope      Scope                  `json:"scope"`
+	SessionID  string                 `json:"session_id"`
+	Fence      Fence                  `json:"fence"`
+	Action     LifecycleRequestAction `json:"action"`
+	Checkpoint *Checkpoint            `json:"checkpoint,omitempty"`
+}
+
+type LifecycleResultType string
+
+const (
+	LifecycleResultTypeLifecycleResult LifecycleResultType = "lifecycle_result"
+)
+
+type LifecycleResultState string
+
+const (
+	LifecycleResultStateReady     LifecycleResultState = "ready"
+	LifecycleResultStateSuspended LifecycleResultState = "suspended"
+	LifecycleResultStateClosed    LifecycleResultState = "closed"
+)
+
+type LifecycleResult struct {
+	Type       LifecycleResultType  `json:"type"`
+	RequestID  string               `json:"request_id"`
+	Scope      Scope                `json:"scope"`
+	SessionID  string               `json:"session_id"`
+	Generation Counter              `json:"generation"`
+	State      LifecycleResultState `json:"state"`
+	Revision   Counter              `json:"revision"`
+}
+
+type SessionJoinType string
+
+const (
+	SessionJoinTypeSessionJoin SessionJoinType = "session_join"
+)
+
+type SessionJoin struct {
+	Type      SessionJoinType `json:"type"`
+	RequestID string          `json:"request_id"`
+	Ticket    string          `json:"ticket"`
+	Versions  Versions        `json:"versions"`
+}
+
+type SessionJoinedType string
+
+const (
+	SessionJoinedTypeSessionJoined SessionJoinedType = "session_joined"
+)
+
+type SessionJoined struct {
+	Type              SessionJoinedType `json:"type"`
+	RequestID         string            `json:"request_id"`
+	Scope             Scope             `json:"scope"`
+	SessionID         string            `json:"session_id"`
+	ParticipantRef    string            `json:"participant_ref"`
+	Generation        Counter           `json:"generation"`
+	PermissionVersion Counter           `json:"permission_version"`
+	Versions          Versions          `json:"versions"`
+	GateID            string            `json:"gate_id"`
+}
+
+type SessionLeaveType string
+
+const (
+	SessionLeaveTypeSessionLeave SessionLeaveType = "session_leave"
+)
+
+type SessionLeave struct {
+	Type      SessionLeaveType `json:"type"`
+	RequestID string           `json:"request_id"`
+	Scope     Scope            `json:"scope"`
+	SessionID string           `json:"session_id"`
+}
+
+type SubmitChangesType string
+
+const (
+	SubmitChangesTypeSubmitChanges SubmitChangesType = "submit_changes"
+)
+
+type SubmitChanges struct {
+	Type      SubmitChangesType `json:"type"`
+	RequestID string            `json:"request_id"`
+	Scope     Scope             `json:"scope"`
+	SessionID string            `json:"session_id"`
+	Versions  Versions          `json:"versions"`
+	Changes   []AtomicChange    `json:"changes"`
+	TaskID    *string           `json:"task_id,omitempty"`
+}
+
+type ChangesReceivedType string
+
+const (
+	ChangesReceivedTypeChangesReceived ChangesReceivedType = "changes_received"
+)
+
+type ChangesReceivedState string
+
+const (
+	ChangesReceivedStatePending      ChangesReceivedState = "pending"
+	ChangesReceivedStateSynchronized ChangesReceivedState = "synchronized"
+)
+
+type ChangesReceived struct {
+	Type      ChangesReceivedType  `json:"type"`
+	RequestID string               `json:"request_id"`
+	Scope     Scope                `json:"scope"`
+	SessionID string               `json:"session_id"`
+	ChangeIds []string             `json:"change_ids"`
+	State     ChangesReceivedState `json:"state"`
+}
+
+type TaskSubmitType string
+
+const (
+	TaskSubmitTypeTaskSubmit TaskSubmitType = "task_submit"
+)
+
+type TaskSubmitMode string
+
+const (
+	TaskSubmitModeSuggest TaskSubmitMode = "suggest"
+	TaskSubmitModeDirect  TaskSubmitMode = "direct"
+)
+
+type TaskSubmit struct {
+	Type         TaskSubmitType `json:"type"`
+	RequestID    string         `json:"request_id"`
+	Scope        Scope          `json:"scope"`
+	SessionID    string         `json:"session_id"`
+	Versions     Versions       `json:"versions"`
+	TaskID       string         `json:"task_id"`
+	AllowPartial bool           `json:"allow_partial"`
+	Mode         TaskSubmitMode `json:"mode"`
+	Changes      []AtomicChange `json:"changes"`
+}
+
+type ProposalRequestType string
+
+const (
+	ProposalRequestTypeProposalRequest ProposalRequestType = "proposal_request"
+)
+
+type ProposalRequest struct {
+	Type       ProposalRequestType `json:"type"`
+	RequestID  string              `json:"request_id"`
+	Scope      Scope               `json:"scope"`
+	ProposalID string              `json:"proposal_id"`
+}
+
+type CollaborationUpdateType string
+
+const (
+	CollaborationUpdateTypeCollaborationUpdate CollaborationUpdateType = "collaboration_update"
+)
+
+type CollaborationUpdateEncoding string
+
+const (
+	CollaborationUpdateEncodingJson   CollaborationUpdateEncoding = "json"
+	CollaborationUpdateEncodingBase64 CollaborationUpdateEncoding = "base64"
+)
+
+type CollaborationUpdateState string
+
+const (
+	CollaborationUpdateStateSynchronized CollaborationUpdateState = "synchronized"
+)
+
+type CollaborationUpdate struct {
+	Type         CollaborationUpdateType     `json:"type"`
+	RequestID    string                      `json:"request_id"`
+	Scope        Scope                       `json:"scope"`
+	SessionID    string                      `json:"session_id"`
+	Generation   Counter                     `json:"generation"`
+	BaseRevision Counter                     `json:"base_revision"`
+	ChangeIds    []string                    `json:"change_ids"`
+	Encoding     CollaborationUpdateEncoding `json:"encoding"`
+	Data         string                      `json:"data"`
+	State        CollaborationUpdateState    `json:"state"`
+}
+
+type DocumentUpdateType string
+
+const (
+	DocumentUpdateTypeDocumentUpdate DocumentUpdateType = "document_update"
+)
+
+type DocumentUpdateEncoding string
+
+const (
+	DocumentUpdateEncodingJson   DocumentUpdateEncoding = "json"
+	DocumentUpdateEncodingBase64 DocumentUpdateEncoding = "base64"
+)
+
+type DocumentUpdate struct {
+	Type         DocumentUpdateType     `json:"type"`
+	RequestID    string                 `json:"request_id"`
+	Scope        Scope                  `json:"scope"`
+	SessionID    string                 `json:"session_id"`
+	Generation   Counter                `json:"generation"`
+	FromRevision Counter                `json:"from_revision"`
+	ToRevision   Counter                `json:"to_revision"`
+	Encoding     DocumentUpdateEncoding `json:"encoding"`
+	Data         string                 `json:"data"`
+	Receipt      CommitResult           `json:"receipt"`
+}
+
+type AssetRequestType string
+
+const (
+	AssetRequestTypeAssetRequest AssetRequestType = "asset_request"
+)
+
+type AssetRequest struct {
+	Type        AssetRequestType `json:"type"`
+	RequestID   string           `json:"request_id"`
+	Scope       Scope            `json:"scope"`
+	SessionID   string           `json:"session_id"`
+	Revision    Counter          `json:"revision"`
+	AssetID     string           `json:"asset_id"`
+	OffsetBytes Counter          `json:"offset_bytes"`
+	MaxBytes    PositiveCounter  `json:"max_bytes"`
+}
+
+type AssetResultType string
+
+const (
+	AssetResultTypeAssetResult AssetResultType = "asset_result"
+)
+
+type AssetResult struct {
+	Type        AssetResultType `json:"type"`
+	RequestID   string          `json:"request_id"`
+	Scope       Scope           `json:"scope"`
+	Revision    Counter         `json:"revision"`
+	AssetID     string          `json:"asset_id"`
+	OffsetBytes Counter         `json:"offset_bytes"`
+	SizeBytes   Counter         `json:"size_bytes"`
+	Digest      Digest          `json:"digest"`
+	DataBase64  string          `json:"data_base64"`
+}
+
+type TicketValidationRequestType string
+
+const (
+	TicketValidationRequestTypeTicketValidate TicketValidationRequestType = "ticket_validate"
+)
+
+type TicketValidationRequest struct {
+	Type            TicketValidationRequestType `json:"type"`
+	RequestID       string                      `json:"request_id"`
+	Scope           Scope                       `json:"scope"`
+	SessionID       string                      `json:"session_id"`
+	Fence           Fence                       `json:"fence"`
+	Ticket          string                      `json:"ticket"`
+	ValidationNonce string                      `json:"validation_nonce"`
+}
+
+type TicketValidationResultType string
+
+const (
+	TicketValidationResultTypeTicketValidated TicketValidationResultType = "ticket_validated"
+)
+
+type TicketValidationResult struct {
+	Type              TicketValidationResultType `json:"type"`
+	RequestID         string                     `json:"request_id"`
+	Scope             Scope                      `json:"scope"`
+	SessionID         string                     `json:"session_id"`
+	Generation        Counter                    `json:"generation"`
+	ParticipantRef    string                     `json:"participant_ref"`
+	PermissionVersion Counter                    `json:"permission_version"`
+	Granted           Capabilities               `json:"granted"`
+	Versions          Versions                   `json:"versions"`
+	ExpiresInMs       PositiveCounter            `json:"expires_in_ms"`
+	ValidationNonce   string                     `json:"validation_nonce"`
+	GateID            string                     `json:"gate_id"`
+}
+
+type RevocationNoticeType string
+
+const (
+	RevocationNoticeTypeRevocationNotice RevocationNoticeType = "revocation_notice"
+)
+
+type RevocationNotice struct {
+	Type              RevocationNoticeType `json:"type"`
+	RequestID         string               `json:"request_id"`
+	Scope             Scope                `json:"scope"`
+	SessionID         string               `json:"session_id"`
+	Generation        Counter              `json:"generation"`
+	ParticipantRef    string               `json:"participant_ref"`
+	PermissionVersion Counter              `json:"permission_version"`
+	BarrierID         string               `json:"barrier_id"`
+	GateIds           []string             `json:"gate_ids"`
+	BlockRead         bool                 `json:"block_read"`
+	BlockWrite        bool                 `json:"block_write"`
+}
+
+type TaskChangeStateVariant2Status string
+
+const (
+	TaskChangeStateVariant2StatusPending   TaskChangeStateVariant2Status = "pending"
+	TaskChangeStateVariant2StatusRunning   TaskChangeStateVariant2Status = "running"
+	TaskChangeStateVariant2StatusCancelled TaskChangeStateVariant2Status = "cancelled"
+	TaskChangeStateVariant2StatusUnknown   TaskChangeStateVariant2Status = "unknown"
+)
+
+type TaskChangeStateVariant2 struct {
+	ChangeID string                        `json:"change_id"`
+	Status   TaskChangeStateVariant2Status `json:"status"`
+}
+
+type TaskChangeState = json.RawMessage
+
+type RuntimeReadyType string
+
+const (
+	RuntimeReadyTypeRuntimeReady RuntimeReadyType = "runtime_ready"
+)
+
+type RuntimeReady struct {
+	Type      RuntimeReadyType `json:"type"`
+	RequestID string           `json:"request_id"`
+	Selected  Versions         `json:"selected"`
 }
 
 type Message = json.RawMessage

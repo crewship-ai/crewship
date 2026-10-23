@@ -54,6 +54,8 @@ pub enum ErrorCode {
     DependencyCycle,
     #[serde(rename = "unknown_outcome")]
     UnknownOutcome,
+    #[serde(rename = "task_cancelled")]
+    TaskCancelled,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -69,7 +71,7 @@ pub struct ReadPrecondition {
 #[serde(deny_unknown_fields)]
 pub struct Operation {
     pub op_id: String,
-    pub fingerprint: String,
+    pub fingerprint: Digest,
     pub participant_ref: String,
     pub base_revision: Counter,
     pub dependencies: Vec<String>,
@@ -82,7 +84,9 @@ pub struct Operation {
 pub struct AtomicChange {
     pub change_id: String,
     pub operations: Vec<Operation>,
-    pub membership_hash: String,
+    pub membership_hash: Digest,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -93,11 +97,57 @@ pub struct Fence {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum RejectionRootCauseCode {
+    #[serde(rename = "precondition_failed")]
+    PreconditionFailed,
+    #[serde(rename = "op_id_conflict")]
+    OpIdConflict,
+    #[serde(rename = "target_deleted")]
+    TargetDeleted,
+    #[serde(rename = "quota_exceeded")]
+    QuotaExceeded,
+    #[serde(rename = "permission_revoked")]
+    PermissionRevoked,
+    #[serde(rename = "forbidden")]
+    Forbidden,
+    #[serde(rename = "stale_owner")]
+    StaleOwner,
+    #[serde(rename = "lease_expired")]
+    LeaseExpired,
+    #[serde(rename = "version_mismatch")]
+    VersionMismatch,
+    #[serde(rename = "invalid_request")]
+    InvalidRequest,
+    #[serde(rename = "atomic_change_too_large")]
+    AtomicChangeTooLarge,
+    #[serde(rename = "capacity_exhausted")]
+    CapacityExhausted,
+    #[serde(rename = "unknown_dependency")]
+    UnknownDependency,
+    #[serde(rename = "dependency_cycle")]
+    DependencyCycle,
+    #[serde(rename = "task_cancelled")]
+    TaskCancelled,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RejectionRootCause {
     pub op_id: String,
-    pub code: ErrorCode,
+    pub code: RejectionRootCauseCode,
     pub message: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum RejectionRetry {
+    #[serde(rename = "do_not_retry")]
+    DoNotRetry,
+    #[serde(rename = "query_status")]
+    QueryStatus,
+    #[serde(rename = "reconnect_then_query_status")]
+    ReconnectThenQueryStatus,
+    #[serde(rename = "new_operation_after_refresh")]
+    NewOperationAfterRefresh,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -109,6 +159,7 @@ pub struct Rejection {
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub root_cause: Option<RejectionRootCause>,
+    pub retry: RejectionRetry,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -118,11 +169,21 @@ pub enum OperationResultVariant1Status {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum OperationResultVariant1Durability {
+    #[serde(rename = "node")]
+    Node,
+    #[serde(rename = "replicated")]
+    Replicated,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OperationResultVariant1 {
     pub op_id: String,
     pub status: OperationResultVariant1Status,
     pub revision: Counter,
+    pub issuer: String,
+    pub durability: OperationResultVariant1Durability,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -142,8 +203,8 @@ pub struct OperationResultVariant2 {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum OperationResult {
-    Variant1(OperationResultVariant1),
-    Variant2(OperationResultVariant2),
+    Saved(OperationResultVariant1),
+    Rejected(OperationResultVariant2),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -195,6 +256,8 @@ pub struct Welcome {
     pub scope: Scope,
     pub participant_ref: String,
     pub permission_version: Counter,
+    pub limits: WireLimits,
+    pub issuer: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -223,15 +286,11 @@ pub enum CommitResultType {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum CommitResultIssuer {
-    #[serde(rename = "crewship")]
-    Crewship,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum CommitResultDurability {
     #[serde(rename = "node")]
     Node,
+    #[serde(rename = "replicated")]
+    Replicated,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -242,7 +301,7 @@ pub struct CommitResult {
     pub scope: Scope,
     pub generation: Counter,
     pub revision: Counter,
-    pub issuer: CommitResultIssuer,
+    pub issuer: String,
     pub durability: CommitResultDurability,
     pub changes: Vec<ChangeResult>,
 }
@@ -260,6 +319,7 @@ pub struct StatusRequest {
     pub request_id: String,
     pub scope: Scope,
     pub op_id: String,
+    pub expected_fingerprint: Digest,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -284,8 +344,8 @@ pub struct StatusResultResultVariant2 {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum StatusResultResult {
-    Variant1(OperationResult),
-    Variant2(StatusResultResultVariant2),
+    OperationResult(OperationResult),
+    Unknown(StatusResultResultVariant2),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -301,7 +361,7 @@ pub struct StatusResult {
 #[serde(deny_unknown_fields)]
 pub struct Asset {
     pub asset_id: String,
-    pub digest: String,
+    pub digest: Digest,
     pub size_bytes: Counter,
 }
 
@@ -323,7 +383,7 @@ pub struct Checkpoint {
     pub versions: Versions,
     pub encoding: CheckpointEncoding,
     pub state: String,
-    pub digest: String,
+    pub digest: Digest,
     pub assets: Vec<Asset>,
 }
 
@@ -382,7 +442,7 @@ pub struct SessionTicket {
     pub permission_version: Counter,
     pub granted: Capabilities,
     pub ticket: String,
-    pub expires_in_ms: Counter,
+    pub expires_in_ms: PositiveCounter,
     pub versions: Versions,
 }
 
@@ -399,6 +459,7 @@ pub struct OwnerAcquire {
     pub request_id: String,
     pub scope: Scope,
     pub runtime_ref: String,
+    pub renewal_nonce: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -415,6 +476,8 @@ pub struct OwnerRenew {
     pub scope: Scope,
     pub session_id: String,
     pub fence: Fence,
+    pub renewal_nonce: String,
+    pub permission_version: Counter,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -432,8 +495,10 @@ pub struct OwnerGrant {
     pub session_id: String,
     pub runtime_ref: String,
     pub fence: Fence,
-    pub lease_duration_ms: Counter,
+    pub lease_duration_ms: PositiveCounter,
     pub revision: Counter,
+    pub renewal_nonce: String,
+    pub permission_version: Counter,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -453,6 +518,7 @@ pub struct DeliveryRenew {
     pub fence: Fence,
     pub permission_version: Counter,
     pub renewal_nonce: String,
+    pub gate_id: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -472,7 +538,8 @@ pub struct DeliveryGrant {
     pub generation: Counter,
     pub permission_version: Counter,
     pub renewal_nonce: String,
-    pub duration_ms: Counter,
+    pub duration_ms: PositiveCounter,
+    pub gate_id: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -493,6 +560,7 @@ pub struct SessionClosed {
     pub permission_version: Counter,
     pub barrier_id: String,
     pub reason: Rejection,
+    pub gate_id: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -511,6 +579,8 @@ pub struct DeliveryBlocked {
     pub participant_ref: String,
     pub fence: Fence,
     pub barrier_id: String,
+    pub covered_gate_ids: Vec<String>,
+    pub permission_version: Counter,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -518,10 +588,6 @@ pub enum RevocationConfirmedType {
     #[serde(rename = "revocation_confirmed")]
     RevocationConfirmed,
 }
-
-pub type RevocationConfirmedReadBlocked = crate::True;
-
-pub type RevocationConfirmedWriteBlocked = crate::True;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -532,8 +598,8 @@ pub struct RevocationConfirmed {
     pub participant_ref: String,
     pub barrier_id: String,
     pub permission_version: Counter,
-    pub read_blocked: RevocationConfirmedReadBlocked,
-    pub write_blocked: RevocationConfirmedWriteBlocked,
+    pub read_blocked: bool,
+    pub write_blocked: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -555,7 +621,7 @@ pub struct ReadRequest {
     pub cursor: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub query: Option<serde_json::Map<String, serde_json::Value>>,
-    pub max_bytes: Counter,
+    pub max_bytes: PositiveCounter,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -571,7 +637,7 @@ pub struct ReadResult {
     pub request_id: String,
     pub scope: Scope,
     pub revision: Counter,
-    pub items: Vec<serde_json::Map<String, serde_json::Value>>,
+    pub items: Vec<ReadItem>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
 }
@@ -619,7 +685,7 @@ pub struct Presence {
     pub scope: Scope,
     pub session_id: String,
     pub participant_ref: String,
-    pub ttl_ms: Counter,
+    pub ttl_ms: PositiveCounter,
     pub view: serde_json::Map<String, serde_json::Value>,
 }
 
@@ -647,7 +713,9 @@ pub struct TaskSummary {
     pub task_id: String,
     pub allow_partial: bool,
     pub status: TaskSummaryStatus,
-    pub changes: Vec<ChangeResult>,
+    pub changes: Vec<TaskChangeState>,
+    pub participant_ref: String,
+    pub unresolved_change_ids: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -748,6 +816,8 @@ pub struct UndoRequest {
     pub participant_ref: String,
     pub base_revision: Counter,
     pub op_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_change_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -766,35 +836,629 @@ pub struct ProtocolError {
     pub reason: Rejection,
 }
 
+pub type PositiveCounter = Counter;
+
+pub type Digest = String;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReadItem {
+    pub target_id: String,
+    pub model_type: String,
+    pub revision: Counter,
+    pub data: serde_json::Map<String, serde_json::Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WireLimits {
+    pub max_frame_bytes: PositiveCounter,
+    pub max_batch_bytes: PositiveCounter,
+    pub max_batch_operations: PositiveCounter,
+    pub max_atomic_operations: PositiveCounter,
+    pub max_task_bytes: PositiveCounter,
+    pub max_task_changes: PositiveCounter,
+    pub max_read_bytes: PositiveCounter,
+    pub max_checkpoint_bytes: PositiveCounter,
+    pub max_delivery_ms: PositiveCounter,
+    pub max_presence_ms: PositiveCounter,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CommandDeclaration {
+    pub command_id: String,
+    pub input_schema: serde_json::Map<String, serde_json::Value>,
+    pub result_schema: serde_json::Map<String, serde_json::Value>,
+    pub effect_scope: String,
+    pub mutation: bool,
+    pub replayable: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum FormatDeclarationValidator {
+    #[serde(rename = "adapter")]
+    Adapter,
+    #[serde(rename = "host")]
+    Host,
+    #[serde(rename = "none")]
+    None,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FormatDeclaration {
+    pub format_id: String,
+    pub model_versions: Vec<String>,
+    pub import_extensions: Vec<String>,
+    pub export_extensions: Vec<String>,
+    pub validator: FormatDeclarationValidator,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum RevocationGuaranteeMode {
+    #[serde(rename = "delivery_lease")]
+    DeliveryLease,
+    #[serde(rename = "application_bound")]
+    ApplicationBound,
+    #[serde(rename = "none")]
+    None,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RevocationGuarantee {
+    pub mode: RevocationGuaranteeMode,
+    pub max_delay_ms: Counter,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum StorageDeclarationAuthority {
+    #[serde(rename = "host")]
+    Host,
+    #[serde(rename = "application")]
+    Application,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum StorageDeclarationDurability {
+    #[serde(rename = "none")]
+    None,
+    #[serde(rename = "process")]
+    Process,
+    #[serde(rename = "node")]
+    Node,
+    #[serde(rename = "replicated")]
+    Replicated,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StorageDeclaration {
+    pub authority: StorageDeclarationAuthority,
+    pub durability: StorageDeclarationDurability,
+    pub revocation: RevocationGuarantee,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ApplicationManifestConnectionPath {
+    #[serde(rename = "A")]
+    A,
+    #[serde(rename = "B")]
+    B,
+    #[serde(rename = "C")]
+    C,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ApplicationManifestMergeModelsItem {
+    #[serde(rename = "properties")]
+    Properties,
+    #[serde(rename = "commands")]
+    Commands,
+    #[serde(rename = "yjs_text")]
+    YjsText,
+    #[serde(rename = "application_server")]
+    ApplicationServer,
+    #[serde(rename = "exclusive")]
+    Exclusive,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ApplicationManifest {
+    pub application_id: String,
+    pub package_version: String,
+    pub package_digest: Digest,
+    pub connection_path: ApplicationManifestConnectionPath,
+    pub supported_versions: Vec<Versions>,
+    pub formats: Vec<FormatDeclaration>,
+    pub commands: Vec<CommandDeclaration>,
+    pub capabilities: Vec<String>,
+    pub merge_models: Vec<ApplicationManifestMergeModelsItem>,
+    pub presence_schema: serde_json::Map<String, serde_json::Value>,
+    pub storage: StorageDeclaration,
+    pub input_fallback_allowed: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ManifestRequestType {
+    #[serde(rename = "manifest_request")]
+    ManifestRequest,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManifestRequest {
+    pub r#type: ManifestRequestType,
+    pub request_id: String,
+    pub application_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ManifestResultType {
+    #[serde(rename = "manifest_result")]
+    ManifestResult,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManifestResult {
+    pub r#type: ManifestResultType,
+    pub request_id: String,
+    pub manifest: ApplicationManifest,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum LifecycleRequestType {
+    #[serde(rename = "lifecycle_request")]
+    LifecycleRequest,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum LifecycleRequestAction {
+    #[serde(rename = "open")]
+    Open,
+    #[serde(rename = "suspend")]
+    Suspend,
+    #[serde(rename = "resume")]
+    Resume,
+    #[serde(rename = "close")]
+    Close,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LifecycleRequest {
+    pub r#type: LifecycleRequestType,
+    pub request_id: String,
+    pub scope: Scope,
+    pub session_id: String,
+    pub fence: Fence,
+    pub action: LifecycleRequestAction,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkpoint: Option<Checkpoint>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum LifecycleResultType {
+    #[serde(rename = "lifecycle_result")]
+    LifecycleResult,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum LifecycleResultState {
+    #[serde(rename = "ready")]
+    Ready,
+    #[serde(rename = "suspended")]
+    Suspended,
+    #[serde(rename = "closed")]
+    Closed,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LifecycleResult {
+    pub r#type: LifecycleResultType,
+    pub request_id: String,
+    pub scope: Scope,
+    pub session_id: String,
+    pub generation: Counter,
+    pub state: LifecycleResultState,
+    pub revision: Counter,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionJoinType {
+    #[serde(rename = "session_join")]
+    SessionJoin,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionJoin {
+    pub r#type: SessionJoinType,
+    pub request_id: String,
+    pub ticket: String,
+    pub versions: Versions,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionJoinedType {
+    #[serde(rename = "session_joined")]
+    SessionJoined,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionJoined {
+    pub r#type: SessionJoinedType,
+    pub request_id: String,
+    pub scope: Scope,
+    pub session_id: String,
+    pub participant_ref: String,
+    pub generation: Counter,
+    pub permission_version: Counter,
+    pub versions: Versions,
+    pub gate_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionLeaveType {
+    #[serde(rename = "session_leave")]
+    SessionLeave,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionLeave {
+    pub r#type: SessionLeaveType,
+    pub request_id: String,
+    pub scope: Scope,
+    pub session_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SubmitChangesType {
+    #[serde(rename = "submit_changes")]
+    SubmitChanges,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SubmitChanges {
+    pub r#type: SubmitChangesType,
+    pub request_id: String,
+    pub scope: Scope,
+    pub session_id: String,
+    pub versions: Versions,
+    pub changes: Vec<AtomicChange>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ChangesReceivedType {
+    #[serde(rename = "changes_received")]
+    ChangesReceived,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ChangesReceivedState {
+    #[serde(rename = "pending")]
+    Pending,
+    #[serde(rename = "synchronized")]
+    Synchronized,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChangesReceived {
+    pub r#type: ChangesReceivedType,
+    pub request_id: String,
+    pub scope: Scope,
+    pub session_id: String,
+    pub change_ids: Vec<String>,
+    pub state: ChangesReceivedState,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum TaskSubmitType {
+    #[serde(rename = "task_submit")]
+    TaskSubmit,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum TaskSubmitMode {
+    #[serde(rename = "suggest")]
+    Suggest,
+    #[serde(rename = "direct")]
+    Direct,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaskSubmit {
+    pub r#type: TaskSubmitType,
+    pub request_id: String,
+    pub scope: Scope,
+    pub session_id: String,
+    pub versions: Versions,
+    pub task_id: String,
+    pub allow_partial: bool,
+    pub mode: TaskSubmitMode,
+    pub changes: Vec<AtomicChange>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ProposalRequestType {
+    #[serde(rename = "proposal_request")]
+    ProposalRequest,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProposalRequest {
+    pub r#type: ProposalRequestType,
+    pub request_id: String,
+    pub scope: Scope,
+    pub proposal_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum CollaborationUpdateType {
+    #[serde(rename = "collaboration_update")]
+    CollaborationUpdate,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum CollaborationUpdateEncoding {
+    #[serde(rename = "json")]
+    Json,
+    #[serde(rename = "base64")]
+    Base64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum CollaborationUpdateState {
+    #[serde(rename = "synchronized")]
+    Synchronized,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CollaborationUpdate {
+    pub r#type: CollaborationUpdateType,
+    pub request_id: String,
+    pub scope: Scope,
+    pub session_id: String,
+    pub generation: Counter,
+    pub base_revision: Counter,
+    pub change_ids: Vec<String>,
+    pub encoding: CollaborationUpdateEncoding,
+    pub data: String,
+    pub state: CollaborationUpdateState,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum DocumentUpdateType {
+    #[serde(rename = "document_update")]
+    DocumentUpdate,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum DocumentUpdateEncoding {
+    #[serde(rename = "json")]
+    Json,
+    #[serde(rename = "base64")]
+    Base64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DocumentUpdate {
+    pub r#type: DocumentUpdateType,
+    pub request_id: String,
+    pub scope: Scope,
+    pub session_id: String,
+    pub generation: Counter,
+    pub from_revision: Counter,
+    pub to_revision: Counter,
+    pub encoding: DocumentUpdateEncoding,
+    pub data: String,
+    pub receipt: CommitResult,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum AssetRequestType {
+    #[serde(rename = "asset_request")]
+    AssetRequest,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AssetRequest {
+    pub r#type: AssetRequestType,
+    pub request_id: String,
+    pub scope: Scope,
+    pub session_id: String,
+    pub revision: Counter,
+    pub asset_id: String,
+    pub offset_bytes: Counter,
+    pub max_bytes: PositiveCounter,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum AssetResultType {
+    #[serde(rename = "asset_result")]
+    AssetResult,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AssetResult {
+    pub r#type: AssetResultType,
+    pub request_id: String,
+    pub scope: Scope,
+    pub revision: Counter,
+    pub asset_id: String,
+    pub offset_bytes: Counter,
+    pub size_bytes: Counter,
+    pub digest: Digest,
+    pub data_base64: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum TicketValidationRequestType {
+    #[serde(rename = "ticket_validate")]
+    TicketValidate,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TicketValidationRequest {
+    pub r#type: TicketValidationRequestType,
+    pub request_id: String,
+    pub scope: Scope,
+    pub session_id: String,
+    pub fence: Fence,
+    pub ticket: String,
+    pub validation_nonce: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum TicketValidationResultType {
+    #[serde(rename = "ticket_validated")]
+    TicketValidated,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TicketValidationResult {
+    pub r#type: TicketValidationResultType,
+    pub request_id: String,
+    pub scope: Scope,
+    pub session_id: String,
+    pub generation: Counter,
+    pub participant_ref: String,
+    pub permission_version: Counter,
+    pub granted: Capabilities,
+    pub versions: Versions,
+    pub expires_in_ms: PositiveCounter,
+    pub validation_nonce: String,
+    pub gate_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum RevocationNoticeType {
+    #[serde(rename = "revocation_notice")]
+    RevocationNotice,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RevocationNotice {
+    pub r#type: RevocationNoticeType,
+    pub request_id: String,
+    pub scope: Scope,
+    pub session_id: String,
+    pub generation: Counter,
+    pub participant_ref: String,
+    pub permission_version: Counter,
+    pub barrier_id: String,
+    pub gate_ids: Vec<String>,
+    pub block_read: bool,
+    pub block_write: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum TaskChangeStateVariant2Status {
+    #[serde(rename = "pending")]
+    Pending,
+    #[serde(rename = "running")]
+    Running,
+    #[serde(rename = "cancelled")]
+    Cancelled,
+    #[serde(rename = "unknown")]
+    Unknown,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaskChangeStateVariant2 {
+    pub change_id: String,
+    pub status: TaskChangeStateVariant2Status,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum TaskChangeState {
+    ChangeResult(ChangeResult),
+    Variant2(TaskChangeStateVariant2),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum RuntimeReadyType {
+    #[serde(rename = "runtime_ready")]
+    RuntimeReady,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeReady {
+    pub r#type: RuntimeReadyType,
+    pub request_id: String,
+    pub selected: Versions,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Message {
-    Variant1(Hello),
-    Variant2(Welcome),
-    Variant3(CommitBatch),
-    Variant4(CommitResult),
-    Variant5(StatusRequest),
-    Variant6(StatusResult),
-    Variant7(SessionTicketRequest),
-    Variant8(SessionTicket),
-    Variant9(OwnerAcquire),
-    Variant10(OwnerRenew),
-    Variant11(OwnerGrant),
-    Variant12(DeliveryRenew),
-    Variant13(DeliveryGrant),
-    Variant14(SessionClosed),
-    Variant15(DeliveryBlocked),
-    Variant16(RevocationConfirmed),
-    Variant17(ReadRequest),
-    Variant18(ReadResult),
-    Variant19(CheckpointRequest),
-    Variant20(CheckpointResult),
-    Variant21(Presence),
-    Variant22(TaskStatus),
-    Variant23(TaskResult),
-    Variant24(TaskCancel),
-    Variant25(Proposal),
-    Variant26(ProposalAccept),
-    Variant27(UndoRequest),
-    Variant28(ProtocolError),
+    Hello(Hello),
+    Welcome(Welcome),
+    CommitBatch(CommitBatch),
+    CommitResult(CommitResult),
+    StatusRequest(StatusRequest),
+    StatusResult(StatusResult),
+    SessionTicketRequest(SessionTicketRequest),
+    SessionTicket(SessionTicket),
+    OwnerAcquire(OwnerAcquire),
+    OwnerRenew(OwnerRenew),
+    OwnerGrant(OwnerGrant),
+    DeliveryRenew(DeliveryRenew),
+    DeliveryGrant(DeliveryGrant),
+    SessionClosed(SessionClosed),
+    DeliveryBlocked(DeliveryBlocked),
+    RevocationConfirmed(RevocationConfirmed),
+    ReadRequest(ReadRequest),
+    ReadResult(ReadResult),
+    CheckpointRequest(CheckpointRequest),
+    CheckpointResult(CheckpointResult),
+    Presence(Presence),
+    TaskStatus(TaskStatus),
+    TaskResult(TaskResult),
+    TaskCancel(TaskCancel),
+    Proposal(Proposal),
+    ProposalAccept(ProposalAccept),
+    UndoRequest(UndoRequest),
+    ProtocolError(ProtocolError),
+    ManifestRequest(ManifestRequest),
+    ManifestResult(ManifestResult),
+    LifecycleRequest(LifecycleRequest),
+    LifecycleResult(LifecycleResult),
+    SessionJoin(SessionJoin),
+    SessionJoined(SessionJoined),
+    SessionLeave(SessionLeave),
+    SubmitChanges(SubmitChanges),
+    ChangesReceived(ChangesReceived),
+    TaskSubmit(TaskSubmit),
+    ProposalRequest(ProposalRequest),
+    CollaborationUpdate(CollaborationUpdate),
+    DocumentUpdate(DocumentUpdate),
+    AssetRequest(AssetRequest),
+    AssetResult(AssetResult),
+    TicketValidationRequest(TicketValidationRequest),
+    TicketValidationResult(TicketValidationResult),
+    RevocationNotice(RevocationNotice),
+    RuntimeReady(RuntimeReady),
 }
