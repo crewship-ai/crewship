@@ -3,7 +3,7 @@
 use crate::{
     boundary::{BoundaryError, Transport},
     canonical::CanonicalValue,
-    wire, Counter, Versions,
+    wire, Counter, DeliveryRenew, TicketValidationResult, Versions,
 };
 use serde_json::Value;
 use std::{fmt, time::Duration};
@@ -48,7 +48,32 @@ impl fmt::Debug for BoundGrant {
             .finish_non_exhaustive()
     }
 }
+/// A consumed ticket reply, still dependent on unique-gate admission by the host
+/// integration. Its digest is only a bounded nonce namespace, not authority.
+pub struct BoundTicket {
+    pub ticket: TicketValidationResult,
+    pub first_send: Duration,
+    pub duration: Duration,
+    pub nonce_namespace: String,
+}
 impl BoundGrant {
+    pub fn into_ticket(self) -> Result<BoundTicket, BoundaryError> {
+        if self.reply.value()["type"] != "ticket_validated" {
+            return Err(BoundaryError::Binding);
+        }
+        let ticket = serde_json::from_value(self.reply.value().clone())
+            .map_err(|_| BoundaryError::Binding)?;
+        Ok(BoundTicket {
+            ticket,
+            first_send: self
+                .expires_at
+                .checked_sub(self.duration)
+                .ok_or(BoundaryError::Clock)?,
+            duration: self.duration,
+            nonce_namespace: self.reply.digest(),
+        })
+    }
+
     pub fn value(&self) -> &Value {
         self.reply.value()
     }
@@ -60,6 +85,15 @@ impl BoundGrant {
     }
 }
 impl PendingGrant {
+    pub fn delivery_typed(
+        request: &DeliveryRenew,
+        sent_at: Duration,
+        maximum: Duration,
+    ) -> Result<Self, BoundaryError> {
+        let raw = serde_json::to_vec(request).map_err(|_| BoundaryError::Binding)?;
+        Self::delivery(&raw, sent_at, maximum)
+    }
+
     pub fn delivery(
         raw: &[u8],
         sent_at: Duration,
