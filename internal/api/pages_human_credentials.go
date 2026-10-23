@@ -60,24 +60,13 @@ func validateContentCLIToken(ctx context.Context, reader pageAuthQueryer, token,
 	if strings.TrimSpace(requiredScope) == "" {
 		return errors.New("explicit credential scope required")
 	}
-	var digest, expected string
-	switch {
-	case strings.HasPrefix(token, cliTokenAdminPrefix):
-		key, err := adminHMACKey()
-		if err != nil {
-			return errInvalidCLIToken
-		}
-		digest = hashAdmin(token, key)
-		expected = "ADMIN"
-	case strings.HasPrefix(token, cliTokenStandardPrefix):
-		digest = hashStandard(token)
-		expected = "STANDARD"
-	default:
-		return errInvalidCLIToken
+	digest, expected, err := contentCLITokenIdentity(token)
+	if err != nil {
+		return err
 	}
 	var tier string
 	var expiry, revoked, scopes sql.NullString
-	err := reader.QueryRowContext(ctx, `SELECT c.tier,c.expires_at,c.revoked_at,c.scopes FROM cli_tokens c JOIN users u ON u.id=c.user_id WHERE c.token_hash=? AND c.user_id=? AND u.suspended_at IS NULL`, digest, userID).Scan(&tier, &expiry, &revoked, &scopes)
+	err = reader.QueryRowContext(ctx, `SELECT c.tier,c.expires_at,c.revoked_at,c.scopes FROM cli_tokens c JOIN users u ON u.id=c.user_id WHERE c.token_hash=? AND c.user_id=? AND u.suspended_at IS NULL`, digest, userID).Scan(&tier, &expiry, &revoked, &scopes)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("%w: %v", errContentCredentialUnverified, err)
 	}
@@ -97,4 +86,22 @@ func validateContentCLIToken(ctx context.Context, reader pageAuthQueryer, token,
 		}
 	}
 	return nil
+}
+
+func contentCLITokenIdentity(token string) (digest, expected string, err error) {
+	switch {
+	case strings.HasPrefix(token, cliTokenAdminPrefix):
+		key, err := adminHMACKey()
+		if err != nil {
+			return "", "", errInvalidCLIToken
+		}
+		digest = hashAdmin(token, key)
+		expected = "ADMIN"
+	case strings.HasPrefix(token, cliTokenStandardPrefix):
+		digest = hashStandard(token)
+		expected = "STANDARD"
+	default:
+		return "", "", errInvalidCLIToken
+	}
+	return digest, expected, nil
 }

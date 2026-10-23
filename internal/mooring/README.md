@@ -170,6 +170,19 @@ The wire nonce-to-pending-renewal binding is not implemented by this store.
 There are no tickets, API/CLI routes, production identity callbacks or content
 dispatch paths in this slice; synthetic authority tests are not live RBAC proof.
 
+New Mooring run admission additionally requires the original authenticated
+human receipt's decimal-text user revocation counter and exact session/CLI
+credential provenance. Authentication carries a copied reference through the
+signed socket ticket, host-only message option, queued origin and immutable run
+principal. No raw bearer is retained. Missing legacy provenance is preserved as
+missing and cannot be refreshed from a later run bearer or current user lookup.
+The API helpers validate the original row identity, current user/counter, status
+and explicit scope, and return the earlier original/current credential expiry.
+The production callback must use the writer-bound reader and intersect that
+horizon with the run, exact current attempt and mandate deadlines. These helpers
+do not implement that callback or enable Mooring. Existing web issue origins
+retain their separate web execution revision rules.
+
 For an exclusive host-initiated dispatcher, `Runtime.Exchange` serializes whole
 request/reply pairs and bounds each exchange to five seconds or the caller's
 earlier deadline. Queued cancellation does not close an active caller's channel;

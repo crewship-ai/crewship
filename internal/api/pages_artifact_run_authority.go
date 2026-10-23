@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
@@ -33,6 +34,11 @@ func captureArtifactChatPrincipalQuery(r *http.Request, db artifactPrincipalQuer
 	if current == nil || current.WorkspaceID != ws || current.AgentID != agent {
 		return errors.New("human admission changed")
 	}
+	if receipt.SourceCredentialKind != "" {
+		if _, err := validateOriginalHumanCredential(r.Context(), db, receipt.OriginalCredential(), scopeSelf); err != nil {
+			return err
+		}
+	}
 	var n int
 	if err = db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM conversation_messages WHERE id=? AND session_id=? AND agent_id=? AND author_user_id=? AND role='user'`, message, chat, agent, receipt.UserID).Scan(&n); err != nil {
 		return err
@@ -40,13 +46,13 @@ func captureArtifactChatPrincipalQuery(r *http.Request, db artifactPrincipalQuer
 	if n != 1 {
 		return errors.New("human message missing")
 	}
-	_, err = db.ExecContext(r.Context(), `INSERT INTO artifact_run_principals(run_id,workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(run_id) DO NOTHING`, run, ws, agent, crew, receipt.UserID, chat, message, receipt.MemberID, receipt.MemberRevision, receipt.ChatGeneration, receipt.ChatRevision, tsformat.Format(time.Now().UTC().Add(time.Hour)))
+	_, err = db.ExecContext(r.Context(), `INSERT INTO artifact_run_principals(run_id,workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at,user_authority_revision,source_credential_kind,source_credential_id,source_credential_expires_at,source_credential_binding) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(run_id) DO NOTHING`, run, ws, agent, crew, receipt.UserID, chat, message, receipt.MemberID, receipt.MemberRevision, receipt.ChatGeneration, receipt.ChatRevision, tsformat.Format(time.Now().UTC().Add(time.Hour)), receipt.UserAuthorityRevision, receipt.SourceCredentialKind, receipt.SourceCredentialID, receipt.SourceCredentialExpiresAt, receipt.SourceCredentialBinding)
 	if err != nil {
 		return err
 	}
 	// An exact retry keeps its original expiry. A run cannot silently reuse
 	// a different human, message or captured authority epoch.
-	err = db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM artifact_run_principals WHERE run_id=? AND workspace_id=? AND agent_id=? AND crew_id=? AND human_user_id=? AND chat_id=? AND message_id=? AND member_id=? AND member_revision=? AND chat_generation=? AND chat_revision=?`, run, ws, agent, crew, receipt.UserID, chat, message, receipt.MemberID, receipt.MemberRevision, receipt.ChatGeneration, receipt.ChatRevision).Scan(&n)
+	err = db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM artifact_run_principals WHERE run_id=? AND workspace_id=? AND agent_id=? AND crew_id=? AND human_user_id=? AND chat_id=? AND message_id=? AND member_id=? AND member_revision=? AND chat_generation=? AND chat_revision=? AND user_authority_revision=? AND source_credential_kind=? AND source_credential_id=? AND source_credential_expires_at=? AND source_credential_binding=?`, run, ws, agent, crew, receipt.UserID, chat, message, receipt.MemberID, receipt.MemberRevision, receipt.ChatGeneration, receipt.ChatRevision, receipt.UserAuthorityRevision, receipt.SourceCredentialKind, receipt.SourceCredentialID, receipt.SourceCredentialExpiresAt, receipt.SourceCredentialBinding).Scan(&n)
 	if err != nil {
 		return err
 	}
@@ -56,16 +62,77 @@ func captureArtifactChatPrincipalQuery(r *http.Request, db artifactPrincipalQuer
 	return nil
 }
 
+// New Mooring admissions require the original global user fence and exact
+// credential provenance. A legacy queued receipt must not gain either through
+// late retention.
+// The caller still supplies its writer transaction and performs all current
+// run, attempt, credential, mandate and Page authorization checks separately.
+func captureOriginalUserArtifactPrincipalQuery(r *http.Request, db artifactPrincipalQueryer, run, ws, agent, crew, chat, message string, receipt *chataudience.Receipt) error {
+	current, err := chataudience.RevalidateOriginalUserQuery(r.Context(), db, receipt)
+	if err != nil {
+		return err
+	}
+	if current == nil || !receipt.OriginalCredential().Valid() {
+		return errors.New("original user authority required")
+	}
+	return captureArtifactChatPrincipalQuery(r, db, run, ws, agent, crew, chat, message, receipt)
+}
+
 type artifactRunAuthority struct{ WorkspaceID, AgentID, CrewID, RunID, HumanUserID, ChatID, MessageID, RequestID string }
 type artifactRunKey struct{}
+
+// This additional admission requirement is deliberately not imposed on legacy
+// Docs/GridCraft principals. It does not replace the remaining Mooring checks.
+func (h *PageHandler) checkOriginalUserArtifactRunPrincipal(ctx context.Context, a *artifactRunAuthority) error {
+	if a == nil {
+		return errors.New("original user authority required")
+	}
+	var revision string
+	err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT user_authority_revision FROM artifact_run_principals WHERE run_id=? AND workspace_id=? AND agent_id=? AND crew_id=? AND human_user_id=?`, a.RunID, a.WorkspaceID, a.AgentID, a.CrewID, a.HumanUserID).Scan(&revision)
+	if err != nil || !chataudience.ValidUserAuthorityRevision(revision) {
+		return errors.New("original user authority required")
+	}
+	if _, err := h.validateArtifactPrincipalOriginalCredential(ctx, a, scopeSelf); err != nil {
+		return err
+	}
+	return h.checkArtifactRunPrincipal(ctx, a)
+}
+
+func (h *PageHandler) artifactPrincipalOriginalCredential(ctx context.Context, a *artifactRunAuthority) (auth.OriginalCredential, error) {
+	var reference auth.OriginalCredential
+	if a == nil {
+		return reference, errContentCredentialNotCurrent
+	}
+	err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT human_user_id,user_authority_revision,source_credential_kind,source_credential_id,source_credential_expires_at,source_credential_binding FROM artifact_run_principals WHERE run_id=? AND workspace_id=? AND agent_id=? AND crew_id=? AND human_user_id=?`, a.RunID, a.WorkspaceID, a.AgentID, a.CrewID, a.HumanUserID).Scan(&reference.UserID, &reference.UserAuthorityRevision, &reference.Kind, &reference.ID, &reference.ExpiresAt, &reference.Binding)
+	return reference, err
+}
+
+// The horizon belongs to the ORIGINAL credential, shortened by current expiry.
+// Mooring callers additionally intersect the principal/attempt/mandate horizons.
+func (h *PageHandler) validateArtifactPrincipalOriginalCredential(ctx context.Context, a *artifactRunAuthority, requiredScope string) (time.Time, error) {
+	reference, err := h.artifactPrincipalOriginalCredential(ctx, a)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return validateOriginalHumanCredential(ctx, h.pageAuthReader(ctx), reference, requiredScope)
+}
 
 // Checked again through pageAuthReader after the publication's SQLite write
 // fence. Journal terminal commits and ledger generation changes serialize with it.
 func (h *PageHandler) checkArtifactRunPrincipal(ctx context.Context, a *artifactRunAuthority) error {
 	q := h.pageAuthReader(ctx)
 	var liveHuman int
-	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM artifact_run_principals p JOIN users human ON human.id=p.human_user_id AND human.suspended_at IS NULL JOIN workspace_members wm ON wm.workspace_id=p.workspace_id AND wm.user_id=p.human_user_id AND wm.id=p.member_id AND wm.access_revision=p.member_revision JOIN chats c ON c.id=p.chat_id AND c.workspace_id=p.workspace_id AND c.agent_id=p.agent_id AND c.authority_generation=p.chat_generation AND c.authority_revision=p.chat_revision WHERE p.run_id=? AND NOT EXISTS(SELECT 1 FROM workspace_members WHERE user_id=p.human_user_id AND access_mode='restricted')`, a.RunID).Scan(&liveHuman); err != nil || liveHuman != 1 {
+	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM artifact_run_principals p JOIN users human ON human.id=p.human_user_id AND human.suspended_at IS NULL AND (p.user_authority_revision='' OR p.user_authority_revision=CAST(human.authority_revision AS TEXT)) JOIN workspace_members wm ON wm.workspace_id=p.workspace_id AND wm.user_id=p.human_user_id AND wm.id=p.member_id AND wm.access_revision=p.member_revision JOIN chats c ON c.id=p.chat_id AND c.workspace_id=p.workspace_id AND c.agent_id=p.agent_id AND c.authority_generation=p.chat_generation AND c.authority_revision=p.chat_revision WHERE p.run_id=? AND NOT EXISTS(SELECT 1 FROM workspace_members WHERE user_id=p.human_user_id AND access_mode='restricted')`, a.RunID).Scan(&liveHuman); err != nil || liveHuman != 1 {
 		return errors.New("human chat authority changed")
+	}
+	credential, err := h.artifactPrincipalOriginalCredential(ctx, a)
+	if err != nil {
+		return err
+	}
+	if credential.Kind != "" || credential.ID != "" || credential.ExpiresAt != "" || credential.Binding != "" {
+		if _, err := validateOriginalHumanCredential(ctx, q, credential, scopeSelf); err != nil {
+			return err
+		}
 	}
 
 	var expiry string
@@ -77,7 +144,7 @@ func (h *PageHandler) checkArtifactRunPrincipal(ctx context.Context, a *artifact
 		return errors.New("artifact principal expired")
 	}
 	var started, ended int
-	err := q.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN entry_type='run.started' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop') THEN 1 ELSE 0 END),0) FROM journal_entries WHERE workspace_id=? AND agent_id=? AND trace_id=?`, a.WorkspaceID, a.AgentID, a.RunID).Scan(&started, &ended)
+	err = q.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN entry_type='run.started' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop') THEN 1 ELSE 0 END),0) FROM journal_entries WHERE workspace_id=? AND agent_id=? AND trace_id=?`, a.WorkspaceID, a.AgentID, a.RunID).Scan(&started, &ended)
 	if err != nil || started == 0 || ended != 0 {
 		return errors.New("artifact run is not live")
 	}

@@ -997,7 +997,15 @@ func (h *AuthHandler) WsToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jweToken, err := h.validator.IssueCredentialWSTicket(user.ID, user.SessionID, user.TokenID, user.Name, user.Email, user.CredentialExpiresAt)
+	var jweToken string
+	var err error
+	if user.OriginalCredential != nil {
+		jweToken, err = h.validator.IssueOriginalCredentialWSTicket(user.ID, user.SessionID, user.TokenID, user.Name, user.Email, *user.OriginalCredential)
+	} else {
+		// Existing legacy callers remain supported, without original provenance
+		// and therefore without eligibility for new Mooring admission.
+		jweToken, err = h.validator.IssueCredentialWSTicket(user.ID, user.SessionID, user.TokenID, user.Name, user.Email, user.CredentialExpiresAt)
+	}
 	if err != nil {
 		replyInternalError(w, h.logger, "issue ws ticket", err)
 		return

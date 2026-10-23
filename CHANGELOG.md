@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Queued agent work could retain a human's authority after access was revoked.** New trusted receipts preserve the original user revocation fence through run admission and retries; legacy receipts remain unfenced and cannot authorize the new Mooring admission path.
+
 - **An open workbook could remain active after its editor grant was removed.** Revocation now closes the persisted editor session in the grant transaction, sends a targeted `session_closed` control immediately, and drops queued protected frames while keeping other workbook subscriptions alive. A bounded fallback catches membership and ownership changes.
 
 - **An agent could save a result calculated from cells that had already changed.** Workbook commands now carry cell and range read preconditions, including the range structure revision, and reject changed inputs with a visible reason. Older agent clients conservatively require an unchanged base revision.
