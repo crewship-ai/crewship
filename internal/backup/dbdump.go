@@ -322,6 +322,12 @@ var BackupTables = []string{
 	"documents",
 	"mooring_documents", // after Pages; owns receipts
 	"mooring_receipts",
+	"mooring_collab_documents",
+	"mooring_collab_tasks",
+	"mooring_collab_changes",
+	"mooring_collab_operations",
+	"mooring_collab_checkpoints",
+	"mooring_collab_audit",
 	"document_creations",
 	"slides_heads",
 	"slides_revisions",
