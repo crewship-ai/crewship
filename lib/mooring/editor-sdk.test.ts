@@ -107,3 +107,24 @@ describe("Mooring TypeScript editor SDK", () => {
     expect(t.statuses.at(-1)).toBe("error"); expect(t.sdk.state?.snapshot).toEqual({ text: "prior" })
   })
 })
+it("review: oversized editor commands stay local instead of killing the frame", () => {
+  const t = setup(); t.connect(); t.receive({ type: "snapshot", rev: 1, generation: 1, snapshot: {} })
+  t.sdk.draft(true)
+  const before = t.sent.length
+  expect(t.sdk.command("set", { text: "a".repeat(70 * 1024) })).toBe(false)
+  expect(t.sent).toHaveLength(before)
+  expect(t.sdk.pending).toBe(0)
+  expect(t.statuses.at(-1)).not.toBe("saved")
+})
+it("bounds outgoing UTF-8 bytes and preserves local work on serialization failure", () => {
+  const t = setup(); t.connect(); t.receive({ type: "snapshot", rev: 1, generation: 1, snapshot: {} })
+  for (const args of [{ text: "ž".repeat(40 * 1024) }, { value: BigInt(1) }, undefined]) {
+    const before = t.sent.length
+    expect(t.sdk.command("set", args)).toBe(false)
+    expect(t.sent).toHaveLength(before)
+    expect(t.sdk.pending).toBe(0)
+    expect(t.statuses.at(-1)).toBe("error")
+  }
+  expect(t.sdk.command("set", { text: "retained" })).toBe(true)
+  expect(t.sent.at(-1)).toMatchObject({ seq: 1, arguments: { text: "retained" } })
+})
