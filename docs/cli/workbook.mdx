@@ -475,6 +475,14 @@ previous checkpoints, commands, audit rows and receipts remain unchanged; an
 ordinary write never deletes history to make space. Retention requires an
 explicit operation.
 
+Removing an editor grant closes that participant's existing editor sessions in
+the same transaction. Regranting access requires a new session; old session IDs
+remain closed. An open editor receives a content-free `session_closed` control
+for that workbook, while unrelated workbook subscriptions remain active.
+Membership and ownership changes are also checked by the bounded workbook
+subscription sweep. Every queued protected socket frame checks current access
+again before delivery.
+
 ### Commits feed and live push
 
 `workbook commits` lists the confirmed revisions after `--since`, ascending, at
