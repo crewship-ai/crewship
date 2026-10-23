@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/editororigin"
 	"github.com/crewship-ai/crewship/internal/pages"
 )
 
@@ -22,15 +23,40 @@ import (
 //     also matches this path and skips CSP so the API router doesn't re-stamp
 //     the lockdown after this middleware bowed out.
 func securityHeadersMiddleware(next http.Handler, pageRuntimeOrigin ...string) http.Handler {
+	var o securityHeaderOptions
+	if len(pageRuntimeOrigin) > 0 {
+		o.pageRuntimeOrigin = pageRuntimeOrigin[0]
+	}
+	return securityHeadersMiddlewareWith(next, o)
+}
+
+// securityHeaderOptions are the operator-configured origins Studio may frame.
+type securityHeaderOptions struct {
+	pageRuntimeOrigin string
+	// editorOrigin is the embedded workbook editor origin, set only while the
+	// editor is enabled. It is added to frame-src of every UI document: the
+	// policy belongs to the document, and the UI routes on the client, so a
+	// document first loaded on /chat may later show a workbook Page. Widening
+	// is limited to this one operator-configured origin, whose document is
+	// CSP-sandboxed and holds no credential; frame-src governs only what
+	// Studio frames, not who may frame Studio (frame-ancestors stays 'none').
+	editorOrigin string
+}
+
+func appendFrameSrc(frameSrc, origin string) string {
+	if origin == "" {
+		return frameSrc
+	}
+	if frameSrc == "frame-src 'none'" {
+		return "frame-src " + origin
+	}
+	return frameSrc + " " + origin
+}
+
+func securityHeadersMiddlewareWith(next http.Handler, o securityHeaderOptions) http.Handler {
+	editorFrameSrc := editororigin.FrameSrc(o.editorOrigin)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		frameSrc := pages.FrameSrcDirective()
-		if len(pageRuntimeOrigin) > 0 && pageRuntimeOrigin[0] != "" {
-			if frameSrc == "frame-src 'none'" {
-				frameSrc = "frame-src " + pageRuntimeOrigin[0]
-			} else {
-				frameSrc += " " + pageRuntimeOrigin[0]
-			}
-		}
+		frameSrc := appendFrameSrc(appendFrameSrc(pages.FrameSrcDirective(), o.pageRuntimeOrigin), editorFrameSrc)
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")

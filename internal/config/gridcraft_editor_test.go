@@ -1,0 +1,81 @@
+package config
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestGridCraftEditorOriginIsDefaultOffAndOperatorOwned(t *testing.T) {
+	c := Default()
+	if c.GridCraft.EditorEnabled || c.GridCraft.EditorOrigin != "" || len(c.GridCraft.EditorBundles) != 0 {
+		t.Fatal("editor origin on by default")
+	}
+	digest := strings.Repeat("a1", 32)
+	t.Setenv("CREWSHIP_GRIDCRAFT_ENABLED", "true")
+	t.Setenv("CREWSHIP_GRIDCRAFT_EDITOR_ENABLED", "true")
+	t.Setenv("CREWSHIP_EDITOR_RUNTIME_ORIGIN", "https://editor.example.test")
+	t.Setenv("CREWSHIP_EDITOR_RUNTIME_DEVELOPMENT_SAME_SITE", "true")
+	t.Setenv("CREWSHIP_GRIDCRAFT_EDITOR_BUNDLE_DIR", "/srv/editor-bundles")
+	t.Setenv("CREWSHIP_GRIDCRAFT_EDITOR_BUNDLES", " "+digest+" ,"+strings.Repeat("b2", 32))
+	applyEnvOverrides(c)
+	g := c.GridCraft
+	if !g.EditorEnabled || g.EditorOrigin != "https://editor.example.test" || !g.EditorDevelopmentSameSite || g.EditorBundleDir != "/srv/editor-bundles" || len(g.EditorBundles) != 2 || g.EditorBundles[0] != digest {
+		t.Fatalf("operator override lost: %+v", g)
+	}
+	t.Setenv("CREWSHIP_GRIDCRAFT_EDITOR_ENABLED", "yes")
+	t.Setenv("CREWSHIP_EDITOR_RUNTIME_DEVELOPMENT_SAME_SITE", "1")
+	applyEnvOverrides(c)
+	if c.GridCraft.EditorEnabled || c.GridCraft.EditorDevelopmentSameSite {
+		t.Fatal("misspelled flag opened the editor origin")
+	}
+}
+
+func TestGridCraftEditorOriginValidation(t *testing.T) {
+	digest := strings.Repeat("a1", 32)
+	base := func() *Config {
+		c := Default()
+		c.Auth.NextjsURL = "https://studio.example.test"
+		c.GridCraft = GridCraftConfig{Enabled: true, ServiceSocket: "/run/workbook/service.sock", ServiceTokenFile: "/run/secrets/worker-token",
+			EditorEnabled: true, EditorOrigin: "https://editor.example.test", EditorDevelopmentSameSite: true,
+			EditorBundleDir: "/srv/editor-bundles", EditorBundles: []string{digest}}
+		return c
+	}
+	for _, tc := range []struct {
+		name    string
+		mutate  func(c *Config)
+		allowed string
+		ok      bool
+	}{
+		{"valid sibling with dev exception", func(c *Config) {}, "", true},
+		{"disabled and unset", func(c *Config) { c.GridCraft = GridCraftConfig{} }, "", true},
+		{"requires workbook engine", func(c *Config) { c.GridCraft.Enabled = false }, "", false},
+		{"requires origin", func(c *Config) { c.GridCraft.EditorOrigin = "" }, "", false},
+		{"sibling without dev exception", func(c *Config) { c.GridCraft.EditorDevelopmentSameSite = false }, "", false},
+		{"equals studio", func(c *Config) { c.GridCraft.EditorOrigin = "https://studio.example.test" }, "", false},
+		{"equals explicit studio origin", func(c *Config) {
+			c.Storage.PageStudioOrigin = "https://app.example.test"
+			c.GridCraft.EditorOrigin = "https://app.example.test"
+		}, "", false},
+		{"equals page runtime", func(c *Config) {
+			c.Storage.PageRuntimeOrigin = "https://editor.example.test"
+		}, "", false},
+		{"listed as trusted origin", func(c *Config) {}, "https://studio.example.test, https://editor.example.test", false},
+		{"origin set while disabled is still validated", func(c *Config) {
+			c.GridCraft.EditorEnabled = false
+			c.GridCraft.EditorOrigin = "https://studio.example.test"
+		}, "", false},
+		{"relative bundle dir", func(c *Config) { c.GridCraft.EditorBundleDir = "bundles" }, "", false},
+		{"bundles without dir", func(c *Config) { c.GridCraft.EditorBundleDir = "" }, "", false},
+		{"short digest", func(c *Config) { c.GridCraft.EditorBundles = []string{"abc"} }, "", false},
+		{"uppercase digest", func(c *Config) { c.GridCraft.EditorBundles = []string{strings.ToUpper(digest)} }, "", false},
+		{"prefixed digest", func(c *Config) { c.GridCraft.EditorBundles = []string{"sha256:" + digest} }, "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := base()
+			tc.mutate(c)
+			if err := validateGridCraftEditor(c, tc.allowed); (err == nil) != tc.ok {
+				t.Fatalf("err=%v want ok=%v", err, tc.ok)
+			}
+		})
+	}
+}

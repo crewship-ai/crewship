@@ -432,6 +432,9 @@ func (c *Config) Validate() error {
 	if err := c.GridCraft.validate(); err != nil {
 		return err
 	}
+	if err := validateGridCraftEditor(c, os.Getenv("CREWSHIP_ALLOWED_ORIGINS")); err != nil {
+		return err
+	}
 	if err := c.Documents.validate(); err != nil {
 		return err
 	}
@@ -569,6 +572,7 @@ func applyEnvOverrides(cfg *Config) {
 	if v, ok := os.LookupEnv("CREWSHIP_GRIDCRAFT_SERVICE_TOKEN_FILE"); ok {
 		cfg.GridCraft.ServiceTokenFile = v
 	}
+	applyGridCraftEditorEnv(&cfg.GridCraft)
 	if v, ok := os.LookupEnv("CREWSHIP_SLIDES_ENABLED"); ok {
 		cfg.Slides.Enabled = v == "true" || v == "1"
 	}
