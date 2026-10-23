@@ -274,3 +274,75 @@ pub fn canonical_base64_decoded_len(text: &str, maximum: usize) -> Result<usize,
     }
     Ok(size)
 }
+
+/// Canonical standard base64 with a caller-selected decoded byte limit. This
+/// carries no checkpoint format, digest, transport policy or authority.
+pub fn encode_base64(bytes: &[u8], max_decoded: usize) -> Result<String, BoundaryError> {
+    if bytes.len() > max_decoded {
+        return Err(BoundaryError::Capacity);
+    }
+    let size = bytes
+        .len()
+        .div_ceil(3)
+        .checked_mul(4)
+        .ok_or(BoundaryError::Capacity)?;
+    let mut state = String::new();
+    state
+        .try_reserve_exact(size)
+        .map_err(|_| BoundaryError::Capacity)?;
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    for chunk in bytes.chunks(3) {
+        state.push(ALPHABET[(chunk[0] >> 2) as usize] as char);
+        state.push(
+            ALPHABET[(((chunk[0] & 3) << 4) | (chunk.get(1).copied().unwrap_or(0) >> 4)) as usize]
+                as char,
+        );
+        state.push(if chunk.len() > 1 {
+            ALPHABET[(((chunk[1] & 15) << 2) | (chunk.get(2).copied().unwrap_or(0) >> 6)) as usize]
+                as char
+        } else {
+            '='
+        });
+        state.push(if chunk.len() > 2 {
+            ALPHABET[(chunk[2] & 63) as usize] as char
+        } else {
+            '='
+        });
+    }
+    Ok(state)
+}
+
+/// Reject decoded overflow, noncanonical pad bits, alphabet or padding BEFORE
+/// allocating output. Empty input is canonical if allowed by the app format.
+pub fn decode_base64(text: &str, max_decoded: usize) -> Result<Vec<u8>, BoundaryError> {
+    let size = canonical_base64_decoded_len(text, max_decoded)?;
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(size)
+        .map_err(|_| BoundaryError::Capacity)?;
+    for quartet in text.as_bytes().chunks_exact(4) {
+        let a = base64_sextet(quartet[0]);
+        let b = base64_sextet(quartet[1]);
+        bytes.push((a << 2) | (b >> 4));
+        if quartet[2] != b'=' {
+            let c = base64_sextet(quartet[2]);
+            bytes.push((b << 4) | (c >> 2));
+            if quartet[3] != b'=' {
+                bytes.push((c << 6) | base64_sextet(quartet[3]));
+            }
+        }
+    }
+    Ok(bytes)
+}
+
+// Only called after the canonical alphabet/padding preflight succeeds.
+fn base64_sextet(byte: u8) -> u8 {
+    match byte {
+        b'A'..=b'Z' => byte - b'A',
+        b'a'..=b'z' => byte - b'a' + 26,
+        b'0'..=b'9' => byte - b'0' + 52,
+        b'+' => 62,
+        b'/' => 63,
+        _ => unreachable!("canonical base64 preflight"),
+    }
+}
