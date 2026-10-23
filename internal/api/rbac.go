@@ -32,7 +32,16 @@ import (
 // existing code paths that only know workspace role can keep
 // using RoleFromContext — RBAC is opt-in per-handler.
 func CrewRoleFromDB(ctx context.Context, db *sql.DB, userID, crewID string) (string, error) {
-	if db == nil || userID == "" || crewID == "" {
+	if db == nil {
+		return "", nil
+	}
+	return crewRoleIn(ctx, db, userID, crewID)
+}
+
+// crewRoleIn is CrewRoleFromDB on any querier, so a writer transaction can
+// read the role as of its own snapshot.
+func crewRoleIn(ctx context.Context, db rowQuerier, userID, crewID string) (string, error) {
+	if userID == "" || crewID == "" {
 		return "", nil
 	}
 	var workspaceRole string
@@ -149,6 +158,11 @@ func canScope(ctx context.Context, requested string) bool {
 // created_by_user_id; callers that already have those values can
 // inline the logic instead.
 func canEditAgent(ctx context.Context, db *sql.DB, callerUserID, callerRole, agentID string) (bool, error) {
+	return canEditAgentIn(ctx, db, callerUserID, callerRole, agentID)
+}
+
+// canEditAgentIn is canEditAgent on any querier (a writer transaction).
+func canEditAgentIn(ctx context.Context, db rowQuerier, callerUserID, callerRole, agentID string) (bool, error) {
 	if callerRole == "OWNER" || callerRole == "ADMIN" {
 		return true, nil
 	}
@@ -175,7 +189,7 @@ func canEditAgent(ctx context.Context, db *sql.DB, callerUserID, callerRole, age
 	// Per-crew elevation: if this MANAGER is ADMIN/OWNER on the
 	// crew the agent belongs to, they get edit rights.
 	if agentCrew.Valid {
-		crewRole, err := CrewRoleFromDB(ctx, db, callerUserID, agentCrew.String)
+		crewRole, err := crewRoleIn(ctx, db, callerUserID, agentCrew.String)
 		if err != nil {
 			return false, err
 		}

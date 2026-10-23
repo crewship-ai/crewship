@@ -19,6 +19,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // `crewship admin ...` is the operator-on-the-host recovery surface.
@@ -505,7 +506,12 @@ func runAdminInvalidateSessions(cmd *cobra.Command, _ []string) error {
 	// Already-expired rows are unreachable to clients anyway, so
 	// skipping them is purely a count/wording alignment, not a
 	// security regression.
-	res, err := db.ExecContext(ctx, `
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin session revocation: %w", err)
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `
 		UPDATE user_sessions
 		SET revoked_at = ?, revoked_reason = 'admin_invalidate'
 		WHERE user_id = ?
@@ -517,6 +523,14 @@ func runAdminInvalidateSessions(cmd *cobra.Command, _ []string) error {
 	revoked, err := res.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("revoke sessions rows affected: %w", err)
+	}
+	// The durable marker also stops Guest-published runs accepted before
+	// this revocation, including when the user had no active session left.
+	if _, err = tx.ExecContext(ctx, `UPDATE users SET access_revoked_at = ? WHERE id = ?`, tsformat.Format(time.Now()), userID); err != nil {
+		return fmt.Errorf("record access revocation: %w", err)
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("commit session revocation: %w", err)
 	}
 
 	displayName := fullName

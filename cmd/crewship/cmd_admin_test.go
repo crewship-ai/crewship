@@ -4,6 +4,9 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -29,12 +32,20 @@ func newAdminResetCmdForTest() *cobra.Command {
 
 func initTestDB(t *testing.T) string {
 	t.Helper()
-	// Local recovery signs with the booted instance's keyring in its data dir.
+	// Local recovery signs with the booted instance's keyring in its data dir,
+	// sealed under the master key in secrets.env there, as `crewship start`
+	// writes it; the command's own environment does not carry the key.
 	dataDir := t.TempDir()
 	t.Setenv("CREWSHIP_DATA_DIR", dataDir)
+	master := strings.Repeat("c4", 32)
+	if err := os.WriteFile(filepath.Join(dataDir, "secrets.env"), []byte("ENCRYPTION_KEY="+master+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ENCRYPTION_KEY", master)
 	if _, _, err := journal.EnsureSigningKeys(dataDir, ""); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("ENCRYPTION_KEY", "")
 	db := testutil.MigratedDB(t)
 	dbURL := "file:" + db.Path()
 	// The command under test opens this URL itself, so hand back a file no

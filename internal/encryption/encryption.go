@@ -284,7 +284,20 @@ func Encrypt(plaintext string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return EncryptWithKey(version, key, plaintext)
+}
 
+// EncryptWithKey is Encrypt with an explicit AES-256 key instead of the
+// process environment: the same "version:base64(IV + AuthTag + Ciphertext)"
+// envelope, opened by DecryptWithKeys. Callers that wrap a derived key (the
+// audit keyring at rest) stamp the master-key version they derived it from.
+func EncryptWithKey(version string, key []byte, plaintext string) (string, error) {
+	if !versionPattern.MatchString(version) {
+		return "", fmt.Errorf("encryption: %q is not a key version", version)
+	}
+	if len(key) != 32 {
+		return "", fmt.Errorf("encryption: key must be 32 bytes, got %d", len(key))
+	}
 	gcm, err := aeadForKey(key)
 	if err != nil {
 		return "", err

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,7 +17,7 @@ import (
 )
 
 func TestLocalRecoveryUsesPersistentAppAuditSnapshot(t *testing.T) {
-	t.Setenv("ENCRYPTION_KEY", "synthetic-local-recovery-root")
+	t.Setenv("ENCRYPTION_KEY", strings.Repeat("9", 64))
 	t.Setenv(journal.SigningKeysPathEnv, "")
 	dir := t.TempDir()
 	t.Setenv("CREWSHIP_DATA_DIR", dir)
@@ -55,6 +56,7 @@ func TestAdminResetPasswordUsesTargetInstanceKeyring(t *testing.T) {
 		{name: "none", explicitRoot: true, want: ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("ENCRYPTION_KEY", strings.Repeat("9", 64))
 			t.Setenv(journal.SigningKeysPathEnv, "")
 			t.Setenv("CREWSHIP_HOME", "")
 			instance, other := t.TempDir(), t.TempDir()
@@ -122,6 +124,64 @@ func TestAdminResetPasswordUsesTargetInstanceKeyring(t *testing.T) {
 			result, err := journal.VerifyInstanceAuditWithKeys(t.Context(), reopened.DB, keyrings[tc.want])
 			if err != nil || !result.OK || result.Count == 0 {
 				t.Fatalf("reset was not signed by the %s keyring: %+v %v", tc.want, result, err)
+			}
+		})
+	}
+}
+
+func TestAuditExportKeyringPlaintextForDowngrade(t *testing.T) {
+	for _, tc := range []string{"exported", "no_plaintext_flag", "existing_output"} {
+		t.Run(tc, func(t *testing.T) {
+			master := strings.Repeat("7a", 32)
+			root := t.TempDir()
+			t.Setenv(journal.SigningKeysPathEnv, "")
+			t.Setenv("CREWSHIP_HOME", "")
+			t.Setenv("CREWSHIP_DATA_DIR", root)
+			t.Setenv("DATABASE_URL", "")
+			t.Setenv("ENCRYPTION_KEY", master)
+			keys, _, err := journal.EnsureSigningKeys(root, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "secrets.env"), []byte("ENCRYPTION_KEY="+master+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("ENCRYPTION_KEY", "")
+			output := filepath.Join(t.TempDir(), "plain.json")
+			args := []string{"--plaintext", "--output", output}
+			switch tc {
+			case "no_plaintext_flag":
+				args = []string{"--output", output}
+			case "existing_output":
+				if err := os.WriteFile(output, []byte("keep"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cmd := newAuditExportKeyringCommand()
+			cmd.SetOut(new(bytes.Buffer))
+			cmd.SetArgs(args)
+			err = cmd.Execute()
+			if tc != "exported" {
+				raw, _ := os.ReadFile(output)
+				if err == nil || (tc == "existing_output" && string(raw) != "keep") || (tc == "no_plaintext_flag" && raw != nil) {
+					t.Fatalf("export was not refused: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := os.ReadFile(output)
+			if err != nil {
+				t.Fatal(err)
+			}
+			exported, err := journal.ParseSigningKeys(raw)
+			want, _ := journal.ExportSigningKeys(keys)
+			if err != nil || exported.ActiveID() != keys.ActiveID() || !bytes.Equal(raw, want) {
+				t.Fatalf("export is not the plaintext keyring: %v", err)
+			}
+			if info, _ := os.Stat(output); info.Mode().Perm() != 0o600 {
+				t.Errorf("export mode %v", info.Mode().Perm())
 			}
 		})
 	}

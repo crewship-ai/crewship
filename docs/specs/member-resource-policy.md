@@ -972,4 +972,5 @@ Run, nested calls and trigger writers refuse bounded publication authority;
 trusted archives retain their existing behavior. Shared publication captures an
 exact draft ID/revision/base revision and live explicit rights in one writer
 transaction with audit. Validation is structural only; publishing creates no
-run, chat or attempt. The bounded manual runtime remains a separate slice.
+run, chat or attempt. Bounded manual runs of a published routine are described
+in [restricted workflows](restricted-workflows.md#guest-published-routines).

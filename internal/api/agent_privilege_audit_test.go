@@ -257,6 +257,10 @@ func TestMCPConfigAudit(t *testing.T) {
 			`[{"command":"","env_keys":[],"header_keys":[],"name":"a","transport":"http"},{"command":"node","env_keys":["A","Z"],"header_keys":[],"name":"b","transport":"stdio"}]`},
 		{"env assignment before the command", `{"mcpServers":{"s":{"command":"TOKEN=cmd-value-marker OTHER=x /opt/bin/npx -y srv"}}}`,
 			`[{"command":"npx","env_keys":[],"header_keys":[],"name":"s","transport":"stdio"}]`},
+		{"quoted assignment split by whitespace", `{"mcpServers":{"s":{"command":"TOKEN=\"abc quoted-value-marker\" npx srv"}}}`,
+			`[{"command":"","env_keys":[],"header_keys":[],"name":"s","transport":"stdio"}]`},
+		{"shell operator", `{"mcpServers":{"s":{"command":"$(cat /secret) npx"}}}`,
+			`[{"command":"","env_keys":[],"header_keys":[],"name":"s","transport":"stdio"}]`},
 		{"declared transport", `{"mcpServers":{"s":{"type":"sse","url":"https://h","headers":{"X-Key":"v"}}}}`,
 			`[{"command":"","env_keys":[],"header_keys":["X-Key"],"name":"s","transport":"sse"}]`},
 	}

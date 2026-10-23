@@ -156,6 +156,7 @@ PATCH /api/v1/workspaces/{workspaceId}/pipelines/{slug}/appearance roleCreate
 PATCH /api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget roleManage
 PATCH /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId} roleInline
 POST /api/v1/admin/audit/reseal roleSelf
+POST /api/v1/admin/audit/signing-keys/rotate roleSelf
 POST /api/v1/admin/backups roleManage
 POST /api/v1/admin/backups/restore roleManage
 POST /api/v1/admin/backups/rotate roleManage
