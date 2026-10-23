@@ -99,3 +99,15 @@ explicit errors, never truncation. The host reserves its envelope overhead and
 binds each after-ID cursor to the same scope, confirmed revision and checkpoint
 digest. These pure functions do not authenticate remote cursors or authorize a
 content path. Read-only native documents remain readable in full.
+
+`human::validate_delta` is an experimental application-only fork validator. It
+preserves original client-authored Yrs IDs and checks bounded text/known-format
+encoding, exact affected paragraph IDs, unchanged roots/order/metadata, complete
+causal integration and full native consistency. A reader fails before decoding.
+The host must separately authenticate the writer, bind a unique 53-bit origin
+and current epoch, qualify original causal reads and commit atomically; this
+function does none of those things and is not connected to `PrepareAdapter`, a
+network route or SyncStep2. Host authority must gate every update-bearing frame
+before invoking it. Independent deltas and selective-origin undo have native
+regressions; native WordApp hooks, browser human edits, recovery origin grants
+and a complete human service admission contract remain separate qualification.

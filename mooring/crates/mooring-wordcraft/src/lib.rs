@@ -4,6 +4,8 @@
 pub mod adapter;
 mod candidate;
 pub mod command;
+pub mod human;
+mod human_decode;
 pub mod profile;
 pub mod read;
 
