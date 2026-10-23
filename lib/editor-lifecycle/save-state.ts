@@ -36,11 +36,16 @@ export interface SaveState {
   receipt: boolean
   /** Another tab of this browser owns the journal. */
   busy: boolean
+  /**
+   * Refused changes still waiting for the person's decision (keep theirs or send theirs again). Their
+   * values exist only in the page, so they are unsaved work even when nothing is queued.
+   */
+  refused: number
   trouble?: SaveTrouble
   retryAfterMs?: number
 }
 
-export const initialSaveState: SaveState = { opened: false, canWrite: false, canSend: true, pending: 0, held: 0, stored: false, journalFailed: false, journalWrites: 0, sending: false, receipt: false, busy: false }
+export const initialSaveState: SaveState = { opened: false, canWrite: false, canSend: true, pending: 0, held: 0, stored: false, journalFailed: false, journalWrites: 0, sending: false, receipt: false, busy: false, refused: 0 }
 
 export type SaveEvent =
   | { type: "opened"; canWrite: boolean; canSend?: boolean }
@@ -67,8 +72,11 @@ export type SaveEvent =
   /** A 2xx that is not a verifiable receipt for this write. */
   | { type: "unconfirmed" }
   | { type: "denied" }
-  /** The person took the server's value for a refused change: nothing of it is unsent any more. */
-  | { type: "resolved" }
+  /**
+   * Refused changes now waiting for the person's decision. The last one decided (nothing open, nothing
+   * unsent) ends the refusal trouble; it is never a receipt.
+   */
+  | { type: "refusals"; open: number }
   /** `failed`: a journal write failed. `busy`: another tab owns the journal. */
   | { type: "storage-unavailable"; failed?: boolean; busy?: boolean }
   | { type: "reset" }
@@ -92,8 +100,12 @@ function next(state: SaveState, event: SaveEvent): SaveState {
     case "rejected": return failed("rejected")
     case "unconfirmed": return failed("unconfirmed")
     case "denied": return { ...failed("denied"), canWrite: false }
-    // Only a refusal ends this way, and only once nothing else is unsent; never a receipt.
-    case "resolved": return state.pending === 0 && (state.trouble === "conflict" || state.trouble === "rejected") ? { ...state, trouble: undefined } : state
+    // Only a refusal ends this way, and only once nothing else is open or unsent; never a receipt.
+    case "refusals": {
+      const refused = Math.max(0, event.open)
+      const decided = refused === 0 && state.pending === 0 && (state.trouble === "conflict" || state.trouble === "rejected")
+      return { ...state, refused, trouble: decided ? undefined : state.trouble }
+    }
     case "storage-unavailable": return { ...state, stored: false, journalFailed: state.journalFailed || Boolean(event.failed), busy: Boolean(event.busy), trouble: event.failed ? "storage" : state.trouble }
     case "reset": return initialSaveState
   }
@@ -118,6 +130,8 @@ export function saveWordOf(state: SaveState): SaveWord {
   if (!state.canWrite || state.trouble === "denied") return "readonly"
   if (state.busy) return "busy"
   if (state.sending) return "syncing"
+  // A refused change waits for the person's decision: whatever else got a receipt, it is not saved.
+  if (state.pending === 0 && state.refused > 0) return "unsaved"
   // Nothing unsent but no receipt to point to (just opened): in step, not "saved".
   if (state.pending === 0) return state.receipt ? "saved" : "syncing"
   if (state.trouble === "retrying" || state.trouble === "rate-limited") return "waiting"
@@ -126,7 +140,7 @@ export function saveWordOf(state: SaveState): SaveWord {
 }
 
 /** Leaving now would lose work the server does not hold. */
-export const losesWork = (state: SaveState) => state.pending > 0
+export const losesWork = (state: SaveState) => state.pending > 0 || state.refused > 0
 
 /** Text for the one save status line. `saved`: a verified receipt covers the work. */
 export function saveStateLabel(durability: SaveDurability, saved: boolean): string | undefined {

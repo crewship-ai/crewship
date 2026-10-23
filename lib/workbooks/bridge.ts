@@ -45,9 +45,16 @@
  * - Open drafts: the editor may report which cells have an open, uncommitted cell editor
  *   (`draft`, addresses only, never content). A revision of another writer that changes such a
  *   cell is reported to the host at once (`onConflict` `changed`); the draft stays the editor's.
- *   A commit refused because another writer changed the cell is reported with the person's value
- *   and the server's (`refused`); `keepMine` then writes the person's value against the head as
- *   a host edit (mutation `<session_id>:h<n>`), which reaches the editor as a committed revision.
+ * - Open refusals: every refused edit (a same-cell conflict, `snapshot_required`, an effect out of
+ *   mandate, invalid ops, a full history, an unconfirmed write…) stays open in the bridge with all
+ *   of its cells, the person's values and, for the cells another writer changed, theirs
+ *   (`onRefusals`). It stays open until the person decides: `keepMine` writes every cell of it
+ *   against the head as one host edit (mutation `<session_id>:h<n>`, reaching the editor as a
+ *   committed revision); `takeTheirs` drops the conflicting cells and writes the others the same
+ *   way (or drops the edit when no cell conflicted). A host edit that a snapshot reload overtakes
+ *   comes back as an open refusal (`reloaded`) instead of being dropped. Only when no refusal is
+ *   open and nothing is unsent does the save state leave "refused", and the editor reloads the
+ *   head (the only message on which it drops its own refusal notices).
  * - The editor must say hello and receive its snapshot within `BRIDGE_HANDSHAKE_TIMEOUT_MS`, and
  *   a failed snapshot read at connect ends the session as `load`; the host shows the preview.
  *
@@ -67,6 +74,8 @@ export const BRIDGE_MAX_INPUT_BYTES = 8 * 1024
 export const BRIDGE_MAX_SHEET_LENGTH = 128
 /** Mutations the host holds before refusing new ones. */
 export const BRIDGE_MAX_PENDING = 256
+/** Refused edits the host holds open for the person's decision (the same bound). */
+export const BRIDGE_MAX_REFUSALS = BRIDGE_MAX_PENDING
 /** Page size of the commits feed. */
 export const BRIDGE_COMMITS_LIMIT = 200
 /** Retries of one mutation after a 409 that names no conflicting cell (the head moved). */
@@ -174,16 +183,22 @@ export type FrameMessage =
   /** The cells with an open, uncommitted cell editor in the frame now (addresses only); empty when none. */
   | { type: "draft"; cells: CellRef[] }
 
-/** One cell another writer changed under the person's edit: their value, and the server's with its writer. */
-export interface RefusedCell { sheet: string; cell: string; mine: string; theirs: string; rev: number; actor_label: string }
 /**
- * A same-cell conflict the host shows. `changed`: another writer's revision changed a cell with an
- * open draft (the draft is still in the editor). `refused`: a commit was refused because another
- * writer changed the cell; `seq` is the editor's edit, absent for the host's own keep-mine edit.
+ * One cell of a refused edit: the person's value, and for a cell another writer changed meanwhile
+ * the server's value with its revision and writer (absent for the edit's other cells).
  */
-export type DraftConflict =
-  | { kind: "changed"; sheet: string; cell: string; input: string; rev: number; actor_label: string }
-  | { kind: "refused"; seq?: number; cells: RefusedCell[] }
+export interface RefusedCell { sheet: string; cell: string; mine: string; theirs?: string; rev?: number; actor_label?: string }
+/** Why an edit was refused; `reloaded`: a snapshot reload overtook a keep-mine write before it was saved. */
+export type RefusalReason = RejectCode | "reloaded"
+/**
+ * A refused edit waiting for the person's decision, with every cell it wrote. `id` names it for
+ * `keepMine` and `takeTheirs`; `seq` is the editor's edit (absent once the host wrote it again).
+ * `sending`: the decision is being written (no second decision until it settles). `retryable`:
+ * writing the same cells again can succeed (not for invalid ops or an effect out of mandate).
+ */
+export interface Refusal { id: number; seq?: number; reason: RefusalReason; state: "open" | "sending"; retryable: boolean; cells: RefusedCell[] }
+/** Another writer's revision changed a cell with an open draft (the draft is still in the editor). */
+export type DraftConflict = { kind: "changed"; sheet: string; cell: string; input: string; rev: number; actor_label: string }
 
 /**
  * How the host must create the editor frame: scripts only, no `allow-same-origin` (the origin
@@ -350,11 +365,13 @@ export interface WorkbookBridgeOptions {
   pacing?: Partial<Pacing>
   random?: () => number
   onSaveEvent?: (event: SaveEvent) => void
-  /** A same-cell conflict with the person's open draft or refused edit (see `DraftConflict`). */
+  /** Another writer changed a cell with the person's open draft (see `DraftConflict`). */
   onConflict?: (conflict: DraftConflict) => void
+  /** The refused edits waiting for the person's decision, after every change to them. */
+  onRefusals?: (refusals: Refusal[]) => void
   /** The editor reported which cells have an open draft now (after every `draft` message). */
   onDrafts?: (cells: CellRef[]) => void
-  /** The editor got a fresh snapshot: notices about the content it replaced no longer apply. */
+  /** The editor got a fresh snapshot: warnings about the content it replaced no longer apply (open refusals do). */
   onReload?: () => void
   /** The session is over: destroy the frame. `unsaved` writes never got a receipt. */
   onKill?: (kill: { reason: KillReason; unsaved: number }) => void
@@ -374,6 +391,8 @@ export interface WorkbookBridge {
   readonly confirmedRev: number
   /** Mutations without a receipt. */
   readonly pending: number
+  /** Refused edits waiting for the person's decision, oldest first. */
+  readonly refusals: Refusal[]
   /** Feed every `window` "message" event here. */
   handleWindowMessage(event: WindowMessage): void
   /**
@@ -392,17 +411,20 @@ export interface WorkbookBridge {
   /** The host learned that this session expired (the heartbeat): replace it as an edit's `editor_session_expired` would. */
   sessionExpired(sessionId?: string): void
   /**
-   * The person chose their value after a `refused` conflict: write these cells against the head as
-   * one host edit. False when the session is not live or the cells are not valid ops.
+   * The person keeps their values for refusal `id`: every cell of the refused edit is written
+   * against the head as one host edit. False when the session is not live, the refusal is not
+   * open, or it cannot succeed again (`retryable` false).
    */
-  keepMine(cells: { sheet: string; cell: string; input: string }[]): boolean
+  keepMine(id: number): boolean
   /**
-   * The person took the server's value for the last refused change: nothing is sent. With nothing
-   * unsent the refusal is resolved, and when no cell editor is open the editor reloads the head,
-   * the only message on which it drops its own refusal notice. False when the session is not live
-   * or other edits are unsent.
+   * The person takes the server's values for refusal `id`: its conflicting cells are dropped and
+   * its other cells written against the head as one host edit; with no conflicting cell the whole
+   * edit is dropped. Once no refusal is open and nothing is unsent, the save state leaves
+   * "refused" and, when no cell editor is open, the editor reloads the head, the only message on
+   * which it drops its own refusal notices. False when the session is not live or the refusal is
+   * not open.
    */
-  takeTheirs(): boolean
+  takeTheirs(id: number): boolean
   /** Ends the session (a refusal the host learned of, `session_closed`, unmount). */
   close(reason?: KillReason): void
 }
@@ -425,6 +447,8 @@ interface BridgeWrite extends QueuedWrite {
   priors: string[]
   /** A keep-mine edit of the host (`<session>:h<n>`), not the editor's: `seq` is 0 and the editor hears only its revision. */
   host?: number
+  /** The refusal a host edit writes the person's decision for. */
+  refusal?: number
 }
 
 type Outcome = { type: "ack"; rev: number } | { type: "rejected"; message: HostMessage }
@@ -516,6 +540,13 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
   let drafts = new Set<string>()
   let hostWrites = 0
   const cellKey = (sheet: string, cell: string) => `${sheet}\u0000${cell}`
+  /** Refused edits waiting for the person's decision (or being written after it), in refusal order. */
+  const refusals = new Map<number, Refusal>()
+  let refusalIds = 0
+  /** The person took theirs: reload the head once no refusal is open and nothing is unsent. */
+  let reloadWanted = false, reloading = false
+  const openRefusals = () => [...refusals.values()].filter(refusal => refusal.state === "open").length
+  const copyRefusals = () => [...refusals.values()].map(refusal => ({ ...refusal, cells: refusal.cells.map(cell => ({ ...cell })) }))
 
   const queue = createWriteQueue<BridgeWrite>({
     timers,
@@ -532,7 +563,8 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
 
   function kill(reason: KillReason) {
     if (phase === "killed") return
-    const unsaved = queue.size
+    // An open refusal holds the person's values only here: they are lost with the session too.
+    const unsaved = queue.size + openRefusals()
     phase = "killed"
     queue.stop()
     timers.clearTimeout(driveTimer); timers.clearTimeout(catchUpTimer); timers.clearTimeout(handshakeTimer)
@@ -583,10 +615,13 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
   function deliverCommit(commit: Extract<WorkbookCommit, { kind: "cells" }>) {
     // A held receipt names the revision as ours even when the feed carries no ids.
     const seq = held.get(commit.rev) ?? ownSeq(commit)
+    const ours = seq !== undefined && known.get(seq)?.epoch === epoch
     // An edit refused as unconfirmed may still have committed: the editor then needs its value.
-    if (seq !== undefined && known.get(seq)?.epoch === epoch && outcomes.get(seq)?.type !== "rejected") { ackFrame(seq, commit.rev); settle(seq) }
+    if (ours && outcomes.get(seq)?.type !== "rejected") { ackFrame(seq, commit.rev); settle(seq) }
     else {
       post({ type: "committed", protocol: 1, rev: commit.rev, actor_label: commit.actor_label, ops: commit.ops.map(op => ({ op: "cell.set", ...op })) })
+      // ...and then nothing of it is left for the person to decide.
+      if (ours) for (const refusal of refusals.values()) if (refusal.seq === seq && refusal.state === "open") { refusals.delete(refusal.id); reportRefusals() }
       // Another writer, or another window of the same person, changed a cell being edited here.
       if (!(commit.session_id && ownSessions.has(commit.session_id))) for (const op of commit.ops) if (drafts.has(cellKey(op.sheet, op.cell))) options.onConflict?.({ kind: "changed", sheet: op.sheet, cell: op.cell, input: op.input, rev: commit.rev, actor_label: commit.actor_label })
     }
@@ -603,8 +638,10 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
     let response: TransportResponse
     try { response = await transport.snapshot() } catch { return false }
     if (phase === "killed") return false
-    if (idle && (phase !== "live" || queue.size > 0 || drafts.size > 0 || catching)) return false
+    if (idle && (phase !== "live" || queue.size > 0 || refusals.size > 0 || drafts.size > 0 || catching)) return false
     const refusal = editorRefusal(response)
+    // Nothing is unsent on an idle reload: a session that expired unnoticed is replaced, then the reload tried again.
+    if (refusal === "expired" && idle) { void renew(session.session_id).then(() => { reloading = false; maybeReload() }); return false }
     if (refusal) { kill(refusal); return false }
     const snapshot = response.status === 200 ? parseSnapshot(response.body) : null
     if (!snapshot) return false
@@ -613,15 +650,19 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
     if (idle && snapshot.rev < confirmedRev) return false
     epoch++
     const head = queue.head()
-    const discarded: number[] = []
-    for (const write of queue.writes()) if (queue.remove(write.id) && !write.host) discarded.push(write.seq)
+    const discarded: number[] = [], overtaken: BridgeWrite[] = []
+    for (const write of queue.writes()) if (queue.remove(write.id)) { if (write.host) overtaken.push(write); else discarded.push(write.seq) }
     // The write in flight belongs to the old content too; its outcome is no longer the editor's.
+    // A host write in flight stays the person's: its answer settles it or opens it again (`handle`).
     if (head && queue.head() === head && !head.host) discarded.unshift(head.seq)
     emit({ type: "recount", pending: queue.size })
     held.clear()
     confirmedRev = baseRev = snapshot.rev
     wantRev = Math.max(wantRev, snapshot.rev)
     post({ type: "snapshot", protocol: 1, rev: snapshot.rev, generation: snapshot.generation, snapshot: snapshot.snapshot, discarded })
+    reloadWanted = false
+    // The person's keep-mine choice was made against the old content: they decide again, it is not dropped.
+    for (const write of overtaken) refuse(write, "reloaded")
     options.onReload?.()
     return true
   }
@@ -684,7 +725,7 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
         }
         catchUpFailures = 0
       } finally {
-        if (catchRuns === run) catching = undefined
+        if (catchRuns === run) { catching = undefined; maybeReload() }
       }
     })()
     return catching
@@ -756,6 +797,8 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
       if (++write.unconfirmed < BRIDGE_MAX_UNCONFIRMED) return fail({ kind: "transient" }, { action: "retry" })
       return fail({ kind: "unconfirmed" }, { action: "reject", code: "not_confirmed" })
     }
+    // A host write with a receipt is saved, whatever reload happened since: its refusal is decided.
+    if (write.host) settleHost(write)
     if (write.epoch !== epoch || phase !== "live") return true
     const rev = receipt.rev
     if (rev <= confirmedRev) return true // the commits feed delivered it already
@@ -767,24 +810,68 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
     return true
   }
 
-  /** The person's values for the conflicting cells of a refused write, with the server's. */
-  function refusedCells(write: BridgeWrite, cells: WorkbookConflict[]): RefusedCell[] {
-    const { ops } = JSON.parse(write.body) as { ops: ServerCellOp[] }
-    const out: RefusedCell[] = []
-    for (const conflict of cells) {
-      const mine = ops.find(op => op.cell === conflict.cell && (conflict.sheet === undefined || op.sheet === conflict.sheet))
-      if (mine) out.push({ sheet: mine.sheet, cell: mine.cell, mine: mine.input, theirs: conflict.input, rev: conflict.rev, actor_label: conflict.actor_label })
-    }
-    return out
+  // ----- open refusals -----------------------------------------------------------------------
+
+  function reportRefusals() {
+    if (phase === "killed") return
+    options.onRefusals?.(copyRefusals())
+    emit({ type: "refusals", open: openRefusals() })
   }
 
-  function reject(write: BridgeWrite, code: RejectCode, cells: WorkbookConflict[] = []) {
+  /** Every cell of a refused write with the person's value; the server's where another writer changed it. */
+  function refusalCells(write: BridgeWrite, conflicts: WorkbookConflict[]): RefusedCell[] {
+    const { ops } = JSON.parse(write.body) as { ops: ServerCellOp[] }
+    return ops.map(({ sheet, cell, input }) => {
+      const theirs = conflicts.find(conflict => conflict.cell === cell && (conflict.sheet === undefined || conflict.sheet === sheet))
+      return theirs ? { sheet, cell, mine: input, theirs: theirs.input, rev: theirs.rev, actor_label: theirs.actor_label } : { sheet, cell, mine: input }
+    })
+  }
+
+  /** Opens a refusal for `write`; a host write opens the refusal it was deciding again, with its cells. */
+  function refuse(write: BridgeWrite, reason: RefusalReason, conflicts: WorkbookConflict[] = []) {
+    const fields = { reason, state: "open" as const, retryable: reason !== "invalid_ops" && reason !== "effect_out_of_mandate", cells: refusalCells(write, conflicts) }
+    if (write.host && write.refusal !== undefined) refusals.set(write.refusal, { id: write.refusal, ...fields })
+    else { const id = ++refusalIds; refusals.set(id, { id, seq: write.seq, ...fields }) }
+    reportRefusals()
+  }
+
+  /** A host write got its receipt: the refusal it wrote the decision for is over. */
+  function settleHost(write: BridgeWrite) {
+    if (write.refusal !== undefined && refusals.delete(write.refusal)) reportRefusals()
+  }
+
+  /** Writes `cells` of `refusal` (the person's values) against the head as one host edit. */
+  function writeDecision(refusal: Refusal, cells: RefusedCell[]): boolean {
+    if (queue.size >= BRIDGE_MAX_PENDING) return false
+    const ops: ServerCellOp[] = cells.map(({ sheet, cell, mine }) => ({ kind: "cell.set", sheet, cell, input: mine }))
+    const host = ++hostWrites
+    const id = `${mutationPrefix}h${host}`
+    refusal.state = "sending"
+    queue.enqueue({
+      id, seq: 0, host, refusal: refusal.id, frameKey: "host", epoch, attempted: false, uncertain: false, rebases: 0, unconfirmed: 0, aliases: [], priors: [],
+      body: JSON.stringify({ session_id: session.session_id, mutation_id: id, base_rev: confirmedRev, generation: session.generation, ops }),
+    })
+    emit({ type: "edit", pending: queue.size })
+    reportRefusals()
+    void drive()
+    return true
+  }
+
+  /** After the person took theirs: once nothing is open, unsent or being edited, the editor reloads the head. */
+  function maybeReload() {
+    if (!reloadWanted || reloading || phase !== "live" || queue.size > 0 || refusals.size > 0 || drafts.size > 0 || catching) return
+    reloading = true
+    void reloadSnapshot(true).finally(() => { reloading = false })
+  }
+
+  /** `hold`: keep it as an open refusal (not past the bound, where only the editor keeps it). */
+  function reject(write: BridgeWrite, code: RejectCode, cells: WorkbookConflict[] = [], hold = true) {
     queue.remove(write.id)
     emit({ type: "recount", pending: queue.size })
+    if (write.host) { refuse(write, write.epoch === epoch ? code : "reloaded", cells); return }
     if (write.epoch !== epoch) return
-    const refused = code === "precondition_failed" ? refusedCells(write, cells) : []
-    if (refused.length) options.onConflict?.(write.host ? { kind: "refused", cells: refused } : { kind: "refused", seq: write.seq, cells: refused })
-    if (write.host) return
+    if (hold) refuse(write, code, code === "precondition_failed" ? cells : [])
+    else emit({ type: "rejected" })
     const message: HostMessage = { type: "rejected", protocol: 1, seq: write.seq, code, current_rev: confirmedRev, cells }
     outcomes.set(write.seq, { type: "rejected", message })
     post(message)
@@ -797,6 +884,8 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
       // Sent against content a snapshot replaced; the editor already counts it as discarded.
       queue.remove(write.id)
       emit({ type: "recount", pending: queue.size })
+      // The person's keep-mine choice is not the editor's to discard: it is theirs to make again.
+      if (write.host) refuse(write, "reloaded")
       queue.resume()
       return
     }
@@ -839,6 +928,7 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
     } finally {
       driving = false
     }
+    maybeReload()
   }
 
   // ----- session renewal ----------------------------------------------------------------------
@@ -921,7 +1011,9 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
       id, seq: mutation.seq, frameKey, epoch, attempted: false, uncertain: false, rebases: 0, unconfirmed: 0, aliases: [], priors: [],
       body: JSON.stringify({ session_id: session.session_id, mutation_id: id, base_rev: mutation.base_rev, generation: session.generation, ops: mutation.ops.map(({ sheet, cell, input }) => ({ kind: "cell.set", sheet, cell, input })) }),
     }
-    if (queue.size >= BRIDGE_MAX_PENDING) { reject(write, "too_many_pending"); return true }
+    // Unsent edits and open refusals are both bounded: the frame is untrusted and could refuse itself
+    // into unbounded memory. Past the refusal bound only the editor keeps the refused edit.
+    if (queue.size >= BRIDGE_MAX_PENDING || refusals.size >= BRIDGE_MAX_REFUSALS) { reject(write, "too_many_pending", [], refusals.size < BRIDGE_MAX_REFUSALS); return true }
     queue.enqueue(write)
     emit({ type: "edit", pending: queue.size })
     return true
@@ -1011,6 +1103,7 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
     get session() { return session },
     get confirmedRev() { return confirmedRev },
     get pending() { return queue.size },
+    get refusals() { return copyRefusals() },
     handleWindowMessage(event) {
       if (phase === "killed") return
       const frame = options.frame()
@@ -1043,30 +1136,21 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
       if (push.rev <= confirmedRev && phase === "live") return
       void catchUp(push.rev)
     },
-    keepMine(cells) {
-      if (phase !== "live" || !Array.isArray(cells) || cells.length === 0 || cells.length > BRIDGE_MAX_OPS) return false
-      const ops: ServerCellOp[] = [], seen = new Set<string>()
-      for (const raw of cells) {
-        const op = parseCellOp(raw, null)
-        if (!op || seen.has(cellKey(op.sheet, op.cell))) return false
-        seen.add(cellKey(op.sheet, op.cell))
-        ops.push({ kind: "cell.set", ...op })
-      }
-      if (queue.size >= BRIDGE_MAX_PENDING) return false
-      const host = ++hostWrites
-      const id = `${mutationPrefix}h${host}`
-      queue.enqueue({
-        id, seq: 0, host, frameKey: "host", epoch, attempted: false, uncertain: false, rebases: 0, unconfirmed: 0, aliases: [], priors: [],
-        body: JSON.stringify({ session_id: session.session_id, mutation_id: id, base_rev: confirmedRev, generation: session.generation, ops }),
-      })
-      emit({ type: "edit", pending: queue.size })
-      void drive()
-      return true
+    keepMine(id) {
+      const refusal = refusals.get(id)
+      if (phase !== "live" || !refusal || refusal.state !== "open" || !refusal.retryable) return false
+      return writeDecision(refusal, refusal.cells)
     },
-    takeTheirs() {
-      if (phase !== "live" || queue.size > 0) return false
-      emit({ type: "resolved" })
-      if (drafts.size === 0 && !catching) void reloadSnapshot(true)
+    takeTheirs(id) {
+      const refusal = refusals.get(id)
+      if (phase !== "live" || !refusal || refusal.state !== "open") return false
+      // Their value wins only where they wrote; the person's other cells of the same edit are still written.
+      const conflicting = refusal.cells.some(cell => cell.theirs !== undefined)
+      const rest = conflicting ? refusal.cells.filter(cell => cell.theirs === undefined) : []
+      if (rest.length) { if (!writeDecision(refusal, rest)) return false }
+      else { refusals.delete(id); reportRefusals() }
+      reloadWanted = true
+      maybeReload()
       return true
     },
     online() {

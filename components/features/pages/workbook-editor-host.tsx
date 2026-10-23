@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { useRealtimeChannelSafe, useRealtimeEventSafe, useRealtimeStatusSafe, type RealtimeEventType } from "@/hooks/use-realtime"
 import { initialSaveState, losesWork, saveReducer, type SaveState } from "@/lib/editor-lifecycle/save-state"
 import { useLeaveGuard } from "@/lib/editor-lifecycle/use-leave-guard"
-import { EDITOR_FRAME_ATTRIBUTES, createWorkbookBridge, type CellRef, type DraftConflict, type FrameWindow, type KillReason, type RefusedCell, type WorkbookBridge } from "@/lib/workbooks/bridge"
+import { EDITOR_FRAME_ATTRIBUTES, createWorkbookBridge, type CellRef, type DraftConflict, type FrameWindow, type KillReason, type Refusal, type RefusalReason, type WorkbookBridge } from "@/lib/workbooks/bridge"
 import { WORKBOOK_COMMITTED_EVENT, WORKBOOK_SESSION_REOPEN_MAX_MS, createWorkbookEditorClient, editorFrameSrc, parseCommittedPush, type SessionCheck, type WorkbookEditorClient } from "@/lib/workbooks/editor-client"
 import { PageWorkbook } from "./page-workbook"
 
@@ -75,14 +75,17 @@ export function createEditorFrame(doc: Document, src: string, onLoad: () => void
 export function workbookSaveLabel(state: SaveState): string {
   if (!state.opened) return "Connecting…"
   if (!state.canWrite || state.trouble === "denied") return "Access lost"
+  // A refused change waits for the person's decision: never "Saved" or "No unsaved changes" meanwhile.
+  const refused = state.refused === 1 ? "a change was refused" : `${state.refused} changes were refused`
   if (state.pending > 0) {
     const unsent = `${state.pending} ${state.pending === 1 ? "change" : "changes"} not saved`
     if (state.trouble === "offline") return `Offline · ${unsent}`
     if (state.trouble === "stuck") return `Not saved · server not answering · ${unsent}`
     if (state.trouble === "retrying" || state.trouble === "rate-limited") return "Saving… · retrying"
     if (state.trouble === "rejected" || state.trouble === "unconfirmed") return `Not saved · ${unsent}`
-    return "Saving…"
+    return state.refused > 0 ? `Saving… · ${refused}` : "Saving…"
   }
+  if (state.refused > 0) return state.trouble === "unconfirmed" ? "Not saved · the server did not confirm a change" : `Not saved · ${refused}`
   if (state.receipt) return "Saved"
   if (state.trouble === "rejected" || state.trouble === "conflict") return "Not saved · a change was refused"
   if (state.trouble === "unconfirmed") return "Not saved · the server did not confirm a change"
@@ -116,49 +119,78 @@ function endMessage(end: EditorEnd): { text: string; reopen: boolean } {
   }
 }
 
-/** A same-cell conflict on screen: another writer changed a cell with an open draft, or refused a commit. */
-export type ShownConflict =
-  | { key: string; kind: "changed"; sheet: string; cell: string; input: string; actor_label: string }
-  | { key: string; kind: "refused"; cells: RefusedCell[] }
+/** An early warning on screen: another writer changed a cell with an open draft. */
+export type ShownConflict = { key: string; kind: "changed"; sheet: string; cell: string; input: string; actor_label: string }
 
 const conflictCell = (sheet: string, cell: string) => `${sheet}!${cell}`
 
-/**
- * The conflicts to show after the bridge reported one. A newer report for a cell replaces the
- * older one; a refusal replaces the early warning for its cells (the draft was committed).
- */
+/** The warnings to show after the bridge reported one. A newer report for a cell replaces the older one. */
 export function addConflict(shown: ShownConflict[], conflict: DraftConflict, key: string): ShownConflict[] {
-  if (conflict.kind === "changed") {
-    const cell = conflictCell(conflict.sheet, conflict.cell)
-    return [...shown.filter(item => item.kind !== "changed" || conflictCell(item.sheet, item.cell) !== cell), { key, kind: "changed", sheet: conflict.sheet, cell: conflict.cell, input: conflict.input, actor_label: conflict.actor_label }]
-  }
-  const cells = new Set(conflict.cells.map(item => conflictCell(item.sheet, item.cell)))
-  return [...shown.filter(item => item.kind !== "changed" || !cells.has(conflictCell(item.sheet, item.cell))), { key, kind: "refused", cells: conflict.cells }]
+  const cell = conflictCell(conflict.sheet, conflict.cell)
+  return [...shown.filter(item => conflictCell(item.sheet, item.cell) !== cell), { key, kind: "changed", sheet: conflict.sheet, cell: conflict.cell, input: conflict.input, actor_label: conflict.actor_label }]
 }
 
 /** Early warnings stay only while their cell still has an open draft in the editor. */
 export function keepOpenDrafts(shown: ShownConflict[], drafts: CellRef[]): ShownConflict[] {
   const open = new Set(drafts.map(ref => conflictCell(ref.sheet, ref.cell)))
-  const next = shown.filter(item => item.kind !== "changed" || open.has(conflictCell(item.sheet, item.cell)))
+  const next = shown.filter(item => open.has(conflictCell(item.sheet, item.cell)))
   return next.length === shown.length ? shown : next
 }
 
-function ConflictNotice({ conflicts, onKeepMine, onTakeTheirs }: { conflicts: ShownConflict[]; onKeepMine: (item: Extract<ShownConflict, { kind: "refused" }>) => void; onTakeTheirs: (key: string) => void }) {
-  if (!conflicts.length) return null
-  return <div role="alert" data-testid="workbook-draft-conflict" className="flex flex-col gap-2 border-b border-warn/30 bg-warn/10 px-3 py-2 text-sm">
-    {conflicts.map(item => item.kind === "changed"
-      ? <p key={item.key} data-kind="changed">
-        Changed by {item.actor_label} while you were editing: {conflictCell(item.sheet, item.cell)} is now <q className="break-all">{item.input}</q>. Your draft is kept; when you commit it you can keep yours or take theirs.
-      </p>
-      : <div key={item.key} data-kind="refused" className="flex flex-wrap items-center gap-2">
-        <span className="mr-auto">
-          {item.cells.map(cell => <span key={conflictCell(cell.sheet, cell.cell)} className="block">
-            Changed by {cell.actor_label} while you were editing: {conflictCell(cell.sheet, cell.cell)}. Yours: <q className="break-all">{cell.mine}</q> · Theirs: <q className="break-all">{cell.theirs}</q>
-          </span>)}
-        </span>
-        <Button type="button" size="sm" onClick={() => onKeepMine(item)}>Keep mine</Button>
-        <Button type="button" size="sm" variant="outline" onClick={() => onTakeTheirs(item.key)}>Take theirs</Button>
-      </div>)}
+/** A refusal replaces the early warning for its cells (the draft was committed). */
+function withoutRefused(shown: ShownConflict[], refusals: Refusal[]): ShownConflict[] {
+  const refused = new Set(refusals.flatMap(refusal => refusal.cells.map(cell => conflictCell(cell.sheet, cell.cell))))
+  const next = shown.filter(item => !refused.has(conflictCell(item.sheet, item.cell)))
+  return next.length === shown.length ? shown : next
+}
+
+/** Cells as one label: `Sheet1!B2, C2, Sheet2!A1` (the sheet named when it changes). */
+export function cellList(cells: { sheet: string; cell: string }[]): string {
+  return cells.map((cell, index) => index > 0 && cells[index - 1].sheet === cell.sheet ? cell.cell : conflictCell(cell.sheet, cell.cell)).join(", ")
+}
+
+const REFUSAL_TEXT: Record<RefusalReason, string> = {
+  precondition_failed: "the workbook changed underneath this change",
+  conflict: "the workbook changed underneath this change",
+  invalid_ops: "the server could not accept these cells",
+  history_quota_exceeded: "the workbook's history is full",
+  too_many_pending: "too many changes were waiting to be saved",
+  not_confirmed: "the server did not confirm it",
+  effect_out_of_mandate: "its recalculation could not be confirmed",
+  reloaded: "the workbook was reloaded before your choice was saved",
+}
+
+function RefusalRow({ refusal, onKeepMine, onTakeTheirs }: { refusal: Refusal; onKeepMine: (id: number) => void; onTakeTheirs: (id: number) => void }) {
+  const conflicting = refusal.cells.filter(cell => cell.theirs !== undefined)
+  const rest = refusal.cells.filter(cell => cell.theirs === undefined)
+  const sending = refusal.state === "sending"
+  const take = conflicting.length
+    ? `Take theirs for ${cellList(conflicting)}${rest.length ? ` and save ${cellList(rest)}` : ""}`
+    : `Discard mine for ${cellList(refusal.cells)}`
+  return <div data-kind="refused" data-state={refusal.state} className="flex flex-wrap items-center gap-2">
+    {/* Each row announces itself once, politely; the buttons stay out of the live region. */}
+    <span role="status" aria-live="polite" className="mr-auto">
+      {!conflicting.length && <span className="block">Not saved: {REFUSAL_TEXT[refusal.reason]}.</span>}
+      {refusal.cells.map(cell => <span key={conflictCell(cell.sheet, cell.cell)} className="block">
+        {cell.theirs !== undefined
+          ? <>Changed by {cell.actor_label} while you were editing: {conflictCell(cell.sheet, cell.cell)}. Yours: <q className="break-all">{cell.mine}</q> · Theirs: <q className="break-all">{cell.theirs}</q></>
+          : <>Not saved yet: {conflictCell(cell.sheet, cell.cell)}. Yours: <q className="break-all">{cell.mine}</q></>}
+      </span>)}
+      {conflicting.length > 0 && rest.length > 0 && <span className="block text-muted-foreground">Take theirs keeps their value for {cellList(conflicting)} and still saves your other cells.</span>}
+      {sending && <span className="block text-muted-foreground">Saving your choice…</span>}
+    </span>
+    {refusal.retryable && <Button type="button" size="sm" disabled={sending} aria-label={`Keep mine for ${cellList(refusal.cells)}`} onClick={() => onKeepMine(refusal.id)}>Keep mine</Button>}
+    <Button type="button" size="sm" variant="outline" disabled={sending} aria-label={take} onClick={() => onTakeTheirs(refusal.id)}>{conflicting.length ? "Take theirs" : "Discard mine"}</Button>
+  </div>
+}
+
+function ConflictNotice({ conflicts, refusals, onKeepMine, onTakeTheirs, panel }: { conflicts: ShownConflict[]; refusals: Refusal[]; onKeepMine: (id: number) => void; onTakeTheirs: (id: number) => void; panel: React.Ref<HTMLDivElement> }) {
+  if (!conflicts.length && !refusals.length) return null
+  return <div ref={panel} data-testid="workbook-draft-conflict" className="flex flex-col gap-2 border-b border-warn/30 bg-warn/10 px-3 py-2 text-sm">
+    {conflicts.map(item => <p key={item.key} data-kind="changed" role="status" aria-live="polite">
+      Changed by {item.actor_label} while you were editing: {conflictCell(item.sheet, item.cell)} is now <q className="break-all">{item.input}</q>. Your draft is kept; when you commit it you can keep yours or take theirs.
+    </p>)}
+    {refusals.map(refusal => <RefusalRow key={refusal.id} refusal={refusal} onKeepMine={onKeepMine} onTakeTheirs={onTakeTheirs} />)}
   </div>
 }
 
@@ -237,7 +269,12 @@ export function WorkbookEditorHost({ client, pageId, name, onEnd, onDirtyChange 
   const [save, dispatch] = React.useReducer(saveReducer, initialSaveState)
   const [rev, setRev] = React.useState<number>()
   const [conflicts, setConflicts] = React.useState<ShownConflict[]>([])
+  /** The bridge's open refusals: they survive reloads until the person decides each one. */
+  const [refusals, setRefusals] = React.useState<Refusal[]>([])
   const conflictSeq = React.useRef(0)
+  const panel = React.useRef<HTMLDivElement>(null)
+  /** After a decision: where focus goes once the notice re-rendered. */
+  const refocus = React.useRef(false)
   const bridgeRef = React.useRef<WorkbookBridge | undefined>(undefined)
   const pollRef = React.useRef<() => void>(() => {})
   const onEndRef = React.useRef(onEnd); onEndRef.current = onEnd
@@ -358,11 +395,17 @@ export function WorkbookEditorHost({ client, pageId, name, onEnd, onDirtyChange 
           if (disposed) return
           setConflicts(shown => addConflict(shown, conflict, `c${++conflictSeq.current}`))
         },
+        onRefusals: open => {
+          if (disposed) return
+          setRefusals(open)
+          setConflicts(shown => withoutRefused(shown, open))
+        },
         onDrafts: cells => {
           if (disposed) return
           setConflicts(shown => keepOpenDrafts(shown, cells))
         },
-        // The editor holds new content: notices about what it replaced no longer apply.
+        // The editor holds new content: warnings about what it replaced no longer apply. Open
+        // refusals stay: they hold the person's values until the person decides.
         onReload: () => {
           if (disposed) return
           setConflicts([])
@@ -413,21 +456,19 @@ export function WorkbookEditorHost({ client, pageId, name, onEnd, onDirtyChange 
   })
   useRealtimeEventSafe("realtime.reconnected", () => { bridgeRef.current?.online(); pollRef.current() })
 
-  const keepMine = React.useCallback((item: Extract<ShownConflict, { kind: "refused" }>) => {
-    // The person's value goes out against the head; if someone changed the cell again, a new conflict is shown.
-    if (bridgeRef.current?.keepMine(item.cells.map(cell => ({ sheet: cell.sheet, cell: cell.cell, input: cell.mine })))) {
-      setConflicts(shown => shown.filter(other => other.key !== item.key))
-    }
-  }, [])
-  // The editor already shows the server's value: taking theirs sends nothing. Once no other refused
-  // change is shown, the refusal is over: the status and the editor's own notice clear.
-  const conflictsRef = React.useRef(conflicts); conflictsRef.current = conflicts
-  const takeTheirs = React.useCallback((key: string) => {
-    const rest = conflictsRef.current.filter(other => other.key !== key)
-    conflictsRef.current = rest
-    setConflicts(shown => shown.filter(other => other.key !== key))
-    if (!rest.some(other => other.kind === "refused")) bridgeRef.current?.takeTheirs()
-  }, [])
+  // Keep mine writes every cell of the refused edit against the head; take theirs drops only the
+  // conflicting cells and still writes the others. The bridge reports the refusal as sending, then
+  // drops it on the receipt or opens it again; the status says "refused" until none is open.
+  const keepMine = React.useCallback((id: number) => { if (bridgeRef.current?.keepMine(id)) refocus.current = true }, [])
+  const takeTheirs = React.useCallback((id: number) => { if (bridgeRef.current?.takeTheirs(id)) refocus.current = true }, [])
+  // The clicked row went away or its buttons are disabled: focus moves to the next decision, or the editor.
+  React.useEffect(() => {
+    if (!refocus.current) return
+    refocus.current = false
+    const next = panel.current?.querySelector<HTMLButtonElement>("[data-kind='refused'] button:not([disabled])")
+    if (next) next.focus()
+    else container.current?.querySelector("iframe")?.focus()
+  }, [refusals])
 
   const label = workbookSaveLabel(save)
   return <section aria-label="Workbook page" className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -436,7 +477,7 @@ export function WorkbookEditorHost({ client, pageId, name, onEnd, onDirtyChange 
       {rev !== undefined && rev > 0 && <span className="text-sm tabular-nums text-muted-foreground">Revision {rev}</span>}
       <span role="status" aria-live="polite" data-testid="workbook-save-state" className="text-sm text-muted-foreground">{label}</span>
     </div>
-    <ConflictNotice conflicts={conflicts} onKeepMine={keepMine} onTakeTheirs={takeTheirs} />
+    <ConflictNotice conflicts={conflicts} refusals={refusals} onKeepMine={keepMine} onTakeTheirs={takeTheirs} panel={panel} />
     <div ref={container} data-testid="workbook-editor-frame" className="relative min-h-0 flex-1" />
   </section>
 }

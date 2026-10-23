@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { SaveEvent } from "@/lib/editor-lifecycle/save-state"
-import { BRIDGE_HANDSHAKE_TIMEOUT_MS, BRIDGE_MAX_REBASES, BRIDGE_MAX_INPUT_BYTES, BRIDGE_MAX_UNCONFIRMED, EDITOR_FRAME_ATTRIBUTES, BRIDGE_MAX_MESSAGE_BYTES, BRIDGE_MAX_OPS, createWorkbookBridge, createWorkbookHttpTransport, parseCommits, parseFrameMessage, parseWorkbookSession, type DraftConflict, type HostMessage, type KillReason, type TransportResponse, type WorkbookBridgeOptions, type WorkbookSession, type WorkbookTransport } from "./bridge"
+import { initialSaveState, saveReducer, saveWordOf, type SaveEvent } from "@/lib/editor-lifecycle/save-state"
+import { BRIDGE_HANDSHAKE_TIMEOUT_MS, BRIDGE_MAX_REFUSALS, BRIDGE_MAX_REBASES, BRIDGE_MAX_INPUT_BYTES, BRIDGE_MAX_UNCONFIRMED, EDITOR_FRAME_ATTRIBUTES, BRIDGE_MAX_MESSAGE_BYTES, BRIDGE_MAX_OPS, createWorkbookBridge, createWorkbookHttpTransport, parseCommits, parseFrameMessage, parseWorkbookSession, type DraftConflict, type HostMessage, type Refusal, type KillReason, type TransportResponse, type WorkbookBridgeOptions, type WorkbookSession, type WorkbookTransport } from "./bridge"
 
 const SID = "ws_session1"
 /** The editor document is served with CSP `sandbox allow-scripts`: its origin is opaque. */
@@ -48,10 +48,12 @@ function setup(overrides: Partial<WorkbookTransport> = {}, { loaded = true, reop
   const events: SaveEvent[] = []
   const kills: { reason: KillReason; unsaved: number }[] = []
   const conflicts: DraftConflict[] = []
+  let refusals: Refusal[] = []
   const bridge = createWorkbookBridge({
     session: { ...session, ...sessionOverride }, frame: () => frame, transport, pageLabel: "Budget", clientId: "client-a", reopenSession: reopen,
     createChannel: () => ({ port1: port, port2: "port2" }), random: () => 1,
     onSaveEvent: event => events.push(event), onKill: kill => kills.push(kill), onConflict: conflict => conflicts.push(conflict), onReload,
+    onRefusals: open => { refusals = open },
   })
   if (loaded) bridge.frameLoaded()
   const toFrame = (): HostMessage[] => port.postMessage.mock.calls.map(([data]) => JSON.parse(data as string))
@@ -60,7 +62,9 @@ function setup(overrides: Partial<WorkbookTransport> = {}, { loaded = true, reop
   const send = (message: unknown) => port.onmessage?.({ data: typeof message === "string" ? message : JSON.stringify(message) })
   const connect = async () => { hello(); await flush(); port.postMessage.mockClear() }
   const editBodies = () => transport.edit.mock.calls.map(([, body]) => body)
-  return { bridge, frame, port, transport, events, kills, conflicts, toFrame, types, hello, send, connect, editBodies }
+  /** The save state the host would show after every event so far. */
+  const state = () => events.reduce(saveReducer, initialSaveState)
+  return { bridge, frame, port, transport, events, kills, conflicts, refusals: () => refusals, state, toFrame, types, hello, send, connect, editBodies }
 }
 
 describe("handshake", () => {
@@ -767,126 +771,189 @@ describe("same-cell conflicts with an open draft", () => {
     expect(parseFrameMessage(JSON.stringify(draft(Array.from({ length: BRIDGE_MAX_OPS + 1 }, (_, i) => `A${i + 1}`)))).ok).toBe(false)
   })
 
-  it("on a refused commit names the writer and keeps the person's value for keep-mine or take-theirs", async () => {
-    const conflict: TransportResponse = { status: 409, body: { error: "precondition_failed", head_rev: 42, conflicts: [{ sheet: "Sheet1", cell: "B2", input: "7", rev: 42, actor_label: "Agent Ada" }] } }
-    const t = setup({ edit: vi.fn(async () => conflict), commits: vi.fn(async () => feed(42, [remote(42, [["B2", "7"]])])) })
+  const conflictOn = (cell: string, input: string, rev = 42, actor = "Agent Ada"): TransportResponse => ({ status: 409, body: { error: "precondition_failed", head_rev: rev, conflicts: [{ sheet: "Sheet1", cell, input, rev, actor_label: actor }] } })
+  const hostReceipt = (id: string, rev: number) => ok({ operation_key: { artifact_id: "page1", authority_id: "user:u1", mutation_id: id }, outcome: "applied", rev, durability: "node" })
+  const hostCommit = (rev: number, host: number, cells: Cells) => ({ rev, kind: "cells", actor_label: "Owner", own: true, session_id: SID, mutation_id: `${SID}:h${host}`, ops: cells.map(([cell, input]) => ({ sheet: "Sheet1", cell, input })) })
+  const bodyOps = (body: string | undefined) => (JSON.parse(body!) as { ops: { cell: string; input: string }[] }).ops.map(op => [op.cell, op.input])
+
+  it("on a refused commit keeps every cell of the edit, names the writer of the conflicting one, and marks the rest as not conflicting", async () => {
+    const t = setup({ edit: vi.fn(async () => conflictOn("B2", "7")), commits: vi.fn(async () => feed(42, [remote(42, [["B2", "7"]])])) })
     await t.connect()
     t.send(mutation(1, 41, [["B2", "mine"], ["C2", "also mine"]]))
     await flush()
-    expect(t.conflicts).toEqual([{ kind: "refused", seq: 1, cells: [{ sheet: "Sheet1", cell: "B2", mine: "mine", theirs: "7", rev: 42, actor_label: "Agent Ada" }] }])
+    expect(t.refusals()).toEqual([{
+      id: 1, seq: 1, reason: "precondition_failed", state: "open", retryable: true,
+      cells: [
+        { sheet: "Sheet1", cell: "B2", mine: "mine", theirs: "7", rev: 42, actor_label: "Agent Ada" },
+        { sheet: "Sheet1", cell: "C2", mine: "also mine" },
+      ],
+    }])
+    expect(t.state().refused).toBe(1)
+    expect(saveWordOf(t.state())).toBe("unsaved")
   })
 
-  it("keep mine: sends the person's value against the head as a host edit, and the editor learns it as a committed revision", async () => {
-    const conflict: TransportResponse = { status: 409, body: { error: "precondition_failed", head_rev: 42, conflicts: [{ sheet: "Sheet1", cell: "B2", input: "7", rev: 42, actor_label: "Agent Ada" }] } }
-    const kept = { rev: 43, kind: "cells", actor_label: "Owner", own: true, session_id: SID, mutation_id: `${SID}:h1`, ops: [{ sheet: "Sheet1", cell: "B2", input: "mine" }] }
+  it("keep mine on a multi-cell edit resends every cell of it against the head, and is not saved before the receipt", async () => {
     let head = 42
+    const kept = hostCommit(43, 1, [["B2", "mine"], ["C2", "also mine"], ["D2", "and this"]])
+    const hold = deferred<TransportResponse>()
     const t = setup({
-      edit: vi.fn(async (id: string) => id === `${SID}:h1` ? ok({ operation_key: { artifact_id: "page1", authority_id: "user:u1", mutation_id: id }, outcome: "applied", rev: 43, durability: "node" }) : conflict),
+      edit: vi.fn(async (id: string) => id === `${SID}:h1` ? hold.promise : conflictOn("B2", "7")),
       commits: vi.fn(async (since: number) => feed(head, [remote(42, [["B2", "7"]]), kept].filter(c => c.rev > since && c.rev <= head))),
     })
     await t.connect()
-    t.send(mutation(1, 41, [["B2", "mine"]]))
+    t.send(mutation(1, 41, [["B2", "mine"], ["C2", "also mine"], ["D2", "and this"]]))
     await flush()
+    const [refusal] = t.refusals()
+    expect(t.bridge.keepMine(refusal.id)).toBe(true)
+    await flush()
+    expect(JSON.parse(t.editBodies().at(-1)!)).toEqual({ session_id: SID, mutation_id: `${SID}:h1`, base_rev: 42, generation: 1, ops: [
+      { kind: "cell.set", sheet: "Sheet1", cell: "B2", input: "mine" },
+      { kind: "cell.set", sheet: "Sheet1", cell: "C2", input: "also mine" },
+      { kind: "cell.set", sheet: "Sheet1", cell: "D2", input: "and this" },
+    ] })
+    // In flight: shown as sending (no second click), counted as unsent, never "saved".
+    expect(t.refusals()).toEqual([expect.objectContaining({ id: refusal.id, state: "sending" })])
+    expect(t.bridge.keepMine(refusal.id)).toBe(false)
+    expect(t.bridge.takeTheirs(refusal.id)).toBe(false)
+    expect(saveWordOf(t.state())).not.toBe("saved")
     head = 43
-    expect(t.bridge.keepMine([{ sheet: "Sheet1", cell: "B2", input: "mine" }])).toBe(true)
+    hold.resolve(hostReceipt(`${SID}:h1`, 43))
     await flush()
-    expect(JSON.parse(t.editBodies().at(-1)!)).toEqual({ session_id: SID, mutation_id: `${SID}:h1`, base_rev: 42, generation: 1, ops: [{ kind: "cell.set", sheet: "Sheet1", cell: "B2", input: "mine" }] })
+    expect(t.refusals()).toEqual([])
+    expect(t.state()).toMatchObject({ pending: 0, refused: 0, receipt: true })
+    expect(saveWordOf(t.state())).toBe("saved")
     // The editor never sent this edit, so it gets no ack for it: it gets the revision instead.
-    expect(t.types()).toEqual(["committed:42", "rejected", "committed:43"])
-    expect(t.toFrame().at(-1)).toEqual({ type: "committed", protocol: 1, rev: 43, actor_label: "Owner", ops: ops([["B2", "mine"]]) })
-    expect(t.bridge.pending).toBe(0)
-    expect(t.bridge.confirmedRev).toBe(43)
-    expect(t.events).toContainEqual({ type: "ack", pending: 0 })
-    expect(t.kills).toEqual([])
+    expect(t.toFrame().at(-1)).toEqual({ type: "committed", protocol: 1, rev: 43, actor_label: "Owner", ops: ops([["B2", "mine"], ["C2", "also mine"], ["D2", "and this"]]) })
+    expect(t.transport.edit).toHaveBeenCalledTimes(2)
     // Later frame edits keep their own numbering.
     t.send(mutation(2, 43, [["C9", "next"]]))
     await flush()
     expect(t.transport.edit.mock.calls.at(-1)![0]).toBe(`${SID}:2`)
   })
 
-  it("keep mine refused again reports the new conflict to the host and tells the editor nothing it did not send", async () => {
-    const first: TransportResponse = { status: 409, body: { error: "precondition_failed", head_rev: 42, conflicts: [{ sheet: "Sheet1", cell: "B2", input: "7", rev: 42, actor_label: "Agent Ada" }] } }
-    const second: TransportResponse = { status: 409, body: { error: "precondition_failed", head_rev: 43, conflicts: [{ sheet: "Sheet1", cell: "B2", input: "8", rev: 43, actor_label: "Bob" }] } }
+  it("take theirs on a multi-cell edit drops only the conflicting cell and saves the others, then reloads the head", async () => {
     let head = 42
     const t = setup({
-      edit: vi.fn(async (id: string) => id === `${SID}:h1` ? second : first),
-      commits: vi.fn(async (since: number) => feed(head, [remote(42, [["B2", "7"]]), remote(43, [["B2", "8"]], "Bob")].filter(c => c.rev > since && c.rev <= head))),
+      edit: vi.fn(async (id: string) => id === `${SID}:h1` ? hostReceipt(id, 43) : conflictOn("B2", "7")),
+      commits: vi.fn(async (since: number) => feed(head, [remote(42, [["B2", "7"]]), hostCommit(43, 1, [["C2", "also mine"], ["D2", "and this"]])].filter(c => c.rev > since && c.rev <= head))),
+      snapshot: vi.fn(async () => ok({ schema_version: 1, rev: head, generation: 1, snapshot: { sheets: ["head"] } })),
     })
     await t.connect()
-    t.send(mutation(1, 41, [["B2", "mine"]]))
+    t.send(mutation(1, 41, [["B2", "mine"], ["C2", "also mine"], ["D2", "and this"]]))
     await flush()
     head = 43
-    t.bridge.keepMine([{ sheet: "Sheet1", cell: "B2", input: "mine" }])
+    expect(t.bridge.takeTheirs(t.refusals()[0].id)).toBe(true)
     await flush()
-    expect(t.types()).toEqual(["committed:42", "rejected", "committed:43"])
-    expect(t.conflicts.at(-1)).toEqual({ kind: "refused", cells: [{ sheet: "Sheet1", cell: "B2", mine: "mine", theirs: "8", rev: 43, actor_label: "Bob" }] })
-    expect(t.bridge.pending).toBe(0)
+    expect(bodyOps(t.editBodies().at(-1))).toEqual([["C2", "also mine"], ["D2", "and this"]])
+    expect(t.refusals()).toEqual([])
+    expect(t.state()).toMatchObject({ pending: 0, refused: 0, trouble: undefined })
+    // Everything is settled: the editor reloads the head and drops its own refusal notice.
+    expect(t.types().at(-1)).toBe("snapshot")
   })
 
-  const refusedOnce = () => {
-    const conflict: TransportResponse = { status: 409, body: { error: "precondition_failed", head_rev: 42, conflicts: [{ sheet: "Sheet1", cell: "B2", input: "7", rev: 42, actor_label: "Agent Ada" }] } }
-    return {
-      edit: vi.fn(async () => conflict),
+  it("take theirs when every cell conflicted sends nothing, resolves the refusal and reloads the head so the editor drops its refusal", async () => {
+    const t = setup({
+      edit: vi.fn(async () => conflictOn("B2", "7")),
       commits: vi.fn(async (since: number) => feed(42, [remote(42, [["B2", "7"]])].filter(c => c.rev > since))),
       snapshot: vi.fn(async () => ok({ schema_version: 1, rev: 42, generation: 1, snapshot: { sheets: ["head"] } })),
-    }
-  }
-
-  it("take theirs with nothing pending and no open draft: sends nothing, resolves the refusal and reloads the head so the editor drops its refusal", async () => {
-    const t = setup(refusedOnce())
+    })
     await t.connect()
     t.send(mutation(1, 41, [["B2", "mine"]]))
     await flush()
     const edits = t.transport.edit.mock.calls.length
     const before = t.events.length
-    expect(t.bridge.takeTheirs()).toBe(true)
+    expect(t.bridge.takeTheirs(t.refusals()[0].id)).toBe(true)
     await flush()
     expect(t.transport.edit.mock.calls.length).toBe(edits)
-    expect(t.events.slice(before)).toEqual([{ type: "resolved" }, { type: "recount", pending: 0 }])
+    expect(t.events.slice(before)).toEqual([{ type: "refusals", open: 0 }, { type: "recount", pending: 0 }])
     expect(t.toFrame().at(-1)).toEqual({ type: "snapshot", protocol: 1, rev: 42, generation: 1, snapshot: { sheets: ["head"] }, discarded: [] })
-    expect(t.bridge.confirmedRev).toBe(42)
+    expect(t.state()).toMatchObject({ pending: 0, refused: 0, trouble: undefined })
     expect(t.kills).toEqual([])
   })
 
-  it("take theirs with another cell editor open resolves the refusal but leaves the editor's document alone", async () => {
-    const t = setup(refusedOnce())
+  it("take theirs on one refusal keeps a later refusal of another kind open, its status, and the editor's document", async () => {
+    const t = setup({
+      edit: vi.fn(async (id: string): Promise<TransportResponse> => id.endsWith(":1") ? conflictOn("B2", "7") : { status: 403, body: { error: "effect_out_of_mandate" } }),
+      commits: vi.fn(async (since: number) => feed(42, [remote(42, [["B2", "7"]])].filter(c => c.rev > since))),
+      snapshot: vi.fn(async () => ok({ schema_version: 1, rev: 42, generation: 1, snapshot: { sheets: ["head"] } })),
+    })
     await t.connect()
     t.send(mutation(1, 41, [["B2", "mine"]]))
     await flush()
-    t.send({ type: "draft", protocol: 1, cells: [{ sheet: "Sheet1", cell: "C3" }] })
-    const snapshots = t.transport.snapshot.mock.calls.length
-    expect(t.bridge.takeTheirs()).toBe(true)
+    t.send(mutation(2, 42, [["C9", "=RAND()"]]))
     await flush()
-    expect(t.events.at(-1)).toEqual({ type: "resolved" })
-    expect(t.transport.snapshot.mock.calls.length).toBe(snapshots)
-    expect(t.types().at(-1)).not.toBe("snapshot")
+    const [first, second] = t.refusals()
+    expect(second).toEqual({ id: 2, seq: 2, reason: "effect_out_of_mandate", state: "open", retryable: false, cells: [{ sheet: "Sheet1", cell: "C9", mine: "=RAND()" }] })
+    expect(t.bridge.takeTheirs(first.id)).toBe(true)
+    await flush()
+    expect(t.refusals()).toEqual([second])
+    expect(t.state().refused).toBe(1)
+    expect(saveWordOf(t.state())).toBe("unsaved")
+    expect(t.types()).not.toContain("snapshot")
+    // A refusal that cannot succeed again is not retried, only discarded on the person's word.
+    expect(t.bridge.keepMine(second.id)).toBe(false)
+    expect(t.bridge.takeTheirs(second.id)).toBe(true)
+    await flush()
+    expect(t.refusals()).toEqual([])
+    expect(t.state()).toMatchObject({ refused: 0, trouble: undefined })
+    expect(t.types().at(-1)).toBe("snapshot")
   })
 
-  it("take theirs while other edits are unsent resolves nothing and reloads nothing", async () => {
+  it("take theirs while other edits are unsent resolves that refusal but reloads only once they are saved", async () => {
     const pending = deferred<TransportResponse>()
-    const t = setup({ ...refusedOnce(), edit: vi.fn(async (id: string) => id === `${SID}:2` ? pending.promise : refusedOnce().edit()) })
+    let head = 42
+    const t = setup({
+      edit: vi.fn(async (id: string) => id === `${SID}:2` ? pending.promise : conflictOn("B2", "7")),
+      commits: vi.fn(async (since: number) => feed(head, [remote(42, [["B2", "7"]]), own(43, 2, [["C9", "later"]])].filter(c => c.rev > since && c.rev <= head))),
+      snapshot: vi.fn(async () => ok({ schema_version: 1, rev: head === 42 ? 41 : head, generation: 1, snapshot: { sheets: ["head"] } })),
+    })
     await t.connect()
     t.send(mutation(1, 41, [["B2", "mine"]]))
     await flush()
     t.send(mutation(2, 42, [["C9", "later"]]))
     await flush()
     const snapshots = t.transport.snapshot.mock.calls.length
-    expect(t.bridge.takeTheirs()).toBe(false)
+    expect(t.bridge.takeTheirs(t.refusals()[0].id)).toBe(true)
     await flush()
-    expect(t.events).not.toContainEqual({ type: "resolved" })
+    expect(t.refusals()).toEqual([])
     expect(t.transport.snapshot.mock.calls.length).toBe(snapshots)
+    head = 43
+    pending.resolve(receipt(2, 43))
+    await flush()
+    expect(t.types()).toContain("ack:43")
+    expect(t.types().at(-1)).toBe("snapshot")
+  })
+
+  it("take theirs with a cell editor open resolves the refusal but leaves the editor's document alone", async () => {
+    const t = setup({
+      edit: vi.fn(async () => conflictOn("B2", "7")),
+      commits: vi.fn(async (since: number) => feed(42, [remote(42, [["B2", "7"]])].filter(c => c.rev > since))),
+    })
+    await t.connect()
+    t.send(mutation(1, 41, [["B2", "mine"]]))
+    await flush()
+    t.send({ type: "draft", protocol: 1, cells: [{ sheet: "Sheet1", cell: "C3" }] })
+    const snapshots = t.transport.snapshot.mock.calls.length
+    expect(t.bridge.takeTheirs(t.refusals()[0].id)).toBe(true)
+    await flush()
+    expect(t.events.at(-1)).toEqual({ type: "refusals", open: 0 })
+    expect(t.transport.snapshot.mock.calls.length).toBe(snapshots)
+    expect(t.types().at(-1)).not.toBe("snapshot")
   })
 
   it("take theirs never discards an edit made while the head is being read", async () => {
     const head = deferred<TransportResponse>()
-    const base = refusedOnce()
     let reading = false
-    const t = setup({ ...base, snapshot: vi.fn(async () => reading ? head.promise : base.snapshot()), edit: vi.fn(async (id: string) => id === `${SID}:2` ? receipt(2, 43) : base.edit()) })
+    const t = setup({
+      edit: vi.fn(async (id: string) => id === `${SID}:2` ? receipt(2, 43) : conflictOn("B2", "7")),
+      commits: vi.fn(async (since: number) => feed(42, [remote(42, [["B2", "7"]])].filter(c => c.rev > since))),
+      snapshot: vi.fn(async () => reading ? head.promise : ok({ schema_version: 1, rev: 41, generation: 1, snapshot: {} })),
+    })
     await t.connect()
     t.send(mutation(1, 41, [["B2", "mine"]]))
     await flush()
     reading = true
-    t.bridge.takeTheirs()
+    t.bridge.takeTheirs(t.refusals()[0].id)
     t.send(mutation(2, 42, [["C9", "later"]]))
     head.resolve(ok({ schema_version: 1, rev: 42, generation: 1, snapshot: { sheets: [] } }))
     await flush()
@@ -894,25 +961,164 @@ describe("same-cell conflicts with an open draft", () => {
     expect(t.transport.edit.mock.calls.map(([id]) => id)).toContain(`${SID}:2`)
   })
 
-  it("tells the host when the editor got a fresh snapshot, so stale notices go", async () => {
-    const reloads: number[] = []
-    const t = setup({ commits: vi.fn(async (): Promise<TransportResponse> => ({ status: 410, body: { error: "snapshot_required", head_rev: 50 } })) }, { onReload: () => reloads.push(1) })
+  it("keep mine refused again reopens the same refusal with the new writer and tells the editor nothing it did not send", async () => {
+    let head = 42
+    const t = setup({
+      edit: vi.fn(async (id: string) => id === `${SID}:h1` ? conflictOn("B2", "8", 43, "Bob") : conflictOn("B2", "7")),
+      commits: vi.fn(async (since: number) => feed(head, [remote(42, [["B2", "7"]]), remote(43, [["B2", "8"]], "Bob")].filter(c => c.rev > since && c.rev <= head))),
+    })
     await t.connect()
+    t.send(mutation(1, 41, [["B2", "mine"], ["C2", "also"]]))
+    await flush()
+    head = 43
+    const [refusal] = t.refusals()
+    t.bridge.keepMine(refusal.id)
+    await flush()
+    expect(t.types()).toEqual(["committed:42", "rejected", "committed:43"])
+    expect(t.refusals()).toEqual([{ id: refusal.id, reason: "precondition_failed", state: "open", retryable: true, cells: [
+      { sheet: "Sheet1", cell: "B2", mine: "mine", theirs: "8", rev: 43, actor_label: "Bob" },
+      { sheet: "Sheet1", cell: "C2", mine: "also" },
+    ] }])
+    expect(t.state()).toMatchObject({ pending: 0, refused: 1 })
+  })
+
+  it("a keep-mine write in flight when a snapshot reload replaces the content comes back as an open refusal with its values", async () => {
+    let gone = false
+    const hold = deferred<TransportResponse>()
+    const reloads: number[] = []
+    const t = setup({
+      edit: vi.fn(async (id: string): Promise<TransportResponse> => id === `${SID}:h1` ? hold.promise : conflictOn("B2", "7")),
+      commits: vi.fn(async (since: number): Promise<TransportResponse> => gone ? { status: 410, body: { error: "snapshot_required", head_rev: 50 } } : feed(42, [remote(42, [["B2", "7"]])].filter(c => c.rev > since))),
+      snapshot: vi.fn(async () => ok({ schema_version: 1, rev: gone ? 50 : 41, generation: 1, snapshot: {} })),
+    }, { onReload: () => reloads.push(1) })
+    await t.connect()
+    t.send(mutation(1, 41, [["B2", "mine"], ["C2", "also"]]))
+    await flush()
+    const [refusal] = t.refusals()
+    expect(t.bridge.keepMine(refusal.id)).toBe(true)
+    await flush()
+    gone = true
+    t.bridge.notify({ rev: 50, generation: 1 })
+    await flush()
+    expect(t.types()).toContain("snapshot")
+    hold.resolve({ status: 503, body: null })
+    await flush()
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(t.refusals()).toEqual([{ id: refusal.id, reason: "reloaded", state: "open", retryable: true, cells: [{ sheet: "Sheet1", cell: "B2", mine: "mine" }, { sheet: "Sheet1", cell: "C2", mine: "also" }] }])
+    expect(t.state()).toMatchObject({ pending: 0, refused: 1 })
+    expect(saveWordOf(t.state())).toBe("unsaved")
+    // Not resent behind the person's back against content they have not seen.
+    expect(t.transport.edit.mock.calls.filter(([id]) => id === `${SID}:h1`)).toHaveLength(1)
+  })
+
+  it("a queued keep-mine write dropped by a snapshot reload comes back as an open refusal", async () => {
+    let gone = false
+    const t = setup({
+      edit: vi.fn(async (id: string): Promise<TransportResponse> => id === `${SID}:h1` ? { status: 503, body: null } : conflictOn("B2", "7")),
+      commits: vi.fn(async (since: number): Promise<TransportResponse> => gone ? { status: 410, body: { error: "snapshot_required", head_rev: 50 } } : feed(42, [remote(42, [["B2", "7"]])].filter(c => c.rev > since))),
+      snapshot: vi.fn(async () => ok({ schema_version: 1, rev: gone ? 50 : 41, generation: 1, snapshot: {} })),
+      operation: vi.fn(async (): Promise<TransportResponse> => ({ status: 404, body: null })),
+    })
+    await t.connect()
+    t.send(mutation(1, 41, [["B2", "mine"]]))
+    await flush()
+    t.bridge.keepMine(t.refusals()[0].id)
+    await flush() // 503: waiting in backoff
+    expect(t.bridge.pending).toBe(1)
+    gone = true
+    t.bridge.notify({ rev: 50, generation: 1 })
+    await flush()
+    expect(t.bridge.pending).toBe(0)
+    expect(t.refusals()).toEqual([expect.objectContaining({ reason: "reloaded", state: "open", cells: [{ sheet: "Sheet1", cell: "B2", mine: "mine" }] })])
+    expect(t.state()).toMatchObject({ pending: 0, refused: 1 })
+  })
+
+  it("a keep-mine write in flight across a reload that the server applied after all settles its refusal", async () => {
+    let gone = false
+    const hold = deferred<TransportResponse>()
+    const t = setup({
+      edit: vi.fn(async (id: string): Promise<TransportResponse> => id === `${SID}:h1` ? hold.promise : conflictOn("B2", "7")),
+      commits: vi.fn(async (since: number): Promise<TransportResponse> => gone ? { status: 410, body: { error: "snapshot_required", head_rev: 50 } } : feed(42, [remote(42, [["B2", "7"]])].filter(c => c.rev > since))),
+      snapshot: vi.fn(async () => ok({ schema_version: 1, rev: gone ? 50 : 41, generation: 1, snapshot: {} })),
+    })
+    await t.connect()
+    t.send(mutation(1, 41, [["B2", "mine"]]))
+    await flush()
+    t.bridge.keepMine(t.refusals()[0].id)
+    await flush()
+    gone = true
+    t.bridge.notify({ rev: 50, generation: 1 })
+    await flush()
+    hold.resolve(hostReceipt(`${SID}:h1`, 50))
+    await flush()
+    expect(t.refusals()).toEqual([])
+    expect(t.state()).toMatchObject({ pending: 0, refused: 0 })
+  })
+
+  it("an edit refused as unconfirmed that the feed later shows committed is no longer an open refusal", async () => {
+    let head = 41
+    const t = setup({
+      edit: vi.fn(async () => ok(null)),
+      commits: vi.fn(async (since: number) => since === 41 && head === 42 ? feed(42, [own(42, 1, [["B3", "21"]])]) : feed(since, [])),
+    })
+    await t.connect()
+    t.send(mutation(1, 41, [["B3", "21"]]))
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(t.refusals()).toEqual([expect.objectContaining({ seq: 1, reason: "not_confirmed", retryable: true })])
+    head = 42
+    t.bridge.notify({ rev: 42, generation: 1 })
+    await flush()
+    expect(t.refusals()).toEqual([])
+    expect(t.state().refused).toBe(0)
+  })
+
+  it("counts open refusals as unsaved when the session ends", async () => {
+    const t = setup({ edit: vi.fn(async () => conflictOn("B2", "7")), commits: vi.fn(async (since: number) => feed(42, [remote(42, [["B2", "7"]])].filter(c => c.rev > since))) })
+    await t.connect()
+    t.send(mutation(1, 41, [["B2", "mine"]]))
+    await flush()
+    t.bridge.close("disabled")
+    expect(t.kills).toEqual([{ reason: "disabled", unsaved: 1 }])
+  })
+
+  it("tells the host when the editor got a fresh snapshot, and keeps the open refusals", async () => {
+    const reloads: number[] = []
+    let gone = false
+    const t = setup({
+      edit: vi.fn(async () => conflictOn("B2", "7")),
+      commits: vi.fn(async (since: number): Promise<TransportResponse> => gone ? { status: 410, body: { error: "snapshot_required", head_rev: 50 } } : feed(42, [remote(42, [["B2", "7"]])].filter(c => c.rev > since))),
+    }, { onReload: () => reloads.push(1) })
+    await t.connect()
+    t.send(mutation(1, 41, [["B2", "mine"]]))
+    await flush()
     reloads.length = 0
+    gone = true
     t.transport.snapshot.mockResolvedValueOnce(ok({ schema_version: 1, rev: 50, generation: 1, snapshot: {} }))
     t.bridge.notify({ rev: 50, generation: 1 })
     await flush()
     expect(t.types().at(-1)).toBe("snapshot")
     expect(reloads).toEqual([1])
+    expect(t.refusals()).toEqual([expect.objectContaining({ seq: 1, state: "open" })])
+    expect(t.state().refused).toBe(1)
   })
 
-  it("refuses keep mine for invalid cells or a session that is not live", async () => {
-    const t = setup()
-    expect(t.bridge.keepMine([{ sheet: "Sheet1", cell: "B2", input: "x" }])).toBe(false)
-    expect(t.bridge.takeTheirs()).toBe(false)
+  it("holds at most BRIDGE_MAX_REFUSALS open refusals; past that the editor alone keeps the refused edit", async () => {
+    const t = setup({ edit: vi.fn(async (): Promise<TransportResponse> => ({ status: 400, body: { error: "invalid_ops" } })) })
     await t.connect()
-    expect(t.bridge.keepMine([])).toBe(false)
-    expect(t.bridge.keepMine([{ sheet: "Sheet1", cell: "b2", input: "x" }])).toBe(false)
+    for (let seq = 1; seq <= BRIDGE_MAX_REFUSALS + 2; seq++) { t.send(mutation(seq, 41, [["B2", `x${seq}`]])); await flush() }
+    expect(t.refusals()).toHaveLength(BRIDGE_MAX_REFUSALS)
+    expect(t.bridge.pending).toBe(0)
+    expect(t.toFrame().at(-1)).toEqual({ type: "rejected", protocol: 1, seq: BRIDGE_MAX_REFUSALS + 2, code: "too_many_pending", current_rev: 41, cells: [] })
+    expect(t.transport.edit).toHaveBeenCalledTimes(BRIDGE_MAX_REFUSALS)
+  })
+
+  it("refuses keep mine and take theirs for an unknown refusal or a session that is not live", async () => {
+    const t = setup()
+    expect(t.bridge.keepMine(1)).toBe(false)
+    expect(t.bridge.takeTheirs(1)).toBe(false)
+    await t.connect()
+    expect(t.bridge.keepMine(1)).toBe(false)
+    expect(t.bridge.takeTheirs(1)).toBe(false)
     expect(t.transport.edit).not.toHaveBeenCalled()
   })
 })
@@ -1177,6 +1383,26 @@ describe("the server's live-session contract", () => {
     expect(reopen).toHaveBeenCalledTimes(1)
     expect(t.bridge.session.session_id).toBe(SID2)
     expect(t.kills).toEqual([])
+  })
+
+  it("take theirs on a session that expired unnoticed opens a new one for the reload instead of ending the editor", async () => {
+    const reopen = reopened({}, { snapshot: async () => ok({ schema_version: 1, rev: 42, generation: 1, snapshot: { sheets: ["head"] } }) })
+    let expiredNow = false
+    const t = setup({
+      edit: vi.fn(async (): Promise<TransportResponse> => ({ status: 409, body: { error: "precondition_failed", head_rev: 42, conflicts: [{ sheet: "Sheet1", cell: "B2", input: "7", rev: 42, actor_label: "Agent Ada" }] } })),
+      commits: vi.fn(async (since: number) => feed(42, [remote(42, [["B2", "7"]])].filter(c => c.rev > since))),
+      snapshot: vi.fn(async (): Promise<TransportResponse> => expiredNow ? expired : ok({ schema_version: 1, rev: 41, generation: 1, snapshot: {} })),
+    }, { reopen })
+    await t.connect()
+    t.send(mutation(1, 41, [["B2", "mine"]]))
+    await flush()
+    expiredNow = true
+    expect(t.bridge.takeTheirs(t.refusals()[0].id)).toBe(true)
+    await flush(); await flush()
+    expect(t.kills).toEqual([])
+    expect(reopen).toHaveBeenCalledTimes(1)
+    expect(t.bridge.session.session_id).toBe(SID2)
+    expect(t.toFrame().at(-1)).toEqual(expect.objectContaining({ type: "snapshot", rev: 42 }))
   })
 
   it("410 snapshot_required from the feed rereads the snapshot without ending the editor", async () => {

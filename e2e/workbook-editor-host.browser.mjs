@@ -386,11 +386,14 @@ try {
   assert.equal(refused.state.cells.B2, "7")
   await a.getByText("Not saved · a change was refused").waitFor()
   // At commit the refusal names the writer and keeps the person's value until they choose.
-  await warning.getByRole("button", { name: "Keep mine" }).waitFor()
+  await warning.getByRole("button", { name: "Keep mine for Sheet1!B2" }).waitFor()
   assert.match(await warning.textContent(), /Yours: .?mine.? · Theirs: .?7/)
-  await warning.getByRole("button", { name: "Take theirs" }).click()
+  // Until the person decides, their value exists only in the page: leaving is guarded.
+  assert.equal(await unsent(a), "true")
+  await warning.getByRole("button", { name: "Take theirs for Sheet1!B2" }).click()
   await warning.waitFor({ state: "detached" })
-  assert.equal(await unsent(a), "false")
+  // The leave guard follows the save state one render later.
+  await a.getByLabel("Unsent edits").filter({ hasText: "false" }).waitFor({ timeout: 3000 })
   await waitEditor(b, s => s.cells.B2 === "7", 3000)
   step("conflict", { refused: refused.state.rejected[0], aStatus: await status(a), warnedBeforeCommit: true, keepOrTakeOffered: true })
 
@@ -524,10 +527,15 @@ try {
 
     api.editMode = "normal"
     await commitCell(page, "C4", "later")
-    await page.getByText("Saved", { exact: true }).waitFor({ timeout: 5000 })
+    await waitEditor(page, s => s.acks.length >= 2, 5000)
     assert.equal(api.cells.C4, "later")
+    // The later edit is saved, but the unconfirmed one still waits for the person: never "Saved" meanwhile.
+    await page.getByText("Not saved · a change was refused").waitFor({ timeout: 5000 })
+    await page.getByRole("button", { name: "Keep mine for Sheet1!C3" }).click()
+    await page.getByText("Saved", { exact: true }).waitFor({ timeout: 5000 })
+    assert.equal(api.cells.C3, "lost")
     assert.equal(await page.locator("iframe").count(), 1)
-    step("unconfirmed-bounded", { memorySettledByFeed: true, unreadableAttempts: c3.length, rejected: state.rejected.at(-1).code, laterEditSaved: true })
+    step("unconfirmed-bounded", { memorySettledByFeed: true, unreadableAttempts: c3.length, rejected: state.rejected.at(-1).code, laterEditSaved: true, refusalKeptUntilDecided: true })
     await page.close()
   }
 

@@ -519,7 +519,8 @@ describe("save state and leave guard", () => {
     await waitFor(() => expect(t.status()).toBe("Not saved · a change was refused"))
     expect(t.fromFrame).toContainEqual(expect.objectContaining({ type: "committed", rev: 42, ops: [{ op: "cell.set", sheet: "Sheet1", cell: "B2", input: "7" }] }))
     expect(t.fromFrame).toContainEqual(expect.objectContaining({ type: "rejected", seq: 1, code: "precondition_failed", cells: [{ cell: "B2", input: "7", rev: 42, actor_label: "Agent Ada" }] }))
-    expect(t.dirty.at(-1)).toBe(false)
+    // The person's value is held only by the open refusal: leaving would lose it.
+    expect(t.dirty.at(-1)).toBe(true)
   })
 
   it("warns at once when another writer changes the cell of an open draft, without losing the draft", async () => {
@@ -531,7 +532,7 @@ describe("save state and leave guard", () => {
     expect(warning).toHaveTextContent("Changed by Agent Ada while you were editing")
     expect(warning).toHaveTextContent("Sheet1!B3")
     // The draft is the editor's: the host never discards or overwrites it, and offers no choice until it is committed.
-    expect(screen.queryByRole("button", { name: "Keep mine" })).toBeNull()
+    expect(screen.queryByRole("button", { name: /^Keep mine/ })).toBeNull()
     expect(t.frame()).not.toBeNull()
     // The draft closed (committed or cancelled): the warning goes.
     await t.send(JSON.stringify({ type: "draft", protocol: 1, cells: [] }))
@@ -557,7 +558,7 @@ describe("save state and leave guard", () => {
     expect(panel).toHaveTextContent("Changed by Agent Ada while you were editing")
     expect(panel).toHaveTextContent("777")
     expect(panel).toHaveTextContent("99")
-    await act(async () => { screen.getByRole("button", { name: "Keep mine" }).click() })
+    await act(async () => { screen.getByRole("button", { name: "Keep mine for Sheet1!B3" }).click() })
     await waitFor(() => expect(edit).toHaveBeenCalledWith(`${SID}:h1`, expect.stringContaining('"input":"777"')))
     await waitFor(() => expect(screen.queryByTestId("workbook-draft-conflict")).toBeNull())
 
@@ -565,7 +566,7 @@ describe("save state and leave guard", () => {
     await t.send(mutation(2, 43, "B3", "888"))
     await screen.findByTestId("workbook-draft-conflict")
     const edits = edit.mock.calls.length
-    await act(async () => { screen.getByRole("button", { name: "Take theirs" }).click() })
+    await act(async () => { screen.getByRole("button", { name: "Take theirs for Sheet1!B3" }).click() })
     expect(screen.queryByTestId("workbook-draft-conflict")).toBeNull()
     expect(edit.mock.calls.length).toBe(edits)
   })
@@ -581,31 +582,76 @@ describe("save state and leave guard", () => {
     await t.connect()
     await t.send(mutation(1, 41, "B4", "mine-B4"))
     await waitFor(() => expect(t.status()).toBe("Not saved · a change was refused"))
-    const edits = t.transport.edit.mock.calls.length
-    await act(async () => { screen.getByRole("button", { name: "Take theirs" }).click() })
+    const edits = vi.mocked(t.transport.edit).mock.calls.length
+    await act(async () => { screen.getByRole("button", { name: /^Take theirs/ }).click() })
     await waitFor(() => expect(t.status()).toBe("No unsaved changes"))
     expect(screen.queryByTestId("workbook-draft-conflict")).toBeNull()
-    expect(t.transport.edit.mock.calls.length).toBe(edits)
+    expect(vi.mocked(t.transport.edit).mock.calls.length).toBe(edits)
     // A fresh snapshot is the only message the editor clears its own refusal notice on.
     await waitFor(() => expect(t.fromFrame.at(-1)).toEqual(expect.objectContaining({ type: "snapshot", rev: 42, discarded: [] })))
   })
 
-  it("take theirs on one of two refused changes keeps the refused status for the other", async () => {
+  it("take theirs on one of two refused changes keeps the refused status for the other, and moves focus to it", async () => {
     const t = setup({ transport: { edit: refusedOn({ B4: "77", C5: "88" }), commits: agentChanged({ B4: "77", C5: "88" }) } })
     await t.connect()
     await t.send(mutation(1, 41, "B4", "mine-B4"))
     await t.send(mutation(2, 41, "C5", "mine-C5"))
-    await waitFor(() => expect(screen.getAllByRole("button", { name: "Take theirs" })).toHaveLength(2))
-    const snapshots = t.transport.snapshot.mock.calls.length
-    await act(async () => { screen.getAllByRole("button", { name: "Take theirs" })[0].click() })
-    expect(screen.getAllByRole("button", { name: "Take theirs" })).toHaveLength(1)
+    await waitFor(() => expect(screen.getAllByRole("button", { name: /^Take theirs/ })).toHaveLength(2))
+    const snapshots = vi.mocked(t.transport.snapshot).mock.calls.length
+    await act(async () => { screen.getByRole("button", { name: "Take theirs for Sheet1!B4" }).click() })
+    expect(screen.getAllByRole("button", { name: /^Take theirs/ })).toHaveLength(1)
     expect(t.status()).toBe("Not saved · a change was refused")
-    expect(t.transport.snapshot.mock.calls.length).toBe(snapshots)
-    await act(async () => { screen.getByRole("button", { name: "Take theirs" }).click() })
+    expect(vi.mocked(t.transport.snapshot).mock.calls.length).toBe(snapshots)
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Keep mine for Sheet1!C5" }))
+    await act(async () => { screen.getByRole("button", { name: "Take theirs for Sheet1!C5" }).click() })
     await waitFor(() => expect(t.status()).toBe("No unsaved changes"))
+    // No notice left: focus goes to the editor, not to the page body.
+    expect(document.activeElement).toBe(t.frame())
   })
 
-  it("drops conflict notices when the editor gets a fresh snapshot", async () => {
+  it("a refused multi-cell edit shows every cell, says which one conflicts, and keep mine sends them all; never Saved before the receipt", async () => {
+    const kept = deferred<TransportResponse>()
+    const edit = vi.fn(async (id: string): Promise<TransportResponse> => id === `${SID}:h1`
+      ? kept.promise
+      : { status: 409, body: { error: "precondition_failed", head_rev: 42, conflicts: [{ sheet: "Sheet1", cell: "B2", input: "7", rev: 42, actor_label: "Agent Ada" }] } })
+    const t = setup({ transport: { edit, commits: agentChanged({ B2: "7" }) } })
+    await t.connect()
+    await t.send(JSON.stringify({ type: "mutation", protocol: 1, seq: 1, base_rev: 41, ops: [["B2", "mine"], ["C2", "also mine"], ["D2", "and this"]].map(([cell, input]) => ({ op: "cell.set", sheet: "Sheet1", cell, input })) }))
+    const panel = await screen.findByTestId("workbook-draft-conflict")
+    const row = panel.querySelector<HTMLElement>("[data-kind='refused']")!
+    expect(row).toHaveTextContent("Changed by Agent Ada while you were editing: Sheet1!B2. Yours: mine · Theirs: 7")
+    expect(row).toHaveTextContent("Not saved yet: Sheet1!C2. Yours: also mine")
+    expect(row).toHaveTextContent("Not saved yet: Sheet1!D2. Yours: and this")
+    expect(row.querySelector("[role='status'][aria-live='polite']")).not.toBeNull()
+    expect(panel.getAttribute("role")).not.toBe("alert")
+    expect(t.status()).toBe("Not saved · a change was refused")
+    await act(async () => { screen.getByRole("button", { name: "Keep mine for Sheet1!B2, C2, D2" }).click() })
+    await waitFor(() => expect(edit).toHaveBeenCalledWith(`${SID}:h1`, expect.anything()))
+    expect((JSON.parse(String((edit.mock.calls.at(-1) as unknown[])[1])) as { ops: { cell: string }[] }).ops.map(op => op.cell)).toEqual(["B2", "C2", "D2"])
+    // While the write is out the row stays, with its buttons disabled; the status never claims Saved.
+    expect(screen.getByRole("button", { name: "Keep mine for Sheet1!B2, C2, D2" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: /^Take theirs/ })).toBeDisabled()
+    expect(t.status()).not.toMatch(/Saved|No unsaved changes/)
+    await act(async () => { kept.resolve(ok({ operation_key: { artifact_id: "page-1", authority_id: "user:u1", mutation_id: `${SID}:h1` }, outcome: "applied", rev: 43, durability: "node" })) })
+    await waitFor(() => expect(t.status()).toBe("Saved"))
+    expect(screen.queryByTestId("workbook-draft-conflict")).toBeNull()
+  })
+
+  it("take theirs on a multi-cell edit names the cells it still saves and sends only those", async () => {
+    const edit = vi.fn(async (id: string): Promise<TransportResponse> => id === `${SID}:h1`
+      ? ok({ operation_key: { artifact_id: "page-1", authority_id: "user:u1", mutation_id: id }, outcome: "applied", rev: 43, durability: "node" })
+      : { status: 409, body: { error: "precondition_failed", head_rev: 42, conflicts: [{ sheet: "Sheet1", cell: "B2", input: "7", rev: 42, actor_label: "Agent Ada" }] } })
+    const t = setup({ transport: { edit, commits: agentChanged({ B2: "7" }) } })
+    await t.connect()
+    await t.send(JSON.stringify({ type: "mutation", protocol: 1, seq: 1, base_rev: 41, ops: [["B2", "mine"], ["C2", "also mine"]].map(([cell, input]) => ({ op: "cell.set", sheet: "Sheet1", cell, input })) }))
+    const take = await screen.findByRole("button", { name: "Take theirs for Sheet1!B2 and save Sheet1!C2" })
+    await act(async () => { take.click() })
+    await waitFor(() => expect(edit).toHaveBeenCalledWith(`${SID}:h1`, expect.anything()))
+    expect((JSON.parse(String((edit.mock.calls.at(-1) as unknown[])[1])) as { ops: { cell: string }[] }).ops.map(op => op.cell)).toEqual(["C2"])
+    await waitFor(() => expect(t.status()).toBe("Saved"))
+  })
+
+  it("keeps a refused notice open across a reload the person did not cause, and drops only the stale warnings", async () => {
     let pruned = false
     const t = setup({
       transport: {
@@ -616,11 +662,12 @@ describe("save state and leave guard", () => {
     })
     await t.connect()
     await t.send(mutation(1, 41, "B4", "mine-B4"))
-    await screen.findByTestId("workbook-draft-conflict")
+    await screen.findByRole("button", { name: "Keep mine for Sheet1!B4" })
     pruned = true
     await push("workbook.committed", { page_id: "page-1", rev: 50, generation: 1, kind: "cells", cells: 1 })
     await waitFor(() => expect(t.fromFrame.at(-1)).toEqual(expect.objectContaining({ type: "snapshot", rev: 50 })))
-    await waitFor(() => expect(screen.queryByTestId("workbook-draft-conflict")).toBeNull())
+    expect(screen.getByRole("button", { name: "Keep mine for Sheet1!B4" })).toBeEnabled()
+    expect(t.status()).toBe("Not saved · a change was refused")
   })
 
   it("reads the commits feed on a workbook.committed push for its Page, and ignores other Pages", async () => {
@@ -697,6 +744,10 @@ describe("workbookSaveLabel", () => {
     [{ ...opened, canWrite: false, trouble: "denied" as const }, "Access lost"],
     [{ ...opened, pending: 1, trouble: "unconfirmed" as const }, "Not saved · 1 change not saved"],
     [{ ...opened, trouble: "unconfirmed" as const }, "Not saved · the server did not confirm a change"],
+    [{ ...opened, receipt: true, refused: 1 }, "Not saved · a change was refused"],
+    [{ ...opened, refused: 2 }, "Not saved · 2 changes were refused"],
+    [{ ...opened, pending: 1, refused: 1 }, "Saving… · a change was refused"],
+    [{ ...opened, receipt: true, refused: 1, trouble: "unconfirmed" as const }, "Not saved · the server did not confirm a change"],
   ])("%j → %s", (state, label) => {
     expect(workbookSaveLabel(state)).toBe(label)
   })
