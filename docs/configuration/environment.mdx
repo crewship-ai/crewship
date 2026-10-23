@@ -622,8 +622,9 @@ from operator-pinned bundles. All of it is off by default.
 **Zero-config default.** With the editor enabled and no
 `CREWSHIP_EDITOR_RUNTIME_ORIGIN`, Crewship serves the editor on the Studio
 origin under `/_editor/b/<digest>/` (see [Same-host mode](#same-host-mode)).
-No DNS record, certificate or proxy route is needed. A dedicated origin is
-optional hardening on top.
+No origin has to be configured: the editor follows the origin each browser
+request reaches. No DNS record, certificate or extra proxy route is needed. A
+dedicated origin is optional hardening on top.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -704,6 +705,28 @@ Without `CREWSHIP_EDITOR_RUNTIME_ORIGIN`, an enabled editor is served at
 `<Studio origin>/_editor/b/<digest>/<path>` with the headers above, where every
 `<editor origin>` source is the bundle path `<Studio origin>/_editor/b/`, never
 the bare Studio origin. Studio's `frame-src` likewise names only that path.
+The host page frames the editor by that path (`/_editor/b/<digest>/index.html`),
+resolved against its own origin.
+
+**Which Studio origin.** Nothing needs to be configured. The `<Studio origin>`
+of each response is the one the request reached: its `Host` header, and
+`https` when the connection is TLS or a trusted proxy
+(`CREWSHIP_TRUSTED_PROXY_CIDRS`, loopback by default) sends
+`X-Forwarded-Proto: https`, otherwise `http`. A CSP source with `http` also
+matches the `https` URL of the same host, so a proxy that ends TLS without
+being trusted still gets a working policy. A `Host` that a CSP source cannot
+name (no valid DNS name or IPv4 address, an IPv6 literal, a bad port) gets
+`400` on the editor path and no editor in `frame-src`; requests on the Page
+runtime origin get `421`. Studio documents whose policy names the request's
+origin are sent with `Cache-Control: private`, so no shared cache serves one
+host's policy to another; the editor's own responses are `no-store` or
+`private` already.
+
+When `CREWSHIP_PAGE_STUDIO_ORIGIN` is set, it is the only origin the editor
+answers on: a request that reaches Crewship under another `Host` gets `421` on
+the editor path and no editor in `frame-src` (fail closed). Set it only if the
+proxy forwards the original `Host`; `CREWSHIP_NEXTJS_URL` plays no part.
+
 Isolation then rests on:
 
 - **The opaque origin.** The server's `sandbox allow-scripts` applies whatever
@@ -741,10 +764,13 @@ Isolation then rests on:
   Studio's own HSTS value, so loading the editor never weakens the host's
   stored HSTS policy.
 
-Same-host mode requires an HTTPS Studio origin; plain HTTP is allowed only on
-loopback. Same-host mode is refused when the Page runtime shares the Studio
-origin, because Studio would then frame its own whole origin, and when
-`CREWSHIP_ALLOWED_ORIGINS` contains `null`. The Page runtime origin
+Browsers load the editor only from an HTTPS Studio origin, or plain HTTP on
+loopback (the host page refuses anything else); a configured
+`CREWSHIP_PAGE_STUDIO_ORIGIN` must be one of those. Same-host mode is refused
+at startup when the configured Studio origin is the Page runtime origin,
+because Studio would then frame its own whole origin, and when
+`CREWSHIP_ALLOWED_ORIGINS` contains `null`; without a configured origin the
+Page runtime host is refused per request. The Page runtime origin
 (`CREWSHIP_PAGE_RUNTIME_ORIGIN`) must be a host that serves only the Page
 runtime, never the Studio UI: Studio lists that whole origin in `frame-src`,
 so if it also served Studio documents, a frame that navigates itself could
@@ -766,21 +792,50 @@ therefore:
 - put **no SSO or authentication gate** on `/_editor/`. The editor frame is
   credentialless and always unauthenticated; the bundle is public, constant
   code;
-- forward the `Cookie` and `Sec-Fetch-*` request headers. Setting its own
-  cookies on these responses is harmless but unnecessary.
+- forward the original `Host` header (Caddy and Traefik do by default; nginx:
+  `proxy_set_header Host $host;`, Apache: `ProxyPreserveHost On`), as the rest
+  of Crewship already needs for its same-origin check of sign-in and other
+  state-changing requests;
+- forward the `Cookie` and `Sec-Fetch-*` request headers and pass the
+  `X-Crewship-Route` response header through. Setting its own cookies on these
+  responses is harmless but unnecessary;
+- not let a shared cache override `Cache-Control` for `/_editor/` ("cache
+  everything" rules).
 
-Crewship checks this itself: in same-host mode the server requests
-`/_editor/` variants through its public Studio URL a few seconds after start
-and every hour after. If one is redirected, or an encoded traversal out of the
-prefix is answered by anything but the editor (or a plain refusal in front),
-and a repeat 30 seconds later confirms it, the server **disables the editor**
-until restart: bundle files answer `503`
-with the reason, the UI and API are unaffected, and the log names the problem.
-Many deployments cannot reach their own public name from inside; then the
-self-check decides nothing. `/healthz` reports the outcome under
-`workbook_editor`, and [`crewship doctor`](/cli/doctor#workbook-editor-proxy)
-runs the same check from the machine it runs on, through the proxy a browser
-uses. Run it from outside after any proxy change.
+These are the defaults of common reverse proxies; the operator sets nothing
+for the editor itself.
+
+Crewship checks this itself. It learns the public Studio origin from signed-in
+browser requests (the `Origin` or `Referer` of a same-origin request that a
+sign-in session authenticated, never an anonymous one; at most four origins),
+or uses `CREWSHIP_PAGE_STUDIO_ORIGIN` when set. Until a browser has used
+Studio, the check is `pending`, never `passed`. Then the server requests
+`/_editor/` variants through that public URL: soon after an origin is learned,
+hourly while it passes and every five minutes while it does not. Browsers
+resolve `..`, `%2e%2e` and `.%2e` segments before sending a request, so only
+spellings that reach a server unchanged are probed (`..%2f`, `..%5c`). Every
+Crewship response in same-host mode carries `X-Crewship-Route` (`editor` or
+`app`), so a path under the prefix that ends up elsewhere in Crewship is
+recognised positively; a refusal in front of Crewship, whatever its headers,
+reached nothing and is fine. If a probe is redirected, or Crewship answers a
+traversal outside the editor, and a repeat 30 seconds later confirms it, the
+server **disables the editor on that origin**: bundle files answer `503`, the
+UI and API are unaffected, and the log names the problem. After three
+consecutive passing checks (about 15 minutes after the proxy is fixed or a
+maintenance redirect ends) the editor is enabled again by itself. The check
+also reports, without disabling anything, a prefix that does not reach the
+editor, a proxy that rewrites `Host` (the browser's origin and the `Host`
+Crewship sees differ), and a proxy that strips `X-Crewship-Route`. Many
+deployments cannot reach their own public name from inside; then the
+self-check decides nothing.
+
+The public `/healthz` reports only a coarse `workbook_editor` state: `ok`,
+`pending`, `failed` or `disabled`. Origins, causes and the problems found are
+in the log and, for instance administrators, in
+[`crewship admin instance workbook-editor`](/cli/admin#workbook-editor).
+[`crewship doctor`](/cli/doctor#workbook-editor-proxy) runs the same check from
+the machine it runs on, through the proxy a browser uses. Run it from outside
+after any proxy change.
 
 To check a deployment by hand:
 
@@ -792,8 +847,8 @@ curl -sI -H 'Sec-Fetch-Dest: iframe' -H 'Cookie: authjs.session-token=x' <Studio
 #   -> 403
 curl -sI <Studio>/_editor/b/x/
 #   -> 404 with the sandboxed policy, never 3xx
-curl -s -o /dev/null -w '%{http_code}\n' '<Studio>/_editor/b/..%2f..%2fapi/v1/auth/session'
-#   -> 404 (or 400 from the proxy), never the API's answer
+curl -s -o /dev/null -D - '<Studio>/_editor/b/..%2f..%2fhealthz' | grep -i '^x-crewship-route'
+#   -> "X-Crewship-Route: editor", or nothing if the proxy refused it; never "app"
 ```
 
 In a local development setup with the Next.js dev server, `/_editor/*` is

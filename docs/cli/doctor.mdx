@@ -186,29 +186,43 @@ orphaned **pre-C1 (slug-only) crew docker resources** that survive
 
 For the embedded workbook editor in same-host mode (served under `/_editor/`
 on the Studio origin, see
-[Same-host mode](/configuration/environment#same-host-mode)). Reads the
-`workbook_editor` field from the running server's `/healthz`, then requests
-`/_editor/` variants through the public Studio URL that field names, from
-this machine and without cookies: a plain miss, a trailing slash, an unknown
-bundle, and encoded `..` traversals out of the prefix. Run it from where a
-browser reaches Crewship, so it goes through the same proxy, CDN or load
-balancer.
+[Same-host mode](/configuration/environment#same-host-mode)). Reads the coarse
+`workbook_editor` state from the running server's `/healthz` and, when you are
+logged in as an instance administrator, the per-origin detail from
+`GET /api/v1/admin/instance/workbook-editor`: the public Studio origins the
+server checks (the configured one, or those signed-in browsers used) and the
+result of its own check for each. It then requests `/_editor/` variants
+through each of those origins, from this machine and without cookies: a plain
+miss, a trailing slash, an unknown bundle, and the encoded traversals a
+browser can send (`..%2f`, `..%5c`). Run it from where a browser reaches
+Crewship, so it goes through the same proxy, CDN or load balancer.
 
-- **PASS** — every variant reaches the editor unchanged, without a redirect.
-  The row also shows the server's own self-check (`passed`, `pending`,
-  `unreachable`).
-- **WARN** — passes, with a note (for example the proxy sets cookies on
-  `/_editor/` responses, which is harmless).
+- **PASS** — from this machine every variant reaches the editor with a policy
+  for that origin and no redirect, no traversal reaches Crewship outside the
+  editor (a refusal by the proxy is fine), and the server's own check of the
+  origin passed too.
+- **WARN** — the check passes from here but the server's own check has not
+  passed (`pending`, `unreachable`, or failed without disabling the editor,
+  for example a `502` while starting); no browser has used Studio since the
+  server started, so no public origin is known yet (open Studio in a browser,
+  then run doctor again); a public origin is not reachable from this machine;
+  the server saw a browser origin whose `Host` the proxy rewrites; or a note
+  such as the proxy setting cookies on `/_editor/` responses (harmless).
+  Without an instance administrator's login doctor knows only the coarse
+  state: `pending` and `failed` are WARN, `ok` is INFO.
 - **FAIL — redirect or path rewrite** — a variant is redirected (SSO gate,
-  trailing-slash rule) or a traversal leaves the prefix (the proxy decodes or
-  normalises the path). The path-scoped isolation does not hold; fix the proxy
-  so it passes `/_editor/` unchanged and restart Crewship.
-- **FAIL — does not reach the editor** — `/_editor/` is not routed to
-  Crewship, or an authentication gate answers it. The editor cannot load.
+  trailing-slash rule) or Crewship answers a traversal outside the editor (the
+  proxy decodes or normalises the path). The path-scoped isolation does not
+  hold; fix the proxy so it passes `/_editor/` unchanged.
+- **FAIL — does not work through the public URL** — `/_editor/` is not routed
+  to Crewship, an authentication gate answers it, or the editor answers for
+  another host (the proxy rewrites `Host`). The editor cannot load.
 - **FAIL — the server disabled the workbook editor** — the server's
-  self-check found a redirect or path rewrite; the row prints its reason.
+  self-check confirmed a redirect or path rewrite on an origin. The editor
+  comes back by itself after three consecutive passing checks once the proxy
+  is fixed; no restart is needed.
 - **INFO** — the editor is off, uses a dedicated origin, the server is older
-  or not reachable, or the public URL is not reachable from this machine.
+  or not reachable.
 
 ### Telemetry status
 
