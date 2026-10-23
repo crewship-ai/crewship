@@ -32,48 +32,13 @@ impl<'a> ConfirmedContext<'a> {
         match context.read_policy {
             PrepareContextReadPolicy::AgentConfirmedCurrent => {}
         }
-        if change.operations.is_empty()
-            || change.operations.len() > 256
-            || inventory.len() > 65_536
-            || context.targets.len() != inventory.len()
-            || context.operation_revisions.len() != change.operations.len()
-        {
-            return Err(ContextError::Invalid);
-        }
-        let mut identities = BTreeMap::new();
-        for identity in inventory {
-            if !valid_identifier(&identity.target_id)
-                || identities
-                    .insert(&identity.target_id, identity.deleted)
-                    .is_some()
-            {
-                return Err(ContextError::Invalid);
-            }
-        }
-        let mut targets = BTreeMap::new();
-        for target in &context.targets {
-            if identities.get(&target.target_id) != Some(&target.deleted)
-                || target.structure_revision > target.revision
-                || target.revision > context.document_revision
-                || targets
-                    .insert(target.target_id.clone(), target.clone())
-                    .is_some()
-            {
-                return Err(ContextError::Invalid);
-            }
-        }
-        let mut ids = BTreeSet::new();
-        let mut revision = context.document_revision.0;
-        for (operation, label) in change.operations.iter().zip(&context.operation_revisions) {
-            revision = revision.checked_add(1).ok_or(ContextError::Invalid)?;
-            if !valid_identifier(&operation.op_id)
-                || !ids.insert(&operation.op_id)
-                || label.op_id != operation.op_id
-                || label.revision.0 != revision
-            {
-                return Err(ContextError::Invalid);
-            }
-        }
+        let targets = validate_layout(
+            context.document_revision,
+            &context.targets,
+            &context.operation_revisions,
+            change,
+            inventory,
+        )?;
         // The first capability accepts only confirmed entry observations, never
         // guessed future host labels or reads of not-yet-created targets.
         for operation in &change.operations {
@@ -141,49 +106,7 @@ impl WorkingTargets<'_> {
         if !self.checked || label.op_id != op_id || effects.len() > 4096 {
             return Err(ContextError::Invalid);
         }
-        let mut ids = BTreeSet::new();
-        let mut created = 0usize;
-        for effect in effects {
-            if !valid_identifier(&effect.target_id)
-                || !ids.insert(&effect.target_id)
-                || !(effect.content_changed || effect.structure_changed)
-                || (effect.created && effect.deleted)
-                || ((effect.created || effect.deleted) && !effect.structure_changed)
-            {
-                return Err(ContextError::Invalid);
-            }
-            match self.targets.get(&effect.target_id) {
-                None if effect.created => created += 1,
-                Some(target) if !effect.created && !target.deleted => {}
-                _ => return Err(ContextError::Invalid),
-            }
-        }
-        if self.targets.len() + created > 65_536 {
-            return Err(ContextError::Invalid);
-        }
-        for effect in effects {
-            if effect.created {
-                self.targets.insert(
-                    effect.target_id.clone(),
-                    TargetVersion {
-                        target_id: effect.target_id.clone(),
-                        revision: label.revision,
-                        structure_revision: label.revision,
-                        deleted: false,
-                    },
-                );
-            } else {
-                let target = self
-                    .targets
-                    .get_mut(&effect.target_id)
-                    .expect("validated target");
-                target.revision = label.revision;
-                if effect.structure_changed {
-                    target.structure_revision = label.revision;
-                }
-                target.deleted = effect.deleted;
-            }
-        }
+        apply_effects(&mut self.targets, label.revision, effects)?;
         self.next += 1;
         self.checked = false;
         Ok(())
@@ -236,4 +159,112 @@ fn failure(operation: &Operation, code: ErrorCode) -> PreparedFailure {
         code,
         message: "confirmed read precondition failed".into(),
     }
+}
+
+// Shared structural checks never classify a stale observation or select a wire
+// policy. Strict-current and causal entry validation retain distinct APIs.
+pub(crate) fn validate_layout(
+    document_revision: Counter,
+    targets_input: &[TargetVersion],
+    labels: &[PreparedOperationRevision],
+    change: &AtomicChange,
+    inventory: &[TargetIdentity],
+) -> Result<BTreeMap<String, TargetVersion>, ContextError> {
+    if change.operations.is_empty()
+        || change.operations.len() > 256
+        || inventory.len() > 65_536
+        || targets_input.len() != inventory.len()
+        || labels.len() != change.operations.len()
+    {
+        return Err(ContextError::Invalid);
+    }
+    let mut identities = BTreeMap::new();
+    for identity in inventory {
+        if !valid_identifier(&identity.target_id)
+            || identities
+                .insert(&identity.target_id, identity.deleted)
+                .is_some()
+        {
+            return Err(ContextError::Invalid);
+        }
+    }
+    let mut targets = BTreeMap::new();
+    for target in targets_input {
+        if identities.get(&target.target_id) != Some(&target.deleted)
+            || target.structure_revision > target.revision
+            || target.revision > document_revision
+            || targets
+                .insert(target.target_id.clone(), target.clone())
+                .is_some()
+        {
+            return Err(ContextError::Invalid);
+        }
+    }
+    let mut ids = BTreeSet::new();
+    let mut revision = document_revision.0;
+    for (operation, label) in change.operations.iter().zip(labels) {
+        revision = revision.checked_add(1).ok_or(ContextError::Invalid)?;
+        if !valid_identifier(&operation.op_id)
+            || !ids.insert(&operation.op_id)
+            || label.op_id != operation.op_id
+            || label.revision.0 != revision
+        {
+            return Err(ContextError::Invalid);
+        }
+    }
+    Ok(targets)
+}
+
+// Validate a whole effect set before changing any ephemeral target counter.
+pub(crate) fn apply_effects(
+    targets: &mut BTreeMap<String, TargetVersion>,
+    revision: Counter,
+    effects: &[TargetEffect],
+) -> Result<(), ContextError> {
+    if effects.len() > 4096 {
+        return Err(ContextError::Invalid);
+    }
+    let mut ids = BTreeSet::new();
+    let mut created = 0usize;
+    for effect in effects {
+        if !valid_identifier(&effect.target_id)
+            || !ids.insert(&effect.target_id)
+            || !(effect.content_changed || effect.structure_changed)
+            || (effect.created && effect.deleted)
+            || ((effect.created || effect.deleted) && !effect.structure_changed)
+        {
+            return Err(ContextError::Invalid);
+        }
+        match targets.get(&effect.target_id) {
+            None if effect.created => created += 1,
+            Some(target) if !effect.created && !target.deleted => {}
+            _ => return Err(ContextError::Invalid),
+        }
+    }
+    if targets.len() + created > 65_536 {
+        return Err(ContextError::Invalid);
+    }
+    for effect in effects {
+        if effect.created {
+            targets.insert(
+                effect.target_id.clone(),
+                TargetVersion {
+                    target_id: effect.target_id.clone(),
+                    revision,
+                    structure_revision: revision,
+                    deleted: false,
+                },
+            );
+        } else {
+            let target = targets
+                .get_mut(&effect.target_id)
+                .expect("validated target");
+            target.revision = revision;
+            if effect.structure_changed {
+                target.structure_revision = revision;
+            }
+            target.deleted = effect.deleted;
+        }
+    }
+    Ok(())
 }
