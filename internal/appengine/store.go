@@ -97,7 +97,7 @@ func (s *Store) tx(ctx context.Context, k Key, a Authorize, fn func(*sql.Tx, Pri
 func readState(ctx context.Context, tx *sql.Tx, k Key) (State, error) {
 	var s State
 	var data []byte
-	err := tx.QueryRowContext(ctx, `SELECT schema_version,head_rev,generation,snapshot FROM gridcraft_heads WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&s.SchemaVersion, &s.Rev, &s.Generation, &data)
+	err := tx.QueryRowContext(ctx, `SELECT schema_version,head_rev,generation,snapshot,coalesce((SELECT max(rev) FROM gridcraft_audit a WHERE a.page_id=gridcraft_heads.page_id AND kind='snapshot'),0) FROM gridcraft_heads WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&s.SchemaVersion, &s.Rev, &s.Generation, &data, &s.StructureRev)
 	if errors.Is(err, sql.ErrNoRows) {
 		return s, ErrNotFound
 	}
@@ -270,6 +270,9 @@ func (s *Store) Execute(ctx context.Context, k Key, r Request, a Authorize, e En
 		// head moved since, the client retries with the same mutation ID.
 		if v.Rev != res.state.Rev || v.Generation != res.state.Generation {
 			return &PreconditionError{HeadRev: v.Rev}
+		}
+		if err := checkReadSet(ctx, tx, k, r, v, p); err != nil {
+			return err
 		}
 		if c.Binding != res.binding || hash(c.Snapshot) != c.ResultHash || len(c.Snapshot) == 0 || len(c.Snapshot) > MaxSnapshotBytes || !json.Valid(c.Snapshot) {
 			return ErrCandidate
@@ -532,6 +535,9 @@ func (s *Store) prescan(ctx context.Context, k Key, r Request, a Authorize) *win
 // the exact head. Every rejection that a retry of the same packet cannot fix
 // requires a fresh snapshot.
 func (s *Store) admitBase(ctx context.Context, tx *sql.Tx, k Key, r Request, v State, p Principal, pre *windowScan) error {
+	if err := checkReadSet(ctx, tx, k, r, v, p); err != nil {
+		return err
+	}
 	reread := &PreconditionError{HeadRev: v.Rev, SnapshotRequired: true}
 	// A base below the principal's history floor would rebase over revisions
 	// the principal may not read; their conflicts would disclose that history.

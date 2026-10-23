@@ -24,6 +24,8 @@ type State struct {
 	Snapshot   json.RawMessage `json:"snapshot"`
 }
 type Request struct {
+	// ReadSet is interpreted by the application adapter. Generic commands do not accept it.
+	ReadSet    json.RawMessage `json:"read_set,omitempty"`
 	MutationID string          `json:"mutation_id"`
 	BaseRev    int64           `json:"base_rev"`
 	Generation int64           `json:"generation"`
@@ -52,7 +54,7 @@ func (JSONStorage) Read(ctx context.Context, tx *sql.Tx, page string) (s State, 
 }
 func Fingerprint(raw []byte) string { h := sha256.Sum256(raw); return hex.EncodeToString(h[:]) }
 func (JSONStorage) Commit(ctx context.Context, tx *sql.Tx, page, actor string, m Manifest, r Request) (Receipt, error) {
-	if len(r.MutationID) == 0 || len(r.MutationID) > 128 || r.BaseRev < 1 || r.Generation < 1 || len(r.Arguments) > MaxBytes {
+	if len(r.ReadSet) != 0 || len(r.MutationID) == 0 || len(r.MutationID) > 128 || r.BaseRev < 1 || r.Generation < 1 || len(r.Arguments) > MaxBytes {
 		return Receipt{}, ErrInvalid
 	}
 	raw, _ := json.Marshal(r)
