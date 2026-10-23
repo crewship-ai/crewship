@@ -38,6 +38,28 @@ verify canonical base64 pad bits; or validate adapter semantics and causal reads
 Those checks must precede dispatch. The semantic fixtures continue to describe
 requirements, not execution evidence for those unimplemented integrations.
 
+`boundary::validate_commit_result` is a separate pure check against an exact
+pending request. Its non-deserializable transport context must come from verified
+host admission; an issuer string or runtime message cannot construct that proof.
+It checks scope, request ID, owner generation, immutable atomic membership,
+per-operation revision continuity and disjoint saved ranges. Older replay ranges
+may coexist with newer ranges and need not be adjacent. The outer durability is
+a conservative lower bound over saved members and must meet the caller's required
+minimum; original per-operation receipts are not rewritten. An all-rejected reply
+makes no saved claim. `crewship` is the logical host identity across restarts;
+history from another issuer needs a future explicit provenance protocol.
+Modes come from caller-qualified host/session policy; Hello/Welcome does not yet
+implement a durability-selection field or replicated-durability qualification.
+
+This helper neither issues receipts nor applies document state. It does not yet
+validate document-update wrappers, owner/delivery grants or their session/nonces;
+those remain unsupported until their separate binding validators are connected.
+`canonical_base64_decoded_len` checks standard alphabet, padding, unused pad bits
+and decoded size without allocating decoded data. Application decoding and
+delivery permission remain separate. Shared `boundary-semantics-fixtures.json`
+covers receipt tampering, trusted minimums and base64 boundaries; it is not live
+admission or persistence evidence.
+
 `mooring_protocol::negotiate` initially accepts only an exact tuple of protocol,
 model and engine versions. Unsupported versions return `version_mismatch` before
 any document content. Minor/patch compatibility needs shared evidence before
