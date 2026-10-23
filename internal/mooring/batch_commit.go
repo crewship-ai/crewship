@@ -279,14 +279,7 @@ func (s *BatchStore) Commit(ctx context.Context, request BatchRequest) (BatchRes
 			}
 			var candidate []byte
 			if reason == nil {
-				isolatedRaw, e := json.Marshal(c)
-				if e != nil {
-					return e
-				}
-				var isolated BatchChange
-				if e = json.Unmarshal(isolatedRaw, &isolated); e != nil {
-					return e
-				}
+				isolated := cloneBatchChange(c)
 				var failure *PreparedFailure
 				candidate, failure, e = s.config.Adapter.Apply(ctx, append([]byte(nil), checkpoint...), isolated)
 				if failure != nil {
