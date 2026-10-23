@@ -231,6 +231,10 @@ func TestAdminInvalidateSessions_NoActiveSessionsMessage(t *testing.T) {
 	if !strings.Contains(buf.String(), "no active sessions") {
 		t.Errorf("expected nothing-to-revoke note, got:\n%s", buf.String())
 	}
+	// A user who already logged out still gets the durable revocation marker.
+	if got := queryAdminString(t, dbURL, `SELECT COALESCE(access_revoked_at,'') FROM users WHERE id='u1'`); got == "" {
+		t.Error("invalidate-sessions did not record the access revocation marker")
+	}
 }
 
 func TestAdminInvalidateSessions_UnknownEmail(t *testing.T) {

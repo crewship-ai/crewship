@@ -25,6 +25,9 @@ func localAuditSigningContext(ctx context.Context, target localDBTarget) (contex
 	if err != nil {
 		return nil, err
 	}
+	if err := adoptPersistedMasterKeys(filepath.Dir(path)); err != nil {
+		return nil, err
+	}
 	keys, err := journal.LoadSigningKeys(path)
 	if err != nil {
 		return nil, fmt.Errorf("audit keyring %s: %w", path, err)
@@ -88,6 +91,9 @@ func localAuditKeyringPath(target localDBTarget) (string, error) {
 func sameSigningKeys(a, b string) (bool, error) {
 	var docs [2][]byte
 	for i, p := range []string{a, b} {
+		if err := adoptPersistedMasterKeys(filepath.Dir(p)); err != nil {
+			return false, err
+		}
 		keys, err := journal.LoadSigningKeys(p)
 		if err != nil {
 			return false, err

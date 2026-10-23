@@ -24,6 +24,7 @@ import (
 	"filippo.io/age"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/quiesce"
 	"github.com/crewship-ai/crewship/internal/safepath"
@@ -837,6 +838,9 @@ func writeRecoveredSecrets(rep *RecoverReport, kit *RecoveryKit, dataDir string)
 	if existing, err := readEnvFile(secretsPath); err == nil {
 		values = existing
 	}
+	// The master keys a booted target sealed its own keyring with, before
+	// the kit's replace them: they let a replaced keyring be re-sealed.
+	previousMaster := previousMasterKeys(values)
 	newSecret, err := RotateAuthKeys(func(s string) error { values[NextAuthSecretEnv] = s; return nil })
 	if err != nil {
 		return err
@@ -861,8 +865,20 @@ func writeRecoveredSecrets(rep *RecoverReport, kit *RecoveryKit, dataDir string)
 		}
 	}
 	if kit != nil && len(kit.AuditKeyring) > 0 {
-		auditPath, replaced, unreadable, err := journal.ReplaceSigningKeys(dataDir, kit.AuditKeyring, time.Now())
+		// Sealed at rest under the recovered instance's master key, which is
+		// the kit's, not this host's environment.
+		env, err := kitEnv(kit)
 		if err != nil {
+			return err
+		}
+		if _, ok := env[encryption.KeyVersionEnvVar]; !ok {
+			env[encryption.KeyVersionEnvVar] = ""
+		}
+		var auditPath, replaced, unreadable string
+		if err := withEnv(env, func() (err error) {
+			auditPath, replaced, unreadable, err = journal.ReplaceSigningKeys(dataDir, kit.AuditKeyring, time.Now(), previousMaster)
+			return err
+		}); err != nil {
 			return err
 		}
 		if replaced != "" {
@@ -901,6 +917,38 @@ func writeRecoveredSecrets(rep *RecoverReport, kit *RecoveryKit, dataDir string)
 	}
 	rep.KeysFile = keysPath
 	return nil
+}
+
+// previousMasterKeys resolves master-key versions from the target's previous
+// secrets.env, then this process's environment, with Decrypt's fallback from
+// a missing ENCRYPTION_KEY_V<N> to ENCRYPTION_KEY.
+func previousMasterKeys(persisted map[string]string) journal.MasterKeyFunc {
+	// Snapshot now: the call runs later, under the kit's environment.
+	snapshot := map[string]string{}
+	for _, kv := range os.Environ() {
+		if name, value, ok := strings.Cut(kv, "="); ok && strings.HasPrefix(name, "ENCRYPTION_KEY") {
+			snapshot[name] = value
+		}
+	}
+	for k, v := range persisted {
+		if v != "" {
+			snapshot[k] = v
+		}
+	}
+	return func(version string) ([]byte, error) {
+		for _, name := range []string{encryption.KeyEnvVar(version), "ENCRYPTION_KEY"} {
+			value := snapshot[name]
+			if value == "" {
+				continue
+			}
+			key, err := hex.DecodeString(value)
+			if err != nil || len(key) != 32 {
+				return nil, fmt.Errorf("%s is not a 32-byte hex key", name)
+			}
+			return key, nil
+		}
+		return nil, fmt.Errorf("%s is not set", encryption.KeyEnvVar(version))
+	}
 }
 
 func readEnvFile(p string) (map[string]string, error) {
