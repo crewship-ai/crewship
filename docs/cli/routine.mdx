@@ -2424,8 +2424,25 @@ this routine, return 422 and must be removed explicitly before publishing.
 A null description is rejected with 400. Publication stores an immutable authority
 manifest and consumes the draft atomically with its audit event. It does not run
 agents: the generic runner, nested calls and automatic trigger writers refuse the
-published version. Bounded manual execution is a later runtime slice. Existing
-`routine draft publish FILE` keeps its legacy validation flow.
+published version. Existing `routine draft publish FILE` keeps its legacy
+validation flow.
+
+### Run a Guest-published routine
+
+```bash
+crewship routine run ROUTINE_SLUG --inputs '{"task":"..."}' --wait
+```
+
+A Guest with Run on the routine and on its recorded agents starts a bounded
+manual run of the published version; the publisher's frozen grants and the
+recorded provider credentials must still be current. Logging out does not stop
+an accepted run. Revoked grants, membership removal, suspension, an
+administrator revoking the user's sessions (even after the user logged out), a
+grant issuer losing authority, a rotated agent credential, or the routine being
+withdrawn stop it before its next step, and so does the 30-minute run limit.
+`--delay` is refused (422) for published routines. A stopped run's `--wait` exits
+nonzero without printing a result. Schedules, webhooks, nested calls and Page
+actions cannot start a published routine.
 
 
 ## `crewship routine shared-runs`

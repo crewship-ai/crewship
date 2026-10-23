@@ -347,11 +347,23 @@ func TestAdminPeople_SessionsAndRevoke(t *testing.T) {
 	if rr.Code != http.StatusOK || all.Revoked != 1 {
 		t.Fatalf("revoke-all = %d %s", rr.Code, rr.Body.String())
 	}
+	// With no active session left (the user logged out), revoke-all still
+	// writes the durable marker that stops accepted Guest-published runs.
+	if _, err := f.db.Exec(`UPDATE users SET access_revoked_at=NULL WHERE id='u-member'`); err != nil {
+		t.Fatal(err)
+	}
+	if rr := call(h.RevokeAllSessions, "POST", map[string]string{"userId": "u-member"}); rr.Code != http.StatusOK {
+		t.Fatalf("repeat revoke-all = %d %s", rr.Code, rr.Body.String())
+	}
+	var marker sql.NullString
+	if err := f.db.QueryRow(`SELECT access_revoked_at FROM users WHERE id='u-member'`).Scan(&marker); err != nil || !marker.Valid {
+		t.Fatalf("revoke-all without active sessions left no access marker: %v %v", marker, err)
+	}
 
 	var audits int
 	_ = f.db.QueryRow(`SELECT COUNT(*) FROM audit_logs WHERE entity_type = 'USER' AND entity_id = 'u-member' AND action IN ('user.session_revoked', 'user.sessions_revoked')`).Scan(&audits)
-	if audits != 2 {
-		t.Errorf("audit rows = %d, want 2", audits)
+	if audits != 3 {
+		t.Errorf("audit rows = %d, want 3", audits)
 	}
 }
 

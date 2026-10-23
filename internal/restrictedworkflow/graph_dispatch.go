@@ -155,6 +155,15 @@ func (s *Service) executeGraph(ctx context.Context, j job, originHandle string, 
 	proofs := map[string]restricteddispatch.RunProof{}
 	sealed := map[string]sealedLeaf{}
 	check := func() error {
+		if g.Publication != nil {
+			// One composite query: authority, publication, provider
+			// declarations, lease and parent attempt. Earlier outputs are
+			// re-verified before completion.
+			if ctx.Err() != nil || s.checkPublishedJob(ctx, s.db, j, originHandle, g, boundary{parent: parent.ID, assignment: &assignment}) != nil {
+				return ErrDenied
+			}
+			return nil
+		}
 		if ctx.Err() != nil || s.checkJob(ctx, s.db, j, originHandle) != nil || s.checkOwnership(ctx, s.db, assignment) != nil {
 			return ErrDenied
 		}
@@ -250,7 +259,7 @@ func (s *Service) executeGraph(ctx context.Context, j job, originHandle string, 
 			var text strings.Builder
 			done := false
 			emit := func(kind, value string) error {
-				if stepCtx.Err() != nil || check() != nil {
+				if stepCtx.Err() != nil || (g.Publication == nil && check() != nil) {
 					return ErrDenied
 				}
 				switch kind {

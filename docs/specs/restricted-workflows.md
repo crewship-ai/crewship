@@ -16,6 +16,62 @@ Execution is bounded to 16 agent leaves, 64 graph nodes and nesting depth four. 
 
 These projections use private context and delivery rather than shared activity streams. The routine UI selects them using the server-derived current membership access mode. Text and native execution require an explicitly installed typed adapter for the configured profile; unsupported profiles have no trusted fallback.
 
+## Guest-published routines
+
+A routine whose HEAD carries a Guest publication manifest runs only through the
+manual `POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run` admission
+above (`crewship routine run <slug> --wait`). Page actions, issue preflight,
+schedules, webhooks, nested `call_pipeline` and resume refuse it. Admission
+recompiles the exact published version: every step must be a direct `agent_run`
+on the agent, crew and `responses_text`/`native_api_key` profile recorded at
+publication, and both the caller's grants (root-routine Run, agent Run and
+Delegate) and the publisher's frozen View/Edit/Publish and agent bindings must
+be live, with the same grant, publisher membership and issuer identities and a
+live trusted OWNER/ADMIN issuer. A run-only Guest can invoke another Guest's
+publication within both sets of grants.
+
+Run authority belongs to those grants and the accounts, not to a browser
+session or CLI token: logging out does not stop an accepted run. Every
+administrator session revocation (`POST /api/v1/admin/users/{userId}/sessions/revoke-all`,
+single-session revoke and host-side `crewship admin invalidate-sessions`) also
+writes a durable `users.access_revoked_at` marker in the same transaction, so a
+user who had already logged out is still stopped.
+
+At every step boundary, immediately before each provider call, ONE composite
+query rechecks the whole authority of the run: the origin attempt, member
+revision and account, private chat and agent profile, the caller's grants, the
+exact HEAD publication and every frozen authoring/execution binding (same grant,
+publisher membership and live trusted OWNER/ADMIN issuer), the revocation marker
+of the caller and publisher, the current provider declaration of every recorded
+agent (credential, grant, credential revision, model and profile must equal the
+manifest, so a rotated credential stops the run), the frozen recipe and provider
+slots, the dispatch lease and the run's parent attempt. A failed check stops the
+run before the next step; no further provider request is made. Published runs do
+not poll authority between boundaries; the existing lease monitor still cancels
+a run whose dispatch ownership is lost, and the run's deadline cancels an
+in-flight provider call. The manifest's recorded grant/key expiry is not used;
+provider slots keep their existing live expiry checks.
+
+A published run has a hard 30-minute limit from its acceptance, fixed when it
+is accepted. Deferred start is refused: `delay_seconds` other than 0 returns
+HTTP 422 for a published routine. Moving HEAD (republish or rollback) also stops
+an older run, as a changed recipe does for legacy runs. Results stay private to
+the run's caller; other Guests and the publisher receive the opaque 404. A
+completed run's receipt is also hidden once its authority is later revoked;
+this is accepted, the run itself is unaffected.
+
+Acceptance appends a chained `audit.entity_created` journal event
+(`action: published_run_started`) with the run, routine, version, version ID,
+authority fingerprint and publisher. A stop appends `audit.entity_updated`
+(`action: published_run_stopped`) in the same transaction as the failed state,
+with `reason` one of `grant_revoked`, `membership_changed`, `account_suspended`,
+`sessions_revoked`, `issuer_authority_lost`, `provider_changed`, `unpublished`,
+`publication_changed`, `max_duration`, `authority_changed` or
+`execution_failed`. Events carry no inputs or outputs. Exception: stopping
+never waits for the audit writer. If the stop event cannot be appended, the
+failed state still commits without it and the failure is logged; the start
+event, by contrast, is required for admission.
+
 ## Authorized routine catalog
 
 ```http
