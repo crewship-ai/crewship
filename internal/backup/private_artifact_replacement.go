@@ -23,6 +23,9 @@ type privateArtifactTargetReader interface {
 // Inspect optional source tables as well as the durable marker: older targets
 // can still carry consent or creation proof before their marker migration.
 func rejectPrivateArtifactTargetReplacement(ctx context.Context, target privateArtifactTargetReader, workspaceIDs []string) error {
+	if err := rejectMooringDeliveryTargetReplacement(ctx, target, workspaceIDs); err != nil {
+		return err
+	}
 	scope := ""
 	args := make([]any, len(workspaceIDs))
 	if len(workspaceIDs) > 0 {
@@ -58,6 +61,40 @@ func rejectPrivateArtifactTargetReplacement(ctx context.Context, target privateA
 		}
 		if protected {
 			return ErrPrivateArtifactTargetReplacement
+		}
+	}
+	return nil
+}
+
+// Runtime delivery metadata is deliberately absent from portable bundles.
+// Dropping the target's rows cannot withdraw a lease already held by a runtime,
+// and would erase the expiry evidence needed by subsequent revocation barriers.
+// Refuse replacement until a qualified retirement protocol can prove it safe.
+var ErrMooringDeliveryTargetReplacement = errors.New("backup: target contains issued Mooring delivery metadata; restore into a separate empty target")
+
+func rejectMooringDeliveryTargetReplacement(ctx context.Context, target privateArtifactTargetReader, workspaceIDs []string) error {
+	args := make([]any, len(workspaceIDs))
+	scope := ""
+	if len(workspaceIDs) > 0 {
+		scope = " WHERE " + equalityOrIN(quoteIdent("workspace_id"), len(workspaceIDs))
+		for i, id := range workspaceIDs {
+			args[i] = id
+		}
+	}
+	for _, table := range []string{"mooring_delivery_gates", "mooring_delivery_barriers"} {
+		var exists bool
+		if err := target.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?)`, table).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			continue
+		}
+		var issued bool
+		if err := target.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM `+quoteIdent(table)+scope+`)`, args...).Scan(&issued); err != nil {
+			return err
+		}
+		if issued {
+			return ErrMooringDeliveryTargetReplacement
 		}
 	}
 	return nil
