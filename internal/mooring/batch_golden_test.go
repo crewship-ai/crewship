@@ -225,3 +225,38 @@ func TestBatchIdentityConflictKeepsIndependentDraftPending(t *testing.T) {
 		t.Fatal("pending draft could not exact-retry independently", result, err)
 	}
 }
+
+func TestBatchAdapterSeesExactCanonicalUnicodeBytes(t *testing.T) {
+	store, adapter, _, _, lease := batchFixture(t)
+	op := testBatchOp("unicode")
+	op.Payload = json.RawMessage(`{"text":"<é😀\u2028","number":9007199254740993}`)
+	structure := "0"
+	op.Reads = []BatchReadPrecondition{{TargetID: "p", Revision: "0", StructureRevision: &structure}}
+	expected, err := CanonicalJSON(op.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := testBatchChange(t, lease.Key, "unicode", "", op)
+	store.config.Authority = func(_ context.Context, _ *sql.Tx, access BatchAccess) error {
+		if access.Operation != nil {
+			if string(access.Operation.Payload) != string(expected) {
+				t.Error("authority clone changed canonical bytes")
+			}
+			*access.Operation.Reads[0].StructureRevision = "999"
+		}
+		return nil
+	}
+	adapter.apply = func(_ context.Context, _ []byte, c BatchChange) ([]byte, *PreparedFailure, error) {
+		if string(c.Operations[0].Payload) != string(expected) || *c.Operations[0].Reads[0].StructureRevision != "0" {
+			t.Error("adapter clone changed bytes or aliased authority input")
+		}
+		*c.Operations[0].Reads[0].StructureRevision = "222"
+		return []byte("1"), nil, nil
+	}
+	if _, err = store.Commit(t.Context(), BatchRequest{lease, "0", []BatchChange{change}}); err != nil {
+		t.Fatal(err)
+	}
+	if structure != "0" {
+		t.Fatal("adapter/authority mutation escaped immutable input")
+	}
+}
