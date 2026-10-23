@@ -48,6 +48,24 @@ import (
 // sweeper's agent.expired record follows the expires_at the chained
 // agent.hired/agent.rehired entry already fixed.
 //
+// Known limits. This is a source scan, not a proof; review still owns these:
+//
+//   - It judges a function, not a transaction. A chained append anywhere in
+//     a function satisfies the insert and Emit rules even if it is on a
+//     different transaction, or on a path that does not reach the insert.
+//   - Field detection reads only map literals passed directly as metadata.
+//     Metadata built elsewhere is flagged as unreadable for privileged
+//     entities, but a privileged field under an unlisted entity type, or a
+//     differently named field (a new column), is not seen.
+//   - Entity types and authorization entry types are recognised by literal
+//     name. A computed entity type is listed in dynamicAuditActionSites; a
+//     computed journal Type is not seen at all.
+//   - Writes that bypass audit_logs and the journal (a privilege change with
+//     no audit at all) are invisible to it; the behaviour tests in
+//     legacy_authorization_audit_test.go and agent_privilege_audit_test.go
+//     cover the known paths.
+//   - Only production .go files under internal/ and cmd/ are scanned.
+//
 // Adding an entry is a deliberate act that has to be justified in review.
 var legacyAuditInsertSites = map[string]string{
 	"internal/api/internal_handler.go:WriteAuditLog":                             "the best-effort writer this guard polices at its call sites",

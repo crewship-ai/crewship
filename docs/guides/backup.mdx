@@ -957,7 +957,8 @@ them. Normal instance recovery restores that keyring and preserves historical
 audit MACs; the recovery drill checks both workspace and instance chains.
 When `recover --force` lands on a data directory whose server already booted,
 that directory holds its own keyring: recovery replaces it with the kit's and
-keeps the previous one beside it as `audit-keyring.json.replaced-<UTC time>`
+keeps the previous one beside it as `audit-keyring.json.replaced-<UTC time>`,
+re-sealed under the recovered master key
 (never deleted). A keyring that is not a regular file (a symlink, a directory)
 is refused before anything in the directory changes.
 Workspace and crew bundles never carry signing keys. Without the historical

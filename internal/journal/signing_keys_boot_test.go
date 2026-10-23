@@ -4,12 +4,13 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
 
 func TestAuditBootPublishesOneStablePrivateKeyring(t *testing.T) {
-	t.Setenv("ENCRYPTION_KEY", "synthetic-boot-root")
+	t.Setenv("ENCRYPTION_KEY", strings.Repeat("5", 64)) // the keyring is sealed under it
 	dir := t.TempDir()
 	const boots = 8
 	var group sync.WaitGroup
