@@ -37,3 +37,11 @@ integration must close all associated delivery gates and preserve pending drafts
 The child receives only LANG=C.UTF-8 and TZ=UTC; backend credentials and loader
 environment are not inherited. Diagnostics are discarded. Tests use an actual helper child and inherited FD,
 not a running Rust service or live collaboration acceptance.
+
+For actual Go/Rust bootstrap acceptance, build the pinned child using
+`crewship-heavy cargo build --manifest-path mooring/Cargo.toml -p mooring-collab --release --locked --offline`,
+then run `crewship-heavy env MOORING_TEST_RUST_BINARY=/absolute/path/to/mooring-collab go test -race ./internal/mooring -run '^TestRuntimeActualRustChild$' -count=1`.
+This opt-in test starts the real Rust process, checks readiness, unsupported
+post-bootstrap traffic closure and host cancellation. It does not exercise
+participants, leases, content dispatch or durable receipts. A skipped opt-in
+test is not execution evidence.
