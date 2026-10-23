@@ -338,6 +338,10 @@ func buildDocument(routes []route) map[string]any {
 	for name, schema := range documentSchemaComponents() {
 		schemas[name] = schema
 	}
+	_, mooringComponents := mooringSchemaCatalog()
+	for name, schema := range mooringComponents {
+		schemas[name] = schema
+	}
 	_, workbookComponents := gridcraftSchemaCatalog()
 	for name, schema := range workbookComponents {
 		schemas[name] = schema
@@ -664,6 +668,10 @@ func routeSchemaCatalog() map[string]DomainSchema {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	for key, schema := range documentSchemaCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	mooringRoutes, _ := mooringSchemaCatalog()
+	for key, schema := range mooringRoutes {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	workbookRoutes, _ := gridcraftSchemaCatalog()

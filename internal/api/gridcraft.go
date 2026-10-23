@@ -27,7 +27,8 @@ type gridcraftHTTP struct {
 	// editor is the operator switch of the live editing surface.
 	editor bool
 	// broadcast pushes workbook.committed on a Page channel; nil disables it.
-	broadcast func(prefix, id, eventType string, payload any)
+	broadcast        func(prefix, id, eventType string, payload any)
+	mooringBroadcast func(prefix, id, eventType string, payload any)
 	// editorBundle reports the qualified editor bundle digest and frame URL
 	// for a new session opened by the request; nil while the editor is off.
 	editorBundle func(*http.Request) (digest, url string)
@@ -51,6 +52,7 @@ func (r *Router) RegisterGridCraft(options appengine.Options, engine appengine.E
 	h := &gridcraftHTTP{pages: r.pages, store: store, engine: engine, operations: operations, editor: options.Editor, editorBundle: r.workbookEditorBundle}
 	if r.hub != nil {
 		h.broadcast = r.hub.BroadcastChannel
+		h.mooringBroadcast = r.hub.BroadcastChannel
 	}
 	authed, wsCtx := r.authMw.RequireAuth, r.authMw.RequireWorkspace
 	internalAuth := func(next http.Handler) http.Handler {
@@ -82,6 +84,7 @@ func (r *Router) RegisterGridCraft(options appengine.Options, engine appengine.E
 	// independently verified by artifactAgentRequest and checked again in SQL.
 	// openapi: responses 200,400,403,404,409,429,500,503
 	r.mux.Handle("POST /api/v1/internal/gridcraft", internalAuth(http.HandlerFunc(h.agent)))
+	r.registerMooring(h)
 	r.gridcraftOutbox = &gridcraftOutboxWorker{h: h}
 	h.outbox = r.gridcraftOutbox
 }

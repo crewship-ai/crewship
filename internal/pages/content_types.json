@@ -156,5 +156,17 @@
     "export_formats": [],
     "execution_profile": "headless-worker/v1",
     "authoring_skill": ""
+  },
+  {
+    "type_id": "mooring-app",
+    "schema_version": 1,
+    "viewer": "mooring",
+    "editor": "mooring",
+    "storage_adapter": "mooring",
+    "projection_adapter": "mooring",
+    "anchor_kinds": [],
+    "export_formats": [],
+    "execution_profile": "host-json",
+    "authoring_skill": ""
   }
 ]

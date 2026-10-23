@@ -409,5 +409,20 @@
       },
       "can_initialize_content": false
     }
+  },
+  {
+    "name": "generic-mooring-personal",
+    "facts": {
+      "human_owned": true,
+      "has_mooring": true
+    },
+    "expected": {
+      "content_descriptor": {
+        "type_id": "mooring-app",
+        "schema_version": 1,
+        "supported": true
+      },
+      "can_initialize_content": false
+    }
   }
 ]

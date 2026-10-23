@@ -59,3 +59,5 @@ func (a *GridCraftAdapter) Export(context.Context, appengine.Key, UnsupportedExp
 }
 
 var _ GridCraftOperations = (*GridCraftAdapter)(nil)
+
+var _ RevisionStorage[appengine.Key, appengine.Request, appengine.State, appengine.Receipt, appengine.Authorize] = (*GridCraftAdapter)(nil)

@@ -357,6 +357,7 @@ func (s *Server) respondRoutinesMCPToolsList(w http.ResponseWriter, req memoryMC
 	tools := routineMCPTools
 	if s.ipc != nil && s.ipc.GridCraftEnabled {
 		tools = append(append([]memoryMCPToolDescriptor(nil), tools...), gridcraftMCPCatalog()...)
+		tools = append(tools, mooringMCPCatalog()...)
 	}
 	result, _ := json.Marshal(map[string]any{"tools": tools})
 	writeJSONResponse(w, http.StatusOK, memoryMCPResponse{
@@ -383,6 +384,9 @@ func (s *Server) respondRoutinesMCPToolsCall(w http.ResponseWriter, r *http.Requ
 	}
 
 	if s.respondDocumentCreateMCPToolCall(w, r, req, params.Name, params.Arguments) {
+		return
+	}
+	if s.respondMooringMCPToolCall(w, r, req, params.Name, params.Arguments) {
 		return
 	}
 	if s.respondGridCraftMCPToolCall(w, r, req, params.Name, params.Arguments) {

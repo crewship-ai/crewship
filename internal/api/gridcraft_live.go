@@ -610,6 +610,9 @@ func (h *gridcraftHTTP) publish(ctx context.Context, pageID string) error {
 			}
 			if on {
 				h.broadcast("page", c.PageID, "workbook.committed", gridcraftCommitted{PageID: c.PageID, Rev: c.Rev, Generation: c.Generation, Kind: c.Kind, Cells: c.Cells})
+				if h.mooringBroadcast != nil {
+					h.mooringBroadcast("page", c.PageID, "mooring.committed", map[string]any{"artifact_id": c.PageID, "rev": c.Rev, "generation": c.Generation})
+				}
 			}
 		}
 		if len(claimed) < 100 {
