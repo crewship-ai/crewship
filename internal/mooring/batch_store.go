@@ -101,7 +101,17 @@ func (s *BatchStore) Initialize(ctx context.Context, lease OwnerLease, checkpoin
 		return ErrInvalid
 	}
 	checkpoint = append([]byte(nil), checkpoint...)
-	if err := s.config.Adapter.ValidateCheckpoint(ctx, append([]byte(nil), checkpoint...)); err != nil {
+	var inventory []BatchTargetIdentity
+	if s.targetsEnabled() {
+		var err error
+		inventory, err = s.config.Targets.Adapter.ValidateTargets(ctx, append([]byte(nil), checkpoint...))
+		if err != nil {
+			return err
+		}
+		if !validTargetInventory(inventory, s.config.Targets.Limits.Targets) {
+			return ErrInvalid
+		}
+	} else if err := s.config.Adapter.ValidateCheckpoint(ctx, append([]byte(nil), checkpoint...)); err != nil {
 		return err
 	}
 	return s.transaction(ctx, func(tx *sql.Tx) error {
@@ -112,11 +122,14 @@ func (s *BatchStore) Initialize(ctx context.Context, lease OwnerLease, checkpoin
 			return err
 		}
 		encoded := base64.StdEncoding.EncodeToString(checkpoint)
-		if _, err := tx.ExecContext(ctx, `INSERT INTO mooring_collab_documents(page_id,workspace_id,application_id,revision,checkpoint_base64) VALUES(?,?,?,'0',?)`, lease.Key.ArtifactID, lease.Key.WorkspaceID, lease.Key.ApplicationID, encoded); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO mooring_collab_documents(page_id,workspace_id,application_id,revision,checkpoint_base64,target_tracking) VALUES(?,?,?,'0',?,?)`, lease.Key.ArtifactID, lease.Key.WorkspaceID, lease.Key.ApplicationID, encoded, s.targetsEnabled()); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, `INSERT INTO mooring_collab_checkpoints(page_id,workspace_id,revision,checkpoint_base64,decoded_bytes) VALUES(?,?,'0',?,?)`, lease.Key.ArtifactID, lease.Key.WorkspaceID, encoded, len(checkpoint))
 		if err != nil {
+			return err
+		}
+		if err = s.initializeTargets(ctx, tx, lease.Key, inventory); err != nil {
 			return err
 		}
 		return s.audit(ctx, tx, lease.Key, "initialized", map[string]string{"revision": "0"})
@@ -231,7 +244,11 @@ func (s *BatchStore) saveChange(ctx context.Context, tx *sql.Tx, k SessionKey, c
 		if e != nil {
 			return e
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO mooring_collab_operations(page_id,workspace_id,op_id,change_id,participant_ref,fingerprint,result_json) VALUES(?,?,?,?,?,?,?)`, k.ArtifactID, k.WorkspaceID, op.ID, c.ID, op.Participant, op.Fingerprint, string(packet)); err != nil {
+		dependencies, err := json.Marshal(op.Dependencies)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO mooring_collab_operations(page_id,workspace_id,op_id,change_id,participant_ref,fingerprint,result_json,dependencies_json,target_effects_complete) VALUES(?,?,?,?,?,?,?,?,?)`, k.ArtifactID, k.WorkspaceID, op.ID, c.ID, op.Participant, op.Fingerprint, string(packet), string(dependencies), s.targetsEnabled()); err != nil {
 			return err
 		}
 	}
