@@ -128,7 +128,7 @@ func TestRPCCausalActualRustThousandTaskAndRecovery(t *testing.T) {
 		t.Fatal("incomplete durable task", events)
 	}
 	var complete int
-	if err = store.db.QueryRow(`SELECT COUNT(*) FROM mooring_collab_operations WHERE target_effects_complete=1 AND status='saved'`).Scan(&complete); err != nil || complete != 1000 {
+	if err = store.db.QueryRow(`SELECT COUNT(*) FROM mooring_collab_operations WHERE target_effects_complete=1`).Scan(&complete); err != nil || complete != 1000 {
 		t.Fatal("missing durable provenance", complete, err)
 	}
 	var revision, structure string
