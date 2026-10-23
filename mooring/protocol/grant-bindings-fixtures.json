@@ -1,0 +1,644 @@
+{
+  "profile": "mooring-host-grant-bindings-v1",
+  "status": "pure pending request/reply metadata checks; no channel authentication, gate registration or content delivery integration",
+  "rules": {
+    "first_send": "Create pending once for a NEW nonce. Retries use identical bytes and original private first-send timestamp. Controller must enforce nonce freshness; never reconstruct pending for the same nonce at a newer time.",
+    "clock": "Native timestamps must be CLOCK_BOOTTIME. Expiry is exclusive first_send+granted duration; reply arrival never restarts it.",
+    "initial_assignment": "OwnerAcquire assigns session/fence; ticket validation assigns participant/gate/current permissions. Accept these only from trusted host; subsequent renewals bind exact registered fields."
+  },
+  "context": {
+    "first_send_ms": 1000,
+    "received_at_ms": 1100,
+    "maximum_duration_ms": 2000,
+    "runtime_ref": "r1",
+    "minimum_generation": "6",
+    "minimum_permission": "5",
+    "versions": {
+      "protocol_version": "0.4.0",
+      "model_version": "1.0.0",
+      "engine_version": "1.0.0"
+    }
+  },
+  "requests": {
+    "delivery": {
+      "type": "delivery_renew",
+      "request_id": "dr1",
+      "scope": {
+        "application_id": "editor",
+        "workspace_id": "w",
+        "artifact_id": "a"
+      },
+      "session_id": "s1",
+      "participant_ref": "host-p1",
+      "fence": {
+        "generation": "7",
+        "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "permission_version": "5",
+      "renewal_nonce": "dn1",
+      "gate_id": "g1"
+    },
+    "owner_renew": {
+      "type": "owner_renew",
+      "request_id": "or1",
+      "scope": {
+        "application_id": "editor",
+        "workspace_id": "w",
+        "artifact_id": "a"
+      },
+      "session_id": "s1",
+      "fence": {
+        "generation": "7",
+        "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "permission_version": "5",
+      "renewal_nonce": "on1"
+    },
+    "owner_acquire": {
+      "type": "owner_acquire",
+      "request_id": "oa1",
+      "scope": {
+        "application_id": "editor",
+        "workspace_id": "w",
+        "artifact_id": "a"
+      },
+      "runtime_ref": "r1",
+      "renewal_nonce": "an1"
+    },
+    "ticket": {
+      "type": "ticket_validate",
+      "request_id": "tv1",
+      "scope": {
+        "application_id": "editor",
+        "workspace_id": "w",
+        "artifact_id": "a"
+      },
+      "session_id": "s1",
+      "fence": {
+        "generation": "7",
+        "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "ticket": "opaque-test-ticket",
+      "validation_nonce": "vn1"
+    }
+  },
+  "replies": {
+    "delivery": {
+      "type": "delivery_grant",
+      "request_id": "dr1",
+      "scope": {
+        "application_id": "editor",
+        "workspace_id": "w",
+        "artifact_id": "a"
+      },
+      "session_id": "s1",
+      "participant_ref": "host-p1",
+      "generation": "7",
+      "permission_version": "5",
+      "renewal_nonce": "dn1",
+      "duration_ms": "1000",
+      "gate_id": "g1"
+    },
+    "owner_renew": {
+      "type": "owner_grant",
+      "request_id": "or1",
+      "scope": {
+        "application_id": "editor",
+        "workspace_id": "w",
+        "artifact_id": "a"
+      },
+      "session_id": "s1",
+      "runtime_ref": "r1",
+      "fence": {
+        "generation": "7",
+        "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "lease_duration_ms": "1000",
+      "revision": "14",
+      "renewal_nonce": "on1",
+      "permission_version": "5"
+    },
+    "owner_acquire": {
+      "type": "owner_grant",
+      "request_id": "oa1",
+      "scope": {
+        "application_id": "editor",
+        "workspace_id": "w",
+        "artifact_id": "a"
+      },
+      "session_id": "host-assigned-session",
+      "runtime_ref": "r1",
+      "fence": {
+        "generation": "7",
+        "token": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+      },
+      "lease_duration_ms": "1000",
+      "revision": "14",
+      "renewal_nonce": "an1",
+      "permission_version": "5"
+    },
+    "ticket": {
+      "type": "ticket_validated",
+      "request_id": "tv1",
+      "scope": {
+        "application_id": "editor",
+        "workspace_id": "w",
+        "artifact_id": "a"
+      },
+      "session_id": "s1",
+      "participant_ref": "host-assigned-p",
+      "generation": "7",
+      "permission_version": "6",
+      "granted": {
+        "read": true,
+        "write": true,
+        "suggest": true
+      },
+      "versions": {
+        "protocol_version": "0.4.0",
+        "model_version": "1.0.0",
+        "engine_version": "1.0.0"
+      },
+      "expires_in_ms": "1000",
+      "validation_nonce": "vn1",
+      "gate_id": "host-assigned-g"
+    }
+  },
+  "cases": [
+    {
+      "id": "delivery-valid",
+      "kind": "delivery",
+      "expected_error": null,
+      "mutations": []
+    },
+    {
+      "id": "delivery-participant-forgery",
+      "kind": "delivery",
+      "expected_error": "Forbidden",
+      "mutations": [],
+      "transport": "participant"
+    },
+    {
+      "id": "delivery-wrong-scope",
+      "kind": "delivery",
+      "expected_error": "Forbidden",
+      "mutations": [
+        {
+          "path": "/scope/artifact_id",
+          "value": "other"
+        }
+      ]
+    },
+    {
+      "id": "delivery-wrong-request",
+      "kind": "delivery",
+      "expected_error": "StaleOwner",
+      "mutations": [
+        {
+          "path": "/request_id",
+          "value": "old"
+        }
+      ]
+    },
+    {
+      "id": "delivery-at-exclusive-expiry",
+      "kind": "delivery",
+      "expected_error": "Expired",
+      "mutations": [],
+      "received_at_ms": 2000
+    },
+    {
+      "id": "delivery-clock-regression",
+      "kind": "delivery",
+      "expected_error": "Clock",
+      "mutations": [],
+      "received_at_ms": 999
+    },
+    {
+      "id": "owner_renew-valid",
+      "kind": "owner_renew",
+      "expected_error": null,
+      "mutations": []
+    },
+    {
+      "id": "owner_renew-participant-forgery",
+      "kind": "owner_renew",
+      "expected_error": "Forbidden",
+      "mutations": [],
+      "transport": "participant"
+    },
+    {
+      "id": "owner_renew-wrong-scope",
+      "kind": "owner_renew",
+      "expected_error": "Forbidden",
+      "mutations": [
+        {
+          "path": "/scope/artifact_id",
+          "value": "other"
+        }
+      ]
+    },
+    {
+      "id": "owner_renew-wrong-request",
+      "kind": "owner_renew",
+      "expected_error": "StaleOwner",
+      "mutations": [
+        {
+          "path": "/request_id",
+          "value": "old"
+        }
+      ]
+    },
+    {
+      "id": "owner_renew-at-exclusive-expiry",
+      "kind": "owner_renew",
+      "expected_error": "Expired",
+      "mutations": [],
+      "received_at_ms": 2000
+    },
+    {
+      "id": "owner_renew-clock-regression",
+      "kind": "owner_renew",
+      "expected_error": "Clock",
+      "mutations": [],
+      "received_at_ms": 999
+    },
+    {
+      "id": "owner_acquire-valid",
+      "kind": "owner_acquire",
+      "expected_error": null,
+      "mutations": []
+    },
+    {
+      "id": "owner_acquire-participant-forgery",
+      "kind": "owner_acquire",
+      "expected_error": "Forbidden",
+      "mutations": [],
+      "transport": "participant"
+    },
+    {
+      "id": "owner_acquire-wrong-scope",
+      "kind": "owner_acquire",
+      "expected_error": "Forbidden",
+      "mutations": [
+        {
+          "path": "/scope/artifact_id",
+          "value": "other"
+        }
+      ]
+    },
+    {
+      "id": "owner_acquire-wrong-request",
+      "kind": "owner_acquire",
+      "expected_error": "StaleOwner",
+      "mutations": [
+        {
+          "path": "/request_id",
+          "value": "old"
+        }
+      ]
+    },
+    {
+      "id": "owner_acquire-at-exclusive-expiry",
+      "kind": "owner_acquire",
+      "expected_error": "Expired",
+      "mutations": [],
+      "received_at_ms": 2000
+    },
+    {
+      "id": "owner_acquire-clock-regression",
+      "kind": "owner_acquire",
+      "expected_error": "Clock",
+      "mutations": [],
+      "received_at_ms": 999
+    },
+    {
+      "id": "ticket-valid",
+      "kind": "ticket",
+      "expected_error": null,
+      "mutations": []
+    },
+    {
+      "id": "ticket-participant-forgery",
+      "kind": "ticket",
+      "expected_error": "Forbidden",
+      "mutations": [],
+      "transport": "participant"
+    },
+    {
+      "id": "ticket-wrong-scope",
+      "kind": "ticket",
+      "expected_error": "Forbidden",
+      "mutations": [
+        {
+          "path": "/scope/artifact_id",
+          "value": "other"
+        }
+      ]
+    },
+    {
+      "id": "ticket-wrong-request",
+      "kind": "ticket",
+      "expected_error": "StaleOwner",
+      "mutations": [
+        {
+          "path": "/request_id",
+          "value": "old"
+        }
+      ]
+    },
+    {
+      "id": "ticket-at-exclusive-expiry",
+      "kind": "ticket",
+      "expected_error": "Expired",
+      "mutations": [],
+      "received_at_ms": 2000
+    },
+    {
+      "id": "ticket-clock-regression",
+      "kind": "ticket",
+      "expected_error": "Clock",
+      "mutations": [],
+      "received_at_ms": 999
+    },
+    {
+      "id": "delivery-session_id",
+      "kind": "delivery",
+      "expected_error": "StaleOwner",
+      "mutations": [
+        {
+          "path": "/session_id",
+          "value": "other"
+        }
+      ]
+    },
+    {
+      "id": "delivery-participant_ref",
+      "kind": "delivery",
+      "expected_error": "StaleOwner",
+      "mutations": [
+        {
+          "path": "/participant_ref",
+          "value": "other"
+        }
+      ]
+    },
+    {
+      "id": "delivery-generation",
+      "kind": "delivery",
+      "expected_error": "StaleOwner",
+      "mutations": [
+        {
+          "path": "/generation",
+          "value": "8"
+        }
+      ]
+    },
+    {
+      "id": "delivery-permission_version",
+      "kind": "delivery",
+      "expected_error": "StaleOwner",
+      "mutations": [
+        {
+          "path": "/permission_version",
+          "value": "6"
+        }
+      ]
+    },
+    {
+      "id": "delivery-renewal_nonce",
+      "kind": "delivery",
+      "expected_error": "StaleOwner",
+      "mutations": [
+        {
+          "path": "/renewal_nonce",
+          "value": "old"
+        }
+      ]
+    },
+    {
+      "id": "delivery-gate_id",
+      "kind": "delivery",
+      "expected_error": "StaleOwner",
+      "mutations": [
+        {
+          "path": "/gate_id",
+          "value": "other"
+        }
+      ]
+    },
+    {
+      "id": "delivery-lost-response-retry-retains-first-send",
+      "kind": "delivery",
+      "expected_error": null,
+      "mutations": [],
+      "received_at_ms": 1900
+    },
+    {
+      "id": "delivery-lost-response-retry-after-original-expiry",
+      "kind": "delivery",
+      "expected_error": "Expired",
+      "mutations": [],
+      "received_at_ms": 2100
+    },
+    {
+      "id": "delivery-duration-over-host-bound",
+      "kind": "delivery",
+      "expected_error": "Capacity",
+      "mutations": [
+        {
+          "path": "/duration_ms",
+          "value": "2001"
+        }
+      ]
+    },
+    {
+      "id": "delivery-zero-duration",
+      "kind": "delivery",
+      "expected_error": "Wire",
+      "mutations": [
+        {
+          "path": "/duration_ms",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "id": "owner-renew-session_id",
+      "kind": "owner_renew",
+      "expected_error": "StaleOwner",
+      "mutations": [
+        {
+          "path": "/session_id",
+          "value": "other"
+        }
+      ]
+    },
+    {
+      "id": "owner-renew-runtime_ref",
+      "kind": "owner_renew",
+      "expected_error": "StaleOwner",
+      "mutations": [
+        {
+          "path": "/runtime_ref",
+          "value": "other"
+        }
+      ]
+    },
+    {
+      "id": "owner-renew-fence-generation",
+      "kind": "owner_renew",
+      "expected_error": "StaleOwner",
+      "mutations": [
+        {
+          "path": "/fence/generation",
+          "value": "8"
+        }
+      ]
+    },
+    {
+      "id": "owner-renew-fence-token",
+      "kind": "owner_renew",
+      "expected_error": "StaleOwner",
+      "mutations": [
+        {
+          "path": "/fence/token",
+          "value": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        }
+      ]
+    },
+    {
+      "id": "owner-renew-renewal_nonce",
+      "kind": "owner_renew",
+      "expected_error": "StaleOwner",
+      "mutations": [
+        {
+          "path": "/renewal_nonce",
+          "value": "old"
+        }
+      ]
+    },
+    {
+      "id": "owner-renew-permission_version",
+      "kind": "owner_renew",
+      "expected_error": "StaleOwner",
+      "mutations": [
+        {
+          "path": "/permission_version",
+          "value": "6"
+        }
+      ]
+    },
+    {
+      "id": "acquire-host-assigned-fields-are-not-client-claims",
+      "kind": "owner_acquire",
+      "expected_error": null,
+      "mutations": [
+        {
+          "path": "/session_id",
+          "value": "new-host-session"
+        },
+        {
+          "path": "/fence/token",
+          "value": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        },
+        {
+          "path": "/permission_version",
+          "value": "6"
+        }
+      ]
+    },
+    {
+      "id": "acquire-stale-generation",
+      "kind": "owner_acquire",
+      "expected_error": "StaleOwner",
+      "mutations": [
+        {
+          "path": "/fence/generation",
+          "value": "6"
+        }
+      ]
+    },
+    {
+      "id": "acquire-runtime-mismatch",
+      "kind": "owner_acquire",
+      "expected_error": "StaleOwner",
+      "mutations": [
+        {
+          "path": "/runtime_ref",
+          "value": "other"
+        }
+      ]
+    },
+    {
+      "id": "ticket-host-assigned-subject-and-gate",
+      "kind": "ticket",
+      "expected_error": null,
+      "mutations": [
+        {
+          "path": "/participant_ref",
+          "value": "different-host-subject"
+        },
+        {
+          "path": "/gate_id",
+          "value": "different-host-gate"
+        }
+      ]
+    },
+    {
+      "id": "ticket-stale-permission",
+      "kind": "ticket",
+      "expected_error": "PermissionRevoked",
+      "mutations": [
+        {
+          "path": "/permission_version",
+          "value": "4"
+        }
+      ]
+    },
+    {
+      "id": "ticket-wrong-version",
+      "kind": "ticket",
+      "expected_error": "VersionMismatch",
+      "mutations": [
+        {
+          "path": "/versions/model_version",
+          "value": "2.0.0"
+        }
+      ]
+    },
+    {
+      "id": "ticket-wrong-generation",
+      "kind": "ticket",
+      "expected_error": "StaleOwner",
+      "mutations": [
+        {
+          "path": "/generation",
+          "value": "8"
+        }
+      ]
+    },
+    {
+      "id": "ticket-old-validation-nonce",
+      "kind": "ticket",
+      "expected_error": "StaleOwner",
+      "mutations": [
+        {
+          "path": "/validation_nonce",
+          "value": "old"
+        }
+      ]
+    },
+    {
+      "id": "ticket-session-mismatch",
+      "kind": "ticket",
+      "expected_error": "StaleOwner",
+      "mutations": [
+        {
+          "path": "/session_id",
+          "value": "other"
+        }
+      ]
+    }
+  ]
+}
