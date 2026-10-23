@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/mooring-core"]
+members = ["crates/mooring-core", "crates/mooring-text"]
 resolver = "2"
 
 [workspace.package]
