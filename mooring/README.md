@@ -86,3 +86,34 @@ counter is `precondition_failed`, attributed to the actual operation. This initi
 `agent_confirmed_current` capability rejects causal stale and provisional reads;
 the shared context fixtures qualify only this pure intersection, not host commits
 or the remaining broader collaboration modes.
+
+### Experimental WordCraft current-frontier human validator
+
+`mooring-wordcraft::experimental_human_current` is a pure host-only candidate
+boundary. It is not connected to any endpoint, dispatcher, advertised capability
+or browser admission flow. Existing runtime profiles still refuse human updates.
+The host must authenticate the original writer, scope, source and epoch and bind
+an issued origin before constructing the non-`Deserialize` `HostWriter` input;
+it must repeat final authority checks in its durable commit transaction.
+
+This first case accepts only an exact confirmed frontier. `checkpoint_frontier`
+encodes the actual state vector in sorted client order, so its byte identity does
+not depend on hash-map iteration. A stale or unknown frontier is an explicit
+`UnqualifiedFrontier`, never an inferred rejected allocation or Saved receipt.
+There is no retirement/GC authorization or optimistic dependency qualification.
+
+The bounded original update appends only the issued origin's current clock,
+uses exact current formatting stamps or qualified own historical identities,
+and passes a disposable full-root/native/effect audit. Actual allocated clock
+coverage and delete-range availability are checked independently of Yrs's
+pending-update flag. Original client bytes and IDs are retained; no server
+command reexecution replaces them. Reader input is refused before decoding.
+
+Native Yrs GC can remove a format identity after undo. Redo may therefore need
+`HostCommittedOwnOperation` records from the host's already-qualified immutable
+Saved history. These typed inputs are not proof constructors: the host must
+bind scope, participant, original epoch/source and receipts independently.
+Unverified client claims cannot supply history. Inputs are bounded to256 records
+and262144 total original bytes; unavailable history fails closed. Current native
+tests mock this outer host proof. This does not qualify durable human history,
+selective undo across arbitrary recovery, live authority or E3 completion.
