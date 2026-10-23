@@ -266,6 +266,7 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "provisioning.failed",
       "provisioning.build_failed",
       "sidecar.stale",
+      "sidecar.recreated",
       "image.stale",
       // Pages (docs/specs/pages.md §5, §7.1b) — no dedicated facet yet, so
       // they land here explicitly rather than through the unclaimed
