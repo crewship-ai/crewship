@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/appengine"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -136,6 +137,7 @@ func (h *PageHandler) deleteWorkbookPage(r *http.Request, workspace string, rec 
 	if validateContentHumanCredential(r.WithContext(ctx), tx, "pages:write") != nil {
 		return workbookHumanDeleteRefusal, nil
 	}
+	var notify func()
 	var res sql.Result
 	if rec.OwnerUserID != "" && rec.OwnerUserID == user.ID {
 		res, err = tx.ExecContext(ctx, `DELETE FROM pages WHERE id = ? AND workspace_id = ? AND owner_user_id = ?`, rec.ID, workspace, user.ID)
@@ -155,6 +157,13 @@ func (h *PageHandler) deleteWorkbookPage(r *http.Request, workspace string, rec 
 		if err := execOneRow(ctx, tx, `INSERT INTO audit_logs(id,workspace_id,user_id,action,entity_type,entity_id,metadata,created_at) VALUES(?,?,?,?,?,?,?,?)`, generateCUID(), workspace, user.ID, "artifact.orphaned_workbook_deleted", "page", rec.ID, string(metadata), tsformat.Format(time.Now())); err != nil {
 			return "", err
 		}
+		notify, err = appendAuthorizationAudit(ctx, tx, h.journal, journal.Entry{
+			WorkspaceID: workspace, Type: "artifact.orphaned_workbook_deleted", ActorType: journal.ActorUser, ActorID: user.ID,
+			Summary: "Orphaned workbook deleted", Payload: map[string]any{"page_id": rec.ID, "owner_user_id": rec.OwnerUserID, "owner_crew_id": rec.OwnerCrewID},
+		})
+		if err != nil {
+			return "", err
+		}
 		res, err = tx.ExecContext(ctx, `DELETE FROM pages WHERE id = ? AND workspace_id = ? AND `+workbookOrphanSQL+` AND EXISTS(SELECT 1 FROM workspace_members m JOIN users u ON u.id = m.user_id AND u.suspended_at IS NULL WHERE m.workspace_id = pages.workspace_id AND m.user_id = ? AND m.role = 'OWNER')`, rec.ID, workspace, user.ID)
 	}
 	if err != nil {
@@ -165,5 +174,11 @@ func (h *PageHandler) deleteWorkbookPage(r *http.Request, workspace string, rec 
 	} else if n != 1 {
 		return workbookPageRefusal, nil
 	}
-	return "", tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return "", err
+	}
+	if notify != nil {
+		notify()
+	}
+	return "", nil
 }

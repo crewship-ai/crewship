@@ -113,6 +113,7 @@ func (h *gridcraftHTTP) share(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := gridcraftShared{Page: rec.Slug, Editor: editorRef, EditorUserID: editorID}
+	var notifyPublication func()
 	if rec.PrivateAudience {
 		if !req.Publish {
 			replyError(w, http.StatusConflict, "publication_required: sharing ends this workbook's private audience; the editor sees the full current workbook (every sheet and its revision number, not earlier revisions) and the ordinary Page ACL, which admins also manage, decides who sees its name. Repeat with publish=true")
@@ -134,6 +135,14 @@ func (h *gridcraftHTTP) share(w http.ResponseWriter, r *http.Request) {
 		}
 		metadata, _ := json.Marshal(map[string]any{"owner_user_id": rec.OwnerUserID, "head_rev": rev, "generation": generation, "revoked_mandates": out.RevokedMandates})
 		if err = execOneRow(ctx, tx, `INSERT INTO audit_logs(id,workspace_id,user_id,action,entity_type,entity_id,metadata,created_at) VALUES(?,?,?,?,?,?,?,?)`, generateCUID(), k.WorkspaceID, user.ID, "artifact.private_output_published", "page", rec.ID, string(metadata), stamp); err != nil {
+			gridcraftError(w, err)
+			return
+		}
+		notifyPublication, err = appendAuthorizationAudit(ctx, tx, h.pages.journal, journal.Entry{
+			WorkspaceID: k.WorkspaceID, Type: "artifact.private_output_published", ActorType: journal.ActorUser, ActorID: user.ID,
+			Summary: "Workbook published", Payload: map[string]any{"page_id": rec.ID, "owner_user_id": rec.OwnerUserID, "head_rev": rev, "generation": generation, "revoked_mandates": out.RevokedMandates},
+		})
+		if err != nil {
 			gridcraftError(w, err)
 			return
 		}
@@ -171,6 +180,9 @@ ON CONFLICT(page_id,subject_type,subject_id,level) DO UPDATE SET panel_ids=NULL,
 		}
 		gridcraftError(w, err)
 		return
+	}
+	if notifyPublication != nil {
+		notifyPublication()
 	}
 	broadcastWorkspaceEvent(h.pages.hub, k.WorkspaceID, "page.updated", map[string]any{})
 	writeJSON(w, http.StatusOK, out)

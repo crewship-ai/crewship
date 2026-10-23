@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/inbox"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -349,6 +350,14 @@ func (h *WorkspaceHandler) TransferPageOwnership(w http.ResponseWriter, r *http.
 			return
 		}
 	}
+	notifyTransfer, err := appendAuthorizationAudit(ctx, tx, h.journal, journal.Entry{
+		WorkspaceID: ws, Type: entryPageOwnerTransferred, ActorType: journal.ActorUser, ActorID: actor.ID,
+		Summary: "Private output ownership transferred", Payload: map[string]any{"page_id": id, "from_user_id": p.OwnerUserID, "to_user_id": body.SuccessorUserID, "reason": "explicit_human_transfer"},
+	})
+	if err != nil {
+		replyInternalError(w, h.logger, "audit output custody transfer", err)
+		return
+	}
 	// The Page identifies a subject with new custody news, not a once-only
 	// event. Reopen its administrator card atomically; the journal below keeps
 	// the history of every committed transfer.
@@ -380,7 +389,7 @@ func (h *WorkspaceHandler) TransferPageOwnership(w http.ResponseWriter, r *http.
 		replyInternalError(w, h.logger, "commit output custody", err)
 		return
 	}
-	emitPageOwnerTransferJournals(ctx, h.journal, ws, actor.ID, p.OwnerUserID, []pageOwnerTransferResult{{PageID: id, PageSlug: p.Slug, PageName: p.Name, ToUserID: body.SuccessorUserID, Reason: "explicit_human_transfer"}})
+	notifyTransfer()
 	response := WorkspacePageOwnershipSummary(refreshed[0])
 	writeJSON(w, 200, response)
 }

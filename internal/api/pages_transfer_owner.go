@@ -130,7 +130,7 @@ func transferDepartingUserPages(ctx context.Context, db *sql.DB, j journal.Emitt
 		// A refused erasure opens custody of the subject's workbooks (see
 		// gridcraft_custody.go) once this transaction has let go.
 		_ = tx.Rollback()
-		return nil, recordRefusedDepartureCustody(ctx, db, actorID, wsID, userID, "erasure_refused", err)
+		return nil, recordRefusedDepartureCustody(ctx, db, j, actorID, wsID, userID, "erasure_refused", err)
 	}
 	if len(results) == 0 {
 		return nil, nil

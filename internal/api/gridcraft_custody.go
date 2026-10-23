@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -56,7 +57,7 @@ func workbookCustodySQL(alias, kind, actorID string, now time.Time) (string, []a
 // that owner still owns in ws, after a removal or erasure of owner was refused
 // for them. The departure's own transaction has rolled back, so this commits
 // separately; callers must not hold an open transaction on db.
-func recordWorkbookCustodyRequests(ctx context.Context, db *sql.DB, actorID, ws, owner, reason string, pageIDs []string) error {
+func recordWorkbookCustodyRequests(ctx context.Context, db *sql.DB, j journal.Emitter, actorID, ws, owner, reason string, pageIDs []string) error {
 	if len(pageIDs) == 0 {
 		return nil
 	}
@@ -71,24 +72,47 @@ func recordWorkbookCustodyRequests(ctx context.Context, db *sql.DB, actorID, ws,
 	}
 	metadata, _ := json.Marshal(map[string]string{"owner_user_id": owner, "reason": reason})
 	now := tsformat.Format(time.Now())
+	var notifications []func()
 	for _, id := range pageIDs {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO audit_logs(id,workspace_id,user_id,action,entity_type,entity_id,metadata,created_at) SELECT ?,p.workspace_id,(SELECT id FROM users WHERE id=?),?,'page',p.id,?,? FROM pages p WHERE p.id=? AND p.workspace_id=? AND p.owner_user_id=? AND (`+kind+`)='workbook'`,
-			generateCUID(), actorID, workbookCustodyRequestedAction, string(metadata), now, id, ws, owner); err != nil {
+		result, err := tx.ExecContext(ctx, `INSERT INTO audit_logs(id,workspace_id,user_id,action,entity_type,entity_id,metadata,created_at) SELECT ?,p.workspace_id,(SELECT id FROM users WHERE id=?),?,'page',p.id,?,? FROM pages p WHERE p.id=? AND p.workspace_id=? AND p.owner_user_id=? AND (`+kind+`)='workbook'`,
+			generateCUID(), actorID, workbookCustodyRequestedAction, string(metadata), now, id, ws, owner)
+		if err != nil {
 			return fmt.Errorf("record workbook custody request: %w", err)
 		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			continue
+		}
+		notify, err := appendAuthorizationAudit(ctx, tx, j, journal.Entry{
+			WorkspaceID: ws, Type: workbookCustodyRequestedAction, ActorType: journal.ActorUser, ActorID: actorID,
+			Summary: "Workbook custody requested", Payload: map[string]any{"page_id": id, "owner_user_id": owner, "reason": reason},
+		})
+		if err != nil {
+			return err
+		}
+		notifications = append(notifications, notify)
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	for _, notify := range notifications {
+		notify()
+	}
+	return nil
 }
 
 // recordRefusedDepartureCustody is the departure paths' hook: when err is a
 // manual-transfer refusal it records the workbook custody requests and
 // returns err unchanged, or the recording failure.
-func recordRefusedDepartureCustody(ctx context.Context, db *sql.DB, actorID, ws, owner, reason string, err error) error {
+func recordRefusedDepartureCustody(ctx context.Context, db *sql.DB, j journal.Emitter, actorID, ws, owner, reason string, err error) error {
 	var manual *ErrPagesNeedManualTransfer
 	if !errors.As(err, &manual) {
 		return err
 	}
-	if recordErr := recordWorkbookCustodyRequests(ctx, db, actorID, ws, owner, reason, manual.PageIDs); recordErr != nil {
+	if recordErr := recordWorkbookCustodyRequests(ctx, db, j, actorID, ws, owner, reason, manual.PageIDs); recordErr != nil {
 		return recordErr
 	}
 	return err

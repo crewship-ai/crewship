@@ -695,7 +695,7 @@ func departWorkspaceAuthorized(ctx context.Context, db *sql.DB, j journal.Emitte
 		// departure first opens custody of the member's workbooks (see
 		// gridcraft_custody.go), after this transaction has let go.
 		_ = tx.Rollback()
-		return recordRefusedDepartureCustody(ctx, db, actorID, workspaceID, memberUserID, "member_removal_refused", err)
+		return recordRefusedDepartureCustody(ctx, db, j, actorID, workspaceID, memberUserID, "member_removal_refused", err)
 	}
 
 	removed, err := tx.ExecContext(ctx,

@@ -321,3 +321,51 @@ func TestGridCraftWorkbookCustodyOnlyForDepartedOwners(t *testing.T) {
 		openCustody(t, f, ann, bob)
 	})
 }
+
+// Access changes and their chained audit must commit together. A broken journal
+// cannot leave publication, custody eligibility, ownership or deletion applied.
+func TestGridCraftAuthorizationAuditFailureRollsBack(t *testing.T) {
+	for _, action := range []string{"publication", "request", "transfer", "delete"} {
+		t.Run(action, func(t *testing.T) {
+			f, ann, _ := gridcraftCustodyFixture(t, false)
+			if action == "transfer" {
+				if err := recordWorkbookCustodyRequests(t.Context(), f.db, nil, "boss", "ws-old", "ann", "erasure_refused", []string{"custody-book-id"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if action == "delete" {
+				mustExec(t, f.db, `DELETE FROM workspace_members WHERE workspace_id='ws-old' AND user_id='ann'`)
+			}
+			legacyBefore := gridcraftCount(t, f, `SELECT count(*) FROM audit_logs`)
+			chainBefore := gridcraftCount(t, f, `SELECT count(*) FROM journal_entries`)
+			mustExec(t, f.db, `CREATE TRIGGER reject_workbook_audit BEFORE INSERT ON journal_entries BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END`)
+			switch action {
+			case "publication":
+				wantCode(t, f.do(ann, "POST", "/api/v1/pages/custody-book/workbook/editors?workspace_id=ws-old", `{"editor":"bob@ex.com","publish":true}`), 500, "publication audit fails closed")
+				if n := gridcraftCount(t, f, `SELECT count(*) FROM page_grants WHERE page_id='custody-book-id'`); n != 0 {
+					t.Fatalf("publication left %d grants", n)
+				}
+			case "request":
+				if err := recordWorkbookCustodyRequests(t.Context(), f.db, nil, "boss", "ws-old", "ann", "erasure_refused", []string{"custody-book-id"}); err == nil {
+					t.Fatal("custody request ignored journal failure")
+				}
+			case "transfer":
+				wantCode(t, f.do(f.boss, "POST", "/api/v1/workspaces/ws-old/page-ownership/custody-book-id?workspace_id=ws-old", `{"expected_owner_user_id":"ann","successor_user_id":"bob"}`), 500, "transfer audit fails closed")
+			case "delete":
+				wantCode(t, f.do(f.boss, "DELETE", "/api/v1/pages/custody-book?workspace_id=ws-old", ""), 500, "deletion audit fails closed")
+			}
+			if n := gridcraftCount(t, f, `SELECT count(*) FROM pages WHERE id='custody-book-id' AND owner_user_id='ann' AND private_audience=1`); n != 1 {
+				t.Fatal("failed audit changed workbook authority or deleted the page")
+			}
+			if n := gridcraftCount(t, f, `SELECT count(*) FROM gridcraft_heads WHERE page_id='custody-book-id' AND head_rev=1`); n != 1 {
+				t.Fatal("failed audit lost workbook content")
+			}
+			if n := gridcraftCount(t, f, `SELECT count(*) FROM audit_logs`); n != legacyBefore {
+				t.Fatalf("legacy audit escaped rollback: %d -> %d", legacyBefore, n)
+			}
+			if n := gridcraftCount(t, f, `SELECT count(*) FROM journal_entries`); n != chainBefore {
+				t.Fatalf("chain escaped rollback: %d -> %d", chainBefore, n)
+			}
+		})
+	}
+}
