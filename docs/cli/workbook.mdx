@@ -184,9 +184,18 @@ again.
 - **Editors share the history quota.** Every import by an editor counts toward
   the workbook's revision and size limits. When the quota is full, writes are
   refused for everyone, including the owner.
-- **Agents need proposals.** Agent read, apply and status return
-  `409 proposal_required` on a shared workbook. So does a new mandate.
-  Workbooks do not support proposals yet, so there is no direct agent fallback.
+- **Agents need a fresh owner mandate.** On a shared workbook an agent reads
+  and applies directly only under a mandate the **owner** admitted **after
+  publication**, for one explicit target cell (`workbook admit`). Its base
+  revision is at or above the published revision, it stays revocable with
+  `workbook revoke`, and per-cell concurrency applies as for every writer. Its
+  commits appear to editors under the agent's name (`actor_label` in the
+  commits feed and in `409 precondition_failed` conflicts). Everything else
+  returns `409 proposal_required`: a mandate admitted before publication
+  (publication revoked it), an admit by a named editor, a wildcard target (`*`)
+  and an agent import. Workbooks do not support proposals yet, so there is no
+  other direct agent path. The workspace OWNER reads a shared workbook only as
+  an audited reader and cannot admit mandates.
 
 The Page must already hold an imported workbook. Only the owner may share it.
 
@@ -273,8 +282,9 @@ Status codes: `200` confirms the response (`201` for a new editor session);
 `400` rejects an invalid request; `401` requires a current human credential;
 `403` rejects effects outside a mandate; `404` hides missing or inaccessible
 workbooks and sessions; `409` reports a conflict, stale candidate, operation in
-progress, or `editor_session_expired`; `410` reports a commits range outside the
-retained history; `429` reports capacity/history limits, or
+progress, `editor_session_expired`, or `proposal_required` (see sharing); `410`
+reports a commits range outside the retained history; `429` reports
+capacity/history limits, or
 `too_many_editor_sessions` with `Retry-After`; `500` reports storage failure;
 `503` reports an unavailable experimental runtime, or
 `gridcraft_editor_disabled`. A `401` always concerns the sign-in or token
@@ -527,6 +537,9 @@ Read the original human operation receipt and current delivery/head information.
 ## `crewship workbook admit <page-slug|@ID>`
 
 `--file <path|->` supplies a retained human mandate for one live run and cell.
+Only the owner admits. On a shared workbook the owner admits after publication,
+with `base_rev` at the current head and one explicit cell; an editor's admit or
+a `*` target is refused with `409 proposal_required`.
 
 ## `crewship workbook revoke <page-slug|@ID> <operation-id>`
 

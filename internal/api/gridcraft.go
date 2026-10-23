@@ -115,7 +115,7 @@ func gridcraftError(w http.ResponseWriter, err error) {
 	case errors.Is(err, appengine.ErrQuota):
 		code, message = 429, "history_quota_exceeded"
 	case errors.Is(err, errWorkbookProposalRequired):
-		code, message = 409, "proposal_required: this workbook is shared; agent changes need a proposal, which workbooks do not support yet"
+		code, message = 409, "proposal_required: this workbook is shared; an agent changes it directly only under a mandate its owner admitted after publication for one explicit cell, anything else needs a proposal, which workbooks do not support yet"
 	case errors.Is(err, appengine.ErrDisabled), errors.Is(err, appengine.ErrEngineUnavailable):
 		code, message = 503, "Workbook unavailable"
 	}
@@ -545,7 +545,7 @@ func (h *gridcraftHTTP) mandate(w http.ResponseWriter, r *http.Request) {
 	}
 	// Mandate names of human operations ("human-import", "human-edit") are
 	// reserved, so an agent revision is never recorded under one.
-	if len(req.MandateID) == 0 || len(req.MandateID) > 256 || strings.HasPrefix(req.MandateID, appengine.HumanMandatePrefix) || len(req.RunID) == 0 || len(req.Targets) != 1 || req.Targets[0] == "*" || len(req.Targets[0]) > 256 || req.BaseRev < 1 || req.Generation < 1 {
+	if len(req.MandateID) == 0 || len(req.MandateID) > 256 || strings.HasPrefix(req.MandateID, appengine.HumanMandatePrefix) || len(req.RunID) == 0 || len(req.Targets) != 1 || req.Targets[0] == "" || len(req.Targets[0]) > 256 || req.BaseRev < 1 || req.Generation < 1 {
 		gridcraftError(w, appengine.ErrInvalid)
 		return
 	}
@@ -566,9 +566,17 @@ func (h *gridcraftHTTP) mandate(w http.ResponseWriter, r *http.Request) {
 		gridcraftError(w, err)
 		return
 	}
-	// A shared workbook accepts agent changes only as proposals.
-	if record == nil || access != workbookOwner || !record.PrivateAudience {
+	// A shared workbook accepts a direct agent mandate only from its owner,
+	// bounded to an explicit cell. Anything else needs a proposal, which
+	// workbooks do not support yet. Publication revoked every mandate admitted
+	// before it, so a mandate admitted here is always post-publication.
+	wildcard := req.Targets[0] == "*"
+	if record == nil || access != workbookOwner || (!record.PrivateAudience && wildcard) {
 		gridcraftError(w, errWorkbookProposalRequired)
+		return
+	}
+	if wildcard {
+		gridcraftError(w, appengine.ErrInvalid)
 		return
 	}
 	ctx := context.WithValue(r.Context(), pageAuthReaderKey{}, tx)
@@ -729,10 +737,18 @@ func (h *gridcraftHTTP) agent(w http.ResponseWriter, r *http.Request) {
 		}
 		ctx = context.WithValue(ctx, ctxRole, role)
 		rec, err := h.pages.loadPage(ctx, a.WorkspaceID, "@"+k.PageID)
-		if err == nil && !rec.PrivateAudience && rec.HasWorkbook && rec.OwnerUserID == a.HumanUserID && rec.OwnerCrewID == "" && rec.FolderID == "" {
-			return appengine.Principal{}, errWorkbookProposalRequired
-		}
-		if err != nil || rec.OwnerUserID != a.HumanUserID || rec.OwnerCrewID != "" || !rec.PrivateAudience || rec.FolderID != "" || !h.pages.mayEditSpec(ctx, a.WorkspaceID, a.HumanUserID, role, rec) {
+		shared := err == nil && !rec.PrivateAudience && rec.HasWorkbook && rec.OwnerUserID == a.HumanUserID && rec.OwnerCrewID == "" && rec.FolderID == ""
+		if shared {
+			// The run's human must still be the workbook owner by the
+			// ordinary human rule, and the mandate one the owner admitted
+			// after publication (sharedAgentMandate).
+			if _, access, accessErr := h.pages.workbookHumanAccess(ctx, a.WorkspaceID, k.PageID, a.HumanUserID, true); accessErr != nil || access != workbookOwner {
+				return appengine.Principal{}, errWorkbookProposalRequired
+			}
+			if err = sharedAgentMandate(ctx, tx, k, body.MandateID, a); err != nil {
+				return appengine.Principal{}, err
+			}
+		} else if err != nil || rec.OwnerUserID != a.HumanUserID || rec.OwnerCrewID != "" || !rec.PrivateAudience || rec.FolderID != "" || !h.pages.mayEditSpec(ctx, a.WorkspaceID, a.HumanUserID, role, rec) {
 			return appengine.Principal{}, appengine.ErrForbidden
 		}
 		var targets string
@@ -753,6 +769,13 @@ func (h *gridcraftHTTP) agent(w http.ResponseWriter, r *http.Request) {
 		var bounds []string
 		if json.Unmarshal([]byte(targets), &bounds) != nil {
 			return appengine.Principal{}, appengine.ErrForbidden
+		}
+		if shared {
+			for _, target := range bounds {
+				if target == "*" || target == "" {
+					return appengine.Principal{}, errWorkbookProposalRequired
+				}
+			}
 		}
 		// The mandate's base revision is also the agent's history floor: the
 		// commits feed never shows it what changed before the mandate.
@@ -777,6 +800,12 @@ func (h *gridcraftHTTP) agent(w http.ResponseWriter, r *http.Request) {
 	case "apply":
 		// An agent is one writer per mandate; client sessions are a human concept.
 		if body.Request == nil || body.Request.Command.Kind != "cell.set" || body.Request.SessionID != "" || body.MutationID != "" {
+			// An agent never imports; on a shared workbook that change would
+			// need a proposal.
+			if body.Request != nil && body.Request.Command.Kind == "import" && h.agentSharedWorkbook(r.Context(), a, k) {
+				gridcraftError(w, errWorkbookProposalRequired)
+				return
+			}
 			gridcraftError(w, appengine.ErrInvalid)
 			return
 		}

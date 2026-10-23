@@ -23,9 +23,53 @@ const (
 )
 
 // errWorkbookProposalRequired refuses direct agent changes on a shared
-// workbook. Shared content accepts agent changes only as proposals, which
-// workbooks do not support yet, so there is no silent direct fallback.
+// workbook that no post-publication owner mandate covers. Such changes need a
+// proposal, which workbooks do not support yet, so there is no silent direct
+// fallback.
 var errWorkbookProposalRequired = errors.New("proposal_required")
+
+// sharedAgentMandate decides whether a mandate may reach a shared (published)
+// workbook directly. Only a mandate the owner admitted at or after publication
+// qualifies: its base revision is at or above the publication floor and it was
+// not revoked by (or before) the publication. Publication revokes every live
+// mandate in its own transaction and a revoked mandate cannot be renewed or its
+// name reused, so this repeats that invariant at the point of use. A mandate
+// from before publication answers proposal_required; an unknown mandate stays
+// hidden (ErrForbidden), and a mandate revoked after publication is refused by
+// the caller's live-mandate lookup like on a private workbook.
+func sharedAgentMandate(ctx context.Context, tx *sql.Tx, k appengine.Key, mandateID string, a *artifactRunAuthority) error {
+	var base int64
+	var revokedAt sql.NullString
+	err := tx.QueryRowContext(ctx, `SELECT base_rev,revoked_at FROM gridcraft_intents WHERE workspace_id=? AND page_id=? AND mandate_id=? AND run_id=? AND human_user_id=?`, k.WorkspaceID, k.PageID, mandateID, a.RunID, a.HumanUserID).Scan(&base, &revokedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return appengine.ErrForbidden
+	}
+	if err != nil {
+		return err
+	}
+	var floor sql.NullInt64
+	var publishedAt string
+	err = tx.QueryRowContext(ctx, `SELECT json_extract(metadata,'$.head_rev'),created_at FROM audit_logs WHERE workspace_id=? AND entity_type='page' AND entity_id=? AND action='artifact.private_output_published' ORDER BY created_at DESC LIMIT 1`, k.WorkspaceID, k.PageID).Scan(&floor, &publishedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		// No recorded publication: nothing proves the mandate is newer.
+		return errWorkbookProposalRequired
+	}
+	if err != nil {
+		return err
+	}
+	if !floor.Valid || base < floor.Int64 || (revokedAt.Valid && revokedAt.String <= publishedAt) {
+		return errWorkbookProposalRequired
+	}
+	return nil
+}
+
+// agentSharedWorkbook reports whether the run's human owns the published
+// workbook k, so a change only a proposal could make is refused as such.
+func (h *gridcraftHTTP) agentSharedWorkbook(ctx context.Context, a *artifactRunAuthority, k appengine.Key) bool {
+	var shared bool
+	err := h.pages.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pages p JOIN gridcraft_heads g ON g.page_id=p.id AND g.workspace_id=p.workspace_id WHERE p.id=? AND p.workspace_id=? AND p.owner_user_id=? AND p.private_audience=0)`, k.PageID, k.WorkspaceID, a.HumanUserID).Scan(&shared)
+	return err == nil && shared
+}
 
 // workbookHumanAccess is the single human authorization rule for workbook
 // content. Import, read, status and any later human edit path call it inside

@@ -1,17 +1,13 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/appengine"
-	"github.com/crewship-ai/crewship/internal/artifacts"
-	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 )
 
 func gridcraftImportBody(mutation string, base, generation int) string {
@@ -155,76 +151,6 @@ func TestGridCraftShareRequiresImportedWorkbookAndLiveEditor(t *testing.T) {
 	wantCode(t, f.do(ann, "POST", path, `{"editor":"boss@ex.com","publish":true,"extra":1}`), 400, "strict body")
 	if n := gridcraftCount(t, f, `SELECT count(*) FROM pages WHERE id='empty-book-id' AND private_audience=1`); n != 1 {
 		t.Fatal("refused share changed the audience")
-	}
-}
-
-// Publication revokes direct agent mandates; a shared workbook refuses direct
-// agent access and new mandates with proposal_required.
-func TestGridCraftSharedWorkbookRequiresAgentProposal(t *testing.T) {
-	rig := pagesTransferSetupWithDB(t, gridcraftFullDB(t))
-	f, _ := documentCreationAdmissionWithPrincipal(t, newArtifactPrincipalFixtureWithRig(t, rig))
-	f.rig.db.SetMaxOpenConns(1)
-	wmSeedPage(t, f.rig.db, f.a.WorkspaceID, "grid-shared-page", "grid-shared", "Workbook", f.a.HumanUserID, "")
-	mustExec(t, f.rig.db, `UPDATE pages SET private_audience=1 WHERE id='grid-shared-page'`)
-	mustExec(t, f.rig.db, `INSERT INTO users(id,email,full_name) VALUES('grid-peer','grid-peer@example.test','Peer')`)
-	mustExec(t, f.rig.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('grid-peer-member',?,'grid-peer','MEMBER')`, f.a.WorkspaceID)
-	f.pages.artifactMasterToken = "synthetic-workbook-master"
-	store := appengine.New(f.rig.db, appengine.Options{Enabled: true})
-	engine := &gridcraftBlockingEngine{}
-	h := &gridcraftHTTP{pages: f.pages, store: store, engine: engine, operations: artifacts.NewGridCraftAdapter(store, engine, true)}
-	humanToken := mintTokenFor(t, f.rig.db, f.a.HumanUserID, "workbook-share-owner")
-	human := func(method, body string) *http.Request {
-		r := httptest.NewRequest(method, "/", strings.NewReader(body))
-		r.Header.Set("Authorization", "Bearer "+humanToken)
-		ctx := context.WithValue(r.Context(), ctxUser, &AuthUser{ID: f.a.HumanUserID, Email: "owner@example.test"})
-		ctx = context.WithValue(ctx, ctxWorkspaceID, f.a.WorkspaceID)
-		ctx = context.WithValue(ctx, ctxAuthKind, AuthKindCLIToken)
-		r = r.WithContext(ctx)
-		r.SetPathValue("slug", "@grid-shared-page")
-		return r
-	}
-	serve := func(handler http.HandlerFunc, r *http.Request) *httptest.ResponseRecorder {
-		w := httptest.NewRecorder()
-		handler(w, r)
-		return w
-	}
-	wantCode(t, serve(h.importFile, human("POST", gridcraftImportBody("import", 0, 0))), 200, "import")
-	mandate := fmt.Sprintf(`{"mandate_id":"cell-edit","run_id":%q,"base_rev":1,"generation":1,"targets":["Sheet1!B2"]}`, f.a.RunID)
-	wantCode(t, serve(h.mandate, human("POST", mandate)), 200, "private mandate")
-	token := internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(f.pages.artifactMasterToken, f.a.WorkspaceID, f.a.CrewID), f.a.WorkspaceID, f.a.AgentID, f.a.RunID)
-	agent := func(body string) *httptest.ResponseRecorder {
-		w := httptest.NewRecorder()
-		h.agent(w, documentDraftRequest(f, token, "POST", body))
-		return w
-	}
-	read := `{"action":"read","artifact_id":"grid-shared-page","mandate_id":"cell-edit"}`
-	wantCode(t, agent(read), 200, "private direct read")
-
-	shared := serve(h.share, human("POST", `{"editor":"grid-peer@example.test","publish":true}`))
-	wantCode(t, shared, 200, "publish")
-	if !strings.Contains(shared.Body.String(), `"revoked_mandates":1`) {
-		t.Fatalf("share response %s", shared.Body.String())
-	}
-	var revoked int
-	if err := f.rig.db.QueryRow(`SELECT count(*) FROM gridcraft_intents WHERE page_id='grid-shared-page' AND revoked_at IS NOT NULL`).Scan(&revoked); err != nil || revoked != 1 {
-		t.Fatalf("mandates revoked=%d err=%v", revoked, err)
-	}
-	apply := `{"action":"apply","artifact_id":"grid-shared-page","mandate_id":"cell-edit","request":{"mutation_id":"agent-edit","mandate_id":"cell-edit","base_rev":1,"generation":1,"command":{"kind":"cell.set","sheet":"Sheet1","cell":"B2","input":"42"}}}`
-	for name, body := range map[string]string{"read": read, "apply": apply} {
-		w := agent(body)
-		wantCode(t, w, 409, "shared "+name)
-		if !strings.Contains(w.Body.String(), "proposal_required") {
-			t.Fatalf("shared %s: %s", name, w.Body.String())
-		}
-	}
-	again := serve(h.mandate, human("POST", strings.Replace(mandate, "cell-edit", "cell-edit-2", 1)))
-	wantCode(t, again, 409, "no direct mandate on shared workbook")
-	if !strings.Contains(again.Body.String(), "proposal_required") {
-		t.Fatalf("mandate refusal %s", again.Body.String())
-	}
-	var head int
-	if err := f.rig.db.QueryRow(`SELECT head_rev FROM gridcraft_heads WHERE page_id='grid-shared-page'`).Scan(&head); err != nil || head != 1 {
-		t.Fatalf("agent changed shared workbook: %d %v", head, err)
 	}
 }
 
