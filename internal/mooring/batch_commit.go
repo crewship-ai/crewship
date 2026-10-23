@@ -401,6 +401,13 @@ func (s *BatchStore) Commit(ctx context.Context, request BatchRequest) (BatchRes
 			emitted = true
 		}
 		if emitted {
+			// Rejected operations also retain immutable dependency history. A prior
+			// candidate may consume the remaining budget after pre-admission checks;
+			// charge the complete transaction before final authority/fence checks.
+			// All-known retries skip this check and retain their original outcome.
+			if e = s.targetByteCapacity(ctx, tx, key.ArtifactID, 0); e != nil {
+				return e
+			}
 			// A later change's expensive apply can expire an earlier participant's
 			// clock-bound run/grant even while SQLite blocks permission-table writes.
 			// Revalidate every fresh accepted author after ALL application work. Any
