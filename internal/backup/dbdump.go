@@ -320,6 +320,8 @@ var BackupTables = []string{
 	"page_folder_acl", // FK folder_id → page_folders; nullable set_by_user_id → users
 	"pages",
 	"documents",
+	"mooring_documents", // after Pages; owns receipts
+	"mooring_receipts",
 	"document_creations",
 	"slides_heads",
 	"slides_revisions",

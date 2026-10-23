@@ -31,13 +31,13 @@ type mooringHTTP struct {
 
 func (r *Router) registerMooring(h *gridcraftHTTP) {
 	m := &mooringHTTP{h, mooring.JSONAdapter{}}
-	authed, workspace := r.authMw.RequireAuth, r.authMw.RequireWorkspace
+	authed, wsCtx := r.authMw.RequireAuth, r.authMw.RequireWorkspace
 	// openapi: responses 200,401,403
-	r.mux.Handle("GET /api/v1/mooring/apps", authed(workspace(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) { writeJSON(w, 200, mooring.Applications()) }))))
+	r.mux.Handle("GET /api/v1/mooring/apps", authed(wsCtx(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) { writeJSON(w, 200, mooring.Applications()) }))))
 	// openapi: responses 200,201,400,401,403,404,409,500,503
 	r.authedMut("POST", "/api/v1/mooring/documents", roleInline, m.create)
 	// openapi: responses 200,400,401,403,404,500,503
-	r.mux.Handle("GET /api/v1/pages/{slug}/mooring", authed(workspace(http.HandlerFunc(m.read))))
+	r.mux.Handle("GET /api/v1/pages/{slug}/mooring", authed(wsCtx(http.HandlerFunc(m.read))))
 	// openapi: responses 200,400,401,403,404,409,500,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/mooring/commands", roleInline, m.command)
 	// openapi: responses 200,400,401,403,404,409,500,503

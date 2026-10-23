@@ -36,6 +36,10 @@ import "sort"
 // table. Drift detection catches the omission in tests so an oversight
 // surfaces before a bundle ships missing rows.
 var BackupTableIntent = map[string]ScopedTableIntent{
+	"mooring_documents": IntentInclude,        // durable generic application state
+	"mooring_receipts":  IntentInclude,        // immutable history and idempotence evidence
+	"mooring_intents":   IntentExcludeRuntime, // live human/run mandates never survive restore
+
 	// Portable workbook backup is unavailable in the experimental pilot. Dump
 	// refuses a workspace containing workbooks instead of silently omitting them.
 	"gridcraft_heads":        IntentExcludeOperational,
