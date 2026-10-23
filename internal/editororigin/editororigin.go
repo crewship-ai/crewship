@@ -13,13 +13,17 @@
 //   - Same host (zero-config default): without a dedicated origin, bundles
 //     are served under SameHostPrefix on the Studio origin. Every request
 //     whose path starts with the prefix (in any case or encoding) lands here,
-//     never in the app, and nothing under it redirects. Policy sources are
+//     never in the app, and nothing under it redirects. The Studio origin is
+//     the one each request reached (its Host and scheme), unless the
+//     operator configured a public Studio origin, which then is the only
+//     host the editor answers on. Policy sources are
 //     scoped to the bundle path, so the opaque-origin document cannot fetch
 //     the Studio API or load Studio scripts, and Studio's frame-src names the
 //     bundle path only, so a frame that navigates itself cannot reach a
 //     Studio document. Both hold only while nothing in front of Crewship
 //     redirects or normalises the prefix; CheckProxy verifies that through
-//     the public URL and a failed check disables the editor. Requests a
+//     the public URL browsers use and a confirmed failure disables the
+//     editor on that origin until the check passes again. Requests a
 //     credentialless sandboxed frame would not make are refused: Crewship's
 //     own cookies (the iframe lacks credentialless; cookies a proxy sets are
 //     ignored), a document that is not a frame, and assets not requested
@@ -105,15 +109,24 @@ const (
 const permissionsPolicy = "camera=(), microphone=(), geolocation=(), clipboard-read=(), usb=(), serial=(), hid=()"
 
 // Options configures the editor origin. Origin and StudioOrigin are browser
-// origins; BundleDir holds one directory per allowlisted digest. SameHost
-// serves the editor under SameHostPrefix on StudioOrigin instead of a
-// dedicated Origin, which must then be empty.
+// origins; BundleDir holds one directory per allowlisted digest.
+//
+// SameHost serves the editor under SameHostPrefix on the Studio origin
+// instead of a dedicated Origin, which must then be empty. In that mode
+// StudioOrigin is optional: empty (the zero-config default) uses the origin
+// of each request, built from its Host and Scheme; set, it is the only
+// origin the editor answers on. Requests on PageRuntimeOrigin are refused.
 type Options struct {
-	Origin       string
-	SameHost     bool
-	StudioOrigin string
-	BundleDir    string
-	Bundles      []string
+	Origin            string
+	SameHost          bool
+	StudioOrigin      string
+	PageRuntimeOrigin string
+	// Scheme returns the scheme a browser used for r ("https" or "http").
+	// Nil uses TLS on the connection. Crewship passes its trusted-proxy rule
+	// (X-Forwarded-Proto only from a trusted proxy).
+	Scheme    func(r *http.Request) string
+	BundleDir string
+	Bundles   []string
 }
 
 type file struct {
@@ -124,8 +137,8 @@ type file struct {
 
 type bundle struct {
 	files map[string]file
-	// indexCSP adds the hashes of index.html's inline scripts.
-	indexCSP string
+	// inline holds the CSP hash sources of index.html's inline scripts.
+	inline string
 }
 
 // Handler serves allowlisted bundles on the editor host. A nil *Handler is a
@@ -134,10 +147,19 @@ type Handler struct {
 	host     string
 	all      bool // Deny: match every host, serve nothing.
 	sameHost bool // Match SameHostPrefix on any host instead of a host name.
-	base     string
-	csp      string
-	bundles  map[string]bundle
-	check    proxyState
+	// base is the dedicated editor origin. In same-host mode it is unused.
+	base string
+	// ancestor is the frame-ancestors source of a dedicated editor.
+	ancestor string
+	// broken: same-host mode with an unusable configured Studio origin; the
+	// prefix is owned and nothing is served.
+	broken bool
+	// pinned is the configured public Studio origin (same host), or "".
+	pinned  string
+	runtime string
+	scheme  func(*http.Request) string
+	bundles map[string]bundle
+	check   proxyState
 }
 
 // IsDigest reports whether s is a lowercase hex SHA-256 digest, the only
@@ -231,22 +253,26 @@ func isLoopback(host string) bool {
 }
 
 // ValidateSameHost checks the zero-config mode, in which the editor is served
-// under SameHostPrefix on the Studio origin. Studio must use HTTPS (plain HTTP
-// only on loopback, where browsers still treat it as a secure context). The
-// Page runtime must not share the Studio origin: Studio would then list its
-// own whole origin in frame-src, and a self-navigated editor frame could land
-// on a framable Studio document. The opaque origin "null" must not be a
-// trusted API caller.
+// under SameHostPrefix on the Studio origin. studio is the configured public
+// Studio origin, or "" (the default) to use the origin of each request. A
+// configured Studio must use HTTPS (plain HTTP only on loopback, where
+// browsers still treat it as a secure context) and must not be the Page
+// runtime origin: Studio would then list its own whole origin in frame-src,
+// and a self-navigated editor frame could land on a framable Studio
+// document. Without one, requests on the Page runtime origin are refused at
+// request time. The opaque origin "null" must not be a trusted API caller.
 func ValidateSameHost(studio, pageRuntime string, allowedOrigins []string) error {
-	s, err := parseOrigin(studio)
-	if err != nil {
-		return fmt.Errorf("Studio origin %w", err)
-	}
-	if s.Scheme != "https" && !isLoopback(strings.ToLower(s.Hostname())) {
-		return errors.New("the same-host editor requires an HTTPS Studio origin (plain HTTP only on loopback)")
-	}
-	if pageRuntime != "" && CanonicalOrigin(pageRuntime) == CanonicalOrigin(studio) {
-		return errors.New("the same-host editor cannot be combined with a Page runtime on the Studio origin; configure a Page runtime origin or a dedicated editor origin")
+	if strings.TrimSpace(studio) != "" {
+		s, err := parseOrigin(studio)
+		if err != nil {
+			return fmt.Errorf("Studio origin %w", err)
+		}
+		if s.Scheme != "https" && !isLoopback(strings.ToLower(s.Hostname())) {
+			return errors.New("the same-host editor requires an HTTPS Studio origin (plain HTTP only on loopback)")
+		}
+		if pageRuntime != "" && CanonicalOrigin(pageRuntime) == CanonicalOrigin(studio) {
+			return errors.New("the same-host editor cannot be combined with a Page runtime on the Studio origin; configure a Page runtime origin or a dedicated editor origin")
+		}
 	}
 	if trustsOpaqueOrigin(allowedOrigins) {
 		return errors.New("the opaque origin \"null\" must not be a trusted API origin while the editor is configured")
@@ -310,6 +336,12 @@ func ValidateOrigin(editor, studio, pageRuntime string, developmentSameSite bool
 	return nil
 }
 
+// RouteHeader marks every response of a same-host Crewship: "editor" from
+// the editor handler, "app" from everything else. CheckProxy uses it to
+// recognise, positively, a request under the prefix that Crewship answered
+// outside the editor.
+const RouteHeader = "X-Crewship-Route"
+
 func basePolicy(self, ancestor, extraScript string) string {
 	return "default-src 'none'; script-src " + self + " 'wasm-unsafe-eval'" + extraScript +
 		"; style-src " + self + " 'unsafe-inline'; img-src " + self + " data: blob:; font-src " + self +
@@ -319,10 +351,15 @@ func basePolicy(self, ancestor, extraScript string) string {
 
 const denyCSP = "default-src 'none'; frame-ancestors 'none'; sandbox"
 
+// sameHostDenyCSP answers same-host requests that have no usable origin. It
+// keeps the editor's shape (CheckProxy and clients recognise the handler)
+// with no source and no ancestor.
+var sameHostDenyCSP = basePolicy("'none'", "'none'", "")
+
 // Deny returns a handler that matches every host and serves nothing. It is
 // the fail-closed answer when an editor origin is configured but unusable.
 func Deny() *Handler {
-	return &Handler{all: true, csp: denyCSP, bundles: map[string]bundle{}}
+	return &Handler{all: true, bundles: map[string]bundle{}}
 }
 
 // New builds the editor origin handler. Bundles that fail verification are
@@ -334,34 +371,34 @@ func Deny() *Handler {
 // up and the prefix never reaches it.
 func New(o Options) (*Handler, error) {
 	var errs []error
-	ancestor := CanonicalOrigin(o.StudioOrigin)
-	if ancestor == "" {
-		ancestor = "'none'"
-		errs = append(errs, errors.New("editor origin requires a Studio origin for frame-ancestors"))
-	}
 	var h *Handler
-	var self string
 	if o.SameHost {
-		h = &Handler{sameHost: true, csp: denyCSP, bundles: map[string]bundle{}}
+		h = &Handler{sameHost: true, scheme: o.Scheme, runtime: CanonicalOrigin(o.PageRuntimeOrigin), bundles: map[string]bundle{}}
+		h.check.init()
 		if strings.TrimSpace(o.Origin) != "" {
+			h.broken = true
 			return h, errors.New("same-host editor must not also name a dedicated editor origin")
 		}
-		if ancestor == "'none'" {
-			return h, errors.Join(errs...)
+		if strings.TrimSpace(o.StudioOrigin) != "" {
+			h.pinned = CanonicalOrigin(o.StudioOrigin)
+			if h.pinned == "" {
+				h.broken = true
+				return h, errors.New("the configured Studio origin is not an HTTP(S) origin; the same-host editor serves nothing")
+			}
 		}
-		// Sources carry the bundle path: the Studio origin itself is never a
-		// source the editor may fetch from or load code from.
-		h.base = ancestor + SameHostPrefix
-		self = h.base + BundlePrefix
 	} else {
+		ancestor := CanonicalOrigin(o.StudioOrigin)
+		if ancestor == "" {
+			ancestor = "'none'"
+			errs = append(errs, errors.New("editor origin requires a Studio origin for frame-ancestors"))
+		}
 		u, err := parseOrigin(o.Origin)
 		if err != nil {
 			return nil, fmt.Errorf("editor origin %w", err)
 		}
-		self = u.Scheme + "://" + hostKey(u.Scheme, u.Host)
-		h = &Handler{host: hostname(u.Host), base: self, bundles: map[string]bundle{}}
+		self := u.Scheme + "://" + hostKey(u.Scheme, u.Host)
+		h = &Handler{host: hostname(u.Host), base: self, ancestor: ancestor, bundles: map[string]bundle{}}
 	}
-	h.csp = basePolicy(self, ancestor, "")
 	if len(o.Bundles) > maxBundles {
 		return h, fmt.Errorf("at most %d editor bundles may be pinned", maxBundles)
 	}
@@ -375,7 +412,7 @@ func New(o Options) (*Handler, error) {
 		for _, hash := range inlineScriptHashes(files["index.html"].body) {
 			extra += " " + hash
 		}
-		h.bundles[digest] = bundle{files: files, indexCSP: basePolicy(self, ancestor, extra)}
+		h.bundles[digest] = bundle{files: files, inline: extra}
 	}
 	return h, errors.Join(errs...)
 }
@@ -705,24 +742,138 @@ func (h *Handler) Matches(r *http.Request) bool {
 	return false
 }
 
-// FrameSource is the source Studio adds to frame-src for this editor: the
-// dedicated origin, or in same-host mode the bundle path on the Studio origin
-// (never the bare Studio origin). It is "" when nothing may be framed.
-func (h *Handler) FrameSource() string {
-	if h == nil || h.base == "" {
-		return ""
+// errMisdirected, errBadHost and errRuntimeHost explain why a same-host
+// request has no Studio origin the editor may use.
+var (
+	errMisdirected = errors.New("the editor answers only on the configured Studio origin")
+	errBadHost     = errors.New("the request does not name a valid host")
+	errRuntimeHost = errors.New("the editor is not served on the Page runtime origin")
+)
+
+// requestHost validates a Host header as a CSP host-source can name it: a
+// DNS name or IPv4 address (letters, digits, '-' and '.' in non-empty
+// labels, an optional trailing dot) with an optional numeric port. IPv6
+// literals cannot appear in a CSP source and are refused. The result is
+// lowercased.
+func requestHost(raw string) (string, bool) {
+	host := strings.ToLower(raw)
+	name, port := host, ""
+	if i := strings.LastIndexByte(host, ':'); i >= 0 {
+		name, port = host[:i], host[i+1:]
+		if port == "" || len(port) > 5 {
+			return "", false
+		}
+		n := 0
+		for _, c := range port {
+			if c < '0' || c > '9' {
+				return "", false
+			}
+			n = n*10 + int(c-'0')
+		}
+		if n == 0 || n > 65535 {
+			return "", false
+		}
 	}
-	if h.sameHost {
-		return h.base + BundlePrefix
+	if name == "" || len(name) > 253 {
+		return "", false
+	}
+	for _, label := range strings.Split(strings.TrimSuffix(name, "."), ".") {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return "", false
+		}
+		for _, c := range label {
+			if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
+				return "", false
+			}
+		}
+	}
+	return host, true
+}
+
+// requestScheme is the scheme a browser used for r: the configured rule, or
+// TLS on the connection. Anything but "https" is "http". A CSP source with
+// the http scheme also matches https (CSP3 scheme-part matching), so a
+// request whose TLS ended at a proxy Crewship does not trust still gets a
+// policy that holds for the browser's https origin.
+func (h *Handler) requestScheme(r *http.Request) string {
+	if h.scheme != nil {
+		if h.scheme(r) == "https" {
+			return "https"
+		}
+		return "http"
+	}
+	if r.TLS != nil {
+		return "https"
+	}
+	return "http"
+}
+
+// StudioOriginFor is the Studio origin of a same-host request: the
+// configured one, which the request's Host must name, or the origin the
+// request reached. It fails for a dedicated or disabled editor.
+func (h *Handler) StudioOriginFor(r *http.Request) (string, error) {
+	if h == nil || !h.sameHost || h.broken {
+		return "", errors.New("no same-host editor")
+	}
+	host, ok := requestHost(r.Host)
+	if !ok {
+		return "", errBadHost
+	}
+	if h.pinned != "" {
+		u, _ := url.Parse(h.pinned)
+		if hostKey(u.Scheme, host) != u.Host {
+			return "", errMisdirected
+		}
+		return h.pinned, nil
+	}
+	scheme := h.requestScheme(r)
+	origin := scheme + "://" + hostKey(scheme, host)
+	if h.runtime != "" {
+		for _, s := range []string{"http", "https"} {
+			if h.runtime == s+"://"+hostKey(s, host) {
+				return "", errRuntimeHost
+			}
+		}
+	}
+	return origin, nil
+}
+
+// FrameSource is the source Studio adds to frame-src for a dedicated
+// editor: its origin. A same-host editor has no fixed source (FrameSourceFor);
+// it and a disabled editor return "".
+func (h *Handler) FrameSource() string {
+	if h == nil || h.sameHost || h.all {
+		return ""
 	}
 	return h.base
 }
 
-// IndexURL is the editor document of the bundle pinned by digest, for the
-// host page's iframe src; "" when nothing may be framed.
-func (h *Handler) IndexURL(digest string) string {
-	if h.FrameSource() == "" {
+// FrameSourceFor is the source Studio adds to frame-src of the response to
+// r: the dedicated origin, or in same-host mode the bundle path on the
+// request's Studio origin (never the bare origin). It is "" when nothing may
+// be framed.
+func (h *Handler) FrameSourceFor(r *http.Request) string {
+	if h == nil || !h.sameHost {
+		return h.FrameSource()
+	}
+	origin, err := h.StudioOriginFor(r)
+	if err != nil {
 		return ""
+	}
+	return origin + SameHostPrefix + BundlePrefix
+}
+
+// IndexURL is the editor document of the bundle pinned by digest, for the
+// host page's iframe src; "" when nothing may be framed. In same-host mode
+// it is the path alone (/_editor/b/<digest>/index.html), which the host page
+// resolves against its own origin, so it never depends on how a proxy
+// presents the Host or scheme to Crewship.
+func (h *Handler) IndexURL(digest string) string {
+	if h == nil || h.all || h.broken {
+		return ""
+	}
+	if h.sameHost {
+		return SameHostPrefix + BundlePrefix + digest + "/index.html"
 	}
 	return h.base + BundlePrefix + digest + "/index.html"
 }
@@ -799,6 +950,7 @@ func (h *Handler) setHeaders(w http.ResponseWriter, csp string) {
 	hdr.Set("X-Content-Type-Options", "nosniff")
 	if h.sameHost {
 		hdr.Set("Strict-Transport-Security", StudioHSTS)
+		hdr.Set(RouteHeader, "editor")
 	} else {
 		hdr.Set("Strict-Transport-Security", dedicatedHSTS)
 	}
@@ -806,17 +958,47 @@ func (h *Handler) setHeaders(w http.ResponseWriter, csp string) {
 	hdr.Set("Cache-Control", "no-store")
 }
 
+// policy is the editor policy for one response. In same-host mode it names
+// the request's Studio origin; ok is false when the request has none.
+func (h *Handler) policy(r *http.Request, inline string) (csp, origin string, err error) {
+	if !h.sameHost {
+		if h.all {
+			return denyCSP, "", nil
+		}
+		return basePolicy(h.base, h.ancestor, inline), "", nil
+	}
+	origin, err = h.StudioOriginFor(r)
+	if err != nil {
+		return sameHostDenyCSP, "", err
+	}
+	// Sources carry the bundle path: the Studio origin itself is never a
+	// source the editor may fetch from or load code from.
+	return basePolicy(origin+SameHostPrefix+BundlePrefix, origin, inline), origin, nil
+}
+
 // ServeHTTP serves one verified bundle file. It never looks at credentials
 // (same-host mode reads only cookie names); the bundle is public, constant
 // code with no user data.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	h.setHeaders(w, h.csp)
+	csp, origin, originErr := h.policy(r, "")
+	h.setHeaders(w, csp)
 	if h.sameHost {
 		w.Header().Set("Vary", sameHostVary)
 	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	switch {
+	case errors.Is(originErr, errBadHost):
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	case originErr != nil && h.sameHost && !h.broken:
+		// The configured Studio origin, or the Page runtime host: the editor
+		// is not served here. Fail closed rather than build a policy for a
+		// host Studio does not run on.
+		http.Error(w, "misdirected request", http.StatusMisdirectedRequest)
 		return
 	}
 	p := r.URL.EscapedPath()
@@ -832,8 +1014,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	if reason := h.check.disabledReason(); reason != "" {
-		http.Error(w, "the embedded editor is disabled: "+reason, http.StatusServiceUnavailable)
+	if h.sameHost && h.check.disabledFor(origin) {
+		http.Error(w, "the embedded editor is disabled: a proxy in front of Crewship redirects or rewrites "+SameHostPrefix+"/; an administrator can see the details", http.StatusServiceUnavailable)
 		return
 	}
 	if h.sameHost && !sameHostRequestAllowed(r, f.index) {
@@ -841,7 +1023,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if f.index {
-		w.Header().Set("Content-Security-Policy", b.indexCSP)
+		csp, _, _ = h.policy(r, b.inline)
+		w.Header().Set("Content-Security-Policy", csp)
 	} else {
 		// Same host: never in a shared cache. One that ignores Vary would
 		// replay a frame's 200 to a Studio-context request refused above.
@@ -863,7 +1046,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // Gate routes every request for the editor (its host, or in same-host mode
 // its path prefix) to h and everything else to next. With a nil h it returns
-// next unchanged.
+// next unchanged. In same-host mode every other response is marked
+// RouteHeader: app.
 func Gate(h *Handler, next http.Handler) http.Handler {
 	if h == nil {
 		return next
@@ -872,6 +1056,9 @@ func Gate(h *Handler, next http.Handler) http.Handler {
 		if h.Matches(r) {
 			h.ServeHTTP(w, r)
 			return
+		}
+		if h.sameHost {
+			w.Header().Set(RouteHeader, "app")
 		}
 		next.ServeHTTP(w, r)
 	})

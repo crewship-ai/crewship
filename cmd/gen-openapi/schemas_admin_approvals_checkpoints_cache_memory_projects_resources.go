@@ -362,6 +362,13 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 				"alarm": nullable(object(map[string]any{"kind": str(), "summary": str(), "at": str()})), "oldest": str(), "newest": str(),
 			}, "workspace_id", "workspace_name", "samples", "min_samples")),
 		}, "workspaces")},
+		"GET /api/v1/admin/instance/workbook-editor": {Response: object(map[string]any{
+			"mode": str(), "status": str(), "origin": str(),
+			"origins": array(object(map[string]any{
+				"origin": str(), "source": str(), "proxy_check": str(), "disabled": boolean(), "cause": str(),
+				"problems": stringArray(), "warnings": stringArray(), "consecutive_passes": integer(), "checked_at": str(),
+			}, "origin", "source", "proxy_check", "disabled")),
+		}, "mode")},
 		"GET /api/v1/admin/instance/retention": {Response: object(map[string]any{
 			"workspaces":          array(object(withProps(instanceWsRef, map[string]any{"windows": retentionWindows}), append([]string{"windows"}, instanceWsRequired...)...)),
 			"defaults":            retentionWindows,

@@ -9,9 +9,11 @@
 //   EDITOR_MODE=same-host the zero-config default. The Go harness is the
 //                        front server of the one Studio origin: its Gate sends
 //                        /_editor/ to the editor handler and proxies all other
-//                        paths to the Studio stand-in in this file. Attacks
-//                        from a hostile bundle and from a weakened host page
-//                        are negative tests.
+//                        paths to the Studio stand-in in this file, with the
+//                        frame-src source Crewship computes for that request.
+//                        No Studio origin is configured. Attacks from a
+//                        hostile bundle and from a weakened host page are
+//                        negative tests.
 //
 // Environment:
 //   PLAYWRIGHT_MODULE        absolute path of playwright's index.mjs when this
@@ -23,6 +25,13 @@
 //   HOST_SANDBOX=1           host iframe also has sandbox="allow-scripts"
 //   EDITOR_MODE=same-host    zero-config mode (always with Studio COEP), including
 //                            reopening behind a proxy that sets its own cookie
+//   EDITOR_PROXY=1           (same-host) the browser reaches Crewship through a
+//                            reverse proxy on another host:port (localhost:<p>
+//                            in front of 127.0.0.1:<q>) that forwards the Host;
+//                            nothing tells Crewship that public origin
+//   EDITOR_PINNED=1          (same-host, with EDITOR_PROXY) Crewship is configured
+//                            with its own address as the public Studio origin:
+//                            the editor must refuse the proxy's origin
 import { createServer } from 'node:http'
 import { readFile, mkdtemp, rm } from 'node:fs/promises'
 import { existsSync, readFileSync } from 'node:fs'
@@ -52,6 +61,8 @@ import { pathToFileURL } from 'node:url'
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ? pathToFileURL(process.env.PLAYWRIGHT_MODULE).href : 'playwright')
 
 const sameHost = process.env.EDITOR_MODE === 'same-host'
+const viaProxy = sameHost && process.env.EDITOR_PROXY === '1'
+const pinned = viaProxy && process.env.EDITOR_PINNED === '1'
 const hits = { navigated: 0, probe: 0, selfnav: [], runtime: 0, api: 0, ws: 0, beacon: 0, opened: 0 }
 let editor
 // The origin the browser sees for Studio: this server (dedicated mode) or the
@@ -98,7 +109,10 @@ const server = createServer((req, res) => {
   // ?frameself=1 is a same-origin Page runtime (development): the runtime origin equals Studio, so
   // Studio's frame-src includes its own origin. Same-host configuration
   // refuses that combination; here it is the negative control.
-  const frameSrc = [url.searchParams.get('frameself') === '1' ? parentOrigin : '', editor?.frameSrc].filter(Boolean).join(' ')
+  // Same host: the source Crewship's security headers add for this very
+  // request, passed on by the Go front server.
+  const editorSrc = sameHost ? req.headers['x-test-editor-frame-src'] : editor?.frameSrc
+  const frameSrc = [url.searchParams.get('frameself') === '1' ? parentOrigin : '', editorSrc].filter(Boolean).join(' ') || "'none'"
   res.setHeader('Content-Security-Policy', `default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self'; frame-src ${frameSrc}; frame-ancestors 'none'`)
   res.end('<!doctype html><html><body><h1>STUDIO-SECRET</h1></body></html>')
 })
@@ -112,6 +126,25 @@ const command = process.env.CREWSHIP_TEST_EDITOR_BINARY ?? 'go'
 const args = process.env.CREWSHIP_TEST_EDITOR_BINARY ? ['-test.run=^TestEditorOriginBrowserHarness$'] : ['test', './internal/editororigin', '-run', '^TestEditorOriginBrowserHarness$', '-count=1']
 const harnessEnv = { ...process.env, CREWSHIP_TEST_EDITOR_FILE: file, CREWSHIP_TEST_STUDIO_ORIGIN: studioUpstream }
 if (sameHost) Object.assign(harnessEnv, { CREWSHIP_TEST_EDITOR_MODE: 'same-host', CREWSHIP_TEST_STUDIO_UPSTREAM: studioUpstream })
+if (pinned) harnessEnv.CREWSHIP_TEST_EDITOR_PINNED = '1'
+// EDITOR_PROXY: a reverse proxy on another host name and port that passes
+// every request through unchanged, Host included (Caddy, Traefik, nginx with
+// proxy_set_header Host $host). Crewship is never told this origin.
+let proxy
+async function startProxy(target) {
+  const { request } = await import('node:http')
+  const t = new URL(target)
+  proxy = createServer((req, res) => {
+    const up = request({ host: t.hostname, port: t.port, method: req.method, path: req.url, headers: req.headers }, r => {
+      res.writeHead(r.statusCode, r.rawHeaders)
+      r.pipe(res)
+    })
+    up.on('error', () => { res.statusCode = 502; res.end() })
+    req.pipe(up)
+  })
+  await new Promise(resolve => proxy.listen(0, '127.0.0.1', resolve))
+  return `http://localhost:${proxy.address().port}`
+}
 const harness = spawn(command, args, { env: harnessEnv, stdio: ['ignore', 'pipe', 'pipe'] })
 let log = ''
 harness.stdout.on('data', d => { log += d })
@@ -119,6 +152,9 @@ harness.stderr.on('data', d => { log += d })
 const exited = new Promise(resolve => harness.on('exit', resolve))
 let browser
 const check = (ok, what) => { if (!ok) throw new Error(what) }
+// The editor document URL as the host page frames it: same host resolves
+// the server's path against the page's own origin (F2 editorFrameSrc).
+const editorIndex = () => new URL(editor.index, parentOrigin).href
 const zeroHits = () => hits.navigated === 0 && hits.probe === 0 && hits.runtime === 0 && hits.api === 0 && hits.ws === 0 && hits.beacon === 0 && hits.opened === 0
 
 // The host bridge contract: accept origin "null" only from the exact frame
@@ -126,7 +162,7 @@ const zeroHits = () => hits.navigated === 0 && hits.probe === 0 && hits.runtime 
 // to that window (targetOrigin "*" is forced by the opaque origin and safe
 // because the recipient is the verified window object).
 async function mount(page, { sandbox, credentialless, timeout = 10000 }) {
-  const src = `${editor.index}?host=authority&parent_origin=${encodeURIComponent(parentOrigin)}&v=1`
+  const src = `${editorIndex()}?host=authority&parent_origin=${encodeURIComponent(parentOrigin)}&v=1`
   return page.evaluate(({ src, digest, sandbox, credentialless, timeout }) => new Promise((resolve, reject) => {
     const frame = document.createElement('iframe')
     if (sandbox !== null) frame.setAttribute('sandbox', sandbox)
@@ -195,10 +231,37 @@ try {
     try { editor = JSON.parse(await readFile(file, 'utf8')) } catch { await new Promise(r => setTimeout(r, 100)) }
   }
   check(editor, `editor harness did not start: ${log}`)
-  if (sameHost) parentOrigin = editor.origin
-  check(editor.index.startsWith(sameHost ? `${parentOrigin}/_editor/b/` : `${editor.origin}/b/`), `unexpected editor URL ${editor.index}`)
-  check(editor.frameSrc === (sameHost ? `${parentOrigin}/_editor/b/` : editor.origin), `unexpected frame-src source ${editor.frameSrc}`)
+  if (sameHost) parentOrigin = viaProxy ? await startProxy(editor.origin) : editor.origin
+  // Same host: the server names the editor by path only; the host page
+  // resolves it against its own origin (what the browser shows), whatever
+  // Host or scheme a proxy presents to Crewship.
+  check(sameHost ? editor.index === `/_editor/b/${editor.digest}/index.html` : editor.index.startsWith(`${editor.origin}/b/`), `unexpected editor URL ${editor.index}`)
+  if (sameHost) {
+    const studioPolicy = (await fetch(parentOrigin + '/')).headers.get('content-security-policy') ?? ''
+    const frameSrc = studioPolicy.split(';').map(d => d.trim()).find(d => d.startsWith('frame-src'))
+    console.log(`Studio at ${parentOrigin}${viaProxy ? ` (proxy in front of ${editor.origin})` : ''}: ${frameSrc}`)
+    check(frameSrc === (pinned ? "frame-src 'none'" : `frame-src ${parentOrigin}/_editor/b/`), `Studio frame-src does not follow the request origin: ${frameSrc}`)
+  } else {
+    check(editor.frameSrc === editor.origin, `unexpected frame-src source ${editor.frameSrc}`)
+  }
   browser = await chromium.launch({ headless: true })
+
+  if (pinned) {
+    // Fail closed: Crewship is configured with another public origin than
+    // the one the browser uses. The editor must not load, and its server
+    // answers 421 rather than a policy for a host Studio is not on.
+    const { context, page } = await freshPage()
+    const statuses = []
+    page.on('response', r => { if (r.url().startsWith(editorIndex())) statuses.push(r.status()) })
+    const outcome = await mount(page, { sandbox: 'allow-scripts', credentialless: true, timeout: 3000 }).then(() => 'handshake', e => (e.message.includes('no handshake') ? 'no handshake' : e.message))
+    // Studio's frame-src names no editor here, so the browser does not even
+    // request the frame; the server refuses the editor path on its own too.
+    const direct = await fetch(editorIndex(), { headers: { 'Sec-Fetch-Dest': 'iframe', 'Sec-Fetch-Site': 'same-origin' } })
+    console.log('configured origin, browser on another origin:', JSON.stringify({ outcome, statuses, direct: direct.status }))
+    check(outcome === 'no handshake' && direct.status === 421, `editor loaded on an origin other than the configured one: ${outcome} ${direct.status}`)
+    await context.close()
+    console.log('PASS: with a configured Studio origin the editor refuses (421) a browser that reaches Crewship on another origin')
+  }
 
   if (!sameHost) {
     const hostSandbox = process.env.HOST_SANDBOX === '1' ? 'allow-scripts' : null
@@ -244,7 +307,7 @@ try {
     console.log('PASS: with Studio in frame-src, sandbox="allow-scripts" + credentialless keeps a self-navigated frame opaque; allow-same-origin would let it read Studio')
   }
 
-  if (sameHost) {
+  if (sameHost && !pinned) {
     // 1. Production frame on the Studio origin under Studio's COEP.
     {
       const { context, page, consoleLines } = await freshPage()
@@ -264,7 +327,7 @@ try {
         try { await import(base + 'app.js'); out.module = 'imported' } catch (e) { out.module = 'refused' }
         out.fetch = (await fetch(base + 'app.js')).status
         return out
-      }, editor.index.replace(/index\.html$/, ''))
+      }, editorIndex().replace(/index\.html$/, ''))
       console.log('Studio-context load of editor code:', JSON.stringify(studioLoad))
       check(studioLoad.classic === 'refused' && studioLoad.module === 'refused' && studioLoad.fetch === 403, `Studio loaded the editor bundle into its own origin: ${JSON.stringify(studioLoad)}`)
       // Path confusion seen from Studio itself (credentialed, same-origin):
@@ -326,7 +389,7 @@ try {
     for (const coep of ['1', '0']) {
       const { context, page } = await freshPage(`/?coep=${coep}`)
       const statuses = []
-      page.on('response', r => { if (r.url().startsWith(editor.index)) statuses.push(r.status()) })
+      page.on('response', r => { if (r.url().startsWith(editorIndex())) statuses.push(r.status()) })
       const outcome = await mount(page, { sandbox: 'allow-scripts', credentialless: false, timeout: 3000 }).then(() => 'handshake', e => (e.message.includes('no handshake') ? 'no handshake' : e.message))
       console.log(`credentialless stripped, Studio COEP=${coep}:`, outcome, JSON.stringify(statuses))
       check(outcome === 'no handshake', `editor ran without credentialless (COEP=${coep})`)
@@ -369,6 +432,7 @@ try {
   }
 } finally {
   await browser?.close()
+  if (proxy) await new Promise(resolve => proxy.close(resolve))
   if (editor) await fetch(editor.origin + '/__stop').catch(() => {})
   else harness.kill('SIGTERM')
   await exited

@@ -199,11 +199,14 @@ type Router struct {
 	pageBuildImage                   string
 	pageRuntimeOrigin                string
 	pageRuntimeDevelopmentSameOrigin bool
-	pageStudioOrigin                 string
-	storagePath                      string // base path for crew file storage
-	catalogFetcher                   *devcontainer.CatalogFetcher
-	runtimeFetcher                   *devcontainer.RuntimeFetcher
-	dockerClient                     *dockerclient.Client
+	// workbookEditorDetail answers GET /api/v1/admin/instance/workbook-editor;
+	// nil while the embedded workbook editor is off.
+	workbookEditorDetail func() any
+	pageStudioOrigin     string
+	storagePath          string // base path for crew file storage
+	catalogFetcher       *devcontainer.CatalogFetcher
+	runtimeFetcher       *devcontainer.RuntimeFetcher
+	dockerClient         *dockerclient.Client
 	// instanceBackups is Admin › Backups across the instance, kept so tests
 	// can point its instance backup at a temp directory.
 	instanceBackups    *InstanceBackupsHandler

@@ -22,8 +22,10 @@ type GridCraftConfig struct {
 	// sessions, cell edits, the commits feed) and of the embedded editor; the
 	// workspace flag gridcraft_editor must be on as well. The editor runs
 	// foreign code in a sandboxed frame (internal/editororigin). All of it is
-	// off unless EditorEnabled and Enabled are both set. Without EditorOrigin the editor is served under a
-	// path prefix of the Studio origin (zero-config default); EditorOrigin
+	// off unless EditorEnabled and Enabled are both set. Without EditorOrigin
+	// the editor is served under a path prefix of the Studio origin each
+	// request reached, or only of Storage.PageStudioOrigin when that is set
+	// (zero-config default); EditorOrigin
 	// moves it to a dedicated host (optional hardening), and alone only
 	// isolates that host.
 	EditorEnabled             bool     `yaml:"editor_enabled"`
@@ -66,7 +68,9 @@ func validateGridCraftEditor(c *Config, allowedOrigins string) error {
 		if g.EditorDevelopmentSameSite {
 			return errors.New("gridcraft editor: the sibling-subdomain exception applies only to a dedicated editor origin")
 		}
-		if err := editororigin.ValidateSameHost(c.PageStudioOrigin(), c.Storage.PageRuntimeOrigin, allowed); err != nil {
+		// Only an explicitly configured public Studio origin pins the editor;
+		// otherwise it follows each request's origin (zero-config default).
+		if err := editororigin.ValidateSameHost(c.Storage.PageStudioOrigin, c.Storage.PageRuntimeOrigin, allowed); err != nil {
 			return fmt.Errorf("gridcraft editor: %w", err)
 		}
 	}

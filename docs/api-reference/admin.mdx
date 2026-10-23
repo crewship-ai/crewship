@@ -48,6 +48,7 @@ The operational surface for OWNER and ADMIN roles: workspace stats, user managem
 | `PUT` | [/api/v1/admin/instance/keeper/governance/defaults](#put-api-v1-admin-instance-keeper-governance-defaults) | Change that template; no existing workspace changes |
 | `GET` | [/api/v1/admin/instance/keeper/requests](#get-api-v1-admin-instance-keeper-requests) | Keeper decisions across workspaces |
 | `GET` | [/api/v1/admin/instance/keeper/health](#get-api-v1-admin-instance-keeper-health) | Every workspace's Keeper decision window |
+| `GET` | [/api/v1/admin/instance/workbook-editor](#get-api-v1-admin-instance-workbook-editor) | The embedded workbook editor's mode and proxy self-check |
 | `GET` | [/api/v1/admin/instance/retention](#get-api-v1-admin-instance-retention) | How long every workspace keeps each kind of data |
 | `PUT` | [/api/v1/admin/instance/retention](#put-api-v1-admin-instance-retention) | Set retention windows for one, several or every existing workspace |
 | `GET` | [/api/v1/admin/instance/retention/defaults](#get-api-v1-admin-instance-retention-defaults) | The retention windows a new workspace starts with |
@@ -1013,6 +1014,49 @@ window is listed too: zero samples is its own answer, not a healthy one.
 | `401` | Missing authentication. |
 | `403` | Caller is not an instance administrator. |
 | `500` | A read failed. |
+
+## `GET /api/v1/admin/instance/workbook-editor`
+
+The embedded workbook editor's mode and, in same-host mode, the server's
+proxy self-check of every public Studio origin it knows: the configured one
+(`CREWSHIP_PAGE_STUDIO_ORIGIN`, `source: "configured"`), or the origins
+signed-in browsers used (`source: "learned"`). The public `/healthz` reports
+only the coarse `status` (`ok`, `pending`, `failed` or `disabled`); origins,
+redirect targets and error text are only here and in the server log.
+
+**Auth:** instance administrator. **Request:** no body. **Response:**
+
+```json
+{
+  "mode": "same-host",
+  "status": "disabled",
+  "origins": [
+    {
+      "origin": "https://crewship.example.com",
+      "source": "learned",
+      "proxy_check": "failed",
+      "disabled": true,
+      "cause": "redirect",
+      "problems": ["/_editor/b/x is redirected (HTTP 302 to \"https://sso.example.com/login\")"],
+      "consecutive_passes": 1,
+      "checked_at": "2026-10-23T08:00:00Z"
+    }
+  ]
+}
+```
+
+`mode` is `off`, `same-host` or `dedicated` (then `origin` names the
+dedicated editor origin). `cause` is one of `redirect` and `path_rewrite`
+(both disable the editor on that origin), `not_routed`, `host_rewritten` and
+`marker_missing` (the editor stays enabled but does not work, or the check
+cannot tell). A disabled origin is enabled again after three consecutive
+passing checks; `consecutive_passes` counts them.
+
+| Status | Condition |
+|--------|-----------|
+| `200` | The editor state; `{"mode":"off"}` while the editor is off. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
 
 ## `GET /api/v1/admin/instance/retention`
 

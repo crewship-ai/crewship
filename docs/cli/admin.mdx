@@ -795,6 +795,21 @@ window: how many decisions it holds, how many let work go on, how often the
 judge failed, the p95 latency and any standing alarm. Below the sample minimum
 there is too little to judge, which is not the same as healthy.
 
+### workbook-editor
+
+`GET /api/v1/admin/instance/workbook-editor`. The embedded workbook editor's
+mode and, in same-host mode, the server's proxy self-check of every public
+Studio origin it knows: the configured one, or those signed-in browsers used.
+For each origin: the check result, whether the editor is disabled there, the
+cause and the problems found. A disabled origin comes back by itself after
+three consecutive passing checks, five minutes apart. `crewship doctor` reads
+the same detail and repeats the check from your machine.
+
+```
+crewship admin instance workbook-editor
+crewship admin instance workbook-editor -f json
+```
+
 ### retention get
 
 `GET /api/v1/admin/instance/retention`. How long every workspace keeps each

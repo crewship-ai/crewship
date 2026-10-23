@@ -7,6 +7,7 @@ package api
 
 import (
 	"context"
+	"net/http"
 	"time"
 
 	dockerclient "github.com/moby/moby/client"
@@ -461,6 +462,17 @@ func WithPageRuntime(runtime, studio string, developmentSameOrigin ...bool) Rout
 		r.pageRuntimeOrigin = runtime
 		r.pageStudioOrigin = studio
 		r.pageRuntimeDevelopmentSameOrigin = len(developmentSameOrigin) > 0 && developmentSameOrigin[0]
+	}
+}
+
+// WithWorkbookEditor wires the embedded workbook editor's server-side state:
+// observe sees every request a sign-in session authenticated (the same-host
+// editor learns from it which public origin browsers use), and detail
+// answers GET /api/v1/admin/instance/workbook-editor. Either may be nil.
+func WithWorkbookEditor(observe func(*http.Request), detail func() any) RouterOption {
+	return func(r *Router) {
+		r.authMw.observeSession = observe
+		r.workbookEditorDetail = detail
 	}
 }
 
