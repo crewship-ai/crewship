@@ -113707,6 +113707,17 @@
       "get": {
         "description": "List mooring apps (GET /api/v1/mooring/apps).",
         "operationId": "get_api_v1_mooring_apps",
+        "parameters": [
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -130026,6 +130037,15 @@
             "in": "path",
             "name": "slug",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
             "schema": {
               "type": "string"
             }
