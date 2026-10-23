@@ -287,25 +287,52 @@ func (s *BatchStore) Commit(ctx context.Context, request BatchRequest) (BatchRes
 			var targetRows []preparedTargetRow
 			var targetCandidate BatchTargetCandidate
 			var targetContext BatchPrepareContext
+			var causalContext BatchCausalPrepareContext
 			if reason == nil {
 				isolated := cloneBatchChange(c)
 				var failure *PreparedFailure
 				if s.targetsEnabled() {
-					targetContext, e = s.targetContext(ctx, tx, key, c, rev)
-					if e != nil {
-						return e
-					}
-					if e = s.confirmTargetContext(ctx, checkpoint, c, targetContext); e != nil {
-						return e
-					}
-					failure = confirmedTargetReadFailure(c, targetContext)
-					rawContext, _ := json.Marshal(targetContext)
-					var isolatedContext BatchPrepareContext
-					if e = json.Unmarshal(rawContext, &isolatedContext); e != nil {
-						return e
-					}
-					if failure == nil {
-						targetCandidate, failure, e = s.config.Targets.Adapter.PrepareTargets(ctx, append([]byte(nil), checkpoint...), isolated, isolatedContext)
+					if s.config.Targets.ReadPolicy == CausalTargetReadPolicy {
+						inventory, inventoryErr := s.config.Targets.Adapter.ValidateTargets(ctx, append([]byte(nil), checkpoint...))
+						if inventoryErr != nil {
+							return inventoryErr
+						}
+						causalContext, e = s.qualifyCausalReads(ctx, tx, key, c, inventory, s.config.Targets.HistoryBudget)
+						if e != nil {
+							return e
+						}
+						failure, e = causalTargetReadFailure(c, causalContext, inventory)
+						if e != nil {
+							return e
+						}
+						rawContext, marshalErr := json.Marshal(causalContext)
+						if marshalErr != nil {
+							return marshalErr
+						}
+						var isolatedContext BatchCausalPrepareContext
+						if e = json.Unmarshal(rawContext, &isolatedContext); e != nil {
+							return e
+						}
+						if failure == nil {
+							targetCandidate, failure, e = s.config.Targets.Adapter.(CausalTargetBatchAdapter).PrepareCausalTargets(ctx, append([]byte(nil), checkpoint...), isolated, isolatedContext)
+						}
+					} else {
+						targetContext, e = s.targetContext(ctx, tx, key, c, rev)
+						if e != nil {
+							return e
+						}
+						if e = s.confirmTargetContext(ctx, checkpoint, c, targetContext); e != nil {
+							return e
+						}
+						failure = confirmedTargetReadFailure(c, targetContext)
+						rawContext, _ := json.Marshal(targetContext)
+						var isolatedContext BatchPrepareContext
+						if e = json.Unmarshal(rawContext, &isolatedContext); e != nil {
+							return e
+						}
+						if failure == nil {
+							targetCandidate, failure, e = s.config.Targets.Adapter.PrepareTargets(ctx, append([]byte(nil), checkpoint...), isolated, isolatedContext)
+						}
 					}
 					candidate = append([]byte(nil), targetCandidate.Checkpoint...)
 				} else {
@@ -332,7 +359,11 @@ func (s *BatchStore) Commit(ctx context.Context, request BatchRequest) (BatchRes
 						if e != nil {
 							return e
 						}
-						targetRows, e = s.validateTargetCandidate(c, targetContext, targetCandidate, validated)
+						if s.config.Targets.ReadPolicy == CausalTargetReadPolicy {
+							targetRows, e = s.validateCausalTargetCandidate(c, causalContext, targetCandidate, validated)
+						} else {
+							targetRows, e = s.validateTargetCandidate(c, targetContext, targetCandidate, validated)
+						}
 						if e != nil {
 							return e
 						}

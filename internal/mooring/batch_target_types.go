@@ -59,10 +59,22 @@ func DefaultBatchTargetLimits() BatchTargetLimits {
 	return BatchTargetLimits{65536, 1000000, 256, 128 << 20}
 }
 
+// CausalTargetBatchAdapter is a separate capability. Implementations must not
+// translate historical observations into current reads or fall back to strict.
+type CausalTargetBatchAdapter interface {
+	TargetBatchAdapter
+	PrepareCausalTargets(context.Context, []byte, BatchChange, BatchCausalPrepareContext) (BatchTargetCandidate, *PreparedFailure, error)
+}
+
+const CausalTargetReadPolicy = "agent_dependency_covered"
+
 // TargetStoreConfig is separately default-off. Enabled configuration never falls
 // back to the legacy context-free adapter or ignores target read observations.
 type TargetStoreConfig struct {
-	Enabled bool
-	Adapter TargetBatchAdapter
-	Limits  BatchTargetLimits
+	// Empty selects the original strict-current policy. Causal is explicit.
+	ReadPolicy    string
+	HistoryBudget BatchHistoryBudget
+	Enabled       bool
+	Adapter       TargetBatchAdapter
+	Limits        BatchTargetLimits
 }
