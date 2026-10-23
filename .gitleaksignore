@@ -97,3 +97,41 @@ a41d725e0d02a7a806308f7fdb01af116b99d509:components/features/admin/backups/__tes
 # Synthetic error-redaction fixture; invalid run-token format, mock transport only.
 # Pin this exception to the original historical commit, rule, path and line.
 ad01771335611d1de65a80085ee4228959998486:cmd/crewship/cmd_doc_create_test.go:generic-api-key:83
+
+# Pinned Cargo vendor checksum maps: source filenames trigger generic-api-key,
+# but matched values are SHA256 digests, not credentials. Exact staged fingerprints;
+# license-inventory.py verifies the strict manifest shape and every source digest.
+mooring/vendor/arc-swap-1.9.3/.cargo-checksum.json:generic-api-key:1
+mooring/vendor/libc-0.2.191/.cargo-checksum.json:generic-api-key:1
+mooring/vendor/parking_lot_core-0.9.12/.cargo-checksum.json:generic-api-key:1
+mooring/vendor/quote-1.0.47/.cargo-checksum.json:generic-api-key:1
+mooring/vendor/rustversion-1.0.23/.cargo-checksum.json:generic-api-key:1
+mooring/vendor/serde_json-1.0.154/.cargo-checksum.json:generic-api-key:1
+mooring/vendor/syn-3.0.9/.cargo-checksum.json:generic-api-key:1
+
+# Same vendored SHA256 findings in the introducing commit (history scan).
+a5e52eb700be14e985b892b1a87ddb6215d5e613:mooring/vendor/arc-swap-1.9.3/.cargo-checksum.json:generic-api-key:1
+a5e52eb700be14e985b892b1a87ddb6215d5e613:mooring/vendor/libc-0.2.191/.cargo-checksum.json:generic-api-key:1
+a5e52eb700be14e985b892b1a87ddb6215d5e613:mooring/vendor/parking_lot_core-0.9.12/.cargo-checksum.json:generic-api-key:1
+a5e52eb700be14e985b892b1a87ddb6215d5e613:mooring/vendor/quote-1.0.47/.cargo-checksum.json:generic-api-key:1
+a5e52eb700be14e985b892b1a87ddb6215d5e613:mooring/vendor/rustversion-1.0.23/.cargo-checksum.json:generic-api-key:1
+a5e52eb700be14e985b892b1a87ddb6215d5e613:mooring/vendor/serde_json-1.0.154/.cargo-checksum.json:generic-api-key:1
+a5e52eb700be14e985b892b1a87ddb6215d5e613:mooring/vendor/syn-3.0.9/.cargo-checksum.json:generic-api-key:1
+
+# Same exact checksum findings after the main-base restack.
+077cac2b941758220cb54b9f5b0e817f3dfc9b73:mooring/vendor/arc-swap-1.9.3/.cargo-checksum.json:generic-api-key:1
+077cac2b941758220cb54b9f5b0e817f3dfc9b73:mooring/vendor/libc-0.2.191/.cargo-checksum.json:generic-api-key:1
+077cac2b941758220cb54b9f5b0e817f3dfc9b73:mooring/vendor/parking_lot_core-0.9.12/.cargo-checksum.json:generic-api-key:1
+077cac2b941758220cb54b9f5b0e817f3dfc9b73:mooring/vendor/quote-1.0.47/.cargo-checksum.json:generic-api-key:1
+077cac2b941758220cb54b9f5b0e817f3dfc9b73:mooring/vendor/rustversion-1.0.23/.cargo-checksum.json:generic-api-key:1
+077cac2b941758220cb54b9f5b0e817f3dfc9b73:mooring/vendor/serde_json-1.0.154/.cargo-checksum.json:generic-api-key:1
+077cac2b941758220cb54b9f5b0e817f3dfc9b73:mooring/vendor/syn-3.0.9/.cargo-checksum.json:generic-api-key:1
+
+# Exact vendored-checksum fingerprints after the reviewed main restack.
+5eec46eb8db47efbc61dacc4e2d766ae077e17a2:mooring/vendor/arc-swap-1.9.3/.cargo-checksum.json:generic-api-key:1
+5eec46eb8db47efbc61dacc4e2d766ae077e17a2:mooring/vendor/libc-0.2.191/.cargo-checksum.json:generic-api-key:1
+5eec46eb8db47efbc61dacc4e2d766ae077e17a2:mooring/vendor/parking_lot_core-0.9.12/.cargo-checksum.json:generic-api-key:1
+5eec46eb8db47efbc61dacc4e2d766ae077e17a2:mooring/vendor/quote-1.0.47/.cargo-checksum.json:generic-api-key:1
+5eec46eb8db47efbc61dacc4e2d766ae077e17a2:mooring/vendor/rustversion-1.0.23/.cargo-checksum.json:generic-api-key:1
+5eec46eb8db47efbc61dacc4e2d766ae077e17a2:mooring/vendor/serde_json-1.0.154/.cargo-checksum.json:generic-api-key:1
+5eec46eb8db47efbc61dacc4e2d766ae077e17a2:mooring/vendor/syn-3.0.9/.cargo-checksum.json:generic-api-key:1
