@@ -237,7 +237,6 @@ type chainReader interface {
 
 // VerifyResult reports the outcome of walking one workspace's chain.
 type VerifyResult struct {
-	keyUnavailable       bool
 	ContinuationVerified bool   `json:"continuation_verified"`
 	HistoricalStatus     string `json:"historical_status,omitempty"`
 	provenFailure        bool
@@ -279,6 +278,10 @@ type VerifyResult struct {
 	RepairableTruncated bool              `json:"repairable_truncated,omitempty"`
 	BreakCount          int               `json:"break_count,omitempty"`      // total breaks found (>= len(Breaks))
 	BreaksTruncated     bool              `json:"breaks_truncated,omitempty"` // list trimmed; see BreakCount
+
+	// UnchainedFallback counts instance audit rows recorded outside the chain
+	// because its tail was broken when a security-reducing action ran.
+	UnchainedFallback int `json:"unchained_fallback,omitempty"`
 }
 
 // maxReportedBreaks bounds the per-row breaks carried in a VerifyResult. A
@@ -613,11 +616,20 @@ func VerifyChainWithKeys(ctx context.Context, db chainReader, workspaceID string
 	expectedPrev := GenesisPrevHash
 	var expectedSeq int64 = 1
 
+	// segmentBroken/segmentProven describe defects since the last authentic
+	// row. An authentic row after them demotes them out of the current
+	// segment: they stay reported (OK=false, Breaks), but appends extend the
+	// segment after them. segmentPost marks a defect in a row written after
+	// the upgrade boundary — a keyring-signed (v2) row, or any row after the
+	// last OWNER checkpoint. That is not inherited history but damage since
+	// the upgrade, reported as post_upgrade_invalid.
+	segmentBroken, segmentProven, segmentPost := false, false, false
 	for rows.Next() {
 		f, prevHash, entryHash, livePriority, err := scanChainRow(rows)
 		if err != nil {
 			return nil, fmt.Errorf("journal: verify scan: %w", err)
 		}
+		rowBreaks := res.BreakCount
 
 		// Older imports can contain unsigned rows. They never cover gaps or
 		// authenticate history; admission still checks every chained row.
@@ -635,7 +647,6 @@ func VerifyChainWithKeys(ctx context.Context, db chainReader, workspaceID string
 			anchorSeen = true
 			expectedSeq, expectedPrev = f.Seq, prevHash
 			res.provenFailure = false
-			res.keyUnavailable = false
 			segmentBreakStart = res.BreakCount
 		}
 
@@ -668,7 +679,6 @@ func VerifyChainWithKeys(ctx context.Context, db chainReader, workspaceID string
 				res.Reason = fmt.Sprintf("sequence gap: expected seq %d, found %d (no signed compaction checkpoint covers the missing row)", expectedSeq, f.Seq)
 				if !historical {
 					res.provenFailure = !checkpointKeysUnavailable
-					res.keyUnavailable = checkpointKeysUnavailable
 					return res, nil
 				}
 				res.HistoricalStatus = "historical_invalid"
@@ -747,6 +757,9 @@ func VerifyChainWithKeys(ctx context.Context, db chainReader, workspaceID string
 				}
 				hashedPriority = recovered
 			} else {
+				if hashErr == nil || errors.Is(hashErr, ErrChainIntegrity) {
+					segmentProven = true
+				}
 				if (hashErr == nil || errors.Is(hashErr, ErrChainIntegrity)) && !historical {
 					res.provenFailure = true
 				}
@@ -754,9 +767,6 @@ func VerifyChainWithKeys(ctx context.Context, db chainReader, workspaceID string
 					res.HistoricalStatus = "historical_invalid"
 				}
 				if errors.Is(hashErr, ErrSigningKeyUnavailable) {
-					if !historical {
-						res.keyUnavailable = true
-					}
 					res.note(f.Seq, f.ID, "key_unavailable", fmt.Sprintf("verification key unavailable at seq %d; historical MAC is unverified", f.Seq))
 				} else {
 					res.note(f.Seq, f.ID, "content", fmt.Sprintf("content hash mismatch at seq %d: entry was modified after write (or the chain key differs)", f.Seq))
@@ -801,6 +811,24 @@ func VerifyChainWithKeys(ctx context.Context, db chainReader, workspaceID string
 			}
 		}
 
+		if res.BreakCount > rowBreaks {
+			segmentBroken = true
+			if !historical && (f.KeyID.Valid || anchor != nil) {
+				segmentPost = true
+			}
+		} else if segmentBroken {
+			status := "historical_unverified"
+			if segmentPost {
+				status = "post_upgrade_invalid"
+			} else if segmentProven {
+				status = "historical_invalid"
+			}
+			res.HistoricalStatus = worseHistorical(res.HistoricalStatus, status)
+			segmentBroken, segmentProven, segmentPost = false, false, false
+			segmentBreakStart = res.BreakCount
+			res.provenFailure = false
+		}
+
 		expectedPrev = entryHash
 		expectedSeq++
 	}
@@ -808,9 +836,6 @@ func VerifyChainWithKeys(ctx context.Context, db chainReader, workspaceID string
 		return nil, fmt.Errorf("journal: verify iterate: %w", err)
 	}
 	res.ContinuationVerified = anchorSeen && res.BreakCount == segmentBreakStart && !res.provenFailure
-	if anchor == nil {
-		res.ContinuationVerified = res.BreakCount == 0 && !res.provenFailure
-	}
 	if legacyCount > 0 {
 		res.OK = false
 		if res.Count == legacyCount {
@@ -989,14 +1014,13 @@ func unresolvedReason(
 	return ""
 }
 
-// AppendError admits an authenticated current chain, including a continuation
-// explicitly accepted by OWNER. It never calls missing keys proven corruption.
-func (r *VerifyResult) AppendError() error {
-	if r.OK || r.ContinuationVerified {
-		return nil
+// historicalRank orders historical statuses from best to worst, so a later
+// finding never makes an earlier, worse one look better.
+var historicalRank = map[string]int{"": 0, "verified": 1, "legacy_unverified": 2, "historical_unverified": 3, "historical_invalid": 4, "post_upgrade_invalid": 5}
+
+func worseHistorical(current, next string) string {
+	if historicalRank[next] > historicalRank[current] {
+		return next
 	}
-	if r.keyUnavailable {
-		return ErrSigningKeyUnavailable
-	}
-	return ErrChainIntegrity
+	return current
 }

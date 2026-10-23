@@ -5,10 +5,12 @@ import (
 	"testing"
 )
 
-// This measures the native writer snapshot, including complete chain admission.
-// Rollback keeps the history length fixed; setup uses one real writer batch.
+// BenchmarkAuditAppendHistory measures one transactional append against a
+// pre-seeded history. Append admission checks only the chain tail, so the cost
+// must stay flat as the history grows. Rollback keeps the history length
+// fixed; setup uses one real writer batch.
 func BenchmarkAuditAppendHistory(b *testing.B) {
-	for _, size := range []int{100, 1000, 10000} {
+	for _, size := range []int{100, 10000, 100000} {
 		b.Run(fmt.Sprint(size), func(b *testing.B) {
 			db := openTestDB(b)
 			defer db.Close()

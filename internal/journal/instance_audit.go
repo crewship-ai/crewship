@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"strconv"
 )
 
@@ -38,4 +39,27 @@ func instanceAuditMACWithKey(key []byte, seq int64, prev string, f InstanceAudit
 		}
 	}
 	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// InstanceAuditFallbackKey/Value mark an instance audit row written outside the
+// chain. Only revocations and password reset may write one, and only while the
+// chain tail is broken (see appendInstanceAuditTx in internal/api): those
+// actions reduce access and must never wait on audit repair. The row has no
+// chain columns, so it neither extends nor launders the chain; verification
+// counts it in UnchainedFallback and never reports such a chain as OK.
+const (
+	InstanceAuditFallbackKey   = "audit_chain"
+	InstanceAuditFallbackValue = "unchained_fallback"
+)
+
+// IsInstanceAuditFallback reports whether metadata carries the fallback mark.
+func IsInstanceAuditFallback(metadata sql.NullString) bool {
+	if !metadata.Valid {
+		return false
+	}
+	var mark map[string]any
+	if json.Unmarshal([]byte(metadata.String), &mark) != nil {
+		return false
+	}
+	return mark[InstanceAuditFallbackKey] == InstanceAuditFallbackValue
 }

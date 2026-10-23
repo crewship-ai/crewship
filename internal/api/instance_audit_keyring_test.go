@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -106,34 +105,5 @@ func TestAuditInstanceOwnerExplicitReseal(t *testing.T) {
 	}
 }
 
-func TestAuditInstanceMiddleFailureRefusesAppend(t *testing.T) {
-	for _, change := range []string{"metadata='changed'", "chain_key_id='missing-old-key'", "chain_key_id='missing-tail-key'"} {
-		t.Run(change, func(t *testing.T) {
-			db := setupTestDB(t)
-			for range 3 {
-				if err := auditInstance(t.Context(), nil, db, "fixture.authentic", "instance", "", "", nil); err != nil {
-					t.Fatal(err)
-				}
-			}
-			sequence := 1
-			if change == "chain_key_id='missing-tail-key'" {
-				sequence = 3
-			}
-			if _, err := db.Exec("UPDATE instance_audit_logs SET "+change+" WHERE chain_seq=?", sequence); err != nil {
-				t.Fatal(err)
-			}
-			err := auditInstance(t.Context(), nil, db, "fixture.must_refuse", "instance", "", "", nil)
-			wanted := journal.ErrChainIntegrity
-			if change != "metadata='changed'" {
-				wanted = journal.ErrSigningKeyUnavailable
-			}
-			if !errors.Is(err, wanted) {
-				t.Errorf("append after invalid middle: %v want %v", err, wanted)
-			}
-			var count int
-			if err := db.QueryRow("SELECT COUNT(*) FROM instance_audit_logs").Scan(&count); err != nil || count != 3 {
-				t.Errorf("refused append changed history: %d %v", count, err)
-			}
-		})
-	}
-}
+// Middle-of-history failures no longer refuse appends: see
+// TestInstanceAuditAppendChecksTailOnly.

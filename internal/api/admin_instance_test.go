@@ -110,6 +110,7 @@ func TestInstanceRoutes_RefuseAWorkspaceAdmin(t *testing.T) {
 		{"POST", "/api/v1/admin/instance/people/carol/suspend", ""},
 		{"PUT", "/api/v1/admin/instance/admins/wsadmin", ""},
 		{"GET", "/api/v1/admin/instance/audit", ""},
+		{"GET", "/api/v1/admin/instance/audit/verify", ""},
 	} {
 		if rr := f.do(f.wsAdmin, c.method, c.path, c.body); rr.Code != http.StatusForbidden {
 			t.Errorf("workspace ADMIN %s %s = %d, want 403", c.method, c.path, rr.Code)

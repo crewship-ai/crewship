@@ -24135,6 +24135,196 @@
         "x-crewship-read-only": true
       }
     },
+    "/api/v1/admin/instance/audit/verify": {
+      "get": {
+        "description": "Get admin instance audit verify (GET /api/v1/admin/instance/audit/verify).",
+        "operationId": "get_api_v1_admin_instance_audit_verify",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "break_count": {
+                      "type": "integer"
+                    },
+                    "breaks": {
+                      "items": {
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "seq": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "seq",
+                          "id",
+                          "kind",
+                          "reason"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "breaks_truncated": {
+                      "type": "boolean"
+                    },
+                    "broken_id": {
+                      "type": "string"
+                    },
+                    "broken_seq": {
+                      "type": "integer"
+                    },
+                    "checkpoints": {
+                      "type": "integer"
+                    },
+                    "continuation_verified": {
+                      "type": "boolean"
+                    },
+                    "count": {
+                      "type": "integer"
+                    },
+                    "historical_status": {
+                      "type": "string"
+                    },
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "repairable": {
+                      "items": {
+                        "properties": {
+                          "emit_priority": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "seq": {
+                            "type": "integer"
+                          },
+                          "stored_priority": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "seq",
+                          "id",
+                          "stored_priority",
+                          "emit_priority"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "repairable_count": {
+                      "type": "integer"
+                    },
+                    "repairable_truncated": {
+                      "type": "boolean"
+                    },
+                    "unchained_fallback": {
+                      "type": "integer"
+                    },
+                    "workspace_id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "workspace_id",
+                    "ok",
+                    "count",
+                    "continuation_verified"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get admin instance audit verify",
+        "tags": [
+          "admin"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
     "/api/v1/admin/instance/backups/bundles": {
       "get": {
         "description": "List admin instance backups bundles (GET /api/v1/admin/instance/backups/bundles).",
@@ -38129,6 +38319,9 @@
                     },
                     "repairable_truncated": {
                       "type": "boolean"
+                    },
+                    "unchained_fallback": {
+                      "type": "integer"
                     },
                     "workspace_id": {
                       "type": "string"

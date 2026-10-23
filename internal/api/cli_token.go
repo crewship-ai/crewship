@@ -586,7 +586,7 @@ func (h *CLITokenHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := auditCLITokenTx(r.Context(), tx, user.ID, tokenID, "auth.cli_token_revoked"); err != nil {
+	if err := auditCLITokenTx(withSecurityAuditFallback(r.Context()), tx, user.ID, tokenID, "auth.cli_token_revoked"); err != nil {
 		replyInternalError(w, h.logger, "revoke cli token: audit", err)
 		return
 	}

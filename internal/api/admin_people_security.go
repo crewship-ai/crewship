@@ -165,7 +165,13 @@ func (h *AdminUsersHandler) mutateSecurity(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	if instance {
-		err = auditInstance(r.Context(), r, tx, action, "USER", target, WorkspaceIDFromContext(r.Context()), metadata)
+		// Revocations proceed with a broken chain tail; unlock restores access
+		// and stays chained-only.
+		auditCtx := r.Context()
+		if operation != "unlock" {
+			auditCtx = withSecurityAuditFallback(auditCtx)
+		}
+		err = auditInstance(auditCtx, r, tx, action, "USER", target, WorkspaceIDFromContext(r.Context()), metadata)
 	} else {
 		notifyAudit, err = appendSettingsAudit(r, tx, h.journal, action, "USER", target, metadata)
 	}
