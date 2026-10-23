@@ -1,6 +1,5 @@
 //! Model-v2 action-scoped property identities. This module grants no authority.
 use crate::{AdapterError, CHARACTER_FLAGS, CHARACTER_PREFIX, PROPS_PRESENT};
-use mooring_protocol::Counter;
 use mooring_text::yrs::{types::Attrs, Any};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
@@ -21,6 +20,18 @@ pub(crate) struct Key<'a> {
     pub origin: u64,
 }
 
+fn canonical_counter(raw: &str) -> Option<u64> {
+    if raw.is_empty()
+        || raw.len() > 16
+        || (raw.len() > 1 && raw.starts_with('0'))
+        || !raw.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    let value = raw.parse::<u64>().ok()?;
+    (value <= MAX_STAMP).then_some(value)
+}
+
 pub(crate) fn parse_key(raw: &str) -> Result<Key<'_>, AdapterError> {
     if raw.len() > 48 {
         return Err(AdapterError::InvalidCheckpoint);
@@ -35,14 +46,12 @@ pub(crate) fn parse_key(raw: &str) -> Result<Key<'_>, AdapterError> {
     }
     let stamp = parts
         .next()
-        .and_then(|s| Counter::try_from(s.to_owned()).ok())
-        .ok_or(AdapterError::InvalidCheckpoint)?
-        .0;
+        .and_then(canonical_counter)
+        .ok_or(AdapterError::InvalidCheckpoint)?;
     let origin = parts
         .next()
-        .and_then(|s| Counter::try_from(s.to_owned()).ok())
-        .ok_or(AdapterError::InvalidCheckpoint)?
-        .0;
+        .and_then(canonical_counter)
+        .ok_or(AdapterError::InvalidCheckpoint)?;
     if parts.next().is_some()
         || stamp == 0
         || stamp > MAX_STAMP

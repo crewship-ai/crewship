@@ -126,3 +126,13 @@ The earlier v1 raw-delta structural validator now compiles only in tests. Its
 text-preservation checks are not full peer-format undo qualification; model-v2
 production code exposes no raw human update admission. No native WordApp command
 hook, browser human service or deployment is implied by these model regressions.
+
+Checkpoint restoration preflights the complete original Yrs v1 bytes before
+allocating any upstream Update: at most 4,096 encoded clients and 262,144 total
+structs/deletion ranges, checked u32 clocks, canonical u53 IDs/counters, bounded
+UTF-8 strings and exact frame consumption. Only this model's Map/Array/Text,
+string metadata/IDs and closed scalar formatting values are accepted. Nested Any
+containers, embeds, subdocuments and unknown content kinds fail nonterminally;
+this is not general-purpose Yrs feature support or a human admission API. Scope,
+authority, negotiated transport limits and checkpoint provenance remain the
+caller's responsibility. The scan borrows the input and allocates nothing.

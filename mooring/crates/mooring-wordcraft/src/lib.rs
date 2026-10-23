@@ -3,6 +3,7 @@
 //! An export is a candidate, never a durable Saved receipt.
 pub mod adapter;
 mod candidate;
+mod checkpoint_wire;
 pub mod command;
 mod format;
 #[cfg(test)]
@@ -375,6 +376,7 @@ impl Document {
             _ => return Err(AdapterError::InvalidCheckpoint),
         };
         let unsupported = classify(&native).map_err(|_| AdapterError::InvalidCheckpoint)?;
+        checkpoint_wire::preflight(&update)?;
         let recovered = mooring_text::recover(&update, Vec::new())
             .map_err(|_| AdapterError::InvalidCheckpoint)?;
         if model == format::Model::V2 {
@@ -619,3 +621,6 @@ mod tests;
 
 #[cfg(test)]
 mod model_v2_tests;
+
+#[cfg(test)]
+mod checkpoint_budget_tests;
