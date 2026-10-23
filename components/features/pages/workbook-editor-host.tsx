@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { parseRevisionPush } from "@/lib/mooring/revision"
 import { Button } from "@/components/ui/button"
 import { useRealtimeChannelSafe, useRealtimeEventSafe, useRealtimeStatusSafe, type RealtimeEventType } from "@/hooks/use-realtime"
 import { initialSaveState, losesWork, saveReducer, type SaveState } from "@/lib/editor-lifecycle/save-state"
@@ -491,6 +492,10 @@ export function WorkbookEditorHost({ client, pageId, name, onEnd, onDirtyChange 
   useRealtimeChannelSafe(`page:${pageId}`)
   useRealtimeEventSafe(WORKBOOK_COMMITTED_EVENT as RealtimeEventType, event => {
     const head = parseCommittedPush(event.payload, pageId)
+    if (head) bridgeRef.current?.notify(head)
+  })
+  useRealtimeEventSafe("mooring.committed", event => {
+    const head = parseRevisionPush(event.payload, pageId)
     if (head) bridgeRef.current?.notify(head)
   })
   useRealtimeEventSafe("realtime.reconnected", () => { bridgeRef.current?.online(); pollRef.current() })
