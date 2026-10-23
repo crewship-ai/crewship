@@ -34,6 +34,7 @@ pub struct ReadLease {
     ticket: TicketValidationResult,
     fence: Fence,
     namespace: String,
+    host_issuer: String,
     sequence: u64,
     maximum: Duration,
     gate: DeliveryGate,
@@ -84,6 +85,7 @@ impl ReadLease {
             ticket: bound.ticket,
             fence,
             namespace: bound.nonce_namespace,
+            host_issuer: bound.host_issuer,
             sequence: 0,
             maximum,
             gate,
@@ -149,6 +151,10 @@ impl ReadLease {
         self.ensure_open()?;
         if !self.may_deliver(now) {
             return Err(DeliveryError::Closed);
+        }
+        if !matches!(host, Transport::AuthenticatedHost { issuer, .. } if *issuer == self.host_issuer)
+        {
+            return Err(DeliveryError::Grant(BoundaryError::Forbidden));
         }
         let pending = self.pending.as_ref().ok_or(DeliveryError::Binding)?;
         let grant = pending

@@ -96,6 +96,12 @@ fn controller_generates_distinct_nonces_and_old_reply_cannot_replace_pending() {
         .accept(&reply(&second, 1500), &Transport::Participant, at(1501))
         .is_err());
     assert_eq!(lease.retry_bytes().unwrap(), second);
+    let different_host = Transport::AuthenticatedHost {
+        issuer: "another-host", durabilities: &[Durability::Node], required: Durability::Node,
+    };
+    assert_eq!(lease.accept(&reply(&second, 1500), &different_host, at(1502)),
+        Err(DeliveryError::Grant(mooring_protocol::boundary::BoundaryError::Forbidden)));
+    assert_eq!(lease.retry_bytes().unwrap(), second);
     lease
         .accept(&reply(&second, 1500), &host(), at(1600))
         .unwrap();

@@ -69,7 +69,9 @@ the WordCraft adapter. UTF-16 offsets match browser Yjs indexing.
 `mooring-core::delivery::ReadLease` consumes a validated ticket for one freshly
 registered host gate and owns renewal nonce generation, one immutable pending
 request, and send-time lease checks. Retries retain the same pending object and
-first-send deadline. Revocation, expired old permission, clock regression, or
+first-send deadline and initial authenticated logical host identity. A grant
+from a different host identity cannot renew that ticket. Revocation, expired
+old permission, clock regression, or
 nonce sequence exhaustion permanently close this controller. Admission must
 ensure a gate is registered only once, including across runtime restarts; an
 old ticket must never recreate it. Every content path must call `may_deliver`

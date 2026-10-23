@@ -40,6 +40,7 @@ pub struct BoundGrant {
     reply: CanonicalValue,
     expires_at: Duration,
     duration: Duration,
+    host_issuer: String,
 }
 impl fmt::Debug for BoundGrant {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -55,6 +56,7 @@ pub struct BoundTicket {
     pub first_send: Duration,
     pub duration: Duration,
     pub nonce_namespace: String,
+    pub host_issuer: String,
 }
 impl BoundGrant {
     pub fn into_ticket(self) -> Result<BoundTicket, BoundaryError> {
@@ -71,6 +73,7 @@ impl BoundGrant {
                 .ok_or(BoundaryError::Clock)?,
             duration: self.duration,
             nonce_namespace: self.reply.digest(),
+            host_issuer: self.host_issuer,
         })
     }
 
@@ -285,6 +288,7 @@ impl PendingGrant {
             reply,
             expires_at,
             duration,
+            host_issuer: (*issuer).into(),
         })
     }
 }
