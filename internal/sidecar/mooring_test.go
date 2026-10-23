@@ -28,7 +28,7 @@ func TestMooringMCPPreservesRunIdentityAndExactGenericPacket(t *testing.T) {
 	defer host.Close()
 	s.ipc.BaseURL = host.URL
 	s.ipc.Token = "synthetic-workbook-ipc"
-	arguments := `{"action":"command","artifact_id":"page","mandate_id":"m","request":{"mutation_id":"original-edit","base_rev":1,"generation":1,"command":"set","arguments":{"text":"agent"}}}`
+	arguments := `{"action":"command","artifact_id":"page","mandate_id":"m","request":{"mutation_id":"original-edit","base_rev":1,"generation":1,"read_set":{"cells":[{"sheet":"Sheet1","cell":"A1","rev":1}],"ranges":[{"sheet":"Sheet1","start":"A1","end":"A9","rev":1,"structure_rev":1}]},"command":"set","arguments":{"text":"agent"}}}`
 	for i := 0; i < 2; i++ {
 		r := httptest.NewRequest("POST", "/mcp/routines", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"mooring_command","arguments":`+arguments+`}}`))
 		r.Header.Set("Authorization", "Bearer "+token)
@@ -39,7 +39,7 @@ func TestMooringMCPPreservesRunIdentityAndExactGenericPacket(t *testing.T) {
 			t.Fatalf("workbook MCP failed: %s", body)
 		}
 	}
-	if len(bodies) != 2 || bodies[0] != bodies[1] || !strings.Contains(bodies[0], `"base_rev":1`) || !strings.Contains(bodies[0], `"mutation_id":"original-edit"`) {
+	if len(bodies) != 2 || bodies[0] != bodies[1] || !strings.Contains(bodies[0], `"base_rev":1`) || !strings.Contains(bodies[0], `"mutation_id":"original-edit"`) || !strings.Contains(bodies[0], `"read_set":{"cells":[{"sheet":"Sheet1","cell":"A1","rev":1}],"ranges":[{"sheet":"Sheet1","start":"A1","end":"A9","rev":1,"structure_rev":1}]}`) {
 		t.Fatalf("request was renewed: %v", bodies)
 	}
 }
