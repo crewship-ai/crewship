@@ -27,7 +27,8 @@ export function MooringEditorHost({ workspaceId, pageId, name, onDirtyChange }: 
   React.useEffect(() => {
     const controller = new AbortController()
     let port: CapabilityPort | undefined, frame: HTMLIFrameElement | undefined
-    let loads = 0, connected = false, dead = false, loading = false, wanted = false, draft = false
+    let loads = 0, connected = false, dead = false, wanted = false, draft = false
+    let loading: Promise<void> | undefined
     let committing = false
     let latest = -1, generation = 0, bundle = "", pending: { seq: number; body: string } | undefined
     const requestID = crypto.randomUUID()
@@ -48,10 +49,7 @@ export function MooringEditorHost({ workspaceId, pageId, name, onDirtyChange }: 
       if ([401, 403, 404].includes(response.status)) { stop("Access to this document is unavailable."); throw new Error("Access lost") }
       return { response, body: await response.json().catch(() => null) as unknown }
     }
-    async function load() {
-      if (dead) return
-      if (loading) { wanted = true; return }
-      loading = true
+    async function readSnapshot() {
       try {
         const { response, body } = await call("")
         if (dead || controller.signal.aborted) return
@@ -75,10 +73,24 @@ export function MooringEditorHost({ workspaceId, pageId, name, onDirtyChange }: 
         setError(undefined); update()
       } catch (cause) {
         if (!controller.signal.aborted && !dead) { setError(cause instanceof Error ? cause.message : "The document could not be loaded."); setLabel("Offline · changes are not confirmed"); send({ type: "offline" }) }
-      } finally {
-        loading = false
-        if (wanted) { wanted = false; void load() }
       }
+    }
+    function load(): Promise<void> {
+      if (dead) return Promise.resolve()
+      wanted = true
+      if (loading) return loading
+      // Every caller joins the complete drain, including a fresh read queued
+      // while the first GET was in flight. A commit receipt can overtake that
+      // first GET, so joining only that old response is not sufficient.
+      loading = (async () => {
+        try {
+          while (wanted && !dead) {
+            wanted = false
+            await readSnapshot()
+          }
+        } finally { loading = undefined }
+      })()
+      return loading
     }
     async function commit() {
       const writing = pending
