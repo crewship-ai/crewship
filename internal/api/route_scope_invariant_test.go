@@ -125,6 +125,7 @@ func TestScopeForRoute(t *testing.T) {
 		{"/api/v1/notification-channels", "webhooks:write"},
 		{"/api/v1/workspaces/{workspaceId}/pipeline-webhooks", "webhooks:write"},
 		{"/api/v1/workspaces/{workspaceId}", "workspace:admin"},
+		{"/api/v1/mooring/documents", "workspace:admin"},
 		// Still workspace:admin, and deliberately so. This is the API-TOKEN
 		// axis, which is not the axis routine.run moved. A session caller
 		// (JWT, from the dashboard or the repl) is unscoped and never meets

@@ -171,7 +171,7 @@ func (m *mooringHTTP) revoke(w http.ResponseWriter, r *http.Request) {
 	if notify != nil {
 		notify()
 	}
-	writeJSON(w, 200, map[string]string{"status": "revoked"})
+	writeJSON(w, 200, mooringRevoked{Status: "revoked"})
 }
 
 type mooringAgentPacket struct {
