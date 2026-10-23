@@ -22,6 +22,8 @@ type frozenGraph struct {
 	Agent   string         `json:"agent"`
 	Profile string         `json:"profile"`
 	Rights  []access.Right `json:"rights"`
+	// Publication is absent for legacy graphs, preserving their frozen hash.
+	Publication *publishedRef `json:"publication,omitempty"`
 }
 type graphRecipe struct {
 	ID, Hash, Raw string
@@ -87,6 +89,10 @@ func (s *Service) checkGraph(ctx context.Context, q interface {
 			}
 		} else {
 			seenRecipes[r.ID] = r.Hash
+			// Published graphs are checked by checkPublishedJob only.
+			if g.Publication != nil {
+				return ErrDenied
+			}
 			current, err := loadLegacyGraphRecipe(ctx, q, j.Workspace, r.ID)
 			if err != nil {
 				return err
@@ -193,6 +199,20 @@ func (s *Service) compileGraph(ctx context.Context, user, workspace, pipelineID 
 	if authority == nil {
 		return graph, ErrDenied
 	}
+	root, ref, manifest, published, err := loadPublishedRoot(ctx, s.db, workspace, pipelineID)
+	if err != nil {
+		if errors.Is(err, ErrDenied) {
+			return graph, ErrDenied
+		}
+		return graph, graphLookupError(err)
+	}
+	if published {
+		graph, err = s.compilePublishedGraph(ctx, user, workspace, root, ref, manifest)
+		if errors.Is(err, access.ErrDenied) {
+			return frozenGraph{}, ErrDenied
+		}
+		return graph, err
+	}
 	leaves, nodes, bytes := 0, 0, 0
 	seenBytes := map[string]bool{}
 	path := map[string]bool{}
@@ -294,7 +314,6 @@ func (s *Service) compileGraph(ctx context.Context, user, workspace, pipelineID 
 		}
 		return r, nil
 	}
-	var err error
 	graph.Root, err = visit(pipelineID, 1)
 	if err != nil {
 		if errors.Is(err, ErrDenied) || errors.Is(err, access.ErrDenied) {
@@ -319,13 +338,7 @@ func (s *Service) compileGraph(ctx context.Context, user, workspace, pipelineID 
 	// agent dependency. Nested recipes remain pinned by the frozen graph.
 	graph.Rights = append(graph.Rights, access.Right{Kind: "routine", ID: pipelineID, Operation: "run"})
 	// Sort via canonical JSON-independent rights ordering before hashing/pinning.
-	for i := 0; i < len(graph.Rights); i++ {
-		for j := i + 1; j < len(graph.Rights); j++ {
-			if graph.Rights[j].Kind+graph.Rights[j].ID+graph.Rights[j].Operation < graph.Rights[i].Kind+graph.Rights[i].ID+graph.Rights[i].Operation {
-				graph.Rights[i], graph.Rights[j] = graph.Rights[j], graph.Rights[i]
-			}
-		}
-	}
+	sortRights(graph.Rights)
 	encoded, err := json.Marshal(graph)
 	if err != nil || len(encoded) > 1<<20 {
 		return frozenGraph{}, ErrUnsupported

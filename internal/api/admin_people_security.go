@@ -1,13 +1,16 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // WithJournal retains the router's configured transactional audit writer.
@@ -135,6 +138,12 @@ func (h *AdminUsersHandler) mutateSecurity(w http.ResponseWriter, r *http.Reques
 			}
 		}
 	}
+	if err == nil && operation != "unlock" {
+		// Durable, session-independent marker in the same transaction: a
+		// Guest-published run accepted earlier stops at its next step even
+		// when the user had already logged out and no session row changed.
+		err = markAccessRevokedTx(r.Context(), tx, target)
+	}
 	if errors.Is(err, sessions.ErrNotFound) {
 		replyError(w, 404, "session not found")
 		return
@@ -227,4 +236,17 @@ func readAdminSessionRevocations(r *http.Request, tx *sql.Tx, target string, ids
 		values = append(values, row)
 	}
 	return values, nil
+}
+
+// markAccessRevokedTx records an administrator revocation of a user's access.
+// Every admin session-revocation path writes it in its own transaction.
+func markAccessRevokedTx(ctx context.Context, tx *sql.Tx, user string) error {
+	result, err := tx.ExecContext(ctx, `UPDATE users SET access_revoked_at=? WHERE id=?`, tsformat.Format(time.Now()), user)
+	if err != nil {
+		return err
+	}
+	if n, err := result.RowsAffected(); err != nil || n != 1 {
+		return errors.Join(err, errors.New("access revocation marker not written"))
+	}
+	return nil
 }
