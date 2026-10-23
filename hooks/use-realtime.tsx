@@ -176,6 +176,7 @@ export type RealtimeEventType =
   // Broadcast on `page:{pageId}` with `{page_id, rev, generation, kind,
   // cells}` and NO cell content: an open editor reads the revision through
   // the commits feed under its own current access.
+  | "mooring.committed"
   | "workbook.committed"
   // Feed-relevant journal rows forwarded by the journal→WS bridge
   // (internal/server/journal_ws_bridge.go), carrying the same serialized shape
@@ -327,6 +328,7 @@ export const VALID_REALTIME_TYPES: Set<string> = new Set([
   "page.folder.updated",
   "page.action.dispatched",
   // Live workbook push on `page:{pageId}`; revision numbers only.
+  "mooring.committed",
   "workbook.committed",
   // Journal entries forwarded by the journal→WS bridge on the opt-in
   // `journal:{workspaceId}` channel. Allowlisted so a future consumer's

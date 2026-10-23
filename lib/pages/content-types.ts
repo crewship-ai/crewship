@@ -27,6 +27,7 @@ export interface ContentFacts {
   board_format?: string
   has_artifact?: boolean
   has_workbook?: boolean
+  has_mooring?: boolean
   artifact_profile?: string
   artifact_version?: number
   has_project?: boolean
@@ -53,7 +54,7 @@ function reference(type_id: string, schema_version: number): ContentReference {
 }
 export function deriveContentTypes(facts: ContentFacts): ContentDerivation {
   const result: ContentDerivation = { content_descriptor: reference("panels", 1), can_initialize_content: false }
-  const specialized = [facts.has_slides, facts.has_document, facts.has_board, facts.has_artifact, facts.has_workbook].filter(Boolean).length
+  const specialized = [facts.has_slides, facts.has_document, facts.has_board, facts.has_artifact, facts.has_workbook, facts.has_mooring].filter(Boolean).length
   if (specialized > 1 || (specialized > 0 && (facts.has_panels || facts.has_project || facts.has_application))) {
     result.content_descriptor = { type_id: "conflicting", schema_version: 0, supported: false, reason: "conflicting-storage" }
     return result
@@ -66,7 +67,8 @@ export function deriveContentTypes(facts: ContentFacts): ContentDerivation {
   } else if (facts.has_artifact) {
     result.content_descriptor = reference("html", facts.artifact_version ?? 0)
     if (facts.artifact_profile !== "static-html-v1") Object.assign(result.content_descriptor, { supported: false, reason: "unsupported-profile" })
-  } else if (facts.has_workbook) result.content_descriptor = reference("gridcraft-workbook", 1)
+  } else if (facts.has_mooring) result.content_descriptor = reference("mooring-app", 1)
+  else if (facts.has_workbook) result.content_descriptor = reference("gridcraft-workbook", 1)
   else {
     if (facts.has_project || facts.has_application) result.application_descriptor = reference("application", 1)
     result.can_initialize_content = Boolean(facts.human_owned && !facts.has_panels && !facts.has_project && !facts.has_application)
