@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -170,6 +171,13 @@ func TestAcceptance_IssueList_QuickViews(t *testing.T) {
 	// awaits an answer on ENG-1; ENG-2 blocks ENG-4... which is DONE, so use ENG-3.
 	mustExec(`UPDATE missions SET owner_user_id = 'ic-owner' WHERE id IN ('ic-issue-a','ic-issue-c')`)
 	mustExec(`UPDATE missions SET status = 'REVIEW' WHERE id = 'ic-issue-c'`)
+	// Reproduce the clock-boundary order explicitly: newer ENG-3 precedes
+	// ENG-1. Quick-view assertions below concern membership, not list ordering.
+	mustExec(`UPDATE missions SET created_at = CASE id
+        WHEN 'ic-issue-a' THEN '2026-01-01 00:00:00'
+        WHEN 'ic-issue-c' THEN '2026-01-01 00:00:01' END
+        WHERE id IN ('ic-issue-a','ic-issue-c')`)
+
 	mustExec(`INSERT INTO issue_agent_sessions (id, workspace_id, mission_id, agent_id, state)
 		VALUES ('ic-s1', ?, 'ic-issue-a', 'ic-lead', 'awaiting_input')`, issueCountsWorkspaceID)
 	mustExec(`INSERT INTO mission_relations (id, source_id, target_id, relation_type) VALUES ('ic-r1', 'ic-issue-b', 'ic-issue-c', 'blocks')`)
@@ -198,6 +206,9 @@ func TestAcceptance_IssueList_QuickViews(t *testing.T) {
 		for _, r := range rows {
 			got = append(got, r.Identifier)
 		}
+		// The server orders newest first; these assertions verify the exact
+		// filter membership, including duplicates, independently of that order.
+		sort.Strings(got)
 		if strings.Join(got, ",") != strings.Join(tc.want, ",") {
 			t.Errorf("issue list %v = %v, want %v", tc.args, got, tc.want)
 		}

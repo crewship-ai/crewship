@@ -199,6 +199,16 @@ func (r *Router) resealAudit(w http.ResponseWriter, request *http.Request) {
 			r.replyResealFailure(w, err)
 			return
 		}
+		// Instance admins see every reseal in the instance trail too. Like an
+		// incident record, it falls back unchained if that chain's tail is broken.
+		raw, err := json.Marshal(map[string]any{"checkpoint_id": id, "old_tail_seq": oldSeq, "historical_status": historical, "reason": checkpoint.Reason})
+		if err == nil {
+			err = appendInstanceAuditTx(withSecurityAuditFallback(request.Context()), tx, journal.InstanceAuditFields{ID: generateCUID(), UserID: sql.NullString{String: checkpoint.ActorID, Valid: true}, Action: "audit.workspace_resealed", EntityType: "audit_chain", EntityID: sql.NullString{String: id, Valid: true}, TargetWorkspaceID: sql.NullString{String: input.WorkspaceID, Valid: true}, Metadata: sql.NullString{String: string(raw), Valid: true}, CreatedAt: tsformat.Format(now)})
+		}
+		if err != nil {
+			r.replyResealFailure(w, err)
+			return
+		}
 	}
 	prepared, err := auditResealNativeRow(request.Context(), tx, table, id)
 	if err != nil {
@@ -263,6 +273,7 @@ func (r *Router) resealAudit(w http.ResponseWriter, request *http.Request) {
 	if notify != nil {
 		notify()
 	}
+	raiseAuditChainIncident(request.Context(), auditChainIncident{Kind: "reseal", Scope: input.Scope, WorkspaceID: input.WorkspaceID, Seq: oldSeq, CheckpointID: id})
 	writeJSON(w, 200, map[string]any{"scope": input.Scope, "workspace_id": input.WorkspaceID, "checkpoint_id": id, "tail_seq": oldSeq + 1, "tail_hash": hash, "continuation_verified": true, "historical_status": historical})
 }
 

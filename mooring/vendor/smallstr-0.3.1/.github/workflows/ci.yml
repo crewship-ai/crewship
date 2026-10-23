@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  pull_request:
+    paths:
+      - '**.rs'
+      - '**.toml'
+      - '.github/workflows/ci.yml'
+  push:
+    branches: [master]
+    paths:
+      - '**.rs'
+      - '**.toml'
+      - '.github/workflows/ci.yml'
+
+jobs:
+  Test:
+    strategy:
+      fail-fast: false
+
+      matrix:
+        rust: [stable, nightly]
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v1
+    - uses: hecrj/setup-rust-action@v1
+      with:
+        rust-version: ${{ matrix.platform.rust }}
+
+    - name: Build
+      run: cargo build --verbose
+
+    - name: Test
+      run: cargo test --verbose
+
+    - name: Build with std
+      run: cargo build --verbose --features std,ffi
+
+    - name: Test with std
+      run: cargo build --verbose --features std,ffi
+
+    - name: Build with serde/no_std
+      run: cargo build --verbose --features serde
+
+    - name: Test with serde/no_std
+      run: cargo test --verbose --features serde
+
+    - name: Build with serde/std
+      run: cargo build --verbose --features serde,std
+
+    - name: Test with serde/std
+      run: cargo test --verbose --features serde,std
+
+    - name: Build with union feature
+      if: matrix.platform.rust == 'nightly'
+      run: cargo build --verbose --features union
+
+    - name: Test with with union feature
+      if: matrix.platform.rust == 'nightly'
+      run: cargo test --verbose --features union
+
+    env:
+      RUST_BACKTRACE: 1
+      RUST_INCREMENTAL: 0
+      RUSTFLAGS: "-C debuginfo=0"

@@ -135,6 +135,21 @@ func TestFrontendStagePreservesTypecheckAndBuildInputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A tracked input may be covered while another COPY names a directory that
+	// does not exist in this release. Docker rejects that COPY in a fresh build;
+	// ignored or untracked local files must not hide the missing source.
+	for _, source := range sources {
+		found := false
+		for _, file := range strings.Split(string(output), "\x00") {
+			if file != "" && copiedBy([]string{source}, file) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("frontend COPY source %s has no tracked input in this release", source)
+		}
+	}
 	jsonImports := regexp.MustCompile(`@/([^"'\s]+\.json)`)
 	relativeImports := regexp.MustCompile(`(?:from\s+|import\s*\(\s*)["'](\.{1,2}/[^"'\s]+\.(?:mjs|js|json))["']`)
 	for _, file := range strings.Split(string(output), "\x00") {

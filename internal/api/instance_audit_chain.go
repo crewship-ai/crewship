@@ -76,7 +76,11 @@ func (p instanceAuditProof) integrityWithKeys(keys *journal.SigningKeys, f journ
 func appendInstanceAuditTx(ctx context.Context, tx *sql.Tx, f journal.InstanceAuditFields) error {
 	err := appendInstanceAuditTxMode(ctx, tx, f, false)
 	var tail *instanceAuditTailError
-	if errors.As(err, &tail) && securityAuditFallback(ctx) {
+	if !errors.As(err, &tail) {
+		return err
+	}
+	raiseAuditChainIncident(ctx, auditChainIncident{Kind: "chain_break", Scope: "instance", Seq: tail.seq, Reason: tail.Error()})
+	if securityAuditFallback(ctx) {
 		return appendInstanceAuditFallbackTx(ctx, tx, f)
 	}
 	return err
@@ -84,7 +88,10 @@ func appendInstanceAuditTx(ctx context.Context, tx *sql.Tx, f journal.InstanceAu
 
 // instanceAuditTailError is a refusal before anything was written, because
 // the chain tail does not authenticate. Only this refusal may fall back.
-type instanceAuditTailError struct{ cause error }
+type instanceAuditTailError struct {
+	cause error
+	seq   int64
+}
 
 func (e *instanceAuditTailError) Error() string {
 	return "instance audit chain tail: " + e.cause.Error()
@@ -146,14 +153,14 @@ func appendInstanceAuditTxMode(ctx context.Context, tx *sql.Tx, f journal.Instan
 		if !checkpoint {
 			integrity := proof.integrityWithKeys(keys, tail)
 			if integrity == "key_unavailable" {
-				return &instanceAuditTailError{journal.ErrSigningKeyUnavailable}
+				return &instanceAuditTailError{journal.ErrSigningKeyUnavailable, proof.seq.Int64}
 			}
 			if integrity != "entry_verified" {
-				return &instanceAuditTailError{journal.ErrChainIntegrity}
+				return &instanceAuditTailError{journal.ErrChainIntegrity, proof.seq.Int64}
 			}
 		}
 		if proof.seq.Int64 == math.MaxInt64 {
-			return &instanceAuditTailError{journal.ErrChainIntegrity}
+			return &instanceAuditTailError{journal.ErrChainIntegrity, proof.seq.Int64}
 		}
 		seq = proof.seq.Int64 + 1
 		prev = proof.hash.String
