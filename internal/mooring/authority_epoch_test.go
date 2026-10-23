@@ -39,8 +39,8 @@ func TestAuthorityEpochCanonicalMutationsPreserveIssuedEvidence(t *testing.T) {
 	exec(`INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('m','w','u','MEMBER')`)
 	exec(`INSERT INTO workspaces(id,name,slug) VALUES('other','Other','other')`)
 	exec(`INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('m-other','other','u','MEMBER')`)
-	exec(`INSERT INTO user_sessions(id,user_id,expires_at) VALUES('session','u','2099-01-01T00:00:00Z')`)
-	exec(`INSERT INTO cli_tokens(id,user_id,name,token_hash) VALUES('token','u','Test','test-only-hash')`)
+	exec(`INSERT INTO user_sessions(id,user_id,expires_at,created_at) VALUES('session','u','2099-01-01T00:00:00Z','2026-01-02T00:00:00Z')`)
+	exec(`INSERT INTO cli_tokens(id,user_id,name,token_hash,created_at) VALUES('token','u','Test','test-only-hash','2026-01-02T00:00:00Z')`)
 	exec(`INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('p','user','u','write','u')`)
 	for _, tc := range []struct {
 		name, sql string
@@ -50,9 +50,13 @@ func TestAuthorityEpochCanonicalMutationsPreserveIssuedEvidence(t *testing.T) {
 		{"grant readdition", `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('p','user','u','write','u')`, false},
 		{"session revoke", `UPDATE user_sessions SET revoked_at='2026-10-23T00:00:00Z' WHERE id='session'`, true},
 		{"session restore", `UPDATE user_sessions SET revoked_at=NULL WHERE id='session'`, true},
+		{"session creation identity", `UPDATE user_sessions SET created_at='2026-01-01T00:00:00Z' WHERE id='session'`, true},
+		{"session creation restoration", `UPDATE user_sessions SET created_at='2026-01-02T00:00:00Z' WHERE id='session'`, true},
 		{"session horizon", `UPDATE user_sessions SET expires_at='2098-01-01T00:00:00Z' WHERE id='session'`, true},
 		{"token revoke", `UPDATE cli_tokens SET revoked_at='2026-10-23T00:00:00Z' WHERE id='token'`, true},
 		{"token restore", `UPDATE cli_tokens SET revoked_at=NULL WHERE id='token'`, true},
+		{"token creation identity", `UPDATE cli_tokens SET created_at='2026-01-01T00:00:00Z' WHERE id='token'`, true},
+		{"token creation restoration", `UPDATE cli_tokens SET created_at='2026-01-02T00:00:00Z' WHERE id='token'`, true},
 		{"token identity", `UPDATE cli_tokens SET token_hash='replacement-test-only-hash' WHERE id='token'`, true},
 		{"user revoke with old counter", `UPDATE users SET access_revoked_at='2026-10-23T00:00:00Z',authority_revision=authority_revision WHERE id='u'`, true},
 		{"user restore", `UPDATE users SET access_revoked_at=NULL WHERE id='u'`, true},
@@ -150,7 +154,7 @@ func TestAuthorityEpochUserExhaustionRollsBackCredentialMutation(t *testing.T) {
 	s, db, _, owner := deliveryFixture(t)
 	for _, q := range []string{
 		`INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('m','w','u','MEMBER')`,
-		`INSERT INTO user_sessions(id,user_id,expires_at) VALUES('session','u','2099-01-01T00:00:00Z')`,
+		`INSERT INTO user_sessions(id,user_id,expires_at,created_at) VALUES('session','u','2099-01-01T00:00:00Z','2026-01-02T00:00:00Z')`,
 		`UPDATE users SET authority_revision=9223372036854775807 WHERE id='u'`,
 	} {
 		if _, err := db.Exec(q); err != nil {

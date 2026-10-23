@@ -253,8 +253,8 @@ BEGIN
  UPDATE users SET authority_revision=authority_revision+1 WHERE id=OLD.user_id;
 END;
 
-CREATE TRIGGER mooring_epoch_user_sessions_update_old BEFORE UPDATE OF id,user_id,expires_at,revoked_at ON user_sessions
-WHEN OLD.id IS NOT NEW.id OR OLD.user_id IS NOT NEW.user_id OR OLD.expires_at IS NOT NEW.expires_at OR OLD.revoked_at IS NOT NEW.revoked_at
+CREATE TRIGGER mooring_epoch_user_sessions_update_old BEFORE UPDATE OF id,user_id,created_at,expires_at,revoked_at ON user_sessions
+WHEN OLD.id IS NOT NEW.id OR OLD.user_id IS NOT NEW.user_id OR OLD.created_at IS NOT NEW.created_at OR OLD.expires_at IS NOT NEW.expires_at OR OLD.revoked_at IS NOT NEW.revoked_at
 BEGIN
  UPDATE users SET authority_revision=authority_revision+1 WHERE id=OLD.user_id;
 END;
@@ -270,8 +270,8 @@ BEGIN
  UPDATE users SET authority_revision=authority_revision+1 WHERE id=OLD.user_id;
 END;
 
-CREATE TRIGGER mooring_epoch_cli_tokens_update_old BEFORE UPDATE OF id,user_id,token_hash,tier,expires_at,revoked_at,scopes ON cli_tokens
-WHEN OLD.id IS NOT NEW.id OR OLD.user_id IS NOT NEW.user_id OR OLD.token_hash IS NOT NEW.token_hash OR OLD.tier IS NOT NEW.tier OR OLD.expires_at IS NOT NEW.expires_at OR OLD.revoked_at IS NOT NEW.revoked_at OR OLD.scopes IS NOT NEW.scopes
+CREATE TRIGGER mooring_epoch_cli_tokens_update_old BEFORE UPDATE OF id,user_id,created_at,token_hash,tier,expires_at,revoked_at,scopes ON cli_tokens
+WHEN OLD.id IS NOT NEW.id OR OLD.user_id IS NOT NEW.user_id OR OLD.created_at IS NOT NEW.created_at OR OLD.token_hash IS NOT NEW.token_hash OR OLD.tier IS NOT NEW.tier OR OLD.expires_at IS NOT NEW.expires_at OR OLD.revoked_at IS NOT NEW.revoked_at OR OLD.scopes IS NOT NEW.scopes
 BEGIN
  UPDATE users SET authority_revision=authority_revision+1 WHERE id=OLD.user_id;
 END;
