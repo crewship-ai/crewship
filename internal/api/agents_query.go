@@ -350,6 +350,9 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if agentDeleteBeforeTx != nil {
+		agentDeleteBeforeTx()
+	}
 	// Deleting removes the agent from its crew with every privilege it held:
 	// the soft delete and its chained audit (with those privileges, MCP
 	// configuration redacted) commit together.
@@ -359,6 +362,17 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = tx.Rollback() }()
+	// The gate above read outside the writer lock. Re-decide it on the
+	// transaction, against the caller's membership and the agent's crew and
+	// creator as they stand now, so a concurrent demotion or move cannot let
+	// a delete through on a stale answer.
+	if ok, err := agentDeleteAllowedIn(r.Context(), tx, callerUserID, role, workspaceID, agentID); err != nil {
+		replyInternalError(w, h.logger, "re-check agent delete authority", err)
+		return
+	} else if !ok {
+		replyForbidden(w, h.logger, callerUserID, role, "agent.delete", "agent:"+agentID)
+		return
+	}
 	previous, err := agentPrivileges(r.Context(), tx, workspaceID, agentID)
 	if errors.Is(err, sql.ErrNoRows) {
 		replyError(w, http.StatusNotFound, "Agent not found")
@@ -496,4 +510,31 @@ func (h *AgentHandler) stopDeletedAgentRuns(ctx context.Context, agentID string)
 		out.Error = "not every run could be confirmed stopped; retrying in the background"
 	}
 	return out
+}
+
+// agentDeleteBeforeTx lets a test interleave a concurrent writer between the
+// request's first authorization read and its writer transaction.
+var agentDeleteBeforeTx func()
+
+// agentDeleteAllowedIn re-runs the per-agent edit gate on tx. The role is the
+// lower of the request's role (which may already be capped, e.g. by a token)
+// and the caller's current workspace membership.
+func agentDeleteAllowedIn(ctx context.Context, tx *sql.Tx, userID, requestRole, workspaceID, agentID string) (bool, error) {
+	if userID == "" {
+		return false, nil
+	}
+	var member string
+	err := tx.QueryRowContext(ctx, `SELECT m.role FROM workspace_members m JOIN users u ON u.id = m.user_id
+		WHERE m.user_id = ? AND m.workspace_id = ? AND u.suspended_at IS NULL`, userID, workspaceID).Scan(&member)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	role := requestRole
+	if roleRank[member] < roleRank[role] {
+		role = member
+	}
+	return canEditAgentIn(ctx, tx, userID, role, agentID)
 }
