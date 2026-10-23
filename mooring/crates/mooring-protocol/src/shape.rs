@@ -1,7 +1,10 @@
 //! Validator for the exact bundled schema vocabulary, not arbitrary schemas.
 //! A valid shape carries no authenticated identity or permission.
 use serde_json::Value;
-use std::{collections::BTreeSet, sync::LazyLock};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::LazyLock,
+};
 
 const COUNTER_PATTERN: &str = "^(0|[1-9][0-9]{0,18}|1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4]|18446744073709551615)$";
 
@@ -12,6 +15,17 @@ static SCHEMA: LazyLock<Value> = LazyLock::new(|| {
     assert!(
         local_references(&schema, &schema["$defs"]),
         "invalid bundled reference"
+    );
+    assert!(
+        expanded_depth(
+            &schema,
+            &schema["$defs"],
+            &mut BTreeSet::new(),
+            &mut BTreeMap::new(),
+            128
+        )
+        .is_some(),
+        "cyclic or over-deep bundled schema graph"
     );
     schema
 });
@@ -353,6 +367,71 @@ fn local_references(value: &Value, definitions: &Value) -> bool {
     }
 }
 
+// Prove every schema path (including unused definitions/negations) fits the
+// evaluator bound before matching. Reaching a limit under `not` must never
+// become a successful negation. No externally supplied schemas are loaded.
+fn expanded_depth<'a>(
+    schema: &'a Value,
+    definitions: &'a Value,
+    active: &mut BTreeSet<&'a str>,
+    memo: &mut BTreeMap<&'a str, usize>,
+    remaining: usize,
+) -> Option<usize> {
+    if remaining == 0 {
+        return None;
+    }
+    if schema.is_boolean() {
+        return Some(1);
+    }
+    let object = schema.as_object()?;
+    let mut deepest = 0;
+    if let Some(reference) = object.get("$ref") {
+        let reference = reference.as_str()?;
+        if active.contains(reference) {
+            return None;
+        }
+        let depth = if let Some(depth) = memo.get(reference) {
+            *depth
+        } else {
+            let target = definitions.get(reference.strip_prefix("#/$defs/")?)?;
+            active.insert(reference);
+            let depth = expanded_depth(target, definitions, active, memo, remaining - 1);
+            active.remove(reference);
+            let depth = depth?;
+            memo.insert(reference, depth);
+            depth
+        };
+        deepest = deepest.max(depth);
+    }
+    let mut children = Vec::new();
+    for key in ["$defs", "properties"] {
+        if let Some(group) = object.get(key) {
+            children.extend(group.as_object()?.values());
+        }
+    }
+    for key in ["items", "if", "then", "else", "not", "additionalProperties"] {
+        if let Some(child) = object.get(key) {
+            children.push(child);
+        }
+    }
+    for key in ["allOf", "anyOf", "oneOf"] {
+        if let Some(group) = object.get(key) {
+            children.extend(group.as_array()?);
+        }
+    }
+    for child in children {
+        deepest = deepest.max(expanded_depth(
+            child,
+            definitions,
+            active,
+            memo,
+            remaining - 1,
+        )?);
+    }
+    let depth = deepest.checked_add(1)?;
+    (depth <= remaining).then_some(depth)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -393,5 +472,43 @@ mod tests {
             &serde_json::json!({"not":{"$ref":"https://external/schema"}}),
             &SCHEMA["$defs"]
         ));
+    }
+    #[test]
+    fn reference_cycles_under_negation_and_unused_definitions_fail_before_matching() {
+        for schema in [
+            serde_json::json!({"$defs":{"a":{"not":{"$ref":"#/$defs/a"}}}}),
+            serde_json::json!({"$defs":{"a":{"$ref":"#/$defs/b"},"b":{"not":{"$ref":"#/$defs/a"}}}}),
+        ] {
+            assert!(vocabulary(&schema));
+            assert!(local_references(&schema, &schema["$defs"]));
+            assert!(expanded_depth(
+                &schema,
+                &schema["$defs"],
+                &mut BTreeSet::new(),
+                &mut BTreeMap::new(),
+                128
+            )
+            .is_none());
+        }
+        assert!(expanded_depth(
+            &SCHEMA,
+            &SCHEMA["$defs"],
+            &mut BTreeSet::new(),
+            &mut BTreeMap::new(),
+            128
+        )
+        .is_some());
+        let mut schema = serde_json::json!({});
+        for _ in 0..129 {
+            schema = serde_json::json!({"not":schema});
+        }
+        assert!(expanded_depth(
+            &schema,
+            &Value::Null,
+            &mut BTreeSet::new(),
+            &mut BTreeMap::new(),
+            128
+        )
+        .is_none());
     }
 }
