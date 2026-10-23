@@ -2,6 +2,7 @@ package backup
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -93,6 +94,25 @@ func TestMooringBackupPreservesConfirmedStateWithoutRunMandates(t *testing.T) {
 	dump, e := DumpWorkspace(t.Context(), source, workspace)
 	if e != nil {
 		t.Fatal(e)
+	}
+	for name, incoming := range map[string]*DBDump{
+		"scope anchor":       {WorkspaceID: workspace},
+		"workspace row":      {Tables: map[string][]map[string]any{"workspaces": {{"id": workspace}}}},
+		"partial Page":       {Tables: map[string][]map[string]any{"pages": {{"id": "mooring-portable"}}}},
+		"scoped partial row": {Tables: map[string][]map[string]any{"page_grants": {{"workspace_id": workspace}}}},
+	} {
+		hookCalled := false
+		_, err := RestoreDumpTxHooks(t.Context(), source, incoming, &RestoreDumpHooks{PreInsert: func(context.Context, *sql.Tx) error {
+			hookCalled = true
+			return nil
+		}})
+		if !errors.Is(err, ErrMooringDeliveryTargetReplacement) || hookCalled {
+			t.Fatal("restore admission did not preserve delivery before hooks", name, err, hookCalled)
+		}
+	}
+	var issued int
+	if e := source.QueryRow(`SELECT COUNT(*) FROM mooring_delivery_gates WHERE id='source-live-gate'`).Scan(&issued); e != nil || issued != 1 {
+		t.Fatal("refused restores changed issued evidence", issued, e)
 	}
 	if len(dump.Tables["mooring_delivery_gates"]) != 0 || len(dump.Tables["mooring_delivery_barriers"]) != 0 || len(dump.Tables["mooring_documents"]) != 1 || len(dump.Tables["mooring_receipts"]) != 1 || len(dump.Tables["mooring_intents"]) != 0 || len(dump.Tables["mooring_session_owners"]) != 0 {
 		t.Fatalf("confirmed content omitted or live authority leaked: documents=%d receipts=%d intents=%d", len(dump.Tables["mooring_documents"]), len(dump.Tables["mooring_receipts"]), len(dump.Tables["mooring_intents"]))
