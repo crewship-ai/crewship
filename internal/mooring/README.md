@@ -27,3 +27,13 @@ qualified transport support exists. Drafts must remain intact on refusal.
 payload strings remain opaque. Version syntax validation does not negotiate
 support. Complete envelope schema, authentication, directions and scope checks
 remain separate prerequisites before dispatch. No route calls these helpers.
+
+`NewWireSchema` accepts a trusted public schema snapshot and audits the complete
+fixed Mooring schema vocabulary before construction: unknown keywords/patterns,
+remote/missing references and cycles fail closed even in unused branches or
+negations. The recursion bound is derived from the acyclic schema graph, not an
+unadvertised message work quota. `ValidateE3` returns canonical bytes after the
+bounded JSON and envelope shape pass. Shared semantic-negative fixtures remain
+shape-valid deliberately; authentication, direction allowlists, authority, cross-
+field equality, immutable membership/fingerprints and app effects still require
+separate enforcement. No runtime route uses this interpreter.
