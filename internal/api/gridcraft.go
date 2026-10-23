@@ -220,7 +220,9 @@ func (h *gridcraftHTTP) humanKey(r *http.Request, write bool) (appengine.Key, er
 	if strings.HasPrefix(ref, "@") {
 		column, ref = "id", strings.TrimPrefix(ref, "@")
 	}
-	tx, err := h.pages.db.BeginTx(r.Context(), nil)
+	// A read transaction: resolving the key never writes, so it must not
+	// take the database-wide write lock.
+	tx, err := h.pages.db.BeginTx(r.Context(), &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return k, err
 	}
