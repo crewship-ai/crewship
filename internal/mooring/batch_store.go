@@ -18,14 +18,7 @@ type BatchDenied struct{ Code string }
 func (d *BatchDenied) Error() string { return d.Code }
 func (s *BatchStore) authorize(ctx context.Context, tx *sql.Tx, k SessionKey, intent string, op *BatchOperation, task, participant string) error {
 	if op != nil {
-		raw, err := json.Marshal(op)
-		if err != nil {
-			return err
-		}
-		var isolated BatchOperation
-		if err = json.Unmarshal(raw, &isolated); err != nil {
-			return err
-		}
+		isolated := cloneBatchOperation(*op)
 		op = &isolated
 	}
 	return s.config.Authority(ctx, tx, BatchAccess{intent, k, op, task, participant})
