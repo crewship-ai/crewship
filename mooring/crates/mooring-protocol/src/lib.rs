@@ -2,6 +2,7 @@
 //! Not an authenticated endpoint; application and authority checks remain explicit.
 use serde::{Deserialize, Serialize};
 pub mod canonical;
+pub mod boundary;
 mod generated;
 mod shape;
 pub mod wire;
