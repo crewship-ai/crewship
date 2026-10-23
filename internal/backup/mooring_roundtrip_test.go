@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"strings"
@@ -47,15 +48,18 @@ func TestMooringBackupPreservesConfirmedStateWithoutRunMandates(t *testing.T) {
 	if _, e = source.Exec(`INSERT INTO mooring_intents(page_id,mandate_id,run_id,human_user_id,page_version,policy_version,generation,base_rev,command,fingerprint) VALUES('mooring-portable','source-live-mandate','source-live-run','u_cov_mooring-roundtrip',1,1,1,2,'set','retained')`); e != nil {
 		t.Fatal(e)
 	}
+	if _, e = source.Exec(`INSERT INTO mooring_session_owners(page_id,workspace_id,application_id,owner_id,generation,token_hash,boot_id,expires_ns) VALUES('mooring-portable',?,'hello','source-live-owner',7,?,'source-boot',9223372036854775807)`, workspace, bytes.Repeat([]byte{1}, 32)); e != nil {
+		t.Fatal(e)
+	}
 	dump, e := DumpWorkspace(t.Context(), source, workspace)
 	if e != nil {
 		t.Fatal(e)
 	}
-	if len(dump.Tables["mooring_documents"]) != 1 || len(dump.Tables["mooring_receipts"]) != 1 || len(dump.Tables["mooring_intents"]) != 0 {
+	if len(dump.Tables["mooring_documents"]) != 1 || len(dump.Tables["mooring_receipts"]) != 1 || len(dump.Tables["mooring_intents"]) != 0 || len(dump.Tables["mooring_session_owners"]) != 0 {
 		t.Fatalf("confirmed content omitted or live authority leaked: documents=%d receipts=%d intents=%d", len(dump.Tables["mooring_documents"]), len(dump.Tables["mooring_receipts"]), len(dump.Tables["mooring_intents"]))
 	}
 	raw, e := json.Marshal(dump)
-	if e != nil || strings.Contains(string(raw), "must not leak") || strings.Contains(string(raw), "source-live-run") {
+	if e != nil || strings.Contains(string(raw), "must not leak") || strings.Contains(string(raw), "source-live-run") || strings.Contains(string(raw), "source-live-owner") {
 		t.Fatal("backup crossed workspace or authority boundary", e)
 	}
 	destination := openMigratedDBCov(t)
@@ -76,6 +80,9 @@ func TestMooringBackupPreservesConfirmedStateWithoutRunMandates(t *testing.T) {
 	}
 	if e = destination.QueryRow(`SELECT COUNT(*) FROM mooring_intents`).Scan(&count); e != nil || count != 0 {
 		t.Fatal("live mandate restored", count, e)
+	}
+	if e = destination.QueryRow(`SELECT count(*) FROM mooring_session_owners`).Scan(&count); e != nil || count != 0 {
+		t.Fatalf("runtime owner restored: %d %v", count, e)
 	}
 	// Fresh authorization is still required by the host. Restored durable storage
 	// keeps exact idempotence evidence rather than reapplying a confirmed command.
