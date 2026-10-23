@@ -1298,6 +1298,10 @@ var startCmd = &cobra.Command{
 				// internal/api/audit_retention.go.
 				go api.StartAuditRetentionSweeper(ctx, deps.DB, logger, 24*time.Hour)
 
+				if apiRouter := srv.APIRouter(); apiRouter != nil {
+					go apiRouter.StartAuditVerification(ctx, time.Hour)
+				}
+
 				// approvals_queue retention (#2233) — same daily shape, for
 				// terminal HITL approval rows that were kept forever before
 				// this. Defaults to 90 days; see

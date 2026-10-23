@@ -238,6 +238,7 @@ type Router struct {
 	ratelimitStore *ratelimitcfg.Store // runtime-tunable limiter values; nil → shipped defaults
 	cappedMux      http.Handler        // body-capped mux, NOT rate-limited — the #1333 authenticated-CLI exemption routes here directly
 	cliExemptNeg   *cliExemptNegCache  // bounded negative cache of failed exemption lookups — stops spoofed CLI-prefix bearers from forcing an unthrottled DB lookup per request
+	auditAlerts    *auditChainAlerter  // audit chain break/reseal alerts (audit_chain_alerts.go)
 	journal        journal.Emitter     // Crew Journal emitter; nil → emits become no-ops so dev builds without the server-level wiring still work
 	consolidator   *consolidate.Consolidator
 	// outputBasePath is the host-side root that the container
@@ -871,6 +872,14 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	for _, opt := range opts {
 		opt(r)
 	}
+	r.auditAlerts = &auditChainAlerter{db: r.db, logger: r.logger}
+	if writer, ok := r.journal.(interface {
+		SetChainBreakObserver(func(context.Context, string, error))
+	}); ok {
+		writer.SetChainBreakObserver(func(ctx context.Context, workspaceID string, err error) {
+			r.auditAlerts.raise(ctx, auditChainIncident{Kind: "chain_break", Scope: "workspace", WorkspaceID: workspaceID, Reason: err.Error()})
+		})
+	}
 
 	// Now that options have attached the hub and any extra revocation
 	// notifiers, wrap the sessions store so every successful Revoke /
@@ -1011,7 +1020,9 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		if err != nil {
 			keys = nil
 		}
-		req = req.WithContext(journal.WithSigningKeys(req.Context(), keys))
+		// The alerter rides the same copy: production always configures the
+		// writer, and one request copy keeps the mux's req.Pattern visible.
+		req = req.WithContext(withAuditChainAlerter(journal.WithSigningKeys(req.Context(), keys), r.auditAlerts))
 	}
 	// Order matters: SecurityHeaders runs outermost so headers go on every
 	// response (incl. 403s from the origin check); VersionHeader rides the
