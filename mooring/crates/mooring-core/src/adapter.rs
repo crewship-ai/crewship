@@ -41,6 +41,27 @@ pub trait PrepareAdapter {
     ) -> Result<Prepared<Self::Candidate>, Self::Error>;
 }
 
+/// Explicit opt-in to the separately negotiated causal-agent preparation
+/// contract. There is deliberately no default implementation forwarding to
+/// strict-current preparation or rewriting its immutable read observations.
+///
+/// Before calling, the dispatcher must bind the compact host attestations to
+/// the verified inherited channel, scope, input digest and exact atomic change.
+/// The implementation restores the complete app inventory and uses
+/// `causal::CausalContext` for ALL original read bindings, then checks each
+/// operation and advances its actual effects in immutable order. Host coverage
+/// attests complete durable history; same-atomic coverage remains checked here.
+/// Missing history, uncertain application state and malformed bindings abort
+/// nonterminally. This trait grants no human delta or provisional-target policy.
+pub trait CausalPrepareAdapter: PrepareAdapter {
+    fn prepare_atomic_causal(
+        &self,
+        authoritative_checkpoint: &[u8],
+        normalized: &AtomicChange,
+        context: &crate::causal::CausalPrepareContext,
+    ) -> Result<Prepared<Self::Candidate>, Self::Error>;
+}
+
 pub enum Prepared<C> {
     Candidate(C),
     /// Must be qualified against original immutable membership before a host
