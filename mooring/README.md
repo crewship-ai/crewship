@@ -74,3 +74,15 @@ from a caller-verified, host-authenticated and size-bounded authoritative
 snapshot and retains pending text as unsaved drafts.
 It does not infer Yjs dependencies, automatically replay intents, or implement
 the WordCraft adapter. UTF-16 offsets match browser Yjs indexing.
+
+`mooring-core::prepare::ConfirmedContext` qualifies the complete host target
+context against the application's restored checkpoint inventory before classifying
+read failures. It validates host prospective labels in immutable operation order;
+it never allocates revisions. Its working view first checks the original confirmed
+read set, then applies a complete validated effect set atomically using those
+labels. Malformed host context is nonterminal. An unknown read target is
+`invalid_request`, a retained tombstone is `target_deleted`, and a mismatched live
+counter is `precondition_failed`, attributed to the actual operation. This initial
+`agent_confirmed_current` capability rejects causal stale and provisional reads;
+the shared context fixtures qualify only this pure intersection, not host commits
+or the remaining broader collaboration modes.
