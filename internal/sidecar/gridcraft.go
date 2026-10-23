@@ -60,7 +60,7 @@ func gridcraftMCPCatalog() []memoryMCPToolDescriptor {
 		return map[string]any{"type": "object", "additionalProperties": false, "properties": props, "required": required}
 	}
 	command := object(map[string]any{"kind": map[string]any{"const": "cell.set"}, "sheet": text, "cell": text, "input": text}, []string{"kind", "sheet", "cell", "input"})
-	packet := object(map[string]any{"mutation_id": text, "mandate_id": text, "base_rev": integer, "generation": integer, "command": command}, []string{"mutation_id", "mandate_id", "base_rev", "generation", "command"})
+	packet := object(map[string]any{"mutation_id": text, "mandate_id": text, "base_rev": integer, "generation": integer, "command": command, "read_set": workbookReadSetMCPSchema()}, []string{"mutation_id", "mandate_id", "base_rev", "generation", "command"})
 	result := []memoryMCPToolDescriptor{}
 	for _, name := range []string{"workbook_read", "workbook_apply", "workbook_status", "workbook_commits"} {
 		props := map[string]any{"artifact_id": text, "mandate_id": text}

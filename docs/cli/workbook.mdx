@@ -441,21 +441,51 @@ details. Because a mandate is bound to its base revision, an agent that keeps
 getting `precondition_failed` for the same target should treat the mandate as
 no longer applicable and ask for a new one rather than retry indefinitely.
 
-An agent mandate keeps its original base revision, so an agent can still change
-its target after the owner edited other cells, but not after someone else
-changed that target. Mandate IDs starting with `human-` are reserved for human
-operations and rejected on admission.
+An agent mandate keeps its original base revision. To write after independent
+edits, the command must declare its inputs in `request.read_set`; without it,
+the whole base revision must still match. Mandate IDs starting with `human-`
+are reserved for human operations and rejected on admission.
+
+A read-set contains `cells` (`sheet`, `cell`, `rev`) and/or `ranges` (`sheet`,
+`start`, `end`, `rev`, `structure_rev`). `rev` is the document revision when the
+input was read. A read response also supplies `structure_rev`, the latest
+import revision. For example:
+
+```json
+{"cells":[{"sheet":"Sheet1","cell":"A1","rev":12}],"ranges":[{"sheet":"Sheet1","start":"C1","end":"C8","rev":12,"structure_rev":1}]}
+```
+
+The host checks every declared input, including edits by the same writer,
+independently of the write targets. A changed input or imported structure gives
+`409 precondition_failed` with a `reason` and requires reading again. An
+explicit empty object declares no data dependency, for example setting a
+constant. Unverifiable history fails closed. The pilot supports imports, cell
+writes and atomic multi-cell writes; row/column insertion is not supported.
+For a retry, retain the entire original request including its read-set and
+mutation ID; changing the read-set under that ID is a payload conflict.
+The `workbook_apply` and `mooring_command` MCP schemas expose the same optional
+`request.read_set`, bounded to 256 cells and 32 ranges. Application support and
+cross-field checks remain server-side; a generic application that does not
+support workbook read dependencies rejects them.
+The native GridCraft path of `mooring agent` carries the same read-set. Other
+pilot adapters reject a read-set whose semantics they do not implement.
 
 History stores a full snapshot for imports and every 50th revision, and the
 command and resulting snapshot hash of every revision, so any revision can be
 rebuilt from the nearest checkpoint with the pinned engine and verified. The
 history quota counts those snapshots and commands. When it is reached, the
-server drops history that no rebase can use: checkpoints and commands older than
-the newest checkpoint at least 256 revisions back. If the last 256 revisions do
-not fit either, the new revision becomes a checkpoint and all earlier commands
-are dropped; edits based on older revisions then get `snapshot_required`.
-Audit rows and receipts are kept. `429 history_quota_exceeded` remains only for
-a single revision whose snapshot and command alone exceed the quota.
+server rejects the write with `429 quota_exceeded`. The confirmed head, all
+previous checkpoints, commands, audit rows and receipts remain unchanged; an
+ordinary write never deletes history to make space. Retention requires an
+explicit operation.
+
+Removing an editor grant closes that participant's existing editor sessions in
+the same transaction. Regranting access requires a new session; old session IDs
+remain closed. An open editor receives a content-free `session_closed` control
+for that workbook, while unrelated workbook subscriptions remain active.
+Membership and ownership changes are also checked by the bounded workbook
+subscription sweep. Every queued protected socket frame checks current access
+again before delivery.
 
 ### Commits feed and live push
 

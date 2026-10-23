@@ -58,78 +58,65 @@ func TestRecordedCommandSizeIsBounded(t *testing.T) {
 	}
 }
 
-// Reaching the history quota is recoverable. History older than the newest
-// checkpoint at least MaxRebaseWindow revisions behind the head is not needed
-// for rebasing, so it is pruned and editing continues; the audit rows (writer,
-// receipt and result hash) remain.
-func TestHistoryQuotaPrunesBeyondRebaseWindow(t *testing.T) {
-	s, db, a, k := fixture(t)
-	e := &fakeEngine{}
-	imported(t, s, a, k, e)
-	input := strings.Repeat("x", 4000)
-	s.options.MaxHistoryBytes = 400 * 4100
-	const commits = 700
-	for i := 0; i < commits; i++ {
-		if _, err := s.Execute(t.Context(), k, bigEdit(i, input), a, e); err != nil {
-			t.Fatalf("commit %d: %v", i, err)
-		}
-	}
-	head := int64(commits + 1)
-	if n := historyBytes(t, s, k.PageID); n > s.options.MaxHistoryBytes {
-		t.Fatalf("history %d over quota", n)
-	}
-	var oldest, kept, audits int64
-	if err := db.QueryRow(`SELECT min(rev) FROM gridcraft_revisions WHERE page_id=?`, k.PageID).Scan(&oldest); err != nil {
-		t.Fatal(err)
-	}
-	if oldest <= 1 || oldest > head-MaxRebaseWindow || oldest%CheckpointInterval != 0 {
-		t.Fatalf("oldest kept checkpoint %d", oldest)
-	}
-	if err := db.QueryRow(`SELECT count(*) FROM gridcraft_audit WHERE page_id=? AND rev>? AND command IS NOT NULL`, k.PageID, oldest).Scan(&kept); err != nil || kept != head-oldest {
-		t.Fatalf("commands after the kept checkpoint %d %v", kept, err)
-	}
-	if err := db.QueryRow(`SELECT count(*) FROM gridcraft_audit WHERE page_id=? AND result_hash IS NOT NULL`, k.PageID).Scan(&audits); err != nil || audits != head {
-		t.Fatalf("audit rows %d %v", audits, err)
-	}
-	// The full rebase window is still served.
-	late := Request{MutationID: "s2:1", MandateID: "human-import", SessionID: "s2", BaseRev: head - MaxRebaseWindow, Generation: 1, Command: Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "Z9", Input: "1"}}
-	if r, err := s.Execute(t.Context(), k, late, a, e); err != nil || r.Rev != head+1 {
-		t.Fatalf("rebase within window after pruning: %+v %v", r, err)
+// A write may never pay for its own storage by deleting confirmed history.
+// Exercise both the former forced-checkpoint and old-rebase-window paths.
+func TestHistoryQuotaRejectsWriteAndPreservesEveryRevision(t *testing.T) {
+	for _, commits := range []int{20, 350} {
+		t.Run(fmt.Sprint(commits), func(t *testing.T) {
+			s, db, a, k := fixture(t)
+			e := mapEngine{}
+			initial := Request{MutationID: "import-1", MandateID: "human-import", Command: Command{Kind: "import", Snapshot: []byte(`{}`)}}
+			if _, err := s.Execute(t.Context(), k, initial, a, e); err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i < commits; i++ {
+				if _, err := s.Execute(t.Context(), k, bigEdit(i, strings.Repeat("x", 4000)), a, e); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before, err := s.Read(t.Context(), k, a)
+			if err != nil {
+				t.Fatal(err)
+			}
+			bytesBefore := historyBytes(t, s, k.PageID)
+			s.options.MaxHistoryBytes = bytesBefore
+			if _, err = s.Execute(t.Context(), k, bigEdit(commits, "quota-write"), a, e); !errors.Is(err, ErrQuota) {
+				t.Fatalf("full history must reject the write, got %v", err)
+			}
+			after, err := s.Read(t.Context(), k, a)
+			if err != nil || after.Rev != before.Rev || string(after.Snapshot) != string(before.Snapshot) {
+				t.Fatalf("head changed after rejected write: %+v %v", after, err)
+			}
+			if got := historyBytes(t, s, k.PageID); got != bytesBefore {
+				t.Fatalf("history changed from %d to %d", bytesBefore, got)
+			}
+			for rev := int64(1); rev <= before.Rev; rev++ {
+				replayRevision(t, db.DB, e, k, rev)
+			}
+			var audits, outbox int64
+			if err = db.QueryRow(`SELECT count(*) FROM gridcraft_audit WHERE page_id=?`, k.PageID).Scan(&audits); err != nil || audits != before.Rev {
+				t.Fatalf("audit changed: %d %v", audits, err)
+			}
+			if err = db.QueryRow(`SELECT count(*) FROM gridcraft_outbox WHERE page_id=?`, k.PageID).Scan(&outbox); err != nil || outbox != before.Rev {
+				t.Fatalf("outbox changed: %d %v", outbox, err)
+			}
+			// Refusal is not a receipt: retry can succeed when capacity is explicitly raised.
+			s.options.MaxHistoryBytes = bytesBefore + 10000
+			if receipt, err := s.Execute(t.Context(), k, bigEdit(commits, "quota-write"), a, e); err != nil || receipt.Rev != before.Rev+1 {
+				t.Fatalf("retry after raising quota: %+v %v", receipt, err)
+			}
+		})
 	}
 }
 
-// When even the rebase window does not fit the quota, the commit becomes a
-// checkpoint and all earlier history is pruned. Stale clients then reread
-// (snapshot_required) instead of the workbook refusing every further edit. A
-// base just before the forced checkpoint still rebases: the pruned command of
-// that base revision is not part of its window.
-func TestHistoryQuotaForcesCheckpointWhenWindowDoesNotFit(t *testing.T) {
+func TestCheckpointQuotaRejectsWriteWithoutPruning(t *testing.T) {
 	s, db, a, k := fixture(t)
 	e := &fakeEngine{}
 	imported(t, s, a, k, e)
-	input := strings.Repeat("x", 4000)
-	s.options.MaxHistoryBytes = 20 * 4100
-	const commits = 100
-	for i := 0; i < commits; i++ {
-		if _, err := s.Execute(t.Context(), k, bigEdit(i, input), a, e); err != nil {
-			t.Fatalf("commit %d: %v", i, err)
-		}
+	s.options.MaxRevisions = 1
+	request := Request{MutationID: "import-2", MandateID: "human-import", BaseRev: 1, Generation: 1, Command: Command{Kind: "import", Snapshot: []byte(`{"sheets":[{}]}`)}}
+	if _, err := s.Execute(t.Context(), k, request, a, e); !errors.Is(err, ErrQuota) {
+		t.Fatalf("checkpoint quota: %v", err)
 	}
-	head := int64(commits + 1)
-	if n := historyBytes(t, s, k.PageID); n > s.options.MaxHistoryBytes {
-		t.Fatalf("history %d over quota", n)
-	}
-	var forced int64
-	if err := db.QueryRow(`SELECT min(rev) FROM gridcraft_revisions WHERE page_id=?`, k.PageID).Scan(&forced); err != nil || forced <= 1 || forced%CheckpointInterval == 0 {
-		t.Fatalf("forced checkpoint %d %v", forced, err)
-	}
-	late := Request{MutationID: "s2:1", MandateID: "human-import", SessionID: "s2", BaseRev: forced - 2, Generation: 1, Command: Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "Z9", Input: "1"}}
-	var precondition *PreconditionError
-	if _, err := s.Execute(t.Context(), k, late, a, e); !errors.As(err, &precondition) || !precondition.SnapshotRequired || precondition.HeadRev != head {
-		t.Fatalf("stale edit across pruned history: %v", err)
-	}
-	late.MutationID, late.BaseRev = "s2:2", forced-1
-	if r, err := s.Execute(t.Context(), k, late, a, e); err != nil || r.Rev != head+1 {
-		t.Fatalf("rebase from the revision before the forced checkpoint: %+v %v", r, err)
-	}
+	replayRevision(t, db.DB, e, k, 1)
 }

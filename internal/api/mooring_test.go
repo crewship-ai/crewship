@@ -29,6 +29,9 @@ func TestMooringManifestCommandDurabilityAndAuthority(t *testing.T) {
 	base := "/api/v1/pages/generic-hello/mooring"
 	wantCode(t, f.do(f.boss, "POST", "/api/v1/mooring/documents?workspace_id=ws-old", body), 200, "create retry")
 	wantCode(t, f.do(f.wsAdmin, "GET", base+"?workspace_id=ws-old", ""), 404, "private content no implicit admin")
+
+	unsupportedReads := `{"mutation_id":"unsupported-read","base_rev":1,"generation":1,"read_set":{},"command":"set","arguments":{"text":"candidate"}}`
+	wantCode(t, f.do(f.boss, "POST", base+"/commands?workspace_id=ws-old", unsupportedReads), 400, "generic adapter must not ignore read-set semantics")
 	packet := `{"mutation_id":"one","base_rev":1,"generation":1,"command":"set","arguments":{"text":"Durable český text"}}`
 	for i := 0; i < 2; i++ {
 		w := f.do(f.boss, "POST", base+"/commands?workspace_id=ws-old", packet)

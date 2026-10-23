@@ -260,8 +260,16 @@ func (m *mooringHTTP) nativeAgent(w http.ResponseWriter, r *http.Request, packet
 			mooringError(w, mooring.ErrInvalid)
 			return
 		}
+		var reads *appengine.ReadSet
+		if len(req.ReadSet) != 0 {
+			reads = &appengine.ReadSet{}
+			if bytes.Equal(bytes.TrimSpace(req.ReadSet), []byte("null")) || appengine.DecodeStrict(req.ReadSet, reads) != nil {
+				mooringError(w, mooring.ErrInvalid)
+				return
+			}
+		}
 		native.Action = "apply"
-		native.Request = &appengine.Request{MutationID: req.MutationID, MandateID: packet.MandateID, BaseRev: req.BaseRev, Generation: req.Generation, Command: appengine.Command{Kind: req.Command, Sheet: args.Sheet, Cell: args.Cell, Input: args.Input}}
+		native.Request = &appengine.Request{ReadSet: reads, MutationID: req.MutationID, MandateID: packet.MandateID, BaseRev: req.BaseRev, Generation: req.Generation, Command: appengine.Command{Kind: req.Command, Sheet: args.Sheet, Cell: args.Cell, Input: args.Input}}
 	}
 	raw, _ := json.Marshal(native)
 	request := r.Clone(r.Context())

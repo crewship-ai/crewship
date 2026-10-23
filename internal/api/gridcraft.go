@@ -116,7 +116,7 @@ func gridcraftError(w http.ResponseWriter, err error) {
 	case errors.Is(err, appengine.ErrCapacity):
 		code, message = 429, "capacity_exhausted"
 	case errors.Is(err, appengine.ErrQuota):
-		code, message = 429, "history_quota_exceeded"
+		code, message = 429, "quota_exceeded"
 	case errors.Is(err, errWorkbookProposalRequired):
 		code, message = 409, "proposal_required: shared workbook changes require proposals; proposal delivery is not available yet"
 	case errors.Is(err, appengine.ErrDisabled), errors.Is(err, appengine.ErrEngineUnavailable):
@@ -489,7 +489,7 @@ func (h *gridcraftHTTP) writePrecondition(w http.ResponseWriter, r *http.Request
 		}
 		conflicts = append(conflicts, gridcraftConflict{c.Sheet, c.Cell, c.Input, c.Rev, label})
 	}
-	writeJSON(w, 409, map[string]any{"error": "precondition_failed", "head_rev": p.HeadRev, "snapshot_required": p.SnapshotRequired, "conflicts": conflicts})
+	writeJSON(w, 409, map[string]any{"error": "precondition_failed", "head_rev": p.HeadRev, "snapshot_required": p.SnapshotRequired, "conflicts": conflicts, "reason": p.Reason})
 }
 func (h *gridcraftHTTP) actorLabel(ctx context.Context, authority string) string {
 	var label sql.NullString
@@ -797,6 +797,11 @@ func (h *gridcraftHTTP) agent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		result, err := h.operations.Apply(r.Context(), k, *body.Request, authority)
+		var precondition *appengine.PreconditionError
+		if errors.As(err, &precondition) {
+			h.writePrecondition(w, r, precondition)
+			return
+		}
 		if err != nil {
 			gridcraftError(w, err)
 			return

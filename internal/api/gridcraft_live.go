@@ -294,6 +294,9 @@ func (h *gridcraftHTTP) openSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *gridcraftHTTP) writeSession(w http.ResponseWriter, r *http.Request, status int, out gridcraftEditorSession, p appengine.Principal) {
+	if h.pages.hub != nil {
+		h.pages.hub.TrackWorkbookPage(out.PageID, h.pages.recheckWorkbookSessions)
+	}
 	out.ActorLabel = h.actorLabel(r.Context(), p.AuthorityID)
 	if h.editorBundle != nil {
 		out.BundleDigest, out.EditorURL = h.editorBundle(r)
