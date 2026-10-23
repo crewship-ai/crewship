@@ -2439,10 +2439,25 @@ recorded provider credentials must still be current. Logging out does not stop
 an accepted run. Revoked grants, membership removal, suspension, an
 administrator revoking the user's sessions (even after the user logged out), a
 grant issuer losing authority, a rotated agent credential, or the routine being
-withdrawn stop it before its next step, and so does the 30-minute run limit.
+withdrawn stop it before its next step, and so does the workspace run limit
+(30 minutes unless an OWNER/ADMIN sets
+`crewship workspace update --guest-routine-max-run-minutes N`, 1-240).
 `--delay` is refused (422) for published routines. A stopped run's `--wait` exits
 nonzero without printing a result. Schedules, webhooks, nested calls and Page
 actions cannot start a published routine.
+
+### Withdraw a Guest publication
+
+```bash
+crewship routine unpublish ROUTINE_ID
+```
+
+Requires Publish on the routine, or workspace OWNER/ADMIN. The published version
+stays in history; new runs are refused and running ones stop before their next
+step. A routine without a current Guest publication, or one already withdrawn,
+returns 409. A shared draft saved before the withdrawal must be reloaded
+(`routine shared-draft`) before publishing; publishing again makes the routine
+runnable for new runs, while runs stopped by the withdrawal stay stopped.
 
 
 ## `crewship routine shared-runs`

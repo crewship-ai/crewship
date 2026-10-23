@@ -124,7 +124,7 @@ BEGIN UPDATE users SET hashed_password=(SELECT hash FROM local_reset_expected) W
 				t.Fatalf("local audit key identity: %v", err)
 			}
 			var metadata map[string]any
-			if json.Unmarshal([]byte(f.Metadata.String), &metadata) != nil || len(metadata) != 3 || metadata["source"] != "local_recovery" || metadata["sessions_revoked"] != float64(1) || metadata["cli_tokens_revoked"] != float64(1) || f.UserID.Valid || f.EntityType != "user" || f.EntityID.String != "local-reset-user" || f.TargetWorkspaceID.Valid || f.IPAddress.Valid || f.UserAgent.Valid || seq != 2 || mac != wanted {
+			if json.Unmarshal([]byte(f.Metadata.String), &metadata) != nil || len(metadata) != 4 || metadata["access_revocation_marked"] != true || metadata["source"] != "local_recovery" || metadata["sessions_revoked"] != float64(1) || metadata["cli_tokens_revoked"] != float64(1) || f.UserID.Valid || f.EntityType != "user" || f.EntityID.String != "local-reset-user" || f.TargetWorkspaceID.Valid || f.IPAddress.Valid || f.UserAgent.Valid || seq != 2 || mac != wanted {
 				t.Error("local reset lost system attribution, nonsecret counts or configured chain integrity")
 			}
 		})

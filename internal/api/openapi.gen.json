@@ -4612,6 +4612,10 @@
             "nullable": true,
             "type": "integer"
           },
+          "guest_routine_max_run_minutes": {
+            "nullable": true,
+            "type": "integer"
+          },
           "name": {
             "nullable": true,
             "type": "string"
@@ -15707,6 +15711,28 @@
         ],
         "type": "object"
       },
+      "RestrictedRoutineUnpublication": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "version": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "withdrawn_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "withdrawn_at"
+        ],
+        "type": "object"
+      },
       "RestrictedRunRequest": {
         "additionalProperties": false,
         "properties": {
@@ -20142,6 +20168,11 @@
             "nullable": true,
             "type": "string"
           },
+          "guest_routine_max_run_minutes": {
+            "maximum": 240,
+            "minimum": 1,
+            "type": "integer"
+          },
           "id": {
             "type": "string"
           },
@@ -20224,7 +20255,8 @@
           "run_retention_days",
           "credential_audit_retention_days",
           "audit_log_retention_days",
-          "approvals_retention_days"
+          "approvals_retention_days",
+          "guest_routine_max_run_minutes"
         ],
         "type": "object"
       },
@@ -22138,6 +22170,192 @@
           }
         ],
         "summary": "Submit admin audit reseal",
+        "tags": [
+          "admin"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/admin/audit/signing-keys/rotate": {
+      "post": {
+        "description": "Rotate admin audit signing keys (POST /api/v1/admin/audit/signing-keys/rotate).",
+        "operationId": "post_api_v1_admin_audit_signing-keys_rotate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "expected_active_key_id": {
+                    "description": "Optional: the reviewed current active key ID; a different one is a 409.",
+                    "maxLength": 64,
+                    "type": "string"
+                  },
+                  "reason": {
+                    "description": "Trimmed explanation, 8–512 UTF-8 bytes.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "active_key_id": {
+                      "type": "string"
+                    },
+                    "effective": {
+                      "description": "The running server keeps signing with its boot snapshot until it restarts.",
+                      "enum": [
+                        "next_start"
+                      ],
+                      "type": "string"
+                    },
+                    "previous_active_key_id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "previous_active_key_id",
+                    "active_key_id",
+                    "effective"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Rotate admin audit signing keys",
         "tags": [
           "admin"
         ],
@@ -24275,6 +24493,196 @@
           }
         ],
         "summary": "Get admin instance audit",
+        "tags": [
+          "admin"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/admin/instance/audit/verify": {
+      "get": {
+        "description": "Get admin instance audit verify (GET /api/v1/admin/instance/audit/verify).",
+        "operationId": "get_api_v1_admin_instance_audit_verify",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "break_count": {
+                      "type": "integer"
+                    },
+                    "breaks": {
+                      "items": {
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "seq": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "seq",
+                          "id",
+                          "kind",
+                          "reason"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "breaks_truncated": {
+                      "type": "boolean"
+                    },
+                    "broken_id": {
+                      "type": "string"
+                    },
+                    "broken_seq": {
+                      "type": "integer"
+                    },
+                    "checkpoints": {
+                      "type": "integer"
+                    },
+                    "continuation_verified": {
+                      "type": "boolean"
+                    },
+                    "count": {
+                      "type": "integer"
+                    },
+                    "historical_status": {
+                      "type": "string"
+                    },
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "repairable": {
+                      "items": {
+                        "properties": {
+                          "emit_priority": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "seq": {
+                            "type": "integer"
+                          },
+                          "stored_priority": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "seq",
+                          "id",
+                          "stored_priority",
+                          "emit_priority"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "repairable_count": {
+                      "type": "integer"
+                    },
+                    "repairable_truncated": {
+                      "type": "boolean"
+                    },
+                    "unchained_fallback": {
+                      "type": "integer"
+                    },
+                    "workspace_id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "workspace_id",
+                    "ok",
+                    "count",
+                    "continuation_verified"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get admin instance audit verify",
         "tags": [
           "admin"
         ],
@@ -38415,6 +38823,9 @@
                     },
                     "repairable_truncated": {
                       "type": "boolean"
+                    },
+                    "unchained_fallback": {
+                      "type": "integer"
                     },
                     "workspace_id": {
                       "type": "string"
@@ -178695,6 +179106,118 @@
           "workspaces"
         ],
         "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/unpublish": {
+      "post": {
+        "description": "Unpublish workspace restricted routine library (POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/unpublish).",
+        "operationId": "post_api_v1_workspaces_workspaceId_restricted-routine-library_routineId_unpublish",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "routineId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestrictedRoutineUnpublication"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestrictedRoutinePublicationError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestrictedRoutinePublicationError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestrictedRoutinePublicationError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestrictedRoutinePublicationError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestrictedRoutinePublicationError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestrictedRoutinePublicationError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Unpublish workspace restricted routine library",
+        "tags": [
+          "workspaces"
+        ],
+        "x-crewship-read-only": false
       }
     },
     "/api/v1/workspaces/{workspaceId}/restricted-routine-runs": {

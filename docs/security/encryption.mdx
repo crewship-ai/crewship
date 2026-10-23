@@ -188,6 +188,16 @@ crewship admin reencrypt
 #    Failed: 0 confirms envelope conversion, not retirement of the audit root.
 ```
 
+The restart in step 2 also re-wraps the sealed audit keyring
+(`<data-dir>/audit-keyring.json`) from the old master-key version to the new
+one, with the same signing keys; the boot log fails loudly if the old key is
+missing. So keep every earlier `ENCRYPTION_KEY_V<N>` configured until a server
+has started once on the new version. Changing the `ENCRYPTION_KEY` value
+itself in place (instead of adding a version) makes the keyring — and every
+v1 envelope and legacy audit MAC — unreadable; never do that. An operator-managed
+keyring at `CREWSHIP_AUDIT_KEYRING_PATH` outside the data directory is not
+re-wrapped; it is yours to protect.
+
 The operation is idempotent — envelopes already at the current version are
 skipped, so an interrupted run can be repeated. Undecryptable values are
 counted under `failed` and left untouched. The CLI exits non-zero so failed

@@ -26,6 +26,10 @@ func (r *Router) registerAdminRoutes() {
 	// checkpoint transaction; neither instance ADMIN nor context role bypasses it.
 	// openapi: responses 200,400,401,403,404,409,500
 	r.authedSelfMut("POST", "/api/v1/admin/audit/reseal", r.resealAudit)
+	// Same instance OWNER + instance:admin authority as an instance reseal,
+	// rechecked inside the transaction that records the rotation.
+	// openapi: responses 200,400,401,403,404,409,500
+	r.authedSelfMut("POST", "/api/v1/admin/audit/signing-keys/rotate", r.rotateAuditSigningKey)
 	// Actual OWNER authority is checked inside the read-only snapshot.
 	// openapi: query scope:string workspace_id:string; responses 200,400,401,403,404,500
 	r.authedAdminAny("GET", "/api/v1/admin/audit/head", r.auditHead)
@@ -123,6 +127,7 @@ func (r *Router) registerAdminRoutes() {
 	r.authedInstance("DELETE", "/api/v1/admin/instance/workspaces/{workspaceId}", inst.DeleteWorkspace)
 	// openapi: responses 200,401,403,500
 	r.authedInstance("GET", "/api/v1/admin/instance/audit", inst.AuditLog)
+	r.authedInstance("GET", "/api/v1/admin/instance/audit/verify", inst.AuditVerify)
 
 	// Admin › Security across workspaces: the Keeper of every workspace, set for
 	// one, several or all of them (dry_run previews what a save overwrites),

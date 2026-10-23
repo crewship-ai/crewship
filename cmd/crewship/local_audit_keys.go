@@ -25,6 +25,9 @@ func localAuditSigningContext(ctx context.Context, target localDBTarget) (contex
 	if err != nil {
 		return nil, err
 	}
+	if err := adoptPersistedMasterKeys(filepath.Dir(path)); err != nil {
+		return nil, err
+	}
 	keys, err := journal.LoadSigningKeys(path)
 	if err != nil {
 		return nil, fmt.Errorf("audit keyring %s: %w", path, err)
@@ -85,9 +88,18 @@ func localAuditKeyringPath(target localDBTarget) (string, error) {
 	return found[0], nil
 }
 
+// sameSigningKeys compares two candidate keyrings by their key sets. Master
+// keys already in the environment win over either data dir's secrets.env, and
+// adoptPersistedMasterKeys only fills variables that are still empty: the
+// first candidate's secrets.env supplies the keys for both. A second keyring
+// sealed under a different master key therefore fails to open, and the caller
+// reports the ambiguity instead of guessing.
 func sameSigningKeys(a, b string) (bool, error) {
 	var docs [2][]byte
 	for i, p := range []string{a, b} {
+		if err := adoptPersistedMasterKeys(filepath.Dir(p)); err != nil {
+			return false, err
+		}
 		keys, err := journal.LoadSigningKeys(p)
 		if err != nil {
 			return false, err

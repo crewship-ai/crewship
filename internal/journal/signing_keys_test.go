@@ -182,43 +182,8 @@ func TestAuditSigningContextRefusesUnavailableSnapshot(t *testing.T) {
 	}
 }
 
-func TestAuditMiddleFailureRefusesAppend(t *testing.T) {
-	for _, change := range []string{"summary='changed'", "chain_key_id='missing-old-key'"} {
-		t.Run(change, func(t *testing.T) {
-			db := openTestDB(t)
-			defer db.Close()
-			writer := NewWriter(db, quietLogger(), WriterOptions{})
-			defer writer.Close()
-			for range 3 {
-				if _, err := writer.EmitSync(t.Context(), Entry{WorkspaceID: "ws_test", Type: EntryInvitationCreated, ActorType: ActorSystem, Summary: "Authentic history"}); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if _, err := db.Exec("UPDATE journal_entries SET " + change + " WHERE seq=1"); err != nil {
-				t.Fatal(err)
-			}
-			result, err := VerifyChain(t.Context(), db, "ws_test")
-			if err != nil || result.OK {
-				t.Fatalf("middle corruption not detected: %+v %v", result, err)
-			}
-			_, err = writer.EmitSync(t.Context(), Entry{WorkspaceID: "ws_test", Type: EntryInvitationCreated, ActorType: ActorSystem, Summary: "Must refuse"})
-			wanted := ErrChainIntegrity
-			if change == "chain_key_id='missing-old-key'" {
-				wanted = ErrSigningKeyUnavailable
-			}
-			if !errors.Is(err, wanted) {
-				t.Errorf("append after invalid middle: %v want %v", err, wanted)
-			}
-			var count int
-			if err := db.QueryRow("SELECT COUNT(*) FROM journal_entries").Scan(&count); err != nil || count != 3 {
-				t.Errorf("refused append changed history: %d %v", count, err)
-			}
-			if _, err := writer.EmitSync(t.Context(), Entry{WorkspaceID: "unrelated", Type: EntryInvitationCreated, ActorType: ActorSystem, Summary: "Unaffected chain"}); err != nil {
-				t.Fatalf("unrelated chain blocked: %v", err)
-			}
-		})
-	}
-}
+// Middle-of-history failures no longer refuse appends: see
+// TestAuditHistoricalDefectDoesNotBlockAppend and TestAuditTamperedTailRefusesAppend.
 
 func TestAuditUnsignedLegacyDoesNotAuthenticateOrHideChainedFailure(t *testing.T) {
 	db := openTestDB(t)
@@ -237,7 +202,7 @@ func TestAuditUnsignedLegacyDoesNotAuthenticateOrHideChainedFailure(t *testing.T
 	if err != nil || result.OK || !result.ContinuationVerified || result.HistoricalStatus != "legacy_unverified" {
 		t.Fatalf("legacy history was blessed or current segment lost: %+v %v", result, err)
 	}
-	if _, err := db.Exec(`UPDATE journal_entries SET summary='changed' WHERE seq=1`); err != nil {
+	if _, err := db.Exec(`UPDATE journal_entries SET summary='changed' WHERE seq=3`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := writer.EmitSync(t.Context(), Entry{WorkspaceID: "ws_test", Type: EntryInvitationCreated, ActorType: ActorSystem, Summary: "Must refuse"}); !errors.Is(err, ErrChainIntegrity) {

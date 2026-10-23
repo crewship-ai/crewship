@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/inbox"
@@ -582,6 +583,9 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	audit["crew_id"] = body.CrewID
 	audit["initial_status"] = initialStatus
 	audit["pending_review"] = gate.held()
+	for k, v := range h.internalCallerAudit(r, wsID, body.CrewID) {
+		audit[k] = v
+	}
 	current, err := agentPrivileges(r.Context(), tx, wsID, agentID)
 	if err != nil {
 		replyInternalError(w, h.logger, "read created agent privileges", err)
@@ -786,4 +790,31 @@ func (h *InternalHandler) RecordMCPToolCall(w http.ResponseWriter, r *http.Reque
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]string{"id": id})
+}
+
+// internalCallerAudit identifies the agent-side caller of an internal write
+// for forensics, from what its credentials prove rather than what it claims:
+// the workspace and crew the X-Internal-Token is bound to (empty for the
+// master token) and, when it carries a valid run token, the run and agent.
+// No token is recorded. An invalid run token is noted, not trusted.
+func (h *InternalHandler) internalCallerAudit(r *http.Request, workspaceID, crewID string) map[string]any {
+	caller := map[string]any{
+		"caller_token_workspace_id": InternalTokenWorkspaceFromContext(r.Context()),
+		"caller_token_crew_id":      InternalTokenCrewFromContext(r.Context()),
+	}
+	proof := r.Header.Get("X-Crewship-Run-Token")
+	if proof == "" {
+		return caller
+	}
+	crew := InternalTokenCrewFromContext(r.Context())
+	if crew == "" {
+		crew = crewID
+	}
+	ws, agent, run, ok := internaltoken.ValidateAgentRunToken(internaltoken.DeriveAgentRunKey(h.internalToken, workspaceID, crew), proof)
+	if !ok || ws != workspaceID {
+		caller["caller_run_token_invalid"] = true
+		return caller
+	}
+	caller["caller_run_id"], caller["caller_agent_id"] = run, agent
+	return caller
 }

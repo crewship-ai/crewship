@@ -697,6 +697,7 @@ func (w *Writer) persistBatchTx(ctx context.Context, tx *sql.Tx, batch []Entry, 
 	// Per-workspace chain heads, lazily loaded from the DB the first
 	// time a workspace appears in this batch.
 	heads := make(map[string]*chainHead, 4)
+	starts := make(map[string]appendStart, 4)
 
 	for _, e := range batch {
 		if err := checkRecoveredStopWrite(ctx, tx, e); err != nil {
@@ -754,6 +755,7 @@ func (w *Writer) persistBatchTx(ctx context.Context, tx *sql.Tx, batch []Entry, 
 				return err
 			}
 			heads[e.WorkspaceID] = head
+			starts[e.WorkspaceID] = appendStart{seq: head.seq, hash: head.prevHash, trusted: e.reseal}
 		}
 
 		seq := head.seq + 1
@@ -835,14 +837,12 @@ func (w *Writer) persistBatchTx(ctx context.Context, tx *sql.Tx, batch []Entry, 
 		head.seq = seq
 		head.prevHash = entryHash
 	}
-	// Check the complete chain in this same writer snapshot, after native
-	// insert triggers. Once per workspace/batch, not once per inserted row.
-	for workspace := range heads {
-		result, err := VerifyChainWithKeys(ctx, tx, workspace, keys)
-		if err != nil {
-			return err
-		}
-		if err := result.AppendError(); err != nil {
+	// Re-read the tail in this same writer snapshot, after native insert
+	// triggers: the previous tail, its link, and every row this batch wrote.
+	// Never the whole chain — that is the on-demand verifier's job, and a walk
+	// here would make every audited write cost O(history) under the lock.
+	for workspace, head := range heads {
+		if err := verifyAppendTail(ctx, tx, workspace, keys, starts[workspace], head.seq); err != nil {
 			return err
 		}
 	}

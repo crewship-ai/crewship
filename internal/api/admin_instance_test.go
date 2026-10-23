@@ -117,6 +117,7 @@ func TestInstanceRoutes_RefuseAWorkspaceAdmin(t *testing.T) {
 		{"POST", "/api/v1/admin/instance/people/carol/suspend", ""},
 		{"PUT", "/api/v1/admin/instance/admins/wsadmin", ""},
 		{"GET", "/api/v1/admin/instance/audit", ""},
+		{"GET", "/api/v1/admin/instance/audit/verify", ""},
 	} {
 		if rr := f.do(f.wsAdmin, c.method, c.path, c.body); rr.Code != http.StatusForbidden {
 			t.Errorf("workspace ADMIN %s %s = %d, want 403", c.method, c.path, rr.Code)
@@ -303,6 +304,12 @@ func TestInstanceSuspend(t *testing.T) {
 	wantCode(t, f.do(f.boss, "POST", "/api/v1/admin/instance/people/carol/reactivate", ""), http.StatusNoContent, "reactivate")
 	if accountSuspended(t.Context(), f.db, "carol") {
 		t.Error("still suspended")
+	}
+	// Reactivation keeps the durable marker: runs accepted before the
+	// suspension stay stopped even if both happened between two steps.
+	var marked bool
+	if err := f.db.QueryRow(`SELECT access_revoked_at IS NOT NULL FROM users WHERE id='carol'`).Scan(&marked); err != nil || !marked {
+		t.Errorf("suspension did not record the access revocation marker: %v", err)
 	}
 	if !f.audited("instance.user_suspended") || !f.audited("instance.user_reactivated") {
 		t.Error("suspend/reactivate not audited")

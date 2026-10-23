@@ -158,6 +158,74 @@ the old history cannot be verified; this is not a clean whole-history verdict.
 The checkpoint and its exact old-tail acknowledgement commit together;
 failure rolls both back. No key material is sent through this command.
 
+## `crewship audit rotate-key`
+
+Adds a fresh random active signing key to the server's app-owned audit keyring
+(`<data-dir>/audit-keyring.json`, sealed at rest) instead of hand-editing it.
+Every earlier key stays in the keyring for verification only; no historical
+MAC is rewritten. The rotation is recorded as an `audit.signing_key_rotated`
+instance audit entry (key IDs and reason only, never key material), signed with
+the key the server is running with.
+
+```bash
+crewship audit rotate-key --reason "Scheduled audit signing key rotation"
+crewship audit rotate-key --expected-active-key-id key-0123abcd… --reason "Rotation after operator change"
+```
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--reason` | `""` | Required explanation, trimmed to 8–512 UTF-8 bytes. |
+| `--expected-active-key-id` | `""` | Optional: refuse with 409 unless this is the keyring's current active key. |
+
+The running server keeps signing with the keyring it booted with; the new key
+signs from the next server start (`effective: next_start`). Restart after
+rotating.
+
+The rotated keyring is first written beside the live one as
+`audit-keyring.json.pending-<entry id>` and renamed into place only after its
+audit entry committed. If the server stops in between, the next start installs
+the pending keyring only when that entry exists, is the newest
+`audit.signing_key_rotated` entry, names exactly the staged active key, and that
+key is not already in the keyring. Anything else — an uncommitted rotation, a
+stale or replayed pending file — is set aside as
+`audit-keyring.json.discarded-<entry id>` (with a numeric suffix if that name is
+taken; never installed, never overwritten or deleted), logged as a warning, and
+the start continues. If the audit log cannot be read, the pending file is left
+for the next start. A second rotation while one is pending is refused with 409.
+
+The authenticated `POST /api/v1/admin/audit/signing-keys/rotate` requires the
+same authority as an instance reseal: the configured instance OWNER with
+`instance:admin`, rechecked inside the transaction. Request body: a JSON object
+with `reason` and optionally `expected_active_key_id`; unknown fields are
+rejected and the body is limited to 4096 bytes. The response carries
+`previous_active_key_id`, `active_key_id` and `effective`. Statuses: 400 for an
+invalid body, 401 without authentication, 403 without that authority, 404 for a
+restricted account, 409 when the active key changed or the keyring is
+configured outside the data directory (`CREWSHIP_AUDIT_KEYRING_PATH`, which
+Crewship never rewrites), 500 when the audit entry cannot be committed — the
+previous keyring is then put back.
+
+## `crewship audit export-keyring`
+
+Host-local: decrypts this host's audit keyring and writes it **unencrypted** to a
+new file, for a rollback to a build that predates keyring sealing. It finds the
+keyring as `crewship admin reset-password` does and takes the master key from
+the environment or the data directory's `secrets.env`. No server or API is
+involved; the keys never cross the network.
+
+```bash
+crewship audit export-keyring --plaintext --output /root/audit-keyring.plain.json
+```
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--plaintext` | `false` | Required acknowledgement that the output holds every key in the clear. |
+| `--output` | `""` | Required new file; created with mode `0600`, never overwrites an existing file. |
+
+Stop the server, export, put the file in place of `<data-dir>/audit-keyring.json`
+(or point `CREWSHIP_AUDIT_KEYRING_PATH` at it), start the older build, and delete
+any other plaintext copy afterwards.
+
 ## Common errors
 
 - **`bad --since: …`** / **`bad --until: …`** — the value is neither RFC3339 nor a duration. Accept formats: `2026-05-01T00:00:00Z`, `1h`, `24h`, `7d`.

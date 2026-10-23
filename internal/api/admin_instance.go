@@ -341,13 +341,20 @@ func (h *InstanceAdminHandler) Suspend(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "suspend", err)
 		return
 	}
-	ids, err := revokeCLITokensAuditedTx(ctx, tx, actor.ID, id, now)
+	// Durable: a suspension lifted before a run's next step still stops it.
+	if err := MarkAccessRevokedTx(ctx, tx, id); err != nil {
+		replyInternalError(w, h.logger, "suspend: access revocation marker", err)
+		return
+	}
+	// Suspension only removes access, so it proceeds with a broken chain tail.
+	auditCtx := withSecurityAuditFallback(ctx)
+	ids, err := revokeCLITokensAuditedTx(auditCtx, tx, actor.ID, id, now)
 	if err != nil {
 		replyInternalError(w, h.logger, "suspend: revoke CLI tokens and audit", err)
 		return
 	}
 	tokens := int64(len(ids))
-	if err := auditInstance(ctx, r, tx, "instance.user_suspended", "user", id, "", map[string]any{
+	if err := auditInstance(auditCtx, r, tx, "instance.user_suspended", "user", id, "", map[string]any{
 		"reason": req.Reason, "sessions_revoked": revoked, "cli_tokens_revoked": tokens,
 	}); err != nil {
 		replyInternalError(w, h.logger, "suspend: audit", err)
@@ -1178,6 +1185,25 @@ func (h *InstanceAdminHandler) AuditLog(w http.ResponseWriter, r *http.Request) 
 		h.logger.Error("instance audit chain integrity failure; inspect audit history before explicit OWNER reseal")
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// AuditVerify walks the whole instance audit chain on demand: read-only, on
+// the pool, never inside a writer transaction. Appends check only the tail,
+// so this (with the backup drill) is where history is verified. The result
+// carries historical_status, unchained_fallback and the first failure.
+// GET /api/v1/admin/instance/audit/verify
+func (h *InstanceAdminHandler) AuditVerify(w http.ResponseWriter, r *http.Request) {
+	keys, err := journal.SigningKeysForContext(r.Context())
+	if err != nil {
+		replyInternalError(w, h.logger, "load audit verification keys", err)
+		return
+	}
+	result, err := journal.VerifyInstanceAuditWithKeys(r.Context(), h.db, keys)
+	if err != nil {
+		replyInternalError(w, h.logger, "verify instance audit", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────

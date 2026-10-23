@@ -1,10 +1,12 @@
 package backup_test
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -85,6 +87,13 @@ func TestAuditRecoveryKitRestoresAndDrillsBothChainsOnForeignHost(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	sealed, err := os.ReadFile(filepath.Join(root, journal.SigningKeysFile))
+	if err != nil || bytes.Contains(sealed, []byte("key_b64")) {
+		t.Fatalf("recovery wrote the audit keyring in plaintext: %v", err)
+	}
+	// The restored keyring is sealed under the recovered instance's master
+	// key (the kit's), which its server runs with — not this host's.
+	t.Setenv("ENCRYPTION_KEY", instKeyV1)
 	recoveredKeys, err := journal.LoadSigningKeys(filepath.Join(root, journal.SigningKeysFile))
 	if err != nil || recoveredKeys.ActiveID() != keys.ActiveID() {
 		t.Fatalf("recovery did not publish the original audit snapshot: %v", err)

@@ -105,6 +105,9 @@ func remainingAdminSystemSchemaCatalogV2() map[string]DomainSchema {
 		"breaks":           array(obj(map[string]any{"seq": integer(), "id": str(), "kind": str(), "reason": str()}, "seq", "id", "kind", "reason")),
 		"repairable_count": integer(), "repairable_truncated": boolean(),
 		"repairable": array(obj(map[string]any{"seq": integer(), "id": str(), "stored_priority": str(), "emit_priority": str()}, "seq", "id", "stored_priority", "emit_priority")),
+		// Instance chain only: security actions recorded outside the chain
+		// while its tail was broken.
+		"unchained_fallback": integer(),
 	}, "workspace_id", "ok", "count", "continuation_verified")
 	auditScope := func() map[string]any {
 		return map[string]any{"type": "string", "enum": []string{"workspace", "instance"}}
@@ -124,40 +127,51 @@ func remainingAdminSystemSchemaCatalogV2() map[string]DomainSchema {
 		"tail_seq": auditSequence(), "tail_hash": str(), "continuation_verified": boolean(),
 		"historical_status": map[string]any{"type": "string", "enum": []string{"verified", "historical_unverified", "historical_invalid"}},
 	}, "scope", "workspace_id", "checkpoint_id", "tail_seq", "tail_hash", "continuation_verified", "historical_status")
+	auditKeyRotateRequest := obj(map[string]any{
+		"expected_active_key_id": map[string]any{"type": "string", "maxLength": 64, "description": "Optional: the reviewed current active key ID; a different one is a 409."},
+		"reason":                 map[string]any{"type": "string", "description": "Trimmed explanation, 8–512 UTF-8 bytes."},
+	}, "reason")
+	auditKeyRotateRequest["additionalProperties"] = false
+	auditKeyRotate := obj(map[string]any{
+		"previous_active_key_id": str(), "active_key_id": str(),
+		"effective": map[string]any{"type": "string", "enum": []string{"next_start"}, "description": "The running server keeps signing with its boot snapshot until it restarts."},
+	}, "previous_active_key_id", "active_key_id", "effective")
 	prune := obj(map[string]any{"removed": array(str()), "count": integer(), "error": str()})
 	reap := obj(map[string]any{
 		"orphans": array(obj(map[string]any{"crew_id": str(), "slug": str(), "container_id": str(), "reaped": boolean()})),
 		"count":   integer(), "applied": boolean(), "inspected": integer(), "identified": integer(), "detector_inert": boolean(),
 	})
 	return map[string]DomainSchema{
-		"GET /api/v1/admin/health":                    {Response: adminHealth},
-		"GET /api/v1/admin/users":                     {Response: array(user)},
-		"GET /api/v1/admin/users/{userId}/data":       {Response: obj(map[string]any{"user": user, "journal": array(free()), "credentials": array(free()), "counts": free()})},
-		"DELETE /api/v1/admin/users/{userId}/data":    {Response: noContent()},
-		"GET /api/v1/admin/keeper/health":             {Response: keeperHealth},
-		"GET /api/v1/admin/keeper/config":             {Response: keeperConfig},
-		"PUT /api/v1/admin/keeper/config":             {Request: json(map[string]any{"enabled": boolean(), "judge_provider": str(), "judge_endpoint_url": str(), "judge_wire": str(), "judge_model": str(), "judge_timeout_ms": integer(), "judge_profile": str(), "judge_evidence": boolean(), "judge_evidence_facts": str(), "judge_hard_gate": boolean(), "judge_precedent": boolean(), "judge_precedent_n": integer(), "judge_consistency_samples": integer(), "judge_escalate_from": integer(), "judge_prompt_budget_tokens": integer()}), Response: keeperConfig},
-		"DELETE /api/v1/admin/keeper/config":          {Response: keeperConfig},
-		"GET /api/v1/admin/keeper/aux":                {Response: keeperAux},
-		"PUT /api/v1/admin/keeper/aux/{slot}":         {Request: json(map[string]any{"provider": str(), "model": str(), "timeout_ms": integer(), "credential_id": str()}), Response: keeperAux},
-		"DELETE /api/v1/admin/keeper/aux/{slot}":      {Response: keeperAux},
-		"DELETE /api/v1/admin/keeper/aux":             {Response: keeperAux},
-		"POST /api/v1/admin/keeper/aux/use-judge":     {Response: keeperAux},
-		"POST /api/v1/admin/keeper/aux/{slot}/probe":  {Response: keeperTest},
-		"GET /api/v1/admin/keeper/judge/models":       {Response: keeperModels},
-		"POST /api/v1/admin/keeper/judge/test":        {Request: json(map[string]any{"judge_endpoint_url": str(), "judge_model": str()}), Response: keeperTest},
-		"POST /api/v1/admin/keeper/judge/test-hosted": {Request: json(map[string]any{"provider": str(), "model": str(), "credential_id": str()}), Response: keeperTest},
-		"POST /api/v1/admin/keeper/findings/test":     {Request: json(map[string]any{"workspace_id": str(), "crew_id": str(), "reason": str()}), Response: obj(map[string]any{"inbox_item_id": str(), "recipients": array(obj(map[string]any{"user_id": str(), "email": str(), "name": str(), "role": str()}))})},
-		"POST /api/v1/admin/keeper/review/{slot}/run": {Request: json(map[string]any{"workspace_id": str(), "crew_id": str(), "agent_id": str(), "skill_id": str(), "tool_name": str(), "tool_args_snippet": str(), "recent_tool_calls": array(str()), "trigger": str(), "failure_snippet": str(), "prior_lesson": str()}), Response: obj(map[string]any{"slot": str(), "decision": str(), "reason": str(), "lesson": str(), "error": str(), "data": free()})},
-		"GET /api/v1/admin/journal/verify":            {Response: integrity},
-		"GET /api/v1/admin/audit/head":                {Response: auditHead},
-		"POST /api/v1/admin/audit/reseal":             {Request: auditResealRequest, Response: auditReseal},
-		"GET /api/v1/admin/legacy-resources":          {Response: obj(map[string]any{"present": boolean()})},
-		"POST /api/v1/admin/prune-legacy-resources":   {Response: prune},
-		"POST /api/v1/admin/prune-crew-runtimes":      {Response: prune},
-		"POST /api/v1/admin/reap-orphan-containers":   {Response: reap},
-		"GET /api/v1/system/setup-status":             {Response: setup},
-		"GET /api/v1/system/telemetry":                {Response: telemetry},
+		"GET /api/v1/admin/health":                     {Response: adminHealth},
+		"GET /api/v1/admin/users":                      {Response: array(user)},
+		"GET /api/v1/admin/users/{userId}/data":        {Response: obj(map[string]any{"user": user, "journal": array(free()), "credentials": array(free()), "counts": free()})},
+		"DELETE /api/v1/admin/users/{userId}/data":     {Response: noContent()},
+		"GET /api/v1/admin/keeper/health":              {Response: keeperHealth},
+		"GET /api/v1/admin/keeper/config":              {Response: keeperConfig},
+		"PUT /api/v1/admin/keeper/config":              {Request: json(map[string]any{"enabled": boolean(), "judge_provider": str(), "judge_endpoint_url": str(), "judge_wire": str(), "judge_model": str(), "judge_timeout_ms": integer(), "judge_profile": str(), "judge_evidence": boolean(), "judge_evidence_facts": str(), "judge_hard_gate": boolean(), "judge_precedent": boolean(), "judge_precedent_n": integer(), "judge_consistency_samples": integer(), "judge_escalate_from": integer(), "judge_prompt_budget_tokens": integer()}), Response: keeperConfig},
+		"DELETE /api/v1/admin/keeper/config":           {Response: keeperConfig},
+		"GET /api/v1/admin/keeper/aux":                 {Response: keeperAux},
+		"PUT /api/v1/admin/keeper/aux/{slot}":          {Request: json(map[string]any{"provider": str(), "model": str(), "timeout_ms": integer(), "credential_id": str()}), Response: keeperAux},
+		"DELETE /api/v1/admin/keeper/aux/{slot}":       {Response: keeperAux},
+		"DELETE /api/v1/admin/keeper/aux":              {Response: keeperAux},
+		"POST /api/v1/admin/keeper/aux/use-judge":      {Response: keeperAux},
+		"POST /api/v1/admin/keeper/aux/{slot}/probe":   {Response: keeperTest},
+		"GET /api/v1/admin/keeper/judge/models":        {Response: keeperModels},
+		"POST /api/v1/admin/keeper/judge/test":         {Request: json(map[string]any{"judge_endpoint_url": str(), "judge_model": str()}), Response: keeperTest},
+		"POST /api/v1/admin/keeper/judge/test-hosted":  {Request: json(map[string]any{"provider": str(), "model": str(), "credential_id": str()}), Response: keeperTest},
+		"POST /api/v1/admin/keeper/findings/test":      {Request: json(map[string]any{"workspace_id": str(), "crew_id": str(), "reason": str()}), Response: obj(map[string]any{"inbox_item_id": str(), "recipients": array(obj(map[string]any{"user_id": str(), "email": str(), "name": str(), "role": str()}))})},
+		"POST /api/v1/admin/keeper/review/{slot}/run":  {Request: json(map[string]any{"workspace_id": str(), "crew_id": str(), "agent_id": str(), "skill_id": str(), "tool_name": str(), "tool_args_snippet": str(), "recent_tool_calls": array(str()), "trigger": str(), "failure_snippet": str(), "prior_lesson": str()}), Response: obj(map[string]any{"slot": str(), "decision": str(), "reason": str(), "lesson": str(), "error": str(), "data": free()})},
+		"GET /api/v1/admin/journal/verify":             {Response: integrity},
+		"GET /api/v1/admin/instance/audit/verify":      {Response: integrity},
+		"GET /api/v1/admin/audit/head":                 {Response: auditHead},
+		"POST /api/v1/admin/audit/reseal":              {Request: auditResealRequest, Response: auditReseal},
+		"POST /api/v1/admin/audit/signing-keys/rotate": {Request: auditKeyRotateRequest, Response: auditKeyRotate},
+		"GET /api/v1/admin/legacy-resources":           {Response: obj(map[string]any{"present": boolean()})},
+		"POST /api/v1/admin/prune-legacy-resources":    {Response: prune},
+		"POST /api/v1/admin/prune-crew-runtimes":       {Response: prune},
+		"POST /api/v1/admin/reap-orphan-containers":    {Response: reap},
+		"GET /api/v1/system/setup-status":              {Response: setup},
+		"GET /api/v1/system/telemetry":                 {Response: telemetry},
 		// GET /api/v1/system/runtime was declared here too, with a `runtimes`
 		// item shape that had drifted from the one in
 		// schemas_observability_payments.go. routeSchemaCatalog merges

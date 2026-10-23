@@ -42,6 +42,7 @@ The operational surface for OWNER and ADMIN roles: workspace stats, user managem
 | `PUT` | [/api/v1/admin/instance/admins/\{userId\}](#put-api-v1-admin-instance-admins-userid) | Name an instance administrator |
 | `DELETE` | [/api/v1/admin/instance/admins/\{userId\}](#delete-api-v1-admin-instance-admins-userid) | Remove a named instance administrator |
 | `GET` | [/api/v1/admin/instance/audit](#get-api-v1-admin-instance-audit) | Instance-level actions, newest first |
+| `GET` | [/api/v1/admin/instance/audit/verify](#get-api-v1-admin-instance-audit-verify) | Verify the whole instance audit chain |
 | `GET` | [/api/v1/admin/instance/keeper/governance](#get-api-v1-admin-instance-keeper-governance) | Every workspace's Keeper watchdog settings and the instance defaults |
 | `PUT` | [/api/v1/admin/instance/keeper/governance](#put-api-v1-admin-instance-keeper-governance) | Set the watchdog for one, several or all existing workspaces |
 | `GET` | [/api/v1/admin/instance/keeper/governance/defaults](#get-api-v1-admin-instance-keeper-governance-defaults) | The template a new workspace's Keeper starts with |
@@ -754,6 +755,40 @@ Actions: `instance.user_created`, `instance.member_added`,
 | `500` | A query failed. |
 
 
+
+## `GET /api/v1/admin/instance/audit/verify`
+
+Walks the whole instance audit chain on demand, read-only and outside any
+write transaction. Audited writes check only the chain tail, so this is where
+history is verified (the backup drill runs the same check).
+
+**Auth:** instance administrator. **Request:** no body. **Response:**
+
+```json
+{
+  "ok": false,
+  "count": 412,
+  "continuation_verified": true,
+  "historical_status": "post_upgrade_invalid",
+  "unchained_fallback": 1,
+  "reason": "instance audit history contains an unverifiable entry"
+}
+```
+
+`ok` is true only when every row verifies. `continuation_verified` means the
+segment after the last defect (or OWNER reseal) verifies. `historical_status`
+is `legacy_unverified` (rows older than the chain), `historical_unverified` or
+`historical_invalid` (defects in rows that predate the keyring upgrade or the
+last reseal), or `post_upgrade_invalid` (a defect in a keyring-signed row or
+after the last reseal). `unchained_fallback` counts security actions recorded
+outside the chain while its tail was broken.
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Verified (whatever the verdict). |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `500` | Verification keys or the read failed. |
 ## `GET /api/v1/admin/instance/keeper/governance`
 
 The Keeper watchdog settings of every workspace on the instance, including

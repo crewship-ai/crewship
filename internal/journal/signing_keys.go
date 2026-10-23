@@ -119,6 +119,19 @@ func LoadSigningKeys(path string) (*SigningKeys, error) {
 	if path == "" {
 		return defaultSigningKeys(), nil
 	}
+	raw, err := readSigningKeysFile(path)
+	if err != nil {
+		return nil, err
+	}
+	plain, _, err := openSigningKeys(raw)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSigningKeys(plain)
+}
+
+// readSigningKeysFile reads a bounded private regular file, sealed or not.
+func readSigningKeysFile(path string) ([]byte, error) {
 	before, err := os.Lstat(path)
 	if err != nil || !before.Mode().IsRegular() {
 		return nil, errors.New("audit keyring: private regular file required")
@@ -136,7 +149,7 @@ func LoadSigningKeys(path string) (*SigningKeys, error) {
 	if err != nil || len(data) > 64*1024 {
 		return nil, errors.New("audit keyring: cannot read bounded document")
 	}
-	return ParseSigningKeys(data)
+	return data, nil
 }
 func LoadSigningKeysFromEnv() (*SigningKeys, error) {
 	return LoadSigningKeys(os.Getenv(SigningKeysPathEnv))

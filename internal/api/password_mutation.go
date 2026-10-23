@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"net/http"
 
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -27,11 +29,24 @@ func auditPasswordTx(ctx context.Context, tx *sql.Tx, user, action, now string, 
 	if err != nil {
 		return err
 	}
+	// No unchained fallback: whoever sets the password gains access with it,
+	// so a broken chain tail refuses (replyPasswordAuditError says why).
 	return appendInstanceAuditTx(ctx, tx, journal.InstanceAuditFields{
 		ID: generateCUID(), UserID: sql.NullString{String: user, Valid: true}, Action: action,
 		EntityType: "user", EntityID: sql.NullString{String: user, Valid: true},
 		Metadata: sql.NullString{String: string(metadata), Valid: true}, CreatedAt: now,
 	})
+}
+
+// replyPasswordAuditError fails a web password change/reset closed. A broken
+// audit chain is reported as such (503), not as an anonymous server error.
+func replyPasswordAuditError(w http.ResponseWriter, logger *slog.Logger, op string, err error) {
+	if errors.Is(err, journal.ErrChainIntegrity) || errors.Is(err, journal.ErrSigningKeyUnavailable) {
+		logger.Error(op+": instance audit chain refused the record", "err", err)
+		replyError(w, http.StatusServiceUnavailable, "Passwords cannot be changed until an instance administrator repairs the audit trail.")
+		return
+	}
+	replyInternalError(w, logger, op, err)
 }
 
 func acknowledgePasswordTx(ctx context.Context, tx *sql.Tx, user, expected string) error {
@@ -76,11 +91,17 @@ func acknowledgePasswordSessions(ctx context.Context, tx *sql.Tx, user, expected
 // AuditLocalPasswordResetTx records host-side recovery without inventing an
 // authenticated human actor. The caller owns mutations and the final commit.
 func AuditLocalPasswordResetTx(ctx context.Context, tx *sql.Tx, userID, expectedHash, now string, sessionsRevoked int64, tokensRevoked int) error {
-	metadata, err := json.Marshal(map[string]any{"source": "local_recovery", "sessions_revoked": sessionsRevoked, "cli_tokens_revoked": tokensRevoked})
+	// Account recovery also stops accepted Guest-published runs.
+	if err := MarkAccessRevokedTx(ctx, tx, userID); err != nil {
+		return err
+	}
+	metadata, err := json.Marshal(map[string]any{"source": "local_recovery", "sessions_revoked": sessionsRevoked, "cli_tokens_revoked": tokensRevoked, "access_revocation_marked": true})
 	if err != nil {
 		return err
 	}
-	if err := appendInstanceAuditTx(ctx, tx, journal.InstanceAuditFields{ID: generateCUID(), Action: "auth.password_reset", EntityType: "user", EntityID: sql.NullString{String: userID, Valid: true}, Metadata: sql.NullString{String: string(metadata), Valid: true}, CreatedAt: now}); err != nil {
+	// Host-side recovery is the operator's own incident response (shell
+	// access to the server already implies it), so it may fall back.
+	if err := appendInstanceAuditTx(withSecurityAuditFallback(ctx), tx, journal.InstanceAuditFields{ID: generateCUID(), Action: "auth.password_reset", EntityType: "user", EntityID: sql.NullString{String: userID, Valid: true}, Metadata: sql.NullString{String: string(metadata), Valid: true}, CreatedAt: now}); err != nil {
 		return err
 	}
 	if err := acknowledgePasswordTx(ctx, tx, userID, expectedHash); err != nil {
@@ -144,8 +165,12 @@ func RevokeRecoveryCLITokensTx(ctx context.Context, tx *sql.Tx, actor, userID, n
 	if n, err := res.RowsAffected(); err != nil || n != int64(len(ids)) {
 		return nil, errors.Join(err, errors.New("token revoke count changed"))
 	}
+	// Each token revocation is a pure revocation and may fall back with a
+	// broken chain tail. The web reset still fails closed at its own password
+	// audit, which rolls these back with it; local recovery completes.
+	revokeCtx := withSecurityAuditFallback(ctx)
 	for _, id := range ids {
-		if err := appendInstanceAuditTx(ctx, tx, journal.InstanceAuditFields{
+		if err := appendInstanceAuditTx(revokeCtx, tx, journal.InstanceAuditFields{
 			ID: generateCUID(), UserID: sql.NullString{String: actor, Valid: actor != ""}, Action: "auth.cli_token_revoked",
 			EntityType: "cli_token", EntityID: sql.NullString{String: id, Valid: true}, CreatedAt: now,
 		}); err != nil {
