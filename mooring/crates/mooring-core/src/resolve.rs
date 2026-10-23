@@ -223,11 +223,12 @@ pub fn plan(
     }) {
         return Err(InvalidBatch::InvalidRejection);
     }
-    let cycles = cyclic_changes(changes, prior, direct, &op_to_change);
+    let preflight = admission_failures(changes, prior, direct, &op_to_change);
+    let cycles = cyclic_changes(changes, prior, &preflight, &op_to_change);
     let mut context = Context {
         changes,
         prior,
-        direct,
+        direct: &preflight,
         op_to_change,
         cycles,
         visiting: vec![false; changes.len()],
@@ -504,4 +505,117 @@ fn cyclic_changes(
                 .map(|operation| operation.op_id.clone())
         })
         .collect()
+}
+
+/// Gather definite nonexecuting outcomes before SCC. Propagation removes a
+/// failed vertex's outgoing edges, so an apparent cycle cannot hide an already
+/// definite admission/dependency rejection. No adapter is invoked here.
+fn admission_failures(
+    changes: &[AtomicChange],
+    prior: &BTreeMap<String, PriorOperation>,
+    direct: &BTreeMap<String, Rejection>,
+    owners: &BTreeMap<String, usize>,
+) -> BTreeMap<String, Rejection> {
+    let mut failures = BTreeMap::new();
+    for change in changes {
+        let members: Vec<_> = change
+            .operations
+            .iter()
+            .map(|op| op.op_id.clone())
+            .collect();
+        let conflict = change.operations.iter().find(|op| {
+            prior.get(&op.op_id).is_some_and(|old| {
+                old.fingerprint != op.fingerprint
+                    || old.change_id != change.change_id
+                    || old.member_ids != members
+                    || old.task_id != change.task_id
+            })
+        });
+        if let Some(op) = conflict {
+            failures.insert(
+                op.op_id.clone(),
+                Rejection::direct(
+                    &op.op_id,
+                    Code::OpIdConflict,
+                    "operation content, atomic membership or task changed",
+                ),
+            );
+            continue;
+        }
+        if prior.contains_key(&change.operations[0].op_id) {
+            if let Some(reason) =
+                change
+                    .operations
+                    .iter()
+                    .find_map(|op| match &prior[&op.op_id].outcome {
+                        HostOutcome::Rejected(reason) => Some(reason),
+                        _ => None,
+                    })
+            {
+                failures.insert(change.operations[0].op_id.clone(), reason.clone());
+            }
+            continue; // committed/rejected matching retries never revalidate
+        }
+        if let Some((op, reason)) = change
+            .operations
+            .iter()
+            .find_map(|op| direct.get(&op.op_id).map(|reason| (op, reason)))
+        {
+            failures.insert(op.op_id.clone(), reason.clone());
+            continue;
+        }
+        'operations: for op in &change.operations {
+            for dependency in &op.dependencies {
+                if owners.contains_key(dependency) {
+                    continue;
+                }
+                let reason = match prior.get(dependency) {
+                    Some(old) => match &old.outcome {
+                        HostOutcome::PreviouslyConfirmed => continue,
+                        HostOutcome::Rejected(reason) => Rejection::dependent(reason.root.clone()),
+                    },
+                    None => Rejection::direct(
+                        &op.op_id,
+                        Code::UnknownDependency,
+                        &format!("unknown dependency {dependency}"),
+                    ),
+                };
+                failures.insert(op.op_id.clone(), reason);
+                break 'operations;
+            }
+        }
+    }
+    // At most one new failed change per pass is needed for progress; the
+    // operation/dependency iteration order makes selection deterministic.
+    loop {
+        let mut added = false;
+        for change in changes {
+            if change
+                .operations
+                .iter()
+                .any(|op| failures.contains_key(&op.op_id) || prior.contains_key(&op.op_id))
+            {
+                continue;
+            }
+            'operations: for op in &change.operations {
+                for dependency in &op.dependencies {
+                    if let Some(&owner) = owners.get(dependency) {
+                        if let Some(root) = changes[owner].operations.iter().find_map(|member| {
+                            failures
+                                .get(&member.op_id)
+                                .map(|reason| reason.root.clone())
+                        }) {
+                            failures.insert(op.op_id.clone(), Rejection::dependent(root));
+                            added = true;
+                            break 'operations;
+                        }
+                    }
+                }
+            }
+        }
+        if !added {
+            break;
+        }
+    }
+    failures
 }

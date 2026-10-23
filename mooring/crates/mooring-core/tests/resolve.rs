@@ -378,3 +378,43 @@ fn d4_indivisible_atomic_cross_dependency_cycle_cannot_be_scheduled_as_partial_c
     );
     assert!(result.execution_order.is_empty());
 }
+
+#[test]
+fn d4_definite_admission_failure_removes_outgoing_edges_before_scc() {
+    for code in [Code::TaskCancelled, Code::UnknownDependency] {
+        let mut changes = [
+            change("a", vec![op("A", &["B"])]),
+            change("b", vec![op("B", &["A"])]),
+        ];
+        let mut direct = BTreeMap::new();
+        if code == Code::TaskCancelled {
+            direct.insert(
+                "A".into(),
+                Rejection::direct("A", code.clone(), "task cancelled"),
+            );
+        } else {
+            changes[0].operations[0].dependencies.push("missing".into());
+        }
+        let result = run(&changes, &BTreeMap::new(), &direct);
+        assert_eq!(
+            rejected(&result.changes[0].operations[0].decision).code,
+            code
+        );
+        let dependent = rejected(&result.changes[1].operations[0].decision);
+        assert_eq!(dependent.code, Code::DependencyRejected);
+        assert_eq!(dependent.root.op_id, "A");
+        assert_eq!(dependent.root.code, code);
+    }
+    let changes = [
+        change("a", vec![op("A", &["missing"])]),
+        change("b", vec![op("B", &["C", "A"])]),
+        change("c", vec![op("C", &["B"])]),
+    ];
+    let result = run(&changes, &BTreeMap::new(), &BTreeMap::new());
+    for index in 1..3 {
+        let reason = rejected(&result.changes[index].operations[0].decision);
+        assert_eq!(reason.code, Code::DependencyRejected);
+        assert_eq!(reason.root.op_id, "A");
+        assert_eq!(reason.root.code, Code::UnknownDependency);
+    }
+}
