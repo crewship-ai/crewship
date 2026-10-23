@@ -49,7 +49,7 @@ pub fn valid_identifier(value: &str) -> bool {
 /// are { [ , : outside quoted strings; the outer container has depth one.
 /// Strict parsing afterwards rejects bad syntax, escapes, duplicate keys,
 /// invalid Unicode, nonfinite numbers and trailing content.
-pub(crate) fn preflight(raw: &[u8]) -> Result<(), WireError> {
+pub fn preflight(raw: &[u8]) -> Result<(), WireError> {
     preflight_with_limit(raw, MAX_FRAME_BYTES)
 }
 

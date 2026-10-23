@@ -67,8 +67,14 @@ pub fn validate(raw: &[u8], peer: Peer) -> Result<CanonicalValue, WireError> {
     Ok(value)
 }
 
+/// Resource-only preflight for a previously selected inherited control channel.
+/// This is not syntax, schema, authority, or profile negotiation validation.
+pub fn preflight(raw: &[u8]) -> Result<(), WireError> {
+    wire::preflight_with_limit(raw, MAX_CONTROL_BYTES)
+}
+
 fn normalize(raw: &[u8]) -> Result<CanonicalValue, WireError> {
-    wire::preflight_with_limit(raw, MAX_CONTROL_BYTES)?;
+    preflight(raw)?;
     canonical::normalize_with_limit(raw, MAX_CONTROL_BYTES).map_err(|error| match error {
         canonical::CanonicalError::Size => WireError::ResourceLimit,
         _ => WireError::InvalidJson,

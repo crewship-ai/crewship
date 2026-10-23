@@ -86,3 +86,22 @@ counter is `precondition_failed`, attributed to the actual operation. This initi
 `agent_confirmed_current` capability rejects causal stale and provisional reads;
 the shared context fixtures qualify only this pure intersection, not host commits
 or the remaining broader collaboration modes.
+
+The packaged `mooring-collab --rpc-fd 3` now registers only `wordcraft` and the
+explicit protocol/model/engine tuple `0.4.0 / 0.1.0 / 0.10.0`. The native model
+qualification is source `668d7ce3a4b1dcf241a9c50a20754a85647a02c4`
+(`v0.10.0-64-g668d7ce3`), not the `v0.10.0` tag. The wrapper model is version
+0.1.0; release source/binary/WASM provenance remains separate from these semantic
+labels. This is host-only preparation, separate from participant interoperability.
+
+After explicit private control profile selection, the inherited process validates
+full checkpoint inventory or prepares an owned WordCraft candidate, validates its
+opaque state and declared effects again, then returns a bounded candidate or an
+actual-member failure. It never installs candidates, retains an outcome ledger,
+issues Saved, or opens a participant listener. No profile selection retains the
+small bootstrap-only behavior. Invalid controls, uncertain app errors and oversized
+responses close the channel as nonterminal errors; output serialization is bounded
+before a full response allocation. The Go host must hold its writer transaction,
+recheck authority/fencing, commit content/outcomes/target versions together, and
+only then acknowledge or deliver. Human Yrs updates and causal/provisional reads
+remain unsupported by the first negotiated capability.
