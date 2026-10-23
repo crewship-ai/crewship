@@ -1,5 +1,7 @@
 //! Default-off pure WordCraft WASM model facade. No network, authoritative
 //! install, durable receipt or human CRDT update admission is implemented here.
+mod experimental_draft;
+
 use mooring_core::adapter::{PrepareAdapter, Prepared, PreparedCandidate};
 use mooring_protocol::{
     canonical::fingerprint_atomic, wire::normalize_bounded, PrepareContext, Scope,
@@ -197,7 +199,7 @@ pub fn bind_agent_change(scope_json: &str, change_json: &str) -> Result<String, 
 #[wasm_bindgen]
 pub fn profile_json() -> String {
     let profile = mooring_wordcraft::profile::qualified_versions();
-    json!({"application_id":mooring_wordcraft::profile::APPLICATION_ID,"selected":profile,"checkpoint_format":mooring_wordcraft::profile::CHECKPOINT_FORMAT,"upstream_source":mooring_wordcraft::profile::SOURCE_PIN,"upstream_git_describe":mooring_wordcraft::profile::SOURCE_DESCRIBE,"facade_package_version":env!("CARGO_PKG_VERSION"),"authoritative_install":false,"human_raw_updates":false,"qualification_artifacts":mooring_wordcraft::profile::qualification_artifacts()}).to_string()
+    json!({"application_id":mooring_wordcraft::profile::APPLICATION_ID,"selected":profile,"checkpoint_format":mooring_wordcraft::profile::CHECKPOINT_FORMAT,"upstream_source":mooring_wordcraft::profile::SOURCE_PIN,"upstream_git_describe":mooring_wordcraft::profile::SOURCE_DESCRIBE,"facade_package_version":env!("CARGO_PKG_VERSION"),"authoritative_install":false,"human_raw_updates":false,"experimental_local_drafts":true,"human_causal_witness":false,"qualification_artifacts":mooring_wordcraft::profile::qualification_artifacts()}).to_string()
 }
 #[cfg(test)]
 mod tests {

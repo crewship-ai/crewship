@@ -136,3 +136,23 @@ containers, embeds, subdocuments and unknown content kinds fail nonterminally;
 this is not general-purpose Yrs feature support or a human admission API. Scope,
 authority, negotiated transport limits and checkpoint provenance remain the
 caller's responsibility. The scan borrows the input and allocates nothing.
+
+### Experimental local drafts
+
+`experimental_draft::DraftReplica` and the `WordCraftLocalDraft` WASM facade
+exercise original client-authored updates, immutable retry bytes, selective
+origin undo and fresh-origin recovery. They are local draft mechanics, not a
+server admission or authorization API. The local frontier stamp calculation is
+explicitly NOT a qualified human causal witness; no human wire capability may
+be enabled from these primitives. `human_raw_updates` reports host admission
+capability and remains false; `experimental_local_drafts` describes this separate
+local experiment. Host scope, epochs, origin issuance and current rights still
+require independent validation.
+
+The client keeps at most 256 original operation records and 1,024 retired local
+origins; acknowledgement-based eviction and durable browser pending storage are
+not implemented here. Recovery preserves the full prior native draft and original
+proposals, requires a fresh unused origin and refuses old operation IDs. Input
+labelled verified-host is authenticated by the caller; disposable-fork validation
+is a model integrity check, not proof of host authority or a complete human delta
+auditor. No receipt, durable Saved status or native WordApp hook is supplied.

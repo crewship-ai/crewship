@@ -5,6 +5,8 @@ pub mod adapter;
 mod candidate;
 mod checkpoint_wire;
 pub mod command;
+/// Unqualified local-draft experiment; no human protocol capability.
+pub mod experimental_draft;
 mod format;
 #[cfg(test)]
 mod human;
