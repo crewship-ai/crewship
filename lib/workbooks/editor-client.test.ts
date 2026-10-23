@@ -73,6 +73,23 @@ describe("editorFrameSrc", () => {
     expect(editorFrameSrc(`${HOST}/_editor/b/${DIGEST}/index.html`, "", HOST)).toBeNull()
   })
 
+  it("resolves the server's relative same-host editor URL against the host origin", () => {
+    expect(editorFrameSrc(`/_editor/b/${DIGEST}/index.html`, DIGEST, HOST)).toBe(`${HOST}/_editor/b/${DIGEST}/index.html?host=authority&parent_origin=${encodeURIComponent(HOST)}&v=1`)
+    expect(editorFrameSrc(`/_editor/b/${DIGEST}/index.html`, DIGEST, "http://127.0.0.1:3000", { allowLoopbackHttp: true })).toContain("http://127.0.0.1:3000/_editor/b/")
+    expect(editorFrameSrc(`/_editor/b/${DIGEST}/index.html`, DIGEST, "http://studio.test", { allowLoopbackHttp: false })).toBeNull()
+  })
+
+  it.each([
+    ["a relative path outside the editor prefix", `/b/${DIGEST}/index.html`],
+    ["a relative path to another file", `/_editor/b/${DIGEST}/app.js`],
+    ["a relative path with another digest", `/_editor/b/${"e".repeat(64)}/index.html`],
+    ["a relative traversal", `/_editor/b/${DIGEST}/../../api/v1/index.html`],
+    ["a protocol-relative URL", `//editor.test/b/${DIGEST}/index.html`],
+    ["a path without a leading slash", `_editor/b/${DIGEST}/index.html`],
+  ])("refuses %s", (_, url) => {
+    expect(editorFrameSrc(url, DIGEST, HOST)).toBeNull()
+  })
+
   it.each([
     ["an empty pin (no editor origin configured)", ""],
     ["a prefixed pin", `sha256:${DIGEST}`],

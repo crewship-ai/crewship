@@ -181,7 +181,9 @@ export function editorFrameSrc(
 ): string | null {
   if (!editorUrl || !isBundleDigest(bundleDigest)) return null
   let url: URL
-  try { url = new URL(editorUrl) } catch { return null }
+  // The zero-config server sends a path on the host's own origin; a protocol-relative URL is not one.
+  const relative = editorUrl.startsWith("/") && !editorUrl.startsWith("//")
+  try { url = relative ? new URL(editorUrl, hostOrigin) : new URL(editorUrl) } catch { return null }
   if (url.username || url.password) return null
   if (url.protocol !== "https:" && !(allowLoopbackHttp && url.protocol === "http:" && LOOPBACK.has(url.hostname))) return null
   const path = url.origin === hostOrigin ? `${SAME_HOST_PREFIX}/b/${bundleDigest}/index.html` : `/b/${bundleDigest}/index.html`
