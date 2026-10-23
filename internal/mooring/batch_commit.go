@@ -1,0 +1,365 @@
+package mooring
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"strconv"
+)
+
+func (s *BatchStore) loadKnown(ctx context.Context, tx *sql.Tx, k SessionKey, changes []BatchChange) (map[int]BatchChangeResult, error) {
+	known := map[int]BatchChangeResult{}
+	for index, c := range changes {
+		var membership, raw string
+		err := tx.QueryRowContext(ctx, `SELECT membership_hash,result_json FROM mooring_collab_changes WHERE page_id=? AND change_id=?`, k.ArtifactID, c.ID).Scan(&membership, &raw)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+		exists := err == nil
+		if exists {
+			if membership != c.MembershipHash {
+				return nil, ErrOperationConflict
+			}
+			var result BatchChangeResult
+			if err = json.Unmarshal([]byte(raw), &result); err != nil {
+				return nil, err
+			}
+			if len(result.Operations) != len(c.Operations) {
+				return nil, ErrInvalid
+			}
+			known[index] = result
+		}
+		for _, op := range c.Operations {
+			var fingerprint, change string
+			err = tx.QueryRowContext(ctx, `SELECT fingerprint,change_id FROM mooring_collab_operations WHERE page_id=? AND op_id=?`, k.ArtifactID, op.ID).Scan(&fingerprint, &change)
+			if errors.Is(err, sql.ErrNoRows) {
+				if exists {
+					return nil, ErrInvalid
+				}
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			if !exists || fingerprint != op.Fingerprint || change != c.ID {
+				return nil, ErrOperationConflict
+			}
+		}
+	}
+	return known, nil
+}
+func (s *BatchStore) ledgerCapacity(ctx context.Context, tx *sql.Tx, page string, changes []BatchChange, known map[int]BatchChangeResult) error {
+	fresh, operations := 0, 0
+	for i, c := range changes {
+		if _, ok := known[i]; !ok {
+			fresh++
+			operations += len(c.Operations)
+		}
+	}
+	var count int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM mooring_collab_operations WHERE page_id=?`, page).Scan(&count); err != nil {
+		return err
+	}
+	if operations > 0 && operations > s.config.Limits.LedgerOperations-count {
+		return ErrBatchCapacity
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM mooring_collab_changes WHERE page_id=?`, page).Scan(&count); err != nil {
+		return err
+	}
+	if fresh > 0 && fresh > s.config.Limits.Changes-count {
+		return ErrBatchCapacity
+	}
+	return s.auditCapacity(ctx, tx, page, fresh)
+}
+func (s *BatchStore) validateTasks(ctx context.Context, tx *sql.Tx, k SessionKey, changes []BatchChange, known map[int]BatchChangeResult) (map[int]*BatchRejection, error) {
+	reasons := map[int]*BatchRejection{}
+	counts := map[string]int{}
+	for i, c := range changes {
+		if _, ok := known[i]; !ok && c.TaskID != "" {
+			counts[c.TaskID]++
+		}
+	}
+	for i, c := range changes {
+		if _, ok := known[i]; ok || c.TaskID == "" {
+			continue
+		}
+		var actor, status string
+		var partial int
+		err := tx.QueryRowContext(ctx, `SELECT participant_ref,allow_partial,status FROM mooring_collab_tasks WHERE page_id=? AND task_id=?`, k.ArtifactID, c.TaskID).Scan(&actor, &partial, &status)
+		if err != nil {
+			return nil, err
+		} // Unknown task never creates a different task identity.
+		for _, op := range c.Operations {
+			if op.Participant != actor {
+				return nil, ErrInvalid
+			}
+		}
+		if partial == 0 {
+			var prior int
+			if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM mooring_collab_changes WHERE page_id=? AND task_id=?`, k.ArtifactID, c.TaskID).Scan(&prior); err != nil {
+				return nil, err
+			}
+			if counts[c.TaskID] != 1 || prior != 0 {
+				return nil, ErrInvalid
+			}
+		}
+		if status == "cancelled" {
+			reasons[i] = batchReason("task_cancelled")
+		}
+	}
+	return reasons, nil
+}
+func dependencyOutcome(ctx context.Context, tx *sql.Tx, page, id string) (*BatchOperationResult, error) {
+	var raw string
+	err := tx.QueryRowContext(ctx, `SELECT result_json FROM mooring_collab_operations WHERE page_id=? AND op_id=?`, page, id).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var result BatchOperationResult
+	err = json.Unmarshal([]byte(raw), &result)
+	return &result, err
+}
+func (s *BatchStore) deniedReason(err error) (*BatchRejection, error) {
+	if err == nil {
+		return nil, nil
+	}
+	var denied *BatchDenied
+	if errors.As(err, &denied) && (denied.Code == "permission_revoked" || denied.Code == "forbidden" || denied.Code == "task_cancelled") {
+		return batchReason(denied.Code), nil
+	}
+	return nil, err
+}
+
+// Commit atomically persists fresh outcomes and accepted checkpoints. Known
+// results are returned unchanged, including after a lost response/reconnection.
+// Any SQL/engine/owner error returns no terminal result; callers query Status.
+func (s *BatchStore) Commit(ctx context.Context, request BatchRequest) (BatchResult, error) {
+	if err := s.ready(); err != nil {
+		return BatchResult{}, err
+	}
+	changes, err := normalizeBatch(request)
+	if err != nil {
+		return BatchResult{}, err
+	}
+	result := BatchResult{}
+	emitted := false
+	eventChanges := []BatchChangeResult{}
+	err = s.transaction(ctx, func(tx *sql.Tx) error {
+		key := request.Lease.Key
+		// No operation/task existence lookup precedes current scoped authorization.
+		for _, c := range changes {
+			for i := range c.Operations {
+				op := &c.Operations[i]
+				if e := s.authorize(ctx, tx, key, "outcome", op, c.TaskID, op.Participant); e != nil {
+					return e
+				}
+			}
+		}
+		revision, checkpoint, e := batchScopeMatches(ctx, tx, key)
+		if e != nil {
+			return e
+		}
+		rev, e := batchCounter(revision)
+		if e != nil {
+			return e
+		}
+		known, e := s.loadKnown(ctx, tx, key, changes)
+		if e != nil {
+			return e
+		}
+		plan := planBatch(changes, known)
+		if e = s.ledgerCapacity(ctx, tx, key.ArtifactID, changes, known); e != nil {
+			return e
+		}
+		taskReasons, e := s.validateTasks(ctx, tx, key, changes, known)
+		if e != nil {
+			return e
+		}
+		done := map[int]bool{}
+		outcomes := map[string]BatchOperationResult{}
+		for index, r := range known {
+			done[index] = true
+			for _, op := range r.Operations {
+				outcomes[op.ID] = op
+			}
+		}
+		accepted := map[int]BatchChangeResult{}
+		for index, r := range known {
+			accepted[index] = r
+		}
+		for len(done) < len(changes) {
+			next := -1
+			for i := range changes {
+				if done[i] {
+					continue
+				}
+				ready := true
+				for _, d := range plan.Edges[i] {
+					if !done[d] {
+						ready = false
+						break
+					}
+				}
+				if ready || plan.Initial[i] != nil {
+					next = i
+					break
+				}
+			}
+			if next < 0 {
+				return ErrInvalid
+			}
+			c := changes[next]
+			reason := plan.Initial[next]
+			if reason == nil {
+				reason = taskReasons[next]
+			}
+			if reason == nil {
+				for _, op := range c.Operations {
+					for _, dep := range op.Dependencies {
+						if index, ok := plan.ByOperation[dep]; ok && index == next {
+							continue
+						}
+						prior, ok := outcomes[dep]
+						if !ok {
+							stored, e := dependencyOutcome(ctx, tx, key.ArtifactID, dep)
+							if e != nil {
+								return e
+							}
+							if stored == nil {
+								reason = batchReason("unknown_dependency")
+								break
+							}
+							prior = *stored
+						}
+						if prior.Status == "rejected" {
+							if prior.Reason == nil || !validBatchRejection(prior.Reason) {
+								return ErrInvalid
+							}
+							reason = dependencyReason(prior)
+							break
+						}
+					}
+					if reason != nil {
+						break
+					}
+				}
+			}
+			if reason == nil && request.ExpectedRevision != revision {
+				reason = batchReason("precondition_failed")
+			}
+			if reason == nil {
+				if _, _, e := batchRange(rev, len(c.Operations)); e != nil {
+					reason = batchReason("capacity_exhausted")
+				}
+			}
+			for i := range c.Operations {
+				op := &c.Operations[i]
+				denied, e := s.deniedReason(s.authorize(ctx, tx, key, "write", op, c.TaskID, op.Participant))
+				if e != nil {
+					return e
+				}
+				if reason == nil && denied != nil {
+					reason = denied
+				}
+			}
+			var candidate []byte
+			if reason == nil {
+				isolatedRaw, e := json.Marshal(c)
+				if e != nil {
+					return e
+				}
+				var isolated BatchChange
+				if e = json.Unmarshal(isolatedRaw, &isolated); e != nil {
+					return e
+				}
+				candidate, reason, e = s.config.Adapter.Apply(ctx, append([]byte(nil), checkpoint...), isolated)
+				if e != nil {
+					return e
+				}
+				if reason != nil && !validBatchRejection(reason) {
+					return ErrInvalid
+				}
+				if reason == nil {
+					if len(candidate) > s.config.Limits.CheckpointBytes {
+						reason = batchReason("quota_exceeded")
+					} else if e = s.config.Adapter.ValidateCheckpoint(ctx, append([]byte(nil), candidate...)); e != nil {
+						return e
+					}
+					e = s.checkpointCapacity(ctx, tx, key.ArtifactID, len(candidate))
+					if errors.Is(e, ErrBatchCapacity) {
+						reason = batchReason("quota_exceeded")
+					} else if e != nil {
+						return e
+					}
+				}
+			}
+			// Recheck every original participant after expensive engine validation.
+			// A prepared apply does not carry authorization and cannot issue Saved.
+			for i := range c.Operations {
+				op := &c.Operations[i]
+				denied, e := s.deniedReason(s.authorize(ctx, tx, key, "write", op, c.TaskID, op.Participant))
+				if e != nil {
+					return e
+				}
+				if denied != nil && reason == nil {
+					reason = denied
+				}
+			}
+			if e = s.config.Owners.Check(ctx, tx, request.Lease); e != nil {
+				return e
+			}
+			var stored BatchChangeResult
+			if reason != nil {
+				stored = rejectedBatchChange(c, reason)
+			} else {
+				stored, e = savedBatchChange(c, rev)
+				if e != nil {
+					return e
+				}
+				if e = s.saveCheckpoint(ctx, tx, key, stored.LastRevision, candidate); e != nil {
+					return e
+				}
+				checkpoint = append([]byte(nil), candidate...)
+				rev, e = batchCounter(stored.LastRevision)
+				if e != nil {
+					return e
+				}
+			}
+			if e = s.saveChange(ctx, tx, key, c, stored); e != nil {
+				return e
+			}
+			eventChanges = append(eventChanges, stored)
+			accepted[next] = stored
+			done[next] = true
+			for _, op := range stored.Operations {
+				outcomes[op.ID] = op
+			}
+			emitted = true
+		}
+		if emitted {
+			if e = s.config.Owners.Check(ctx, tx, request.Lease); e != nil {
+				return e
+			}
+		}
+		result.Revision = strconv.FormatUint(rev, 10)
+		result.Changes = make([]BatchChangeResult, len(changes))
+		for i := range changes {
+			result.Changes[i] = accepted[i]
+		}
+		return nil
+	})
+	if err != nil {
+		return BatchResult{}, err
+	}
+	if emitted && s.config.AfterCommit != nil {
+		raw, _ := json.Marshal(BatchResult{Revision: result.Revision, Changes: eventChanges})
+		var eventResult BatchResult
+		_ = json.Unmarshal(raw, &eventResult)
+		s.config.AfterCommit(BatchCommitEvent{Scope: request.Lease.Key, Result: eventResult})
+	}
+	return result, nil
+}
