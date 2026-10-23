@@ -284,6 +284,23 @@ var startCmd = &cobra.Command{
 		if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
 			return fmt.Errorf("failed to run migrations: %w", err)
 		}
+		// A rotate-key interrupted between its audit commit and the keyring
+		// rename is finished now; one whose entry never committed is set aside.
+		if auditPath == filepath.Join(dataDir.Root, journal.SigningKeysFile) {
+			changed, err := journal.ResolvePendingSigningKeyRotations(dataDir.Root, func(id string) (bool, error) {
+				var found bool
+				err := db.QueryRowContext(context.Background(), `SELECT EXISTS(SELECT 1 FROM instance_audit_logs WHERE id=? AND action=?)`, id, journal.SigningKeyRotatedAction).Scan(&found)
+				return found, err
+			})
+			if err != nil {
+				return fmt.Errorf("settle pending audit key rotation: %w", err)
+			}
+			if changed {
+				if cfg.Audit.Keys, err = journal.LoadSigningKeys(auditPath); err != nil {
+					return fmt.Errorf("load rotated audit keyring: %w", err)
+				}
+			}
+		}
 		// Automations an instance restore left held (`crewship recover`):
 		// schedulers, inbound webhooks and queued work read this in-memory
 		// copy on every tick and request until an admin resumes them. Loaded

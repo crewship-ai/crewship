@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,7 +14,7 @@ func TestAuditOwnerCheckpointAtomicFaultsAndFreshAuthority(t *testing.T) {
 	for _, scope := range []string{"instance", "workspace"} {
 		for _, fault := range []string{"healthy", "nonowner", "stale", "abort", "ignore", "old_tail_undo", "checkpoint_delete", "actor_suspend", "deferred_commit", "after_successor"} {
 			t.Run(scope+"/"+fault, func(t *testing.T) {
-				t.Setenv("ENCRYPTION_KEY", "synthetic-checkpoint-before")
+				t.Setenv("ENCRYPTION_KEY", strings.Repeat("6", 64))
 				_, oldPath, keyErr := journal.EnsureSigningKeys(t.TempDir(), "")
 				if keyErr != nil {
 					t.Fatal(keyErr)
@@ -46,7 +47,7 @@ func TestAuditOwnerCheckpointAtomicFaultsAndFreshAuthority(t *testing.T) {
 				if err := f.db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&baselineCount); err != nil {
 					t.Fatal(err)
 				}
-				t.Setenv("ENCRYPTION_KEY", "synthetic-checkpoint-after")
+				t.Setenv("ENCRYPTION_KEY", strings.Repeat("7", 64))
 				_, newPath, keyErr := journal.EnsureSigningKeys(t.TempDir(), "")
 				if keyErr != nil {
 					t.Fatal(keyErr)

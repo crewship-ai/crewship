@@ -2,6 +2,7 @@ package api
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,7 +11,7 @@ import (
 )
 
 func TestAuditAutoRevertRetainsBootSigningSnapshot(t *testing.T) {
-	t.Setenv("ENCRYPTION_KEY", "synthetic-auto-revert-legacy")
+	t.Setenv("ENCRYPTION_KEY", strings.Repeat("8", 64))
 	old, path, err := journal.EnsureSigningKeys(t.TempDir(), "")
 	if err != nil {
 		t.Fatal(err)
