@@ -25,11 +25,11 @@ const PAGE = "page-1"
 const api = {
   flag: true,
   rev: 1,
-  cells: { A1: "Item", B2: "10" },
+  cells: new Map([["A1", "Item"], ["B2", "10"]]),
   /** rev → commit; rev 1 is the import. */
   commits: [{ rev: 1, kind: "snapshot" }],
   /** cell → { rev, writer } of its last write. */
-  writes: {},
+  writes: new Map(),
   receipts: new Map(),
   sessions: new Map(),
   opened: 0,
@@ -56,7 +56,7 @@ function commit(writer, actor, ops, extra = {}) {
     if (typeof op.cell !== "string" || !/^[A-Z]{1,3}[1-9][0-9]{0,6}$/.test(op.cell)) throw new Error("Invalid fixture cell address")
   }
   api.rev++
-  for (const op of ops) { api.cells[op.cell] = op.input; api.writes[op.cell] = { rev: api.rev, writer } }
+  for (const op of ops) { api.cells.set(op.cell, op.input); api.writes.set(op.cell, { rev: api.rev, writer }) }
   api.commits.push({ rev: api.rev, kind: "cells", actor_label: actor, ops: ops.map(({ sheet, cell, input }) => ({ sheet, cell, input })), writer, ...extra })
   return api.rev
 }
@@ -69,11 +69,11 @@ function address(cell) {
 }
 function gridcraftSnapshot() {
   const rows = {}
-  for (const [cell, input] of Object.entries(api.cells)) {
+  for (const [cell, input] of api.cells) {
     const { row, col } = address(cell)
     ;(rows[row] ??= {})[col] = { value: { t: "Text", v: input }, formula: null, style: 0 }
   }
-  return { sheets: [{ name: "Sheet1", cells: { bands: { 0: { rows } }, len: Object.keys(api.cells).length } }], active_sheet: 0 }
+  return { sheets: [{ name: "Sheet1", cells: { bands: { 0: { rows } }, len: api.cells.size } }], active_sheet: 0 }
 }
 
 const json = (response, status, body) => { response.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" }); response.end(body === undefined ? "" : JSON.stringify(body)) }
@@ -122,8 +122,8 @@ async function workbookApi(request, response, path, query) {
     const known = api.receipts.get(edit.mutation_id)
     if (known) return json(response, 200, known)
     const conflicts = edit.ops.flatMap(op => {
-      const last = api.writes[op.cell]
-      return last && last.rev > edit.base_rev && last.writer !== edit.session_id ? [{ cell: op.cell, input: api.cells[op.cell], rev: last.rev, actor_label: last.writer.startsWith("agent:") ? "Agent Ada" : "Owner" }] : []
+      const last = api.writes.get(op.cell)
+      return last && last.rev > edit.base_rev && last.writer !== edit.session_id ? [{ cell: op.cell, input: api.cells.get(op.cell), rev: last.rev, actor_label: last.writer.startsWith("agent:") ? "Agent Ada" : "Owner" }] : []
     })
     if (conflicts.length) return json(response, 409, { error: "precondition_failed", head_rev: api.rev, conflicts })
     const rev = commit(edit.session_id, "Owner", edit.ops, { own: true, session_id: edit.session_id, mutation_id: edit.mutation_id })
@@ -525,7 +525,7 @@ try {
     await commitCell(page, "C2", "memory")
     await page.getByText("Saved", { exact: true }).waitFor({ timeout: 8000 })
     await waitEditor(page, s => s.acks.includes(1), 3000)
-    assert.equal(api.cells.C2, "memory")
+    assert.equal(api.cells.get("C2"), "memory")
 
     api.editMode = "unreadable"
     await commitCell(page, "C3", "lost")
@@ -538,12 +538,12 @@ try {
     api.editMode = "normal"
     await commitCell(page, "C4", "later")
     await waitEditor(page, s => s.acks.length >= 2, 5000)
-    assert.equal(api.cells.C4, "later")
+    assert.equal(api.cells.get("C4"), "later")
     // The later edit is saved, but the unconfirmed one still waits for the person: never "Saved" meanwhile.
     await page.getByText("Not saved · a change was refused").waitFor({ timeout: 5000 })
     await page.getByRole("button", { name: "Keep mine for Sheet1!C3" }).click()
     await page.getByText("Saved", { exact: true }).waitFor({ timeout: 5000 })
-    assert.equal(api.cells.C3, "lost")
+    assert.equal(api.cells.get("C3"), "lost")
     assert.equal(await page.locator("iframe").count(), 1)
     step("unconfirmed-bounded", { memorySettledByFeed: true, unreadableAttempts: c3.length, rejected: state.rejected.at(-1).code, laterEditSaved: true, refusalKeptUntilDecided: true })
     await page.close()
@@ -560,7 +560,7 @@ try {
     await commitCell(page, "D1", "after-expiry")
     await page.getByText("Saved", { exact: true }).waitFor({ timeout: 5000 })
     const d1 = editsFor("D1")
-    assert.equal(api.cells.D1, "after-expiry")
+    assert.equal(api.cells.get("D1"), "after-expiry")
     assert.equal(api.opened, openedBefore + 1)
     // The editor's own expiry never reaches the app-wide sign-in handling: no token refresh, no replay.
     assert.deepEqual(d1.map(edit => edit.session_id), [first, api.lastSession])
