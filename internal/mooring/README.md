@@ -69,3 +69,11 @@ not a scheduler or complete task execution API. Restoring durable task/checkpoin
 operation/audit records grants no execution authority; fresh runtime/participant
 admission and fresh owner capability remain mandatory. All six collaboration
 tables are portable durable data; process-bound owner leases stay excluded.
+
+
+Current portable recovery qualification is **exact IDs into an empty artifact
+destination**. Workspace/crew forks, artifact ID remapping and history merges
+are refused before any destination deletion/write. Fingerprints bind original
+scope; re-keying history, dropping it or presenting it as new-scope Saved would
+violate that identity. Qualified clone/import provenance belongs to the later
+recovery integration. No transformed restore support is claimed by this primitive.
