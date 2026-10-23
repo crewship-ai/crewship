@@ -237,10 +237,15 @@ func (s *Store) Execute(ctx context.Context, k Key, r Request, a Authorize, e En
 	defer cancel()
 	c, err := e.Prepare(candidateCtx, res.binding, res.state, r.Command)
 	if err != nil {
-		return Receipt{}, err
+		return Receipt{}, s.interrupted(ctx, k, a, err)
 	}
 	if err = candidateCtx.Err(); err != nil {
-		return Receipt{}, err
+		return Receipt{}, s.interrupted(ctx, k, a, err)
+	}
+	// Default-off test hook (build tag crewship_testbarrier). It only delays the
+	// commit below; every check in that transaction still runs afterwards.
+	if err = testBarrier(ctx, barrierPreCommit, k, res.principal.AuthorityID, r.MutationID); err != nil {
+		return Receipt{}, s.interrupted(ctx, k, a, err)
 	}
 	var receipt Receipt
 	err = s.tx(ctx, k, a, func(tx *sql.Tx, p Principal) error {
@@ -378,7 +383,47 @@ func (s *Store) Execute(ctx context.Context, k Key, r Request, a Authorize, e En
 		_, err = tx.ExecContext(ctx, `UPDATE gridcraft_operations SET state='applied',receipt=?,lease_until=0 WHERE workspace_id=? AND page_id=? AND authority_id=? AND mutation_id=? AND token=?`, receiptBytes, k.WorkspaceID, k.PageID, p.AuthorityID, r.MutationID, res.token)
 		return err
 	})
-	return receipt, err
+	if err != nil {
+		return Receipt{}, s.interrupted(ctx, k, a, err)
+	}
+	if err = testBarrier(ctx, barrierPostCommit, k, res.principal.AuthorityID, r.MutationID); err != nil {
+		// Committed; only the acknowledgement is lost. A retry returns the receipt.
+		return Receipt{}, err
+	}
+	return receipt, nil
+}
+
+// interrupted classifies a failure that happened after the request context
+// ended. Revoking a credential cancels its in-flight request, which engine
+// transports report as unavailable; the caller must instead learn that its
+// authority is gone. Authorization is re-evaluated read-only (no writer
+// fence, rolled back) on a detached, bounded context purely to choose the
+// error: nothing is written or granted.
+func (s *Store) interrupted(ctx context.Context, k Key, a Authorize, err error) error {
+	if ctx.Err() == nil {
+		return err
+	}
+	check, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	authErr := s.recheckAuthority(check, k, a)
+	if errors.Is(authErr, ErrUnauthenticated) || errors.Is(authErr, ErrForbidden) || errors.Is(authErr, ErrNotFound) {
+		return authErr
+	}
+	// Still authorized: the caller went away. Keep both causes in the chain.
+	return fmt.Errorf("%w: operation interrupted: %w", ctx.Err(), err)
+}
+
+func (s *Store) recheckAuthority(ctx context.Context, k Key, a Authorize) error {
+	if a == nil || !bounded(k.WorkspaceID) || !bounded(k.PageID) {
+		return ErrForbidden
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, err = a(ctx, tx)
+	return err
 }
 
 // pruneHistory drops history that replay from checkpoint keep no longer needs:

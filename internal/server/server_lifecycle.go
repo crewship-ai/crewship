@@ -104,6 +104,13 @@ func (s *Server) Start(ctx context.Context) error {
 	if s.documentsStartupErr != nil {
 		return fmt.Errorf("Docs authority startup: %w", s.documentsStartupErr)
 	}
+	port := 0
+	if s.cfg != nil {
+		port = s.cfg.Server.Port
+	}
+	if err := startGridCraftTestBarrier(s.logger, port); err != nil {
+		return err
+	}
 	s.startedAt = time.Now()
 
 	// Recover orphaned RUNNING runs from previous crashes/restarts.

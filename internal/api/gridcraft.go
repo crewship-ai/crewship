@@ -65,8 +65,16 @@ func (r *Router) RegisterGridCraft(options appengine.Options, engine appengine.E
 	r.mux.Handle("POST /api/v1/internal/gridcraft", internalAuth(http.HandlerFunc(h.agent)))
 }
 func gridcraftError(w http.ResponseWriter, err error) {
+	if errors.Is(err, appengine.ErrUnauthenticated) {
+		// Same wire shape as the auth middleware gives the next request.
+		writeAuthError(w, http.StatusUnauthorized, reasonSessionInvalid)
+		return
+	}
 	code, message := 500, "Workbook operation failed"
 	switch {
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		// Still authorized, but the call was interrupted (the caller left).
+		code, message = 503, "Workbook unavailable"
 	case errors.Is(err, appengine.ErrForbidden), errors.Is(err, appengine.ErrNotFound):
 		code, message = 404, "Workbook not found"
 	case errors.Is(err, appengine.ErrInvalid), errors.Is(err, appengine.ErrCandidate):
@@ -100,16 +108,11 @@ func (h *gridcraftHTTP) humanAuthority(r *http.Request, k appengine.Key, write b
 		ctx = context.WithValue(ctx, pageAuthReaderKey{}, tx)
 		request := r.WithContext(ctx)
 		user := UserFromContext(ctx)
-		agent, _ := pageGrantCallerIsAgent(request)
-		if user == nil || agent || projectAgentFrom(ctx) != nil || ctx.Value(artifactRunKey{}) != nil {
+		if !gridcraftHumanCaller(request) {
 			return appengine.Principal{}, appengine.ErrForbidden
 		}
-		scope := "pages:read"
-		if write {
-			scope = "pages:write"
-		}
-		if validateContentHumanCredential(request, tx, scope) != nil {
-			return appengine.Principal{}, appengine.ErrForbidden
+		if err := gridcraftCredential(request, tx, write); err != nil {
+			return appengine.Principal{}, err
 		}
 		rec, access, err := h.pages.workbookHumanAccess(ctx, k.WorkspaceID, k.PageID, user.ID, write)
 		if err != nil {
@@ -135,20 +138,60 @@ func (h *gridcraftHTTP) auditRead(w http.ResponseWriter, r *http.Request, rec *p
 	}
 	return h.pages.auditPrivateOwnerAccess(w, r, &audited)
 }
+
+// gridcraftHumanCaller reports whether the request comes from a human user
+// directly: not an agent, an acting agent, an internal token or an artifact run.
+func gridcraftHumanCaller(r *http.Request) bool {
+	ctx := r.Context()
+	agent, _ := pageGrantCallerIsAgent(r)
+	return UserFromContext(ctx) != nil && !agent && projectAgentFrom(ctx) == nil && ctx.Value(artifactRunKey{}) == nil
+}
+
+// gridcraftCredential rechecks the human credential inside the operation's
+// transaction. Only a credential that is actually revoked or expired becomes
+// ErrUnauthenticated (401): the middleware admitted it, so it was lost while
+// the request ran. A missing scope or a storage failure while reading the
+// credential keeps the hidden refusal, so a busy database never signs a user
+// out.
+func gridcraftCredential(r *http.Request, tx *sql.Tx, write bool) error {
+	scope := "pages:read"
+	if write {
+		scope = "pages:write"
+	}
+	err := validateContentHumanCredential(r, tx, scope)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, errInvalidCLIToken), errors.Is(err, errContentCredentialNotCurrent):
+		return appengine.ErrUnauthenticated
+	default:
+		return appengine.ErrForbidden
+	}
+}
+
 func (h *gridcraftHTTP) humanKey(r *http.Request, write bool) (appengine.Key, error) {
 	k := appengine.Key{WorkspaceID: WorkspaceIDFromContext(r.Context())}
 	column, ref := "slug", r.PathValue("slug")
 	if strings.HasPrefix(ref, "@") {
 		column, ref = "id", strings.TrimPrefix(ref, "@")
 	}
-	if h.pages.db.QueryRowContext(r.Context(), "SELECT id FROM pages WHERE workspace_id=? AND "+column+"=?", k.WorkspaceID, ref).Scan(&k.PageID) != nil {
-		return k, appengine.ErrForbidden
-	}
 	tx, err := h.pages.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		return k, err
 	}
 	defer tx.Rollback()
+	// An agent or internal caller is refused as not found before any credential
+	// check. For a human, the credential comes before the slug lookup: a revoked
+	// credential gets the same answer whether or not the Page exists.
+	if !gridcraftHumanCaller(r.WithContext(context.WithValue(r.Context(), pageAuthReaderKey{}, tx))) {
+		return k, appengine.ErrForbidden
+	}
+	if err = gridcraftCredential(r, tx, write); err != nil {
+		return k, err
+	}
+	if tx.QueryRowContext(r.Context(), "SELECT id FROM pages WHERE workspace_id=? AND "+column+"=?", k.WorkspaceID, ref).Scan(&k.PageID) != nil {
+		return k, appengine.ErrForbidden
+	}
 	_, err = h.humanAuthority(r, k, write, nil)(r.Context(), tx)
 	return k, err
 }

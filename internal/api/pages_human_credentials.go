@@ -4,12 +4,20 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 )
 
 var errContentCredentialScope = errors.New("current CLI scope required")
+
+// errContentCredentialNotCurrent: the session is revoked, expired or gone.
+var errContentCredentialNotCurrent = errors.New("current session required")
+
+// errContentCredentialUnverified: the credential could not be read (a storage
+// error such as a busy database), which says nothing about its validity.
+var errContentCredentialUnverified = errors.New("credential check unavailable")
 
 // Call through the operation's authority reader after its writer fence. Exact
 // credential validity is separate from live membership and object ACL checks.
@@ -28,12 +36,19 @@ func validateContentHumanCredential(r *http.Request, reader pageAuthQueryer, req
 	case AuthKindSession:
 		var expiry string
 		var revoked sql.NullString
-		if user.SessionID == "" || reader.QueryRowContext(r.Context(), `SELECT expires_at,revoked_at FROM user_sessions WHERE id=? AND user_id=?`, user.SessionID, user.ID).Scan(&expiry, &revoked) != nil || revoked.Valid {
-			return errors.New("current session required")
+		if user.SessionID == "" {
+			return errContentCredentialNotCurrent
+		}
+		err := reader.QueryRowContext(r.Context(), `SELECT expires_at,revoked_at FROM user_sessions WHERE id=? AND user_id=?`, user.SessionID, user.ID).Scan(&expiry, &revoked)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: %v", errContentCredentialUnverified, err)
+		}
+		if err != nil || revoked.Valid {
+			return errContentCredentialNotCurrent
 		}
 		limit, err := time.Parse(time.RFC3339Nano, expiry)
 		if err != nil || !time.Now().Before(limit) {
-			return errors.New("current session required")
+			return errContentCredentialNotCurrent
 		}
 		return nil
 	default:
@@ -63,6 +78,9 @@ func validateContentCLIToken(ctx context.Context, reader pageAuthQueryer, token,
 	var tier string
 	var expiry, revoked, scopes sql.NullString
 	err := reader.QueryRowContext(ctx, `SELECT c.tier,c.expires_at,c.revoked_at,c.scopes FROM cli_tokens c JOIN users u ON u.id=c.user_id WHERE c.token_hash=? AND c.user_id=? AND u.suspended_at IS NULL`, digest, userID).Scan(&tier, &expiry, &revoked, &scopes)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: %v", errContentCredentialUnverified, err)
+	}
 	if err != nil || tier != expected || revoked.Valid {
 		return errInvalidCLIToken
 	}
