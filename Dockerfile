@@ -55,6 +55,7 @@ COPY config/*.json ./config/
 COPY schemas/*.json ./schemas/
 COPY internal/pages/content_types.json ./internal/pages/
 COPY e2e/ ./e2e/
+COPY mooring/protocol/generated/ts/ ./mooring/protocol/generated/ts/
 COPY scripts/prepare-pdf-assets.mjs scripts/prepare-chat-workers.mjs scripts/check-control-accessibility.tsx ./scripts/
 COPY tools/pages-build/sdk.ts ./tools/pages-build/
 # The browser instantiates this shared closed model with its own pinned Yjs.

@@ -1,0 +1,5244 @@
+{
+  "status": "draft-conformance-input-not-runtime-proof",
+  "schema_version": "0.4.0",
+  "description": "Schema vectors execute against JSON Schema Draft2020-12. Semantic vectors MUST pass schema and MUST be rejected by authenticated runtime validation; these are required test inputs, not claims of current runtime conformance. Every top-level envelope has positive/missing-field/unknown-property vectors.",
+  "schema_cases": [
+    {
+      "id": "valid-hello",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "hello",
+        "request_id": "request-1",
+        "supported": [
+          {
+            "protocol_version": "0.4.0",
+            "model_version": "1.0.0",
+            "engine_version": "1.0.0"
+          }
+        ]
+      }
+    },
+    {
+      "id": "missing-request-id-hello",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "hello",
+        "supported": [
+          {
+            "protocol_version": "0.4.0",
+            "model_version": "1.0.0",
+            "engine_version": "1.0.0"
+          }
+        ]
+      }
+    },
+    {
+      "id": "unknown-property-hello",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "hello",
+        "request_id": "request-1",
+        "supported": [
+          {
+            "protocol_version": "0.4.0",
+            "model_version": "1.0.0",
+            "engine_version": "1.0.0"
+          }
+        ],
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-welcome",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "welcome",
+        "request_id": "request-1",
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "participant_ref": "host-ref",
+        "permission_version": "1",
+        "limits": {
+          "max_frame_bytes": "16777216",
+          "max_batch_bytes": "262144",
+          "max_batch_operations": "256",
+          "max_atomic_operations": "256",
+          "max_task_bytes": "4194304",
+          "max_task_changes": "4096",
+          "max_read_bytes": "1048576",
+          "max_checkpoint_bytes": "16777216",
+          "max_delivery_ms": "5000",
+          "max_presence_ms": "30000"
+        },
+        "issuer": "crewship"
+      }
+    },
+    {
+      "id": "missing-request-id-welcome",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "welcome",
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "participant_ref": "host-ref",
+        "permission_version": "1",
+        "limits": {
+          "max_frame_bytes": "16777216",
+          "max_batch_bytes": "262144",
+          "max_batch_operations": "256",
+          "max_atomic_operations": "256",
+          "max_task_bytes": "4194304",
+          "max_task_changes": "4096",
+          "max_read_bytes": "1048576",
+          "max_checkpoint_bytes": "16777216",
+          "max_delivery_ms": "5000",
+          "max_presence_ms": "30000"
+        },
+        "issuer": "crewship"
+      }
+    },
+    {
+      "id": "unknown-property-welcome",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "welcome",
+        "request_id": "request-1",
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "participant_ref": "host-ref",
+        "permission_version": "1",
+        "limits": {
+          "max_frame_bytes": "16777216",
+          "max_batch_bytes": "262144",
+          "max_batch_operations": "256",
+          "max_atomic_operations": "256",
+          "max_task_bytes": "4194304",
+          "max_task_changes": "4096",
+          "max_read_bytes": "1048576",
+          "max_checkpoint_bytes": "16777216",
+          "max_delivery_ms": "5000",
+          "max_presence_ms": "30000"
+        },
+        "issuer": "crewship",
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-commit_batch",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "commit_batch",
+        "request_id": "request-1",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "expected_revision": "1",
+        "changes": [
+          {
+            "change_id": "c1",
+            "operations": [
+              {
+                "op_id": "o1",
+                "participant_ref": "host-ref",
+                "base_revision": "0",
+                "dependencies": [],
+                "read_preconditions": [],
+                "payload": {
+                  "kind": "text",
+                  "text": "Příliš žluťoučký kůň"
+                },
+                "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+              }
+            ],
+            "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+          }
+        ]
+      }
+    },
+    {
+      "id": "missing-request-id-commit_batch",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "commit_batch",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "expected_revision": "1",
+        "changes": [
+          {
+            "change_id": "c1",
+            "operations": [
+              {
+                "op_id": "o1",
+                "participant_ref": "host-ref",
+                "base_revision": "0",
+                "dependencies": [],
+                "read_preconditions": [],
+                "payload": {
+                  "kind": "text",
+                  "text": "Příliš žluťoučký kůň"
+                },
+                "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+              }
+            ],
+            "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+          }
+        ]
+      }
+    },
+    {
+      "id": "unknown-property-commit_batch",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "commit_batch",
+        "request_id": "request-1",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "expected_revision": "1",
+        "changes": [
+          {
+            "change_id": "c1",
+            "operations": [
+              {
+                "op_id": "o1",
+                "participant_ref": "host-ref",
+                "base_revision": "0",
+                "dependencies": [],
+                "read_preconditions": [],
+                "payload": {
+                  "kind": "text",
+                  "text": "Příliš žluťoučký kůň"
+                },
+                "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+              }
+            ],
+            "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+          }
+        ],
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-commit_result",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "commit_result",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "generation": "1",
+        "revision": "1",
+        "issuer": "crewship",
+        "durability": "node",
+        "changes": [
+          {
+            "change_id": "c1",
+            "status": "saved",
+            "operations": [
+              {
+                "op_id": "o1",
+                "status": "saved",
+                "revision": "1",
+                "issuer": "crewship",
+                "durability": "node"
+              }
+            ],
+            "first_revision": "1",
+            "last_revision": "1"
+          }
+        ]
+      }
+    },
+    {
+      "id": "missing-request-id-commit_result",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "commit_result",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "generation": "1",
+        "revision": "1",
+        "issuer": "crewship",
+        "durability": "node",
+        "changes": [
+          {
+            "change_id": "c1",
+            "status": "saved",
+            "operations": [
+              {
+                "op_id": "o1",
+                "status": "saved",
+                "revision": "1",
+                "issuer": "crewship",
+                "durability": "node"
+              }
+            ],
+            "first_revision": "1",
+            "last_revision": "1"
+          }
+        ]
+      }
+    },
+    {
+      "id": "unknown-property-commit_result",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "commit_result",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "generation": "1",
+        "revision": "1",
+        "issuer": "crewship",
+        "durability": "node",
+        "changes": [
+          {
+            "change_id": "c1",
+            "status": "saved",
+            "operations": [
+              {
+                "op_id": "o1",
+                "status": "saved",
+                "revision": "1",
+                "issuer": "crewship",
+                "durability": "node"
+              }
+            ],
+            "first_revision": "1",
+            "last_revision": "1"
+          }
+        ],
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-operation_status",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "operation_status",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "op_id": "o1",
+        "expected_fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+      }
+    },
+    {
+      "id": "missing-request-id-operation_status",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "operation_status",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "op_id": "o1",
+        "expected_fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+      }
+    },
+    {
+      "id": "unknown-property-operation_status",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "operation_status",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "op_id": "o1",
+        "unexpected_identity": "spoof",
+        "expected_fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+      }
+    },
+    {
+      "id": "valid-operation_status_result",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "operation_status_result",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "result": {
+          "op_id": "o1",
+          "status": "saved",
+          "revision": "1",
+          "issuer": "crewship",
+          "durability": "node"
+        }
+      }
+    },
+    {
+      "id": "missing-request-id-operation_status_result",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "operation_status_result",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "result": {
+          "op_id": "o1",
+          "status": "saved",
+          "revision": "1",
+          "issuer": "crewship",
+          "durability": "node"
+        }
+      }
+    },
+    {
+      "id": "unknown-property-operation_status_result",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "operation_status_result",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "result": {
+          "op_id": "o1",
+          "status": "saved",
+          "revision": "1",
+          "issuer": "crewship",
+          "durability": "node"
+        },
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-session_ticket_request",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "session_ticket_request",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "requested": {
+          "read": true,
+          "write": true,
+          "suggest": true
+        }
+      }
+    },
+    {
+      "id": "missing-request-id-session_ticket_request",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "session_ticket_request",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "requested": {
+          "read": true,
+          "write": true,
+          "suggest": true
+        }
+      }
+    },
+    {
+      "id": "unknown-property-session_ticket_request",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "session_ticket_request",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "requested": {
+          "read": true,
+          "write": true,
+          "suggest": true
+        },
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-session_ticket",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "session_ticket",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "participant_ref": "host-ref",
+        "permission_version": "1",
+        "granted": {
+          "read": true,
+          "write": true,
+          "suggest": true
+        },
+        "ticket": "synthetic-test-ticket",
+        "expires_in_ms": "1",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        }
+      }
+    },
+    {
+      "id": "missing-request-id-session_ticket",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "session_ticket",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "participant_ref": "host-ref",
+        "permission_version": "1",
+        "granted": {
+          "read": true,
+          "write": true,
+          "suggest": true
+        },
+        "ticket": "synthetic-test-ticket",
+        "expires_in_ms": "1",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        }
+      }
+    },
+    {
+      "id": "unknown-property-session_ticket",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "session_ticket",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "participant_ref": "host-ref",
+        "permission_version": "1",
+        "granted": {
+          "read": true,
+          "write": true,
+          "suggest": true
+        },
+        "ticket": "synthetic-test-ticket",
+        "expires_in_ms": "1",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-owner_acquire",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "owner_acquire",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "runtime_ref": "runtime-1",
+        "renewal_nonce": "nonce-1"
+      }
+    },
+    {
+      "id": "missing-request-id-owner_acquire",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "owner_acquire",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "runtime_ref": "runtime-1",
+        "renewal_nonce": "nonce-1"
+      }
+    },
+    {
+      "id": "unknown-property-owner_acquire",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "owner_acquire",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "runtime_ref": "runtime-1",
+        "renewal_nonce": "nonce-1",
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-owner_renew",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "owner_renew",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "renewal_nonce": "nonce-1",
+        "permission_version": "1"
+      }
+    },
+    {
+      "id": "missing-request-id-owner_renew",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "owner_renew",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "renewal_nonce": "nonce-1",
+        "permission_version": "1"
+      }
+    },
+    {
+      "id": "unknown-property-owner_renew",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "owner_renew",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "renewal_nonce": "nonce-1",
+        "permission_version": "1",
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-owner_grant",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "owner_grant",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "runtime_ref": "runtime-1",
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "lease_duration_ms": "1",
+        "revision": "1",
+        "renewal_nonce": "nonce-1",
+        "permission_version": "1"
+      }
+    },
+    {
+      "id": "missing-request-id-owner_grant",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "owner_grant",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "runtime_ref": "runtime-1",
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "lease_duration_ms": "1",
+        "revision": "1",
+        "renewal_nonce": "nonce-1",
+        "permission_version": "1"
+      }
+    },
+    {
+      "id": "unknown-property-owner_grant",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "owner_grant",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "runtime_ref": "runtime-1",
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "lease_duration_ms": "1",
+        "revision": "1",
+        "renewal_nonce": "nonce-1",
+        "permission_version": "1",
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-delivery_renew",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "delivery_renew",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "participant_ref": "host-ref",
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "permission_version": "1",
+        "renewal_nonce": "nonce-1",
+        "gate_id": "gate-1"
+      }
+    },
+    {
+      "id": "missing-request-id-delivery_renew",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "delivery_renew",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "participant_ref": "host-ref",
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "permission_version": "1",
+        "renewal_nonce": "nonce-1",
+        "gate_id": "gate-1"
+      }
+    },
+    {
+      "id": "unknown-property-delivery_renew",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "delivery_renew",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "participant_ref": "host-ref",
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "permission_version": "1",
+        "renewal_nonce": "nonce-1",
+        "gate_id": "gate-1",
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-delivery_grant",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "delivery_grant",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "participant_ref": "host-ref",
+        "generation": "1",
+        "permission_version": "1",
+        "renewal_nonce": "nonce-1",
+        "duration_ms": "1",
+        "gate_id": "gate-1"
+      }
+    },
+    {
+      "id": "missing-request-id-delivery_grant",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "delivery_grant",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "participant_ref": "host-ref",
+        "generation": "1",
+        "permission_version": "1",
+        "renewal_nonce": "nonce-1",
+        "duration_ms": "1",
+        "gate_id": "gate-1"
+      }
+    },
+    {
+      "id": "unknown-property-delivery_grant",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "delivery_grant",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "participant_ref": "host-ref",
+        "generation": "1",
+        "permission_version": "1",
+        "renewal_nonce": "nonce-1",
+        "duration_ms": "1",
+        "gate_id": "gate-1",
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-session_closed",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "session_closed",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "participant_ref": "host-ref",
+        "generation": "1",
+        "permission_version": "1",
+        "barrier_id": "barrier-1",
+        "reason": {
+          "code": "precondition_failed",
+          "message": "read revision changed",
+          "retry": "do_not_retry"
+        },
+        "gate_id": "gate-1"
+      }
+    },
+    {
+      "id": "missing-request-id-session_closed",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "session_closed",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "participant_ref": "host-ref",
+        "generation": "1",
+        "permission_version": "1",
+        "barrier_id": "barrier-1",
+        "reason": {
+          "code": "precondition_failed",
+          "message": "read revision changed",
+          "retry": "do_not_retry"
+        },
+        "gate_id": "gate-1"
+      }
+    },
+    {
+      "id": "unknown-property-session_closed",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "session_closed",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "participant_ref": "host-ref",
+        "generation": "1",
+        "permission_version": "1",
+        "barrier_id": "barrier-1",
+        "reason": {
+          "code": "precondition_failed",
+          "message": "read revision changed",
+          "retry": "do_not_retry"
+        },
+        "gate_id": "gate-1",
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-delivery_blocked",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "delivery_blocked",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "participant_ref": "host-ref",
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "barrier_id": "barrier-1",
+        "covered_gate_ids": [
+          "gate-1",
+          "gate-2"
+        ],
+        "permission_version": "1"
+      }
+    },
+    {
+      "id": "missing-request-id-delivery_blocked",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "delivery_blocked",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "participant_ref": "host-ref",
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "barrier_id": "barrier-1",
+        "covered_gate_ids": [
+          "gate-1",
+          "gate-2"
+        ],
+        "permission_version": "1"
+      }
+    },
+    {
+      "id": "unknown-property-delivery_blocked",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "delivery_blocked",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "participant_ref": "host-ref",
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "barrier_id": "barrier-1",
+        "covered_gate_ids": [
+          "gate-1",
+          "gate-2"
+        ],
+        "permission_version": "1",
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-revocation_confirmed",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "revocation_confirmed",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "participant_ref": "host-ref",
+        "barrier_id": "barrier-1",
+        "permission_version": "1",
+        "read_blocked": true,
+        "write_blocked": true
+      }
+    },
+    {
+      "id": "missing-request-id-revocation_confirmed",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "revocation_confirmed",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "participant_ref": "host-ref",
+        "barrier_id": "barrier-1",
+        "permission_version": "1",
+        "read_blocked": true,
+        "write_blocked": true
+      }
+    },
+    {
+      "id": "unknown-property-revocation_confirmed",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "revocation_confirmed",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "participant_ref": "host-ref",
+        "barrier_id": "barrier-1",
+        "permission_version": "1",
+        "read_blocked": true,
+        "write_blocked": true,
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-read_request",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "read_request",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "max_bytes": "1"
+      }
+    },
+    {
+      "id": "missing-request-id-read_request",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "read_request",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "max_bytes": "1"
+      }
+    },
+    {
+      "id": "unknown-property-read_request",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "read_request",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "max_bytes": "1",
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-read_result",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "read_result",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "revision": "1",
+        "items": [
+          {
+            "target_id": "paragraph-1",
+            "model_type": "paragraph",
+            "revision": "1",
+            "data": {
+              "text": "hello"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "missing-request-id-read_result",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "read_result",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "revision": "1",
+        "items": [
+          {
+            "target_id": "paragraph-1",
+            "model_type": "paragraph",
+            "revision": "1",
+            "data": {
+              "text": "hello"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "unknown-property-read_result",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "read_result",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "revision": "1",
+        "items": [
+          {
+            "target_id": "paragraph-1",
+            "model_type": "paragraph",
+            "revision": "1",
+            "data": {
+              "text": "hello"
+            }
+          }
+        ],
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-checkpoint_request",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "checkpoint_request",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "revision": "1"
+      }
+    },
+    {
+      "id": "missing-request-id-checkpoint_request",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "checkpoint_request",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "revision": "1"
+      }
+    },
+    {
+      "id": "unknown-property-checkpoint_request",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "checkpoint_request",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "revision": "1",
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-checkpoint_result",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "checkpoint_result",
+        "request_id": "request-1",
+        "checkpoint": {
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "revision": "2",
+          "generation": "1",
+          "format_version": "text-v1",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "1.0.0",
+            "engine_version": "1.0.0"
+          },
+          "assets": [],
+          "encoding": "base64",
+          "state": "eyJwYXJhZ3JhcGhzIjpbeyJpZCI6InAxIiwidGV4dCI6IlDFmcOtbGnFoSJ9XX0=",
+          "digest": "sha256:d07bcc83806d879b3d096ddb05d4f666d0dfd4b38d5ceecf67a5cfd64eddd11b"
+        }
+      }
+    },
+    {
+      "id": "missing-request-id-checkpoint_result",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "checkpoint_result",
+        "checkpoint": {
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "revision": "2",
+          "generation": "1",
+          "format_version": "text-v1",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "1.0.0",
+            "engine_version": "1.0.0"
+          },
+          "assets": [],
+          "encoding": "base64",
+          "state": "eyJwYXJhZ3JhcGhzIjpbeyJpZCI6InAxIiwidGV4dCI6IlDFmcOtbGnFoSJ9XX0=",
+          "digest": "sha256:d07bcc83806d879b3d096ddb05d4f666d0dfd4b38d5ceecf67a5cfd64eddd11b"
+        }
+      }
+    },
+    {
+      "id": "unknown-property-checkpoint_result",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "checkpoint_result",
+        "request_id": "request-1",
+        "checkpoint": {
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "revision": "2",
+          "generation": "1",
+          "format_version": "text-v1",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "1.0.0",
+            "engine_version": "1.0.0"
+          },
+          "assets": [],
+          "encoding": "base64",
+          "state": "eyJwYXJhZ3JhcGhzIjpbeyJpZCI6InAxIiwidGV4dCI6IlDFmcOtbGnFoSJ9XX0=",
+          "digest": "sha256:d07bcc83806d879b3d096ddb05d4f666d0dfd4b38d5ceecf67a5cfd64eddd11b"
+        },
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-presence",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "presence",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "participant_ref": "host-ref",
+        "ttl_ms": "1",
+        "view": {
+          "target_id": "paragraph-1",
+          "anchor_utf16": "0",
+          "focus_utf16": "2"
+        }
+      }
+    },
+    {
+      "id": "missing-request-id-presence",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "presence",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "participant_ref": "host-ref",
+        "ttl_ms": "1",
+        "view": {
+          "target_id": "paragraph-1",
+          "anchor_utf16": "0",
+          "focus_utf16": "2"
+        }
+      }
+    },
+    {
+      "id": "unknown-property-presence",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "presence",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "participant_ref": "host-ref",
+        "ttl_ms": "1",
+        "view": {
+          "target_id": "paragraph-1",
+          "anchor_utf16": "0",
+          "focus_utf16": "2"
+        },
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-task_status",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "task_status",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "task_id": "task-1"
+      }
+    },
+    {
+      "id": "missing-request-id-task_status",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "task_status",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "task_id": "task-1"
+      }
+    },
+    {
+      "id": "unknown-property-task_status",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "task_status",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "task_id": "task-1",
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-task_result",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "task_result",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "task": {
+          "task_id": "task-1",
+          "allow_partial": false,
+          "status": "saved",
+          "changes": [
+            {
+              "change_id": "c1",
+              "status": "saved",
+              "operations": [
+                {
+                  "op_id": "o1",
+                  "status": "saved",
+                  "revision": "1",
+                  "issuer": "crewship",
+                  "durability": "node"
+                }
+              ],
+              "first_revision": "1",
+              "last_revision": "1"
+            }
+          ],
+          "participant_ref": "host-ref",
+          "unresolved_change_ids": []
+        }
+      }
+    },
+    {
+      "id": "missing-request-id-task_result",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "task_result",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "task": {
+          "task_id": "task-1",
+          "allow_partial": false,
+          "status": "saved",
+          "changes": [
+            {
+              "change_id": "c1",
+              "status": "saved",
+              "operations": [
+                {
+                  "op_id": "o1",
+                  "status": "saved",
+                  "revision": "1",
+                  "issuer": "crewship",
+                  "durability": "node"
+                }
+              ],
+              "first_revision": "1",
+              "last_revision": "1"
+            }
+          ],
+          "participant_ref": "host-ref",
+          "unresolved_change_ids": []
+        }
+      }
+    },
+    {
+      "id": "unknown-property-task_result",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "task_result",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "task": {
+          "task_id": "task-1",
+          "allow_partial": false,
+          "status": "saved",
+          "changes": [
+            {
+              "change_id": "c1",
+              "status": "saved",
+              "operations": [
+                {
+                  "op_id": "o1",
+                  "status": "saved",
+                  "revision": "1",
+                  "issuer": "crewship",
+                  "durability": "node"
+                }
+              ],
+              "first_revision": "1",
+              "last_revision": "1"
+            }
+          ],
+          "participant_ref": "host-ref",
+          "unresolved_change_ids": []
+        },
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-task_cancel",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "task_cancel",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "task_id": "task-1"
+      }
+    },
+    {
+      "id": "missing-request-id-task_cancel",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "task_cancel",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "task_id": "task-1"
+      }
+    },
+    {
+      "id": "unknown-property-task_cancel",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "task_cancel",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "task_id": "task-1",
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-proposal",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "proposal",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "proposal_id": "proposal-1",
+        "participant_ref": "host-ref",
+        "base_revision": "1",
+        "changes": [
+          {
+            "change_id": "c1",
+            "operations": [
+              {
+                "op_id": "o1",
+                "participant_ref": "host-ref",
+                "base_revision": "0",
+                "dependencies": [],
+                "read_preconditions": [],
+                "payload": {
+                  "kind": "text",
+                  "text": "Příliš žluťoučký kůň"
+                },
+                "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+              }
+            ],
+            "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+          }
+        ],
+        "diff": "one paragraph changed"
+      }
+    },
+    {
+      "id": "missing-request-id-proposal",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "proposal",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "proposal_id": "proposal-1",
+        "participant_ref": "host-ref",
+        "base_revision": "1",
+        "changes": [
+          {
+            "change_id": "c1",
+            "operations": [
+              {
+                "op_id": "o1",
+                "participant_ref": "host-ref",
+                "base_revision": "0",
+                "dependencies": [],
+                "read_preconditions": [],
+                "payload": {
+                  "kind": "text",
+                  "text": "Příliš žluťoučký kůň"
+                },
+                "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+              }
+            ],
+            "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+          }
+        ],
+        "diff": "one paragraph changed"
+      }
+    },
+    {
+      "id": "unknown-property-proposal",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "proposal",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "proposal_id": "proposal-1",
+        "participant_ref": "host-ref",
+        "base_revision": "1",
+        "changes": [
+          {
+            "change_id": "c1",
+            "operations": [
+              {
+                "op_id": "o1",
+                "participant_ref": "host-ref",
+                "base_revision": "0",
+                "dependencies": [],
+                "read_preconditions": [],
+                "payload": {
+                  "kind": "text",
+                  "text": "Příliš žluťoučký kůň"
+                },
+                "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+              }
+            ],
+            "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+          }
+        ],
+        "diff": "one paragraph changed",
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-proposal_accept",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "proposal_accept",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "proposal_id": "proposal-1",
+        "base_revision": "1",
+        "op_id": "o1"
+      }
+    },
+    {
+      "id": "missing-request-id-proposal_accept",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "proposal_accept",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "proposal_id": "proposal-1",
+        "base_revision": "1",
+        "op_id": "o1"
+      }
+    },
+    {
+      "id": "unknown-property-proposal_accept",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "proposal_accept",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "proposal_id": "proposal-1",
+        "base_revision": "1",
+        "op_id": "o1",
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-undo_request",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "undo_request",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "participant_ref": "host-ref",
+        "base_revision": "1",
+        "op_id": "o1"
+      }
+    },
+    {
+      "id": "missing-request-id-undo_request",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "undo_request",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "participant_ref": "host-ref",
+        "base_revision": "1",
+        "op_id": "o1"
+      }
+    },
+    {
+      "id": "unknown-property-undo_request",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "undo_request",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "participant_ref": "host-ref",
+        "base_revision": "1",
+        "op_id": "o1",
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-protocol_error",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "protocol_error",
+        "request_id": "request-1",
+        "reason": {
+          "code": "precondition_failed",
+          "message": "read revision changed",
+          "retry": "do_not_retry"
+        }
+      }
+    },
+    {
+      "id": "missing-request-id-protocol_error",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "protocol_error",
+        "reason": {
+          "code": "precondition_failed",
+          "message": "read revision changed",
+          "retry": "do_not_retry"
+        }
+      }
+    },
+    {
+      "id": "unknown-property-protocol_error",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "protocol_error",
+        "request_id": "request-1",
+        "reason": {
+          "code": "precondition_failed",
+          "message": "read revision changed",
+          "retry": "do_not_retry"
+        },
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-manifest_request",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "manifest_request",
+        "request_id": "request-1",
+        "application_id": "editor"
+      }
+    },
+    {
+      "id": "missing-request-id-manifest_request",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "manifest_request",
+        "application_id": "editor"
+      }
+    },
+    {
+      "id": "unknown-property-manifest_request",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "manifest_request",
+        "request_id": "request-1",
+        "application_id": "editor",
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-manifest_result",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "manifest_result",
+        "request_id": "request-1",
+        "manifest": {
+          "application_id": "editor",
+          "package_version": "1.0.0",
+          "package_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "connection_path": "A",
+          "supported_versions": [
+            {
+              "protocol_version": "0.4.0",
+              "model_version": "1.0.0",
+              "engine_version": "1.0.0"
+            }
+          ],
+          "formats": [
+            {
+              "format_id": "value",
+              "model_versions": [
+                "value"
+              ],
+              "import_extensions": [],
+              "export_extensions": [],
+              "validator": "adapter"
+            }
+          ],
+          "commands": [
+            {
+              "command_id": "read_text",
+              "input_schema": {
+                "type": "object"
+              },
+              "result_schema": {
+                "type": "object"
+              },
+              "effect_scope": "document.read",
+              "mutation": false,
+              "replayable": false
+            }
+          ],
+          "capabilities": [
+            "document.read",
+            "document.write"
+          ],
+          "merge_models": [
+            "yjs_text"
+          ],
+          "presence_schema": {},
+          "storage": {
+            "authority": "host",
+            "durability": "node",
+            "revocation": {
+              "mode": "delivery_lease",
+              "max_delay_ms": "5000"
+            }
+          },
+          "input_fallback_allowed": false
+        }
+      }
+    },
+    {
+      "id": "missing-request-id-manifest_result",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "manifest_result",
+        "manifest": {
+          "application_id": "editor",
+          "package_version": "1.0.0",
+          "package_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "connection_path": "A",
+          "supported_versions": [
+            {
+              "protocol_version": "0.4.0",
+              "model_version": "1.0.0",
+              "engine_version": "1.0.0"
+            }
+          ],
+          "formats": [
+            {
+              "format_id": "value",
+              "model_versions": [
+                "value"
+              ],
+              "import_extensions": [],
+              "export_extensions": [],
+              "validator": "adapter"
+            }
+          ],
+          "commands": [
+            {
+              "command_id": "read_text",
+              "input_schema": {
+                "type": "object"
+              },
+              "result_schema": {
+                "type": "object"
+              },
+              "effect_scope": "document.read",
+              "mutation": false,
+              "replayable": false
+            }
+          ],
+          "capabilities": [
+            "document.read",
+            "document.write"
+          ],
+          "merge_models": [
+            "yjs_text"
+          ],
+          "presence_schema": {},
+          "storage": {
+            "authority": "host",
+            "durability": "node",
+            "revocation": {
+              "mode": "delivery_lease",
+              "max_delay_ms": "5000"
+            }
+          },
+          "input_fallback_allowed": false
+        }
+      }
+    },
+    {
+      "id": "unknown-property-manifest_result",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "manifest_result",
+        "request_id": "request-1",
+        "manifest": {
+          "application_id": "editor",
+          "package_version": "1.0.0",
+          "package_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "connection_path": "A",
+          "supported_versions": [
+            {
+              "protocol_version": "0.4.0",
+              "model_version": "1.0.0",
+              "engine_version": "1.0.0"
+            }
+          ],
+          "formats": [
+            {
+              "format_id": "value",
+              "model_versions": [
+                "value"
+              ],
+              "import_extensions": [],
+              "export_extensions": [],
+              "validator": "adapter"
+            }
+          ],
+          "commands": [
+            {
+              "command_id": "read_text",
+              "input_schema": {
+                "type": "object"
+              },
+              "result_schema": {
+                "type": "object"
+              },
+              "effect_scope": "document.read",
+              "mutation": false,
+              "replayable": false
+            }
+          ],
+          "capabilities": [
+            "document.read",
+            "document.write"
+          ],
+          "merge_models": [
+            "yjs_text"
+          ],
+          "presence_schema": {},
+          "storage": {
+            "authority": "host",
+            "durability": "node",
+            "revocation": {
+              "mode": "delivery_lease",
+              "max_delay_ms": "5000"
+            }
+          },
+          "input_fallback_allowed": false
+        },
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-lifecycle_request",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "lifecycle_request",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "action": "open"
+      }
+    },
+    {
+      "id": "missing-request-id-lifecycle_request",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "lifecycle_request",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "action": "open"
+      }
+    },
+    {
+      "id": "unknown-property-lifecycle_request",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "lifecycle_request",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "action": "open",
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-lifecycle_result",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "lifecycle_result",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "generation": "1",
+        "state": "ready",
+        "revision": "1"
+      }
+    },
+    {
+      "id": "missing-request-id-lifecycle_result",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "lifecycle_result",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "generation": "1",
+        "state": "ready",
+        "revision": "1"
+      }
+    },
+    {
+      "id": "unknown-property-lifecycle_result",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "lifecycle_result",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "generation": "1",
+        "state": "ready",
+        "revision": "1",
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-session_join",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "session_join",
+        "request_id": "request-1",
+        "ticket": "synthetic-test-ticket",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        }
+      }
+    },
+    {
+      "id": "missing-request-id-session_join",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "session_join",
+        "ticket": "synthetic-test-ticket",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        }
+      }
+    },
+    {
+      "id": "unknown-property-session_join",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "session_join",
+        "request_id": "request-1",
+        "ticket": "synthetic-test-ticket",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-session_joined",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "session_joined",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "participant_ref": "host-ref",
+        "generation": "1",
+        "permission_version": "1",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "gate_id": "gate-1"
+      }
+    },
+    {
+      "id": "missing-request-id-session_joined",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "session_joined",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "participant_ref": "host-ref",
+        "generation": "1",
+        "permission_version": "1",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "gate_id": "gate-1"
+      }
+    },
+    {
+      "id": "unknown-property-session_joined",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "session_joined",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "participant_ref": "host-ref",
+        "generation": "1",
+        "permission_version": "1",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "gate_id": "gate-1",
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-session_leave",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "session_leave",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1"
+      }
+    },
+    {
+      "id": "missing-request-id-session_leave",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "session_leave",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1"
+      }
+    },
+    {
+      "id": "unknown-property-session_leave",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "session_leave",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-submit_changes",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "submit_changes",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "changes": [
+          {
+            "change_id": "c1",
+            "operations": [
+              {
+                "op_id": "o1",
+                "participant_ref": "host-ref",
+                "base_revision": "0",
+                "dependencies": [],
+                "read_preconditions": [],
+                "payload": {
+                  "kind": "text",
+                  "text": "Příliš žluťoučký kůň"
+                },
+                "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+              }
+            ],
+            "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+          }
+        ]
+      }
+    },
+    {
+      "id": "missing-request-id-submit_changes",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "submit_changes",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "changes": [
+          {
+            "change_id": "c1",
+            "operations": [
+              {
+                "op_id": "o1",
+                "participant_ref": "host-ref",
+                "base_revision": "0",
+                "dependencies": [],
+                "read_preconditions": [],
+                "payload": {
+                  "kind": "text",
+                  "text": "Příliš žluťoučký kůň"
+                },
+                "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+              }
+            ],
+            "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+          }
+        ]
+      }
+    },
+    {
+      "id": "unknown-property-submit_changes",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "submit_changes",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "changes": [
+          {
+            "change_id": "c1",
+            "operations": [
+              {
+                "op_id": "o1",
+                "participant_ref": "host-ref",
+                "base_revision": "0",
+                "dependencies": [],
+                "read_preconditions": [],
+                "payload": {
+                  "kind": "text",
+                  "text": "Příliš žluťoučký kůň"
+                },
+                "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+              }
+            ],
+            "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+          }
+        ],
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-changes_received",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "changes_received",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "change_ids": [
+          "value"
+        ],
+        "state": "pending"
+      }
+    },
+    {
+      "id": "missing-request-id-changes_received",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "changes_received",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "change_ids": [
+          "value"
+        ],
+        "state": "pending"
+      }
+    },
+    {
+      "id": "unknown-property-changes_received",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "changes_received",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "change_ids": [
+          "value"
+        ],
+        "state": "pending",
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-task_submit",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "task_submit",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "task_id": "task-1",
+        "allow_partial": false,
+        "mode": "direct",
+        "changes": [
+          {
+            "change_id": "c1",
+            "task_id": "task-1",
+            "operations": [
+              {
+                "op_id": "o1",
+                "participant_ref": "host-ref",
+                "base_revision": "0",
+                "dependencies": [],
+                "read_preconditions": [],
+                "payload": {
+                  "kind": "text",
+                  "text": "Příliš žluťoučký kůň"
+                },
+                "fingerprint": "sha256:e339931ae9424e43b74976b110b91accb6472f02c8ebab378299ee72adbdc813"
+              },
+              {
+                "op_id": "o2",
+                "participant_ref": "host-ref",
+                "base_revision": "0",
+                "dependencies": [
+                  "o1"
+                ],
+                "read_preconditions": [],
+                "payload": {
+                  "kind": "text",
+                  "text": "Pokračování"
+                },
+                "fingerprint": "sha256:c2399436f4dbbbb2804cc7628454102cc0603a83298971fc93fd6fdc7f23fbd5"
+              }
+            ],
+            "membership_hash": "sha256:4052981e709e6f9bcd03ecdec7dffa978b8ccb4c57aafbb906852a5391971e31"
+          }
+        ]
+      }
+    },
+    {
+      "id": "missing-request-id-task_submit",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "task_submit",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "task_id": "task-1",
+        "allow_partial": false,
+        "mode": "direct",
+        "changes": [
+          {
+            "change_id": "c1",
+            "task_id": "task-1",
+            "operations": [
+              {
+                "op_id": "o1",
+                "participant_ref": "host-ref",
+                "base_revision": "0",
+                "dependencies": [],
+                "read_preconditions": [],
+                "payload": {
+                  "kind": "text",
+                  "text": "Příliš žluťoučký kůň"
+                },
+                "fingerprint": "sha256:e339931ae9424e43b74976b110b91accb6472f02c8ebab378299ee72adbdc813"
+              },
+              {
+                "op_id": "o2",
+                "participant_ref": "host-ref",
+                "base_revision": "0",
+                "dependencies": [
+                  "o1"
+                ],
+                "read_preconditions": [],
+                "payload": {
+                  "kind": "text",
+                  "text": "Pokračování"
+                },
+                "fingerprint": "sha256:c2399436f4dbbbb2804cc7628454102cc0603a83298971fc93fd6fdc7f23fbd5"
+              }
+            ],
+            "membership_hash": "sha256:4052981e709e6f9bcd03ecdec7dffa978b8ccb4c57aafbb906852a5391971e31"
+          }
+        ]
+      }
+    },
+    {
+      "id": "unknown-property-task_submit",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "task_submit",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "task_id": "task-1",
+        "allow_partial": false,
+        "mode": "direct",
+        "changes": [
+          {
+            "change_id": "c1",
+            "task_id": "task-1",
+            "operations": [
+              {
+                "op_id": "o1",
+                "participant_ref": "host-ref",
+                "base_revision": "0",
+                "dependencies": [],
+                "read_preconditions": [],
+                "payload": {
+                  "kind": "text",
+                  "text": "Příliš žluťoučký kůň"
+                },
+                "fingerprint": "sha256:e339931ae9424e43b74976b110b91accb6472f02c8ebab378299ee72adbdc813"
+              },
+              {
+                "op_id": "o2",
+                "participant_ref": "host-ref",
+                "base_revision": "0",
+                "dependencies": [
+                  "o1"
+                ],
+                "read_preconditions": [],
+                "payload": {
+                  "kind": "text",
+                  "text": "Pokračování"
+                },
+                "fingerprint": "sha256:c2399436f4dbbbb2804cc7628454102cc0603a83298971fc93fd6fdc7f23fbd5"
+              }
+            ],
+            "membership_hash": "sha256:4052981e709e6f9bcd03ecdec7dffa978b8ccb4c57aafbb906852a5391971e31"
+          }
+        ],
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-proposal_request",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "proposal_request",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "proposal_id": "proposal-1"
+      }
+    },
+    {
+      "id": "missing-request-id-proposal_request",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "proposal_request",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "proposal_id": "proposal-1"
+      }
+    },
+    {
+      "id": "unknown-property-proposal_request",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "proposal_request",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "proposal_id": "proposal-1",
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-collaboration_update",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "collaboration_update",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "generation": "1",
+        "base_revision": "1",
+        "change_ids": [
+          "value"
+        ],
+        "encoding": "json",
+        "data": "{\"text\":\"hello\"}",
+        "state": "synchronized"
+      }
+    },
+    {
+      "id": "missing-request-id-collaboration_update",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "collaboration_update",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "generation": "1",
+        "base_revision": "1",
+        "change_ids": [
+          "value"
+        ],
+        "encoding": "json",
+        "data": "{\"text\":\"hello\"}",
+        "state": "synchronized"
+      }
+    },
+    {
+      "id": "unknown-property-collaboration_update",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "collaboration_update",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "generation": "1",
+        "base_revision": "1",
+        "change_ids": [
+          "value"
+        ],
+        "encoding": "json",
+        "data": "{\"text\":\"hello\"}",
+        "state": "synchronized",
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-document_update",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "document_update",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "generation": "1",
+        "from_revision": "1",
+        "to_revision": "1",
+        "encoding": "json",
+        "data": "{\"text\":\"hello\"}",
+        "receipt": {
+          "type": "commit_result",
+          "request_id": "request-1",
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "generation": "1",
+          "revision": "1",
+          "issuer": "crewship",
+          "durability": "node",
+          "changes": [
+            {
+              "change_id": "c1",
+              "status": "saved",
+              "operations": [
+                {
+                  "op_id": "o1",
+                  "status": "saved",
+                  "revision": "1",
+                  "issuer": "crewship",
+                  "durability": "node"
+                }
+              ],
+              "first_revision": "1",
+              "last_revision": "1"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "missing-request-id-document_update",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "document_update",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "generation": "1",
+        "from_revision": "1",
+        "to_revision": "1",
+        "encoding": "json",
+        "data": "{\"text\":\"hello\"}",
+        "receipt": {
+          "type": "commit_result",
+          "request_id": "request-1",
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "generation": "1",
+          "revision": "1",
+          "issuer": "crewship",
+          "durability": "node",
+          "changes": [
+            {
+              "change_id": "c1",
+              "status": "saved",
+              "operations": [
+                {
+                  "op_id": "o1",
+                  "status": "saved",
+                  "revision": "1",
+                  "issuer": "crewship",
+                  "durability": "node"
+                }
+              ],
+              "first_revision": "1",
+              "last_revision": "1"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "unknown-property-document_update",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "document_update",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "generation": "1",
+        "from_revision": "1",
+        "to_revision": "1",
+        "encoding": "json",
+        "data": "{\"text\":\"hello\"}",
+        "receipt": {
+          "type": "commit_result",
+          "request_id": "request-1",
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "generation": "1",
+          "revision": "1",
+          "issuer": "crewship",
+          "durability": "node",
+          "changes": [
+            {
+              "change_id": "c1",
+              "status": "saved",
+              "operations": [
+                {
+                  "op_id": "o1",
+                  "status": "saved",
+                  "revision": "1",
+                  "issuer": "crewship",
+                  "durability": "node"
+                }
+              ],
+              "first_revision": "1",
+              "last_revision": "1"
+            }
+          ]
+        },
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-asset_request",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "asset_request",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "revision": "1",
+        "asset_id": "asset-1",
+        "offset_bytes": "1",
+        "max_bytes": "1"
+      }
+    },
+    {
+      "id": "missing-request-id-asset_request",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "asset_request",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "revision": "1",
+        "asset_id": "asset-1",
+        "offset_bytes": "1",
+        "max_bytes": "1"
+      }
+    },
+    {
+      "id": "unknown-property-asset_request",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "asset_request",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "revision": "1",
+        "asset_id": "asset-1",
+        "offset_bytes": "1",
+        "max_bytes": "1",
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-asset_result",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "asset_result",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "revision": "1",
+        "asset_id": "asset-1",
+        "offset_bytes": "1",
+        "size_bytes": "1",
+        "digest": "sha256:ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb",
+        "data_base64": "YQ=="
+      }
+    },
+    {
+      "id": "missing-request-id-asset_result",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "asset_result",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "revision": "1",
+        "asset_id": "asset-1",
+        "offset_bytes": "1",
+        "size_bytes": "1",
+        "digest": "sha256:ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb",
+        "data_base64": "YQ=="
+      }
+    },
+    {
+      "id": "unknown-property-asset_result",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "asset_result",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "revision": "1",
+        "asset_id": "asset-1",
+        "offset_bytes": "1",
+        "size_bytes": "1",
+        "digest": "sha256:ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb",
+        "data_base64": "YQ==",
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-ticket_validate",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "ticket_validate",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "ticket": "synthetic-test-ticket",
+        "validation_nonce": "validation-1"
+      }
+    },
+    {
+      "id": "missing-request-id-ticket_validate",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "ticket_validate",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "ticket": "synthetic-test-ticket",
+        "validation_nonce": "validation-1"
+      }
+    },
+    {
+      "id": "unknown-property-ticket_validate",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "ticket_validate",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "ticket": "synthetic-test-ticket",
+        "validation_nonce": "validation-1",
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-ticket_validated",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "ticket_validated",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "generation": "1",
+        "participant_ref": "host-ref",
+        "permission_version": "1",
+        "granted": {
+          "read": true,
+          "write": true,
+          "suggest": true
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "expires_in_ms": "1",
+        "validation_nonce": "validation-1",
+        "gate_id": "gate-1"
+      }
+    },
+    {
+      "id": "missing-request-id-ticket_validated",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "ticket_validated",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "generation": "1",
+        "participant_ref": "host-ref",
+        "permission_version": "1",
+        "granted": {
+          "read": true,
+          "write": true,
+          "suggest": true
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "expires_in_ms": "1",
+        "validation_nonce": "validation-1",
+        "gate_id": "gate-1"
+      }
+    },
+    {
+      "id": "unknown-property-ticket_validated",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "ticket_validated",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "generation": "1",
+        "participant_ref": "host-ref",
+        "permission_version": "1",
+        "granted": {
+          "read": true,
+          "write": true,
+          "suggest": true
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "expires_in_ms": "1",
+        "validation_nonce": "validation-1",
+        "gate_id": "gate-1",
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "valid-revocation_notice",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "revocation_notice",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "generation": "1",
+        "participant_ref": "host-ref",
+        "permission_version": "1",
+        "barrier_id": "barrier-1",
+        "gate_ids": [
+          "gate-1",
+          "gate-2"
+        ],
+        "block_read": true,
+        "block_write": true
+      }
+    },
+    {
+      "id": "missing-request-id-revocation_notice",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "revocation_notice",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "generation": "1",
+        "participant_ref": "host-ref",
+        "permission_version": "1",
+        "barrier_id": "barrier-1",
+        "gate_ids": [
+          "gate-1",
+          "gate-2"
+        ],
+        "block_read": true,
+        "block_write": true
+      }
+    },
+    {
+      "id": "unknown-property-revocation_notice",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "revocation_notice",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "generation": "1",
+        "participant_ref": "host-ref",
+        "permission_version": "1",
+        "barrier_id": "barrier-1",
+        "gate_ids": [
+          "gate-1",
+          "gate-2"
+        ],
+        "block_read": true,
+        "block_write": true,
+        "unexpected_identity": "spoof"
+      }
+    },
+    {
+      "id": "counter-0-str",
+      "schema_ref": "#/$defs/Counter",
+      "schema_valid": true,
+      "message": "0"
+    },
+    {
+      "id": "counter-18446744073709551615-str",
+      "schema_ref": "#/$defs/Counter",
+      "schema_valid": true,
+      "message": "18446744073709551615"
+    },
+    {
+      "id": "counter-9007199254740993-str",
+      "schema_ref": "#/$defs/Counter",
+      "schema_valid": true,
+      "message": "9007199254740993"
+    },
+    {
+      "id": "counter-18446744073709551616-str",
+      "schema_ref": "#/$defs/Counter",
+      "schema_valid": false,
+      "message": "18446744073709551616"
+    },
+    {
+      "id": "counter-99999999999999999999-str",
+      "schema_ref": "#/$defs/Counter",
+      "schema_valid": false,
+      "message": "99999999999999999999"
+    },
+    {
+      "id": "counter-01-str",
+      "schema_ref": "#/$defs/Counter",
+      "schema_valid": false,
+      "message": "01"
+    },
+    {
+      "id": "counter--1-str",
+      "schema_ref": "#/$defs/Counter",
+      "schema_valid": false,
+      "message": "-1"
+    },
+    {
+      "id": "counter-1.0-str",
+      "schema_ref": "#/$defs/Counter",
+      "schema_valid": false,
+      "message": "1.0"
+    },
+    {
+      "id": "counter-1\n-str",
+      "schema_ref": "#/$defs/Counter",
+      "schema_valid": false,
+      "message": "1\n"
+    },
+    {
+      "id": "counter-1-int",
+      "schema_ref": "#/$defs/Counter",
+      "schema_valid": false,
+      "message": 1
+    },
+    {
+      "id": "counter--str",
+      "schema_ref": "#/$defs/Counter",
+      "schema_valid": false,
+      "message": ""
+    },
+    {
+      "id": "dependency-rejected-without-root",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "protocol_error",
+        "request_id": "request-1",
+        "reason": {
+          "code": "dependency_rejected",
+          "message": "read revision changed",
+          "retry": "do_not_retry"
+        }
+      }
+    },
+    {
+      "id": "dependency-rejected-with-root-outside-batch",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "protocol_error",
+        "request_id": "request-1",
+        "reason": {
+          "code": "dependency_rejected",
+          "message": "dependency failed",
+          "retry": "new_operation_after_refresh",
+          "root_op_id": "o1",
+          "root_cause": {
+            "op_id": "o1",
+            "code": "permission_revoked",
+            "message": "grant revoked"
+          }
+        }
+      }
+    },
+    {
+      "id": "duplicate-dependency",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "submit_changes",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "changes": [
+          {
+            "change_id": "c1",
+            "operations": [
+              {
+                "op_id": "o1",
+                "participant_ref": "host-ref",
+                "base_revision": "0",
+                "dependencies": [
+                  "o2",
+                  "o2"
+                ],
+                "read_preconditions": [],
+                "payload": {
+                  "kind": "text",
+                  "text": "Příliš žluťoučký kůň"
+                },
+                "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+              }
+            ],
+            "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+          }
+        ]
+      }
+    },
+    {
+      "id": "task-without-partial-cannot-span-changes",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "task_submit",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "task_id": "task-1",
+        "allow_partial": false,
+        "mode": "direct",
+        "changes": [
+          {
+            "change_id": "c1",
+            "task_id": "task-1",
+            "operations": [
+              {
+                "op_id": "o1",
+                "participant_ref": "host-ref",
+                "base_revision": "0",
+                "dependencies": [],
+                "read_preconditions": [],
+                "payload": {
+                  "kind": "text",
+                  "text": "Příliš žluťoučký kůň"
+                },
+                "fingerprint": "sha256:e339931ae9424e43b74976b110b91accb6472f02c8ebab378299ee72adbdc813"
+              },
+              {
+                "op_id": "o2",
+                "participant_ref": "host-ref",
+                "base_revision": "0",
+                "dependencies": [
+                  "o1"
+                ],
+                "read_preconditions": [],
+                "payload": {
+                  "kind": "text",
+                  "text": "Pokračování"
+                },
+                "fingerprint": "sha256:c2399436f4dbbbb2804cc7628454102cc0603a83298971fc93fd6fdc7f23fbd5"
+              }
+            ],
+            "membership_hash": "sha256:4052981e709e6f9bcd03ecdec7dffa978b8ccb4c57aafbb906852a5391971e31"
+          },
+          {
+            "change_id": "c1",
+            "task_id": "task-1",
+            "operations": [
+              {
+                "op_id": "o1",
+                "participant_ref": "host-ref",
+                "base_revision": "0",
+                "dependencies": [],
+                "read_preconditions": [],
+                "payload": {
+                  "kind": "text",
+                  "text": "Příliš žluťoučký kůň"
+                },
+                "fingerprint": "sha256:e339931ae9424e43b74976b110b91accb6472f02c8ebab378299ee72adbdc813"
+              },
+              {
+                "op_id": "o2",
+                "participant_ref": "host-ref",
+                "base_revision": "0",
+                "dependencies": [
+                  "o1"
+                ],
+                "read_preconditions": [],
+                "payload": {
+                  "kind": "text",
+                  "text": "Pokračování"
+                },
+                "fingerprint": "sha256:c2399436f4dbbbb2804cc7628454102cc0603a83298971fc93fd6fdc7f23fbd5"
+              }
+            ],
+            "membership_hash": "sha256:4052981e709e6f9bcd03ecdec7dffa978b8ccb4c57aafbb906852a5391971e31"
+          }
+        ]
+      }
+    },
+    {
+      "id": "saved-change-missing-range",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "commit_result",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "generation": "1",
+        "revision": "1",
+        "issuer": "crewship",
+        "durability": "node",
+        "changes": [
+          {
+            "change_id": "c1",
+            "status": "saved",
+            "operations": [
+              {
+                "op_id": "o1",
+                "status": "saved",
+                "revision": "1",
+                "issuer": "crewship",
+                "durability": "node"
+              }
+            ],
+            "last_revision": "1"
+          }
+        ]
+      }
+    },
+    {
+      "id": "mixed-status-atomic-change",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "commit_result",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "generation": "1",
+        "revision": "1",
+        "issuer": "crewship",
+        "durability": "node",
+        "changes": [
+          {
+            "change_id": "c1",
+            "status": "saved",
+            "operations": [
+              {
+                "op_id": "o1",
+                "status": "rejected",
+                "reason": {
+                  "code": "precondition_failed",
+                  "message": "changed",
+                  "retry": "new_operation_after_refresh"
+                }
+              }
+            ],
+            "first_revision": "1",
+            "last_revision": "1"
+          }
+        ]
+      }
+    },
+    {
+      "id": "rejected-change-cannot-carry-revision-range",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "commit_result",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "generation": "1",
+        "revision": "1",
+        "issuer": "crewship",
+        "durability": "node",
+        "changes": [
+          {
+            "change_id": "c1",
+            "status": "rejected",
+            "operations": [
+              {
+                "op_id": "o1",
+                "status": "rejected",
+                "reason": {
+                  "code": "precondition_failed",
+                  "message": "changed",
+                  "retry": "new_operation_after_refresh"
+                }
+              }
+            ],
+            "first_revision": "1",
+            "last_revision": "1"
+          }
+        ]
+      }
+    },
+    {
+      "id": "read-cursor-without-pinned-revision",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "read_request",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "max_bytes": "1",
+        "cursor": "cursor-revision-1"
+      }
+    },
+    {
+      "id": "saved-task-with-unknown-part",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "task_result",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "task": {
+          "task_id": "task-1",
+          "allow_partial": false,
+          "status": "saved",
+          "changes": [
+            {
+              "change_id": "c1",
+              "status": "saved",
+              "operations": [
+                {
+                  "op_id": "o1",
+                  "status": "saved",
+                  "revision": "1",
+                  "issuer": "crewship",
+                  "durability": "node"
+                }
+              ],
+              "first_revision": "1",
+              "last_revision": "1"
+            }
+          ],
+          "participant_ref": "host-ref",
+          "unresolved_change_ids": [
+            "c2"
+          ]
+        }
+      }
+    },
+    {
+      "id": "undo-two-selectors",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "undo_request",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "participant_ref": "host-ref",
+        "base_revision": "1",
+        "op_id": "o1",
+        "task_id": "task-1",
+        "target_change_id": "c1"
+      }
+    },
+    {
+      "id": "base64-invalid-alphabet",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "asset_result",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "revision": "1",
+        "asset_id": "asset-1",
+        "offset_bytes": "1",
+        "size_bytes": "1",
+        "digest": "sha256:ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb",
+        "data_base64": "Y!=="
+      }
+    },
+    {
+      "id": "revocation-no-blocked-mode",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "revocation_confirmed",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "participant_ref": "host-ref",
+        "barrier_id": "barrier-1",
+        "permission_version": "1",
+        "read_blocked": false,
+        "write_blocked": false
+      }
+    },
+    {
+      "id": "write-only-revocation",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "revocation_confirmed",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "participant_ref": "host-ref",
+        "barrier_id": "barrier-1",
+        "permission_version": "1",
+        "read_blocked": false,
+        "write_blocked": true
+      }
+    },
+    {
+      "id": "unknown-envelope",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "future-undefined-envelope",
+        "request_id": "r"
+      }
+    },
+    {
+      "id": "explicit-task-change-pending",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "task_result",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "task": {
+          "task_id": "task-1",
+          "allow_partial": false,
+          "status": "pending",
+          "changes": [
+            {
+              "change_id": "c1",
+              "status": "pending"
+            }
+          ],
+          "participant_ref": "host-ref",
+          "unresolved_change_ids": []
+        }
+      }
+    },
+    {
+      "id": "explicit-task-change-running",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "task_result",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "task": {
+          "task_id": "task-1",
+          "allow_partial": false,
+          "status": "running",
+          "changes": [
+            {
+              "change_id": "c1",
+              "status": "running"
+            }
+          ],
+          "participant_ref": "host-ref",
+          "unresolved_change_ids": []
+        }
+      }
+    },
+    {
+      "id": "explicit-task-change-cancelled",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "task_result",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "task": {
+          "task_id": "task-1",
+          "allow_partial": false,
+          "status": "cancelled",
+          "changes": [
+            {
+              "change_id": "c1",
+              "status": "cancelled"
+            }
+          ],
+          "participant_ref": "host-ref",
+          "unresolved_change_ids": []
+        }
+      }
+    },
+    {
+      "id": "explicit-task-change-unknown",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "task_result",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "task": {
+          "task_id": "task-1",
+          "allow_partial": false,
+          "status": "unknown",
+          "changes": [
+            {
+              "change_id": "c1",
+              "status": "unknown"
+            }
+          ],
+          "participant_ref": "host-ref",
+          "unresolved_change_ids": [
+            "c1"
+          ]
+        }
+      }
+    },
+    {
+      "id": "unknown-outcome-cannot-be-rejected",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "operation_status_result",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "result": {
+          "op_id": "o1",
+          "status": "rejected",
+          "reason": {
+            "code": "unknown_outcome",
+            "message": "not known",
+            "retry": "query_status"
+          }
+        }
+      }
+    },
+    {
+      "id": "unknown-outcome-explicit-status",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "operation_status_result",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "result": {
+          "op_id": "o1",
+          "status": "unknown"
+        }
+      }
+    },
+    {
+      "id": "status-requires-expected-fingerprint",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "operation_status",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "op_id": "o1"
+      }
+    },
+    {
+      "id": "valid-runtime_ready",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "runtime_ready",
+        "request_id": "startup-1",
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        }
+      }
+    },
+    {
+      "id": "missing-request-id-runtime_ready",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "runtime_ready",
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        }
+      }
+    },
+    {
+      "id": "unknown-property-runtime_ready",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "runtime_ready",
+        "request_id": "startup-1",
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "unexpected_identity": "spoof"
+      }
+    }
+  ],
+  "semantic_cases": [
+    {
+      "id": "client-forges-host-receipt",
+      "message": {
+        "type": "commit_result",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "generation": "1",
+        "revision": "1",
+        "issuer": "crewship",
+        "durability": "node",
+        "changes": [
+          {
+            "change_id": "c1",
+            "status": "saved",
+            "operations": [
+              {
+                "op_id": "o1",
+                "status": "saved",
+                "revision": "1",
+                "issuer": "crewship",
+                "durability": "node"
+              }
+            ],
+            "first_revision": "1",
+            "last_revision": "1"
+          }
+        ]
+      },
+      "context": {
+        "check": "direction",
+        "authenticated_role": "participant",
+        "allowed_role": "host"
+      },
+      "schema_valid": true,
+      "expected_error": "forbidden"
+    },
+    {
+      "id": "unknown-issuer",
+      "message": {
+        "type": "commit_result",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "generation": "1",
+        "revision": "1",
+        "issuer": "attacker",
+        "durability": "node",
+        "changes": [
+          {
+            "change_id": "c1",
+            "status": "saved",
+            "operations": [
+              {
+                "op_id": "o1",
+                "status": "saved",
+                "revision": "1",
+                "issuer": "crewship",
+                "durability": "node"
+              }
+            ],
+            "first_revision": "1",
+            "last_revision": "1"
+          }
+        ]
+      },
+      "context": {
+        "check": "issuer",
+        "authenticated_issuer": "crewship"
+      },
+      "schema_valid": true,
+      "expected_error": "forbidden"
+    },
+    {
+      "id": "unnegotiated-replicated",
+      "message": {
+        "type": "commit_result",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "generation": "1",
+        "revision": "1",
+        "issuer": "crewship",
+        "durability": "replicated",
+        "changes": [
+          {
+            "change_id": "c1",
+            "status": "saved",
+            "operations": [
+              {
+                "op_id": "o1",
+                "status": "saved",
+                "revision": "1",
+                "issuer": "crewship",
+                "durability": "node"
+              }
+            ],
+            "first_revision": "1",
+            "last_revision": "1"
+          }
+        ]
+      },
+      "context": {
+        "check": "durability",
+        "negotiated": [
+          "node"
+        ]
+      },
+      "schema_valid": true,
+      "expected_error": "version_mismatch"
+    },
+    {
+      "id": "reader-yjs_update",
+      "message": {
+        "type": "submit_changes",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "changes": [
+          {
+            "change_id": "c1",
+            "operations": [
+              {
+                "op_id": "o1",
+                "participant_ref": "host-ref",
+                "base_revision": "0",
+                "dependencies": [],
+                "read_preconditions": [],
+                "payload": {
+                  "kind": "yjs_update",
+                  "update_base64": "AAA="
+                },
+                "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+              }
+            ],
+            "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+          }
+        ]
+      },
+      "context": {
+        "check": "mutation_role",
+        "role": "reader"
+      },
+      "schema_valid": true,
+      "expected_error": "forbidden"
+    },
+    {
+      "id": "reader-yjs_sync_step2",
+      "message": {
+        "type": "submit_changes",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "changes": [
+          {
+            "change_id": "c1",
+            "operations": [
+              {
+                "op_id": "o1",
+                "participant_ref": "host-ref",
+                "base_revision": "0",
+                "dependencies": [],
+                "read_preconditions": [],
+                "payload": {
+                  "kind": "yjs_sync_step2",
+                  "update_base64": "AAA="
+                },
+                "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+              }
+            ],
+            "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+          }
+        ]
+      },
+      "context": {
+        "check": "mutation_role",
+        "role": "reader"
+      },
+      "schema_valid": true,
+      "expected_error": "forbidden"
+    },
+    {
+      "id": "participant-identity-laundering",
+      "message": {
+        "type": "submit_changes",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "changes": [
+          {
+            "change_id": "c1",
+            "operations": [
+              {
+                "op_id": "o1",
+                "participant_ref": "other-author",
+                "base_revision": "0",
+                "dependencies": [],
+                "read_preconditions": [],
+                "payload": {
+                  "kind": "text",
+                  "text": "Příliš žluťoučký kůň"
+                },
+                "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+              }
+            ],
+            "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+          }
+        ]
+      },
+      "context": {
+        "check": "participant",
+        "participant_ref": "host-ref"
+      },
+      "schema_valid": true,
+      "expected_error": "forbidden"
+    },
+    {
+      "id": "task-attribution-mismatch",
+      "message": {
+        "type": "task_submit",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "task_id": "other-task",
+        "allow_partial": false,
+        "mode": "direct",
+        "changes": [
+          {
+            "change_id": "c1",
+            "task_id": "task-1",
+            "operations": [
+              {
+                "op_id": "o1",
+                "participant_ref": "host-ref",
+                "base_revision": "0",
+                "dependencies": [],
+                "read_preconditions": [],
+                "payload": {
+                  "kind": "text",
+                  "text": "Příliš žluťoučký kůň"
+                },
+                "fingerprint": "sha256:e339931ae9424e43b74976b110b91accb6472f02c8ebab378299ee72adbdc813"
+              },
+              {
+                "op_id": "o2",
+                "participant_ref": "host-ref",
+                "base_revision": "0",
+                "dependencies": [
+                  "o1"
+                ],
+                "read_preconditions": [],
+                "payload": {
+                  "kind": "text",
+                  "text": "Pokračování"
+                },
+                "fingerprint": "sha256:c2399436f4dbbbb2804cc7628454102cc0603a83298971fc93fd6fdc7f23fbd5"
+              }
+            ],
+            "membership_hash": "sha256:4052981e709e6f9bcd03ecdec7dffa978b8ccb4c57aafbb906852a5391971e31"
+          }
+        ]
+      },
+      "context": {
+        "check": "task_membership"
+      },
+      "schema_valid": true,
+      "expected_error": "invalid_request"
+    },
+    {
+      "id": "agent-direct-without-grant",
+      "message": {
+        "type": "task_submit",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "task_id": "task-1",
+        "allow_partial": false,
+        "mode": "direct",
+        "changes": [
+          {
+            "change_id": "c1",
+            "task_id": "task-1",
+            "operations": [
+              {
+                "op_id": "o1",
+                "participant_ref": "host-ref",
+                "base_revision": "0",
+                "dependencies": [],
+                "read_preconditions": [],
+                "payload": {
+                  "kind": "text",
+                  "text": "Příliš žluťoučký kůň"
+                },
+                "fingerprint": "sha256:e339931ae9424e43b74976b110b91accb6472f02c8ebab378299ee72adbdc813"
+              },
+              {
+                "op_id": "o2",
+                "participant_ref": "host-ref",
+                "base_revision": "0",
+                "dependencies": [
+                  "o1"
+                ],
+                "read_preconditions": [],
+                "payload": {
+                  "kind": "text",
+                  "text": "Pokračování"
+                },
+                "fingerprint": "sha256:c2399436f4dbbbb2804cc7628454102cc0603a83298971fc93fd6fdc7f23fbd5"
+              }
+            ],
+            "membership_hash": "sha256:4052981e709e6f9bcd03ecdec7dffa978b8ccb4c57aafbb906852a5391971e31"
+          }
+        ]
+      },
+      "context": {
+        "check": "direct_grant",
+        "agent": true,
+        "direct_grant": false
+      },
+      "schema_valid": true,
+      "expected_error": "forbidden"
+    },
+    {
+      "id": "noncontiguous-atomic-revisions",
+      "message": {
+        "type": "commit_result",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "generation": "1",
+        "revision": "1",
+        "issuer": "crewship",
+        "durability": "node",
+        "changes": [
+          {
+            "change_id": "c1",
+            "status": "saved",
+            "operations": [
+              {
+                "op_id": "o1",
+                "status": "saved",
+                "revision": "1",
+                "issuer": "crewship",
+                "durability": "node"
+              }
+            ],
+            "first_revision": "1",
+            "last_revision": "3"
+          }
+        ]
+      },
+      "context": {
+        "check": "atomic_revisions"
+      },
+      "schema_valid": true,
+      "expected_error": "invalid_request"
+    },
+    {
+      "id": "duplicate-change-id",
+      "message": {
+        "type": "commit_batch",
+        "request_id": "request-1",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "expected_revision": "1",
+        "changes": [
+          {
+            "change_id": "c1",
+            "operations": [
+              {
+                "op_id": "o1",
+                "participant_ref": "host-ref",
+                "base_revision": "0",
+                "dependencies": [],
+                "read_preconditions": [],
+                "payload": {
+                  "kind": "text",
+                  "text": "Příliš žluťoučký kůň"
+                },
+                "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+              }
+            ],
+            "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+          },
+          {
+            "change_id": "c1",
+            "operations": [
+              {
+                "op_id": "o1",
+                "participant_ref": "host-ref",
+                "base_revision": "0",
+                "dependencies": [],
+                "read_preconditions": [],
+                "payload": {
+                  "kind": "text",
+                  "text": "Příliš žluťoučký kůň"
+                },
+                "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+              }
+            ],
+            "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+          }
+        ]
+      },
+      "context": {
+        "check": "unique_operation_ids"
+      },
+      "schema_valid": true,
+      "expected_error": "invalid_request"
+    },
+    {
+      "id": "unknown-author-on-runtime-channel",
+      "message": {
+        "type": "commit_batch",
+        "request_id": "request-1",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "expected_revision": "1",
+        "changes": [
+          {
+            "change_id": "c1",
+            "operations": [
+              {
+                "op_id": "o1",
+                "participant_ref": "host-ref",
+                "base_revision": "0",
+                "dependencies": [],
+                "read_preconditions": [],
+                "payload": {
+                  "kind": "text",
+                  "text": "Příliš žluťoučký kůň"
+                },
+                "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+              }
+            ],
+            "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+          }
+        ]
+      },
+      "context": {
+        "check": "host_registered_participants",
+        "registered": []
+      },
+      "schema_valid": true,
+      "expected_error": "forbidden"
+    },
+    {
+      "id": "noncanonical-base64-pad-bits",
+      "message": {
+        "type": "asset_result",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "revision": "1",
+        "asset_id": "asset-1",
+        "offset_bytes": "1",
+        "size_bytes": "1",
+        "digest": "sha256:ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb",
+        "data_base64": "YR=="
+      },
+      "context": {
+        "check": "base64_canonical"
+      },
+      "schema_valid": true,
+      "expected_error": "invalid_request"
+    },
+    {
+      "id": "stale-owner-renew-nonce",
+      "message": {
+        "type": "owner_grant",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "runtime_ref": "runtime-1",
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "lease_duration_ms": "1",
+        "revision": "1",
+        "renewal_nonce": "old-nonce",
+        "permission_version": "1"
+      },
+      "context": {
+        "check": "lease_binding",
+        "renewal_nonce": "nonce-1",
+        "generation": "1",
+        "permission_version": "1"
+      },
+      "schema_valid": true,
+      "expected_error": "stale_owner"
+    },
+    {
+      "id": "late-delivery-grant",
+      "message": {
+        "type": "delivery_grant",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "participant_ref": "host-ref",
+        "generation": "1",
+        "permission_version": "1",
+        "renewal_nonce": "nonce-1",
+        "duration_ms": "1",
+        "gate_id": "gate-1"
+      },
+      "context": {
+        "check": "delivery_expiry",
+        "sent_boottime_ns": "1000000000",
+        "received_boottime_ns": "7000000000"
+      },
+      "schema_valid": true,
+      "expected_error": "lease_expired"
+    },
+    {
+      "id": "closed-gate-never-reopened",
+      "message": {
+        "type": "delivery_grant",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "participant_ref": "host-ref",
+        "generation": "1",
+        "permission_version": "1",
+        "renewal_nonce": "nonce-1",
+        "duration_ms": "1",
+        "gate_id": "gate-1"
+      },
+      "context": {
+        "check": "closed_gate",
+        "closed_gate_ids": [
+          "gate-1"
+        ]
+      },
+      "schema_valid": true,
+      "expected_error": "permission_revoked"
+    },
+    {
+      "id": "gate-mismatch-on-renew",
+      "message": {
+        "type": "delivery_grant",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "participant_ref": "host-ref",
+        "generation": "1",
+        "permission_version": "1",
+        "renewal_nonce": "nonce-1",
+        "duration_ms": "1",
+        "gate_id": "other-gate"
+      },
+      "context": {
+        "check": "lease_binding",
+        "gate_id": "gate-1",
+        "renewal_nonce": "nonce-1",
+        "generation": "1",
+        "permission_version": "1"
+      },
+      "schema_valid": true,
+      "expected_error": "stale_owner"
+    },
+    {
+      "id": "one-gate-ack-is-not-whole-barrier",
+      "message": {
+        "type": "delivery_blocked",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "participant_ref": "host-ref",
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "barrier_id": "barrier-1",
+        "covered_gate_ids": [
+          "gate-1"
+        ],
+        "permission_version": "1"
+      },
+      "context": {
+        "check": "barrier_coverage",
+        "required_gate_ids": [
+          "gate-1",
+          "gate-2"
+        ],
+        "permission_version": "1",
+        "generation": "1"
+      },
+      "schema_valid": true,
+      "expected_error": "invalid_request"
+    },
+    {
+      "id": "stale-barrier-permission-version",
+      "message": {
+        "type": "delivery_blocked",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "participant_ref": "host-ref",
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "barrier_id": "barrier-1",
+        "covered_gate_ids": [
+          "gate-1",
+          "gate-2"
+        ],
+        "permission_version": "0"
+      },
+      "context": {
+        "check": "barrier_coverage",
+        "required_gate_ids": [
+          "gate-1",
+          "gate-2"
+        ],
+        "permission_version": "1",
+        "generation": "1"
+      },
+      "schema_valid": true,
+      "expected_error": "permission_revoked"
+    },
+    {
+      "id": "cursor-cannot-mix-revisions",
+      "message": {
+        "type": "read_request",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "max_bytes": "1",
+        "cursor": "cursor-1",
+        "revision": "2"
+      },
+      "context": {
+        "check": "cursor_revision",
+        "cursor_revision": "1"
+      },
+      "schema_valid": true,
+      "expected_error": "precondition_failed"
+    },
+    {
+      "id": "proposal-accept-after-proposer-revoked",
+      "message": {
+        "type": "proposal_accept",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "proposal_id": "proposal-1",
+        "base_revision": "1",
+        "op_id": "o1"
+      },
+      "context": {
+        "check": "proposal_authority",
+        "proposer_can_suggest": false,
+        "acceptor_can_write": true
+      },
+      "schema_valid": true,
+      "expected_error": "permission_revoked"
+    },
+    {
+      "id": "undo-other-participant-task",
+      "message": {
+        "type": "undo_request",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "participant_ref": "host-ref",
+        "base_revision": "1",
+        "op_id": "o1",
+        "task_id": "task-1"
+      },
+      "context": {
+        "check": "undo_task_owner",
+        "task_owner": "different-participant"
+      },
+      "schema_valid": true,
+      "expected_error": "forbidden"
+    },
+    {
+      "id": "unknown-task-does-not-create-task",
+      "message": {
+        "type": "task_status",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "task_id": "task-1"
+      },
+      "context": {
+        "check": "task_exists",
+        "task_exists": false
+      },
+      "schema_valid": true,
+      "expected_error": "unknown_outcome"
+    },
+    {
+      "id": "dependency-root-id-mismatch",
+      "message": {
+        "type": "protocol_error",
+        "request_id": "request-1",
+        "reason": {
+          "code": "dependency_rejected",
+          "message": "dependency failed",
+          "retry": "new_operation_after_refresh",
+          "root_op_id": "different-op",
+          "root_cause": {
+            "op_id": "o1",
+            "code": "permission_revoked",
+            "message": "grant revoked"
+          }
+        }
+      },
+      "context": {
+        "check": "dependency_root"
+      },
+      "schema_valid": true,
+      "expected_error": "invalid_request"
+    },
+    {
+      "id": "scope-cannot-be-widened-by-body",
+      "message": {
+        "type": "commit_batch",
+        "request_id": "request-1",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "other-artifact",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "expected_revision": "1",
+        "changes": [
+          {
+            "change_id": "c1",
+            "operations": [
+              {
+                "op_id": "o1",
+                "participant_ref": "host-ref",
+                "base_revision": "0",
+                "dependencies": [],
+                "read_preconditions": [],
+                "payload": {
+                  "kind": "text",
+                  "text": "Příliš žluťoučký kůň"
+                },
+                "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+              }
+            ],
+            "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+          }
+        ]
+      },
+      "context": {
+        "check": "authenticated_scope",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        }
+      },
+      "schema_valid": true,
+      "expected_error": "forbidden"
+    },
+    {
+      "id": "old-client-unoffered-version",
+      "message": {
+        "type": "welcome",
+        "request_id": "request-1",
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "2.0.0",
+          "engine_version": "1.0.0"
+        },
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "participant_ref": "host-ref",
+        "permission_version": "1",
+        "limits": {
+          "max_frame_bytes": "16777216",
+          "max_batch_bytes": "262144",
+          "max_batch_operations": "256",
+          "max_atomic_operations": "256",
+          "max_task_bytes": "4194304",
+          "max_task_changes": "4096",
+          "max_read_bytes": "1048576",
+          "max_checkpoint_bytes": "16777216",
+          "max_delivery_ms": "5000",
+          "max_presence_ms": "30000"
+        },
+        "issuer": "crewship"
+      },
+      "context": {
+        "check": "negotiation",
+        "offered": [
+          {
+            "protocol_version": "0.4.0",
+            "model_version": "1.0.0",
+            "engine_version": "1.0.0"
+          }
+        ]
+      },
+      "schema_valid": true,
+      "expected_error": "version_mismatch"
+    },
+    {
+      "id": "utf8-byte-limit-not-character-count",
+      "message": {
+        "type": "read_result",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "revision": "1",
+        "items": [
+          {
+            "target_id": "paragraph-1",
+            "model_type": "paragraph",
+            "revision": "1",
+            "data": {
+              "text": "řřřřřřřřřř"
+            }
+          }
+        ]
+      },
+      "context": {
+        "check": "utf8_limit",
+        "max_bytes": 8
+      },
+      "schema_valid": true,
+      "expected_error": "capacity_exhausted"
+    },
+    {
+      "id": "new-current-reader-gate-after-writer-downgrade",
+      "message": {
+        "type": "session_joined",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "session_id": "session-1",
+        "participant_ref": "host-ref",
+        "generation": "1",
+        "permission_version": "2",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "gate_id": "gate-new-reader"
+      },
+      "context": {
+        "check": "fresh_current_gate",
+        "closed_gate_ids": [
+          "gate-1"
+        ],
+        "ticket_permission_version": "2",
+        "host_permission_version": "2",
+        "granted": {
+          "read": true,
+          "write": false
+        }
+      },
+      "schema_valid": true,
+      "expected_error": null
+    },
+    {
+      "id": "status-lost-response-reused-id-different-payload",
+      "message": {
+        "type": "operation_status",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "op_id": "o1",
+        "expected_fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+      },
+      "context": {
+        "check": "status_fingerprint",
+        "authorized": true,
+        "stored_outcome": "saved",
+        "stored_fingerprint": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "schema_valid": true,
+      "expected_error": "op_id_conflict"
+    },
+    {
+      "id": "status-rejected-outcome-fingerprint-mismatch",
+      "message": {
+        "type": "operation_status",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "op_id": "o1",
+        "expected_fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+      },
+      "context": {
+        "check": "status_fingerprint",
+        "authorized": true,
+        "stored_outcome": "rejected",
+        "stored_fingerprint": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "schema_valid": true,
+      "expected_error": "op_id_conflict"
+    },
+    {
+      "id": "status-unauthorized-known-operation-does-not-leak",
+      "message": {
+        "type": "operation_status",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "op_id": "o1",
+        "expected_fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+      },
+      "context": {
+        "check": "status_authorization_before_lookup",
+        "authorized": false,
+        "stored_outcome": "saved",
+        "stored_fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+      },
+      "schema_valid": true,
+      "expected_error": "forbidden"
+    },
+    {
+      "id": "status-unauthorized-unknown-operation-same-error",
+      "message": {
+        "type": "operation_status",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "op_id": "o1",
+        "expected_fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+      },
+      "context": {
+        "check": "status_authorization_before_lookup",
+        "authorized": false,
+        "stored_outcome": null
+      },
+      "schema_valid": true,
+      "expected_error": "forbidden"
+    },
+    {
+      "id": "status-authorized-unseen-remains-unknown",
+      "message": {
+        "type": "operation_status",
+        "request_id": "request-1",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "op_id": "o1",
+        "expected_fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+      },
+      "context": {
+        "check": "status_fingerprint",
+        "authorized": true,
+        "stored_outcome": null
+      },
+      "schema_valid": true,
+      "expected_error": null,
+      "expected_status": "unknown"
+    },
+    {
+      "id": "participant-cannot-forge-runtime-readiness",
+      "message": {
+        "type": "runtime_ready",
+        "request_id": "startup-1",
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        }
+      },
+      "context": {
+        "check": "direction",
+        "authenticated_role": "participant",
+        "allowed_role": "runtime",
+        "required_channel": "private_inherited_host_rpc"
+      },
+      "schema_valid": true,
+      "expected_error": "forbidden"
+    }
+  ]
+}
