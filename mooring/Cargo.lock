@@ -172,6 +172,7 @@ name = "mooring-core"
 version = "0.1.0"
 dependencies = [
  "mooring-protocol",
+ "serde_json",
 ]
 
 [[package]]
