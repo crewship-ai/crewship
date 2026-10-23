@@ -72,14 +72,16 @@ type Command struct {
 	Cells []CellInput `json:"cells,omitempty"`
 }
 type Request struct {
-	MutationID string  `json:"mutation_id"`
-	MandateID  string  `json:"mandate_id"`
-	SessionID  string  `json:"session_id,omitempty"`
-	BaseRev    int64   `json:"base_rev"`
-	Generation int64   `json:"generation"`
-	Command    Command `json:"command"`
+	MutationID string   `json:"mutation_id"`
+	MandateID  string   `json:"mandate_id"`
+	SessionID  string   `json:"session_id,omitempty"`
+	BaseRev    int64    `json:"base_rev"`
+	Generation int64    `json:"generation"`
+	Command    Command  `json:"command"`
+	ReadSet    *ReadSet `json:"read_set,omitempty"`
 }
 type State struct {
+	StructureRev  int64           `json:"structure_rev"`
 	SchemaVersion int             `json:"schema_version"`
 	Rev           int64           `json:"rev"`
 	Generation    int64           `json:"generation"`
@@ -241,6 +243,9 @@ func (r Request) validate(k Key) error {
 	if r.BaseRev > 0 && r.Generation < 1 {
 		return ErrPrecondition
 	}
+	if err := r.ReadSet.validate(); err != nil {
+		return err
+	}
 	return r.Command.validate()
 }
 func permits(p Principal, targets []string) bool {
@@ -338,6 +343,7 @@ type CellConflict struct {
 
 // PreconditionError details a rejected base revision. It matches ErrPrecondition.
 type PreconditionError struct {
+	Reason           string
 	HeadRev          int64
 	SnapshotRequired bool
 	Conflicts        []CellConflict

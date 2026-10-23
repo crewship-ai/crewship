@@ -489,7 +489,7 @@ func (h *gridcraftHTTP) writePrecondition(w http.ResponseWriter, r *http.Request
 		}
 		conflicts = append(conflicts, gridcraftConflict{c.Sheet, c.Cell, c.Input, c.Rev, label})
 	}
-	writeJSON(w, 409, map[string]any{"error": "precondition_failed", "head_rev": p.HeadRev, "snapshot_required": p.SnapshotRequired, "conflicts": conflicts})
+	writeJSON(w, 409, map[string]any{"error": "precondition_failed", "head_rev": p.HeadRev, "snapshot_required": p.SnapshotRequired, "conflicts": conflicts, "reason": p.Reason})
 }
 func (h *gridcraftHTTP) actorLabel(ctx context.Context, authority string) string {
 	var label sql.NullString
@@ -797,6 +797,11 @@ func (h *gridcraftHTTP) agent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		result, err := h.operations.Apply(r.Context(), k, *body.Request, authority)
+		var precondition *appengine.PreconditionError
+		if errors.As(err, &precondition) {
+			h.writePrecondition(w, r, precondition)
+			return
+		}
 		if err != nil {
 			gridcraftError(w, err)
 			return

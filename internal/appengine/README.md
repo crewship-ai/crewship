@@ -198,3 +198,13 @@ Harness notes: takeover scenarios must use a different `mutation_id`, since
 park files are keyed by artifact, authority and mutation id. Calls through
 the agent IPC path have a 30 s write timeout, so park those for less than
 that or expect a dropped response instead of a status code.
+
+Agent requests may declare a `read_set` of cell observations and rectangular
+ranges with their observed document revisions; ranges additionally bind to the
+`structure_rev` returned by Read (the last import revision). Admission and
+commit independently validate those inputs against retained commands. Changes
+by the same author also invalidate a read. Intervening derived recalculation
+conservatively invalidates older observations because its address list is capped. Missing/too-old history and changed
+imports fail closed with a reason. An older agent without a read-set requires
+an unchanged whole base revision; an explicitly empty read-set declares an
+input-independent command. Row/column insertion is not part of this pilot.
