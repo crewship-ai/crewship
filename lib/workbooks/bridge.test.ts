@@ -1522,3 +1522,135 @@ describe("HTTP transport", () => {
     expect((fetch.mock.calls[0] as unknown as [string, RequestInit])[1].body).toBe("{\"a\":1}")
   })
 })
+
+describe("a snapshot reload while a receipt waits for earlier revisions", () => {
+  const gone = (head: number): TransportResponse => ({ status: 410, body: { error: "snapshot_required", head_rev: head } })
+  const workbook = (rev: number, snapshot: unknown = {}) => ok({ schema_version: 1, rev, generation: 1, snapshot })
+
+  it("410: the held edit is acked right after the snapshot, and its restatement gets the same ack without a second write", async () => {
+    const t = setup({ edit: vi.fn(async () => receipt(1, 44)), commits: vi.fn(async () => gone(44)) })
+    await t.connect()
+    t.transport.snapshot.mockResolvedValueOnce(workbook(44, { B5: "draft" }))
+    t.send(mutation(1, 41, [["B5", "draft"]]))
+    await flush(); await flush()
+    expect(t.toFrame()).toEqual([
+      { type: "snapshot", protocol: 1, rev: 44, generation: 1, snapshot: { B5: "draft" }, discarded: [] },
+      { type: "ack", protocol: 1, seq: 1, rev: 44 },
+    ])
+    // The editor restates every unconfirmed edit not in `discarded`, byte for byte.
+    t.port.postMessage.mockClear()
+    t.send(mutation(1, 41, [["B5", "draft"]]))
+    await flush()
+    expect(t.toFrame()).toEqual([{ type: "ack", protocol: 1, seq: 1, rev: 44 }])
+    // ...and through a resume after the snapshot.
+    t.port.postMessage.mockClear()
+    t.send({ type: "resume", protocol: 1, last_rev: 44, pending: [{ seq: 1, base_rev: 41, ops: ops([["B5", "draft"]]) }] })
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(t.toFrame()).toEqual([{ type: "ack", protocol: 1, seq: 1, rev: 44 }])
+    expect(t.transport.edit).toHaveBeenCalledTimes(1)
+    expect(t.kills).toEqual([])
+    expect(t.bridge.pending).toBe(0)
+  })
+
+  it("a snapshot commit in the feed: held edits are acked in revision order after the snapshot", async () => {
+    const t = setup({
+      edit: vi.fn(async (id: string) => id.endsWith(":1") ? receipt(1, 44) : receipt(2, 45)),
+      commits: vi.fn(async (since: number) => feed(45, [remote(42, [["B2", "1"]]), { rev: 43, kind: "snapshot" }, own(44, 1, [["B5", "a"]]), own(45, 2, [["B6", "b"]])].filter(c => c.rev > since))),
+    })
+    const commits = deferred<TransportResponse>()
+    t.transport.commits.mockImplementationOnce(() => commits.promise)
+    await t.connect()
+    t.transport.snapshot.mockResolvedValueOnce(workbook(45, { imported: true }))
+    t.send(mutation(1, 41, [["B5", "a"]]))
+    t.send(mutation(2, 41, [["B6", "b"]]))
+    await flush(); await flush()
+    expect(t.toFrame()).toEqual([]) // both receipts wait for 42 and 43
+    commits.resolve(feed(45, [remote(42, [["B2", "1"]]), { rev: 43, kind: "snapshot" }, own(44, 1, [["B5", "a"]]), own(45, 2, [["B6", "b"]])]))
+    await flush(); await flush()
+    expect(t.toFrame()).toEqual([
+      { type: "committed", protocol: 1, rev: 42, actor_label: "Agent Ada", ops: ops([["B2", "1"]]) },
+      { type: "snapshot", protocol: 1, rev: 45, generation: 1, snapshot: { imported: true }, discarded: [] },
+      { type: "ack", protocol: 1, seq: 1, rev: 44 },
+      { type: "ack", protocol: 1, seq: 2, rev: 45 },
+    ])
+    t.send(mutation(1, 41, [["B5", "a"]]))
+    t.send(mutation(2, 41, [["B6", "b"]]))
+    await flush()
+    expect(t.types().slice(4)).toEqual(["ack:44", "ack:45"])
+    expect(t.transport.edit).toHaveBeenCalledTimes(2)
+    expect(t.kills).toEqual([])
+  })
+
+  it("a receipt newer than the snapshot stays held and is acked when the feed reaches it", async () => {
+    const commits = deferred<TransportResponse>()
+    const history = [remote(44, [["C1", "x"]]), { rev: 45, kind: "cells", actor_label: "Owner", own: true, ops: [{ sheet: "Sheet1", cell: "B5", input: "draft" }] }]
+    const t = setup({
+      edit: vi.fn(async () => receipt(1, 45)),
+      commits: vi.fn(async (since: number) => feed(45, history.filter(c => c.rev > since))),
+    })
+    t.transport.commits.mockImplementationOnce(() => commits.promise)
+    await t.connect()
+    // The snapshot was read before the edit committed: it is at 43.
+    t.transport.snapshot.mockResolvedValueOnce(workbook(43))
+    t.send(mutation(1, 41, [["B5", "draft"]]))
+    await flush(); await flush()
+    commits.resolve(gone(43))
+    await flush(); await flush()
+    expect(t.toFrame()[0]).toEqual({ type: "snapshot", protocol: 1, rev: 43, generation: 1, snapshot: {}, discarded: [] })
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(t.types()).toEqual(["snapshot", "committed:44", "ack:45"])
+    t.send(mutation(1, 41, [["B5", "draft"]]))
+    await flush()
+    expect(t.types()).toEqual(["snapshot", "committed:44", "ack:45", "ack:45"])
+    expect(t.transport.edit).toHaveBeenCalledTimes(1)
+    expect(t.kills).toEqual([])
+  })
+
+  it("a snapshot read before a revision the editor already got is read again, so a later edit on that revision is not a protocol error", async () => {
+    const read = deferred<TransportResponse>()
+    const t = setup({ edit: vi.fn(async (id: string) => id.endsWith(":1") ? receipt(1, 42) : receipt(2, 43)), commits: vi.fn(async (since: number) => feed(42, [own(42, 1, [["B5", "x"]])].filter(c => c.rev > since))) })
+    await t.connect()
+    // The feed was pruned: the reload's read of the head is slow.
+    t.transport.commits.mockResolvedValueOnce(gone(42))
+    t.transport.snapshot.mockImplementationOnce(() => read.promise)
+    t.transport.snapshot.mockResolvedValueOnce(workbook(42, { B5: "x" }))
+    t.bridge.notify({ rev: 42, generation: 1 })
+    await flush()
+    // Meanwhile the editor's edit commits at 42 and is acked directly.
+    t.send(mutation(1, 41, [["B5", "x"]]))
+    await flush()
+    expect(t.types()).toEqual(["ack:42"])
+    read.resolve(workbook(41)) // stale: it was read before revision 42 committed
+    await flush(); await flush()
+    // The editor is never taken back behind a revision it was acked at.
+    expect(t.toFrame().filter(m => m.type === "snapshot").map(m => m.rev)).toEqual([42])
+    // Its next edit, made against that revision, is accepted.
+    t.send(mutation(2, 42, [["B6", "y"]]))
+    await flush()
+    expect(t.kills).toEqual([])
+    expect(t.types().at(-1)).toBe("ack:43")
+  })
+
+  it("a resume behind the head keeps a held receipt and acks it from the feed", async () => {
+    const commits = deferred<TransportResponse>()
+    const history = [remote(42, [["B2", "1"]]), remote(43, [["C1", "x"]]), { rev: 44, kind: "cells", actor_label: "Owner", own: true, ops: [{ sheet: "Sheet1", cell: "B5", input: "draft" }] }]
+    let head = 42
+    const t = setup({
+      edit: vi.fn(async () => receipt(1, 44)),
+      commits: vi.fn(async (since: number) => feed(head, history.filter(c => c.rev > since && c.rev <= head))),
+    })
+    await t.connect()
+    t.bridge.notify({ rev: 42, generation: 1 })
+    await flush()
+    head = 44
+    t.transport.commits.mockImplementationOnce(() => commits.promise)
+    t.send(mutation(1, 42, [["B5", "draft"]]))
+    await flush(); await flush()
+    t.send({ type: "resume", protocol: 1, last_rev: 41, pending: [{ seq: 1, base_rev: 42, ops: ops([["B5", "draft"]]) }] })
+    commits.resolve(feed(44, history.filter(c => c.rev > 42)))
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(t.types()).toEqual(["committed:42", "committed:42", "committed:43", "ack:44"])
+    expect(t.transport.edit).toHaveBeenCalledTimes(1)
+    expect(t.kills).toEqual([])
+  })
+})

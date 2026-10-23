@@ -88,6 +88,8 @@ export const BRIDGE_MAX_REBASES = 3
 export const BRIDGE_DEFAULT_RETRY_MS = 150
 /** Attempts of one mutation answered 200 without a durable receipt before it is refused as `not_confirmed`. */
 export const BRIDGE_MAX_UNCONFIRMED = 5
+/** Extra reads of a snapshot that predates a revision the editor already holds (read while that revision committed). */
+const BRIDGE_MAX_STALE_SNAPSHOT_READS = 2
 /** From the bridge's creation until the editor said hello and holds its snapshot. */
 export const BRIDGE_HANDSHAKE_TIMEOUT_MS = 15_000
 /** A replacement session must live this long (or have an edit accepted) before it may be replaced again. */
@@ -630,9 +632,11 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
   }
 
   function deliverCommit(commit: Extract<WorkbookCommit, { kind: "cells" }>) {
-    // A held receipt names the revision as ours even when the feed carries no ids.
-    const seq = held.get(commit.rev) ?? ownSeq(commit)
-    const ours = seq !== undefined && known.get(seq)?.epoch === epoch
+    // A held receipt names the revision as ours even when the feed carries no ids. It survived any
+    // snapshot since (it was never listed as discarded), so the editor still waits for its ack.
+    const heldSeq = held.get(commit.rev)
+    const seq = heldSeq ?? ownSeq(commit)
+    const ours = seq !== undefined && (heldSeq !== undefined || known.get(seq)?.epoch === epoch)
     // An edit refused as unconfirmed may still have committed: the editor then needs its value.
     if (ours && outcomes.get(seq)?.type !== "rejected") { ackFrame(seq, commit.rev); settle(seq) }
     else {
@@ -652,19 +656,25 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
    * while nothing is unsent and no cell editor is open, checked again once the head is read.
    */
   async function reloadSnapshot(idle = false): Promise<boolean> {
-    let response: TransportResponse
-    try { response = await transport.snapshot() } catch { return false }
-    if (phase === "killed") return false
-    if (idle && (phase !== "live" || queue.size > 0 || refusals.size > 0 || overflow > 0 || drafts.size > 0 || catching)) return false
-    const refusal = editorRefusal(response)
-    // Nothing is unsent on an idle reload: a session that expired unnoticed is replaced, then the reload tried again.
-    if (refusal === "expired" && idle) { void renew(session.session_id).then(() => { reloading = false; maybeReload() }); return false }
-    if (refusal) { kill(refusal); return false }
-    const snapshot = response.status === 200 ? parseSnapshot(response.body) : null
-    if (!snapshot) return false
-    if (snapshot.generation !== session.generation) { kill("generation"); return false }
-    // A revision the editor got while the head was read must not be taken back.
-    if (idle && snapshot.rev < confirmedRev) return false
+    let snapshot: WorkbookSnapshot | null = null
+    for (let read = 0; ; read++) {
+      let response: TransportResponse
+      try { response = await transport.snapshot() } catch { return false }
+      if (phase === "killed") return false
+      if (idle && (phase !== "live" || queue.size > 0 || refusals.size > 0 || overflow > 0 || drafts.size > 0 || catching)) return false
+      const refusal = editorRefusal(response)
+      // Nothing is unsent on an idle reload: a session that expired unnoticed is replaced, then the reload tried again.
+      if (refusal === "expired" && idle) { void renew(session.session_id).then(() => { reloading = false; maybeReload() }); return false }
+      if (refusal) { kill(refusal); return false }
+      snapshot = response.status === 200 ? parseSnapshot(response.body) : null
+      if (!snapshot) return false
+      if (snapshot.generation !== session.generation) { kill("generation"); return false }
+      // A revision the editor got (an ack or a commit) while the head was read must not be taken back:
+      // the editor may already have sent edits against it, and the snapshot would lack its content.
+      // The server reads committed state, so a read started after that revision includes it.
+      if (snapshot.rev >= confirmedRev) break
+      if (idle || read >= BRIDGE_MAX_STALE_SNAPSHOT_READS) return false
+    }
     epoch++
     const head = queue.head()
     const discarded: number[] = [], overtaken: BridgeWrite[] = []
@@ -673,10 +683,17 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
     // A host write in flight stays the person's: its answer settles it or opens it again (`handle`).
     if (head && queue.head() === head && !head.host) discarded.unshift(head.seq)
     emit({ type: "recount", pending: queue.size })
-    held.clear()
+    // Receipts waiting for earlier revisions left the queue, so they are not in `discarded`: the
+    // editor keeps them and restates them. Those the snapshot contains are acked right after it, in
+    // revision order (the editor takes an ack at or below its revision as saved); later ones stay
+    // held until the feed reaches them.
+    const contained = [...held].filter(([rev]) => rev <= snapshot.rev).sort(([a], [b]) => a - b)
+    for (const [rev] of contained) held.delete(rev)
     confirmedRev = baseRev = snapshot.rev
-    wantRev = Math.max(wantRev, snapshot.rev)
+    wantRev = Math.max(wantRev, snapshot.rev, ...held.keys())
     post({ type: "snapshot", protocol: 1, rev: snapshot.rev, generation: snapshot.generation, snapshot: snapshot.snapshot, discarded })
+    for (const [rev, seq] of contained) ackFrame(seq, rev)
+    flushHeld()
     reloadWanted = false
     // The person's keep-mine choice was made against the old content: they decide again, it is not dropped.
     for (const write of overtaken) refuse(write, "reloaded")
@@ -1073,7 +1090,7 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
       // Replay from where the editor is; acks it lost are sent again.
       const target = confirmedRev
       for (const [seq, outcome] of outcomes) if (outcome.type === "ack" && outcome.rev > message.last_rev) outcomes.delete(seq)
-      held.clear()
+      // Held receipts are all above the revision the editor resumes from: they stay held, acked as the feed reaches them.
       confirmedRev = message.last_rev
       void catchUp(target)
     }

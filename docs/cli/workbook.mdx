@@ -57,7 +57,11 @@ edits again under it, after
 checking with `workbook status` that the old ones did not already commit; a
 new session that expires again right away ends the editor. A commits range the
 server no longer keeps (`410 snapshot_required`) reloads the workbook in the
-editor. Editor requests never sign the person out of the app or rotate the
+editor. An edit the server already saved when the workbook is reloaded is
+confirmed to the editor right after the reloaded workbook (or once the commits
+feed reaches it, if it is newer), and an edit the editor sends again is answered
+with the same confirmation without being written twice; a reloaded workbook
+older than a revision the editor already shows is read again. Editor requests never sign the person out of the app or rotate the
 sign-in for the editor session's sake. Each confirmed revision arrives as a
 `workbook.committed` push on the Page's realtime channel, and the Page reads
 it through the commits feed; while the realtime connection is down it reads the
