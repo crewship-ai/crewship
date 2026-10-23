@@ -23,15 +23,20 @@ export type OpenSessionResult =
   | { ok: true; session: WorkbookSession }
   /**
    * `status`: the HTTP status, or 0 for a network failure or an unreadable session (also one with
-   * no bundle pin, which the server sends until an editor origin is configured).
+   * no bundle pin, which the server sends until an editor origin is configured). `retryAfterMs`
+   * comes with `429` (the per-person session cap): when a session is likely to be free again,
+   * from the server's Retry-After, at most `WORKBOOK_SESSION_REOPEN_MAX_MS`.
    */
-  | { ok: false; status: number; refusal?: EditorRefusal }
+  | { ok: false; status: number; refusal?: EditorRefusal; retryAfterMs?: number }
 
 export interface WorkbookHead { rev: number; generation: number }
 
 /** `error` of the `503` every live-editing endpoint answers while the operator switch or the workspace flag is off. */
 export const EDITOR_DISABLED_ERROR = "gridcraft_editor_disabled"
-/** `error` of the `401` for an expired or closed session, or one opened for an older generation. */
+/**
+ * `error` of the `401` that servers before `editor_session_expired` answered for an expired or
+ * closed editor session; still read as an expired editor session.
+ */
 export const SESSION_EXPIRED_ERROR = "session_expired"
 /**
  * `error` the server answers for an editor session that is over (expired, closed, opened for an
@@ -41,8 +46,13 @@ export const SESSION_EXPIRED_ERROR = "session_expired"
 export const EDITOR_SESSION_EXPIRED_ERROR = "editor_session_expired"
 /** Realtime event on `page:{pageId}` naming a confirmed workbook revision (no cell content). */
 export const WORKBOOK_COMMITTED_EVENT = "workbook.committed"
-/** Further attempts to open a session after `429` (the per-person session cap), each after Retry-After. */
+/**
+ * Further attempts to open a session after `429` (the per-person session cap), each after
+ * Retry-After, while that wait is at most `MAX_RETRY_AFTER_MS`. A longer wait is returned at once.
+ */
 export const WORKBOOK_SESSION_OPEN_RETRIES = 2
+/** Longest Retry-After reported for a `429` on open: the server's idle expiry of a session. */
+export const WORKBOOK_SESSION_REOPEN_MAX_MS = 15 * 60_000
 const DEFAULT_RETRY_AFTER_MS = 1000
 const MAX_RETRY_AFTER_MS = 10_000
 /** `error` of the `403` for an edit whose recalculated effects could not be confirmed. */
@@ -135,7 +145,7 @@ export function parseCommittedPush(payload: unknown, pageId: string): WorkbookHe
 
 function retryAfterMs(response: Response): number {
   const seconds = Number(response.headers.get("retry-after"))
-  return Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds * 1000, MAX_RETRY_AFTER_MS) : DEFAULT_RETRY_AFTER_MS
+  return Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds * 1000, WORKBOOK_SESSION_REOPEN_MAX_MS) : DEFAULT_RETRY_AFTER_MS
 }
 
 /** Effective value of one flag in `GET /api/v1/feature-flags`: the workspace override wins. */
@@ -209,10 +219,12 @@ export function createWorkbookEditorClient(options: { workspaceId: string; pageI
         } catch {
           return { ok: false, status: 0 }
         }
-        // The per-person session cap: wait as told, a bounded number of times.
-        if (response.status !== 429 || attempt >= WORKBOOK_SESSION_OPEN_RETRIES) break
+        // The per-person session cap: wait as told, a bounded number of times, and only briefly;
+        // a longer wait goes back to the host, which offers to reopen and schedules it.
+        if (response.status !== 429 || attempt >= WORKBOOK_SESSION_OPEN_RETRIES || retryAfterMs(response) > MAX_RETRY_AFTER_MS) break
         await sleep(retryAfterMs(response))
       }
+      if (response.status === 429) return { ok: false, status: 429, retryAfterMs: retryAfterMs(response) }
       if (!response.ok) {
         const refusal = editorRefusal({ status: response.status, body: await read(response) })
         return refusal ? { ok: false, status: response.status, refusal } : { ok: false, status: response.status }

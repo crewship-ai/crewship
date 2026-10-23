@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { EDITOR_DISABLED_ERROR, EDITOR_SESSION_EXPIRED_ERROR, SESSION_EXPIRED_ERROR, WORKBOOK_COMMITTED_EVENT, WORKBOOK_EDITOR_FLAG, WORKBOOK_SESSION_OPEN_RETRIES, createEditorFetch, createWorkbookEditorClient, editorFrameSrc, editorRefusal, flagEnabled, parseCommittedPush } from "./editor-client"
+import { EDITOR_DISABLED_ERROR, EDITOR_SESSION_EXPIRED_ERROR, SESSION_EXPIRED_ERROR, WORKBOOK_COMMITTED_EVENT, WORKBOOK_EDITOR_FLAG, WORKBOOK_SESSION_OPEN_RETRIES, WORKBOOK_SESSION_REOPEN_MAX_MS, createEditorFetch, createWorkbookEditorClient, editorFrameSrc, editorRefusal, flagEnabled, parseCommittedPush } from "./editor-client"
 
 const DIGEST = "a".repeat(64)
 const HOST = "https://crewship.test"
@@ -224,6 +224,22 @@ describe("createWorkbookEditorClient", () => {
     expect(always).toHaveBeenCalledTimes(WORKBOOK_SESSION_OPEN_RETRIES + 1)
     // No Retry-After: a short default, and never longer than the cap.
     expect(waits.every(ms => ms > 0 && ms <= 10_000)).toBe(true)
+  })
+
+  it("returns a 429 with a long Retry-After at once, with the wait, instead of retrying it", async () => {
+    const full = (seconds: string) => vi.fn(async () => new Response(JSON.stringify({ error: "too_many_editor_sessions" }), { status: 429, headers: { "content-type": "application/json", "retry-after": seconds } }))
+    const sleeps: number[] = []
+    const fetch = full("900")
+    const client = createWorkbookEditorClient({ workspaceId: "w", pageId: "p1", fetch, sleep: async ms => { sleeps.push(ms) } })
+    await expect(client.openSession()).resolves.toEqual({ ok: false, status: 429, retryAfterMs: 900_000 })
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(sleeps).toEqual([])
+    // A wait beyond the reopen cap is reported at the cap.
+    const later = createWorkbookEditorClient({ workspaceId: "w", pageId: "p1", fetch: full("86400"), sleep: async () => {} })
+    await expect(later.openSession()).resolves.toEqual({ ok: false, status: 429, retryAfterMs: WORKBOOK_SESSION_REOPEN_MAX_MS })
+    // Short waits are retried in the call; when they run out the last wait is reported.
+    const short = createWorkbookEditorClient({ workspaceId: "w", pageId: "p1", fetch: full("2"), sleep: async () => {} })
+    await expect(short.openSession()).resolves.toEqual({ ok: false, status: 429, retryAfterMs: 2000 })
   })
 
   it("names the refusal of a session it could not open", async () => {

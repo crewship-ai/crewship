@@ -25,9 +25,12 @@ the Page with unconfirmed edits asks first. An edit the server answers without
 a durable receipt is retried with the same mutation ID a few times and then
 reported as not saved; later edits are still sent. An edit the server refuses
 because its recalculation cannot be confirmed (`403 effect_out_of_mandate`) is
-reported as not saved, and the editor stays open. The Page renews its
+reported as not saved, and the editor stays open. The Page checks its
 editor session every minute while it is open and visible, and when the window
-regains focus or reconnects. When the server answers that the editor session is
+regains focus or reconnects; the server renews the session only when less than
+10 minutes of it remain, so the frequent check is cheap and mainly notices
+promptly that the editor was turned off or its bundle withdrawn. A hidden tab
+does not check, and its session idles out after 15 minutes. When the server answers that the editor session is
 over (`editor_session_expired`: expired, closed, opened for an older generation
 or with another sign-in of the same person; older servers answer
 `401 session_expired`), the Page opens a new session once and sends the unsaved
@@ -40,8 +43,11 @@ sign-in for the editor session's sake. Each confirmed revision arrives as a
 `workbook.committed` push on the Page's realtime channel, and the Page reads
 it through the commits feed; while the realtime connection is down it reads the
 head every two seconds instead. A session the server opened but the Page cannot
-use (no editor bundle configured yet) is closed at once, and a full session cap
-(`429`) is retried twice after its `Retry-After`. The editor bundle is pinned by the plain lowercase hex SHA-256 of its
+use (no editor bundle configured yet) is closed at once. A full session cap
+(`429 too_many_editor_sessions`) is retried twice when its `Retry-After` is at
+most 10 seconds; with a longer wait the Page shows the read-only preview with
+**Open editor again** and opens the editor again by itself after the
+`Retry-After` (at least 30 seconds, at most 15 minutes). The editor bundle is pinned by the plain lowercase hex SHA-256 of its
 manifest: the session's `bundle_digest`, the `/b/<digest>/` path of its
 `editor_url` and the editor's handshake must name the same value, and while
 the server sends no digest nothing is framed. If the frame loads another

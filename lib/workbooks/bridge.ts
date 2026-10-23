@@ -28,10 +28,11 @@
  *   retries the same mutation, `403 effect_out_of_mandate` refuses the one edit. A refusal
  *   (`editorRefusal`: lost access, the editor turned off) destroys the session and the port;
  *   nothing retries it.
- * - `401 session_expired` on an edit (the session expired, was closed or belongs to an older
- *   generation) opens a new session through `reopenSession` and sends the pending edits again
- *   under it: same frame `seq`, base and ops, the new session's `mutation_id` (the server binds
- *   the id to its session). An edit that may have reached the old session is first looked up by
+ * - `409 editor_session_expired` on an edit (the session expired, was closed, belongs to an older
+ *   generation or was opened with another sign-in; servers before that code answered
+ *   `401 session_expired`, read the same way) opens a new session through `reopenSession` and
+ *   sends the pending edits again under it: same frame `seq`, base and ops, the new session's
+ *   `mutation_id` (the server binds the id to its session). An edit that may have reached the old session is first looked up by
  *   its old id, and its receipt is taken instead of sending it again. Each expired session is
  *   replaced once; a replacement that expires again before the server accepted anything from it
  *   (within `BRIDGE_REOPEN_SETTLE_MS`) ends the editor as `expired`.
@@ -319,7 +320,7 @@ export interface WorkbookBridgeOptions {
   onSaveEvent?: (event: SaveEvent) => void
   /** The session is over: destroy the frame. `unsaved` writes never got a receipt. */
   onKill?: (kill: { reason: KillReason; unsaved: number }) => void
-  /** Opens a new session after `401 session_expired`; without it an expired session ends the editor. */
+  /** Opens a new session after `editor_session_expired`; without it an expired session ends the editor. */
   reopenSession?: () => Promise<ReopenResult>
   /** Tests only; defaults to `BRIDGE_HANDSHAKE_TIMEOUT_MS`. */
   handshakeTimeoutMs?: number
@@ -350,7 +351,7 @@ export interface WorkbookBridge {
   /** The realtime connection came back: tell the editor, replay from the last revision, retry. */
   online(): void
   offline(): void
-  /** The host learned that this session expired (the heartbeat): replace it as an edit's `401 session_expired` would. */
+  /** The host learned that this session expired (the heartbeat): replace it as an edit's `editor_session_expired` would. */
   sessionExpired(sessionId?: string): void
   /** Ends the session (a refusal the host learned of, `session_closed`, unmount). */
   close(reason?: KillReason): void

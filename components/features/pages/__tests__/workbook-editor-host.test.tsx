@@ -2,8 +2,8 @@ import React from "react"
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { BRIDGE_HANDSHAKE_TIMEOUT_MS, type TransportResponse, type WorkbookSession, type WorkbookTransport } from "@/lib/workbooks/bridge"
-import type { WorkbookEditorClient } from "@/lib/workbooks/editor-client"
-import { PageWorkbookSurface, WORKBOOK_HEAD_POLL_CONNECTED_MS, WORKBOOK_HEAD_POLL_MS, WORKBOOK_SESSION_HEARTBEAT_MS, createEditorFrame, workbookSaveLabel } from "../workbook-editor-host"
+import { WORKBOOK_SESSION_REOPEN_MAX_MS, type WorkbookEditorClient } from "@/lib/workbooks/editor-client"
+import { PageWorkbookSurface, WORKBOOK_HEAD_POLL_CONNECTED_MS, WORKBOOK_HEAD_POLL_MS, WORKBOOK_SESSION_HEARTBEAT_MS, WORKBOOK_SESSION_REOPEN_MIN_MS, createEditorFrame, workbookSaveLabel } from "../workbook-editor-host"
 import { initialSaveState } from "@/lib/editor-lifecycle/save-state"
 
 const requests = vi.hoisted(() => vi.fn())
@@ -291,6 +291,62 @@ describe("failures fall back to the preview", () => {
     expect(await screen.findByText("Workbook unavailable")).toBeInTheDocument() // the preview, here without data
     await act(async () => { screen.getByRole("button", { name: "Open editor again" }).click() })
     await waitFor(() => expect(t.client.openSession).toHaveBeenCalledTimes(2))
+  })
+
+  it("offers to open the editor again after 429 too_many_editor_sessions, and opens it by itself after Retry-After", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const t = setup({ open: { ok: false, status: 429, retryAfterMs: 120_000 } })
+      const notice = await screen.findByTestId("workbook-editor-notice")
+      expect(notice).toHaveAttribute("data-reason", "unavailable")
+      expect(notice).toHaveTextContent("Too many editor windows are open for this workbook")
+      expect(notice).toHaveTextContent("in about 2 minutes")
+      expect(screen.getByRole("button", { name: "Open editor again" })).toBeInTheDocument()
+      expect(t.client.openSession).toHaveBeenCalledTimes(1)
+      await act(async () => { await vi.advanceTimersByTimeAsync(119_000) })
+      expect(t.client.openSession).toHaveBeenCalledTimes(1)
+      vi.mocked(t.client.openSession).mockResolvedValueOnce({ ok: true, session })
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_000) })
+      await waitFor(() => expect(t.client.openSession).toHaveBeenCalledTimes(2))
+      await waitFor(() => expect(t.frame()).not.toBeNull())
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("bounds the scheduled reopen after 429 between a floor and 15 minutes", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const t = setup({ open: { ok: false, status: 429, retryAfterMs: 4 * 60 * 60_000 } })
+      expect(await screen.findByTestId("workbook-editor-notice")).toHaveTextContent("in about 15 minutes")
+      await act(async () => { await vi.advanceTimersByTimeAsync(WORKBOOK_SESSION_REOPEN_MAX_MS - 1000) })
+      expect(t.client.openSession).toHaveBeenCalledTimes(1)
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+      await waitFor(() => expect(t.client.openSession).toHaveBeenCalledTimes(2))
+      cleanup()
+
+      const soon = setup({ open: { ok: false, status: 429, retryAfterMs: 1000 } })
+      await screen.findByTestId("workbook-editor-notice")
+      await act(async () => { await vi.advanceTimersByTimeAsync(WORKBOOK_SESSION_REOPEN_MIN_MS - 1000) })
+      expect(soon.client.openSession).toHaveBeenCalledTimes(1)
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+      await waitFor(() => expect(soon.client.openSession).toHaveBeenCalledTimes(2))
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("schedules no reopen for other refusals to open", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const t = setup({ open: { ok: false, status: 404, refusal: "access" } })
+      await screen.findByTestId("workbook-editor-notice")
+      expect(screen.queryByRole("button", { name: "Open editor again" })).toBeNull()
+      await act(async () => { await vi.advanceTimersByTimeAsync(WORKBOOK_SESSION_REOPEN_MAX_MS) })
+      expect(t.client.openSession).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("ends a session whose editor never says hello, and shows the preview", async () => {
