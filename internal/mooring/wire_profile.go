@@ -23,6 +23,9 @@ func CanonicalE3WireJSON(raw []byte) ([]byte, error) {
 	if err != nil || len(canonical) > MaxE3WireBytes {
 		return nil, ErrCanonicalInput
 	}
+	if err := canonicalPreflight(canonical); err != nil {
+		return nil, ErrCanonicalInput
+	}
 	return canonical, nil
 }
 
