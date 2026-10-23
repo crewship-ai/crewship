@@ -6,15 +6,22 @@ import { useRealtimeChannelSafe, useRealtimeEventSafe, useRealtimeStatusSafe, ty
 import { initialSaveState, losesWork, saveReducer, type SaveState } from "@/lib/editor-lifecycle/save-state"
 import { useLeaveGuard } from "@/lib/editor-lifecycle/use-leave-guard"
 import { EDITOR_FRAME_ATTRIBUTES, createWorkbookBridge, type FrameWindow, type KillReason, type WorkbookBridge } from "@/lib/workbooks/bridge"
-import { WORKBOOK_COMMITTED_EVENT, createWorkbookEditorClient, editorFrameSrc, parseCommittedPush, type SessionCheck, type WorkbookEditorClient } from "@/lib/workbooks/editor-client"
+import { WORKBOOK_COMMITTED_EVENT, WORKBOOK_SESSION_REOPEN_MAX_MS, createWorkbookEditorClient, editorFrameSrc, parseCommittedPush, type SessionCheck, type WorkbookEditorClient } from "@/lib/workbooks/editor-client"
 import { PageWorkbook } from "./page-workbook"
 
 /** How often the host reads the head revision while the editor is visible and no realtime push can arrive. */
 export const WORKBOOK_HEAD_POLL_MS = 2000
 /** The same read while the realtime connection is up: `workbook.committed` drives it, this is the fallback. */
 export const WORKBOOK_HEAD_POLL_CONNECTED_MS = 15_000
-/** Session renewal while the editor is open and visible, well inside the shortest session lifetime. */
+/**
+ * Session check while the editor is open and visible. It renews the session (15 minutes idle), and
+ * is also how the host learns soon that the editor was turned off or its bundle revoked. The server
+ * writes a renewal only once less than 10 minutes remain and otherwise just answers the current
+ * expiry, so checking every minute stays cheap; a hidden tab does not check and its session idles out.
+ */
 export const WORKBOOK_SESSION_HEARTBEAT_MS = 60_000
+/** Least wait before opening the editor again by itself after `429 too_many_editor_sessions`. */
+export const WORKBOOK_SESSION_REOPEN_MIN_MS = 30_000
 /** New frames opened in a row after the workbook moved to a new generation. */
 export const WORKBOOK_GENERATION_REOPENS = 3
 /** Least time between two rechecks of the open session (focus, reconnect, back online). */
@@ -23,8 +30,11 @@ export const WORKBOOK_SESSION_RECHECK_MS = 5000
 /** Why the editor is not (or no longer) showing. `closed` is an unmount and never reaches the UI. */
 export type EditorEnd =
   | { reason: Exclude<KillReason, "closed">; unsaved: number }
-  /** The server refused or failed to open a session (`status` 0: network or unreadable). */
-  | { reason: "unavailable"; status: number }
+  /**
+   * The server refused or failed to open a session (`status` 0: network or unreadable). After `429`
+   * (too many open sessions) `retryAfterMs` says when one is likely free again.
+   */
+  | { reason: "unavailable"; status: number; retryAfterMs?: number }
   /** The session named an editor URL the host may not frame, or the browser cannot isolate it. */
   | { reason: "config" }
 
@@ -79,8 +89,19 @@ export function workbookSaveLabel(state: SaveState): string {
   return "No unsaved changes"
 }
 
+/** When the host opens the editor again by itself after `429`: the server's wait, within bounds. */
+function reopenDelay(end: EditorEnd | undefined): number | null {
+  if (end?.reason !== "unavailable" || end.status !== 429) return null
+  return Math.min(Math.max(end.retryAfterMs ?? 0, WORKBOOK_SESSION_REOPEN_MIN_MS), WORKBOOK_SESSION_REOPEN_MAX_MS)
+}
+
 function endMessage(end: EditorEnd): { text: string; reopen: boolean } {
   const unsaved = "unsaved" in end && end.unsaved > 0 ? ` · ${end.unsaved} ${end.unsaved === 1 ? "change" : "changes"} not saved` : ""
+  const delay = reopenDelay(end)
+  if (delay !== null) {
+    const minutes = Math.max(1, Math.ceil(delay / 60_000))
+    return { text: `Too many editor windows are open for this workbook. Close one and open the editor again, or it opens by itself in about ${minutes} ${minutes === 1 ? "minute" : "minutes"}. Showing the read-only preview.`, reopen: true }
+  }
   switch (end.reason) {
     case "unavailable": return { text: end.status === 503 ? "The workbook editor is turned off. Showing the read-only preview." : "The workbook editor is unavailable. Showing the read-only preview.", reopen: end.status === 0 || end.status >= 500 }
     case "config": return { text: "The workbook editor cannot be opened safely in this browser. Showing the read-only preview.", reopen: false }
@@ -129,7 +150,14 @@ export function PageWorkbookSurface({ workspaceId, pageId, name, onDirtyChange, 
     }
     setEnd(next)
   }, [])
-  const reopen = () => { reopens.current = 0; setEnd(undefined); setAttempt(value => value + 1) }
+  const reopen = React.useCallback(() => { reopens.current = 0; setEnd(undefined); setAttempt(value => value + 1) }, [])
+  // Too many open sessions: one frees up when it idles out, so try again then, once per refusal.
+  React.useEffect(() => {
+    const delay = reopenDelay(end)
+    if (delay === null) return
+    const timer = setTimeout(reopen, delay)
+    return () => clearTimeout(timer)
+  }, [end, reopen])
 
   if (enabled === true && !end && editorFrameSupported()) {
     return <WorkbookEditorHost key={attempt} client={editorClient} pageId={pageId} name={name} onEnd={onEnd} onDirtyChange={onDirtyChange} />
@@ -248,7 +276,7 @@ export function WorkbookEditorHost({ client, pageId, name, onEnd, onDirtyChange 
         if (opened.ok) void client.transport(opened.session).closeSession().catch(() => {})
         return
       }
-      if (!opened.ok) { finish({ reason: "unavailable", status: opened.status }); return }
+      if (!opened.ok) { finish({ reason: "unavailable", status: opened.status, retryAfterMs: opened.retryAfterMs }); return }
       const session = opened.session
       sessionGeneration = session.generation
       // The bridge's session, which changes when an expired one is replaced.
