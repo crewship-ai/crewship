@@ -190,8 +190,15 @@ func (h *PageHandler) commitPageGrantMutation(ctx context.Context, tx *sql.Tx, r
 		}
 		return err
 	}
+	closedUsers, err := h.closeRevokedWorkbookSessions(ctx, tx, changes[0].entry.WorkspaceID, rec)
+	if err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return err
+	}
+	if rec.HasWorkbook && h.hub != nil {
+		h.hub.RecheckWorkbookAccess(ctx, rec.ID, closedUsers...)
 	}
 	for _, publish := range notify {
 		publish()

@@ -126,6 +126,16 @@ function setup(options: { enabled?: boolean; flagError?: boolean; open?: Awaited
   return { view, client, transport, frame, frameWindow, load, message, hello, connect, send, status, dirty, fromFrame }
 }
 
+it("ends only the targeted workbook when the host revokes its session", async () => {
+  const t = setup()
+  await t.connect()
+  await push("session_closed", { artifact_id: "different-workbook", reason: "access_revoked" })
+  expect(t.frame()).not.toBeNull()
+  await push("session_closed", { artifact_id: "page-1", reason: "access_revoked" })
+  await waitFor(() => expect(t.frame()).toBeNull())
+  expect(screen.getByTestId("workbook-editor-notice")).toHaveAttribute("data-reason", "access")
+})
+
 describe("createEditorFrame", () => {
   it("sets every attribute before src, and src last", () => {
     const seen: Record<string, string | null>[] = []

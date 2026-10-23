@@ -494,6 +494,9 @@ export function WorkbookEditorHost({ client, pageId, name, onEnd, onDirtyChange 
     const head = parseCommittedPush(event.payload, pageId)
     if (head) bridgeRef.current?.notify(head)
   })
+  useRealtimeEventSafe("session_closed", event => {
+    if (event.payload.artifact_id === pageId) bridgeRef.current?.close("access")
+  })
   useRealtimeEventSafe("mooring.committed", event => {
     const head = parseRevisionPush(event.payload, pageId)
     if (head) bridgeRef.current?.notify(head)

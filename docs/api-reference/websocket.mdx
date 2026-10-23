@@ -404,6 +404,18 @@ shares its access rule with `crew`. File-change events are broadcast on the
 `crew:{crewId}` channel as `file.event`.
 </Note>
 
+### Workbook session closure (connection control)
+
+`session_closed` has no channel and carries only `{ artifact_id, reason }`.
+It ends the affected workbook editor after access revocation; it carries no
+workbook content. Other page subscriptions on the connection remain active.
+Grant removal closes the persisted editor session in the grant transaction,
+so granting access again cannot revive that session ID. The host rechecks
+current rights before each protected frame and drops queued frames after
+revocation. Active workbook subscriptions also receive a bounded authorization
+recheck every second, with one two-second budget for the entire pass; errors
+fail closed. The five-second closure target is measured in regression tests.
+
 ### Page Channel (`page:{pageId}`)
 
 | Event Type | Description | Payload |
