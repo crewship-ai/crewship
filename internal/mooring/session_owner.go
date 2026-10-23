@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"math"
-	"strings"
 	"time"
 )
 
@@ -46,7 +45,7 @@ type OwnerStore struct {
 func NewOwnerStore(db *sql.DB, enabled bool, clock OwnerClock, ttl time.Duration) *OwnerStore {
 	return &OwnerStore{db: db, enabled: enabled, clock: clock, ttl: ttl}
 }
-func ownerIDValid(s string) bool { return len(s) > 0 && len(s) <= 200 && !strings.ContainsRune(s, 0) }
+func ownerIDValid(s string) bool { return ValidWireIdentifier(s) }
 func (s *OwnerStore) now() (string, int64, error) {
 	if !s.enabled {
 		return "", 0, ErrOwnerDisabled

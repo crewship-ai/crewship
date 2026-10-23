@@ -16,3 +16,14 @@ Deletion removes the ephemeral owner record and old capabilities fail closed. Wo
 this primitive and require a separately authorized transition; a mismatched
 scope cannot silently reuse the original ownership record. No HTTP routes,
 CLI command or runtime process currently invokes this primitive.
+
+`CanonicalE3WireJSON` is an unused strict JSON/JCS resource primitive for the
+explicit negotiated `mooring-e3-bounded-json-v1` implementation profile: 262144
+raw and canonical body bytes, 64 container levels and 32768 structural tokens
+(opening braces/brackets, commas and colons outside strings). It retains generic
+protocol maxima; a larger task/checkpoint is unsupported on this profile until
+qualified transport support exists. Drafts must remain intact on refusal.
+`ValidWireIdentifier` uses 1–200 Unicode scalar values excluding NUL; application
+payload strings remain opaque. Version syntax validation does not negotiate
+support. Complete envelope schema, authentication, directions and scope checks
+remain separate prerequisites before dispatch. No route calls these helpers.
