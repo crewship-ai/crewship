@@ -1024,6 +1024,14 @@ signed-in browsers used (`source: "learned"`). The public `/healthz` reports
 only the coarse `status` (`ok`, `pending`, `failed` or `disabled`); origins,
 redirect targets and error text are only here and in the server log.
 
+A learned origin carries `learned_from`, the ID of the user whose signed-in
+request taught it, and `admin_session`, set once an instance administrator's
+session used it. Only the configured origin and origins with
+`admin_session` count towards `status` and `/healthz`: any signed-in user
+can make the server learn an origin, so the others are listed for you to
+recognise. `last_seen` is the last signed-in request from the origin; one not
+seen for 24 hours is forgotten.
+
 **Auth:** instance administrator. **Request:** no body. **Response:**
 
 ```json
@@ -1034,23 +1042,28 @@ redirect targets and error text are only here and in the server log.
     {
       "origin": "https://crewship.example.com",
       "source": "learned",
+      "learned_from": "usr_2f9c",
+      "admin_session": true,
       "proxy_check": "failed",
       "disabled": true,
       "cause": "redirect",
       "problems": ["/_editor/b/x is redirected (HTTP 302 to \"https://sso.example.com/login\")"],
       "consecutive_passes": 1,
-      "checked_at": "2026-10-23T08:00:00Z"
+      "checked_at": "2026-10-23T08:00:00Z",
+      "last_seen": "2026-10-23T08:04:00Z"
     }
   ]
 }
 ```
 
 `mode` is `off`, `same-host` or `dedicated` (then `origin` names the
-dedicated editor origin). `cause` is one of `redirect` and `path_rewrite`
-(both disable the editor on that origin), `not_routed`, `host_rewritten` and
-`marker_missing` (the editor stays enabled but does not work, or the check
-cannot tell). A disabled origin is enabled again after three consecutive
-passing checks; `consecutive_passes` counts them.
+dedicated editor origin). `cause` is one of `redirect`, `path_rewrite` and
+`marker_missing` (all disable the editor on that exact origin; with
+`marker_missing` the `X-Crewship-Route` response header is removed in front,
+so the check cannot tell where a path ends up), `not_routed` and
+`host_rewritten` (the editor stays enabled but does not work there). A
+disabled origin is enabled again after three consecutive passing checks;
+`consecutive_passes` counts them.
 
 | Status | Condition |
 |--------|-----------|

@@ -161,7 +161,7 @@ func TestLearnOriginFromSignedInBrowserRequests(t *testing.T) {
 		signedIn("crewship.example.test", "javascript:alert(1)"),
 		signedIn("[::1]:8080", "http://[::1]:8080/"),
 	} {
-		h.LearnOrigin(r)
+		learnAs(h, r, "u", true)
 	}
 	if got := h.CheckTargets(); len(got) != 0 {
 		t.Fatalf("learned from a request that is not a signed-in browser page: %v", got)
@@ -172,11 +172,11 @@ func TestLearnOriginFromSignedInBrowserRequests(t *testing.T) {
 	default:
 	}
 	// The browser's own scheme and host, from Referer or Origin.
-	h.LearnOrigin(signedIn("crewship.example.test", "https://crewship.example.test/pages/budget?x=1"))
-	h.LearnOrigin(signedIn("crewship.example.test", "https://crewship.example.test/chat"))
+	learnAs(h, signedIn("crewship.example.test", "https://crewship.example.test/pages/budget?x=1"), "admin", true)
+	learnAs(h, signedIn("crewship.example.test", "https://crewship.example.test/chat"), "admin", true)
 	o := signedIn("other.example.test:8443", "")
 	o.Header.Set("Origin", "https://other.example.test:8443")
-	h.LearnOrigin(o)
+	learnAs(h, o, "admin2", true)
 	if got := h.CheckTargets(); strings.Join(got, ",") != "https://crewship.example.test,https://other.example.test:8443" {
 		t.Fatalf("targets %v", got)
 	}
@@ -187,7 +187,7 @@ func TestLearnOriginFromSignedInBrowserRequests(t *testing.T) {
 	}
 	// A browser on one host while Crewship receives another: the proxy
 	// rewrites Host and the editor cannot work there. Reported, not probed.
-	h.LearnOrigin(signedIn("127.0.0.1:8080", "https://rewritten.example.test/chat"))
+	learnAs(h, signedIn("127.0.0.1:8080", "https://rewritten.example.test/chat"), "admin3", true)
 	if got := h.CheckTargets(); len(got) != 2 {
 		t.Fatalf("host-rewritten origin probed: %v", got)
 	}
@@ -204,13 +204,13 @@ func TestLearnOriginFromSignedInBrowserRequests(t *testing.T) {
 		t.Fatalf("rewritten Host not reported: %+v", h.Detail())
 	}
 	// The same browser origin later arrives with its Host: probe it.
-	h.LearnOrigin(signedIn("rewritten.example.test", "https://rewritten.example.test/chat"))
+	learnAs(h, signedIn("rewritten.example.test", "https://rewritten.example.test/chat"), "admin3", true)
 	if got := h.CheckTargets(); len(got) != 3 {
 		t.Fatalf("recovered origin not probed: %v", got)
 	}
 	// Bounded: a signed-in user cannot grow the list without limit.
 	for _, host := range []string{"d.example.test", "e.example.test", "f.example.test"} {
-		h.LearnOrigin(signedIn(host, "https://"+host+"/"))
+		learnAs(h, signedIn(host, "https://"+host+"/"), host, false)
 	}
 	if got := h.CheckTargets(); len(got) != maxLearnedOrigins {
 		t.Fatalf("learned %d origins: %v", len(got), got)
@@ -218,13 +218,13 @@ func TestLearnOriginFromSignedInBrowserRequests(t *testing.T) {
 
 	// A configured origin is the only target; nothing is learned.
 	p, _ := sameHostFixture(t)
-	p.LearnOrigin(signedIn("crewship.example.test", "https://crewship.example.test/"))
+	learnAs(p, signedIn("crewship.example.test", "https://crewship.example.test/"), "admin", true)
 	if got := p.CheckTargets(); len(got) != 1 || got[0] != studio {
 		t.Fatalf("configured origin targets %v", got)
 	}
 	// The Page runtime is never a Studio origin.
 	rt, _ := sameHostWith(t, Options{PageRuntimeOrigin: "https://apps.example.net"})
-	rt.LearnOrigin(signedIn("apps.example.net", "https://apps.example.net/"))
+	learnAs(rt, signedIn("apps.example.net", "https://apps.example.net/"), "admin", true)
 	if got := rt.CheckTargets(); len(got) != 0 {
 		t.Fatalf("learned the Page runtime: %v", got)
 	}

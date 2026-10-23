@@ -466,10 +466,12 @@ func WithPageRuntime(runtime, studio string, developmentSameOrigin ...bool) Rout
 }
 
 // WithWorkbookEditor wires the embedded workbook editor's server-side state:
-// observe sees every request a sign-in session authenticated (the same-host
-// editor learns from it which public origin browsers use), and detail
-// answers GET /api/v1/admin/instance/workbook-editor. Either may be nil.
-func WithWorkbookEditor(observe func(*http.Request), detail func() any) RouterOption {
+// observe sees every request a sign-in session authenticated, with the
+// user's ID and a lookup of whether the user administers the instance (the
+// same-host editor learns from it which public origin browsers use), and
+// detail answers GET /api/v1/admin/instance/workbook-editor. Either may be
+// nil.
+func WithWorkbookEditor(observe func(r *http.Request, userID string, isInstanceAdmin func() bool), detail func() any) RouterOption {
 	return func(r *Router) {
 		r.authMw.observeSession = observe
 		r.workbookEditorDetail = detail

@@ -2,6 +2,8 @@ package server
 
 import (
 	"log/slog"
+	"net"
+	"strings"
 
 	goapi "github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/config"
@@ -27,7 +29,8 @@ func newEditorOrigin(cfg *config.Config, logger *slog.Logger) *editororigin.Hand
 			return nil
 		}
 		h, err := editororigin.New(editororigin.Options{SameHost: true, StudioOrigin: cfg.Storage.PageStudioOrigin,
-			PageRuntimeOrigin: cfg.Storage.PageRuntimeOrigin, Scheme: goapi.RequestScheme, BundleDir: g.EditorBundleDir, Bundles: g.EditorBundles})
+			PageRuntimeOrigin: cfg.Storage.PageRuntimeOrigin, Scheme: goapi.RequestScheme, LoopbackServer: loopbackBind(cfg.Server.Host),
+			BundleDir: g.EditorBundleDir, Bundles: g.EditorBundles})
 		if err != nil {
 			// The handler still owns the prefix; refused bundles are not served.
 			logger.Error("gridcraft editor (same host) refused", "error", err)
@@ -50,6 +53,17 @@ func newEditorOrigin(cfg *config.Config, logger *slog.Logger) *editororigin.Hand
 		logger.Error("gridcraft editor bundle refused", "error", err)
 	}
 	return h
+}
+
+// loopbackBind reports whether the server listens on loopback only
+// (development); "" and 0.0.0.0 listen on every interface.
+func loopbackBind(host string) bool {
+	host = strings.Trim(strings.ToLower(strings.TrimSpace(host)), "[]")
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // editorHeaderOptions adds the editor to Studio's frame-src only while the

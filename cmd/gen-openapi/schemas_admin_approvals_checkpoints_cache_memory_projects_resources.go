@@ -365,8 +365,8 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		"GET /api/v1/admin/instance/workbook-editor": {Response: object(map[string]any{
 			"mode": str(), "status": str(), "origin": str(),
 			"origins": array(object(map[string]any{
-				"origin": str(), "source": str(), "proxy_check": str(), "disabled": boolean(), "cause": str(),
-				"problems": stringArray(), "warnings": stringArray(), "consecutive_passes": integer(), "checked_at": str(),
+				"origin": str(), "source": str(), "learned_from": str(), "admin_session": boolean(), "proxy_check": str(), "disabled": boolean(), "cause": str(),
+				"problems": stringArray(), "warnings": stringArray(), "consecutive_passes": integer(), "checked_at": str(), "last_seen": str(),
 			}, "origin", "source", "proxy_check", "disabled")),
 		}, "mode")},
 		"GET /api/v1/admin/instance/retention": {Response: object(map[string]any{

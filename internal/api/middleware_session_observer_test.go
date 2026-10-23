@@ -9,6 +9,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
+	"github.com/crewship-ai/crewship/internal/editororigin"
 )
 
 // The same-host workbook editor learns which public origin browsers use from
@@ -39,7 +40,7 @@ func TestRequireAuthObservesOnlySessionRequests(t *testing.T) {
 	}
 	mw := NewAuthMiddleware(v, store, db, logger)
 	var seen []string
-	mw.observeSession = func(r *http.Request) {
+	mw.observeSession = func(r *http.Request, _ string, _ func() bool) {
 		if UserFromContext(r.Context()) == nil {
 			t.Error("observer ran before authentication")
 		}
@@ -73,5 +74,59 @@ func TestRequireAuthObservesOnlySessionRequests(t *testing.T) {
 	}
 	if len(seen) != 2 || seen[0] != "session bearer" || seen[1] != "session cookie" {
 		t.Fatalf("observed %v, want only the two session requests", seen)
+	}
+}
+
+// End to end through the real middleware: a script holding its own session
+// JWT sets Host, Origin and Sec-Fetch-Site at will. The same-host editor
+// never learns a metadata or http origin from it, and records who taught
+// an origin and whether that user administers the instance.
+func TestRequireAuthTeachesTheEditorOnlyPublicOrigins(t *testing.T) {
+	t.Parallel()
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	if _, err := db.Exec(`UPDATE users SET instance_role = 'ADMIN' WHERE id = ?`, userID); err != nil {
+		t.Fatal(err)
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	v, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := sessions.NewDBStore(db)
+	sess, err := store.Create(t.Context(), userID, "test", "127.0.0.1", auth.RefreshTokenTTL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jwt, err := v.IssueAccessToken(userID, sess.ID, "Test", "test@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	editor, _ := editororigin.New(editororigin.Options{SameHost: true})
+	mw := NewAuthMiddleware(v, store, db, logger)
+	mw.observeSession = editor.LearnOrigin
+	handler := mw.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) }))
+	send := func(host, origin string) {
+		r := httptest.NewRequest("GET", "/api/v1/me/preferences", nil)
+		r.Host = host
+		r.Header.Set("Authorization", "Bearer "+jwt)
+		r.Header.Set("Origin", origin)
+		r.Header.Set("Sec-Fetch-Site", "same-origin")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		if w.Code != 204 {
+			t.Fatalf("%s: HTTP %d", host, w.Code)
+		}
+	}
+	send("169.254.169.254", "http://169.254.169.254")
+	send("169.254.169.254", "https://169.254.169.254")
+	send("crewship.example.test", "http://crewship.example.test")
+	if got := editor.CheckTargets(); len(got) != 0 {
+		t.Fatalf("learned %v", got)
+	}
+	send("crewship.example.test", "https://crewship.example.test")
+	d := editor.Detail()
+	if len(d.Origins) != 1 || d.Origins[0].Origin != "https://crewship.example.test" || d.Origins[0].LearnedFrom != userID || !d.Origins[0].AdminSession {
+		t.Fatalf("detail %+v", d.Origins)
 	}
 }

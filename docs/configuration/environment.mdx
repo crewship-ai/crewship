@@ -718,9 +718,9 @@ being trusted still gets a working policy. A `Host` that a CSP source cannot
 name (no valid DNS name or IPv4 address, an IPv6 literal, a bad port) gets
 `400` on the editor path and no editor in `frame-src`; requests on the Page
 runtime origin get `421`. Studio documents whose policy names the request's
-origin are sent with `Cache-Control: private`, so no shared cache serves one
-host's policy to another; the editor's own responses are `no-store` or
-`private` already.
+origin are sent with `private` added to their `Cache-Control` (HTML keeps its
+`no-cache, must-revalidate`), so no shared cache serves one host's policy to
+another; the editor's own responses are `no-store` or `private` already.
 
 When `CREWSHIP_PAGE_STUDIO_ORIGIN` is set, it is the only origin the editor
 answers on: a request that reaches Crewship under another `Host` gets `421` on
@@ -805,11 +805,31 @@ therefore:
 These are the defaults of common reverse proxies; the operator sets nothing
 for the editor itself.
 
-Crewship checks this itself. It learns the public Studio origin from signed-in
-browser requests (the `Origin` or `Referer` of a same-origin request that a
-sign-in session authenticated, never an anonymous one; at most four origins),
-or uses `CREWSHIP_PAGE_STUDIO_ORIGIN` when set. Until a browser has used
-Studio, the check is `pending`, never `passed`. Then the server requests
+Crewship checks this itself. It uses `CREWSHIP_PAGE_STUDIO_ORIGIN` when set,
+and otherwise learns the public Studio origin from signed-in browser requests:
+the `Origin` or `Referer` of a same-origin request that a sign-in session
+authenticated (never an anonymous request or a CLI token). Those are plain
+headers to a script holding a session, so learning is bounded:
+
+- only `https` origins are learned; plain `http` only for `localhost` and
+  loopback addresses, and those only while the server itself listens on
+  loopback (`CREWSHIP_HOST=127.0.0.1`, development). IP literals that are
+  link-local (including cloud metadata `169.254.169.254`), unspecified,
+  multicast or broadcast are never learned, and the self-check refuses to
+  connect to such addresses whatever name resolved to them;
+- each user teaches at most one origin, at most four are checked, and an
+  origin no signed-in request has used for 24 hours is forgotten. When all
+  four are taken, an instance administrator's origin still gets in, replacing
+  the least recently used origin no administrator used, so other users can
+  never push out the origin administrators use;
+- a browser origin whose host differs from the `Host` Crewship received (a
+  proxy that rewrites `Host`) is reported, never checked, and takes no slot;
+- a learned origin's state applies to that exact origin only (scheme, host
+  and port). The one exception fails closed: a request Crewship sees as
+  `http` because TLS ended at a proxy it does not trust also takes the state
+  of `https` on the same host.
+
+Until a browser has used Studio, the check is `pending`, never `passed`. Then the server requests
 `/_editor/` variants through that public URL: soon after an origin is learned,
 hourly while it passes and every five minutes while it does not. Browsers
 resolve `..`, `%2e%2e` and `.%2e` segments before sending a request, so only
@@ -817,21 +837,25 @@ spellings that reach a server unchanged are probed (`..%2f`, `..%5c`). Every
 Crewship response in same-host mode carries `X-Crewship-Route` (`editor` or
 `app`), so a path under the prefix that ends up elsewhere in Crewship is
 recognised positively; a refusal in front of Crewship, whatever its headers,
-reached nothing and is fine. If a probe is redirected, or Crewship answers a
-traversal outside the editor, and a repeat 30 seconds later confirms it, the
-server **disables the editor on that origin**: bundle files answer `503`, the
-UI and API are unaffected, and the log names the problem. After three
-consecutive passing checks (about 15 minutes after the proxy is fixed or a
-maintenance redirect ends) the editor is enabled again by itself. The check
-also reports, without disabling anything, a prefix that does not reach the
-editor, a proxy that rewrites `Host` (the browser's origin and the `Host`
-Crewship sees differ), and a proxy that strips `X-Crewship-Route`. Many
-deployments cannot reach their own public name from inside; then the
+reached nothing and is fine. If a probe is redirected, Crewship answers a
+traversal outside the editor, or the proxy strips `X-Crewship-Route` (then the
+check cannot tell where a traversal ends up), and a repeat 30 seconds later
+confirms it, the server **disables the editor on that origin**: bundle files
+answer `503`, the UI and API are unaffected, and the log names the problem
+and the user whose request taught the origin. After three consecutive passing
+checks (about 15 minutes after the proxy is fixed or a maintenance redirect
+ends) the editor is enabled again by itself. The check also reports, without
+disabling anything, a prefix that does not reach the editor and a proxy that
+rewrites `Host` (the browser's origin and the `Host` Crewship sees differ).
+Many deployments cannot reach their own public name from inside; then the
 self-check decides nothing.
 
 The public `/healthz` reports only a coarse `workbook_editor` state: `ok`,
-`pending`, `failed` or `disabled`. Origins, causes and the problems found are
-in the log and, for instance administrators, in
+`pending`, `failed` or `disabled`. It counts only the configured origin and
+origins an instance administrator's session used, so other users cannot
+change it; until an administrator has used Studio it stays `pending`.
+Origins, causes, the problems found and who taught each origin are in the
+log and, for instance administrators, in
 [`crewship admin instance workbook-editor`](/cli/admin#workbook-editor).
 [`crewship doctor`](/cli/doctor#workbook-editor-proxy) runs the same check from
 the machine it runs on, through the proxy a browser uses. Run it from outside

@@ -2,9 +2,12 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/editororigin"
@@ -32,10 +35,26 @@ var editorProxyCheckConfirm = 30 * time.Second
 
 // newEditorProxyCheckClient dials the public Studio URL directly, without an
 // egress proxy from the environment, whose own answers would be mistaken
-// for the deployment's.
-func newEditorProxyCheckClient() *http.Client {
+// for the deployment's. Learned origins come from headers any signed-in user
+// controls, so it refuses to connect to addresses
+// editororigin.ProbeIPAllowed rejects (metadata, link-local, unspecified,
+// multicast, and loopback unless allowLoopback), whatever name resolved to
+// them.
+func newEditorProxyCheckClient(allowLoopback bool) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
+	dialer := &net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second,
+		Control: func(_, address string, _ syscall.RawConn) error {
+			host, _, err := net.SplitHostPort(address)
+			if err != nil {
+				return err
+			}
+			if !editororigin.ProbeIPAllowed(net.ParseIP(host), allowLoopback) {
+				return fmt.Errorf("editor self-check refuses to connect to %s", host)
+			}
+			return nil
+		}}
+	transport.DialContext = dialer.DialContext
 	return &http.Client{Timeout: 10 * time.Second, Transport: transport}
 }
 
@@ -94,25 +113,25 @@ func startEditorProxyCheck(ctx context.Context, wg *sync.WaitGroup, h *editorori
 				if ctx.Err() != nil {
 					return
 				}
-				before := originDisabled(h, origin)
+				before, from := originState(h, origin)
 				h.RecordCheck(origin, c)
-				after := originDisabled(h, origin)
+				after, _ := originState(h, origin)
 				switch c.Status {
 				case editororigin.ProxyCheckUnreachable:
-					logger.Warn("gridcraft editor (same host): public URL not reachable for the proxy self-check; run `crewship doctor` from outside", "origin", origin, "detail", c.Warnings)
+					logger.Warn("gridcraft editor (same host): public URL not reachable for the proxy self-check; run `crewship doctor` from outside", "origin", origin, "learned_from", from, "detail", c.Warnings)
 					continue
 				case editororigin.ProxyCheckFailed:
 					if c.Isolation {
-						logger.Error("gridcraft editor (same host) disabled on this origin: a proxy redirects or rewrites /_editor/", "origin", origin, "cause", c.Cause, "problems", c.Problems)
+						logger.Error("gridcraft editor (same host) disabled on this origin: a proxy redirects or rewrites /_editor/, or hides where it routes it", "origin", origin, "learned_from", from, "cause", c.Cause, "problems", c.Problems)
 					} else {
-						logger.Warn("gridcraft editor (same host): /_editor/ does not work through the public URL", "origin", origin, "cause", c.Cause, "problems", c.Problems)
+						logger.Warn("gridcraft editor (same host): /_editor/ does not work through the public URL", "origin", origin, "learned_from", from, "cause", c.Cause, "problems", c.Problems)
 					}
 				default:
 					if before && !after {
-						logger.Info("gridcraft editor (same host) re-enabled: the proxy self-check passed repeatedly", "origin", origin)
+						logger.Info("gridcraft editor (same host) re-enabled: the proxy self-check passed repeatedly", "origin", origin, "learned_from", from)
 					}
 					if len(c.Warnings) > 0 {
-						logger.Warn("gridcraft editor (same host) proxy self-check", "origin", origin, "warnings", c.Warnings)
+						logger.Warn("gridcraft editor (same host) proxy self-check", "origin", origin, "learned_from", from, "warnings", c.Warnings)
 					}
 				}
 				answered = true
@@ -150,11 +169,13 @@ func checkEditorOrigin(ctx context.Context, client *http.Client, origin string) 
 	return c
 }
 
-func originDisabled(h *editororigin.Handler, origin string) bool {
+// originState is whether origin is disabled and which user's request taught
+// it ("" for the configured origin).
+func originState(h *editororigin.Handler, origin string) (disabled bool, learnedFrom string) {
 	for _, o := range h.Detail().Origins {
 		if o.Origin == origin {
-			return o.Disabled
+			return o.Disabled, o.LearnedFrom
 		}
 	}
-	return false
+	return false, ""
 }

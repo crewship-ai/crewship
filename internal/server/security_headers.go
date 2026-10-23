@@ -180,7 +180,9 @@ func securityHeadersMiddlewareWith(next http.Handler, o securityHeaderOptions) h
 				// several hosts to one entry would replay another host's
 				// policy: documents stay out of shared caches. Hashed static
 				// assets carry no policy that matters and stay cacheable.
-				w.Header().Set("Cache-Control", "private")
+				// The UI handler sets its own Cache-Control, so "private" is
+				// merged in when the response is written, not before.
+				w = &privateCacheWriter{ResponseWriter: w}
 			}
 		default:
 			w.Header().Set("Content-Security-Policy",
@@ -196,4 +198,65 @@ func securityHeadersMiddlewareWith(next http.Handler, o securityHeaderOptions) h
 func isUIDocumentPath(p string) bool {
 	ext := path.Ext(p)
 	return ext == "" || ext == ".html"
+}
+
+// privateCacheWriter makes the response's Cache-Control private when its
+// header is written, whatever the wrapped handler set.
+type privateCacheWriter struct {
+	http.ResponseWriter
+	done bool
+}
+
+func (p *privateCacheWriter) mark() {
+	if p.done {
+		return
+	}
+	p.done = true
+	h := p.ResponseWriter.Header()
+	h.Set("Cache-Control", privateCacheControl(h.Get("Cache-Control")))
+}
+
+func (p *privateCacheWriter) WriteHeader(code int) {
+	p.mark()
+	p.ResponseWriter.WriteHeader(code)
+}
+
+func (p *privateCacheWriter) Write(b []byte) (int, error) {
+	p.mark()
+	return p.ResponseWriter.Write(b)
+}
+
+func (p *privateCacheWriter) Flush() {
+	p.mark()
+	if f, ok := p.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Unwrap lets http.ResponseController reach the underlying writer.
+func (p *privateCacheWriter) Unwrap() http.ResponseWriter { return p.ResponseWriter }
+
+// privateCacheControl keeps a Cache-Control value's directives but makes
+// it private: "public" is dropped and "private" added unless the response
+// is already private or no-store.
+func privateCacheControl(v string) string {
+	var out []string
+	private := false
+	for _, d := range strings.Split(v, ",") {
+		d = strings.TrimSpace(d)
+		name, _, _ := strings.Cut(strings.ToLower(d), "=")
+		switch name {
+		case "":
+			continue
+		case "public":
+			continue
+		case "private", "no-store":
+			private = true
+		}
+		out = append(out, d)
+	}
+	if !private {
+		out = append([]string{"private"}, out...)
+	}
+	return strings.Join(out, ", ")
 }

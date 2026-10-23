@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -129,9 +130,22 @@ func checkWorkbookEditorProxy(ctx context.Context, serverURL string, detail func
 		return checkResult{name: name, status: "WARN", detail: "server self-check pending: no browser has used Studio since the server started, so the public URL is not known yet; open Studio in a browser, then run doctor again"}
 	}
 
-	var fails, warns, passes []string
+	// Learned origins come from headers any signed-in user controls. Only
+	// those on the host doctor was pointed at are probed from this machine
+	// (and so from the operator's network); the rest are listed for the
+	// operator to recognise.
+	serverHost := originHostKey(serverURL)
+	var fails, warns, passes, skipped []string
 	for _, o := range d.Origins {
 		server := o.ProxyCheck
+		if o.Source != "configured" && originHostKey(o.Origin) != serverHost {
+			who := ""
+			if o.LearnedFrom != "" {
+				who = " by user " + o.LearnedFrom
+			}
+			skipped = append(skipped, fmt.Sprintf("%s (learned%s; server self-check: %s)", o.Origin, who, server))
+			continue
+		}
 		if o.Disabled {
 			fails = append(fails, fmt.Sprintf("%s: the server disabled the editor (%s: %s)", o.Origin, o.Cause, strings.Join(o.Problems, "; ")))
 			continue
@@ -144,7 +158,10 @@ func checkWorkbookEditorProxy(ctx context.Context, serverURL string, detail func
 		switch c.Status {
 		case editororigin.ProxyCheckFailed:
 			kind := "/_editor/ does not work through the public URL"
-			if c.Isolation {
+			switch {
+			case c.Cause == editororigin.CauseNoMarker:
+				kind = "something in front of Crewship removes the " + editororigin.RouteHeader + " response header, so the editor isolation cannot be verified (the server disables the editor)"
+			case c.Isolation:
 				kind = "a redirect or path rewrite in front of Crewship defeats the editor isolation"
 			}
 			fails = append(fails, fmt.Sprintf("%s: %s: %s", o.Origin, kind, strings.Join(c.Problems, "; ")))
@@ -169,11 +186,28 @@ func checkWorkbookEditorProxy(ctx context.Context, serverURL string, detail func
 		}
 		passes = append(passes, o.Origin)
 	}
+	note := ""
+	if len(skipped) > 0 {
+		note = "; not probed from here, learned from signed-in users on another host than --server (verify they are yours, then run doctor with --server set to one): " + strings.Join(skipped, ", ")
+	}
 	switch {
 	case len(fails) > 0:
-		return checkResult{name: name, status: "FAIL", detail: strings.Join(append(fails, warns...), "; "), hint: workbookEditorProxyHint}
+		return checkResult{name: name, status: "FAIL", detail: strings.Join(append(fails, warns...), "; ") + note, hint: workbookEditorProxyHint}
 	case len(warns) > 0:
-		return checkResult{name: name, status: "WARN", detail: strings.Join(warns, "; "), hint: workbookEditorProxyHint}
+		return checkResult{name: name, status: "WARN", detail: strings.Join(warns, "; ") + note, hint: workbookEditorProxyHint}
+	case len(passes) == 0:
+		return checkResult{name: name, status: "WARN", detail: "no Studio origin the server checks is on " + serverHost + note}
 	}
-	return checkResult{name: name, status: "PASS", detail: strings.Join(passes, ", ") + ": /_editor/ reaches the editor unchanged, nothing in front redirects it or routes a path under it elsewhere in Crewship, and the server self-check passed"}
+	return checkResult{name: name, status: "PASS", detail: strings.Join(passes, ", ") + ": /_editor/ reaches the editor unchanged, nothing in front redirects it or routes a path under it elsewhere in Crewship, and the server self-check passed" + note}
+}
+
+// originHostKey is the host[:port] of an origin or URL, lowercased and
+// without the scheme's default port; "" when it is not one.
+func originHostKey(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return ""
+	}
+	_, host, _ := strings.Cut(editororigin.CanonicalOrigin(u.Scheme+"://"+u.Host), "://")
+	return host
 }

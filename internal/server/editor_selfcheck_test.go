@@ -22,6 +22,9 @@ func sameHostEditor(t *testing.T, studio string) (*config.Config, *editororigin.
 	t.Helper()
 	cfg := config.Default()
 	cfg.Storage.PageStudioOrigin = studio
+	// The stacks below serve on a loopback port, as a development server
+	// bound to loopback does; only then are loopback origins learned.
+	cfg.Server.Host = "127.0.0.1"
 	dir := t.TempDir()
 	digest := writeEditorBundle(t, dir)
 	cfg.GridCraft = config.GridCraftConfig{Enabled: true, EditorEnabled: true, EditorBundleDir: dir, EditorBundles: []string{digest}}
@@ -222,7 +225,7 @@ func TestZeroConfigSelfCheckProbesTheLearnedOrigin(t *testing.T) {
 	r.Host = host
 	r.Header.Set("Sec-Fetch-Site", "same-origin")
 	r.Header.Set("Referer", s.srv.URL+"/chat")
-	s.editor.LearnOrigin(r)
+	s.editor.LearnOrigin(r, "admin", func() bool { return true })
 	waitFor(t, "the learned origin to pass", func() bool { return s.editor.Health() == editororigin.HealthOK })
 	cancel()
 	wg.Wait()

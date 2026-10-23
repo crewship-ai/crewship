@@ -49,7 +49,7 @@ func TestAcceptance_AdminInstanceWorkbookEditor(t *testing.T) {
 	learn.Host = "crewship.example.test"
 	learn.Header.Set("Sec-Fetch-Site", "same-origin")
 	learn.Header.Set("Referer", "https://crewship.example.test/chat")
-	editor.LearnOrigin(learn)
+	editor.LearnOrigin(learn, "we-boss", func() bool { return true })
 	editor.RecordCheck("https://crewship.example.test", editororigin.ProxyCheck{Status: editororigin.ProxyCheckFailed, Isolation: true, Cause: editororigin.CauseRedirect,
 		Problems: []string{`/_editor/b/x is redirected (HTTP 302 to "https://sso.example.test/login")`}})
 
@@ -76,7 +76,7 @@ func TestAcceptance_AdminInstanceWorkbookEditor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("table: %v\n%s", err, out)
 	}
-	for _, want := range []string{"same host", "disabled", "https://crewship.example.test", "learned", "redirect", "sso.example.test"} {
+	for _, want := range []string{"same host", "disabled", "https://crewship.example.test", "learned from we-boss (admin)", "redirect", "sso.example.test"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("table output lacks %q:\n%s", want, out)
 		}
@@ -89,7 +89,8 @@ func TestAcceptance_AdminInstanceWorkbookEditor(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &got); err != nil {
 		t.Fatalf("json: %v\n%s", err, raw)
 	}
-	if got.Mode != "same-host" || got.Status != editororigin.HealthDisabled || len(got.Origins) != 1 || !got.Origins[0].Disabled || got.Origins[0].Cause != editororigin.CauseRedirect {
+	if got.Mode != "same-host" || got.Status != editororigin.HealthDisabled || len(got.Origins) != 1 || !got.Origins[0].Disabled || got.Origins[0].Cause != editororigin.CauseRedirect ||
+		got.Origins[0].LearnedFrom != "we-boss" || !got.Origins[0].AdminSession {
 		t.Fatalf("json = %s", raw)
 	}
 
