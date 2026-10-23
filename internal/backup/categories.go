@@ -183,13 +183,15 @@ const categoryWorkOnly = ""
 // TableCategory maps every table in BackupTables to its category. A table
 // missing here fails TestTableCategory_CoversEveryBackupTable.
 var TableCategory = map[string]string{
-	"mooring_collab_documents":   CategoryPages,
-	"mooring_collab_tasks":       CategoryPages,
-	"mooring_collab_changes":     CategoryPages,
-	"mooring_collab_operations":  CategoryPages,
-	"mooring_collab_checkpoints": CategoryPages,
-	"mooring_collab_audit":       CategoryPages,
-	"mooring_documents":          CategoryPages, "mooring_receipts": CategoryPages,
+	"mooring_collab_documents":       CategoryPages,
+	"mooring_collab_tasks":           CategoryPages,
+	"mooring_collab_changes":         CategoryPages,
+	"mooring_collab_target_versions": CategoryPages,
+	"mooring_collab_target_effects":  CategoryPages,
+	"mooring_collab_operations":      CategoryPages,
+	"mooring_collab_checkpoints":     CategoryPages,
+	"mooring_collab_audit":           CategoryPages,
+	"mooring_documents":              CategoryPages, "mooring_receipts": CategoryPages,
 	"workspace_artifact_creation_policy": CategoryAgents,
 	"workspace_artifact_creation_crews":  CategoryAgents,
 

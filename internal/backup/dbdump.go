@@ -326,6 +326,8 @@ var BackupTables = []string{
 	"mooring_collab_tasks",
 	"mooring_collab_changes",
 	"mooring_collab_operations",
+	"mooring_collab_target_versions",
+	"mooring_collab_target_effects",
 	"mooring_collab_checkpoints",
 	"mooring_collab_audit",
 	"document_creations",
