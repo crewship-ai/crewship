@@ -386,7 +386,10 @@ fn classify(native: &Value) -> Result<bool, AdapterError> {
             if !source.is_char_boundary(byte) {
                 return Err(AdapterError::InvalidNative);
             }
-            unsupported |= length == 0 && (!source.is_empty() || runs.len() != 1);
+            // Actual native and WASM WordCraft normalize empty runs away,
+            // including their formatting. Until that encoding is qualified,
+            // retain the entire document opaquely and forbid writes.
+            unsupported |= length == 0;
             if let Some(props) = run.get("props") {
                 unsupported |= classify_character(props)?;
             }
