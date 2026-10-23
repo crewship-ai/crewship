@@ -101,6 +101,8 @@ def typed(name, node, allow_named=True):
         return 'serde_json::Map<String, serde_json::Value>', 'map[string]json.RawMessage', 'Record<string, unknown>'
     if node.get('type') == 'boolean':
         return 'bool', 'bool', 'boolean'
+    if node.get('type') == 'null':
+        return '()', 'json.RawMessage', 'null'
     if node.get('type') == 'string':
         return 'String', 'string', 'string'
     raise ValueError(f'Unsupported shape: {node}')

@@ -95,3 +95,10 @@ zero-effect dependency connectors and every intervening target effect, before
 constructing these non-deserializable values. Missing history is nonterminal.
 The shared causal vectors distinguish host SQL cases, pure Rust cases and the
 optional-null wire negative; they are not live authorization/convergence proof.
+
+The native WordCraft causal runtime composition uses the application's registered
+`0.4.0 / 0.2.0 / 0.10.0` tuple and its bounded model-v2 checkpoint decoder.
+It offers strict-current or causal preparation only when that exact private
+profile is explicitly selected on the inherited host channel. Original reads
+remain immutable, and returned candidates remain uninstalled. This composition
+adds no human-delta capability, participant endpoint, ACL or Saved authority.

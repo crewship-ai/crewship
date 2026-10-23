@@ -130,7 +130,7 @@ fn actual_child_owns_fd3_and_marks_host_capability_close_on_exec() {
     }
     let mut child = command.spawn().unwrap();
     drop(inherited);
-    write_frame(&mut host, br#"{"type":"hello","request_id":"fd-test","supported":[{"protocol_version":"0.4.0","model_version":"1.0.0","engine_version":"0.1.0"}]}"#).unwrap();
+    write_frame(&mut host, br#"{"type":"hello","request_id":"fd-test","supported":[{"protocol_version":"0.4.0","model_version":"0.1.0","engine_version":"0.10.0"}]}"#).unwrap();
     assert!(read_frame(&mut host).unwrap().is_some());
     let info = std::fs::read_to_string(format!("/proc/{}/fdinfo/3", child.id())).unwrap();
     let flags = info
