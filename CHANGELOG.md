@@ -11,7 +11,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Mooring authorization groundwork:** an inactive human Page authority adapter checks current canonical grants, folder scope and original credential inside the protected writer transaction.
 
-- **Queued agent work could retain a human's authority after access was revoked.** New trusted receipts preserve the original user revocation fence through run admission and retries; legacy receipts remain unfenced and cannot authorize the new Mooring admission path.
+- **Mooring admission preserves the original human credential.** Authenticated chat receipts retain the original user revocation fence and exact credential through run admission and retries; legacy receipts remain unfenced and cannot authorize the new Mooring admission path.
 
 - **An open workbook could remain active after its editor grant was removed.** Revocation now closes the persisted editor session in the grant transaction, sends a targeted `session_closed` control immediately, and drops queued protected frames while keeping other workbook subscriptions alive. A bounded fallback catches membership and ownership changes.
 

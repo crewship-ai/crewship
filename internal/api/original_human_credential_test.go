@@ -241,3 +241,143 @@ func TestOriginalCredentialResolveHumanRejectsUntrustedOrMalformedSource(t *test
 		t.Fatal("workspace token asserted original human source", response.Code)
 	}
 }
+
+func TestOriginalCredentialAdminKeyRotationRevokesOriginalSource(t *testing.T) {
+	t.Setenv(adminTokenHMACKeyEnv, strings.Repeat("ab", 32))
+	f := newArtifactPrincipalFixture(t)
+	key, err := adminHMACKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := cliTokenAdminPrefix + "synthetic-original-admission"
+	mustExec(t, f.rig.db, `INSERT INTO cli_tokens(id,user_id,name,token_hash,tier) VALUES('original-admin',?,'fixture',?,'ADMIN')`, f.a.HumanUserID, hashAdmin(token, key))
+	source, err := captureOriginalHumanCredential(t.Context(), f.rig.db, &AuthUser{ID: f.a.HumanUserID, TokenID: "original-admin"}, AuthKindCLIToken, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := validateOriginalHumanCredential(t.Context(), f.rig.db, *source, "pages:read"); err != nil {
+		t.Fatal(err)
+	}
+	// Canonical bearer auth changes on key rotation even though the exact
+	// credential row and user counter have not changed.
+	t.Setenv(adminTokenHMACKeyEnv, strings.Repeat("cd", 32))
+	if _, err := ValidateCLITokenFull(t.Context(), f.rig.db, token, ValidateAuditContext{}); err == nil {
+		t.Fatal("canonical auth unexpectedly accepts rotated key")
+	}
+	if _, err := validateOriginalHumanCredential(t.Context(), f.rig.db, *source, "pages:read"); err == nil {
+		t.Fatal("original credential survived canonical ADMIN key revocation")
+	}
+}
+
+func TestOriginalCredentialScopedReferenceRejectsMalformedPolicy(t *testing.T) {
+	f := newArtifactPrincipalFixture(t)
+	token := cliTokenStandardPrefix + "synthetic-strict-scope"
+	mustExec(t, f.rig.db, `INSERT INTO cli_tokens(id,user_id,name,token_hash,tier) VALUES('strict-scope-cli',?,'fixture',?,'STANDARD')`, f.a.HumanUserID, hashStandard(token))
+	for _, tc := range []struct {
+		name    string
+		value   any
+		allowed bool
+	}{
+		{"sql-null", nil, true}, {"empty", "", true}, {"whitespace", "  ", true}, {"empty-array", "[]", true},
+		{"read", `["pages:read"]`, true}, {"resource-wildcard", `["pages:*"]`, true}, {"all-wildcard", `["*"]`, true},
+		{"write-only", `["pages:write"]`, false}, {"malformed", "{", false}, {"object", "{}", false}, {"json-null", "null", false},
+		{"scalar", `"pages:read"`, false}, {"null-member", `[null]`, false}, {"numeric-member", `[1]`, false}, {"empty-member", `[""]`, false},
+		{"unknown-member", `["pages:read","unrecognized:scope"]`, false}, {"mixed-null", `["pages:read",null]`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mustExec(t, f.rig.db, `UPDATE cli_tokens SET scopes=? WHERE id='strict-scope-cli'`, tc.value)
+			source, err := captureOriginalHumanCredential(t.Context(), f.rig.db, &AuthUser{ID: f.a.HumanUserID, TokenID: "strict-scope-cli"}, AuthKindCLIToken, token)
+			if err != nil {
+				t.Fatal("capture provenance", err)
+			}
+			if _, err := validateOriginalHumanCredential(t.Context(), f.rig.db, *source, scopeSelf); err != nil {
+				t.Fatal("generic provenance policy changed", err)
+			}
+			_, err = validateOriginalHumanCredential(t.Context(), f.rig.db, *source, "pages:read")
+			if (err == nil) != tc.allowed {
+				t.Errorf("scoped admission allowed=%t want=%t", err == nil, tc.allowed)
+			}
+		})
+	}
+}
+
+func TestOriginalCredentialExpiredJWTIsStrictMooringOnly(t *testing.T) {
+	f, _ := originalSessionFixture(t)
+	v, err := auth.NewJWTValidator("synthetic-short-original-jwt-secret-at-least-32-chars")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Mint an actual signed access JWT near the end of its accepted lifetime.
+	// The backing session remains live for an hour. ValidateAccess's accepted
+	// integer-second horizon ends at exp+6, giving this request 2-3 seconds.
+	v.SetClock(func() time.Time { return time.Now().Add(-auth.AccessTokenTTL - 3*time.Second) })
+	access, err := v.IssueAccessToken(f.a.HumanUserID, "original-session", "Human", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v.SetClock(nil)
+	h := NewInternalHandler(f.rig.db, "synthetic-master", newTestLogger())
+	m := NewAuthMiddleware(v, sessions.NewDBStore(f.rig.db), f.rig.db, newTestLogger())
+	var source *auth.OriginalCredential
+	var receipt *chataudience.Receipt
+	request := httptest.NewRequest(http.MethodPost, "/", nil)
+	request.Header.Set("Authorization", "Bearer "+access)
+	response := httptest.NewRecorder()
+	m.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		source = auth.OriginalCredentialFromContext(r.Context())
+		if source == nil {
+			t.Fatal("verified HTTP auth omitted original source")
+		}
+		receipt, err = h.originalHumanChatReceipt(r.Context(), f.a.ChatID, f.a.HumanUserID, nil, source)
+		w.WriteHeader(http.StatusNoContent)
+	})).ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatal("near-expiry original HTTP authentication", response.Code)
+	}
+	if err != nil || receipt == nil {
+		t.Fatal("initial verified source", receipt, err)
+	}
+	f.receipt = receipt
+	expiry, _ := source.Expiry()
+	time.Sleep(time.Until(expiry) + time.Millisecond)
+	resumed, err := h.originalHumanChatReceipt(t.Context(), f.a.ChatID, f.a.HumanUserID, receipt, nil)
+	if err != nil || resumed == nil || *resumed != *receipt {
+		t.Errorf("generic resume lost original provenance after JWT horizon: %v %v", resumed, err)
+	}
+	if fresh, err := h.originalHumanChatReceipt(t.Context(), f.a.ChatID, f.a.HumanUserID, nil, source); err != nil || fresh != nil {
+		t.Errorf("expired original source became fresh admission: %v %v", fresh, err)
+	}
+	request = httptest.NewRequest(http.MethodPost, "/", nil)
+	if err := f.capture(request, f.a.MessageID, receipt); err != nil {
+		t.Errorf("generic retention unexpectedly cut off by original JWT: %v", err)
+		return
+	}
+	mustExec(t, f.rig.db, `INSERT INTO journal_entries(id,workspace_id,crew_id,agent_id,entry_type,actor_type,summary,trace_id) VALUES('principal-start',?,'principal-crew','principal-agent','run.started','system','test','principal-run')`, f.rig.wsID)
+	if err := f.pages.checkArtifactRunPrincipal(t.Context(), &f.a); err != nil {
+		t.Error("generic principal lifetime changed", err)
+	}
+	stored, err := f.pages.artifactPrincipalOriginalCredential(t.Context(), &f.a)
+	if err != nil || stored != *source {
+		t.Error("generic retention refreshed or lost immutable source", stored, err)
+	}
+	if err := f.pages.checkOriginalUserArtifactRunPrincipal(t.Context(), &f.a); err == nil {
+		t.Error("strict Mooring principal survived original JWT horizon")
+	}
+	if _, err := f.pages.validateArtifactPrincipalOriginalCredential(t.Context(), &f.a, "pages:read"); err == nil {
+		t.Error("strict Mooring horizon refreshed")
+	}
+	if err := captureOriginalUserArtifactPrincipalQuery(request, f.rig.db, "new-strict-run", f.a.WorkspaceID, f.a.AgentID, f.a.CrewID, f.a.ChatID, f.a.MessageID, receipt); err == nil {
+		t.Error("strict Mooring captured expired original")
+	}
+	var admitted int
+	if err := f.rig.db.QueryRow(`SELECT count(*) FROM artifact_run_principals WHERE run_id='new-strict-run'`).Scan(&admitted); err != nil || admitted != 0 {
+		t.Error("denied strict admission wrote principal", admitted, err)
+	}
+	mustExec(t, f.rig.db, `UPDATE users SET access_revoked_at='2026-10-23T00:00:00Z' WHERE id=?`, source.UserID)
+	if got, err := h.originalHumanChatReceipt(t.Context(), f.a.ChatID, f.a.HumanUserID, receipt, nil); err != nil || got != nil {
+		t.Error("generic resume ignored actual user revocation", got, err)
+	}
+	if err := f.pages.checkArtifactRunPrincipal(t.Context(), &f.a); err == nil {
+		t.Error("generic principal ignored original global revocation")
+	}
+}

@@ -176,8 +176,18 @@ credential provenance. Authentication carries a copied reference through the
 signed socket ticket, host-only message option, queued origin and immutable run
 principal. No raw bearer is retained. Missing legacy provenance is preserved as
 missing and cannot be refreshed from a later run bearer or current user lookup.
+Bare legacy receipt capture remains unfenced even when a current user row can
+be resolved; only an original authenticated source creates the new user fence.
+Generic Docs/GridCraft retention and queued resume keep their ordinary run
+lifetime while preserving the original source and user fence. Original JWT
+expiry is enforced by strict Mooring capture/check, not made a generic run
+deadline. Initial source capture still requires a live exact credential.
 The API helpers validate the original row identity, current user/counter, status
 and explicit scope, and return the earlier original/current credential expiry.
+ADMIN references also bind the current bearer HMAC key identity. New scoped
+admission rejects malformed scope metadata; canonical SQL NULL, empty text and
+empty-array unrestricted policy remain supported. Generic provenance retention
+does not change the legacy bearer scope parser.
 The production callback must use the writer-bound reader and intersect that
 horizon with the run, exact current attempt and mandate deadlines. These helpers
 do not implement that callback or enable Mooring. Existing web issue origins

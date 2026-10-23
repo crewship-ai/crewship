@@ -3,14 +3,25 @@ package api
 import (
 	"net/http/httptest"
 	"testing"
-
-	"github.com/crewship-ai/crewship/internal/chataudience"
+	"time"
 )
+
+func originalUserPrincipalFixture(t *testing.T) *artifactPrincipalFixture {
+	t.Helper()
+	f, source := originalSessionFixture(t)
+	h := NewInternalHandler(f.rig.db, "synthetic-original-master", newTestLogger())
+	receipt, err := h.originalHumanChatReceipt(t.Context(), f.a.ChatID, f.a.HumanUserID, nil, source)
+	if err != nil || receipt == nil || !receipt.OriginalCredential().Valid() {
+		t.Fatal("verified original receipt", receipt, err)
+	}
+	f.receipt = receipt
+	return f
+}
 
 // The receipt was admitted before the user-wide revocation. A late run bearer
 // must not attach today's user authority to that old human message.
 func TestArtifactPrincipalOriginalUserRevocationPreventsLateCapture(t *testing.T) {
-	f := newArtifactPrincipalFixture(t)
+	f := originalUserPrincipalFixture(t)
 	mustExec(t, f.rig.db, `UPDATE users SET access_revoked_at='2026-10-23T21:00:00Z' WHERE id=?`, f.a.HumanUserID)
 	err := f.capture(httptest.NewRequest("POST", "/", nil), f.a.MessageID, f.receipt)
 	var principals int
@@ -23,7 +34,7 @@ func TestArtifactPrincipalOriginalUserRevocationPreventsLateCapture(t *testing.T
 }
 
 func TestArtifactPrincipalOriginalUserRevisionCannotRefreshExistingRun(t *testing.T) {
-	f := newArtifactPrincipalFixture(t)
+	f := originalUserPrincipalFixture(t)
 	f.admit(t)
 	var originalRevision, originalExpiry string
 	if err := f.rig.db.QueryRow(`SELECT user_authority_revision,expires_at FROM artifact_run_principals WHERE run_id=?`, f.a.RunID).Scan(&originalRevision, &originalExpiry); err != nil {
@@ -34,7 +45,11 @@ func TestArtifactPrincipalOriginalUserRevisionCannotRefreshExistingRun(t *testin
 		t.Fatal("exact original retry", err)
 	}
 	mustExec(t, f.rig.db, `UPDATE users SET access_revoked_at='2026-10-23T21:00:00Z' WHERE id=?`, f.a.HumanUserID)
-	fresh, err := chataudience.CaptureTrusted(t.Context(), f.rig.db, f.a.ChatID, f.a.HumanUserID, nil)
+	source, err := captureOriginalHumanCredential(t.Context(), f.rig.db, &AuthUser{ID: f.a.HumanUserID, SessionID: "original-session", CredentialExpiresAt: time.Now().Add(30 * time.Minute)}, AuthKindSession, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := NewInternalHandler(f.rig.db, "synthetic-original-master", newTestLogger()).originalHumanChatReceipt(t.Context(), f.a.ChatID, f.a.HumanUserID, nil, source)
 	if err != nil || fresh == nil || fresh.UserAuthorityRevision == originalRevision {
 		t.Fatal("fresh source did not change after revocation", fresh, err)
 	}

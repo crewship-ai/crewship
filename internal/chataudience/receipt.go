@@ -89,6 +89,11 @@ func CaptureTrustedQuery(ctx context.Context, db Queryer, chat, user string, exp
 				return nil, nil
 			}
 			r.setOriginalCredential(*source)
+		} else {
+			// Existing host callers without original authentication provenance
+			// remain legacy. A current-user lookup cannot manufacture a new
+			// original fence for queued work or new Mooring admission.
+			r.UserAuthorityRevision = ""
 		}
 	} else {
 		// A retry carries its original credential even if a new socket or human

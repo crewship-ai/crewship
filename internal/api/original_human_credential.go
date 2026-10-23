@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth"
@@ -49,7 +50,18 @@ func loadOriginalCredential(ctx context.Context, q pageAuthQueryer, user, kind, 
 		}
 		result.reference.ExpiresAt = expiry.UTC().Format(time.RFC3339Nano)
 	}
-	raw, _ := json.Marshal([]string{"crewship.original-credential.v1", kind, id, user, created, result.tier, result.tokenHash})
+	// Rotating the ADMIN bearer HMAC key invalidates canonical authentication
+	// without changing the stored token row. Preserve that dependency as well.
+	keyIdentity := ""
+	if kind == AuthKindCLIToken && result.tier == "ADMIN" {
+		key, err := adminHMACKey()
+		if err != nil {
+			return result, errContentCredentialNotCurrent
+		}
+		digest := sha256.Sum256(key)
+		keyIdentity = hex.EncodeToString(digest[:])
+	}
+	raw, _ := json.Marshal([]string{"crewship.original-credential.v1", kind, id, user, created, result.tier, result.tokenHash, keyIdentity})
 	digest := sha256.Sum256(raw)
 	result.reference.Binding = "sha256:" + hex.EncodeToString(digest[:])
 	if !result.reference.Valid() {
@@ -100,6 +112,11 @@ func validateOriginalHumanCredential(ctx context.Context, q pageAuthQueryer, ori
 	if !original.Valid() || requiredScope == "" {
 		return time.Time{}, errContentCredentialNotCurrent
 	}
+	if requiredScope != scopeSelf {
+		if _, known := knownScopes[requiredScope]; !known {
+			return time.Time{}, errContentCredentialScope
+		}
+	}
 	current, err := loadOriginalCredential(ctx, q, original.UserID, original.Kind, original.ID)
 	if err != nil {
 		return time.Time{}, err
@@ -107,8 +124,11 @@ func validateOriginalHumanCredential(ctx context.Context, q pageAuthQueryer, ori
 	if current.reference.UserAuthorityRevision != original.UserAuthorityRevision || current.reference.Binding != original.Binding {
 		return time.Time{}, errContentCredentialNotCurrent
 	}
-	if original.Kind == AuthKindCLIToken && requiredScope != scopeSelf && current.scopes.Valid {
-		set := parseScopes(current.scopes.String)
+	if original.Kind == AuthKindCLIToken && requiredScope != scopeSelf {
+		set, err := originalCredentialScopes(current.scopes)
+		if err != nil {
+			return time.Time{}, err
+		}
 		if set != nil && !canScope(context.WithValue(ctx, ctxTokenScopes, set), requiredScope) {
 			return time.Time{}, errContentCredentialScope
 		}
@@ -120,6 +140,36 @@ func validateOriginalHumanCredential(ctx context.Context, q pageAuthQueryer, ori
 		return time.Time{}, errContentCredentialNotCurrent
 	}
 	return expiry, nil
+}
+
+// The legacy bearer parser intentionally tolerates corrupt policy. New scoped
+// Mooring admission must fail closed while retaining canonical unrestricted
+// SQL NULL, empty text and empty-array policy. Scope matching stays canonical.
+func originalCredentialScopes(value sql.NullString) (stringSet, error) {
+	raw := strings.TrimSpace(value.String)
+	if !value.Valid || raw == "" {
+		return nil, nil
+	}
+	var entries []json.RawMessage
+	if raw[0] != '[' || json.Unmarshal([]byte(raw), &entries) != nil {
+		return nil, errContentCredentialScope
+	}
+	if len(entries) == 0 {
+		return nil, nil
+	}
+	set := make(stringSet)
+	for _, entry := range entries {
+		var scope string
+		if json.Unmarshal(entry, &scope) != nil {
+			return nil, errContentCredentialScope
+		}
+		scope = strings.TrimSpace(scope)
+		if _, known := knownScopes[scope]; !known {
+			return nil, errContentCredentialScope
+		}
+		set[scope] = struct{}{}
+	}
+	return set, nil
 }
 
 func originalCredentialAdmissionError(err error) bool {
@@ -139,10 +189,10 @@ func (h *InternalHandler) originalHumanChatReceipt(ctx context.Context, chat, us
 	}
 	defer tx.Rollback()
 	ctx = auth.WithOriginalCredential(ctx, auth.OriginalCredential{})
-	if expected != nil && expected.SourceCredentialKind != "" {
-		original := expected.OriginalCredential()
-		source = &original
-	}
+	// Initial authentication must still be exact and current. A generic
+	// queued resume instead preserves its immutable expected receipt and
+	// revalidates its original user/member/chat fences below. Original JWT
+	// expiry is a strict Mooring admission limit, not a legacy run deadline.
 	if source != nil {
 		if source.UserID != user {
 			return nil, nil

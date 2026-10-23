@@ -1,10 +1,39 @@
 package chataudience
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/auth"
 )
+
+// This package's boundary receives host-authenticated provenance; actual
+// credential-row authentication is covered by the API source-path tests.
+func originalUserAudienceContext(t *testing.T, db *sql.DB, user string) context.Context {
+	t.Helper()
+	source := auth.OriginalCredential{UserID: user, Kind: "cli_token", ID: "host-fixture-token", Binding: "sha256:" + strings.Repeat("a", 64)}
+	if err := db.QueryRow(`SELECT CAST(authority_revision AS TEXT) FROM users WHERE id=?`, user).Scan(&source.UserAuthorityRevision); err != nil {
+		t.Fatal(err)
+	}
+	return auth.WithOriginalCredential(t.Context(), source)
+}
+
+func TestOriginalUserLegacyCaptureDoesNotAcquireFence(t *testing.T) {
+	db := audienceDB(t)
+	receipt, err := CaptureTrusted(t.Context(), db, "private", "author", nil)
+	if err != nil || receipt == nil {
+		t.Fatal(receipt, err)
+	}
+	if receipt.SourceCredentialKind != "" || receipt.UserAuthorityRevision != "" {
+		t.Fatalf("legacy bare capture acquired original authority: credential_kind=%q user_revision=%q", receipt.SourceCredentialKind, receipt.UserAuthorityRevision)
+	}
+	if got, err := RevalidateOriginalUserQuery(t.Context(), db, receipt); err != nil || got != nil {
+		t.Fatal("legacy source admitted Mooring", got, err)
+	}
+}
 
 func TestOriginalUserAuthorityRevisionExactJSONAndBounds(t *testing.T) {
 	for _, value := range []string{"1", "9007199254740993", "9223372036854775807"} {
@@ -34,13 +63,17 @@ func TestOriginalUserAuthorityRevisionExactJSONAndBounds(t *testing.T) {
 
 func TestOriginalUserFenceRevokesCaptureAndPreservesLegacyIdentity(t *testing.T) {
 	db := audienceDB(t)
-	original, err := CaptureTrusted(t.Context(), db, "private", "author", nil)
+	original, err := CaptureTrusted(originalUserAudienceContext(t, db, "author"), db, "private", "author", nil)
 	if err != nil || original == nil || !ValidUserAuthorityRevision(original.UserAuthorityRevision) {
 		t.Fatal(original, err)
 	}
 	legacy := *original
 	legacy.UserAuthorityRevision = ""
-	current, err := CaptureTrusted(t.Context(), db, "private", "author", &legacy)
+	legacy.SourceCredentialKind = ""
+	legacy.SourceCredentialID = ""
+	legacy.SourceCredentialExpiresAt = ""
+	legacy.SourceCredentialBinding = ""
+	current, err := CaptureTrusted(originalUserAudienceContext(t, db, "author"), db, "private", "author", &legacy)
 	if err != nil || current == nil || *current != legacy {
 		t.Fatal("legacy retry was refreshed or broken", current, err)
 	}
@@ -51,11 +84,11 @@ func TestOriginalUserFenceRevokesCaptureAndPreservesLegacyIdentity(t *testing.T)
 	if current, err := RevalidateOriginalUserQuery(t.Context(), db, original); err != nil || current != nil {
 		t.Fatal("old original receipt refreshed after revocation", current, err)
 	}
-	fresh, err := CaptureTrusted(t.Context(), db, "private", "author", nil)
+	fresh, err := CaptureTrusted(originalUserAudienceContext(t, db, "author"), db, "private", "author", nil)
 	if err != nil || fresh == nil || fresh.UserAuthorityRevision == original.UserAuthorityRevision {
 		t.Fatal("fresh admission lost revocation epoch", fresh, err)
 	}
-	if current, err := CaptureTrusted(t.Context(), db, "private", "author", &legacy); err != nil || current == nil || current.UserAuthorityRevision != "" {
+	if current, err := CaptureTrusted(originalUserAudienceContext(t, db, "author"), db, "private", "author", &legacy); err != nil || current == nil || current.UserAuthorityRevision != "" {
 		t.Fatal("legacy empty fence upgraded", current, err)
 	}
 }
