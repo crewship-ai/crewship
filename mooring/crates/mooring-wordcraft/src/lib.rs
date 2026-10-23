@@ -1,7 +1,7 @@
 //! Default-off WordCraft native model boundary; no transport or durable receipts.
 //! The caller supplies host-authenticated, scoped checkpoints and stable IDs.
 //! An export is a candidate, never a durable Saved receipt.
-#[allow(dead_code)] // Pending trusted read-context wrapper; no admission exposed.
+pub mod adapter;
 mod candidate;
 pub mod command;
 
