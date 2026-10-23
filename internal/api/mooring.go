@@ -146,7 +146,7 @@ func (m *mooringHTTP) create(w http.ResponseWriter, r *http.Request) {
 			mooringError(w, mooring.ErrConflict)
 			return
 		}
-		writeJSON(w, 200, mooringCreated{PageID: id, Slug: req.Slug, Name: name, AppID: app})
+		writeJSON(w, 200, mooringCreatedResponse{PageID: id, Slug: req.Slug, Name: name, AppID: app})
 		return
 	}
 	if !errors.Is(e, sql.ErrNoRows) {
@@ -192,7 +192,7 @@ func (m *mooringHTTP) create(w http.ResponseWriter, r *http.Request) {
 	if notify != nil {
 		notify()
 	}
-	writeJSON(w, 201, mooringCreated{PageID: id, Slug: req.Slug, Name: req.Name, AppID: req.AppID})
+	writeJSON(w, 201, mooringCreatedResponse{PageID: id, Slug: req.Slug, Name: req.Name, AppID: req.AppID})
 }
 func (m *mooringHTTP) document(ctx context.Context, tx *sql.Tx, k appengine.Key) (mooring.Manifest, mooring.State, error) {
 	var app string
@@ -329,7 +329,7 @@ func (m *mooringHTTP) createAuthority(r *http.Request, tx *sql.Tx, ws, user stri
 	return nil
 }
 
-type mooringCreated struct {
+type mooringCreatedResponse struct {
 	PageID string `json:"page_id"`
 	Slug   string `json:"slug"`
 	Name   string `json:"name"`

@@ -77,7 +77,7 @@ var responseShapeContracts = []struct {
 	{name: "DocumentCheckpoint", pointer: "/components/schemas/DocumentCheckpoint", value: documentCheckpointResponse{}},
 	{name: "DocumentRestoreReceipt", pointer: "/components/schemas/DocumentRestoreReceipt", value: documentRestoreResponse{}},
 	{name: "MooringManifest", pointer: "/components/schemas/MooringManifest", value: mooring.Manifest{}},
-	{name: "MooringCreated", pointer: "/components/schemas/MooringCreated", value: mooringCreated{}},
+	{name: "MooringCreated", pointer: "/components/schemas/MooringCreated", value: mooringCreatedResponse{}},
 	{name: "MooringRead", pointer: "/components/schemas/MooringRead", value: mooringRead{}},
 	{name: "MooringReceipt", pointer: "/components/schemas/MooringReceipt", value: mooring.Receipt{}},
 	{name: "MooringMandate", pointer: "/components/schemas/MooringMandate", value: mooringMandate{}},
