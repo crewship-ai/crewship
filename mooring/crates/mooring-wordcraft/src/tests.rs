@@ -46,7 +46,7 @@ fn synthetic_unicode_empty_paragraph_and_explicit_false_are_lossless() {
         {"kind":"para","text":"Č😀e\u{301}","runs":[
             {"len":2},{"len":4,"props":{"bold":true,"boldCs":false}},
             {"len":3,"props":{"italic":false,"italicCs":true}}],"props":{"style":"Normal"}},
-        {"kind":"para","text":"","runs":[{"len":0,"props":{"bold":false}}],"mark":{"italic":true},"props":{"style":"Normal"}}
+        {"kind":"para","text":"","runs":[],"mark":{"bold":false,"italic":true},"props":{"style":"Normal"}}
     ]);
     let doc = Document::import(native.clone(), ids(&native)).unwrap();
     assert!(!doc.is_read_only());
@@ -222,4 +222,20 @@ fn zero_length_inline_runs_with_ambiguous_insertion_semantics_are_read_only() {
     assert!(doc.is_read_only());
     assert!(doc.read_only_reason().is_some());
     assert_eq!(doc.native().unwrap(), native);
+}
+
+#[test]
+fn unqualified_empty_run_encoding_opens_whole_document_read_only() {
+    for run in [json!({"len":0}), json!({"len":0,"props":{"bold":false}})] {
+        let mut native = d1();
+        native["body"][0] =
+            json!({"kind":"para","text":"","runs":[run],"props":{"style":"Normal"}});
+        let doc = Document::import(native.clone(), ids(&native)).unwrap();
+        assert!(doc.is_read_only());
+        assert!(doc.read_only_reason().is_some());
+        assert_eq!(doc.native().unwrap(), native);
+        let restored = Document::restore(&doc.checkpoint().unwrap()).unwrap();
+        assert!(restored.is_read_only());
+        assert_eq!(restored.native().unwrap(), native);
+    }
 }

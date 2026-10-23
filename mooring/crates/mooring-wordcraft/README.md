@@ -50,3 +50,9 @@ crewship-heavy cargo run --manifest-path mooring/Cargo.toml \
 The executable writes native projection, full checkpoint and restored native
 JSON. These output files still need actual WordCraft engine/WASM load, save and
 reopen checks; a JSON equality assertion alone is not that evidence.
+
+Actual native and WASM WordCraft normalize zero-length runs away, including
+properties carried only by such a run. Those encodings therefore remain
+read-only, including zero-length runs in empty paragraphs. A canonical empty
+paragraph with no runs and explicit paragraph-mark properties is a separate
+qualification case; unit equality alone does not qualify application behavior.
