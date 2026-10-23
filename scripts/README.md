@@ -34,6 +34,7 @@ running the full suite with a deliberately adjusted timeout. Mutation tests
 
 | Script | Responsibility / outputs |
 | --- | --- |
+| [build-mooring-runtime.sh](build-mooring-runtime.sh), [build-mooring-runtime.py](build-mooring-runtime.py) | Optional Linux dev release recipe: offline pinned Rust child/WASM, verified temporary build tools and embedded dependency license texts; caller runs through `crewship-heavy`; default marker disabled |
 | [build-stamp.sh](build-stamp.sh) | Reads Git identity correctly in worktrees; supplies build metadata |
 | [embed-web-out.sh](embed-web-out.sh) | Stages/verifies the static export in `web/out/`; preserves the placeholder |
 | [check-chat-table-worker.mjs](check-chat-table-worker.mjs), [check-chat-xlsx-worker.mjs](check-chat-xlsx-worker.mjs) | Chromium acceptance of built `out/chat-workers` bundles with synthetic CSV/XLSX; runs through `pnpm test:chat-worker` / `pnpm test:chat-xlsx-worker` in CI Playwright PR subset; no live server or external parser |
