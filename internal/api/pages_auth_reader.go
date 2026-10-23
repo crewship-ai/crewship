@@ -32,6 +32,10 @@ func privatePageOwnershipSQL(ctx context.Context, q pageAuthQueryer, alias strin
 	for _, extension := range []struct{ table, kind string }{
 		{"slides_heads", "slides"}, {"documents", "document"},
 		{"page_boards", "board"}, {"page_artifacts", "artifact"},
+		// A workbook is a human-only private output too: crews never own one
+		// (gridcraft_require_personal_page_*), so a departing owner's workbook
+		// waits for an explicit human successor instead of going to a crew.
+		{"gridcraft_heads", "workbook"},
 	} {
 		var schemaType string
 		err := q.QueryRowContext(ctx, `SELECT type FROM sqlite_schema WHERE name=? COLLATE NOCASE AND type IN ('table','view')`, extension.table).Scan(&schemaType)

@@ -344,7 +344,21 @@ func (s *Store) Execute(ctx context.Context, k Key, r Request, a Authorize, e En
 		if err != nil {
 			return err
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO gridcraft_heads(page_id,workspace_id,schema_version,head_rev,generation,snapshot) VALUES(?,?,?,?,?,?) ON CONFLICT(page_id) DO UPDATE SET head_rev=excluded.head_rev,snapshot=excluded.snapshot`, k.PageID, k.WorkspaceID, SchemaVersion, rev, generation, []byte(c.Snapshot)); err != nil {
+		// Only the first revision creates the head, so the personal-Page insert
+		// trigger keeps guarding creation. Later revisions update in place: an
+		// upsert would run that insert trigger again and refuse every write
+		// after the owner explicitly shared the Page.
+		if v.Rev == 0 {
+			_, err = tx.ExecContext(ctx, `INSERT INTO gridcraft_heads(page_id,workspace_id,schema_version,head_rev,generation,snapshot) VALUES(?,?,?,?,?,?)`, k.PageID, k.WorkspaceID, SchemaVersion, rev, generation, []byte(c.Snapshot))
+		} else {
+			var updated sql.Result
+			if updated, err = tx.ExecContext(ctx, `UPDATE gridcraft_heads SET head_rev=?,snapshot=? WHERE workspace_id=? AND page_id=? AND head_rev=?`, rev, []byte(c.Snapshot), k.WorkspaceID, k.PageID, v.Rev); err == nil {
+				if n, e := updated.RowsAffected(); e != nil || n != 1 {
+					err = errors.Join(e, ErrPrecondition)
+				}
+			}
+		}
+		if err != nil {
 			return err
 		}
 		if checkpoint {

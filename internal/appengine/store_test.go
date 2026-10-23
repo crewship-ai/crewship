@@ -502,3 +502,37 @@ func TestAuditRecordsDerivedRecalculation(t *testing.T) {
 		t.Fatalf("audit=%s", raw)
 	}
 }
+
+// The head stays bound to a personal human Page for every revision, not only
+// its creation. Publication (private_audience=0) remains writable.
+func TestWorkbookHeadUpdateRequiresPersonalPage(t *testing.T) {
+	s, db, a, k := fixture(t)
+	e := &fakeEngine{}
+	imported(t, s, a, k, e)
+	if _, err := db.Exec(`UPDATE pages SET private_audience=0 WHERE id='page'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Execute(t.Context(), k, edit(), a, e); err != nil {
+		t.Fatalf("published personal workbook rejected: %v", err)
+	}
+	for _, q := range []string{
+		`INSERT INTO crews(id,workspace_id,name,slug) VALUES('crew','ws','Crew','crew')`,
+		`UPDATE pages SET owner_user_id=NULL, owner_crew_id='crew' WHERE id='page'`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	next := edit()
+	next.MutationID, next.BaseRev = "edit-crew", 2
+	if _, err := s.Execute(t.Context(), k, next, a, e); err == nil {
+		t.Fatal("crew-owned Page accepted a workbook revision")
+	}
+	if _, err := db.Exec(`UPDATE gridcraft_heads SET head_rev=head_rev WHERE page_id='page'`); err == nil {
+		t.Fatal("database accepted a head update on a crew-owned Page")
+	}
+	var rev int
+	if err := db.QueryRow(`SELECT head_rev FROM gridcraft_heads WHERE page_id='page'`).Scan(&rev); err != nil || rev != 2 {
+		t.Fatalf("head=%d err=%v", rev, err)
+	}
+}

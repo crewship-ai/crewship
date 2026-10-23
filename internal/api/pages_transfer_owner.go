@@ -15,7 +15,7 @@ package api
 // whole erasure refuses rather than proceeding halfway when a page cannot be
 // resolved.
 //
-// Docs, Artifacts and Boards always refuse until an administrator explicitly transfers
+// Docs, Artifacts, Boards and Workbooks always refuse until an administrator explicitly transfers
 // them through WorkspaceHandler.TransferPageOwnership. The automatic rule below
 // applies only to regular panel Pages.
 //
@@ -92,7 +92,7 @@ type ErrPagesNeedManualTransfer struct {
 
 func (e *ErrPagesNeedManualTransfer) Error() string {
 	return fmt.Sprintf(
-		"cannot erase this user: page(s) %s require ownership resolution — regular Pages require a panel-owning or member crew; Docs, Artifacts and Boards require an explicit human successor selection. %s",
+		"cannot erase this user: page(s) %s require ownership resolution — regular Pages require a panel-owning or member crew; Docs, Artifacts, Boards and Workbooks require an explicit human successor selection. %s",
 		strings.Join(e.Pages, ", "), pageOwnershipHelp)
 }
 
@@ -126,8 +126,14 @@ func transferDepartingUserPages(ctx context.Context, db *sql.DB, j journal.Emitt
 	defer func() { _ = tx.Rollback() }()
 
 	results, err := transferDepartingUserPagesTx(ctx, tx, wsID, userID)
-	if err != nil || len(results) == 0 {
-		return nil, err
+	if err != nil {
+		// A refused erasure opens custody of the subject's workbooks (see
+		// gridcraft_custody.go) once this transaction has let go.
+		_ = tx.Rollback()
+		return nil, recordRefusedDepartureCustody(ctx, db, actorID, wsID, userID, "erasure_refused", err)
+	}
+	if len(results) == 0 {
+		return nil, nil
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit pages transfer: %w", err)

@@ -1031,6 +1031,10 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 		h.refusePageAction(w, r, rec, "only the page owner, a workspace admin, or a write grantee may edit this page", "")
 		return
 	}
+	if !workbookPageOwnerOnly(rec, user.ID) {
+		h.refusePageAction(w, r, rec, workbookPageRefusal, "")
+		return
+	}
 
 	req, ok := h.decodeWrite(w, r)
 	if !ok {
@@ -1312,9 +1316,31 @@ func (h *PageHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if !h.hasPrivateOutputMetadata(r.Context(), rec) {
 		payload["slug"] = rec.Slug
 	}
-	if _, err := h.db.ExecContext(r.Context(), `DELETE FROM pages WHERE id = ?`, rec.ID); err != nil {
-		replyInternalError(w, h.logger, "delete page", err)
-		return
+	if rec.HasWorkbook {
+		refusal, err := h.deleteWorkbookPage(r, wsID, rec, user)
+		if err != nil {
+			replyInternalError(w, h.logger, "delete workbook page", err)
+			return
+		}
+		if refusal != "" {
+			h.refusePageAction(w, r, rec, refusal, "")
+			return
+		}
+	} else {
+		// A workbook imported after the Page was loaded is never deleted
+		// here; a retry loads it as a workbook and meets the rules above.
+		deleted, err := h.db.ExecContext(r.Context(), `DELETE FROM pages WHERE id = ? AND NOT EXISTS(SELECT 1 FROM gridcraft_heads WHERE page_id = pages.id)`, rec.ID)
+		if err != nil {
+			replyInternalError(w, h.logger, "delete page", err)
+			return
+		}
+		if n, err := deleted.RowsAffected(); err == nil && n == 0 {
+			var workbook bool
+			if h.db.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM gridcraft_heads WHERE page_id=?)`, rec.ID).Scan(&workbook) == nil && workbook {
+				h.refusePageAction(w, r, rec, workbookPageRefusal, "")
+				return
+			}
+		}
 	}
 	// Panels, data, versions and grants cascade from the page row; the wake
 	// gates' `automations` rows belong to another feature's table and do not.

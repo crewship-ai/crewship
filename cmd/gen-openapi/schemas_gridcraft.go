@@ -43,6 +43,10 @@ func gridcraftSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	routes["GET "+base+"/operations/{mutation}"] = DomainSchema{Response: ref("WorkbookStatus")}
 	routes["POST "+base+"/mandates"] = DomainSchema{Request: mandate, RequestRequired: true, Response: ref("WorkbookMandate")}
 	routes["DELETE "+base+"/mandates/{mandate}"] = DomainSchema{Response: obj(map[string]any{"status": str()}, "status")}
+	share := obj(map[string]any{"editor": map[string]any{"type": "string", "description": "Workspace member email or user ID"}, "publish": map[string]any{"type": "boolean", "description": "Required to end a private audience; publication is one-way and shares only the current head"}}, "editor")
+	share["additionalProperties"] = false
+	shared := obj(map[string]any{"page": str(), "editor": str(), "editor_user_id": str(), "published": map[string]any{"type": "boolean"}, "published_rev": integer(1), "revoked_mandates": integer(0)}, "page", "editor", "editor_user_id", "published", "revoked_mandates")
+	routes["POST "+base+"/editors"] = DomainSchema{Request: share, RequestRequired: true, Response: shared}
 	for key, c := range routes {
 		c.SuccessStatuses = []string{"200"}
 		if key == "POST /api/v1/workbooks" {

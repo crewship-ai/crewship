@@ -13,7 +13,7 @@ func workspacePageOwnershipSchemaCatalog() (map[string]DomainSchema, map[string]
 	schemas := map[string]any{
 		"WorkspacePageOwnershipSuccessor": object(map[string]any{"user_id": str(), "name": str(), "email": str()}, "user_id", "name", "email"),
 		"WorkspacePageOwnershipSummary": object(map[string]any{
-			"id": str(), "slug": str(), "name": str(), "type": map[string]any{"type": "string", "enum": []string{"artifact", "board", "document", "slides"}}, "owner_user_id": str(), "owner_name": str(), "eligible_successors": array(ref("WorkspacePageOwnershipSuccessor")),
+			"id": str(), "slug": str(), "name": str(), "type": map[string]any{"type": "string", "enum": []string{"artifact", "board", "document", "slides", "workbook"}}, "owner_user_id": str(), "owner_name": str(), "eligible_successors": array(ref("WorkspacePageOwnershipSuccessor")),
 		}, "id", "slug", "name", "type", "owner_user_id", "owner_name", "eligible_successors"),
 		"WorkspacePageOwnershipListResponse":    object(map[string]any{"pages": array(ref("WorkspacePageOwnershipSummary")), "next_cursor": str()}, "pages"),
 		"WorkspacePageOwnershipTransferRequest": object(map[string]any{"expected_owner_user_id": nonempty(), "successor_user_id": nonempty()}, "expected_owner_user_id", "successor_user_id"),

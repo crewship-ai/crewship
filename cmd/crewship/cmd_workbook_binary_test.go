@@ -62,7 +62,7 @@ func TestWorkbookHumanBinary(t *testing.T) {
 	if err = os.WriteFile(cfg, []byte(fmt.Sprintf("server: %s\ntoken: %s\nworkspace: cworkbookworkspace000000001\nformat: json\n", server.URL, token)), 0600); err != nil {
 		t.Fatal(err)
 	}
-	run := func(input string, args ...string) []byte {
+	runAs := func(config string, wantErr bool, input string, args ...string) []byte {
 		t.Helper()
 		cmd := exec.CommandContext(t.Context(), binary, args...)
 		cmd.Stdin = strings.NewReader(input)
@@ -71,12 +71,16 @@ func TestWorkbookHumanBinary(t *testing.T) {
 				cmd.Env = append(cmd.Env, v)
 			}
 		}
-		cmd.Env = append(cmd.Env, "CREWSHIP_CONFIG="+cfg, "CREWSHIP_NO_SLUG_CACHE=1", "NO_COLOR=1")
+		cmd.Env = append(cmd.Env, "CREWSHIP_CONFIG="+config, "CREWSHIP_NO_SLUG_CACHE=1", "NO_COLOR=1")
 		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("CLI %v: %v %s", args, err, out)
+		if (err != nil) != wantErr {
+			t.Fatalf("CLI %v: err=%v want error=%v %s", args, err, wantErr, out)
 		}
 		return out
+	}
+	run := func(input string, args ...string) []byte {
+		t.Helper()
+		return runAs(cfg, false, input, args...)
 	}
 	created := run("", "workbook", "create", "created-workbook", "--name", "Created workbook")
 	createdRetry := run("", "workbook", "create", "created-workbook", "--name", "Created workbook")
@@ -143,4 +147,38 @@ func TestWorkbookHumanBinary(t *testing.T) {
 	}
 	run(`{"session_id":"w2","mutation_id":"w2:2","base_rev":1,"generation":1,"ops":[{"kind":"cell.set","sheet":"Sheet1","cell":"C5","input":"other"}]}`, "workbook", "edit", "@workbook-binary-page", "--file", "-")
 	run("", "workbook", "status", "@workbook-binary-page", "w2:2")
+
+	// A second human editor: explicit publication, then the ordinary page revoke.
+	const peerToken = "crewship_cli_workbook_synthetic_peer"
+	for _, q := range []string{
+		`INSERT INTO users(id,email) VALUES('workbook-peer','workbook-peer@example.test')`,
+		`INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('workbook-peer-member','cworkbookworkspace000000001','workbook-peer','MEMBER')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(`INSERT INTO cli_tokens(id,user_id,name,token_hash,tier) VALUES('workbook-peer-token','workbook-peer','peer',?,'STANDARD')`, sha256HexToken(peerToken)); err != nil {
+		t.Fatal(err)
+	}
+	peerCfg := filepath.Join(t.TempDir(), "peer.yaml")
+	if err = os.WriteFile(peerCfg, []byte(fmt.Sprintf("server: %s\ntoken: %s\nworkspace: cworkbookworkspace000000001\nformat: json\n", server.URL, peerToken)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runAs(peerCfg, true, "", "workbook", "read", "@workbook-binary-page")
+	if out := runAs(cfg, true, "", "workbook", "share", "@workbook-binary-page", "--editor", "workbook-peer@example.test"); !strings.Contains(string(out), "publication_required") {
+		t.Fatalf("implicit publication: %s", out)
+	}
+	shared := run("", "workbook", "share", "@workbook-binary-page", "--editor", "workbook-peer@example.test", "--publish")
+	var sharedOut struct {
+		Published    bool   `json:"published"`
+		EditorUserID string `json:"editor_user_id"`
+	}
+	if json.Unmarshal(shared, &sharedOut) != nil || !sharedOut.Published || sharedOut.EditorUserID != "workbook-peer" {
+		t.Fatalf("share %s", shared)
+	}
+	runAs(peerCfg, false, "", "workbook", "read", "@workbook-binary-page")
+	runAs(peerCfg, false, `{"mutation_id":"peer-import","mandate_id":"human-import","base_rev":3,"generation":1,"command":{"kind":"import","snapshot":{"sheets":[{}]}}}`, "workbook", "import", "@workbook-binary-page", "--file", "-")
+	run("", "page", "revoke", "@workbook-binary-page", "--user", "workbook-peer@example.test")
+	runAs(peerCfg, true, "", "workbook", "read", "@workbook-binary-page")
 }
