@@ -135,6 +135,7 @@ var restrictedRoutes = map[string]restrictedRule{
 	"PUT /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft":           restrictedPass,
 	"POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/validate": restrictedPass,
 	"POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/publish":  restrictedPass,
+	"POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/unpublish":      restrictedPass,
 	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library":                             restrictedPass,
 	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}":                 restrictedPass,
 	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/runs":            restrictedPass,

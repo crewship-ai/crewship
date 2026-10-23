@@ -102,6 +102,7 @@ var restrictedAllowedPatterns = []string{
 	"POST /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones",
 	"POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/publish",
 	"POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/validate",
+	"POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/unpublish",
 	"PUT /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}",
 	"PUT /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId}",
 	"PUT /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft",

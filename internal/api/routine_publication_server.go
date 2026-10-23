@@ -7,11 +7,13 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 type publicationDraftReference struct {
@@ -183,7 +185,7 @@ func (r *Router) routinePublicationPublish(w http.ResponseWriter, req *http.Requ
 	var retained bool
 	err = tx.QueryRowContext(req.Context(), `SELECT EXISTS(
  SELECT 1 FROM pipelines p JOIN pipeline_versions v ON v.pipeline_id=p.id AND v.version=?
- WHERE p.id=? AND p.workspace_id=? AND p.slug=? AND p.deleted_at IS NULL
+ WHERE p.id=? AND p.workspace_id=? AND p.slug=? AND p.deleted_at IS NULL AND p.publication_withdrawn_at IS NULL
  AND p.head_version=? AND p.publication_revision=? AND p.name=? AND p.description IS ?
  AND p.definition_json=? AND p.definition_hash=? AND p.publication_authority_fingerprint=?
  AND p.author_crew_id IS NULLIF(?,'') AND p.author_agent_id IS NULLIF(?,'') AND p.chat_origin_id IS NULLIF(?,'')
@@ -209,4 +211,85 @@ func (r *Router) routinePublicationPublish(w http.ResponseWriter, req *http.Requ
 		notify()
 	}
 	writeJSON(w, 200, routinePublicationResponse{ID: draft.BasePipelineID, Version: version, PublicationRevision: draft.BaseRevision + 1})
+}
+
+type routineUnpublicationResponse struct {
+	ID          string `json:"id"`
+	Version     int    `json:"version"`
+	WithdrawnAt string `json:"withdrawn_at"`
+}
+
+// routinePublicationUnpublish withdraws the current Guest publication. The
+// archive and manifest stay immutable; new runs are refused and running ones
+// stop at their next step. A Publish holder or a trusted OWNER/ADMIN may act.
+func (r *Router) routinePublicationUnpublish(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	user := UserFromContext(req.Context())
+	workspace, matches := memberAccessWorkspace(req)
+	if user == nil || !matches {
+		guestRoutineDraftError(w, access.ErrDenied)
+		return
+	}
+	if req.ContentLength > 0 {
+		replyError(w, 400, "Unpublish takes no request body")
+		return
+	}
+	tx, err := r.db.BeginTx(req.Context(), nil)
+	if err != nil {
+		guestRoutineDraftError(w, err)
+		return
+	}
+	defer tx.Rollback()
+	var routine, fingerprint string
+	var head int
+	var withdrawn sql.NullString
+	err = tx.QueryRowContext(req.Context(), `SELECT id,publication_authority_fingerprint,head_version,publication_withdrawn_at FROM pipelines WHERE workspace_id=? AND (id=? OR slug=?) AND deleted_at IS NULL`, workspace, req.PathValue("routineId"), req.PathValue("routineId")).Scan(&routine, &fingerprint, &head, &withdrawn)
+	if err != nil {
+		guestRoutineDraftError(w, err)
+		return
+	}
+	if _, err = invitationIssuerRole(req.Context(), tx, user.ID, workspace); errors.Is(err, sql.ErrNoRows) {
+		err = (access.Store{DB: r.db}).CheckIn(req.Context(), tx, user.ID, workspace, access.Right{Kind: "routine", ID: routine, Operation: "publish"})
+	}
+	if err != nil {
+		guestRoutineDraftError(w, err)
+		return
+	}
+	if fingerprint == access.LegacyPublicationAuthorityFingerprint || withdrawn.Valid {
+		replyError(w, 409, "Routine has no current Guest publication to withdraw")
+		return
+	}
+	stamp := tsformat.Format(time.Now())
+	result, err := tx.ExecContext(req.Context(), `UPDATE pipelines SET publication_withdrawn_at=?,publication_last_withdrawn_at=?,publication_revision=publication_revision+1 WHERE id=? AND workspace_id=? AND deleted_at IS NULL AND publication_withdrawn_at IS NULL AND publication_authority_fingerprint=? AND head_version=?`, stamp, stamp, routine, workspace, fingerprint, head)
+	if err != nil {
+		guestRoutineDraftError(w, err)
+		return
+	}
+	if n, err := result.RowsAffected(); err != nil || n != 1 {
+		guestRoutineDraftError(w, errors.Join(err, pipeline.ErrDraftConflict))
+		return
+	}
+	notify, err := r.appendGuestIssueAudit(req.Context(), tx, journal.Entry{
+		WorkspaceID: workspace, Type: journal.EntryAuditEntityUpdated,
+		ActorType: journal.ActorUser, ActorID: user.ID, Summary: "Routine publication withdrawn",
+		Payload: map[string]any{"entity_type": "routine", "action": "unpublish", "pipeline_id": routine, "version": head, "authority_fingerprint": fingerprint, "withdrawn_at": stamp},
+	})
+	if err != nil {
+		guestRoutineDraftError(w, err)
+		return
+	}
+	var retained bool
+	err = tx.QueryRowContext(req.Context(), `SELECT EXISTS(SELECT 1 FROM pipelines WHERE id=? AND workspace_id=? AND deleted_at IS NULL AND publication_withdrawn_at=? AND publication_last_withdrawn_at=? AND publication_authority_fingerprint=? AND head_version=?)`, routine, workspace, stamp, stamp, fingerprint, head).Scan(&retained)
+	if err != nil || !retained {
+		guestRoutineDraftError(w, errors.Join(err, errors.New("withdrawal was not retained")))
+		return
+	}
+	if err = tx.Commit(); err != nil {
+		guestRoutineDraftError(w, err)
+		return
+	}
+	if notify != nil {
+		notify()
+	}
+	writeJSON(w, 200, routineUnpublicationResponse{ID: routine, Version: head, WithdrawnAt: stamp})
 }

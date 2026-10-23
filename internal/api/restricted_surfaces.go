@@ -33,6 +33,7 @@ var restrictedSurfaces = []restrictedSurface{
 		"PUT /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft",
 		"POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/validate",
 		"POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/publish",
+		"POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/unpublish",
 		"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library",
 		"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}",
 		"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/runs",

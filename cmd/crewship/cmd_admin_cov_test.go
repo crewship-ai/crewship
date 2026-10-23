@@ -490,6 +490,9 @@ func TestAdminResetPassword_PasswordStdin(t *testing.T) {
 	if err := bcrypt.CompareHashAndPassword([]byte(got), []byte("stdin-password-42")); err != nil {
 		t.Errorf("stdin password not applied: %v", err)
 	}
+	if marker := queryAdminString(t, dbURL, `SELECT COALESCE(access_revoked_at,'') FROM users WHERE id='u1'`); marker == "" {
+		t.Error("reset-password did not record the access revocation marker")
+	}
 }
 
 func TestAdminResetPassword_StdinAndFlagMutuallyExclusive(t *testing.T) {
