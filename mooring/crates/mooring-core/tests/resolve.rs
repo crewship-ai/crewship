@@ -418,3 +418,22 @@ fn d4_definite_admission_failure_removes_outgoing_edges_before_scc() {
         assert_eq!(reason.root.code, Code::UnknownDependency);
     }
 }
+
+#[test]
+fn d4_internal_cycle_roots_first_submitted_actual_member_not_dfs_entry_or_ancestor() {
+    let changes = [change(
+        "a",
+        vec![op("p", &["z"]), op("y", &["z"]), op("z", &["y"])],
+    )];
+    let result = run(&changes, &BTreeMap::new(), &BTreeMap::new());
+    for (index, expected) in [
+        (0, Code::DependencyRejected),
+        (1, Code::DependencyCycle),
+        (2, Code::DependencyRejected),
+    ] {
+        let reason = rejected(&result.changes[0].operations[index].decision);
+        assert_eq!(reason.code, expected);
+        assert_eq!(reason.root.op_id, "y");
+        assert_eq!(reason.root.code, Code::DependencyCycle);
+    }
+}

@@ -404,39 +404,35 @@ impl Context<'_> {
     }
 }
 fn internal_cycle(change: &AtomicChange) -> Option<String> {
-    fn visit<'a>(
-        id: &'a str,
-        operations: &BTreeMap<&'a str, &'a Operation>,
-        active: &mut BTreeSet<&'a str>,
-        done: &mut BTreeSet<&'a str>,
-    ) -> Option<String> {
-        if active.contains(id) {
-            return Some(id.into());
-        }
-        if done.contains(id) {
-            return None;
-        }
-        active.insert(id);
-        for dependency in &operations[id].dependencies {
-            if operations.contains_key(dependency.as_str()) {
-                if let Some(root) = visit(dependency, operations, active, done) {
-                    return Some(root);
-                }
-            }
-        }
-        active.remove(id);
-        done.insert(id);
-        None
-    }
     let operations: BTreeMap<_, _> = change
         .operations
         .iter()
-        .map(|op| (op.op_id.as_str(), op))
+        .map(|operation| (operation.op_id.as_str(), operation))
         .collect();
-    let (mut active, mut done) = (BTreeSet::new(), BTreeSet::new());
-    for op in &change.operations {
-        if let Some(root) = visit(&op.op_id, &operations, &mut active, &mut done) {
-            return Some(root);
+    // Choose the first SUBMITTED actual cyclic member, not a DFS backedge
+    // entry or an acyclic ancestor leading into another member's cycle.
+    for operation in &change.operations {
+        let mut pending: Vec<_> = operation
+            .dependencies
+            .iter()
+            .filter(|dependency| operations.contains_key(dependency.as_str()))
+            .map(String::as_str)
+            .collect();
+        let mut visited = BTreeSet::new();
+        while let Some(id) = pending.pop() {
+            if id == operation.op_id {
+                return Some(operation.op_id.clone());
+            }
+            if !visited.insert(id) {
+                continue;
+            }
+            pending.extend(
+                operations[id]
+                    .dependencies
+                    .iter()
+                    .filter(|dependency| operations.contains_key(dependency.as_str()))
+                    .map(String::as_str),
+            );
         }
     }
     None

@@ -694,6 +694,57 @@
           "root_code": "dependency_cycle"
         }
       ]
+    },
+    {
+      "id": "internal-cycle-first-submitted-actual-member",
+      "changes": [
+        {
+          "change_id": "A",
+          "operations": [
+            {
+              "op_id": "p",
+              "dependencies": [
+                "z"
+              ]
+            },
+            {
+              "op_id": "y",
+              "dependencies": [
+                "z"
+              ]
+            },
+            {
+              "op_id": "z",
+              "dependencies": [
+                "y"
+              ]
+            }
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "op_id": "p",
+          "status": "rejected",
+          "code": "dependency_rejected",
+          "root_op_id": "y",
+          "root_code": "dependency_cycle"
+        },
+        {
+          "op_id": "y",
+          "status": "rejected",
+          "code": "dependency_cycle",
+          "root_op_id": "y",
+          "root_code": "dependency_cycle"
+        },
+        {
+          "op_id": "z",
+          "status": "rejected",
+          "code": "dependency_rejected",
+          "root_op_id": "y",
+          "root_code": "dependency_cycle"
+        }
+      ]
     }
   ]
 }
