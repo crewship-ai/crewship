@@ -68,9 +68,13 @@ Whole changes follow stable topological order. A failed change and its dependent
 changes are rejected while independent changes can survive. Every accepted
 operation receives a contiguous revision; checkpoints exist at atomic boundaries.
 
-The host checks current authority before and after expensive application work,
-then owner capability in the same FULL-synchronous SQLite writer transaction
-immediately before persistence. Callback inputs are isolated copies so mutation
+The host checks current authority before and after each expensive application,
+then rechecks every fresh accepted author after all application work. A later
+change can expire an earlier author's clock-bound grant despite the SQLite
+writer lock. Any changed or uncertain final authority rolls back the entire
+batch with no terminal result/event; prepared independent work remains a draft.
+Owner capability is checked in the same FULL-synchronous SQLite writer transaction
+immediately before persistence and again immediately before commit. Callback inputs are isolated copies so mutation
 cannot change immutable authorship/membership. Outcome, task, initialization and
 checkpoint-read authority are distinct callback intents. The callback must bind
 participant references to host identities; an owner lease grants no such rights.

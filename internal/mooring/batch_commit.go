@@ -341,6 +341,23 @@ func (s *BatchStore) Commit(ctx context.Context, request BatchRequest) (BatchRes
 			emitted = true
 		}
 		if emitted {
+			// A later change's expensive apply can expire an earlier participant's
+			// clock-bound run/grant even while SQLite blocks permission-table writes.
+			// Revalidate every fresh accepted author after ALL application work. Any
+			// changed/uncertain authority aborts the entire transaction; no prepared
+			// Saved or terminal rejection can escape, and independent work remains a
+			// client draft to retry/query rather than an incorrectly attributed commit.
+			for index, c := range changes {
+				if _, existing := known[index]; existing || accepted[index].Status != "saved" {
+					continue
+				}
+				for i := range c.Operations {
+					op := &c.Operations[i]
+					if e = s.authorize(ctx, tx, key, "write", op, c.TaskID, op.Participant); e != nil {
+						return e
+					}
+				}
+			}
 			if e = s.config.Owners.Check(ctx, tx, request.Lease); e != nil {
 				return e
 			}
