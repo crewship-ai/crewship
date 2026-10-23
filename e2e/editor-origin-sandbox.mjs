@@ -81,7 +81,8 @@ const server = createServer((req, res) => {
   if (sameHost && url.pathname.toLowerCase().includes('editor')) {
     // The Go front server must never hand an editor path to Studio.
     res.statusCode = 500
-    res.end('editor path reached Studio: ' + req.url)
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8')
+    res.end('editor path reached Studio')
     throw new Error('editor path reached Studio: ' + req.url)
   }
   res.setHeader('Content-Type', 'text/html')

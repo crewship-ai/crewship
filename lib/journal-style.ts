@@ -339,6 +339,8 @@ export const TYPE_TO_GROUP: Record<string, EntryGroup> = {
   "page.folder_membership_changed": "page",
   "page.folder_acl_changed": "page",
   "page.owner_transferred": "page",
+  "artifact.orphaned_workbook_deleted": "page",
+  "artifact.private_output_published": "page",
   "page.published": "page",
   "page.link_revoked": "page",
   "page.public_view": "page",

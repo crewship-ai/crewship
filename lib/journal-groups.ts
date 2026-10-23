@@ -204,6 +204,8 @@ export const ENTRY_TYPES_BY_GROUP: Record<EntryGroup, string[]> = {
     "page.folder_membership_changed",
     "page.folder_acl_changed",
     "page.owner_transferred",
+    "artifact.orphaned_workbook_deleted",
+    "artifact.private_output_published",
     "page.published",
     "page.link_revoked",
     "page.public_view",

@@ -52,6 +52,9 @@ const api = {
 let sessionCount = 0
 
 function commit(writer, actor, ops, extra = {}) {
+  for (const op of ops) {
+    if (typeof op.cell !== "string" || !/^[A-Z]{1,3}[1-9][0-9]{0,6}$/.test(op.cell)) throw new Error("Invalid fixture cell address")
+  }
   api.rev++
   for (const op of ops) { api.cells[op.cell] = op.input; api.writes[op.cell] = { rev: api.rev, writer } }
   api.commits.push({ rev: api.rev, kind: "cells", actor_label: actor, ops: ops.map(({ sheet, cell, input }) => ({ sheet, cell, input })), writer, ...extra })
