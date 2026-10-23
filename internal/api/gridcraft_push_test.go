@@ -12,9 +12,8 @@ import (
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
-// Every commit is pushed once on the Page channel as workbook.committed, with
-// revision numbers and a cell count but no cell content, and its outbox row is
-// marked sent. The sweeper delivers what a crash left pending.
+// Each commit publishes the compatibility and generic revision notices on the
+// authorized Page channel, without cell content. The sweeper delivers pending rows.
 func TestGridCraftCommittedPushOnPageChannel(t *testing.T) {
 	f := gridcraftInstanceFixture(t)
 	hub := ws.NewHub(newTestLogger(), nil, ws.NopValidatorForTests, ws.NopSessionsForTests)
@@ -31,7 +30,7 @@ func TestGridCraftCommittedPushOnPageChannel(t *testing.T) {
 	setGridCraftEditorFlag(t, f, "ws-old", true)
 	observer := hub.AddObserver("page:push-book", "boss", 16)
 	t.Cleanup(func() { hub.RemoveObserver("page:push-book", observer) })
-	next := func(name string) map[string]any {
+	nextFrame := func(name, kind string) map[string]any {
 		t.Helper()
 		select {
 		case raw := <-observer.Frames():
@@ -43,7 +42,7 @@ func TestGridCraftCommittedPushOnPageChannel(t *testing.T) {
 				Channel string         `json:"channel"`
 				Payload map[string]any `json:"payload"`
 			}
-			if err := json.Unmarshal(raw, &frame); err != nil || frame.Type != "workbook.committed" || frame.Channel != "page:push-book" {
+			if err := json.Unmarshal(raw, &frame); err != nil || frame.Type != kind || frame.Channel != "page:push-book" {
 				t.Fatalf("%s: frame %s", name, raw)
 			}
 			return frame.Payload
@@ -51,6 +50,16 @@ func TestGridCraftCommittedPushOnPageChannel(t *testing.T) {
 			t.Fatalf("%s: no push", name)
 		}
 		return nil
+	}
+	next := func(name string) map[string]any {
+		t.Helper()
+		legacy := nextFrame(name, "workbook.committed")
+		generic := nextFrame(name, "mooring.committed")
+		want := map[string]any{"artifact_id": "push-book", "rev": legacy["rev"], "generation": legacy["generation"]}
+		if fmt.Sprint(generic) != fmt.Sprint(want) {
+			t.Fatalf("%s: generic push %v, want %v", name, generic, want)
+		}
+		return legacy
 	}
 	base := liveWorkbook(t, f, f.boss, "boss", "push-book")
 	if p := next("import"); fmt.Sprint(p) != fmt.Sprint(map[string]any{"page_id": "push-book", "rev": float64(1), "generation": float64(1), "kind": "snapshot", "cells": float64(0)}) {
