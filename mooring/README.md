@@ -102,3 +102,13 @@ It offers strict-current or causal preparation only when that exact private
 profile is explicitly selected on the inherited host channel. Original reads
 remain immutable, and returned candidates remain uninstalled. This composition
 adds no human-delta capability, participant endpoint, ACL or Saved authority.
+
+`mooring-core::session::Session` is the wire-independent state for a future
+single-owner actor. It owns the confirmed application document separately from
+queued and outstanding batches, with aggregate operation/encoded-byte limits
+and a bounded outstanding-batch count. Another batch can start before a durable
+acknowledgement. Only ordered, externally verified host responses can replace
+the document; an uncertain transport outcome closes further sends/installs and
+returns every original body for status-based recovery. This state primitive
+does not verify receipts, restore checkpoints, drive timers, authenticate gates
+or advertise a live session transport capability.
