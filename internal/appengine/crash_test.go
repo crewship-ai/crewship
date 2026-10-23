@@ -14,6 +14,7 @@ import (
 func TestWorkbookHostCrashHelper(t *testing.T) {
 	phase := os.Getenv("WORKBOOK_CRASH_PHASE")
 	if phase == "" {
+		// SKIP-WAIVER(#3967): parent test executes this subprocess entrypoint with a selected crash phase.
 		t.Skip("subprocess helper")
 	}
 	db, err := database.Open("file:" + os.Getenv("WORKBOOK_CRASH_DB"))

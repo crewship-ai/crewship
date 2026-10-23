@@ -85,6 +85,7 @@ func TestEditorOriginBrowserHarness(t *testing.T) {
 	out := os.Getenv("CREWSHIP_TEST_EDITOR_FILE")
 	if out == "" {
 		// SKIP-WAIVER(#2472): blocking server started only by the Chromium harness script.
+		// SKIP-WAIVER(#3967): browser runner starts this server entrypoint explicitly; ordinary Go tests do not drive a browser.
 		t.Skip("browser harness only")
 	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

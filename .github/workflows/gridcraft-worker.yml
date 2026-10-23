@@ -27,6 +27,14 @@ jobs:
           go-version: '1.27.3'
       - name: Verify the pinned GridCraft engine
         run: bash docker/gridcraft/prepare.sh
+      - name: Execute every real pinned engine contract without skips
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s docker/gridcraft -p 'test_verify_contract_tests.py'
+          CREWSHIP_TEST_GRIDCRAFT_BINARY="$GITHUB_WORKSPACE/docker/gridcraft/gridcraft-cli" \
+            go test -json -count=1 -timeout 15m -run '^(TestRealGridCraft|TestRecalcCheckCannot)' ./internal/appengine/ \
+            | tee "$RUNNER_TEMP/gridcraft-contract-tests.jsonl"
+          python3 docker/gridcraft/verify-contract-tests.py "$RUNNER_TEMP/gridcraft-contract-tests.jsonl"
       - name: Verify the GridCraft worker image and lifecycle
         id: image
         env:

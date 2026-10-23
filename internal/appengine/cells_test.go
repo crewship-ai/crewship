@@ -117,6 +117,7 @@ func TestCellsSetEffectsStayWithinTargets(t *testing.T) {
 func TestRealGridCraftCellsSetOnFormulaSheet(t *testing.T) {
 	binary := os.Getenv("CREWSHIP_TEST_GRIDCRAFT_BINARY")
 	if binary == "" {
+		// SKIP-WAIVER(#3967): requires the pinned Linux engine; worker CI verifies all ten real contracts without skips.
 		t.Skip("set CREWSHIP_TEST_GRIDCRAFT_BINARY for the pinned engine contract")
 	}
 	raw, err := os.ReadFile("testdata/blank-workbook.json")

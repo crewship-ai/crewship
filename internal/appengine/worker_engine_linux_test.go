@@ -59,6 +59,7 @@ func fakeCLI(t *testing.T, body string) WorkerEngine {
 		if os.Getenv("CI") != "" {
 			t.Fatalf("engine sandbox unavailable in CI, containment would be unverified: %v", err)
 		}
+		// SKIP-WAIVER(#3967): requires Linux confinement support; qualification runs on a supporting kernel.
 		t.Skipf("engine sandbox unavailable on this kernel: %v", err)
 	}
 	dir := t.TempDir()
@@ -505,6 +506,10 @@ func TestWorkerEngineCannotStartSessionsSubreapersOrNamespaces(t *testing.T) {
 // the sweep kills it and fails every candidate in flight closed.
 func TestSweepFailsEveryCandidateInFlightOnUnattributedProcess(t *testing.T) {
 	if err := PrepareEngineSandbox(); err != nil {
+		if os.Getenv("CI") != "" {
+			t.Fatalf("engine sandbox unavailable in CI, sweep containment would be unverified: %v", err)
+		}
+		// SKIP-WAIVER(#3967): requires Linux confinement support; qualification runs on a supporting kernel.
 		t.Skipf("engine sandbox unavailable: %v", err)
 	}
 	marker := sleepMarker(t)
@@ -748,6 +753,7 @@ func fakeCLI2(t *testing.T, engine WorkerEngine, body string) WorkerEngine {
 func TestRealGridCraftConcurrentCandidatesOnDifferentWorkbooks(t *testing.T) {
 	binary := os.Getenv("CREWSHIP_TEST_GRIDCRAFT_BINARY")
 	if binary == "" {
+		// SKIP-WAIVER(#3967): requires the pinned Linux engine; worker CI verifies all ten real contracts without skips.
 		t.Skip("set CREWSHIP_TEST_GRIDCRAFT_BINARY to the pinned CLI to execute real engine concurrency")
 	}
 	if err := PrepareEngineSandbox(); err != nil {
@@ -891,6 +897,7 @@ func BenchmarkRealWorkerEngineCellSet(b *testing.B) {
 // mostly in race builds. Run many launcher executions to catch a regression.
 func TestWorkerEngineLauncherNeverRunsUnderEngineLimits(t *testing.T) {
 	if testing.Short() {
+		// SKIP-WAIVER(#3967): full CI runs the launcher stress loop; -short omits this costly stress case.
 		t.Skip("long launcher loop")
 	}
 	engine := fakeCLI(t, `cp "$src" "$dst"`)

@@ -22,6 +22,7 @@ func (r localFixtureRunner) Run(ctx context.Context, input []byte, c Command) (E
 func TestRealGridCraftImportEditRestartAndRetry(t *testing.T) {
 	binary := os.Getenv("CREWSHIP_TEST_GRIDCRAFT_BINARY")
 	if binary == "" {
+		// SKIP-WAIVER(#3967): requires the pinned Linux engine; worker CI verifies all ten real contracts without skips.
 		t.Skip("set CREWSHIP_TEST_GRIDCRAFT_BINARY to the pinned CLI to execute real engine contract")
 	}
 	raw, err := os.ReadFile("testdata/blank-workbook.json")
@@ -87,6 +88,7 @@ func TestRealGridCraftImportEditRestartAndRetry(t *testing.T) {
 func TestRealGridCraftDependentFormulaRecalculation(t *testing.T) {
 	binary := os.Getenv("CREWSHIP_TEST_GRIDCRAFT_BINARY")
 	if binary == "" {
+		// SKIP-WAIVER(#3967): requires the pinned Linux engine; worker CI verifies all ten real contracts without skips.
 		t.Skip("set CREWSHIP_TEST_GRIDCRAFT_BINARY for the pinned formula engine contract")
 	}
 	raw, err := os.ReadFile("testdata/blank-workbook.json")
@@ -142,6 +144,7 @@ func TestRealGridCraftDependentFormulaRecalculation(t *testing.T) {
 func TestRealGridCraftRecalcVerificationDetectsTamperedValues(t *testing.T) {
 	binary := os.Getenv("CREWSHIP_TEST_GRIDCRAFT_BINARY")
 	if binary == "" {
+		// SKIP-WAIVER(#3967): requires the pinned Linux engine; worker CI verifies all ten real contracts without skips.
 		t.Skip("set CREWSHIP_TEST_GRIDCRAFT_BINARY for the pinned formula engine contract")
 	}
 	raw, err := os.ReadFile("testdata/blank-workbook.json")
@@ -274,6 +277,7 @@ func TestEngineOutputLimitAppliesToCompactSnapshot(t *testing.T) {
 func TestRealGridCraftLargeSheetWithinCompactLimit(t *testing.T) {
 	binary := os.Getenv("CREWSHIP_TEST_GRIDCRAFT_BINARY")
 	if binary == "" {
+		// SKIP-WAIVER(#3967): requires the pinned Linux engine; worker CI verifies all ten real contracts without skips.
 		t.Skip("set CREWSHIP_TEST_GRIDCRAFT_BINARY for the pinned engine size contract")
 	}
 	raw := largeWorkbook(t, 6000)
@@ -297,6 +301,7 @@ func TestRealGridCraftLargeSheetWithinCompactLimit(t *testing.T) {
 func TestRealGridCraftReportBindsReturnedBytes(t *testing.T) {
 	binary := os.Getenv("CREWSHIP_TEST_GRIDCRAFT_BINARY")
 	if binary == "" {
+		// SKIP-WAIVER(#3967): requires the pinned Linux engine; worker CI verifies all ten real contracts without skips.
 		t.Skip("set CREWSHIP_TEST_GRIDCRAFT_BINARY for the pinned formula engine contract")
 	}
 	raw, err := os.ReadFile("testdata/blank-workbook.json")
@@ -322,6 +327,7 @@ func TestRealGridCraftReportBindsReturnedBytes(t *testing.T) {
 func TestRealGridCraftIterativeCycleRejectsDerivedChanges(t *testing.T) {
 	binary := os.Getenv("CREWSHIP_TEST_GRIDCRAFT_BINARY")
 	if binary == "" {
+		// SKIP-WAIVER(#3967): requires the pinned Linux engine; worker CI verifies all ten real contracts without skips.
 		t.Skip("set CREWSHIP_TEST_GRIDCRAFT_BINARY for the pinned formula engine contract")
 	}
 	raw, err := os.ReadFile("testdata/blank-workbook.json")

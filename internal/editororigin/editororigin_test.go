@@ -274,6 +274,7 @@ func TestBundleIntegrityIsVerifiedBeforeServing(t *testing.T) {
 			os.WriteFile(outside, []byte("console.log(1)"), 0o644)
 			os.Remove(filepath.Join(root, digest, "app.js"))
 			if err := os.Symlink(outside, filepath.Join(root, digest, "app.js")); err != nil {
+				// SKIP-WAIVER(#3967): this rejection case requires symlink creation support on the test filesystem.
 				t.Skip(err)
 			}
 			return []string{digest}

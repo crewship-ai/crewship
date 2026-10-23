@@ -123,6 +123,7 @@ func TestReplayFromNearestCheckpointMatchesRecordedResultHashes(t *testing.T) {
 func TestRealGridCraftReplayFromNearestCheckpointMatchesResultHashes(t *testing.T) {
 	binary := os.Getenv("CREWSHIP_TEST_GRIDCRAFT_BINARY")
 	if binary == "" {
+		// SKIP-WAIVER(#3967): requires the pinned Linux engine; worker CI verifies all ten real contracts without skips.
 		t.Skip("set CREWSHIP_TEST_GRIDCRAFT_BINARY for the pinned engine replay contract")
 	}
 	raw, err := os.ReadFile("testdata/blank-workbook.json")
