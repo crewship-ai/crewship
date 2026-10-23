@@ -223,6 +223,8 @@ dependencies = [
  "mooring-core",
  "mooring-protocol",
  "mooring-text",
+ "mooring-wordcraft",
+ "serde",
  "serde_json",
  "yrs",
 ]
