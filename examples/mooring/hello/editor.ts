@@ -8,6 +8,7 @@ const status = document.querySelector<HTMLOutputElement>("output")!
 const confirmed = document.querySelector<HTMLElement>("#confirmed")!
 const revisionLabel = document.querySelector<HTMLElement>("#revision")!
 let dirty = false, submitted: string | undefined
+let draftVersion = 0, submittedVersion = 0, confirmedText = ""
 const labels: Record<SaveStatus, string> = { connecting: "Connecting…", saved: "Saved", draft: "Not saved · draft", saving: "Saving…", offline: "Offline · changes are not confirmed", error: "Not saved" }
 const config = new URL(location.href)
 const sdk = createEditorSDK({
@@ -24,6 +25,7 @@ const sdk = createEditorSDK({
   },
   onState(state) {
     const text = record(state.snapshot) && typeof state.snapshot.text === "string" ? state.snapshot.text : ""
+    confirmedText = text
     confirmed.textContent = text
     revisionLabel.textContent = `Confirmed revision ${state.rev}`
     // A push from an agent updates the confirmed view, never the person's draft.
@@ -34,15 +36,17 @@ const sdk = createEditorSDK({
     save.disabled = state === "connecting" || state === "saving" || state === "offline"
   },
   onReceipt(receipt) {
-    if (input.value === submitted) dirty = false
+    dirty = draftVersion !== submittedVersion
+    if (!dirty) input.value = confirmedText
     submitted = undefined
     sdk.draft(dirty)
     revisionLabel.textContent = `Saved · receipt revision ${receipt.rev}`
   },
 })
-input.addEventListener("input", () => { dirty = true; sdk.draft(true) })
+input.addEventListener("input", () => { draftVersion++; dirty = true; sdk.draft(true) })
 save.addEventListener("click", () => {
   submitted = input.value
+  submittedVersion = draftVersion
   if (!sdk.command("set", { text: submitted })) submitted = undefined
 })
 // The child load event precedes the parent's iframe load notification. Posting

@@ -1,6 +1,6 @@
 /** Browser editor SDK. Contains no authentication or Crewship dependencies.
  * The host owns durable state; an editor owns its unsubmitted drafts. */
-import { MOORING_PROTOCOL, bundleDigest, decodeMessage, record, revision, type CapabilityPort, type WindowEnvelope } from "./channel"
+import { MOORING_PROTOCOL, MOORING_MAX_MESSAGE_BYTES, bundleDigest, decodeMessage, record, revision, type CapabilityPort, type WindowEnvelope } from "./channel"
 
 export interface DocumentState { rev: number; generation: number; snapshot: unknown }
 export type SaveStatus = "connecting" | "saved" | "draft" | "saving" | "offline" | "error"
@@ -81,8 +81,17 @@ export function createEditorSDK(options: EditorSDKOptions) {
     draft(value: boolean) { dirty = value; if (!value && !pending.size) failed = false; send({ type: "draft", dirty }); status() },
     command(command: string, args: unknown): boolean {
       if (!port || !state || !online || pending.size || closed) return false
-      const mutation = { type: "command", seq: ++sequence, base_rev: state.rev, generation: state.generation, command, arguments: args }
-      pending.set(sequence, mutation); dirty = false; failed = false; send(mutation); status(); return true
+      const mutation = { type: "command", seq: sequence + 1, base_rev: state.rev, generation: state.generation, command, arguments: args }
+      let encoded: string
+      try {
+        encoded = JSON.stringify({ ...mutation, protocol: MOORING_PROTOCOL })
+        if (typeof command !== "string" || !command || !("arguments" in JSON.parse(encoded))) throw new Error("Invalid command")
+      } catch { dirty = true; error("This change cannot be encoded; your draft is not saved"); return false }
+      if (new TextEncoder().encode(encoded).length > MOORING_MAX_MESSAGE_BYTES) {
+        dirty = true; error("This change exceeds the message limit; your draft is not saved"); return false
+      }
+      sequence++
+      pending.set(sequence, mutation); dirty = false; failed = false; port.postMessage(encoded); status(); return true
     },
     close() { closed = true; unlisten(); if (port) { port.onmessage = null; port.close() } },
   }
