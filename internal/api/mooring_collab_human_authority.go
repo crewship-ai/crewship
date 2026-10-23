@@ -34,9 +34,28 @@ func (h *PageHandler) authorizeCollaborationHumanPage(ctx context.Context, tx *s
 	if tx == nil || key.WorkspaceID == "" || key.ArtifactID == "" || key.ApplicationID != "wordcraft" {
 		return result, errCollaborationHumanAccess
 	}
+	if InternalTokenWorkspaceFromContext(ctx) != "" || InternalTokenCrewFromContext(ctx) != "" || projectAgentFrom(ctx) != nil || ctx.Value(artifactRunKey{}) != nil {
+		return result, errCollaborationHumanAccess
+	}
 	source := auth.OriginalCredentialFromContext(ctx)
 	user := UserFromContext(ctx)
 	if source == nil || user == nil || user.ID != source.UserID || user.OriginalCredential == nil || *user.OriginalCredential != *source {
+		return result, errCollaborationHumanAccess
+	}
+	kind := AuthKindFromContext(ctx)
+	if kind != source.Kind {
+		return result, errCollaborationHumanAccess
+	}
+	switch kind {
+	case AuthKindSession:
+		if user.SessionID != source.ID || user.TokenID != "" {
+			return result, errCollaborationHumanAccess
+		}
+	case AuthKindCLIToken:
+		if user.TokenID != source.ID || user.SessionID != "" {
+			return result, errCollaborationHumanAccess
+		}
+	default:
 		return result, errCollaborationHumanAccess
 	}
 	write, initialize := false, false

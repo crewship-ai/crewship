@@ -29,6 +29,7 @@ func TestCollaborationHumanAuthorityUsesCanonicalPagesAndOriginalCredential(t *t
 		}
 		value.OriginalCredential = source
 		ctx := context.WithValue(t.Context(), ctxUser, value)
+		ctx = context.WithValue(ctx, ctxAuthKind, AuthKindSession)
 		ctx = context.WithValue(ctx, ctxRole, "OWNER") // deliberately stale/forged role
 		return auth.WithOriginalCredential(ctx, *source)
 	}
@@ -66,6 +67,18 @@ func TestCollaborationHumanAuthorityUsesCanonicalPagesAndOriginalCredential(t *t
 		t.Fatal("policy mutation did not change permission binding")
 	}
 	check(ctx, "outcome", true)
+	for _, marked := range []context.Context{
+		context.WithValue(ctx, ctxInternalTokenWS, r.wsID),
+		context.WithValue(ctx, ctxInternalTokenCrew, "carried-crew"),
+		context.WithValue(ctx, projectAgentKey{}, &projectAgent{AgentID: "carried-agent"}),
+		context.WithValue(ctx, artifactRunKey{}, &artifactRunAuthority{RunID: "carried-run"}),
+		context.WithValue(ctx, artifactRunKey{}, "malformed-run-marker"),
+		context.WithValue(ctx, ctxAuthKind, ""),
+		context.WithValue(ctx, ctxAuthKind, AuthKindCLIToken),
+	} {
+		check(marked, "read", false)
+		check(marked, "write", false)
+	}
 	check(ctx, "unknown-intent", false)
 	// Crew grants use canonical Page policy and disappear with membership.
 	mustExec(t, r.db, `DELETE FROM page_grants WHERE page_id='collab-auth-page'`)
@@ -129,7 +142,9 @@ func TestCollaborationHumanInitializationAndScopeAreExplicit(t *testing.T) {
 			t.Fatal(err)
 		}
 		value.OriginalCredential = source
-		return auth.WithOriginalCredential(context.WithValue(t.Context(), ctxUser, value), *source)
+		ctx := context.WithValue(t.Context(), ctxUser, value)
+		ctx = context.WithValue(ctx, ctxAuthKind, AuthKindCLIToken)
+		return auth.WithOriginalCredential(ctx, *source)
 	}
 	key := mooring.SessionKey{WorkspaceID: r.wsID, ArtifactID: "collab-init", ApplicationID: "wordcraft"}
 	invoke := func(intent string) (collaborationHumanPageAccess, error) {
