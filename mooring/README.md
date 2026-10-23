@@ -112,3 +112,11 @@ the document; an uncertain transport outcome closes further sends/installs and
 returns every original body for status-based recovery. This state primitive
 does not verify receipts, restore checkpoints, drive timers, authenticate gates
 or advertise a live session transport capability.
+
+The unused native `actor::Actor` composes that state with the reviewed scheduler.
+It retains at most four outstanding 256-operation/256KiB batches plus the
+scheduler's bounded 256-operation/256KiB unsent queue. A conservative envelope
+reserve reduces each batch payload allowance; the actual wire encoder must
+verify its output against the charge before I/O. Native timer and acknowledgement
+waits remain separate. This composition still has no FD dispatcher, participant
+admission, owner/read gates or mixed-author host submission authority.
