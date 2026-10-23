@@ -23,3 +23,12 @@ crewship-heavy cargo build --manifest-path mooring/Cargo.toml --target wasm32-un
 
 The workspace has no external dependencies yet. New dependencies must be pinned,
 vendored and accompanied by their license texts before integration.
+
+`mooring_core::lease::DeliveryGate` is a fail-closed primitive for delivery
+checks. A verified host response grants time only from the renewal request's
+send timestamp. Revocation permanently closes the gate; late responses cannot
+reopen it. Native runtimes must obtain timestamps from `lease::boottime()`;
+this uses Linux `CLOCK_BOOTTIME` and returns an unsupported error elsewhere.
+Tests simulate suspension and response delay, but do not prove every runtime
+content path checks the gate. The caller must bind each gate and renewal reply
+to one authenticated participant and session.
