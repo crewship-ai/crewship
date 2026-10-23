@@ -13,6 +13,8 @@ import (
 // Cell-level concurrency: a mutation based on an older revision is rebased
 // onto the head unless another writer changed one of its target cells, an
 // import intervened, or the window exceeds MaxRebaseWindow revisions.
+// Agent fixtures explicitly declare no read dependency: these test write-target
+// concurrency for constant assignments; read dependency tests live separately.
 func TestCellLevelConcurrencyAgainstOtherWriters(t *testing.T) {
 	agent := func(context.Context, *sql.Tx) (Principal, error) {
 		return Principal{AuthorityID: "agent:a:run:r:mandate:m", MandateID: "m", Targets: []string{"Sheet1!B2"}}, nil
@@ -63,14 +65,14 @@ func TestCellLevelConcurrencyAgainstOtherWriters(t *testing.T) {
 			conflicts: []CellConflict{{Sheet: "Sheet1", Cell: "B2", Input: "c", Rev: 3, AuthorityID: "user:owner"}}, wantErr: ErrPrecondition},
 		{name: "agent after a human commit to another cell",
 			before:   []step{{"owner", cellSet("a", "s1", "C3", 1)}},
-			mutation: step{"agent", Request{MutationID: "agent-1", MandateID: "m", BaseRev: 1, Generation: 1, Command: Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "99"}}}, wantRev: 3},
+			mutation: step{"agent", Request{ReadSet: &ReadSet{}, MutationID: "agent-1", MandateID: "m", BaseRev: 1, Generation: 1, Command: Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "99"}}}, wantRev: 3},
 		{name: "agent after a human overwrote its target",
 			before:    []step{{"owner", cellSet("a", "s1", "B2", 1)}},
-			mutation:  step{"agent", Request{MutationID: "agent-1", MandateID: "m", BaseRev: 1, Generation: 1, Command: Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "99"}}},
+			mutation:  step{"agent", Request{ReadSet: &ReadSet{}, MutationID: "agent-1", MandateID: "m", BaseRev: 1, Generation: 1, Command: Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "99"}}},
 			conflicts: []CellConflict{{Sheet: "Sheet1", Cell: "B2", Input: "a", Rev: 2, AuthorityID: "user:owner"}}, wantErr: ErrPrecondition},
 		{name: "agent keeps rebasing its own target",
-			before:   []step{{"agent", Request{MutationID: "agent-0", MandateID: "m", BaseRev: 1, Generation: 1, Command: Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "1"}}}},
-			mutation: step{"agent", Request{MutationID: "agent-1", MandateID: "m", BaseRev: 1, Generation: 1, Command: Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "99"}}}, wantRev: 3},
+			before:   []step{{"agent", Request{ReadSet: &ReadSet{}, MutationID: "agent-0", MandateID: "m", BaseRev: 1, Generation: 1, Command: Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "1"}}}},
+			mutation: step{"agent", Request{ReadSet: &ReadSet{}, MutationID: "agent-1", MandateID: "m", BaseRev: 1, Generation: 1, Command: Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "B2", Input: "99"}}}, wantRev: 3},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			s, _, owner, k := fixture(t)

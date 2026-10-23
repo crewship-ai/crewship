@@ -441,10 +441,28 @@ details. Because a mandate is bound to its base revision, an agent that keeps
 getting `precondition_failed` for the same target should treat the mandate as
 no longer applicable and ask for a new one rather than retry indefinitely.
 
-An agent mandate keeps its original base revision, so an agent can still change
-its target after the owner edited other cells, but not after someone else
-changed that target. Mandate IDs starting with `human-` are reserved for human
-operations and rejected on admission.
+An agent mandate keeps its original base revision. To write after independent
+edits, the command must declare its inputs in `request.read_set`; without it,
+the whole base revision must still match. Mandate IDs starting with `human-`
+are reserved for human operations and rejected on admission.
+
+A read-set contains `cells` (`sheet`, `cell`, `rev`) and/or `ranges` (`sheet`,
+`start`, `end`, `rev`, `structure_rev`). `rev` is the document revision when the
+input was read. A read response also supplies `structure_rev`, the latest
+import revision. For example:
+
+```json
+{"cells":[{"sheet":"Sheet1","cell":"A1","rev":12}],"ranges":[{"sheet":"Sheet1","start":"C1","end":"C8","rev":12,"structure_rev":1}]}
+```
+
+The host checks every declared input, including edits by the same writer,
+independently of the write targets. A changed input or imported structure gives
+`409 precondition_failed` with a `reason` and requires reading again. An
+explicit empty object declares no data dependency, for example setting a
+constant. Unverifiable history fails closed. The pilot supports imports, cell
+writes and atomic multi-cell writes; row/column insertion is not supported.
+The native GridCraft path of `mooring agent` carries the same read-set. Other
+pilot adapters reject a read-set whose semantics they do not implement.
 
 History stores a full snapshot for imports and every 50th revision, and the
 command and resulting snapshot hash of every revision, so any revision can be

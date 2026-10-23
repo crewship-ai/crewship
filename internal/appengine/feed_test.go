@@ -22,7 +22,8 @@ func TestCommitsFeedServesRetainedHistoryInOrder(t *testing.T) {
 	if _, err := s.Execute(t.Context(), k, human, owner, e); err != nil {
 		t.Fatal(err)
 	}
-	byAgent := Request{MutationID: "agent-1", MandateID: "m", BaseRev: 1, Generation: 1, Command: Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "C3", Input: "9"}}
+	// This feed fixture writes a constant independent of previous cell values.
+	byAgent := Request{ReadSet: &ReadSet{}, MutationID: "agent-1", MandateID: "m", BaseRev: 1, Generation: 1, Command: Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "C3", Input: "9"}}
 	if _, err := s.Execute(t.Context(), k, byAgent, agent, e); err != nil {
 		t.Fatal(err)
 	}

@@ -124,6 +124,20 @@ func TestMooringGenericCommandUsesNativeGridCraftAuthority(t *testing.T) {
 	if e := f.rig.db.QueryRow(`SELECT COUNT(*) FROM mooring_documents WHERE page_id='mooring-native-page'`).Scan(&count); e != nil || count != 0 {
 		t.Fatal("native data copied to generic store", count, e)
 	}
+
+	if !strings.Contains(read.Body.String(), `"structure_rev":1`) {
+		t.Fatal("native read lacks structure revision", read.Body.String())
+	}
+	derived := strings.Replace(packet, `"mutation_id":"native-one"`, `"mutation_id":"stale-derived","read_set":{"cells":[{"sheet":"Sheet1","cell":"B2","rev":1}]}`, 1)
+	rejected := call(derived)
+	wantCode(t, rejected, 409, "read-set retained across generic native bridge")
+	if !strings.Contains(rejected.Body.String(), `"reason":"read_cell_changed"`) {
+		t.Fatal("missing read refusal reason", rejected.Body.String())
+	}
+	malformed := strings.Replace(packet, `"mutation_id":"native-one"`, `"mutation_id":"malformed-read","read_set":{"unexpected":true}`, 1)
+	wantCode(t, call(malformed), 400, "unknown read fields rejected")
+	nullReads := strings.Replace(packet, `"mutation_id":"native-one"`, `"mutation_id":"null-read","read_set":null`, 1)
+	wantCode(t, call(nullReads), 400, "null read-set cannot bypass conservative default")
 	mustExec(t, f.rig.db, `UPDATE gridcraft_intents SET revoked_at='2026-01-01T00:00:00Z' WHERE mandate_id='set-cell'`)
 	wantCode(t, call(packet), 404, "native revocation on generic path")
 }
