@@ -130,10 +130,21 @@ Rotate a user's password.
 
 <Warning>
   The hashed value is written into `users.hashed_password`, the brute-force
-  lockout state is cleared (`failed_login_count=0`, `locked_until=NULL`), and
-  every active session row for that user is revoked as a side effect (the audit
-  trail records `revoked_reason='password_change'`).
+  lockout state is cleared (`failed_login_count=0`, `locked_until=NULL`),
+  every active session row for that user is revoked (the audit trail records
+  `revoked_reason='password_change'`), and every live CLI token of the account
+  is revoked, each with its own `auth.cli_token_revoked` audit entry. All of it
+  commits together with the `auth.password_reset` entry, or none of it does.
+  A running server is not notified, so stop it first.
 </Warning>
+
+The audit entries are signed with the keyring of the instance whose database
+the command writes: `CREWSHIP_AUDIT_KEYRING_PATH` when set, otherwise
+`audit-keyring.json` beside the database file, or in the data directory named
+by `CREWSHIP_HOME` / `CREWSHIP_DATA_DIR` (or the default one, when the database
+is its own). The command never creates a keyring. When it finds none — or two
+different ones — it stops and asks for `CREWSHIP_AUDIT_KEYRING_PATH`; a
+`DATABASE_URL` alone never borrows the unrelated default `~/.crewship` keyring.
 
 ```bash
 # Interactive: stdin prompt with hidden input (no shell-history leak)
