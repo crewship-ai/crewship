@@ -169,7 +169,7 @@ func (s *Store) reserve(ctx context.Context, k Key, r Request, a Authorize, e En
 		} else if err != nil {
 			return err
 		}
-		if err = s.admitBase(ctx, tx, k, r, v, writerOf(p, r), pre); err != nil {
+		if err = s.admitBase(ctx, tx, k, r, v, p, pre); err != nil {
 			return err
 		}
 		var total, workspace, artifact int
@@ -531,7 +531,7 @@ func (s *Store) prescan(ctx context.Context, k Key, r Request, a Authorize) *win
 	}
 	defer tx.Rollback()
 	p, err := a(ctx, tx)
-	if err != nil || p.MandateID != r.MandateID || !permits(p, commandTargets(r.Command)) {
+	if err != nil || p.MandateID != r.MandateID || !permits(p, commandTargets(r.Command)) || r.BaseRev < p.HistoryFloor {
 		return nil
 	}
 	var head, generation int64
@@ -558,11 +558,14 @@ func (s *Store) prescan(ctx context.Context, k Key, r Request, a Authorize) *win
 // and no other writer changed one of its target cells. Imports still require
 // the exact head. Every rejection that a retry of the same packet cannot fix
 // requires a fresh snapshot.
-func (s *Store) admitBase(ctx context.Context, tx *sql.Tx, k Key, r Request, v State, writer string, pre *windowScan) error {
+func (s *Store) admitBase(ctx context.Context, tx *sql.Tx, k Key, r Request, v State, p Principal, pre *windowScan) error {
 	reread := &PreconditionError{HeadRev: v.Rev, SnapshotRequired: true}
-	if v.Generation != r.Generation || r.BaseRev > v.Rev {
+	// A base below the principal's history floor would rebase over revisions
+	// the principal may not read; their conflicts would disclose that history.
+	if v.Generation != r.Generation || r.BaseRev > v.Rev || r.BaseRev < p.HistoryFloor {
 		return reread
 	}
+	writer := writerOf(p, r)
 	if r.BaseRev == v.Rev {
 		return nil
 	}

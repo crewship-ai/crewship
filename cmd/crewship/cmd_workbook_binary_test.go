@@ -258,7 +258,12 @@ func TestWorkbookHumanBinary(t *testing.T) {
 	if out := runAs(peerCfg, false, "", "workbook", "session", "open", "@workbook-binary-page"); json.Unmarshal(out, &peerSession) != nil || peerSession.SessionID == "" {
 		t.Fatalf("editor session %s", out)
 	}
-	peerEdited := runAs(peerCfg, false, editPacket(peerSession.SessionID, 1, "E5", "peer"), "workbook", "edit", "@workbook-binary-page", "--file", "-")
+	// Its base is the published head: a base below the publication floor is refused.
+	if out := refusedAs(peerCfg, 5, editPacket(peerSession.SessionID, 1, "E5", "peer"), "workbook", "edit", "@workbook-binary-page", "--file", "-"); !strings.Contains(out, `"snapshot_required": true`) || !strings.Contains(out, `"conflicts": []`) {
+		t.Fatalf("editor edit below the floor: %s", out)
+	}
+	peerEdit := fmt.Sprintf(`{"session_id":%q,"mutation_id":"%s:2","base_rev":3,"generation":1,"ops":[{"kind":"cell.set","sheet":"Sheet1","cell":"E5","input":"peer"}]}`, peerSession.SessionID, peerSession.SessionID)
+	peerEdited := runAs(peerCfg, false, peerEdit, "workbook", "edit", "@workbook-binary-page", "--file", "-")
 	if json.Unmarshal(peerEdited, &receipt) != nil || receipt.Rev != 4 {
 		t.Fatalf("editor edit %s", peerEdited)
 	}
