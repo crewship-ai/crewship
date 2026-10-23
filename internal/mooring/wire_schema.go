@@ -100,7 +100,7 @@ func (s *WireSchema) audit(n map[string]any, depth int) error {
 				return ErrWireSchema
 			}
 			switch t {
-			case "object", "array", "string", "boolean":
+			case "object", "array", "string", "boolean", "null":
 			default:
 				return ErrWireSchema
 			}
@@ -229,6 +229,8 @@ func (s *WireSchema) matches(n map[string]any, v any, depth int) bool {
 			_, valid = v.(string)
 		case "boolean":
 			_, valid = v.(bool)
+		case "null":
+			valid = v == nil
 		}
 		if !valid {
 			return false

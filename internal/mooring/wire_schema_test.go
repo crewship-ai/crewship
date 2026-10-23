@@ -151,3 +151,24 @@ func TestWireSchemaCanonicalCausalReadIndex(t *testing.T) {
 		t.Fatal("nearby unsupported pattern accepted")
 	}
 }
+
+func TestWireSchemaRequiredNullableCausalEntry(t *testing.T) {
+	const rawSchema = `{"type":"object","properties":{"entry":{"oneOf":[{"type":"object","properties":{"deleted":{"type":"boolean"}},"required":["deleted"],"additionalProperties":false},{"type":"null"}]}},"required":["entry"],"additionalProperties":false}`
+	s, err := NewWireSchema([]byte(rawSchema))
+	if err != nil {
+		t.Fatal("required nullable causal schema rejected", err)
+	}
+	for _, raw := range []string{`{"entry":null}`, `{"entry":{"deleted":false}}`} {
+		if _, err := s.ValidateE3([]byte(raw)); err != nil {
+			t.Fatal(raw, err)
+		}
+	}
+	for _, raw := range []string{`{}`, `null`, `{"entry":{}}`, `{"entry":"null"}`, `{"entry":false}`, `{"entry":0}`, `{"entry":{"deleted":null}}`, `{"entry":null,"extra":true}`} {
+		if _, err := s.ValidateE3([]byte(raw)); err == nil {
+			t.Fatal("invalid nullable entry accepted", raw)
+		}
+	}
+	if _, err := NewWireSchema([]byte(`{"type":"number"}`)); err == nil {
+		t.Fatal("unadvertised type became supported")
+	}
+}
