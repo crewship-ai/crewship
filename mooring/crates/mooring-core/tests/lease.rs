@@ -79,7 +79,7 @@ fn p43_clock_regression_closes_gate_and_arithmetic_overflow_grants_nothing() {
     assert!(!gate.may_deliver(at(11)));
 }
 #[test]
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", target_pointer_width = "64"))]
 fn p43_native_boottime_is_available_and_monotonic() {
     let a = boottime().unwrap();
     let b = boottime().unwrap();

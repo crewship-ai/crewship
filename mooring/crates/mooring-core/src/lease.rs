@@ -100,9 +100,9 @@ impl DeliveryGate {
     }
 }
 
-/// Linux CLOCK_BOOTTIME includes time spent suspended. Other platforms fail
+/// 64-bit Linux CLOCK_BOOTTIME includes time spent suspended. Other targets fail
 /// explicitly: wall time and suspend-excluding Instant are unsafe fallbacks.
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", target_pointer_width = "64"))]
 pub fn boottime() -> std::io::Result<Tick> {
     use std::ffi::{c_int, c_long};
     #[repr(C)]
@@ -134,7 +134,7 @@ pub fn boottime() -> std::io::Result<Tick> {
     )))
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(all(target_os = "linux", target_pointer_width = "64")))]
 pub fn boottime() -> std::io::Result<Tick> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
