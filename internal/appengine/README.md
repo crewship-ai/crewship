@@ -96,12 +96,9 @@ head is always a full snapshot. Any revision can be rebuilt from the nearest
 checkpoint at or below it by replaying the recorded cells with the pinned engine,
 and each step is verified against the recorded result hash (tested with the real
 engine). The history quota counts checkpoint snapshots and recorded commands
-(default 64 MiB) and at most 1000 checkpoints. Reaching it prunes history no
-rebase can use (before the newest checkpoint at least 256 revisions back); if
-that is not enough, the new revision becomes a checkpoint and all earlier
-commands are pruned. Pruned rows keep writer, receipt and result hash and are
-marked as snapshot revisions, like rows recorded before command history, so no
-mutation is rebased across them.
+(default 64 MiB) and at most 1000 checkpoints. Reaching either limit rejects
+new writes with `quota_exceeded` without changing the head or deleting history.
+Retention must be an explicit operation; a commit never prunes earlier revisions.
 Receipts require FULL synchronous storage and report `durability: node`.
 `Store.Commits` serves the confirmed revisions after a revision (the commits
 feed) under the caller's authorization; a range reaching pruned or pre-history
@@ -201,3 +198,13 @@ Harness notes: takeover scenarios must use a different `mutation_id`, since
 park files are keyed by artifact, authority and mutation id. Calls through
 the agent IPC path have a 30 s write timeout, so park those for less than
 that or expect a dropped response instead of a status code.
+
+Agent requests may declare a `read_set` of cell observations and rectangular
+ranges with their observed document revisions; ranges additionally bind to the
+`structure_rev` returned by Read (the last import revision). Admission and
+commit independently validate those inputs against retained commands. Changes
+by the same author also invalidate a read. Intervening derived recalculation
+conservatively invalidates older observations because its address list is capped. Missing/too-old history and changed
+imports fail closed with a reason. An older agent without a read-set requires
+an unchanged whole base revision; an explicitly empty read-set declares an
+input-independent command. Row/column insertion is not part of this pilot.

@@ -594,8 +594,8 @@ describe("conflicts and the busy artifact", () => {
     expect(t.toFrame()).toEqual([])
   })
 
-  it("429 history quota refuses the write for good", async () => {
-    const t = setup({ edit: vi.fn(async (): Promise<TransportResponse> => ({ status: 429, body: { error: "history_quota_exceeded" } })) })
+  it.each(["quota_exceeded", "history_quota_exceeded"])("429 %s refuses the write for good", async error => {
+    const t = setup({ edit: vi.fn(async (): Promise<TransportResponse> => ({ status: 429, body: { error } })) })
     await t.connect()
     t.send(mutation(1, 41, [["B3", "21"]]))
     await flush()

@@ -15,7 +15,7 @@ func TestWorkbookAgentUsesFixedOriginAndRetainsPacket(t *testing.T) {
 	t.Setenv("CREWSHIP_AGENT_TOKEN", token)
 	t.Setenv("CREWSHIP_SERVER", "https://untrusted.invalid")
 	t.Setenv("CREWSHIP_PROFILE", "human")
-	raw := `{"action":"apply","artifact_id":"page","mandate_id":"m","request":{"mutation_id":"original","mandate_id":"m","base_rev":1,"generation":1,"command":{"kind":"cell.set","sheet":"Sheet1","cell":"B2","input":"42"}}}`
+	raw := `{"action":"apply","artifact_id":"page","mandate_id":"m","request":{"mutation_id":"original","mandate_id":"m","base_rev":1,"generation":1,"read_set":{"cells":[{"sheet":"Sheet1","cell":"A1","rev":1}]},"command":{"kind":"cell.set","sheet":"Sheet1","cell":"B2","input":"42"}}}`
 	var calls []string
 	transport := docCreateTransport(func(r *http.Request) (*http.Response, error) {
 		if r.URL.String() != "http://127.0.0.1:9119/api/v1/gridcraft" || r.Header.Get("Authorization") != "Bearer "+token {
