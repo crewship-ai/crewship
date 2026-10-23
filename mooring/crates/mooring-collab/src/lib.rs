@@ -130,10 +130,9 @@ pub mod private_rpc {
         let supported = [supported_version.clone()];
         let selected = negotiate(&hello, &supported).map_err(invalid)?;
         let selected_control = supports_control
-            && hello
-                .control_profiles
-                .as_ref()
-                .is_some_and(|profiles| !profiles.is_empty());
+            && hello.control_profiles.as_ref().is_some_and(|profiles| {
+                profiles.contains(&mooring_protocol::HelloControlProfilesItem::MooringPrepareV1)
+            });
         let ready = RuntimeReady {
             r#type: RuntimeReadyType::RuntimeReady,
             selected_control_profile: selected_control

@@ -9,6 +9,8 @@ use crate::{
 };
 
 pub const PROFILE: &str = "mooring.prepare.v1";
+/// Shape contract only; no application capability is enabled by this constant.
+pub const CAUSAL_PROFILE: &str = "mooring.prepare-causal.v1";
 pub const MAX_CONTROL_BYTES: usize = 2_097_152;
 pub const MAX_CHECKPOINT_BYTES: usize = 1_572_864;
 
@@ -39,7 +41,14 @@ pub fn validate_bootstrap(raw: &[u8], peer: Peer) -> Result<CanonicalValue, Wire
 pub fn is_control_type(value: &str) -> bool {
     matches!(
         value,
-        "validate_checkpoint" | "checkpoint_validated" | "prepare_atomic" | "atomic_prepared"
+        "validate_checkpoint"
+            | "checkpoint_validated"
+            | "prepare_atomic"
+            | "atomic_prepared"
+            | "validate_checkpoint_causal"
+            | "checkpoint_validated_causal"
+            | "prepare_atomic_causal"
+            | "atomic_prepared_causal"
     )
 }
 
@@ -47,6 +56,17 @@ pub fn is_control_type(value: &str) -> bool {
 /// This validates shape/resources/direction, not scope, revision, fingerprint,
 /// checkpoint digest or adapter effects. Those checks precede app interpretation.
 pub fn validate(raw: &[u8], peer: Peer) -> Result<CanonicalValue, WireError> {
+    validate_selected(raw, peer, false)
+}
+
+/// Separate explicitly selected causal contract, never a fallback for strict
+/// requests. Caller-verified inherited channel provenance and profile selection
+/// are required before use; this does not qualify SQL history or app effects.
+pub fn validate_causal(raw: &[u8], peer: Peer) -> Result<CanonicalValue, WireError> {
+    validate_selected(raw, peer, true)
+}
+
+fn validate_selected(raw: &[u8], peer: Peer, causal: bool) -> Result<CanonicalValue, WireError> {
     if matches!(peer, Peer::Participant) {
         return Err(WireError::InvalidShape);
     }
@@ -54,12 +74,22 @@ pub fn validate(raw: &[u8], peer: Peer) -> Result<CanonicalValue, WireError> {
     let message_type = value.value()["type"]
         .as_str()
         .ok_or(WireError::InvalidShape)?;
-    let allowed = match peer {
-        Peer::InheritedHost => matches!(message_type, "validate_checkpoint" | "prepare_atomic"),
-        Peer::InheritedRuntime => {
+    let allowed = match (peer, causal) {
+        (Peer::InheritedHost, false) => {
+            matches!(message_type, "validate_checkpoint" | "prepare_atomic")
+        }
+        (Peer::InheritedRuntime, false) => {
             matches!(message_type, "checkpoint_validated" | "atomic_prepared")
         }
-        Peer::Participant => false,
+        (Peer::InheritedHost, true) => matches!(
+            message_type,
+            "validate_checkpoint_causal" | "prepare_atomic_causal"
+        ),
+        (Peer::InheritedRuntime, true) => matches!(
+            message_type,
+            "checkpoint_validated_causal" | "atomic_prepared_causal"
+        ),
+        (Peer::Participant, _) => false,
     };
     if !allowed || !crate::shape::envelope(value.value()) {
         return Err(WireError::InvalidShape);
