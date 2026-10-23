@@ -239,6 +239,7 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "provisioning.failed": XCircle,
   "provisioning.build_failed": XCircle,
   "sidecar.stale": AlertTriangle,
+  "sidecar.recreated": CheckCircle,
   "image.stale": AlertTriangle,
 
   // ── Credentials ───────────────────────────────────────────────────

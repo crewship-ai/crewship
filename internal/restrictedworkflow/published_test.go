@@ -104,6 +104,8 @@ func TestPublishedRoutineRunCompletesAndSurvivesLogout(t *testing.T) {
 	if started := publishedJournal(t, s, receipt.ID, "published_run_started"); len(started) != 1 {
 		t.Fatalf("run start audit = %v", started)
 	}
+	// A workspace limit applies to runs accepted after it is set.
+	mustExec(t, s, `UPDATE workspaces SET guest_routine_max_run_minutes=7 WHERE id='w'`)
 	var limit float64
 	if err = s.db.QueryRowContext(t.Context(), `SELECT round((julianday(expires_at)-julianday(fire_at))*86400) FROM restricted_workflow_jobs WHERE id=?`, receipt.ID).Scan(&limit); err != nil || limit != DefaultPublishedRunLimit.Seconds() {
 		t.Fatalf("published run deadline = %vs, err=%v", limit, err)
@@ -122,6 +124,9 @@ func TestPublishedRoutineRunCompletesAndSurvivesLogout(t *testing.T) {
 	other, err := s.AdmitManual(t.Context(), "h2", "w", "private-work", map[string]any{"task": "other"}, "", 0)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if err = s.db.QueryRowContext(t.Context(), `SELECT round((julianday(expires_at)-julianday(fire_at))*86400) FROM restricted_workflow_jobs WHERE id=?`, other.ID).Scan(&limit); err != nil || limit != 420 {
+		t.Fatalf("workspace run limit = %vs, err=%v", limit, err)
 	}
 	if worked, err := s.DispatchNext(t.Context()); !worked || err != nil {
 		t.Fatalf("dispatch worked=%v err=%v", worked, err)
@@ -165,8 +170,11 @@ func TestPublishedRoutineRunStopsAtNextStep(t *testing.T) {
 		{"issuer loses authority", stopIssuer, func(t *testing.T, s *Service) {
 			mustExec(t, s, `UPDATE workspace_members SET role='MEMBER' WHERE id='mo'`)
 		}, ""},
-		{"routine withdrawn", stopUnpublished, func(t *testing.T, s *Service) {
+		{"routine disabled", stopUnpublished, func(t *testing.T, s *Service) {
 			mustExec(t, s, `UPDATE pipelines SET status='disabled' WHERE id='routine'`)
+		}, ""},
+		{"routine unpublished", stopUnpublished, func(t *testing.T, s *Service) {
+			mustExec(t, s, `UPDATE pipelines SET publication_withdrawn_at=? WHERE id='routine'`, tsformat.Format(time.Now()))
 		}, ""},
 		{"max duration", stopDuration, func(t *testing.T, s *Service) {
 			// Wait until the immutable deadline accepted with this run has passed.
@@ -230,6 +238,13 @@ func TestPublishedRoutineRunStopsAtNextStep(t *testing.T) {
 }
 
 func TestPublishedRoutineAdmissionRefusals(t *testing.T) {
+	t.Run("unpublished", func(t *testing.T) {
+		s, _ := publishedFixture(t)
+		mustExec(t, s, `UPDATE pipelines SET publication_withdrawn_at=? WHERE id='routine'`, tsformat.Format(time.Now()))
+		if _, err := s.AdmitManual(t.Context(), "h1", "w", "private-work", map[string]any{"task": "x"}, "", 0); !errors.Is(err, ErrDenied) {
+			t.Fatalf("withdrawn publication admitted: %v", err)
+		}
+	})
 	t.Run("credential rotated after publication", func(t *testing.T) {
 		s, _ := publishedFixture(t)
 		rotated, err := encryption.Encrypt("synthetic-rotated-workflow-key")
@@ -341,5 +356,41 @@ func TestPublishedRoutineAuthorityIsOneQuery(t *testing.T) {
 	err = s.checkPublishedJob(t.Context(), counter, j, handle, g, boundary{parent: j.Origin, assignment: &dispatch.Assignment{Item: &work.Item{ID: "absent"}, RunID: "absent"}})
 	if counter.calls != 1 || err == nil {
 		t.Fatalf("boundary authority: err=%v queries=%d", err, counter.calls)
+	}
+}
+
+// An identical republish reuses the same version row and clears the current
+// withdrawal, but runs accepted before the withdrawal must stay stopped.
+func TestPublishedRoutineIdenticalRepublishDoesNotReviveRuns(t *testing.T) {
+	s, runner := publishedFixture(t)
+	starts := 0
+	base := runner.StartSession
+	runner.StartSession = func(ctx context.Context, handle string) (restricteddispatch.TextSession, error) {
+		starts++
+		return base(ctx, handle)
+	}
+	old, err := s.AdmitManual(t.Context(), "h1", "w", "private-work", map[string]any{"task": "before"}, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withdrawn := tsformat.Format(time.Now())
+	mustExec(t, s, `UPDATE pipelines SET publication_withdrawn_at=?,publication_last_withdrawn_at=? WHERE id='routine'`, withdrawn, withdrawn)
+	// The same head version becomes current again, as PublishDraftIn's dedup does.
+	mustExec(t, s, `UPDATE pipelines SET publication_withdrawn_at=NULL WHERE id='routine'`)
+	if worked, err := s.DispatchNext(t.Context()); !worked || err == nil || starts != 0 {
+		t.Fatalf("withdrawn run revived by identical republish: worked=%v err=%v starts=%d", worked, err, starts)
+	}
+	if stopped := publishedJournal(t, s, old.ID, "published_run_stopped"); len(stopped) != 1 || stopped[0] != stopUnpublished {
+		t.Fatalf("stop audit = %v", stopped)
+	}
+	fresh, err := s.AdmitManual(t.Context(), "h1", "w", "private-work", map[string]any{"task": "after"}, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if worked, err := s.DispatchNext(t.Context()); !worked || err != nil {
+		t.Fatalf("run accepted after republish: worked=%v err=%v", worked, err)
+	}
+	if result, err := s.Result(t.Context(), "h1", "w", fresh.ID); err != nil || result.State != "completed" {
+		t.Fatalf("post-republish run %+v %v", result, err)
 	}
 }

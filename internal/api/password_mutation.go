@@ -91,7 +91,11 @@ func acknowledgePasswordSessions(ctx context.Context, tx *sql.Tx, user, expected
 // AuditLocalPasswordResetTx records host-side recovery without inventing an
 // authenticated human actor. The caller owns mutations and the final commit.
 func AuditLocalPasswordResetTx(ctx context.Context, tx *sql.Tx, userID, expectedHash, now string, sessionsRevoked int64, tokensRevoked int) error {
-	metadata, err := json.Marshal(map[string]any{"source": "local_recovery", "sessions_revoked": sessionsRevoked, "cli_tokens_revoked": tokensRevoked})
+	// Account recovery also stops accepted Guest-published runs.
+	if err := MarkAccessRevokedTx(ctx, tx, userID); err != nil {
+		return err
+	}
+	metadata, err := json.Marshal(map[string]any{"source": "local_recovery", "sessions_revoked": sessionsRevoked, "cli_tokens_revoked": tokensRevoked, "access_revocation_marked": true})
 	if err != nil {
 		return err
 	}

@@ -185,6 +185,8 @@ type updateWorkspaceRequest struct {
 	// would silently delete what an operator typing 0 out of habit with
 	// its neighbours expected to keep. See internal/harbormaster/retention.go.
 	ApprovalsRetentionDays *int `json:"approvals_retention_days"`
+	// GuestRoutineMaxRunMinutes bounds future Guest-published runs (1-240).
+	GuestRoutineMaxRunMinutes *int `json:"guest_routine_max_run_minutes"`
 }
 
 // Update modifies workspace settings such as name, slug, logo, and preferred language.
@@ -247,6 +249,10 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// harbormaster.MaxApprovalsRetentionDays (~106751 days, ~292 years)
 	// and wraps NEGATIVE — a cutoff in the future that would match every
 	// terminal row regardless of age. See retention.go.
+	if req.GuestRoutineMaxRunMinutes != nil && (*req.GuestRoutineMaxRunMinutes < 1 || *req.GuestRoutineMaxRunMinutes > 240) {
+		replyError(w, http.StatusBadRequest, "guest_routine_max_run_minutes must be between 1 and 240")
+		return
+	}
 	if req.ApprovalsRetentionDays != nil && *req.ApprovalsRetentionDays > harbormaster.MaxApprovalsRetentionDays {
 		replyError(w, http.StatusBadRequest, fmt.Sprintf(
 			"approvals_retention_days is %d; the maximum is %d", *req.ApprovalsRetentionDays, harbormaster.MaxApprovalsRetentionDays))
@@ -349,6 +355,9 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		ub.Set("approvals_retention_days", *req.ApprovalsRetentionDays)
 	}
+	if req.GuestRoutineMaxRunMinutes != nil {
+		ub.Set("guest_routine_max_run_minutes", *req.GuestRoutineMaxRunMinutes)
+	}
 	persisted := !ub.Empty()
 	var tx *sql.Tx
 	var expected []any
@@ -438,6 +447,9 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.ApprovalsRetentionDays != nil {
 		changed = append(changed, "approvals_retention_days")
 	}
+	if req.GuestRoutineMaxRunMinutes != nil {
+		changed = append(changed, "guest_routine_max_run_minutes")
+	}
 	meta := map[string]interface{}{"fields": changed}
 	if req.AllowPrivilegedCredentials != nil {
 		changed = append(changed, "allow_privileged_credentials")
@@ -491,7 +503,7 @@ func workspaceSettingsResponse(ctx context.Context, reader interface {
 		SELECT w.id, w.name, w.slug, w.kind, `+personalOwnerSQL+`, w.logo_url, w.preferred_language, w.created_at, w.updated_at,
 			w.allow_privileged_credentials, w.run_retention_days,
 			w.credential_audit_retention_days, w.audit_log_retention_days,
-			w.approvals_retention_days, w.pages_theme, w.appearance_default,
+			w.approvals_retention_days, w.guest_routine_max_run_minutes, w.pages_theme, w.appearance_default,
 			(SELECT COUNT(*) FROM crews WHERE workspace_id = w.id AND deleted_at IS NULL) AS crew_count,
 			(SELECT COUNT(*) FROM agents WHERE workspace_id = w.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM workspace_members WHERE workspace_id = w.id) AS member_count
@@ -500,7 +512,7 @@ func workspaceSettingsResponse(ctx context.Context, reader interface {
 	`, workspaceID).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.Kind, &ws.PersonalOwnerID, &ws.LogoURL, &ws.PreferredLanguage,
 		&ws.CreatedAt, &ws.UpdatedAt, &ws.AllowPrivilegedCredentials, &ws.RunRetentionDays,
 		&ws.CredentialAuditRetentionDays, &ws.AuditLogRetentionDays,
-		&ws.ApprovalsRetentionDays, &ws.pagesThemeJSON, &ws.appearanceDefaultJSON,
+		&ws.ApprovalsRetentionDays, &ws.GuestRoutineMaxRunMinutes, &ws.pagesThemeJSON, &ws.appearanceDefaultJSON,
 		&ws.CrewCount, &ws.AgentCount, &ws.MemberCount)
 	if err != nil {
 		return ws, err

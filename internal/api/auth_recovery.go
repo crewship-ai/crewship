@@ -383,6 +383,12 @@ func (h *RecoveryHandler) Reset(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "reset password: revoke sessions", err)
 		return
 	}
+	// Account recovery also stops accepted Guest-published runs, unlike a
+	// voluntary password change, which is treated like logout.
+	if err := MarkAccessRevokedTx(r.Context(), tx, userID); err != nil {
+		replyInternalError(w, h.logger, "reset password: access revocation marker", err)
+		return
+	}
 	tokenIDs, err := RevokeRecoveryCLITokensTx(r.Context(), tx, userID, userID, now)
 	if err != nil {
 		replyPasswordAuditError(w, h.logger, "reset password: revoke cli tokens", err)

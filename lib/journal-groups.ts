@@ -186,6 +186,7 @@ export const ENTRY_TYPES_BY_GROUP: Record<EntryGroup, string[]> = {
     "provisioning.build_failed",
     "provisioning.step",
     "sidecar.stale",
+    "sidecar.recreated",
     "image.stale",
   ],
   chat: ["chat.user_message", "chat.agent_response", "conversation.compacted"],
