@@ -1,5 +1,5 @@
 import React from "react"
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { BRIDGE_HANDSHAKE_TIMEOUT_MS, BRIDGE_MAX_PENDING, BRIDGE_MAX_REFUSALS, type TransportResponse, type WorkbookSession, type WorkbookTransport } from "@/lib/workbooks/bridge"
 import { WORKBOOK_SESSION_REOPEN_MAX_MS, type WorkbookEditorClient } from "@/lib/workbooks/editor-client"
@@ -80,7 +80,7 @@ afterEach(() => {
   else delete (HTMLIFrameElement.prototype as { credentialless?: unknown }).credentialless
 })
 
-function setup(options: { enabled?: boolean; open?: Awaited<ReturnType<WorkbookEditorClient["openSession"]>>; transport?: Partial<WorkbookTransport>; head?: WorkbookEditorClient["head"]; checkSession?: WorkbookEditorClient["checkSession"] } = {}) {
+function setup(options: { enabled?: boolean; flagError?: boolean; open?: Awaited<ReturnType<WorkbookEditorClient["openSession"]>>; transport?: Partial<WorkbookTransport>; head?: WorkbookEditorClient["head"]; checkSession?: WorkbookEditorClient["checkSession"] } = {}) {
   const transport = {
     snapshot: vi.fn(async () => ok({ schema_version: 1, rev: 41, generation: 1, snapshot: { sheets: [] } })),
     edit: vi.fn(async (): Promise<TransportResponse> => ({ status: 500, body: null })),
@@ -90,7 +90,7 @@ function setup(options: { enabled?: boolean; open?: Awaited<ReturnType<WorkbookE
     ...options.transport,
   }
   const client: WorkbookEditorClient = {
-    editorEnabled: vi.fn(async () => options.enabled ?? true),
+    editorEnabled: vi.fn(async () => { if (options.flagError) throw new Error("offline"); return options.enabled ?? true }),
     openSession: vi.fn(async () => options.open ?? { ok: true as const, session }),
     transport: vi.fn(() => transport),
     head: vi.fn(options.head ?? (async () => ({ ok: true as const, head: { rev: 41, generation: 1 } }))),
@@ -139,7 +139,7 @@ describe("createEditorFrame", () => {
   it("shows the configuration message, not a protocol failure, when the frame attributes do not stick", async () => {
     Object.defineProperty(HTMLIFrameElement.prototype, "credentialless", { configurable: true, get: () => false })
     const t = setup()
-    expect(await screen.findByTestId("workbook-editor-notice")).toHaveTextContent("cannot be opened safely in this browser")
+    expect(await screen.findByTestId("workbook-editor-notice")).toHaveTextContent("cannot be opened safely here")
     expect(screen.getByTestId("workbook-editor-notice")).toHaveAttribute("data-reason", "config")
     expect(screen.queryByRole("button", { name: "Open editor again" })).toBeNull()
     expect(t.frame()).toBeNull()
@@ -159,6 +159,7 @@ describe("createEditorFrame", () => {
 describe("mounting", () => {
   it("keeps the read-only preview while the flag is off", async () => {
     const t = setup({ enabled: false })
+    expect(await screen.findByTestId("workbook-editor-notice")).toHaveTextContent("not enabled for this workspace")
     await screen.findByText("Workbook unavailable")
     expect(t.client.openSession).not.toHaveBeenCalled()
     expect(t.frame()).toBeNull()
@@ -167,9 +168,19 @@ describe("mounting", () => {
   it("keeps the preview in a browser without credentialless frames", async () => {
     delete (HTMLIFrameElement.prototype as { credentialless?: unknown }).credentialless
     const t = setup()
+    expect(await screen.findByTestId("workbook-editor-notice")).toHaveTextContent("Chrome or Edge")
     await waitFor(() => expect(t.client.editorEnabled).toHaveBeenCalled())
     await screen.findByText("Workbook unavailable")
     expect(t.client.openSession).not.toHaveBeenCalled()
+  })
+
+  it("distinguishes a failed flag read and lets the person retry", async () => {
+    const t = setup({ flagError: true })
+    expect(await screen.findByTestId("workbook-editor-notice")).toHaveTextContent("Could not check")
+    expect(t.client.openSession).not.toHaveBeenCalled()
+    vi.mocked(t.client.editorEnabled).mockResolvedValue(true)
+    fireEvent.click(screen.getByRole("button", { name: "Retry editor check" }))
+    await waitFor(() => expect(t.frame()).not.toBeNull())
   })
 
   it("falls back to the preview when the server will not open a session", async () => {

@@ -90,7 +90,7 @@ export function editorRefusal(response: { status: number; body: unknown }): Edit
 export type SessionCheck = "live" | "revoked" | "unknown" | EditorRefusal
 
 export interface WorkbookEditorClient {
-  /** The `gridcraft_editor` flag for this workspace; false on any failure. */
+  /** The `gridcraft_editor` flag for this workspace; throws when availability cannot be checked. */
   editorEnabled(): Promise<boolean>
   /** `POST …/workbook/sessions`. */
   openSession(): Promise<OpenSessionResult>
@@ -206,12 +206,11 @@ export function createWorkbookEditorClient(options: { workspaceId: string; pageI
 
   return {
     async editorEnabled() {
-      try {
-        const response = await send(`/api/v1/feature-flags?${workspace}`, { cache: "no-store" })
-        return response.ok && flagEnabled(await read(response), WORKBOOK_EDITOR_FLAG)
-      } catch {
-        return false
-      }
+      const response = await send(`/api/v1/feature-flags?${workspace}`, { cache: "no-store" })
+      if (!response.ok) throw new Error("Could not check workbook editor availability")
+      const flags = await read(response)
+      if (!Array.isArray(flags)) throw new Error("Invalid feature flag response")
+      return flagEnabled(flags, WORKBOOK_EDITOR_FLAG)
     },
     async openSession() {
       let response: Response

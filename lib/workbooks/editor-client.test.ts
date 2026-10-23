@@ -192,9 +192,9 @@ describe("createWorkbookEditorClient", () => {
     expect(fetch).toHaveBeenCalledWith("/api/v1/feature-flags?workspace_id=ws+1", { cache: "no-store" })
   })
 
-  it("treats a failed flag read as off", async () => {
-    await expect(createWorkbookEditorClient({ workspaceId: "w", pageId: "p", fetch: async () => respond(500, {}) }).editorEnabled()).resolves.toBe(false)
-    await expect(createWorkbookEditorClient({ workspaceId: "w", pageId: "p", fetch: async () => { throw new Error("offline") } }).editorEnabled()).resolves.toBe(false)
+  it("reports a failed flag read instead of treating it as off", async () => {
+    await expect(createWorkbookEditorClient({ workspaceId: "w", pageId: "p", fetch: async () => respond(500, {}) }).editorEnabled()).rejects.toThrow()
+    await expect(createWorkbookEditorClient({ workspaceId: "w", pageId: "p", fetch: async () => { throw new Error("offline") } }).editorEnabled()).rejects.toThrow()
   })
 
   it("opens a session on the Page's workbook route", async () => {

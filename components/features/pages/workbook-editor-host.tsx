@@ -107,7 +107,7 @@ function endMessage(end: EditorEnd): { text: string; reopen: boolean } {
   }
   switch (end.reason) {
     case "unavailable": return { text: end.status === 503 ? "The workbook editor is turned off. Showing the read-only preview." : "The workbook editor is unavailable. Showing the read-only preview.", reopen: end.status === 0 || end.status >= 500 }
-    case "config": return { text: "The workbook editor cannot be opened safely in this browser. Showing the read-only preview.", reopen: false }
+    case "config": return { text: "The workbook editor cannot be opened safely here. Try current Chrome or Edge at this installation’s canonical address. If it still fails, ask an administrator to check the editor origin and approved bundle. Showing the read-only preview.", reopen: false }
     case "access": return { text: `Access lost${unsaved}`, reopen: false }
     case "disabled": return { text: `The workbook editor is turned off${unsaved}. Showing the read-only preview.`, reopen: false }
     case "expired": return { text: `The editor session ended${unsaved}. Open the editor again to continue.`, reopen: true }
@@ -227,6 +227,8 @@ export function PageWorkbookSurface({ workspaceId, pageId, name, onDirtyChange, 
 }) {
   const editorClient = React.useMemo(() => client ?? createWorkbookEditorClient({ workspaceId, pageId }), [client, workspaceId, pageId])
   const [enabled, setEnabled] = React.useState<boolean | null>(null)
+  const [flagError, setFlagError] = React.useState(false)
+  const [flagAttempt, setFlagAttempt] = React.useState(0)
   const [end, setEnd] = React.useState<EditorEnd>()
   const [attempt, setAttempt] = React.useState(0)
   const reopens = React.useRef(0)
@@ -234,9 +236,10 @@ export function PageWorkbookSurface({ workspaceId, pageId, name, onDirtyChange, 
   React.useEffect(() => {
     let live = true
     setEnabled(null)
-    void editorClient.editorEnabled().then(value => { if (live) setEnabled(value) })
+    setFlagError(false)
+    void editorClient.editorEnabled().then(value => { if (live) setEnabled(value) }).catch(() => { if (live) setFlagError(true) })
     return () => { live = false }
-  }, [editorClient])
+  }, [editorClient, flagAttempt])
 
   const onEnd = React.useCallback((next: EditorEnd) => {
     // A new generation needs a new frame and session; the old frame never sees the new content.
@@ -259,10 +262,20 @@ export function PageWorkbookSurface({ workspaceId, pageId, name, onDirtyChange, 
   if (enabled === true && !end && editorFrameSupported()) {
     return <WorkbookEditorHost key={attempt} client={editorClient} pageId={pageId} name={name} onEnd={onEnd} onDirtyChange={onDirtyChange} />
   }
-  const notice = end && endMessage(end)
+  const fallback = flagError
+    ? { reason: "flag-error", text: "Could not check workbook editor availability. Check your connection and retry. Showing the read-only preview." }
+    : enabled === null
+      ? { reason: "checking", text: "Checking editor availability… Showing the read-only preview." }
+      : !enabled
+        ? { reason: "workspace-disabled", text: "The workbook editor is not enabled for this workspace. Ask a workspace administrator to enable GridCraft editing. Showing the read-only preview." }
+        : !editorFrameSupported()
+          ? { reason: "unsupported-browser", text: "This browser cannot isolate the workbook editor safely. Open this page in a current version of Chrome or Edge. Showing the read-only preview." }
+          : undefined
+  const notice = end ? endMessage(end) : fallback && { text: fallback.text, reopen: false }
   return <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-    {notice && <div role="alert" data-testid="workbook-editor-notice" data-reason={end.reason} className="flex flex-wrap items-center gap-2 border-b px-3 py-2 text-sm">
+    {notice && <div role={fallback?.reason === "checking" ? "status" : "alert"} data-testid={fallback?.reason === "checking" && !end ? "workbook-editor-checking" : "workbook-editor-notice"} data-reason={end?.reason ?? fallback?.reason} className="flex flex-wrap items-center gap-2 border-b px-3 py-2 text-sm">
       <span className="mr-auto">{notice.text}</span>
+      {flagError && <Button type="button" size="sm" variant="outline" onClick={() => setFlagAttempt(value => value + 1)}>Retry editor check</Button>}
       {notice.reopen && <Button type="button" size="sm" variant="outline" onClick={reopen}>Open editor again</Button>}
     </div>}
     <PageWorkbook workspaceId={workspaceId} pageId={pageId} name={name} />
