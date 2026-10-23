@@ -34,7 +34,7 @@ func prepareAdapterPeer(t *testing.T, respond func([]byte) []byte) (*RPCPrepareA
 }
 func TestRPCPrepareRequiresSuccessfulPrivateNegotiation(t *testing.T) {
 	key := SessionKey{"workspace", "artifact", "wordcraft"}
-	for _, runtime := range []*Runtime{nil, {RPC: &RPC{}}, {RPC: &RPC{}, selectedControlProfile: PrivatePrepareProfile, selectedVersions: runtimeTestVersions}} {
+	for _, runtime := range []*Runtime{nil, {RPC: &RPC{}}, {RPC: &RPC{}, selectedControlProfile: PrivatePrepareProfile, selectedVersions: RuntimeVersions{Protocol: "0.4.0", Model: "0.1.0", Engine: "0.1.0"}}} {
 		if _, err := NewRPCPrepareAdapter(runtime, key, prepareVersions); err == nil {
 			t.Fatal("unselected or wrong runtime accepted")
 		}

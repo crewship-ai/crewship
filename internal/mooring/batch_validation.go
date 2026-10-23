@@ -156,14 +156,14 @@ func normalizeBatch(r BatchRequest) ([]BatchChange, error) {
 var batchTerminalCodes = map[string]bool{"precondition_failed": true, "op_id_conflict": true, "target_deleted": true, "quota_exceeded": true, "permission_revoked": true, "forbidden": true, "stale_owner": true, "lease_expired": true, "version_mismatch": true, "invalid_request": true, "atomic_change_too_large": true, "capacity_exhausted": true, "unknown_dependency": true, "dependency_cycle": true, "task_cancelled": true}
 
 func validBatchRejection(r *BatchRejection) bool {
-	if r == nil || len(r.Message) > 1000 || !utf8.ValidString(r.Message) {
+	if r == nil || utf8.RuneCountInString(r.Message) > 1000 || !utf8.ValidString(r.Message) {
 		return false
 	}
 	if r.Retry != "do_not_retry" && r.Retry != "query_status" && r.Retry != "reconnect_then_query_status" && r.Retry != "new_operation_after_refresh" {
 		return false
 	}
 	if r.Code == "dependency_rejected" {
-		return batchID(r.RootOperationID) && r.RootCause != nil && r.RootCause.OperationID == r.RootOperationID && batchTerminalCodes[r.RootCause.Code] && len(r.RootCause.Message) <= 1000 && utf8.ValidString(r.RootCause.Message)
+		return batchID(r.RootOperationID) && r.RootCause != nil && r.RootCause.OperationID == r.RootOperationID && batchTerminalCodes[r.RootCause.Code] && utf8.RuneCountInString(r.RootCause.Message) <= 1000 && utf8.ValidString(r.RootCause.Message)
 	}
 	return batchTerminalCodes[r.Code] && r.RootCause == nil && r.RootOperationID == ""
 }
