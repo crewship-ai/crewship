@@ -325,6 +325,10 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   // Reach beyond the workspace: a public link, someone using it, and a
   // webhook credential that writes a panel from outside the product.
   // Publishing and revoking are opposites, so they do not share a glyph.
+  "artifact.mooring_created": FilePlus,
+  "artifact.mooring_committed": FilePen,
+  "artifact.mooring_mandate_admitted": KeyRound,
+  "artifact.mooring_mandate_revoked": Ban,
   "artifact.orphaned_workbook_deleted": Trash2,
   "artifact.private_output_published": Globe,
   "page.published": Globe,
