@@ -411,6 +411,7 @@ type pageRecord struct {
 	PrivateAudience    bool
 	HasDocument        bool
 	HasMooring         bool
+	HasCollaboration   bool
 	HasWorkbook        bool
 	HasProject         bool
 	HasApplication     bool
@@ -558,7 +559,7 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 		       EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=p.id),
 		       COALESCE(l.published,0), COALESCE(l.version,0),
  EXISTS(SELECT 1 FROM documents WHERE page_id=p.id), p.private_audience,
- EXISTS(SELECT 1 FROM gridcraft_heads WHERE page_id=p.id), EXISTS(SELECT 1 FROM mooring_documents WHERE page_id=p.id)
+ EXISTS(SELECT 1 FROM gridcraft_heads WHERE page_id=p.id), EXISTS(SELECT 1 FROM mooring_documents WHERE page_id=p.id), EXISTS(SELECT 1 FROM mooring_collab_documents WHERE page_id=p.id)
 		FROM pages p LEFT JOIN page_project_live l ON l.page_id=p.id
 		WHERE p.workspace_id = ? AND `+scope.where+`
 		ORDER BY p.updated_at DESC, p.slug ASC`, args...)
@@ -573,7 +574,7 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 		if err := rows.Scan(&p.ID, &p.Slug, &p.Name, &p.Description,
 			&p.OwnerUserID, &p.OwnerCrewID, &p.FolderID, &p.PagesVersion,
 			&p.Icon, &p.Color,
-			&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience, &p.HasWorkbook, &p.HasMooring); err != nil {
+			&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience, &p.HasWorkbook, &p.HasMooring, &p.HasCollaboration); err != nil {
 			return nil, err
 		}
 		records = append(records, p)
@@ -1078,7 +1079,7 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 409, "document pages cannot contain panels")
 		return
 	}
-	if len(req.Panels) != 0 && (rec.HasWorkbook || rec.HasMooring) {
+	if len(req.Panels) != 0 && (rec.HasWorkbook || rec.HasMooring || rec.HasCollaboration) {
 		replyError(w, 409, "workbook pages cannot contain panels")
 		return
 	}
@@ -1319,6 +1320,10 @@ func (h *PageHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if !h.hasPrivateOutputMetadata(r.Context(), rec) {
 		payload["slug"] = rec.Slug
 	}
+	if rec.HasCollaboration {
+		h.refusePageAction(w, r, rec, "collaboration documents cannot be deleted yet", "")
+		return
+	}
 	if rec.HasWorkbook || rec.HasMooring {
 		refusal, err := h.deleteWorkbookPage(r, wsID, rec, user)
 		if err != nil {
@@ -1330,14 +1335,19 @@ func (h *PageHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		// A workbook imported after the Page was loaded is never deleted
-		// here; a retry loads it as a workbook and meets the rules above.
-		deleted, err := h.db.ExecContext(r.Context(), `DELETE FROM pages WHERE id = ? AND NOT EXISTS(SELECT 1 FROM gridcraft_heads WHERE page_id = pages.id)`, rec.ID)
+		// Content attached after the Page was loaded is never deleted
+		// through the ordinary Page path. The writer checks both types.
+		deleted, err := h.db.ExecContext(r.Context(), `DELETE FROM pages WHERE id = ? AND NOT EXISTS(SELECT 1 FROM gridcraft_heads WHERE page_id = pages.id) AND NOT EXISTS(SELECT 1 FROM mooring_collab_documents WHERE page_id = pages.id)`, rec.ID)
 		if err != nil {
 			replyInternalError(w, h.logger, "delete page", err)
 			return
 		}
 		if n, err := deleted.RowsAffected(); err == nil && n == 0 {
+			var collaboration bool
+			if h.db.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM mooring_collab_documents WHERE page_id=?)`, rec.ID).Scan(&collaboration) != nil || collaboration {
+				h.refusePageAction(w, r, rec, "collaboration documents cannot be deleted yet", "")
+				return
+			}
 			var workbook bool
 			if h.db.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM gridcraft_heads WHERE page_id=?)`, rec.ID).Scan(&workbook) == nil && workbook {
 				h.refusePageAction(w, r, rec, workbookPageRefusal, "")
@@ -1376,13 +1386,13 @@ func pageWorkspaceInvalidation(rec *pageRecord, hasPanels bool) map[string]any {
 }
 
 func pageHasPrivateOutputMetadata(rec *pageRecord, hasPanels bool) bool {
-	return rec.HasDocument || rec.HasWorkbook || rec.HasMooring || (!hasPanels && rec.OwnerUserID != "" && !rec.HasProject && !rec.HasApplication)
+	return rec.HasDocument || rec.HasWorkbook || rec.HasMooring || rec.HasCollaboration || (!hasPanels && rec.OwnerUserID != "" && !rec.HasProject && !rec.HasApplication)
 }
 
 // Use when panels are not already loaded, before deleting or moving the Page.
 // A failed classification must hide descriptive metadata, never disclose it.
 func (h *PageHandler) hasPrivateOutputMetadata(ctx context.Context, rec *pageRecord) bool {
-	if rec.HasDocument || rec.HasWorkbook || rec.HasMooring {
+	if rec.HasDocument || rec.HasWorkbook || rec.HasMooring || rec.HasCollaboration {
 		return true
 	}
 	if rec.OwnerUserID == "" || rec.HasProject || rec.HasApplication {
@@ -1429,11 +1439,11 @@ func (h *PageHandler) loadPageWithPrivateAudience(ctx context.Context, wsID, slu
  EXISTS(SELECT 1 FROM page_project_live WHERE page_id=pages.id AND published=1),
  COALESCE((SELECT version FROM page_project_live WHERE page_id=pages.id),0),
  EXISTS(SELECT 1 FROM documents WHERE page_id=pages.id), private_audience,
- EXISTS(SELECT 1 FROM gridcraft_heads WHERE page_id=pages.id), EXISTS(SELECT 1 FROM mooring_documents WHERE page_id=pages.id)
+ EXISTS(SELECT 1 FROM gridcraft_heads WHERE page_id=pages.id), EXISTS(SELECT 1 FROM mooring_documents WHERE page_id=pages.id), EXISTS(SELECT 1 FROM mooring_collab_documents WHERE page_id=pages.id)
 		FROM pages WHERE workspace_id = ? AND `+column+` = ?`, wsID, slug).Scan(
 		&p.ID, &p.Slug, &p.Name, &p.Description, &p.OwnerUserID, &p.OwnerCrewID,
 		&p.FolderID, &p.PagesVersion, &p.Icon, &p.Color,
-		&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience, &p.HasWorkbook, &p.HasMooring)
+		&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience, &p.HasWorkbook, &p.HasMooring, &p.HasCollaboration)
 	if err != nil {
 		return nil, err
 	}
