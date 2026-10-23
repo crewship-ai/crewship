@@ -76,3 +76,5 @@ The small Hello editor is a manifest plus client and immutable bundle. Its `set`
 command and text schema are declarations, not special host code. The SDK and
 GridCraft adapter share the private MessagePort handshake; native GridCraft
 operation semantics remain in its adapter.
+
+<!-- docs-inventory: ignore-api /api/v1/internal/mooring — protected host IPC, deliberately excluded from public OpenAPI. -->
