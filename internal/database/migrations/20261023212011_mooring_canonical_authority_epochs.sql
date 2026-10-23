@@ -253,8 +253,8 @@ BEGIN
  UPDATE users SET authority_revision=authority_revision+1 WHERE id=OLD.user_id;
 END;
 
-CREATE TRIGGER mooring_epoch_user_sessions_update_old BEFORE UPDATE OF id,user_id,expires_at,revoked_at ON user_sessions
-WHEN OLD.id IS NOT NEW.id OR OLD.user_id IS NOT NEW.user_id OR OLD.expires_at IS NOT NEW.expires_at OR OLD.revoked_at IS NOT NEW.revoked_at
+CREATE TRIGGER mooring_epoch_user_sessions_update_old BEFORE UPDATE OF id,user_id,created_at,expires_at,revoked_at ON user_sessions
+WHEN OLD.id IS NOT NEW.id OR OLD.user_id IS NOT NEW.user_id OR OLD.created_at IS NOT NEW.created_at OR OLD.expires_at IS NOT NEW.expires_at OR OLD.revoked_at IS NOT NEW.revoked_at
 BEGIN
  UPDATE users SET authority_revision=authority_revision+1 WHERE id=OLD.user_id;
 END;
@@ -270,8 +270,8 @@ BEGIN
  UPDATE users SET authority_revision=authority_revision+1 WHERE id=OLD.user_id;
 END;
 
-CREATE TRIGGER mooring_epoch_cli_tokens_update_old BEFORE UPDATE OF id,user_id,token_hash,tier,expires_at,revoked_at,scopes ON cli_tokens
-WHEN OLD.id IS NOT NEW.id OR OLD.user_id IS NOT NEW.user_id OR OLD.token_hash IS NOT NEW.token_hash OR OLD.tier IS NOT NEW.tier OR OLD.expires_at IS NOT NEW.expires_at OR OLD.revoked_at IS NOT NEW.revoked_at OR OLD.scopes IS NOT NEW.scopes
+CREATE TRIGGER mooring_epoch_cli_tokens_update_old BEFORE UPDATE OF id,user_id,created_at,token_hash,tier,expires_at,revoked_at,scopes ON cli_tokens
+WHEN OLD.id IS NOT NEW.id OR OLD.user_id IS NOT NEW.user_id OR OLD.created_at IS NOT NEW.created_at OR OLD.token_hash IS NOT NEW.token_hash OR OLD.tier IS NOT NEW.tier OR OLD.expires_at IS NOT NEW.expires_at OR OLD.revoked_at IS NOT NEW.revoked_at OR OLD.scopes IS NOT NEW.scopes
 BEGIN
  UPDATE users SET authority_revision=authority_revision+1 WHERE id=OLD.user_id;
 END;
@@ -347,6 +347,27 @@ END;
 
 CREATE TRIGGER mooring_epoch_workspace_artifact_creation_crews_update_new AFTER UPDATE OF workspace_id,crew_id ON workspace_artifact_creation_crews
 WHEN OLD.workspace_id IS NOT NEW.workspace_id OR OLD.crew_id IS NOT NEW.crew_id
+BEGIN
+ UPDATE workspaces SET authority_revision=authority_revision+1 WHERE id=NEW.workspace_id;
+END;
+
+-- The canonical grant reader deactivates non-owner-user write grants when
+-- workbook presence changes. Watch identity/presence, never content revisions.
+CREATE TRIGGER mooring_epoch_gridcraft_heads_insert AFTER INSERT ON gridcraft_heads
+BEGIN
+ UPDATE workspaces SET authority_revision=authority_revision+1 WHERE id=NEW.workspace_id;
+END;
+CREATE TRIGGER mooring_epoch_gridcraft_heads_delete BEFORE DELETE ON gridcraft_heads
+BEGIN
+ UPDATE workspaces SET authority_revision=authority_revision+1 WHERE id=OLD.workspace_id;
+END;
+CREATE TRIGGER mooring_epoch_gridcraft_heads_update_old BEFORE UPDATE OF page_id,workspace_id ON gridcraft_heads
+WHEN OLD.page_id IS NOT NEW.page_id OR OLD.workspace_id IS NOT NEW.workspace_id
+BEGIN
+ UPDATE workspaces SET authority_revision=authority_revision+1 WHERE id=OLD.workspace_id;
+END;
+CREATE TRIGGER mooring_epoch_gridcraft_heads_update_new AFTER UPDATE OF page_id,workspace_id ON gridcraft_heads
+WHEN OLD.page_id IS NOT NEW.page_id OR OLD.workspace_id IS NOT NEW.workspace_id
 BEGIN
  UPDATE workspaces SET authority_revision=authority_revision+1 WHERE id=NEW.workspace_id;
 END;
