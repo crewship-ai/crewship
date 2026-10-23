@@ -257,7 +257,7 @@ export function ConversationThread({ conversation, workspaceId, userId, refresh,
   </div>
 }
 
-function ConversationMembers({ workspaceId, userId, conversation, participants, refresh }: { workspaceId: string; userId: string; conversation: WorkspaceConversation; participants: ConversationParticipant[]; refresh: () => void }) {
+export function ConversationMembers({ workspaceId, userId, conversation, participants, refresh }: { workspaceId: string; userId: string; conversation: WorkspaceConversation; participants: ConversationParticipant[]; refresh: () => void }) {
   const canManage = !conversation.is_direct && conversation.created_by === userId
   const [adding, setAdding] = useState("")
   const [busy, setBusy] = useState(false)

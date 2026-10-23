@@ -298,7 +298,7 @@ export function FolderDeleteDialog({ workspaceId, open, onOpenChange, folder, on
   const visible = folder?.pageCount ?? 0
   const blocked = visible > 0
 
-  const confirm = async () => {
+  const deleteFolder = async () => {
     if (!folder || blocked) return
     setRefusal(null)
     try {
@@ -341,7 +341,7 @@ export function FolderDeleteDialog({ workspaceId, open, onOpenChange, folder, on
             onClick={(e) => {
               // Keep the dialog open until the server has answered.
               e.preventDefault()
-              void confirm()
+              void deleteFolder()
             }}
           >
             {remove.isPending && <Spinner className="h-3.5 w-3.5" />}
