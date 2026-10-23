@@ -145,3 +145,30 @@ func TestAuthorityEpochCanonicalMutationsPreserveIssuedEvidence(t *testing.T) {
 		t.Fatal("generation rollback allowed")
 	}
 }
+
+func TestAuthorityEpochUserExhaustionRollsBackCredentialMutation(t *testing.T) {
+	s, db, _, owner := deliveryFixture(t)
+	for _, q := range []string{
+		`INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('m','w','u','MEMBER')`,
+		`INSERT INTO user_sessions(id,user_id,expires_at) VALUES('session','u','2099-01-01T00:00:00Z')`,
+		`UPDATE users SET authority_revision=9223372036854775807 WHERE id='u'`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	g := deliveryOpen(t, s, owner, "human-a", "user-limit")
+	if _, err := db.Exec(`UPDATE user_sessions SET revoked_at='2026-10-23T00:00:00Z' WHERE id='session'`); err == nil {
+		t.Fatal("exhausted user fence allowed credential mutation")
+	}
+	var clean, closed bool
+	if err := db.QueryRow(`SELECT revoked_at IS NULL FROM user_sessions WHERE id='session'`).Scan(&clean); err != nil || !clean {
+		t.Fatal("failed mutation partially revoked credential", clean, err)
+	}
+	if err := db.QueryRow(`SELECT closed FROM mooring_delivery_gates WHERE id=?`, g.GateID).Scan(&closed); err != nil || closed {
+		t.Fatal("failed mutation partially closed gate", closed, err)
+	}
+	if _, err := db.Exec(`UPDATE users SET authority_revision=1 WHERE id='u'`); err == nil {
+		t.Fatal("user authority generation rollback allowed")
+	}
+}

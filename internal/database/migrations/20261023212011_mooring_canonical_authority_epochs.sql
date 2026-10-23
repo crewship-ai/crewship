@@ -350,3 +350,24 @@ WHEN OLD.workspace_id IS NOT NEW.workspace_id OR OLD.crew_id IS NOT NEW.crew_id
 BEGIN
  UPDATE workspaces SET authority_revision=authority_revision+1 WHERE id=NEW.workspace_id;
 END;
+
+-- The canonical grant reader deactivates non-owner-user write grants when
+-- workbook presence changes. Watch identity/presence, never content revisions.
+CREATE TRIGGER mooring_epoch_gridcraft_heads_insert AFTER INSERT ON gridcraft_heads
+BEGIN
+ UPDATE workspaces SET authority_revision=authority_revision+1 WHERE id=NEW.workspace_id;
+END;
+CREATE TRIGGER mooring_epoch_gridcraft_heads_delete BEFORE DELETE ON gridcraft_heads
+BEGIN
+ UPDATE workspaces SET authority_revision=authority_revision+1 WHERE id=OLD.workspace_id;
+END;
+CREATE TRIGGER mooring_epoch_gridcraft_heads_update_old BEFORE UPDATE OF page_id,workspace_id ON gridcraft_heads
+WHEN OLD.page_id IS NOT NEW.page_id OR OLD.workspace_id IS NOT NEW.workspace_id
+BEGIN
+ UPDATE workspaces SET authority_revision=authority_revision+1 WHERE id=OLD.workspace_id;
+END;
+CREATE TRIGGER mooring_epoch_gridcraft_heads_update_new AFTER UPDATE OF page_id,workspace_id ON gridcraft_heads
+WHEN OLD.page_id IS NOT NEW.page_id OR OLD.workspace_id IS NOT NEW.workspace_id
+BEGIN
+ UPDATE workspaces SET authority_revision=authority_revision+1 WHERE id=NEW.workspace_id;
+END;
