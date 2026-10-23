@@ -24,7 +24,10 @@ var ErrCanonicalInput = errors.New("invalid or oversized canonical JSON input")
 // canonicalPreflight bounds untrusted input before recursive parsing. It is
 // deliberately not a JSON validator; the canonicalizer validates syntax next.
 func canonicalPreflight(raw []byte) error {
-	if len(raw) == 0 || len(raw) > MaxCanonicalBytes || !utf8.Valid(raw) {
+	return canonicalPreflightLimit(raw, MaxCanonicalBytes)
+}
+func canonicalPreflightLimit(raw []byte, maxBytes int) error {
+	if len(raw) == 0 || len(raw) > maxBytes || !utf8.Valid(raw) {
 		return ErrCanonicalInput
 	}
 	depth, structure := 0, 0

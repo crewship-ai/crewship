@@ -44,5 +44,7 @@ func startRuntime(_ context.Context, c RuntimeConfig, cmd *exec.Cmd) (*Runtime, 
 		_ = r.Close()
 		return nil, err
 	}
+	r.selectedVersions = c.Versions
+	r.selectedControlProfile = c.ControlProfile
 	return r, nil
 }

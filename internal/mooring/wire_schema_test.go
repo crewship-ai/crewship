@@ -40,7 +40,7 @@ func TestWireSchemaSharedCases(t *testing.T) {
 	if err = json.Unmarshal(raw, &f); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.Shapes) != 173 || len(f.Semantics) != 33 {
+	if len(f.Shapes) != 190 || len(f.Semantics) != 43 {
 		t.Fatal("unexpected shared coverage")
 	}
 	for _, c := range f.Shapes {
