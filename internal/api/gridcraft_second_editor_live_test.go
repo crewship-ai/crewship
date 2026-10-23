@@ -138,8 +138,21 @@ func TestGridCraftSecondEditorLiveSessionsPushAndFeedFloor(t *testing.T) {
 	wantCode(t, f.do(bob, "GET", base+"/commits"+q+"&since=2", ""), 404, "revoked feed")
 	wantCode(t, f.do(ann, "POST", base+"/editors"+q, `{"editor":"bob@ex.com"}`), 200, "grant restored")
 	wantError(t, f.do(bob, "POST", base+"/sessions"+q, `{"session_id":"`+editor.SessionID+`"}`), 409, "editor_session_expired", "old editor ticket cannot revive")
-	openEditorSession(t, f, bob, base)
+	fresh := openEditorSession(t, f, bob, base)
+	for _, old := range revokedSessionIDs {
+		if old == fresh.SessionID {
+			t.Fatal("late old control targets fresh editor")
+		}
+	}
 
+	// Session closure is an added write in the grant transaction. Its effects
+	// must still be covered by the existing final grant/audit postconditions.
+	mustExec(t, f.db, `CREATE TABLE revocation_saved_grant AS SELECT * FROM page_grants WHERE page_id='live-shared' AND subject_id='bob'`)
+	mustExec(t, f.db, `CREATE TRIGGER revocation_session_fault AFTER UPDATE OF closed_at ON gridcraft_sessions WHEN NEW.session_id='`+fresh.SessionID+`' BEGIN INSERT INTO page_grants SELECT * FROM revocation_saved_grant; END`)
+	wantCode(t, f.do(ann, "DELETE", "/api/v1/pages/live-shared/grants"+q+"&subject_type=user&subject=bob@ex.com", ""), 500, "session trigger cannot invalidate audited grant removal")
+	if err := f.db.QueryRow(`SELECT closed_at IS NOT NULL FROM gridcraft_sessions WHERE session_id=?`, fresh.SessionID).Scan(&closed); err != nil || closed {
+		t.Fatalf("failed revoke did not roll back session: %v %v", closed, err)
+	}
 }
 
 // Ownership changes outside the grant handler can remove write while retaining
