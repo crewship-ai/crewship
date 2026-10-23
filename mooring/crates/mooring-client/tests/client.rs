@@ -1,6 +1,26 @@
 use mooring_client::{conformance_case, negotiate_json, TextClient};
 
 #[test]
+fn identifier_scalars_match_wire_without_constraining_text() {
+    let mut client = TextClient::new();
+    let id = "😀".repeat(200);
+    client.insert(&id, &id, 0, "a\0b").unwrap();
+    assert_eq!(client.text(&id), "a\0b");
+    let drafts = client.unsaved_json();
+    for invalid in ["😀".repeat(201), "a\0b".into(), String::new()] {
+        assert_eq!(
+            client.insert(&invalid, &id, 0, "bad"),
+            Err("invalid_request".into())
+        );
+        assert_eq!(
+            client.insert("other", &invalid, 0, "bad"),
+            Err("invalid_request".into())
+        );
+    }
+    assert_eq!(client.unsaved_json(), drafts);
+}
+
+#[test]
 fn p30_shared_native_wasm_vectors() {
     let cases: Vec<serde_json::Value> =
         serde_json::from_str(include_str!("../../../fixtures/native-wasm.json")).unwrap();

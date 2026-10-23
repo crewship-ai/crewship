@@ -159,19 +159,13 @@
       "type": "object",
       "properties": {
         "workspace_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "artifact_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "application_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -241,9 +235,7 @@
       "type": "object",
       "properties": {
         "target_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "revision": {
           "$ref": "#/$defs/Counter"
@@ -262,17 +254,13 @@
       "type": "object",
       "properties": {
         "op_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "fingerprint": {
           "$ref": "#/$defs/Digest"
         },
         "participant_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "base_revision": {
           "$ref": "#/$defs/Counter"
@@ -280,9 +268,7 @@
         "dependencies": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
+            "$ref": "#/$defs/Identifier"
           },
           "minItems": 0,
           "maxItems": 256,
@@ -316,9 +302,7 @@
       "type": "object",
       "properties": {
         "change_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "operations": {
           "type": "array",
@@ -332,9 +316,7 @@
           "$ref": "#/$defs/Digest"
         },
         "task_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -370,9 +352,7 @@
           "$ref": "#/$defs/ErrorCode"
         },
         "root_op_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "message": {
           "type": "string",
@@ -382,9 +362,7 @@
           "type": "object",
           "properties": {
             "op_id": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200
+              "$ref": "#/$defs/Identifier"
             },
             "code": {
               "enum": [
@@ -459,9 +437,7 @@
           "type": "object",
           "properties": {
             "op_id": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200
+              "$ref": "#/$defs/Identifier"
             },
             "status": {
               "const": "saved"
@@ -470,9 +446,7 @@
               "$ref": "#/$defs/Counter"
             },
             "issuer": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200
+              "$ref": "#/$defs/Identifier"
             },
             "durability": {
               "enum": [
@@ -494,9 +468,7 @@
           "type": "object",
           "properties": {
             "op_id": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200
+              "$ref": "#/$defs/Identifier"
             },
             "status": {
               "const": "rejected"
@@ -525,9 +497,7 @@
       "type": "object",
       "properties": {
         "change_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "status": {
           "enum": [
@@ -629,9 +599,7 @@
           "const": "hello"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "supported": {
           "type": "array",
@@ -657,9 +625,7 @@
           "const": "welcome"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "selected": {
           "$ref": "#/$defs/Versions"
@@ -668,9 +634,7 @@
           "$ref": "#/$defs/Scope"
         },
         "participant_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "permission_version": {
           "$ref": "#/$defs/Counter"
@@ -679,9 +643,7 @@
           "$ref": "#/$defs/WireLimits"
         },
         "issuer": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -704,9 +666,7 @@
           "const": "commit_batch"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "versions": {
           "$ref": "#/$defs/Versions"
@@ -715,9 +675,7 @@
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "fence": {
           "$ref": "#/$defs/Fence"
@@ -754,9 +712,7 @@
           "const": "commit_result"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
@@ -768,9 +724,7 @@
           "$ref": "#/$defs/Counter"
         },
         "issuer": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "durability": {
           "enum": [
@@ -807,17 +761,13 @@
           "const": "operation_status"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "op_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "expected_fingerprint": {
           "$ref": "#/$defs/Digest"
@@ -841,9 +791,7 @@
           "const": "operation_status_result"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
@@ -857,9 +805,7 @@
               "type": "object",
               "properties": {
                 "op_id": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 200
+                  "$ref": "#/$defs/Identifier"
                 },
                 "status": {
                   "const": "unknown"
@@ -887,9 +833,7 @@
       "type": "object",
       "properties": {
         "asset_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "digest": {
           "$ref": "#/$defs/Digest"
@@ -918,9 +862,7 @@
           "$ref": "#/$defs/Counter"
         },
         "format_version": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "versions": {
           "$ref": "#/$defs/Versions"
@@ -1044,9 +986,7 @@
           "const": "session_ticket_request"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
@@ -1071,22 +1011,16 @@
           "const": "session_ticket"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "participant_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "permission_version": {
           "$ref": "#/$defs/Counter"
@@ -1128,22 +1062,16 @@
           "const": "owner_acquire"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "runtime_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "renewal_nonce": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -1163,25 +1091,19 @@
           "const": "owner_renew"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "fence": {
           "$ref": "#/$defs/Fence"
         },
         "renewal_nonce": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "permission_version": {
           "$ref": "#/$defs/Counter"
@@ -1206,22 +1128,16 @@
           "const": "owner_grant"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "runtime_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "fence": {
           "$ref": "#/$defs/Fence"
@@ -1233,9 +1149,7 @@
           "$ref": "#/$defs/Counter"
         },
         "renewal_nonce": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "permission_version": {
           "$ref": "#/$defs/Counter"
@@ -1263,22 +1177,16 @@
           "const": "delivery_renew"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "participant_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "fence": {
           "$ref": "#/$defs/Fence"
@@ -1287,14 +1195,10 @@
           "$ref": "#/$defs/Counter"
         },
         "renewal_nonce": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "gate_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -1318,22 +1222,16 @@
           "const": "delivery_grant"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "participant_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "generation": {
           "$ref": "#/$defs/Counter"
@@ -1342,17 +1240,13 @@
           "$ref": "#/$defs/Counter"
         },
         "renewal_nonce": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "duration_ms": {
           "$ref": "#/$defs/PositiveCounter"
         },
         "gate_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -1377,22 +1271,16 @@
           "const": "session_closed"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "participant_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "generation": {
           "$ref": "#/$defs/Counter"
@@ -1401,17 +1289,13 @@
           "$ref": "#/$defs/Counter"
         },
         "barrier_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "reason": {
           "$ref": "#/$defs/Rejection"
         },
         "gate_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -1436,37 +1320,27 @@
           "const": "delivery_blocked"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "participant_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "fence": {
           "$ref": "#/$defs/Fence"
         },
         "barrier_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "covered_gate_ids": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
+            "$ref": "#/$defs/Identifier"
           },
           "minItems": 0,
           "maxItems": 4096,
@@ -1498,22 +1372,16 @@
           "const": "revocation_confirmed"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "participant_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "barrier_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "permission_version": {
           "$ref": "#/$defs/Counter"
@@ -1561,17 +1429,13 @@
           "const": "read_request"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "revision": {
           "$ref": "#/$defs/Counter"
@@ -1619,9 +1483,7 @@
           "const": "read_result"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
@@ -1660,9 +1522,7 @@
           "const": "checkpoint_request"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
@@ -1687,9 +1547,7 @@
           "const": "checkpoint_result"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "checkpoint": {
           "$ref": "#/$defs/Checkpoint"
@@ -1710,22 +1568,16 @@
           "const": "presence"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "participant_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "ttl_ms": {
           "$ref": "#/$defs/PositiveCounter"
@@ -1750,9 +1602,7 @@
       "type": "object",
       "properties": {
         "task_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "allow_partial": {
           "type": "boolean"
@@ -1777,16 +1627,12 @@
           "maxItems": 4096
         },
         "participant_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "unresolved_change_ids": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
+            "$ref": "#/$defs/Identifier"
           },
           "minItems": 0,
           "maxItems": 4096,
@@ -1898,17 +1744,13 @@
           "const": "task_status"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "task_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -1927,9 +1769,7 @@
           "const": "task_result"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
@@ -1954,17 +1794,13 @@
           "const": "task_cancel"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "task_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -1983,22 +1819,16 @@
           "const": "proposal"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "proposal_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "participant_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "base_revision": {
           "$ref": "#/$defs/Counter"
@@ -2037,25 +1867,19 @@
           "const": "proposal_accept"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "proposal_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "base_revision": {
           "$ref": "#/$defs/Counter"
         },
         "op_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -2076,35 +1900,25 @@
           "const": "undo_request"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "task_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "participant_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "base_revision": {
           "$ref": "#/$defs/Counter"
         },
         "op_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "target_change_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -2136,9 +1950,7 @@
           "const": "protocol_error"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
@@ -2170,14 +1982,10 @@
       "type": "object",
       "properties": {
         "target_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "model_type": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "revision": {
           "$ref": "#/$defs/Counter"
@@ -2246,9 +2054,7 @@
       "type": "object",
       "properties": {
         "command_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "input_schema": {
           "type": "object"
@@ -2257,9 +2063,7 @@
           "type": "object"
         },
         "effect_scope": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "mutation": {
           "type": "boolean"
@@ -2282,9 +2086,7 @@
       "type": "object",
       "properties": {
         "format_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "model_versions": {
           "type": "array",
@@ -2388,9 +2190,7 @@
       "type": "object",
       "properties": {
         "application_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "package_version": {
           "type": "string",
@@ -2435,9 +2235,7 @@
         "capabilities": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
+            "$ref": "#/$defs/Identifier"
           },
           "minItems": 0,
           "maxItems": 128,
@@ -2551,14 +2349,10 @@
           "const": "manifest_request"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "application_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -2576,9 +2370,7 @@
           "const": "manifest_result"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "manifest": {
           "$ref": "#/$defs/ApplicationManifest"
@@ -2599,17 +2391,13 @@
           "const": "lifecycle_request"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "fence": {
           "$ref": "#/$defs/Fence"
@@ -2644,17 +2432,13 @@
           "const": "lifecycle_result"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "generation": {
           "$ref": "#/$defs/Counter"
@@ -2689,9 +2473,7 @@
           "const": "session_join"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "ticket": {
           "type": "string",
@@ -2718,22 +2500,16 @@
           "const": "session_joined"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "participant_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "generation": {
           "$ref": "#/$defs/Counter"
@@ -2745,9 +2521,7 @@
           "$ref": "#/$defs/Versions"
         },
         "gate_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -2771,17 +2545,13 @@
           "const": "session_leave"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -2800,17 +2570,13 @@
           "const": "submit_changes"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "versions": {
           "$ref": "#/$defs/Versions"
@@ -2824,9 +2590,7 @@
           "maxItems": 256
         },
         "task_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -2847,24 +2611,18 @@
           "const": "changes_received"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "change_ids": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
+            "$ref": "#/$defs/Identifier"
           },
           "minItems": 1,
           "maxItems": 256,
@@ -2895,25 +2653,19 @@
           "const": "task_submit"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "versions": {
           "$ref": "#/$defs/Versions"
         },
         "task_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "allow_partial": {
           "type": "boolean"
@@ -2975,17 +2727,13 @@
           "const": "proposal_request"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "proposal_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -3004,17 +2752,13 @@
           "const": "collaboration_update"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "generation": {
           "$ref": "#/$defs/Counter"
@@ -3025,9 +2769,7 @@
         "change_ids": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
+            "$ref": "#/$defs/Identifier"
           },
           "minItems": 1,
           "maxItems": 256,
@@ -3069,17 +2811,13 @@
           "const": "document_update"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "generation": {
           "$ref": "#/$defs/Counter"
@@ -3147,25 +2885,19 @@
           "const": "asset_request"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "revision": {
           "$ref": "#/$defs/Counter"
         },
         "asset_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "offset_bytes": {
           "$ref": "#/$defs/Counter"
@@ -3194,9 +2926,7 @@
           "const": "asset_result"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
@@ -3205,9 +2935,7 @@
           "$ref": "#/$defs/Counter"
         },
         "asset_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "offset_bytes": {
           "$ref": "#/$defs/Counter"
@@ -3248,17 +2976,13 @@
           "const": "ticket_validate"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "fence": {
           "$ref": "#/$defs/Fence"
@@ -3269,9 +2993,7 @@
           "maxLength": 4096
         },
         "validation_nonce": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -3293,25 +3015,19 @@
           "const": "ticket_validated"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "generation": {
           "$ref": "#/$defs/Counter"
         },
         "participant_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "permission_version": {
           "$ref": "#/$defs/Counter"
@@ -3326,14 +3042,10 @@
           "$ref": "#/$defs/PositiveCounter"
         },
         "validation_nonce": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "gate_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -3360,40 +3072,30 @@
           "const": "revocation_notice"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "generation": {
           "$ref": "#/$defs/Counter"
         },
         "participant_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "permission_version": {
           "$ref": "#/$defs/Counter"
         },
         "barrier_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "gate_ids": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
+            "$ref": "#/$defs/Identifier"
           },
           "minItems": 0,
           "maxItems": 4096,
@@ -3447,9 +3149,7 @@
           "type": "object",
           "properties": {
             "change_id": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200
+              "$ref": "#/$defs/Identifier"
             },
             "status": {
               "enum": [
@@ -3475,9 +3175,7 @@
           "const": "runtime_ready"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "selected": {
           "$ref": "#/$defs/Versions"
@@ -3491,6 +3189,15 @@
       "additionalProperties": false,
       "x-direction": "runtime_to_host",
       "description": "Version/readiness acknowledgement on the private inherited host RPC channel only. Carries no scope, participant identity, permissions, content or authority. Never a participant Welcome or durability receipt."
+    },
+    "Identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "not": {
+        "pattern": "\u0000"
+      },
+      "description": "1..200 Unicode scalar values, excluding U+0000. Strict JSON rejects invalid Unicode before schema; no Unicode normalization. Does not constrain opaque application payload text."
     }
   },
   "x-schema-version": "0.4.0"

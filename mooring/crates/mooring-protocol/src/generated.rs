@@ -7,9 +7,9 @@ use crate::Counter;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Scope {
-    pub workspace_id: String,
-    pub artifact_id: String,
-    pub application_id: String,
+    pub workspace_id: Identifier,
+    pub artifact_id: Identifier,
+    pub application_id: Identifier,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -61,7 +61,7 @@ pub enum ErrorCode {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReadPrecondition {
-    pub target_id: String,
+    pub target_id: Identifier,
     pub revision: Counter,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub structure_revision: Option<Counter>,
@@ -70,11 +70,11 @@ pub struct ReadPrecondition {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Operation {
-    pub op_id: String,
+    pub op_id: Identifier,
     pub fingerprint: Digest,
-    pub participant_ref: String,
+    pub participant_ref: Identifier,
     pub base_revision: Counter,
-    pub dependencies: Vec<String>,
+    pub dependencies: Vec<Identifier>,
     pub read_preconditions: Vec<ReadPrecondition>,
     pub payload: serde_json::Map<String, serde_json::Value>,
 }
@@ -82,11 +82,11 @@ pub struct Operation {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AtomicChange {
-    pub change_id: String,
+    pub change_id: Identifier,
     pub operations: Vec<Operation>,
     pub membership_hash: Digest,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub task_id: Option<String>,
+    pub task_id: Option<Identifier>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -133,7 +133,7 @@ pub enum RejectionRootCauseCode {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RejectionRootCause {
-    pub op_id: String,
+    pub op_id: Identifier,
     pub code: RejectionRootCauseCode,
     pub message: String,
 }
@@ -155,7 +155,7 @@ pub enum RejectionRetry {
 pub struct Rejection {
     pub code: ErrorCode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub root_op_id: Option<String>,
+    pub root_op_id: Option<Identifier>,
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub root_cause: Option<RejectionRootCause>,
@@ -179,10 +179,10 @@ pub enum OperationResultVariant1Durability {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OperationResultVariant1 {
-    pub op_id: String,
+    pub op_id: Identifier,
     pub status: OperationResultVariant1Status,
     pub revision: Counter,
-    pub issuer: String,
+    pub issuer: Identifier,
     pub durability: OperationResultVariant1Durability,
 }
 
@@ -195,7 +195,7 @@ pub enum OperationResultVariant2Status {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OperationResultVariant2 {
-    pub op_id: String,
+    pub op_id: Identifier,
     pub status: OperationResultVariant2Status,
     pub reason: Rejection,
 }
@@ -218,7 +218,7 @@ pub enum ChangeResultStatus {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ChangeResult {
-    pub change_id: String,
+    pub change_id: Identifier,
     pub status: ChangeResultStatus,
     pub operations: Vec<OperationResult>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -237,7 +237,7 @@ pub enum HelloType {
 #[serde(deny_unknown_fields)]
 pub struct Hello {
     pub r#type: HelloType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub supported: Vec<Versions>,
 }
 
@@ -251,13 +251,13 @@ pub enum WelcomeType {
 #[serde(deny_unknown_fields)]
 pub struct Welcome {
     pub r#type: WelcomeType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub selected: Versions,
     pub scope: Scope,
-    pub participant_ref: String,
+    pub participant_ref: Identifier,
     pub permission_version: Counter,
     pub limits: WireLimits,
-    pub issuer: String,
+    pub issuer: Identifier,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -270,10 +270,10 @@ pub enum CommitBatchType {
 #[serde(deny_unknown_fields)]
 pub struct CommitBatch {
     pub r#type: CommitBatchType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub versions: Versions,
     pub scope: Scope,
-    pub session_id: String,
+    pub session_id: Identifier,
     pub fence: Fence,
     pub expected_revision: Counter,
     pub changes: Vec<AtomicChange>,
@@ -297,11 +297,11 @@ pub enum CommitResultDurability {
 #[serde(deny_unknown_fields)]
 pub struct CommitResult {
     pub r#type: CommitResultType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
     pub generation: Counter,
     pub revision: Counter,
-    pub issuer: String,
+    pub issuer: Identifier,
     pub durability: CommitResultDurability,
     pub changes: Vec<ChangeResult>,
 }
@@ -316,9 +316,9 @@ pub enum StatusRequestType {
 #[serde(deny_unknown_fields)]
 pub struct StatusRequest {
     pub r#type: StatusRequestType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub op_id: String,
+    pub op_id: Identifier,
     pub expected_fingerprint: Digest,
 }
 
@@ -337,7 +337,7 @@ pub enum StatusResultResultVariant2Status {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StatusResultResultVariant2 {
-    pub op_id: String,
+    pub op_id: Identifier,
     pub status: StatusResultResultVariant2Status,
 }
 
@@ -352,7 +352,7 @@ pub enum StatusResultResult {
 #[serde(deny_unknown_fields)]
 pub struct StatusResult {
     pub r#type: StatusResultType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
     pub result: StatusResultResult,
 }
@@ -360,7 +360,7 @@ pub struct StatusResult {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Asset {
-    pub asset_id: String,
+    pub asset_id: Identifier,
     pub digest: Digest,
     pub size_bytes: Counter,
 }
@@ -379,7 +379,7 @@ pub struct Checkpoint {
     pub scope: Scope,
     pub revision: Counter,
     pub generation: Counter,
-    pub format_version: String,
+    pub format_version: Identifier,
     pub versions: Versions,
     pub encoding: CheckpointEncoding,
     pub state: String,
@@ -420,7 +420,7 @@ pub enum SessionTicketRequestType {
 #[serde(deny_unknown_fields)]
 pub struct SessionTicketRequest {
     pub r#type: SessionTicketRequestType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
     pub requested: Capabilities,
 }
@@ -435,10 +435,10 @@ pub enum SessionTicketType {
 #[serde(deny_unknown_fields)]
 pub struct SessionTicket {
     pub r#type: SessionTicketType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
-    pub participant_ref: String,
+    pub session_id: Identifier,
+    pub participant_ref: Identifier,
     pub permission_version: Counter,
     pub granted: Capabilities,
     pub ticket: String,
@@ -456,10 +456,10 @@ pub enum OwnerAcquireType {
 #[serde(deny_unknown_fields)]
 pub struct OwnerAcquire {
     pub r#type: OwnerAcquireType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub runtime_ref: String,
-    pub renewal_nonce: String,
+    pub runtime_ref: Identifier,
+    pub renewal_nonce: Identifier,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -472,11 +472,11 @@ pub enum OwnerRenewType {
 #[serde(deny_unknown_fields)]
 pub struct OwnerRenew {
     pub r#type: OwnerRenewType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
+    pub session_id: Identifier,
     pub fence: Fence,
-    pub renewal_nonce: String,
+    pub renewal_nonce: Identifier,
     pub permission_version: Counter,
 }
 
@@ -490,14 +490,14 @@ pub enum OwnerGrantType {
 #[serde(deny_unknown_fields)]
 pub struct OwnerGrant {
     pub r#type: OwnerGrantType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
-    pub runtime_ref: String,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
     pub fence: Fence,
     pub lease_duration_ms: PositiveCounter,
     pub revision: Counter,
-    pub renewal_nonce: String,
+    pub renewal_nonce: Identifier,
     pub permission_version: Counter,
 }
 
@@ -511,14 +511,14 @@ pub enum DeliveryRenewType {
 #[serde(deny_unknown_fields)]
 pub struct DeliveryRenew {
     pub r#type: DeliveryRenewType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
-    pub participant_ref: String,
+    pub session_id: Identifier,
+    pub participant_ref: Identifier,
     pub fence: Fence,
     pub permission_version: Counter,
-    pub renewal_nonce: String,
-    pub gate_id: String,
+    pub renewal_nonce: Identifier,
+    pub gate_id: Identifier,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -531,15 +531,15 @@ pub enum DeliveryGrantType {
 #[serde(deny_unknown_fields)]
 pub struct DeliveryGrant {
     pub r#type: DeliveryGrantType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
-    pub participant_ref: String,
+    pub session_id: Identifier,
+    pub participant_ref: Identifier,
     pub generation: Counter,
     pub permission_version: Counter,
-    pub renewal_nonce: String,
+    pub renewal_nonce: Identifier,
     pub duration_ms: PositiveCounter,
-    pub gate_id: String,
+    pub gate_id: Identifier,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -552,15 +552,15 @@ pub enum SessionClosedType {
 #[serde(deny_unknown_fields)]
 pub struct SessionClosed {
     pub r#type: SessionClosedType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
-    pub participant_ref: String,
+    pub session_id: Identifier,
+    pub participant_ref: Identifier,
     pub generation: Counter,
     pub permission_version: Counter,
-    pub barrier_id: String,
+    pub barrier_id: Identifier,
     pub reason: Rejection,
-    pub gate_id: String,
+    pub gate_id: Identifier,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -573,13 +573,13 @@ pub enum DeliveryBlockedType {
 #[serde(deny_unknown_fields)]
 pub struct DeliveryBlocked {
     pub r#type: DeliveryBlockedType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
-    pub participant_ref: String,
+    pub session_id: Identifier,
+    pub participant_ref: Identifier,
     pub fence: Fence,
-    pub barrier_id: String,
-    pub covered_gate_ids: Vec<String>,
+    pub barrier_id: Identifier,
+    pub covered_gate_ids: Vec<Identifier>,
     pub permission_version: Counter,
 }
 
@@ -593,10 +593,10 @@ pub enum RevocationConfirmedType {
 #[serde(deny_unknown_fields)]
 pub struct RevocationConfirmed {
     pub r#type: RevocationConfirmedType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub participant_ref: String,
-    pub barrier_id: String,
+    pub participant_ref: Identifier,
+    pub barrier_id: Identifier,
     pub permission_version: Counter,
     pub read_blocked: bool,
     pub write_blocked: bool,
@@ -612,9 +612,9 @@ pub enum ReadRequestType {
 #[serde(deny_unknown_fields)]
 pub struct ReadRequest {
     pub r#type: ReadRequestType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
+    pub session_id: Identifier,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revision: Option<Counter>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -634,7 +634,7 @@ pub enum ReadResultType {
 #[serde(deny_unknown_fields)]
 pub struct ReadResult {
     pub r#type: ReadResultType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
     pub revision: Counter,
     pub items: Vec<ReadItem>,
@@ -652,7 +652,7 @@ pub enum CheckpointRequestType {
 #[serde(deny_unknown_fields)]
 pub struct CheckpointRequest {
     pub r#type: CheckpointRequestType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
     pub revision: Counter,
 }
@@ -667,7 +667,7 @@ pub enum CheckpointResultType {
 #[serde(deny_unknown_fields)]
 pub struct CheckpointResult {
     pub r#type: CheckpointResultType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub checkpoint: Checkpoint,
 }
 
@@ -681,10 +681,10 @@ pub enum PresenceType {
 #[serde(deny_unknown_fields)]
 pub struct Presence {
     pub r#type: PresenceType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
-    pub participant_ref: String,
+    pub session_id: Identifier,
+    pub participant_ref: Identifier,
     pub ttl_ms: PositiveCounter,
     pub view: serde_json::Map<String, serde_json::Value>,
 }
@@ -710,12 +710,12 @@ pub enum TaskSummaryStatus {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TaskSummary {
-    pub task_id: String,
+    pub task_id: Identifier,
     pub allow_partial: bool,
     pub status: TaskSummaryStatus,
     pub changes: Vec<TaskChangeState>,
-    pub participant_ref: String,
-    pub unresolved_change_ids: Vec<String>,
+    pub participant_ref: Identifier,
+    pub unresolved_change_ids: Vec<Identifier>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -728,9 +728,9 @@ pub enum TaskStatusType {
 #[serde(deny_unknown_fields)]
 pub struct TaskStatus {
     pub r#type: TaskStatusType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub task_id: String,
+    pub task_id: Identifier,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -743,7 +743,7 @@ pub enum TaskResultType {
 #[serde(deny_unknown_fields)]
 pub struct TaskResult {
     pub r#type: TaskResultType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
     pub task: TaskSummary,
 }
@@ -758,9 +758,9 @@ pub enum TaskCancelType {
 #[serde(deny_unknown_fields)]
 pub struct TaskCancel {
     pub r#type: TaskCancelType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub task_id: String,
+    pub task_id: Identifier,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -773,10 +773,10 @@ pub enum ProposalType {
 #[serde(deny_unknown_fields)]
 pub struct Proposal {
     pub r#type: ProposalType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub proposal_id: String,
-    pub participant_ref: String,
+    pub proposal_id: Identifier,
+    pub participant_ref: Identifier,
     pub base_revision: Counter,
     pub changes: Vec<AtomicChange>,
     pub diff: String,
@@ -792,11 +792,11 @@ pub enum ProposalAcceptType {
 #[serde(deny_unknown_fields)]
 pub struct ProposalAccept {
     pub r#type: ProposalAcceptType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub proposal_id: String,
+    pub proposal_id: Identifier,
     pub base_revision: Counter,
-    pub op_id: String,
+    pub op_id: Identifier,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -809,15 +809,15 @@ pub enum UndoRequestType {
 #[serde(deny_unknown_fields)]
 pub struct UndoRequest {
     pub r#type: UndoRequestType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub task_id: Option<String>,
-    pub participant_ref: String,
+    pub task_id: Option<Identifier>,
+    pub participant_ref: Identifier,
     pub base_revision: Counter,
-    pub op_id: String,
+    pub op_id: Identifier,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub target_change_id: Option<String>,
+    pub target_change_id: Option<Identifier>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -830,7 +830,7 @@ pub enum ProtocolErrorType {
 #[serde(deny_unknown_fields)]
 pub struct ProtocolError {
     pub r#type: ProtocolErrorType,
-    pub request_id: String,
+    pub request_id: Identifier,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope: Option<Scope>,
     pub reason: Rejection,
@@ -843,8 +843,8 @@ pub type Digest = String;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReadItem {
-    pub target_id: String,
-    pub model_type: String,
+    pub target_id: Identifier,
+    pub model_type: Identifier,
     pub revision: Counter,
     pub data: serde_json::Map<String, serde_json::Value>,
 }
@@ -867,10 +867,10 @@ pub struct WireLimits {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CommandDeclaration {
-    pub command_id: String,
+    pub command_id: Identifier,
     pub input_schema: serde_json::Map<String, serde_json::Value>,
     pub result_schema: serde_json::Map<String, serde_json::Value>,
-    pub effect_scope: String,
+    pub effect_scope: Identifier,
     pub mutation: bool,
     pub replayable: bool,
 }
@@ -888,7 +888,7 @@ pub enum FormatDeclarationValidator {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FormatDeclaration {
-    pub format_id: String,
+    pub format_id: Identifier,
     pub model_versions: Vec<String>,
     pub import_extensions: Vec<String>,
     pub export_extensions: Vec<String>,
@@ -967,14 +967,14 @@ pub enum ApplicationManifestMergeModelsItem {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ApplicationManifest {
-    pub application_id: String,
+    pub application_id: Identifier,
     pub package_version: String,
     pub package_digest: Digest,
     pub connection_path: ApplicationManifestConnectionPath,
     pub supported_versions: Vec<Versions>,
     pub formats: Vec<FormatDeclaration>,
     pub commands: Vec<CommandDeclaration>,
-    pub capabilities: Vec<String>,
+    pub capabilities: Vec<Identifier>,
     pub merge_models: Vec<ApplicationManifestMergeModelsItem>,
     pub presence_schema: serde_json::Map<String, serde_json::Value>,
     pub storage: StorageDeclaration,
@@ -991,8 +991,8 @@ pub enum ManifestRequestType {
 #[serde(deny_unknown_fields)]
 pub struct ManifestRequest {
     pub r#type: ManifestRequestType,
-    pub request_id: String,
-    pub application_id: String,
+    pub request_id: Identifier,
+    pub application_id: Identifier,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1005,7 +1005,7 @@ pub enum ManifestResultType {
 #[serde(deny_unknown_fields)]
 pub struct ManifestResult {
     pub r#type: ManifestResultType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub manifest: ApplicationManifest,
 }
 
@@ -1031,9 +1031,9 @@ pub enum LifecycleRequestAction {
 #[serde(deny_unknown_fields)]
 pub struct LifecycleRequest {
     pub r#type: LifecycleRequestType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
+    pub session_id: Identifier,
     pub fence: Fence,
     pub action: LifecycleRequestAction,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1060,9 +1060,9 @@ pub enum LifecycleResultState {
 #[serde(deny_unknown_fields)]
 pub struct LifecycleResult {
     pub r#type: LifecycleResultType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
+    pub session_id: Identifier,
     pub generation: Counter,
     pub state: LifecycleResultState,
     pub revision: Counter,
@@ -1078,7 +1078,7 @@ pub enum SessionJoinType {
 #[serde(deny_unknown_fields)]
 pub struct SessionJoin {
     pub r#type: SessionJoinType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub ticket: String,
     pub versions: Versions,
 }
@@ -1093,14 +1093,14 @@ pub enum SessionJoinedType {
 #[serde(deny_unknown_fields)]
 pub struct SessionJoined {
     pub r#type: SessionJoinedType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
-    pub participant_ref: String,
+    pub session_id: Identifier,
+    pub participant_ref: Identifier,
     pub generation: Counter,
     pub permission_version: Counter,
     pub versions: Versions,
-    pub gate_id: String,
+    pub gate_id: Identifier,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1113,9 +1113,9 @@ pub enum SessionLeaveType {
 #[serde(deny_unknown_fields)]
 pub struct SessionLeave {
     pub r#type: SessionLeaveType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
+    pub session_id: Identifier,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1128,13 +1128,13 @@ pub enum SubmitChangesType {
 #[serde(deny_unknown_fields)]
 pub struct SubmitChanges {
     pub r#type: SubmitChangesType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
+    pub session_id: Identifier,
     pub versions: Versions,
     pub changes: Vec<AtomicChange>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub task_id: Option<String>,
+    pub task_id: Option<Identifier>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1155,10 +1155,10 @@ pub enum ChangesReceivedState {
 #[serde(deny_unknown_fields)]
 pub struct ChangesReceived {
     pub r#type: ChangesReceivedType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
-    pub change_ids: Vec<String>,
+    pub session_id: Identifier,
+    pub change_ids: Vec<Identifier>,
     pub state: ChangesReceivedState,
 }
 
@@ -1180,11 +1180,11 @@ pub enum TaskSubmitMode {
 #[serde(deny_unknown_fields)]
 pub struct TaskSubmit {
     pub r#type: TaskSubmitType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
+    pub session_id: Identifier,
     pub versions: Versions,
-    pub task_id: String,
+    pub task_id: Identifier,
     pub allow_partial: bool,
     pub mode: TaskSubmitMode,
     pub changes: Vec<AtomicChange>,
@@ -1200,9 +1200,9 @@ pub enum ProposalRequestType {
 #[serde(deny_unknown_fields)]
 pub struct ProposalRequest {
     pub r#type: ProposalRequestType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub proposal_id: String,
+    pub proposal_id: Identifier,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1229,12 +1229,12 @@ pub enum CollaborationUpdateState {
 #[serde(deny_unknown_fields)]
 pub struct CollaborationUpdate {
     pub r#type: CollaborationUpdateType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
+    pub session_id: Identifier,
     pub generation: Counter,
     pub base_revision: Counter,
-    pub change_ids: Vec<String>,
+    pub change_ids: Vec<Identifier>,
     pub encoding: CollaborationUpdateEncoding,
     pub data: String,
     pub state: CollaborationUpdateState,
@@ -1258,9 +1258,9 @@ pub enum DocumentUpdateEncoding {
 #[serde(deny_unknown_fields)]
 pub struct DocumentUpdate {
     pub r#type: DocumentUpdateType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
+    pub session_id: Identifier,
     pub generation: Counter,
     pub from_revision: Counter,
     pub to_revision: Counter,
@@ -1279,11 +1279,11 @@ pub enum AssetRequestType {
 #[serde(deny_unknown_fields)]
 pub struct AssetRequest {
     pub r#type: AssetRequestType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
+    pub session_id: Identifier,
     pub revision: Counter,
-    pub asset_id: String,
+    pub asset_id: Identifier,
     pub offset_bytes: Counter,
     pub max_bytes: PositiveCounter,
 }
@@ -1298,10 +1298,10 @@ pub enum AssetResultType {
 #[serde(deny_unknown_fields)]
 pub struct AssetResult {
     pub r#type: AssetResultType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
     pub revision: Counter,
-    pub asset_id: String,
+    pub asset_id: Identifier,
     pub offset_bytes: Counter,
     pub size_bytes: Counter,
     pub digest: Digest,
@@ -1318,12 +1318,12 @@ pub enum TicketValidationRequestType {
 #[serde(deny_unknown_fields)]
 pub struct TicketValidationRequest {
     pub r#type: TicketValidationRequestType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
+    pub session_id: Identifier,
     pub fence: Fence,
     pub ticket: String,
-    pub validation_nonce: String,
+    pub validation_nonce: Identifier,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1336,17 +1336,17 @@ pub enum TicketValidationResultType {
 #[serde(deny_unknown_fields)]
 pub struct TicketValidationResult {
     pub r#type: TicketValidationResultType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
+    pub session_id: Identifier,
     pub generation: Counter,
-    pub participant_ref: String,
+    pub participant_ref: Identifier,
     pub permission_version: Counter,
     pub granted: Capabilities,
     pub versions: Versions,
     pub expires_in_ms: PositiveCounter,
-    pub validation_nonce: String,
-    pub gate_id: String,
+    pub validation_nonce: Identifier,
+    pub gate_id: Identifier,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1359,14 +1359,14 @@ pub enum RevocationNoticeType {
 #[serde(deny_unknown_fields)]
 pub struct RevocationNotice {
     pub r#type: RevocationNoticeType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
+    pub session_id: Identifier,
     pub generation: Counter,
-    pub participant_ref: String,
+    pub participant_ref: Identifier,
     pub permission_version: Counter,
-    pub barrier_id: String,
-    pub gate_ids: Vec<String>,
+    pub barrier_id: Identifier,
+    pub gate_ids: Vec<Identifier>,
     pub block_read: bool,
     pub block_write: bool,
 }
@@ -1386,7 +1386,7 @@ pub enum TaskChangeStateVariant2Status {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TaskChangeStateVariant2 {
-    pub change_id: String,
+    pub change_id: Identifier,
     pub status: TaskChangeStateVariant2Status,
 }
 
@@ -1407,9 +1407,11 @@ pub enum RuntimeReadyType {
 #[serde(deny_unknown_fields)]
 pub struct RuntimeReady {
     pub r#type: RuntimeReadyType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub selected: Versions,
 }
+
+pub type Identifier = String;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]

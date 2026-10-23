@@ -1,4 +1,7 @@
 [
+  {"kind":"identifier","unit":"😀","repeat":200,"expected":{"ok":true}},
+  {"kind":"identifier","unit":"😀","repeat":201,"expected":{"ok":false}},
+  {"kind":"identifier","unit":"\u0000","repeat":1,"expected":{"ok":false}},
   {"kind":"counter","input":"\"9007199254740993\"","expected":{"ok":true,"value":"9007199254740993"}},
   {"kind":"counter","input":"\"18446744073709551615\"","expected":{"ok":true,"value":"18446744073709551615"}},
   {"kind":"counter","input":"\"18446744073709551616\"","expected":{"ok":false}},

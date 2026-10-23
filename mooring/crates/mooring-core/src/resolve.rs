@@ -125,7 +125,7 @@ impl AtomicDecision {
     }
 }
 fn valid_id(id: &str) -> bool {
-    !id.is_empty() && id.len() <= 200 && !id.contains('\0')
+    mooring_protocol::wire::valid_identifier(id)
 }
 
 /// Plans bounded atomic changes without modifying them or retaining state. A

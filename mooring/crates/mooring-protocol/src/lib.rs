@@ -1,8 +1,10 @@
-//! Experimental partial wire shapes. Not an authenticated endpoint or a full
-//! JSON-schema validator. Numeric, size and cross-field validation is explicit.
+//! Experimental wire shapes and bounded validation of the bundled schema.
+//! Not an authenticated endpoint; application and authority checks remain explicit.
 use serde::{Deserialize, Serialize};
 pub mod canonical;
 mod generated;
+mod shape;
+pub mod wire;
 pub use generated::*;
 
 /// Lossless counter across Go/Rust/TS. The wire representation is a canonical
@@ -38,8 +40,7 @@ pub fn negotiate<'a>(
     hello: &Hello,
     supported: &'a [Versions],
 ) -> Result<&'a Versions, &'static str> {
-    if hello.request_id.is_empty()
-        || hello.request_id.chars().count() > 200
+    if !wire::valid_identifier(&hello.request_id)
         || hello.supported.is_empty()
         || hello.supported.len() > 16
     {
@@ -51,12 +52,7 @@ pub fn negotiate<'a>(
             &offered.model_version,
             &offered.engine_version,
         ] {
-            if version.len() > 60
-                || version.split('.').count() != 3
-                || !version
-                    .split('.')
-                    .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
-            {
+            if !shape::version(version) {
                 return Err("invalid_request");
             }
         }
