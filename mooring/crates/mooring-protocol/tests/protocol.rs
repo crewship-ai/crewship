@@ -47,7 +47,10 @@ fn p30_old_client_and_model_engine_mismatch_require_upgrade() {
         engine_version: "0.28.0".into(),
     };
     let mut hello: Hello = serde_json::from_str(r#"{"type":"hello","request_id":"r","supported":[{"protocol_version":"0.4.0","model_version":"1.0.0","engine_version":"0.28.0"}]}"#).unwrap();
-    assert_eq!(negotiate(&hello, std::slice::from_ref(&versions)), Ok(&versions));
+    assert_eq!(
+        negotiate(&hello, std::slice::from_ref(&versions)),
+        Ok(&versions)
+    );
     for axis in 0..3 {
         let mut old = versions.clone();
         match axis {
