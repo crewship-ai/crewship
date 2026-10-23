@@ -255,6 +255,8 @@ dependencies = [
 name = "mooring-wordcraft"
 version = "0.1.0"
 dependencies = [
+ "mooring-core",
+ "mooring-protocol",
  "mooring-text",
  "serde",
  "serde_json",
