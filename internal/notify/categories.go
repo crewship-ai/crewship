@@ -260,6 +260,11 @@ const SubkindDigest = "digest"
 // system.health: a backup that fails is the server's health, not a routine's.
 const SubkindBackupIncident = "backup_incident"
 
+// SubkindAuditChainIncident marks an audit chain break or reseal delivered to
+// an instance admin (internal/api audit_chain_alerts.go). It routes under
+// security: a broken audit chain is evidence handling, not server health.
+const SubkindAuditChainIncident = "audit_chain_incident"
+
 // CategoryForItem resolves an inbox row to its notification category.
 //
 // Kind alone is not always enough. A chat reply and a routine's progress notice
@@ -284,6 +289,8 @@ func CategoryForItem(kind string, payload map[string]interface{}) string {
 			return CategoryRoutinesCompleted
 		case SubkindBackupIncident:
 			return CategorySystemHealth
+		case SubkindAuditChainIncident:
+			return CategorySecurity
 		}
 	}
 	return CategoryForKind(kind)

@@ -711,11 +711,12 @@ var NonBackedUpTables = map[string]struct{}{
 
 	// ── Instance-global configuration & operational state. Local to THIS
 	//    instance; carrying it across a restore would clobber the target's own.
-	"app_settings":            {},
-	"instance_config":         {},
-	"rate_limit_overrides":    {}, // instance-global limiter tuning (v168); must not clobber the target's own on restore
-	"keeper_runtime_settings": {}, // instance-global judge wiring; a restored workspace must not repoint the target's gatekeeper at the source's model server
-	"instance_audit_logs":     {}, // instance-level admin actions (Admin › People & workspaces); the target instance keeps its own trail
+	"app_settings":                     {},
+	"instance_config":                  {},
+	"rate_limit_overrides":             {}, // instance-global limiter tuning (v168); must not clobber the target's own on restore
+	"keeper_runtime_settings":          {}, // instance-global judge wiring; a restored workspace must not repoint the target's gatekeeper at the source's model server
+	"instance_audit_logs":              {}, // instance-level admin actions (Admin › People & workspaces); the target instance keeps its own trail
+	"instance_audit_notice_deliveries": {}, // instance-level audit notification bookkeeping; retained by whole-database instance bundles
 	// restore_reports records every restore / dry run / drill THIS instance
 	// ran. Instance bookkeeping, like backup_catalog: a bundle carrying it
 	// would hand the target a restore history it never had.
