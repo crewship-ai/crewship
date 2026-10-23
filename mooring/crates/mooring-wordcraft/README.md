@@ -73,3 +73,13 @@ and account for effects between operations, discard the full candidate after
 any failure, and leave durable revisions and outcomes to Go. Confirmed-read
 agent commands do not replace the separate human path: human proposals must
 preserve their authored CRDT updates and IDs rather than reexecute this grammar.
+
+Native reads can project an already authenticated immutable checkpoint through
+`read::header` and `read::page`. The header retains every document field except
+body; pages retain complete native paragraphs plus their stable IDs. Both have
+explicit serialized-byte budgets (at most 262144 bytes); pages also cap paragraph
+count at 256. Unknown cursors and oversized individual paragraphs/headers are
+explicit errors, never truncation. The host reserves its envelope overhead and
+binds each after-ID cursor to the same scope, confirmed revision and checkpoint
+digest. These pure functions do not authenticate remote cursors or authorize a
+content path. Read-only native documents remain readable in full.

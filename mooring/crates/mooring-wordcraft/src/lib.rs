@@ -4,6 +4,7 @@
 #[allow(dead_code)] // Pending trusted read-context wrapper; no admission exposed.
 mod candidate;
 pub mod command;
+pub mod read;
 
 use std::collections::HashSet;
 
