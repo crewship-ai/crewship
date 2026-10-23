@@ -253,8 +253,10 @@ type AuthMiddleware struct {
 	streams   *auth.StreamCredentials
 	// observeSession, when set, sees every request a sign-in session
 	// authenticated (never a CLI token), after authentication and before
-	// the handler. It must not block or change the request.
-	observeSession func(*http.Request)
+	// the handler, with the user's ID and a lookup (a database query, so
+	// call it only when needed) of whether the user administers the
+	// instance. It must not block or change the request.
+	observeSession func(r *http.Request, userID string, isInstanceAdmin func() bool)
 }
 
 // NewAuthMiddleware creates an AuthMiddleware. sessionsStore must back
@@ -414,7 +416,7 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			return
 		}
 		if authKind == AuthKindSession && m.observeSession != nil {
-			m.observeSession(r)
+			m.observeSession(r, user.ID, func() bool { return m.db != nil && isInstanceAdmin(r, m.db) })
 		}
 		next.ServeHTTP(w, r)
 	})

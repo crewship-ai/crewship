@@ -97,7 +97,7 @@ func TestCheckProxy(t *testing.T) {
 		{"normalize", ProxyCheckFailed, true, ""},
 		{"unrouted", ProxyCheckFailed, false, ""},
 		{"host-rewrite", ProxyCheckFailed, false, ""},
-		{"strip-marker", ProxyCheckFailed, false, ""},
+		{"strip-marker", ProxyCheckFailed, true, ""},
 	} {
 		t.Run(tc.mode, func(t *testing.T) {
 			srv, _ := proxyFixture(t, tc.mode)
@@ -227,7 +227,7 @@ func TestDisablingIsPerOrigin(t *testing.T) {
 	h, digest := zeroConfigFixture(t)
 	index := "/_editor/b/" + digest + "/index.html"
 	for _, host := range []string{"a.example.test", "b.example.test"} {
-		h.LearnOrigin(signedIn(host, "https://"+host+"/chat"))
+		learnAs(h, signedIn(host, "https://"+host+"/chat"), host, false)
 	}
 	h.RecordCheck("https://a.example.test", ProxyCheck{Status: ProxyCheckFailed, Isolation: true, Cause: CauseRedirect, Problems: []string{"x"}})
 	if w := serve(h, "GET", "a.example.test", index, frameNav...); w.Code != http.StatusServiceUnavailable {

@@ -16,13 +16,16 @@ import (
 type workbookEditorOrigin struct {
 	Origin            string    `json:"origin" yaml:"origin"`
 	Source            string    `json:"source" yaml:"source"`
+	LearnedFrom       string    `json:"learned_from,omitempty" yaml:"learned_from,omitempty"`
+	AdminSession      bool      `json:"admin_session,omitempty" yaml:"admin_session,omitempty"`
 	ProxyCheck        string    `json:"proxy_check" yaml:"proxy_check"`
 	Disabled          bool      `json:"disabled" yaml:"disabled"`
 	Cause             string    `json:"cause,omitempty" yaml:"cause,omitempty"`
 	Problems          []string  `json:"problems,omitempty" yaml:"problems,omitempty"`
 	Warnings          []string  `json:"warnings,omitempty" yaml:"warnings,omitempty"`
 	ConsecutivePasses int       `json:"consecutive_passes,omitempty" yaml:"consecutive_passes,omitempty"`
-	CheckedAt         time.Time `json:"checked_at,omitzero" yaml:"checked_at,omitempty"`
+	CheckedAt         time.Time `json:"checked_at,omitzero,omitempty" yaml:"checked_at,omitempty"`
+	LastSeen          time.Time `json:"last_seen,omitzero,omitempty" yaml:"last_seen,omitempty"`
 }
 
 type workbookEditorState struct {
@@ -41,6 +44,12 @@ self-check of every public Studio origin it knows: the configured one
 (CREWSHIP_PAGE_STUDIO_ORIGIN), or those signed-in browsers used. For each:
 the result, whether the editor is disabled there, the cause and the
 problems found. The public /healthz shows only the coarse state.
+
+A learned origin names the user whose signed-in request taught it, and
+whether an instance administrator's session used it. Only the configured
+origin and origins an administrator used count towards /healthz; any
+signed-in user can make the server learn an origin, so check that the others
+are yours. A learned origin not used for 24 hours is forgotten.
 
 A disabled origin comes back by itself after three consecutive passing
 checks, five minutes apart.`,
@@ -81,7 +90,14 @@ checks, five minutes apart.`,
 				if cause == "" {
 					cause = "-"
 				}
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", o.Origin, o.Source, o.ProxyCheck, editor, cause)
+				source := o.Source
+				if o.LearnedFrom != "" {
+					source += " from " + o.LearnedFrom
+				}
+				if o.AdminSession {
+					source += " (admin)"
+				}
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", o.Origin, source, o.ProxyCheck, editor, cause)
 			}
 			_ = tw.Flush()
 			for _, o := range out.Origins {

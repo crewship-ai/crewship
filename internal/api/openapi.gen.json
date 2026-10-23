@@ -37154,6 +37154,9 @@
                     "origins": {
                       "items": {
                         "properties": {
+                          "admin_session": {
+                            "type": "boolean"
+                          },
                           "cause": {
                             "type": "string"
                           },
@@ -37165,6 +37168,12 @@
                           },
                           "disabled": {
                             "type": "boolean"
+                          },
+                          "last_seen": {
+                            "type": "string"
+                          },
+                          "learned_from": {
+                            "type": "string"
                           },
                           "origin": {
                             "type": "string"

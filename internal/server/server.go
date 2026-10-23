@@ -437,7 +437,7 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		if s.bgCtx == nil {
 			s.bgCtx, s.bgCancel = context.WithCancel(journal.WithSigningKeys(context.Background(), cfg.Audit.Keys))
 		}
-		startEditorProxyCheck(s.bgCtx, &s.bgWg, s.editor, logger, newEditorProxyCheckClient(), editorProxyCheckSchedule)
+		startEditorProxyCheck(s.bgCtx, &s.bgWg, s.editor, logger, newEditorProxyCheckClient(s.editor.AllowsLoopbackProbes()), editorProxyCheckSchedule)
 	}
 	mainHandler = securityHeadersMiddlewareWith(mainHandler, editorHeaderOptions(cfg, editor))
 	// The editor (its host, or its path prefix on the Studio origin) serves

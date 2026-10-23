@@ -124,9 +124,14 @@ type Options struct {
 	// Scheme returns the scheme a browser used for r ("https" or "http").
 	// Nil uses TLS on the connection. Crewship passes its trusted-proxy rule
 	// (X-Forwarded-Proto only from a trusted proxy).
-	Scheme    func(r *http.Request) string
-	BundleDir string
-	Bundles   []string
+	Scheme func(r *http.Request) string
+	// LoopbackServer: the server listens on loopback only (development).
+	// Only then may the same-host self-check learn and probe loopback
+	// origins; otherwise a signed-in user could point it at services on the
+	// server's own loopback interface.
+	LoopbackServer bool
+	BundleDir      string
+	Bundles        []string
 }
 
 type file struct {
@@ -157,8 +162,10 @@ type Handler struct {
 	// pinned is the configured public Studio origin (same host), or "".
 	pinned  string
 	runtime string
-	scheme  func(*http.Request) string
-	bundles map[string]bundle
+	// loopback: the server listens on loopback only (Options.LoopbackServer).
+	loopback bool
+	scheme   func(*http.Request) string
+	bundles  map[string]bundle
 	// order lists the loaded bundles in allowlist order; the first one is
 	// the bundle new editor sessions frame (SessionBundle).
 	order []string
@@ -376,7 +383,7 @@ func New(o Options) (*Handler, error) {
 	var errs []error
 	var h *Handler
 	if o.SameHost {
-		h = &Handler{sameHost: true, scheme: o.Scheme, runtime: CanonicalOrigin(o.PageRuntimeOrigin), bundles: map[string]bundle{}}
+		h = &Handler{sameHost: true, scheme: o.Scheme, runtime: CanonicalOrigin(o.PageRuntimeOrigin), loopback: o.LoopbackServer, bundles: map[string]bundle{}}
 		h.check.init()
 		if strings.TrimSpace(o.Origin) != "" {
 			h.broken = true
@@ -894,7 +901,7 @@ func (h *Handler) SessionBundle(r *http.Request) (digest, indexURL string) {
 	}
 	if h.sameHost {
 		origin, err := h.StudioOriginFor(r)
-		if err != nil || h.originDisabled(origin) {
+		if err != nil || h.check.disabledFor(origin) {
 			return "", ""
 		}
 	}
