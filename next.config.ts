@@ -32,6 +32,12 @@ const nextConfig: NextConfig = {
         source: "/api/:path*",
         destination: `http://localhost:${goPort}/api/:path*`,
       },
+      // Same-host workbook editor (zero-config default): the backend owns
+      // this prefix and sets its sandboxed policy.
+      {
+        source: "/_editor/:path*",
+        destination: `http://localhost:${goPort}/_editor/:path*`,
+      },
     ]
   },
 }

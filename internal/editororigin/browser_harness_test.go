@@ -4,11 +4,15 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"net"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -21,7 +25,7 @@ const harnessBootstrap = `import init from './app.js';init()`
 const harnessApp = `export default async function init() {
   const params = new URLSearchParams(location.search)
   const parentOrigin = params.get('parent_origin')
-  const bundle = location.pathname.split('/')[2]
+  const bundle = location.pathname.match(/\/b\/([0-9a-f]{64})\//)[1]
   const r = { origin: self.origin }
   try { r.cookie = document.cookie; r.cookieRead = 'allowed' } catch (e) { r.cookieRead = 'blocked:' + e.name }
   try { document.cookie = 'tossed=1; Path=/'; r.cookieWrite = 'allowed' } catch (e) { r.cookieWrite = 'blocked:' + e.name }
@@ -29,6 +33,12 @@ const harnessApp = `export default async function init() {
   try { top.location.href = parentOrigin + '/navigated'; r.topNav = 'not thrown' } catch (e) { r.topNav = 'blocked:' + e.name }
   try { await WebAssembly.instantiateStreaming(fetch(new URL('./app_bg.wasm', import.meta.url))); r.wasm = 'ok' } catch (e) { r.wasm = 'failed:' + e }
   try { await fetch(parentOrigin + '/probe'); r.fetchParent = 'allowed' } catch (e) { r.fetchParent = 'blocked' }
+  // A stale or compromised bundle calling the Studio API with credentials.
+  try { await fetch(parentOrigin + '/api/v1/auth/session', { credentials: 'include' }); r.fetchApi = 'allowed' } catch (e) { r.fetchApi = 'blocked' }
+  try { new WebSocket(parentOrigin.replace(/^http/, 'ws') + '/ws') } catch (e) {}
+  try { navigator.sendBeacon(parentOrigin + '/beacon', 'x') } catch (e) {}
+  try { await navigator.serviceWorker.register(new URL('./app.js', import.meta.url)); r.serviceWorker = 'registered' } catch (e) { r.serviceWorker = 'blocked:' + e.name }
+  try { r.popup = window.open(parentOrigin + '/opened') === null ? 'blocked' : 'opened' } catch (e) { r.popup = 'blocked:' + e.name }
   // no-cors subresources from the opaque origin (Trunk CSS, images, classic scripts)
   r.cssApplied = getComputedStyle(document.body).color === 'rgb(1, 2, 3)'
   r.classicRan = window.classicRan === true
@@ -59,6 +69,14 @@ var harnessWasm = string([]byte{0, 'a', 's', 'm', 1, 0, 0, 0})
 
 // TestEditorOriginBrowserHarness serves a sandboxed bundle for
 // e2e/editor-origin-sandbox.mjs; the Playwright script stops it.
+//
+// With CREWSHIP_TEST_EDITOR_MODE=same-host it is the front server of the
+// Studio origin, as the Crewship server is: Gate sends the editor prefix to
+// the same-host handler and reverse-proxies everything else, unchanged, to
+// the Studio stand-in at CREWSHIP_TEST_STUDIO_UPSTREAM. A front layer in the
+// same process can play a load balancer that sets its own SameSite=None
+// cookie on editor responses (/__proxycookie?on=1) and records the Cookie
+// headers the editor prefix receives (/__editorcookies).
 func TestEditorOriginBrowserHarness(t *testing.T) {
 	out := os.Getenv("CREWSHIP_TEST_EDITOR_FILE")
 	if out == "" {
@@ -92,10 +110,27 @@ func TestEditorOriginBrowserHarness(t *testing.T) {
 		os.WriteFile(filepath.Join(dir, digest, name), []byte(body), 0o644)
 	}
 	os.WriteFile(filepath.Join(dir, digest, "manifest.json"), manifest, 0o644)
-	h, err := New(Options{Origin: origin, StudioOrigin: os.Getenv("CREWSHIP_TEST_STUDIO_ORIGIN"), BundleDir: dir, Bundles: []string{digest}})
+	opts := Options{Origin: origin, StudioOrigin: os.Getenv("CREWSHIP_TEST_STUDIO_ORIGIN"), BundleDir: dir, Bundles: []string{digest}}
+	sameHost := os.Getenv("CREWSHIP_TEST_EDITOR_MODE") == "same-host"
+	if sameHost {
+		opts = Options{SameHost: true, StudioOrigin: origin, BundleDir: dir, Bundles: []string{digest}}
+	}
+	h, err := New(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
+	var serve http.Handler = h
+	if sameHost {
+		upstream, err := url.Parse(os.Getenv("CREWSHIP_TEST_STUDIO_UPSTREAM"))
+		if err != nil || upstream.Host == "" {
+			t.Fatalf("same-host harness needs CREWSHIP_TEST_STUDIO_UPSTREAM: %v", err)
+		}
+		studio := &httputil.ReverseProxy{Rewrite: func(pr *httputil.ProxyRequest) { pr.SetURL(upstream); pr.Out.Host = pr.In.Host }}
+		serve = Gate(h, studio)
+	}
+	var proxyCookie atomic.Bool
+	var seenMu sync.Mutex
+	var seen []string
 	stop := make(chan struct{}, 1)
 	server := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/__stop" {
@@ -106,16 +141,37 @@ func TestEditorOriginBrowserHarness(t *testing.T) {
 			w.WriteHeader(204)
 			return
 		}
-		h.ServeHTTP(w, r)
+		switch r.URL.Path {
+		case "/__proxycookie":
+			proxyCookie.Store(r.URL.Query().Get("on") == "1")
+			w.WriteHeader(204)
+			return
+		case "/__editorcookies":
+			seenMu.Lock()
+			json.NewEncoder(w).Encode(append([]string{}, seen...))
+			seen = nil
+			seenMu.Unlock()
+			return
+		}
+		if sameHost && strings.HasPrefix(strings.ToLower(r.URL.Path), SameHostPrefix+"/") {
+			seenMu.Lock()
+			seen = append(seen, strings.Join(r.Header.Values("Cookie"), "; "))
+			seenMu.Unlock()
+			if proxyCookie.Load() {
+				w.Header().Add("Set-Cookie", "LBSTICKY=abc; Path=/; SameSite=None; Secure")
+			}
+		}
+		serve.ServeHTTP(w, r)
 	})}
 	defer server.Close()
 	go server.Serve(listener)
-	if err := os.WriteFile(out, []byte(fmt.Sprintf(`{"origin":%q,"digest":%q}`, origin, digest)), 0o600); err != nil {
+	info, _ := json.Marshal(map[string]string{"origin": origin, "digest": digest, "index": h.IndexURL(digest), "frameSrc": h.FrameSource()})
+	if err := os.WriteFile(out, info, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case <-stop:
-	case <-time.After(60 * time.Second):
+	case <-time.After(170 * time.Second):
 		t.Fatal("browser harness timeout")
 	}
 }

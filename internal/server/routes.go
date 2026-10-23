@@ -89,6 +89,12 @@ func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 		body["episodic_error"] = detail
 	}
 	addGridCraftTestBarrierHealth(body)
+	// The embedded workbook editor, only while it is enabled: same-host or
+	// dedicated mode and, in same-host mode, the proxy self-check that
+	// `crewship doctor` reports.
+	if st := s.editor.Status(); st.Mode != "" {
+		body["workbook_editor"] = st
+	}
 	status := http.StatusOK
 	if s.writerOwnerCheck != nil {
 		body["writer_ownership"] = "held"

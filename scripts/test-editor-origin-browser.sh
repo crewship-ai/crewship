@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Chromium contract for the sandboxed editor origin. Missing prerequisites fail.
+# Chromium contract for the sandboxed editor: dedicated origin (three host
+# variants) and the zero-config same-host mode. Missing prerequisites fail.
 #
 #   crewship-heavy scripts/test-editor-origin-browser.sh
 #
@@ -20,3 +21,4 @@ export CREWSHIP_TEST_EDITOR_BINARY="$out/editororigin.test"
 timeout 120s node e2e/editor-origin-sandbox.mjs | tee "$out/browser.log"
 HOST_COEP=1 timeout 120s node e2e/editor-origin-sandbox.mjs | tee "$out/browser-coep.log"
 HOST_SANDBOX=1 timeout 120s node e2e/editor-origin-sandbox.mjs | tee "$out/browser-host-sandbox.log"
+EDITOR_MODE=same-host timeout 180s node e2e/editor-origin-sandbox.mjs | tee "$out/browser-same-host.log"

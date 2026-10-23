@@ -49,7 +49,36 @@ func TestGridCraftEditorOriginValidation(t *testing.T) {
 		{"valid sibling with dev exception", func(c *Config) {}, "", true},
 		{"disabled and unset", func(c *Config) { c.GridCraft = GridCraftConfig{} }, "", true},
 		{"requires workbook engine", func(c *Config) { c.GridCraft.Enabled = false }, "", false},
-		{"requires origin", func(c *Config) { c.GridCraft.EditorOrigin = "" }, "", false},
+		// Zero-config default: no dedicated origin serves the editor under a
+		// sandboxed path prefix of the Studio origin.
+		{"zero-config same host", func(c *Config) { c.GridCraft.EditorOrigin = ""; c.GridCraft.EditorDevelopmentSameSite = false }, "", true},
+		{"same host on loopback http", func(c *Config) {
+			c.Auth.NextjsURL = "http://localhost:3000"
+			c.GridCraft.EditorOrigin, c.GridCraft.EditorDevelopmentSameSite = "", false
+		}, "", true},
+		{"same host on cleartext studio", func(c *Config) {
+			c.Auth.NextjsURL = "http://studio.example.test"
+			c.GridCraft.EditorOrigin, c.GridCraft.EditorDevelopmentSameSite = "", false
+		}, "", false},
+		{"same host with sibling exception set", func(c *Config) { c.GridCraft.EditorOrigin = "" }, "", false},
+		// A same-origin Page runtime puts all of Studio into frame-src; a
+		// self-navigated editor frame would then reach framable Studio documents.
+		{"same host with same-origin page runtime", func(c *Config) {
+			c.GridCraft.EditorOrigin, c.GridCraft.EditorDevelopmentSameSite = "", false
+			c.Storage.PageRuntimeOrigin = "https://studio.example.test"
+		}, "", false},
+		{"same host with separate page runtime", func(c *Config) {
+			c.GridCraft.EditorOrigin, c.GridCraft.EditorDevelopmentSameSite = "", false
+			c.Storage.PageRuntimeOrigin = "https://apps.example.net"
+		}, "", true},
+		{"same host with opaque origin trusted", func(c *Config) {
+			c.GridCraft.EditorOrigin, c.GridCraft.EditorDevelopmentSameSite = "", false
+		}, "https://studio.example.test, null", false},
+		{"dedicated with opaque origin trusted", func(c *Config) {}, "null", false},
+		{"same host while disabled is not validated", func(c *Config) {
+			c.GridCraft.EditorEnabled, c.GridCraft.EditorOrigin = false, ""
+			c.Storage.PageRuntimeOrigin = "https://studio.example.test"
+		}, "", true},
 		{"sibling without dev exception", func(c *Config) { c.GridCraft.EditorDevelopmentSameSite = false }, "", false},
 		{"equals studio", func(c *Config) { c.GridCraft.EditorOrigin = "https://studio.example.test" }, "", false},
 		{"equals explicit studio origin", func(c *Config) {

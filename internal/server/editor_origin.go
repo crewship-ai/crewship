@@ -7,17 +7,30 @@ import (
 	"github.com/crewship-ai/crewship/internal/editororigin"
 )
 
-// newEditorOrigin returns the handler for the embedded workbook editor host,
-// or nil when no editor origin is configured. A configured origin is always
-// isolated from the main application; bundles are loaded only while both the
-// workbook engine and the editor are enabled.
+// newEditorOrigin returns the handler for the embedded workbook editor, or nil
+// when nothing is served.
+//
+// With a dedicated editor origin configured, that host is always isolated
+// from the main application; bundles are loaded only while both the workbook
+// engine and the editor are enabled. Without one (the zero-config default),
+// an enabled editor is served under editororigin.SameHostPrefix on the Studio
+// origin, and a disabled editor changes nothing.
 func newEditorOrigin(cfg *config.Config, logger *slog.Logger) *editororigin.Handler {
 	g := cfg.GridCraft
+	enabled := g.Enabled && g.EditorEnabled
 	if g.EditorOrigin == "" {
-		return nil
+		if !enabled {
+			return nil
+		}
+		h, err := editororigin.New(editororigin.Options{SameHost: true, StudioOrigin: cfg.PageStudioOrigin(), BundleDir: g.EditorBundleDir, Bundles: g.EditorBundles})
+		if err != nil {
+			// The handler still owns the prefix; refused bundles are not served.
+			logger.Error("gridcraft editor (same host) refused", "error", err)
+		}
+		return h
 	}
 	o := editororigin.Options{Origin: g.EditorOrigin, StudioOrigin: cfg.PageStudioOrigin()}
-	if g.Enabled && g.EditorEnabled {
+	if enabled {
 		o.BundleDir, o.Bundles = g.EditorBundleDir, g.EditorBundles
 	}
 	h, err := editororigin.New(o)
@@ -32,4 +45,15 @@ func newEditorOrigin(cfg *config.Config, logger *slog.Logger) *editororigin.Hand
 		logger.Error("gridcraft editor bundle refused", "error", err)
 	}
 	return h
+}
+
+// editorHeaderOptions adds the editor to Studio's frame-src only while the
+// editor is enabled: the dedicated origin, or the bundle path on the Studio
+// origin, never the bare Studio origin.
+func editorHeaderOptions(cfg *config.Config, editor *editororigin.Handler) securityHeaderOptions {
+	o := securityHeaderOptions{pageRuntimeOrigin: cfg.Storage.PageRuntimeOrigin}
+	if cfg.GridCraft.Enabled && cfg.GridCraft.EditorEnabled {
+		o.editorFrameSrc = editor.FrameSource()
+	}
+	return o
 }

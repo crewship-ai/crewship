@@ -33,14 +33,17 @@ func securityHeadersMiddleware(next http.Handler, pageRuntimeOrigin ...string) h
 // securityHeaderOptions are the operator-configured origins Studio may frame.
 type securityHeaderOptions struct {
 	pageRuntimeOrigin string
-	// editorOrigin is the embedded workbook editor origin, set only while the
-	// editor is enabled. It is added to frame-src of every UI document: the
-	// policy belongs to the document, and the UI routes on the client, so a
-	// document first loaded on /chat may later show a workbook Page. Widening
-	// is limited to this one operator-configured origin, whose document is
-	// CSP-sandboxed and holds no credential; frame-src governs only what
-	// Studio frames, not who may frame Studio (frame-ancestors stays 'none').
-	editorOrigin string
+	// editorFrameSrc is the embedded workbook editor's frame-src source, set
+	// only while the editor is enabled: a dedicated editor origin, or the
+	// bundle path on the Studio origin (zero-config default, never the bare
+	// Studio origin, so a self-navigated editor frame cannot reach a Studio
+	// document). It is added to frame-src of every UI document: the policy
+	// belongs to the document, and the UI routes on the client, so a
+	// document first loaded on /chat may later show a workbook Page. The
+	// editor document is CSP-sandboxed and holds no credential; frame-src
+	// governs only what Studio frames, not who may frame Studio
+	// (frame-ancestors stays 'none').
+	editorFrameSrc string
 }
 
 func appendFrameSrc(frameSrc, origin string) string {
@@ -54,7 +57,7 @@ func appendFrameSrc(frameSrc, origin string) string {
 }
 
 func securityHeadersMiddlewareWith(next http.Handler, o securityHeaderOptions) http.Handler {
-	editorFrameSrc := editororigin.FrameSrc(o.editorOrigin)
+	editorFrameSrc := o.editorFrameSrc
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		frameSrc := appendFrameSrc(appendFrameSrc(pages.FrameSrcDirective(), o.pageRuntimeOrigin), editorFrameSrc)
 		w.Header().Set("X-Frame-Options", "DENY")
@@ -95,7 +98,8 @@ func securityHeadersMiddlewareWith(next http.Handler, o securityHeaderOptions) h
 			// omitted on purpose — opting into Chrome's preload list
 			// is a one-way door (removal takes months) and requires
 			// every current and future subdomain to be HTTPS-only.
-			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+			// The same-host workbook editor sends this exact value too.
+			w.Header().Set("Strict-Transport-Security", editororigin.StudioHSTS)
 
 			// COEP `credentialless` strips cookies from cross-origin
 			// no-cors requests so the page can opt into cross-origin
