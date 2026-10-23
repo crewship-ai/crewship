@@ -1,0 +1,656 @@
+{
+  "status": "draft-cross-language-golden-vectors",
+  "atomic_input": {
+    "domain": "mooring.atomic.v0.4",
+    "scope": {
+      "application_id": "editor",
+      "artifact_id": "a",
+      "workspace_id": "w"
+    },
+    "change_id": "c1",
+    "operations_without_fingerprints": [
+      {
+        "op_id": "o1",
+        "participant_ref": "host-ref",
+        "base_revision": "0",
+        "dependencies": [],
+        "read_preconditions": [],
+        "payload": {
+          "kind": "text",
+          "text": "Příliš žluťoučký kůň"
+        }
+      }
+    ]
+  },
+  "atomic_canonical": "{\"change_id\":\"c1\",\"domain\":\"mooring.atomic.v0.4\",\"operations_without_fingerprints\":[{\"base_revision\":\"0\",\"dependencies\":[],\"op_id\":\"o1\",\"participant_ref\":\"host-ref\",\"payload\":{\"kind\":\"text\",\"text\":\"Příliš žluťoučký kůň\"},\"read_preconditions\":[]}],\"scope\":{\"application_id\":\"editor\",\"artifact_id\":\"a\",\"workspace_id\":\"w\"}}",
+  "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47",
+  "operation_canonical": "{\"domain\":\"mooring.operation.v0.4\",\"membership_hash\":\"sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47\",\"op_id\":\"o1\"}",
+  "operation_fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97",
+  "canonicalization": "RFC8785/JCS UTF-8 bytes, UTF-16 key order, binary64 numbers, no Unicode normalization",
+  "canonicalization_vectors": [
+    {
+      "id": "numeric-boundaries",
+      "input_json": "{\"z\":-0,\"a\":1e-7,\"b\":0.000001,\"c\":1e21,\"d\":100000000000000000000,\"e\":1.2345678901234567}",
+      "canonical_json": "{\"a\":1e-7,\"b\":0.000001,\"c\":1e+21,\"d\":100000000000000000000,\"e\":1.2345678901234567,\"z\":0}",
+      "sha256": "sha256:f67c28d0d59bade085fc95f74ae071c7ad8641fa91b0c4109c03446552e9788a"
+    },
+    {
+      "id": "unicode-utf16-order",
+      "input_json": "{\"\\ue000\":\"private-use\",\"😀\":\"astral\",\"a\":\"ascii\",\"\\r\":\"control\",\"é\":\"accent\"}",
+      "canonical_json": "{\"\\r\":\"control\",\"a\":\"ascii\",\"é\":\"accent\",\"😀\":\"astral\",\"\":\"private-use\"}",
+      "sha256": "sha256:e9f00560aa20dea512f402ee12576c14a0f4fd8df6b8531edd5dbffa63e6e6be"
+    },
+    {
+      "id": "numeric-object-keys",
+      "input_json": "{\"2\":\"two\",\"10\":\"ten\",\"01\":\"one\"}",
+      "canonical_json": "{\"01\":\"one\",\"10\":\"ten\",\"2\":\"two\"}",
+      "sha256": "sha256:4220e8b232d3067a2120991af7025f12cd43f3e045caa1c412bdc4e12361105e"
+    },
+    {
+      "id": "unicode-no-normalization",
+      "input_json": "{\"composed\":\"é\",\"decomposed\":\"e\\u0301\",\"escaped\":\"\\n\\t\\u000f\\\"\\\\\"}",
+      "canonical_json": "{\"composed\":\"é\",\"decomposed\":\"é\",\"escaped\":\"\\n\\t\\u000f\\\"\\\\\"}",
+      "sha256": "sha256:6f4683adae9a0f389b16dd985004a4f66edc7b31355c24164a7e614bdd3f57a6"
+    },
+    {
+      "id": "nested-array-order",
+      "input_json": "{\"z\":[{\"b\":true,\"a\":null},false,\"ř\"],\"a\":[]}",
+      "canonical_json": "{\"a\":[],\"z\":[{\"a\":null,\"b\":true},false,\"ř\"]}",
+      "sha256": "sha256:8989e9f7a35914aa9ec07abecd635901681c74b841ebbdb99053fbaf81849f04"
+    },
+    {
+      "id": "adapter-binary64-integer-normalization",
+      "input_json": "{\"payload\":{\"value\":9007199254740993}}",
+      "canonical_json": "{\"payload\":{\"value\":9007199254740992}}",
+      "sha256": "sha256:b895d9def5da2ff763a1067cafaa6a596f9e7513b0e367fa6a9e676cf795a8de"
+    },
+    {
+      "id": "adapter-exact-large-integer-string",
+      "input_json": "{\"payload\":{\"value\":\"9007199254740993\"}}",
+      "canonical_json": "{\"payload\":{\"value\":\"9007199254740993\"}}",
+      "sha256": "sha256:5477a8bfadcc6c829b67762fa28a03c05a4ee4ce67ade099b602a1da11c13443"
+    }
+  ],
+  "invalid_inputs": [
+    {
+      "id": "duplicate-json-keys",
+      "input_json": "{\"payload\":{\"x\":1,\"x\":2}}",
+      "reason": "duplicate_property"
+    },
+    {
+      "id": "lone-high-surrogate",
+      "input_json": "{\"text\":\"\\ud800\"}",
+      "reason": "invalid_unicode"
+    },
+    {
+      "id": "lone-low-surrogate",
+      "input_json": "{\"text\":\"\\udfff\"}",
+      "reason": "invalid_unicode"
+    },
+    {
+      "id": "nonfinite-binary64",
+      "input_json": "{\"value\":1e400}",
+      "reason": "invalid_number"
+    },
+    {
+      "id": "invalid-json-number",
+      "input_json": "{\"value\":NaN}",
+      "reason": "invalid_json"
+    }
+  ],
+  "membership_vectors": [
+    {
+      "id": "task-baseline",
+      "input": {
+        "domain": "mooring.atomic.v0.4",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "change_id": "c1",
+        "operations_without_fingerprints": [
+          {
+            "op_id": "o1",
+            "participant_ref": "host-ref",
+            "base_revision": "0",
+            "dependencies": [],
+            "read_preconditions": [],
+            "payload": {
+              "kind": "text",
+              "text": "Příliš žluťoučký kůň"
+            }
+          },
+          {
+            "op_id": "o2",
+            "participant_ref": "host-ref",
+            "base_revision": "0",
+            "dependencies": [
+              "o1"
+            ],
+            "read_preconditions": [],
+            "payload": {
+              "kind": "text",
+              "text": "Pokračování"
+            }
+          }
+        ],
+        "task_id": "task-1"
+      },
+      "canonical_json": "{\"change_id\":\"c1\",\"domain\":\"mooring.atomic.v0.4\",\"operations_without_fingerprints\":[{\"base_revision\":\"0\",\"dependencies\":[],\"op_id\":\"o1\",\"participant_ref\":\"host-ref\",\"payload\":{\"kind\":\"text\",\"text\":\"Příliš žluťoučký kůň\"},\"read_preconditions\":[]},{\"base_revision\":\"0\",\"dependencies\":[\"o1\"],\"op_id\":\"o2\",\"participant_ref\":\"host-ref\",\"payload\":{\"kind\":\"text\",\"text\":\"Pokračování\"},\"read_preconditions\":[]}],\"scope\":{\"application_id\":\"editor\",\"artifact_id\":\"a\",\"workspace_id\":\"w\"},\"task_id\":\"task-1\"}",
+      "membership_hash": "sha256:4052981e709e6f9bcd03ecdec7dffa978b8ccb4c57aafbb906852a5391971e31"
+    },
+    {
+      "id": "operation-order",
+      "input": {
+        "domain": "mooring.atomic.v0.4",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "change_id": "c1",
+        "operations_without_fingerprints": [
+          {
+            "op_id": "o2",
+            "participant_ref": "host-ref",
+            "base_revision": "0",
+            "dependencies": [
+              "o1"
+            ],
+            "read_preconditions": [],
+            "payload": {
+              "kind": "text",
+              "text": "Pokračování"
+            }
+          },
+          {
+            "op_id": "o1",
+            "participant_ref": "host-ref",
+            "base_revision": "0",
+            "dependencies": [],
+            "read_preconditions": [],
+            "payload": {
+              "kind": "text",
+              "text": "Příliš žluťoučký kůň"
+            }
+          }
+        ],
+        "task_id": "task-1"
+      },
+      "canonical_json": "{\"change_id\":\"c1\",\"domain\":\"mooring.atomic.v0.4\",\"operations_without_fingerprints\":[{\"base_revision\":\"0\",\"dependencies\":[\"o1\"],\"op_id\":\"o2\",\"participant_ref\":\"host-ref\",\"payload\":{\"kind\":\"text\",\"text\":\"Pokračování\"},\"read_preconditions\":[]},{\"base_revision\":\"0\",\"dependencies\":[],\"op_id\":\"o1\",\"participant_ref\":\"host-ref\",\"payload\":{\"kind\":\"text\",\"text\":\"Příliš žluťoučký kůň\"},\"read_preconditions\":[]}],\"scope\":{\"application_id\":\"editor\",\"artifact_id\":\"a\",\"workspace_id\":\"w\"},\"task_id\":\"task-1\"}",
+      "membership_hash": "sha256:c0f48a18dd5329425f92d6f99a0d0d8ed42c7755a21efe5fb15fa9fa13358e31",
+      "must_differ_from": "task-baseline"
+    },
+    {
+      "id": "author-changed",
+      "input": {
+        "domain": "mooring.atomic.v0.4",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "change_id": "c1",
+        "operations_without_fingerprints": [
+          {
+            "op_id": "o1",
+            "participant_ref": "different-host-ref",
+            "base_revision": "0",
+            "dependencies": [],
+            "read_preconditions": [],
+            "payload": {
+              "kind": "text",
+              "text": "Příliš žluťoučký kůň"
+            }
+          },
+          {
+            "op_id": "o2",
+            "participant_ref": "host-ref",
+            "base_revision": "0",
+            "dependencies": [
+              "o1"
+            ],
+            "read_preconditions": [],
+            "payload": {
+              "kind": "text",
+              "text": "Pokračování"
+            }
+          }
+        ],
+        "task_id": "task-1"
+      },
+      "canonical_json": "{\"change_id\":\"c1\",\"domain\":\"mooring.atomic.v0.4\",\"operations_without_fingerprints\":[{\"base_revision\":\"0\",\"dependencies\":[],\"op_id\":\"o1\",\"participant_ref\":\"different-host-ref\",\"payload\":{\"kind\":\"text\",\"text\":\"Příliš žluťoučký kůň\"},\"read_preconditions\":[]},{\"base_revision\":\"0\",\"dependencies\":[\"o1\"],\"op_id\":\"o2\",\"participant_ref\":\"host-ref\",\"payload\":{\"kind\":\"text\",\"text\":\"Pokračování\"},\"read_preconditions\":[]}],\"scope\":{\"application_id\":\"editor\",\"artifact_id\":\"a\",\"workspace_id\":\"w\"},\"task_id\":\"task-1\"}",
+      "membership_hash": "sha256:4d2f619cbd1883b220a5c9fa63a075a67611c5a122855e37471035e2de778d6d",
+      "must_differ_from": "task-baseline"
+    },
+    {
+      "id": "atomic-membership-changed",
+      "input": {
+        "domain": "mooring.atomic.v0.4",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "change_id": "c1",
+        "operations_without_fingerprints": [
+          {
+            "op_id": "o1",
+            "participant_ref": "host-ref",
+            "base_revision": "0",
+            "dependencies": [],
+            "read_preconditions": [],
+            "payload": {
+              "kind": "text",
+              "text": "Příliš žluťoučký kůň"
+            }
+          }
+        ],
+        "task_id": "task-1"
+      },
+      "canonical_json": "{\"change_id\":\"c1\",\"domain\":\"mooring.atomic.v0.4\",\"operations_without_fingerprints\":[{\"base_revision\":\"0\",\"dependencies\":[],\"op_id\":\"o1\",\"participant_ref\":\"host-ref\",\"payload\":{\"kind\":\"text\",\"text\":\"Příliš žluťoučký kůň\"},\"read_preconditions\":[]}],\"scope\":{\"application_id\":\"editor\",\"artifact_id\":\"a\",\"workspace_id\":\"w\"},\"task_id\":\"task-1\"}",
+      "membership_hash": "sha256:04ee8915c01a16851e579836ce438022eb29cc64b7fd7b9e4da2d5c75bb7ba00",
+      "must_differ_from": "task-baseline"
+    },
+    {
+      "id": "change-id-changed",
+      "input": {
+        "domain": "mooring.atomic.v0.4",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "change_id": "c2",
+        "operations_without_fingerprints": [
+          {
+            "op_id": "o1",
+            "participant_ref": "host-ref",
+            "base_revision": "0",
+            "dependencies": [],
+            "read_preconditions": [],
+            "payload": {
+              "kind": "text",
+              "text": "Příliš žluťoučký kůň"
+            }
+          },
+          {
+            "op_id": "o2",
+            "participant_ref": "host-ref",
+            "base_revision": "0",
+            "dependencies": [
+              "o1"
+            ],
+            "read_preconditions": [],
+            "payload": {
+              "kind": "text",
+              "text": "Pokračování"
+            }
+          }
+        ],
+        "task_id": "task-1"
+      },
+      "canonical_json": "{\"change_id\":\"c2\",\"domain\":\"mooring.atomic.v0.4\",\"operations_without_fingerprints\":[{\"base_revision\":\"0\",\"dependencies\":[],\"op_id\":\"o1\",\"participant_ref\":\"host-ref\",\"payload\":{\"kind\":\"text\",\"text\":\"Příliš žluťoučký kůň\"},\"read_preconditions\":[]},{\"base_revision\":\"0\",\"dependencies\":[\"o1\"],\"op_id\":\"o2\",\"participant_ref\":\"host-ref\",\"payload\":{\"kind\":\"text\",\"text\":\"Pokračování\"},\"read_preconditions\":[]}],\"scope\":{\"application_id\":\"editor\",\"artifact_id\":\"a\",\"workspace_id\":\"w\"},\"task_id\":\"task-1\"}",
+      "membership_hash": "sha256:4c0b223dea8741eeaff2b44b3d45580b82319d4347df8047ac53045a07eba78c",
+      "must_differ_from": "task-baseline"
+    },
+    {
+      "id": "task-id-changed",
+      "input": {
+        "domain": "mooring.atomic.v0.4",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "change_id": "c1",
+        "operations_without_fingerprints": [
+          {
+            "op_id": "o1",
+            "participant_ref": "host-ref",
+            "base_revision": "0",
+            "dependencies": [],
+            "read_preconditions": [],
+            "payload": {
+              "kind": "text",
+              "text": "Příliš žluťoučký kůň"
+            }
+          },
+          {
+            "op_id": "o2",
+            "participant_ref": "host-ref",
+            "base_revision": "0",
+            "dependencies": [
+              "o1"
+            ],
+            "read_preconditions": [],
+            "payload": {
+              "kind": "text",
+              "text": "Pokračování"
+            }
+          }
+        ],
+        "task_id": "task-2"
+      },
+      "canonical_json": "{\"change_id\":\"c1\",\"domain\":\"mooring.atomic.v0.4\",\"operations_without_fingerprints\":[{\"base_revision\":\"0\",\"dependencies\":[],\"op_id\":\"o1\",\"participant_ref\":\"host-ref\",\"payload\":{\"kind\":\"text\",\"text\":\"Příliš žluťoučký kůň\"},\"read_preconditions\":[]},{\"base_revision\":\"0\",\"dependencies\":[\"o1\"],\"op_id\":\"o2\",\"participant_ref\":\"host-ref\",\"payload\":{\"kind\":\"text\",\"text\":\"Pokračování\"},\"read_preconditions\":[]}],\"scope\":{\"application_id\":\"editor\",\"artifact_id\":\"a\",\"workspace_id\":\"w\"},\"task_id\":\"task-2\"}",
+      "membership_hash": "sha256:aac9a8d4b9cd794c4046b280a97b53410d2c3da69b6db20229b77ca221405dd4",
+      "must_differ_from": "task-baseline"
+    },
+    {
+      "id": "base-changed",
+      "input": {
+        "domain": "mooring.atomic.v0.4",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "change_id": "c1",
+        "operations_without_fingerprints": [
+          {
+            "op_id": "o1",
+            "participant_ref": "host-ref",
+            "base_revision": "1",
+            "dependencies": [],
+            "read_preconditions": [],
+            "payload": {
+              "kind": "text",
+              "text": "Příliš žluťoučký kůň"
+            }
+          },
+          {
+            "op_id": "o2",
+            "participant_ref": "host-ref",
+            "base_revision": "0",
+            "dependencies": [
+              "o1"
+            ],
+            "read_preconditions": [],
+            "payload": {
+              "kind": "text",
+              "text": "Pokračování"
+            }
+          }
+        ],
+        "task_id": "task-1"
+      },
+      "canonical_json": "{\"change_id\":\"c1\",\"domain\":\"mooring.atomic.v0.4\",\"operations_without_fingerprints\":[{\"base_revision\":\"1\",\"dependencies\":[],\"op_id\":\"o1\",\"participant_ref\":\"host-ref\",\"payload\":{\"kind\":\"text\",\"text\":\"Příliš žluťoučký kůň\"},\"read_preconditions\":[]},{\"base_revision\":\"0\",\"dependencies\":[\"o1\"],\"op_id\":\"o2\",\"participant_ref\":\"host-ref\",\"payload\":{\"kind\":\"text\",\"text\":\"Pokračování\"},\"read_preconditions\":[]}],\"scope\":{\"application_id\":\"editor\",\"artifact_id\":\"a\",\"workspace_id\":\"w\"},\"task_id\":\"task-1\"}",
+      "membership_hash": "sha256:36eb0bb6760f8f31aeec4b1aaaa40e87a7621da632af6cb6ce2614104178193c",
+      "must_differ_from": "task-baseline"
+    },
+    {
+      "id": "read-set-changed",
+      "input": {
+        "domain": "mooring.atomic.v0.4",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "change_id": "c1",
+        "operations_without_fingerprints": [
+          {
+            "op_id": "o1",
+            "participant_ref": "host-ref",
+            "base_revision": "0",
+            "dependencies": [],
+            "read_preconditions": [
+              {
+                "target_id": "paragraph-a",
+                "revision": "0"
+              }
+            ],
+            "payload": {
+              "kind": "text",
+              "text": "Příliš žluťoučký kůň"
+            }
+          },
+          {
+            "op_id": "o2",
+            "participant_ref": "host-ref",
+            "base_revision": "0",
+            "dependencies": [
+              "o1"
+            ],
+            "read_preconditions": [],
+            "payload": {
+              "kind": "text",
+              "text": "Pokračování"
+            }
+          }
+        ],
+        "task_id": "task-1"
+      },
+      "canonical_json": "{\"change_id\":\"c1\",\"domain\":\"mooring.atomic.v0.4\",\"operations_without_fingerprints\":[{\"base_revision\":\"0\",\"dependencies\":[],\"op_id\":\"o1\",\"participant_ref\":\"host-ref\",\"payload\":{\"kind\":\"text\",\"text\":\"Příliš žluťoučký kůň\"},\"read_preconditions\":[{\"revision\":\"0\",\"target_id\":\"paragraph-a\"}]},{\"base_revision\":\"0\",\"dependencies\":[\"o1\"],\"op_id\":\"o2\",\"participant_ref\":\"host-ref\",\"payload\":{\"kind\":\"text\",\"text\":\"Pokračování\"},\"read_preconditions\":[]}],\"scope\":{\"application_id\":\"editor\",\"artifact_id\":\"a\",\"workspace_id\":\"w\"},\"task_id\":\"task-1\"}",
+      "membership_hash": "sha256:6bac8df3ae6ca06ff258a390d464263e0b532187ebb93e141941851cce287daa",
+      "must_differ_from": "task-baseline"
+    },
+    {
+      "id": "dependency-changed",
+      "input": {
+        "domain": "mooring.atomic.v0.4",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "change_id": "c1",
+        "operations_without_fingerprints": [
+          {
+            "op_id": "o1",
+            "participant_ref": "host-ref",
+            "base_revision": "0",
+            "dependencies": [],
+            "read_preconditions": [],
+            "payload": {
+              "kind": "text",
+              "text": "Příliš žluťoučký kůň"
+            }
+          },
+          {
+            "op_id": "o2",
+            "participant_ref": "host-ref",
+            "base_revision": "0",
+            "dependencies": [],
+            "read_preconditions": [],
+            "payload": {
+              "kind": "text",
+              "text": "Pokračování"
+            }
+          }
+        ],
+        "task_id": "task-1"
+      },
+      "canonical_json": "{\"change_id\":\"c1\",\"domain\":\"mooring.atomic.v0.4\",\"operations_without_fingerprints\":[{\"base_revision\":\"0\",\"dependencies\":[],\"op_id\":\"o1\",\"participant_ref\":\"host-ref\",\"payload\":{\"kind\":\"text\",\"text\":\"Příliš žluťoučký kůň\"},\"read_preconditions\":[]},{\"base_revision\":\"0\",\"dependencies\":[],\"op_id\":\"o2\",\"participant_ref\":\"host-ref\",\"payload\":{\"kind\":\"text\",\"text\":\"Pokračování\"},\"read_preconditions\":[]}],\"scope\":{\"application_id\":\"editor\",\"artifact_id\":\"a\",\"workspace_id\":\"w\"},\"task_id\":\"task-1\"}",
+      "membership_hash": "sha256:b9bb3f27003090c32c515dd822da26913932a935b6fdba63c6805a977e1028ec",
+      "must_differ_from": "task-baseline"
+    },
+    {
+      "id": "scope-changed",
+      "input": {
+        "domain": "mooring.atomic.v0.4",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "other-artifact",
+          "workspace_id": "w"
+        },
+        "change_id": "c1",
+        "operations_without_fingerprints": [
+          {
+            "op_id": "o1",
+            "participant_ref": "host-ref",
+            "base_revision": "0",
+            "dependencies": [],
+            "read_preconditions": [],
+            "payload": {
+              "kind": "text",
+              "text": "Příliš žluťoučký kůň"
+            }
+          },
+          {
+            "op_id": "o2",
+            "participant_ref": "host-ref",
+            "base_revision": "0",
+            "dependencies": [
+              "o1"
+            ],
+            "read_preconditions": [],
+            "payload": {
+              "kind": "text",
+              "text": "Pokračování"
+            }
+          }
+        ],
+        "task_id": "task-1"
+      },
+      "canonical_json": "{\"change_id\":\"c1\",\"domain\":\"mooring.atomic.v0.4\",\"operations_without_fingerprints\":[{\"base_revision\":\"0\",\"dependencies\":[],\"op_id\":\"o1\",\"participant_ref\":\"host-ref\",\"payload\":{\"kind\":\"text\",\"text\":\"Příliš žluťoučký kůň\"},\"read_preconditions\":[]},{\"base_revision\":\"0\",\"dependencies\":[\"o1\"],\"op_id\":\"o2\",\"participant_ref\":\"host-ref\",\"payload\":{\"kind\":\"text\",\"text\":\"Pokračování\"},\"read_preconditions\":[]}],\"scope\":{\"application_id\":\"editor\",\"artifact_id\":\"other-artifact\",\"workspace_id\":\"w\"},\"task_id\":\"task-1\"}",
+      "membership_hash": "sha256:86854102dc15bb4e894daba9ee77a0c61792ec1a0416e4e052bde41ac67c1ad4",
+      "must_differ_from": "task-baseline"
+    }
+  ],
+  "retry_vectors": [
+    {
+      "id": "regrouped-reconnected-retry",
+      "atomic_input": {
+        "domain": "mooring.atomic.v0.4",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "change_id": "c1",
+        "operations_without_fingerprints": [
+          {
+            "op_id": "o1",
+            "participant_ref": "host-ref",
+            "base_revision": "0",
+            "dependencies": [],
+            "read_preconditions": [],
+            "payload": {
+              "kind": "text",
+              "text": "Příliš žluťoučký kůň"
+            }
+          },
+          {
+            "op_id": "o2",
+            "participant_ref": "host-ref",
+            "base_revision": "0",
+            "dependencies": [
+              "o1"
+            ],
+            "read_preconditions": [],
+            "payload": {
+              "kind": "text",
+              "text": "Pokračování"
+            }
+          }
+        ],
+        "task_id": "task-1"
+      },
+      "first_transport": {
+        "request_id": "request-1",
+        "batch_id": "batch-1",
+        "owner_generation": "1",
+        "expected_revision": "0"
+      },
+      "retry_transport": {
+        "request_id": "request-2",
+        "batch_id": "batch-99",
+        "owner_generation": "2",
+        "expected_revision": "99"
+      },
+      "membership_hash": "sha256:4052981e709e6f9bcd03ecdec7dffa978b8ccb4c57aafbb906852a5391971e31",
+      "operation_fingerprints": [
+        {
+          "op_id": "o1",
+          "fingerprint": "sha256:e339931ae9424e43b74976b110b91accb6472f02c8ebab378299ee72adbdc813"
+        },
+        {
+          "op_id": "o2",
+          "fingerprint": "sha256:c2399436f4dbbbb2804cc7628454102cc0603a83298971fc93fd6fdc7f23fbd5"
+        }
+      ],
+      "expectation": "same stored outcomes; no reassignment of task or authorship; current authorization still required"
+    }
+  ],
+  "checkpoint_vectors": [
+    {
+      "id": "same-decoded-checkpoint-json-or-base64",
+      "preimage": {
+        "domain": "mooring.checkpoint.v0.4",
+        "scope": {
+          "application_id": "editor",
+          "artifact_id": "a",
+          "workspace_id": "w"
+        },
+        "revision": "2",
+        "generation": "1",
+        "format_version": "text-v1",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "state_base64": "eyJwYXJhZ3JhcGhzIjpbeyJpZCI6InAxIiwidGV4dCI6IlDFmcOtbGnFoSJ9XX0=",
+        "assets": []
+      },
+      "canonical_json": "{\"assets\":[],\"domain\":\"mooring.checkpoint.v0.4\",\"format_version\":\"text-v1\",\"generation\":\"1\",\"revision\":\"2\",\"scope\":{\"application_id\":\"editor\",\"artifact_id\":\"a\",\"workspace_id\":\"w\"},\"state_base64\":\"eyJwYXJhZ3JhcGhzIjpbeyJpZCI6InAxIiwidGV4dCI6IlDFmcOtbGnFoSJ9XX0=\",\"versions\":{\"engine_version\":\"1.0.0\",\"model_version\":\"1.0.0\",\"protocol_version\":\"0.4.0\"}}",
+      "digest": "sha256:d07bcc83806d879b3d096ddb05d4f666d0dfd4b38d5ceecf67a5cfd64eddd11b",
+      "wire_forms": [
+        {
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "revision": "2",
+          "generation": "1",
+          "format_version": "text-v1",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "1.0.0",
+            "engine_version": "1.0.0"
+          },
+          "assets": [],
+          "digest": "sha256:d07bcc83806d879b3d096ddb05d4f666d0dfd4b38d5ceecf67a5cfd64eddd11b",
+          "encoding": "json",
+          "state": "{\"paragraphs\":[{\"id\":\"p1\",\"text\":\"Příliš\"}]}"
+        },
+        {
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "revision": "2",
+          "generation": "1",
+          "format_version": "text-v1",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "1.0.0",
+            "engine_version": "1.0.0"
+          },
+          "assets": [],
+          "digest": "sha256:d07bcc83806d879b3d096ddb05d4f666d0dfd4b38d5ceecf67a5cfd64eddd11b",
+          "encoding": "base64",
+          "state": "eyJwYXJhZ3JhcGhzIjpbeyJpZCI6InAxIiwidGV4dCI6IlDFmcOtbGnFoSJ9XX0="
+        }
+      ]
+    }
+  ],
+  "adapter_semantics_vectors": [
+    {
+      "id": "same-canonical-value-for-hash-and-adapter",
+      "canonicalization_vector": "adapter-binary64-integer-normalization",
+      "adapter_input_canonical": "{\"payload\":{\"value\":9007199254740992}}",
+      "requirement": "Normalize to JCS binary64 and parse those canonical bytes as adapter input before semantic validation. Hashing normalized bytes while validating original exact-u64 data is forbidden."
+    },
+    {
+      "id": "exact-integer-model-requires-string",
+      "canonicalization_vector": "adapter-exact-large-integer-string",
+      "adapter_input_canonical": "{\"payload\":{\"value\":\"9007199254740993\"}}",
+      "requirement": "Application schemas requiring exact large integers require strings. Do not coerce identifiers, counters or money to binary64."
+    }
+  ]
+}
