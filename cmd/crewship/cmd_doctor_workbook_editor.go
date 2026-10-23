@@ -46,7 +46,7 @@ func checkWorkbookEditorProxy(ctx context.Context, serverURL string) checkResult
 	}
 	defer resp.Body.Close()
 	var body struct {
-		Editor *editororigin.Status `json:"workbook_editor"`
+		Editor *editororigin.Status `json:"workbook_editor" yaml:"workbook_editor"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
 		return checkResult{name: name, status: "INFO", detail: "server does not report the workbook editor — skipped"}

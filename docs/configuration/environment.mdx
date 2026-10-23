@@ -618,6 +618,22 @@ also turn on the feature flag `gridcraft_editor`, which is off by default and
 can be switched off again without a restart.
 See [workbook commands](/cli/workbook) for scope and request contracts.
 
+The worker process (`crewship-gridcraft-worker`, inside its own container)
+reads its own limits; out-of-range values stop it at startup:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_GRIDCRAFT_WORKER_CAPACITY` | `2` | Concurrent candidates per worker, 1 to 8. The default fits the documented container profile (256 MiB, 32 PIDs); a higher value needs the larger profile. |
+| `CREWSHIP_GRIDCRAFT_ENGINE_MEMORY_MIB` | `256` | Address-space limit of each engine process in MiB, 64 to 4096. |
+| `CREWSHIP_GRIDCRAFT_ENGINE_FILE_MIB` | `4` | Largest file an engine process may write, in MiB, 2 to 32. |
+| `CREWSHIP_GRIDCRAFT_ENGINE_CPU_SECONDS` | `15` | CPU seconds per engine process, 1 to 20 (below the 20 s candidate timeout). |
+
+`CREWSHIP_GRIDCRAFT_TEST_BARRIER_DIR` and `CREWSHIP_GRIDCRAFT_TEST_BARRIER_SLOT`
+exist only in test builds (build tag `crewship_testbarrier`): the private
+directory for the commit barrier's park/release files and the development slot
+it is limited to. Release builds ignore both, and the release pipeline refuses
+a binary that contains the barrier.
+
 #### Embedded workbook editor origin
 
 The browser workbook editor is third-party code. It runs only in a sandboxed
