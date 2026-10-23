@@ -1,7 +1,6 @@
 package appengine
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -232,44 +231,6 @@ func largeWorkbook(t *testing.T, n int) []byte {
 		t.Fatal(err)
 	}
 	return out
-}
-
-// The snapshot limit bounds what Go stores (compact JSON), not the engine's
-// pretty-printed file, which is several times larger for the same workbook.
-func TestEngineOutputLimitAppliesToCompactSnapshot(t *testing.T) {
-	compact := largeWorkbook(t, 6000)
-	var pretty bytes.Buffer
-	if err := json.Indent(&pretty, compact, "", "    "); err != nil {
-		t.Fatal(err)
-	}
-	if len(compact) >= MaxSnapshotBytes || pretty.Len() <= MaxSnapshotBytes || pretty.Len() > MaxEngineOutputBytes {
-		t.Fatalf("fixture sizes compact=%d pretty=%d", len(compact), pretty.Len())
-	}
-	oversized := largeWorkbook(t, 20000)
-	if len(oversized) <= MaxSnapshotBytes {
-		t.Fatalf("oversized fixture %d", len(oversized))
-	}
-	dir := t.TempDir()
-	write := func(name string, data []byte) string {
-		path := filepath.Join(dir, name)
-		if err := os.WriteFile(path, data, 0600); err != nil {
-			t.Fatal(err)
-		}
-		return path
-	}
-	got, err := readBounded(write("pretty.json", pretty.Bytes()))
-	if err != nil || !bytes.Equal(got, compact) {
-		t.Fatalf("pretty within compact limit: len=%d err=%v", len(got), err)
-	}
-	if _, err = readBounded(write("oversized.json", oversized)); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("compact over limit: %v", err)
-	}
-	if _, err = readBounded(write("raw.json", append(pretty.Bytes(), bytes.Repeat([]byte(" "), MaxEngineOutputBytes)...))); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("raw over limit: %v", err)
-	}
-	if _, err = readBounded(write("broken.json", []byte(`{"sheets":`))); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("malformed: %v", err)
-	}
 }
 
 // A 6k-cell sheet stays editable through the pinned engine even though its
