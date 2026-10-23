@@ -366,3 +366,57 @@ func TestBatchConcurrentCASAndUint64Ceiling(t *testing.T) {
 		t.Fatalf("uint64 ceiling not exact %+v %v", result, err)
 	}
 }
+
+func TestBatchFinalAuthorityAfterAllExpensiveWork(t *testing.T) {
+	s, adapter, owners, _, lease := batchFixture(t)
+	var runTick atomic.Int64
+	runTick.Store(1)
+	s.config.Authority = func(_ context.Context, _ *sql.Tx, access BatchAccess) error {
+		if access.Intent == "write" && access.Participant == "A" && runTick.Load() >= 2 {
+			return &BatchDenied{Code: "permission_revoked"}
+		}
+		return nil
+	}
+	aOp, bOp := testBatchOp("a"), testBatchOp("b")
+	aOp.Participant = "A"
+	bOp.Participant = "B"
+	a := testBatchChange(t, lease.Key, "a", "", aOp)
+	b := testBatchChange(t, lease.Key, "b", "", bOp)
+	adapter.apply = func(_ context.Context, state []byte, c BatchChange) ([]byte, *BatchRejection, error) {
+		if c.ID == "b" {
+			runTick.Store(2)
+		} // A's run/grant expires; owner remains valid.
+		var n int
+		if err := json.Unmarshal(state, &n); err != nil {
+			return nil, nil, err
+		}
+		return []byte(strconv.Itoa(n + 1)), nil, nil
+	}
+	emitted := 0
+	s.config.AfterCommit = func(BatchCommitEvent) { emitted++ }
+	result, err := s.Commit(t.Context(), BatchRequest{lease, "0", []BatchChange{a, b}})
+	var denied *BatchDenied
+	if !errors.As(err, &denied) || denied.Code != "permission_revoked" || len(result.Changes) != 0 || emitted != 0 {
+		t.Fatalf("expired earlier author escaped commit %+v %v events%d", result, err, emitted)
+	}
+	if adapter.calls.Load() != 2 {
+		t.Fatal("regression did not reach later expensive apply")
+	}
+	if err := checkOwnerTx(t, owners, s.db, lease); err != nil {
+		t.Fatal("owner expired instead of participant authority", err)
+	}
+	if batchCount(t, s, "mooring_collab_operations") != 0 || batchCount(t, s, "mooring_collab_changes") != 0 || batchCount(t, s, "mooring_collab_checkpoints") != 1 || batchCount(t, s, "mooring_collab_audit") != 1 {
+		t.Fatal("final authority failure did not roll back entire batch")
+	}
+	rev, state, err := s.ReadCheckpoint(t.Context(), lease.Key)
+	if err != nil || rev != "0" || string(state) != "0" {
+		t.Fatal("prepared changes became visible", rev, string(state), err)
+	}
+	for _, c := range []BatchChange{a, b} {
+		op := c.Operations[0]
+		status, err := s.Status(t.Context(), lease.Key, op.ID, op.Fingerprint)
+		if err != nil || status != nil {
+			t.Fatal("unknown outcome became terminal", status, err)
+		}
+	}
+}
