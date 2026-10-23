@@ -51,6 +51,38 @@ func (v *privateControlValidator) validate(raw []byte, fromRuntime bool) ([]byte
 	return normalized, nil
 }
 
+// validateCausal never accepts a strict message under the causal profile, or
+// vice versa. Only the verified Runtime constructor selects this capability.
+type privateCausalPeer uint8
+
+const (
+	privateCausalHost privateCausalPeer = iota + 1
+	privateCausalRuntime
+)
+
+func (v *privateControlValidator) validateCausal(raw []byte, peer privateCausalPeer) ([]byte, error) {
+	if v == nil || v.schema == nil || (peer != privateCausalHost && peer != privateCausalRuntime) {
+		return nil, ErrPrivateControl
+	}
+	normalized, err := canonicalPrivateControlJSON(raw)
+	if err != nil {
+		return nil, ErrPrivateControl
+	}
+	var value map[string]any
+	if json.Unmarshal(normalized, &value) != nil || value["control_profile"] != PrivateCausalPrepareProfile {
+		return nil, ErrPrivateControl
+	}
+	t, _ := value["type"].(string)
+	allowed := t == "validate_checkpoint_causal" || t == "prepare_atomic_causal"
+	if peer == privateCausalRuntime {
+		allowed = t == "checkpoint_validated_causal" || t == "atomic_prepared_causal"
+	}
+	if !allowed || !v.schema.matches(v.schema.root, value, 0) {
+		return nil, ErrPrivateControl
+	}
+	return normalized, nil
+}
+
 func canonicalPrivateControlJSON(raw []byte) ([]byte, error) {
 	if canonicalPreflightLimit(raw, MaxPrivatePrepareRPCFrame) != nil {
 		return nil, ErrPrivateControl

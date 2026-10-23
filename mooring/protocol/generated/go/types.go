@@ -173,7 +173,8 @@ const (
 type HelloControlProfilesItem string
 
 const (
-	HelloControlProfilesItemMooringPrepareV1 HelloControlProfilesItem = "mooring.prepare.v1"
+	HelloControlProfilesItemMooringPrepareV1       HelloControlProfilesItem = "mooring.prepare.v1"
+	HelloControlProfilesItemMooringPrepareCausalV1 HelloControlProfilesItem = "mooring.prepare-causal.v1"
 )
 
 type Hello struct {
@@ -1170,7 +1171,8 @@ const (
 type RuntimeReadySelectedControlProfile string
 
 const (
-	RuntimeReadySelectedControlProfileMooringPrepareV1 RuntimeReadySelectedControlProfile = "mooring.prepare.v1"
+	RuntimeReadySelectedControlProfileMooringPrepareV1       RuntimeReadySelectedControlProfile = "mooring.prepare.v1"
+	RuntimeReadySelectedControlProfileMooringPrepareCausalV1 RuntimeReadySelectedControlProfile = "mooring.prepare-causal.v1"
 )
 
 type RuntimeReady struct {
@@ -1352,6 +1354,132 @@ type AtomicPrepared struct {
 	MembershipHash        Digest                       `json:"membership_hash"`
 	Outcome               AtomicPreparedOutcome        `json:"outcome"`
 	ControlProfile        AtomicPreparedControlProfile `json:"control_profile"`
+}
+
+type CausalReadIndex string
+
+type CausalEntryVersion struct {
+	Revision          Counter `json:"revision"`
+	StructureRevision Counter `json:"structure_revision"`
+	Deleted           bool    `json:"deleted"`
+}
+
+type QualifiedCausalReadEntry = json.RawMessage
+
+type QualifiedCausalRead struct {
+	OpID                      Identifier               `json:"op_id"`
+	ReadIndex                 CausalReadIndex          `json:"read_index"`
+	TargetID                  Identifier               `json:"target_id"`
+	ObservedRevision          Counter                  `json:"observed_revision"`
+	ObservedStructureRevision *Counter                 `json:"observed_structure_revision,omitempty"`
+	Entry                     QualifiedCausalReadEntry `json:"entry"`
+	Covered                   bool                     `json:"covered"`
+}
+
+type CausalPrepareContextReadPolicy string
+
+const (
+	CausalPrepareContextReadPolicyAgentDependencyCovered CausalPrepareContextReadPolicy = "agent_dependency_covered"
+)
+
+type CausalPrepareContext struct {
+	ReadPolicy         CausalPrepareContextReadPolicy `json:"read_policy"`
+	DocumentRevision   Counter                        `json:"document_revision"`
+	Targets            []TargetVersion                `json:"targets"`
+	OperationRevisions []PreparedOperationRevision    `json:"operation_revisions"`
+	QualifiedReads     []QualifiedCausalRead          `json:"qualified_reads"`
+}
+
+type ValidateCheckpointCausalType string
+
+const (
+	ValidateCheckpointCausalTypeValidateCheckpointCausal ValidateCheckpointCausalType = "validate_checkpoint_causal"
+)
+
+type ValidateCheckpointCausalControlProfile string
+
+const (
+	ValidateCheckpointCausalControlProfileMooringPrepareCausalV1 ValidateCheckpointCausalControlProfile = "mooring.prepare-causal.v1"
+)
+
+type ValidateCheckpointCausal struct {
+	Type           ValidateCheckpointCausalType           `json:"type"`
+	RequestID      Identifier                             `json:"request_id"`
+	Scope          Scope                                  `json:"scope"`
+	Selected       Versions                               `json:"selected"`
+	Checkpoint     OpaquePreparedCheckpoint               `json:"checkpoint"`
+	ControlProfile ValidateCheckpointCausalControlProfile `json:"control_profile"`
+}
+
+type CheckpointValidatedCausalType string
+
+const (
+	CheckpointValidatedCausalTypeCheckpointValidatedCausal CheckpointValidatedCausalType = "checkpoint_validated_causal"
+)
+
+type CheckpointValidatedCausalControlProfile string
+
+const (
+	CheckpointValidatedCausalControlProfileMooringPrepareCausalV1 CheckpointValidatedCausalControlProfile = "mooring.prepare-causal.v1"
+)
+
+type CheckpointValidatedCausal struct {
+	Type                  CheckpointValidatedCausalType           `json:"type"`
+	RequestID             Identifier                              `json:"request_id"`
+	Scope                 Scope                                   `json:"scope"`
+	Selected              Versions                                `json:"selected"`
+	InputCheckpointDigest Digest                                  `json:"input_checkpoint_digest"`
+	Inventory             []TargetIdentity                        `json:"inventory"`
+	ControlProfile        CheckpointValidatedCausalControlProfile `json:"control_profile"`
+}
+
+type PrepareAtomicCausalType string
+
+const (
+	PrepareAtomicCausalTypePrepareAtomicCausal PrepareAtomicCausalType = "prepare_atomic_causal"
+)
+
+type PrepareAtomicCausalControlProfile string
+
+const (
+	PrepareAtomicCausalControlProfileMooringPrepareCausalV1 PrepareAtomicCausalControlProfile = "mooring.prepare-causal.v1"
+)
+
+type PrepareAtomicCausal struct {
+	Type           PrepareAtomicCausalType           `json:"type"`
+	RequestID      Identifier                        `json:"request_id"`
+	Scope          Scope                             `json:"scope"`
+	Selected       Versions                          `json:"selected"`
+	Checkpoint     OpaquePreparedCheckpoint          `json:"checkpoint"`
+	Context        CausalPrepareContext              `json:"context"`
+	Change         AtomicChange                      `json:"change"`
+	ControlProfile PrepareAtomicCausalControlProfile `json:"control_profile"`
+}
+
+type AtomicPreparedCausalType string
+
+const (
+	AtomicPreparedCausalTypeAtomicPreparedCausal AtomicPreparedCausalType = "atomic_prepared_causal"
+)
+
+type AtomicPreparedCausalOutcome = json.RawMessage
+
+type AtomicPreparedCausalControlProfile string
+
+const (
+	AtomicPreparedCausalControlProfileMooringPrepareCausalV1 AtomicPreparedCausalControlProfile = "mooring.prepare-causal.v1"
+)
+
+type AtomicPreparedCausal struct {
+	Type                  AtomicPreparedCausalType           `json:"type"`
+	RequestID             Identifier                         `json:"request_id"`
+	Scope                 Scope                              `json:"scope"`
+	Selected              Versions                           `json:"selected"`
+	InputCheckpointDigest Digest                             `json:"input_checkpoint_digest"`
+	ChangeID              Identifier                         `json:"change_id"`
+	MembershipHash        Digest                             `json:"membership_hash"`
+	Outcome               AtomicPreparedCausalOutcome        `json:"outcome"`
+	ControlProfile        AtomicPreparedCausalControlProfile `json:"control_profile"`
 }
 
 type Message = json.RawMessage

@@ -77,7 +77,7 @@ func TestMooringRuntimeHelper(t *testing.T) {
 	if err = rpc.Write(ready); err != nil {
 		t.Fatal(err)
 	}
-	if selected == PrivatePrepareProfile {
+	if privatePrepareProfile(selected) {
 		rpc.maxFrame = MaxPrivatePrepareRPCFrame
 	}
 	if mode == "die" {

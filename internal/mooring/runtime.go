@@ -18,6 +18,12 @@ const MaxRPCFrame = 256 * 1024
 // PrivatePrepareProfile is an explicit inherited-channel capability. Its
 // transport ceiling never changes the public participant/batch wire profile.
 const PrivatePrepareProfile = "mooring.prepare.v1"
+const PrivateCausalPrepareProfile = "mooring.prepare-causal.v1"
+
+func privatePrepareProfile(profile string) bool {
+	return profile == PrivatePrepareProfile || profile == PrivateCausalPrepareProfile
+}
+
 const MaxPrivatePrepareRPCFrame = 2 * 1024 * 1024
 
 var ErrRuntimeDisabled = errors.New("mooring runtime disabled")
@@ -142,13 +148,13 @@ func StartRuntime(ctx context.Context, c RuntimeConfig) (*Runtime, error) {
 	if !c.Enabled {
 		return nil, ErrRuntimeDisabled
 	}
-	if c.Binary == "" || c.Versions.Protocol == "" || c.Versions.Model == "" || c.Versions.Engine == "" || (c.ControlProfile != "" && c.ControlProfile != PrivatePrepareProfile) {
+	if c.Binary == "" || c.Versions.Protocol == "" || c.Versions.Model == "" || c.Versions.Engine == "" || (c.ControlProfile != "" && !privatePrepareProfile(c.ControlProfile)) {
 		return nil, ErrRuntimeHandshake
 	}
 	return startRuntime(ctx, c, exec.CommandContext(ctx, c.Binary, "--rpc-fd", "3"))
 }
 func runtimeHandshake(rpc *RPC, versions RuntimeVersions, profile string) error {
-	if profile != "" && profile != PrivatePrepareProfile {
+	if profile != "" && !privatePrepareProfile(profile) {
 		return ErrRuntimeHandshake
 	}
 	if err := rpc.conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
@@ -177,7 +183,7 @@ func runtimeHandshake(rpc *RPC, versions RuntimeVersions, profile string) error 
 	if err := rpc.conn.SetDeadline(time.Time{}); err != nil {
 		return err
 	}
-	if profile == PrivatePrepareProfile {
+	if privatePrepareProfile(profile) {
 		rpc.maxFrame = MaxPrivatePrepareRPCFrame
 	}
 	return nil

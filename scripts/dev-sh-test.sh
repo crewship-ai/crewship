@@ -363,14 +363,14 @@ if [[ "$out" == *"web/out/ was built from ${HEAD1:0:8}"* ]]; then pass "names th
 # running the old inode; /proc/<pid>/exe then reads "<path> (deleted)" and a
 # `-f` test on that string finds nothing. The check has to look at the link.
 printf '%s\n' "$(git -C "$STALE_DIR" rev-parse HEAD)" > "$STALE_DIR/.web-build-marker"
-# rm first: the earlier steps left a non-executable stand-in at this path,
-# and cp onto it would keep that mode and the exec would fail silently.
-rm -f "$STALE_DIR/bin"
-cp "$(command -v sleep)" "$STALE_DIR/bin"
-"$STALE_DIR/bin" 30 &
+# Preserve the sleep applet name: CI may resolve sleep to a multicall
+# coreutils executable, which selects its command from argv[0]. Calling a copy
+# named "bin" exits before there is a running inode to replace.
+cp "$(command -v sleep)" "$STALE_DIR/sleep"
+"$STALE_DIR/sleep" 30 &
 RUNNER=$!
 sleep 0.2
-cp "$(command -v sleep)" "$STALE_DIR/bin.new" && mv -f "$STALE_DIR/bin.new" "$STALE_DIR/bin"
+cp "$(command -v sleep)" "$STALE_DIR/sleep.new" && mv -f "$STALE_DIR/sleep.new" "$STALE_DIR/sleep"
 out=$(printf '%s\n%s\n%s\n' 'set -euo pipefail' "$STALE_FN" "deploy_staleness '$STALE_DIR' '/proc/$RUNNER/exe'" | bash 2>/dev/null)
 if [[ "$out" == *"replaced on disk"* ]]; then pass "names a running binary whose file was replaced (proc exe reads deleted)"; else fail "replaced binary not reported: '$out'"; fi
 kill "$RUNNER" 2>/dev/null || true

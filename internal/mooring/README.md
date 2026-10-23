@@ -254,3 +254,25 @@ human. The result is a current permission/member binding, not a ticket or Saved
 receipt. Outer admission must preserve its original captured values, qualify
 engine versions and host incarnation, audit private owner reads, and require a
 send-time delivery gate for every protected response. No route is enabled here.
+
+The separate unused causal SQL qualifier builds compact original-read
+attestations from complete retained operation dependencies and target effects.
+It checks every intervening effect, positive zero-effect completeness markers,
+exact unsigned counters, target history continuity and original read bindings.
+Missing/corrupt history returns a nonterminal error rather than a guessed stale
+rejection. Local work budgets are 10,000 operations, 65,536 dependency edges, 100,000
+effects, 128 MiB encoded history and 1,000,000 traversal steps; exceeded budgets preserve
+pending work. The existing strict-current private profile remains unchanged.
+The 1k-task qualification test uses an explicit mock application/allow-all host
+fixture; it does not establish participant authorization or WordCraft transport.
+
+`TargetStoreConfig.ReadPolicy = "agent_dependency_covered"` separately opts into
+causal-agent preparation. It requires `CausalTargetBatchAdapter` and explicit
+finite history budgets. Under the same SQL writer, the host validates the actual
+input inventory, qualifies every intervening retained effect, and passes an
+isolated compact context alongside the unchanged original operation. It then
+independently validates all candidate effects and every earlier same-atomic
+writer against immutable dependency closure before the existing commit fences.
+The empty policy retains strict-current behavior. This store primitive does not
+select a private runtime profile or establish application/participant authority;
+those require separately qualified integration.

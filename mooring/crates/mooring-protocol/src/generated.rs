@@ -237,6 +237,8 @@ pub enum HelloType {
 pub enum HelloControlProfilesItem {
     #[serde(rename = "mooring.prepare.v1")]
     MooringPrepareV1,
+    #[serde(rename = "mooring.prepare-causal.v1")]
+    MooringPrepareCausalV1,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1415,6 +1417,8 @@ pub enum RuntimeReadyType {
 pub enum RuntimeReadySelectedControlProfile {
     #[serde(rename = "mooring.prepare.v1")]
     MooringPrepareV1,
+    #[serde(rename = "mooring.prepare-causal.v1")]
+    MooringPrepareCausalV1,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1632,6 +1636,157 @@ pub struct AtomicPrepared {
     pub control_profile: AtomicPreparedControlProfile,
 }
 
+pub type CausalReadIndex = String;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CausalEntryVersion {
+    pub revision: Counter,
+    pub structure_revision: Counter,
+    pub deleted: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum QualifiedCausalReadEntry {
+    CausalEntryVersion(CausalEntryVersion),
+    Variant2(()),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QualifiedCausalRead {
+    pub op_id: Identifier,
+    pub read_index: CausalReadIndex,
+    pub target_id: Identifier,
+    pub observed_revision: Counter,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_structure_revision: Option<Counter>,
+    pub entry: QualifiedCausalReadEntry,
+    pub covered: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum CausalPrepareContextReadPolicy {
+    #[serde(rename = "agent_dependency_covered")]
+    AgentDependencyCovered,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CausalPrepareContext {
+    pub read_policy: CausalPrepareContextReadPolicy,
+    pub document_revision: Counter,
+    pub targets: Vec<TargetVersion>,
+    pub operation_revisions: Vec<PreparedOperationRevision>,
+    pub qualified_reads: Vec<QualifiedCausalRead>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ValidateCheckpointCausalType {
+    #[serde(rename = "validate_checkpoint_causal")]
+    ValidateCheckpointCausal,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ValidateCheckpointCausalControlProfile {
+    #[serde(rename = "mooring.prepare-causal.v1")]
+    MooringPrepareCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ValidateCheckpointCausal {
+    pub r#type: ValidateCheckpointCausalType,
+    pub request_id: Identifier,
+    pub scope: Scope,
+    pub selected: Versions,
+    pub checkpoint: OpaquePreparedCheckpoint,
+    pub control_profile: ValidateCheckpointCausalControlProfile,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum CheckpointValidatedCausalType {
+    #[serde(rename = "checkpoint_validated_causal")]
+    CheckpointValidatedCausal,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum CheckpointValidatedCausalControlProfile {
+    #[serde(rename = "mooring.prepare-causal.v1")]
+    MooringPrepareCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CheckpointValidatedCausal {
+    pub r#type: CheckpointValidatedCausalType,
+    pub request_id: Identifier,
+    pub scope: Scope,
+    pub selected: Versions,
+    pub input_checkpoint_digest: Digest,
+    pub inventory: Vec<TargetIdentity>,
+    pub control_profile: CheckpointValidatedCausalControlProfile,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum PrepareAtomicCausalType {
+    #[serde(rename = "prepare_atomic_causal")]
+    PrepareAtomicCausal,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum PrepareAtomicCausalControlProfile {
+    #[serde(rename = "mooring.prepare-causal.v1")]
+    MooringPrepareCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PrepareAtomicCausal {
+    pub r#type: PrepareAtomicCausalType,
+    pub request_id: Identifier,
+    pub scope: Scope,
+    pub selected: Versions,
+    pub checkpoint: OpaquePreparedCheckpoint,
+    pub context: CausalPrepareContext,
+    pub change: AtomicChange,
+    pub control_profile: PrepareAtomicCausalControlProfile,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum AtomicPreparedCausalType {
+    #[serde(rename = "atomic_prepared_causal")]
+    AtomicPreparedCausal,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum AtomicPreparedCausalOutcome {
+    PreparedCandidate(PreparedCandidate),
+    PreparedDirectFailure(PreparedDirectFailure),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum AtomicPreparedCausalControlProfile {
+    #[serde(rename = "mooring.prepare-causal.v1")]
+    MooringPrepareCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AtomicPreparedCausal {
+    pub r#type: AtomicPreparedCausalType,
+    pub request_id: Identifier,
+    pub scope: Scope,
+    pub selected: Versions,
+    pub input_checkpoint_digest: Digest,
+    pub change_id: Identifier,
+    pub membership_hash: Digest,
+    pub outcome: AtomicPreparedCausalOutcome,
+    pub control_profile: AtomicPreparedCausalControlProfile,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Message {
@@ -1686,4 +1841,8 @@ pub enum Message {
     CheckpointValidated(CheckpointValidated),
     PrepareAtomic(PrepareAtomic),
     AtomicPrepared(AtomicPrepared),
+    ValidateCheckpointCausal(ValidateCheckpointCausal),
+    CheckpointValidatedCausal(CheckpointValidatedCausal),
+    PrepareAtomicCausal(PrepareAtomicCausal),
+    AtomicPreparedCausal(AtomicPreparedCausal),
 }

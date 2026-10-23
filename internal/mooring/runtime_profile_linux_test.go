@@ -63,7 +63,7 @@ func TestRuntimePrivateProfileMustBeOfferedAndSelectedExactly(t *testing.T) {
 }
 
 func TestRuntimePrivateProfileRaisesOnlyNegotiatedTransportBound(t *testing.T) {
-	for _, profile := range []string{"", PrivatePrepareProfile} {
+	for _, profile := range []string{"", PrivatePrepareProfile, PrivateCausalPrepareProfile} {
 		t.Run(profile, func(t *testing.T) {
 			r, err := helperRuntimeProfile(t, t.Context(), "echo", profile)
 			if err != nil {

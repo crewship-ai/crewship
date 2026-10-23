@@ -17,6 +17,18 @@ func (s *BatchStore) targetConfigValid() bool {
 		return true
 	}
 	c := s.config.Targets
+	if c.ReadPolicy != "" {
+		if c.ReadPolicy != CausalTargetReadPolicy {
+			return false
+		}
+		if _, ok := c.Adapter.(CausalTargetBatchAdapter); !ok {
+			return false
+		}
+		b := c.HistoryBudget
+		if b.Operations < 1 || b.Operations > 10000 || b.DependencyEdges < 1 || b.DependencyEdges > 65536 || b.Effects < 1 || b.Effects > 100000 {
+			return false
+		}
+	}
 	return c.Adapter != nil && c.Limits.Targets > 0 && c.Limits.Targets <= 65536 && c.Limits.Effects > 0 && c.Limits.EffectsPerOperation > 0 && c.Limits.EffectsPerOperation <= 4096 && c.Limits.ProvenanceBytes > 0
 }
 func validTargetInventory(in []BatchTargetIdentity, limit int) bool {
