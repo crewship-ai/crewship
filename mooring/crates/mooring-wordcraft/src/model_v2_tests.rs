@@ -340,3 +340,83 @@ fn full_native_peer_insert_with_different_or_explicit_empty_properties_survives_
         assert!(own.native() == merged && peer.native() == merged);
     }
 }
+
+#[test]
+fn restored_visible_future_format_stamp_is_rejected() {
+    let replica = Replica::initial(941);
+    let key = replica.key("bold", format::MAX_STAMP);
+    replica.text().format(
+        &mut replica.doc.transact_mut(),
+        0,
+        1,
+        Attrs::from([(key, Any::Bool(true))]),
+    );
+    let checkpoint = replica.document().checkpoint().unwrap();
+    assert!(matches!(
+        Document::restore(&checkpoint),
+        Err(AdapterError::InvalidCheckpoint)
+    ));
+}
+
+#[test]
+fn restored_inactive_future_format_stamp_is_rejected() {
+    let replica = Replica::initial(942);
+    let key = replica.key("bold", format::MAX_STAMP);
+    replica.text().format(
+        &mut replica.doc.transact_mut(),
+        0,
+        1,
+        Attrs::from([(key.clone(), Any::Bool(true))]),
+    );
+    replica.text().format(
+        &mut replica.doc.transact_mut(),
+        0,
+        1,
+        Attrs::from([(key.clone(), Any::Null)]),
+    );
+    // The malicious property is no longer visible, but is retained in history
+    // and could otherwise reappear through a future selective undo.
+    assert_eq!(replica.native(), replica.base);
+    assert!(replica
+        .update()
+        .windows(key.len())
+        .any(|part| part == key.as_bytes()));
+    let checkpoint = replica.document().checkpoint().unwrap();
+    assert!(matches!(
+        Document::restore(&checkpoint),
+        Err(AdapterError::InvalidCheckpoint)
+    ));
+}
+
+#[test]
+fn explicit_agent_format_wins_after_valid_restored_prior_format() {
+    let replica = Replica::initial(943);
+    let key = replica.key("bold", replica.stamp());
+    replica.text().format(
+        &mut replica.doc.transact_mut(),
+        0,
+        1,
+        Attrs::from([(key, Any::Bool(true))]),
+    );
+    let checkpoint = replica.document().checkpoint().unwrap();
+    let mut restored = Document::restore(&checkpoint).unwrap();
+    let target_id = restored.block_ids().unwrap()[0].clone();
+    candidate::apply(
+        &mut restored,
+        &command::Command::Format {
+            target_id,
+            start: command::Anchor::Start {},
+            end: command::Anchor::End {},
+            properties: BTreeMap::from([("bold".into(), Some(false))]),
+        },
+    )
+    .unwrap();
+    let native = restored.native().unwrap();
+    assert!(native["body"][0]["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|run| run["props"]["bold"] == false));
+    let saved = restored.checkpoint().unwrap();
+    assert_eq!(Document::restore(&saved).unwrap().native().unwrap(), native);
+}
