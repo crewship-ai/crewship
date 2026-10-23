@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux && mooring_rust_integration
 
 package mooring
 
@@ -14,7 +14,7 @@ import (
 func TestRuntimeActualRustChild(t *testing.T) {
 	binary := os.Getenv("MOORING_TEST_RUST_BINARY")
 	if binary == "" {
-		t.Skip("set MOORING_TEST_RUST_BINARY to the built mooring-collab")
+		t.Fatal("mooring_rust_integration requires MOORING_TEST_RUST_BINARY pointing to the built mooring-collab")
 	}
 	r, err := StartRuntime(t.Context(), RuntimeConfig{Enabled: true, Binary: binary, Versions: runtimeTestVersions})
 	if err != nil {

@@ -40,8 +40,9 @@ not a running Rust service or live collaboration acceptance.
 
 For actual Go/Rust bootstrap acceptance, build the pinned child using
 `crewship-heavy cargo build --manifest-path mooring/Cargo.toml -p mooring-collab --release --locked --offline`,
-then run `crewship-heavy env MOORING_TEST_RUST_BINARY=/absolute/path/to/mooring-collab go test -race ./internal/mooring -run '^TestRuntimeActualRustChild$' -count=1`.
+then run `crewship-heavy env MOORING_TEST_RUST_BINARY=/absolute/path/to/mooring-collab go test -race -tags mooring_rust_integration ./internal/mooring -run '^TestRuntimeActualRustChild$' -count=1`.
 This opt-in test starts the real Rust process, checks readiness, unsupported
 post-bootstrap traffic closure and host cancellation. It does not exercise
-participants, leases, content dispatch or durable receipts. A skipped opt-in
-test is not execution evidence.
+participants, leases, content dispatch or durable receipts. The explicit build
+tag excludes this dependency from ordinary Go tests; selecting it without the
+required binary fails instead of silently skipping.
