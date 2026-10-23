@@ -138,6 +138,90 @@ pub(crate) fn properties(attrs: &Attrs, model: Model) -> Result<Option<Value>, A
     Ok((explicit_empty || !properties.is_empty()).then_some(Value::Object(properties)))
 }
 
+/// Scan every retained formatting item, including inactive/deleted markers.
+/// This is a checkpoint integrity bound, not a human causal stamp witness.
+/// A legitimate action's stamp is at most the resulting state-vector sum:
+/// creating its distinct attribute identity allocates at least one CRDT item.
+pub(crate) fn validate_stored_stamps(bytes: &[u8], max_stamp: u64) -> Result<(), AdapterError> {
+    use mooring_text::yrs::{updates::decoder::Decode, Update};
+    let mut decoder = StampDecoder {
+        inner: mooring_text::yrs::updates::decoder::DecoderV1::from(bytes),
+        max_stamp,
+    };
+    Update::decode(&mut decoder).map_err(|_| AdapterError::InvalidCheckpoint)?;
+    Ok(())
+}
+struct StampDecoder<'a> {
+    inner: mooring_text::yrs::updates::decoder::DecoderV1<'a>,
+    max_stamp: u64,
+}
+impl mooring_text::yrs::encoding::read::Read for StampDecoder<'_> {
+    fn read_exact(
+        &mut self,
+        len: usize,
+    ) -> Result<&[u8], mooring_text::yrs::encoding::read::Error> {
+        self.inner.read_exact(len)
+    }
+}
+impl mooring_text::yrs::updates::decoder::Decoder for StampDecoder<'_> {
+    fn reset_ds_cur_val(&mut self) {
+        self.inner.reset_ds_cur_val();
+    }
+    fn read_ds_clock(&mut self) -> Result<u32, mooring_text::yrs::encoding::read::Error> {
+        self.inner.read_ds_clock()
+    }
+    fn read_ds_len(&mut self) -> Result<u32, mooring_text::yrs::encoding::read::Error> {
+        self.inner.read_ds_len()
+    }
+    fn read_left_id(
+        &mut self,
+    ) -> Result<mooring_text::yrs::ID, mooring_text::yrs::encoding::read::Error> {
+        self.inner.read_left_id()
+    }
+    fn read_right_id(
+        &mut self,
+    ) -> Result<mooring_text::yrs::ID, mooring_text::yrs::encoding::read::Error> {
+        self.inner.read_right_id()
+    }
+    fn read_client(
+        &mut self,
+    ) -> Result<mooring_text::yrs::ClientID, mooring_text::yrs::encoding::read::Error> {
+        self.inner.read_client()
+    }
+    fn read_info(&mut self) -> Result<u8, mooring_text::yrs::encoding::read::Error> {
+        self.inner.read_info()
+    }
+    fn read_parent_info(&mut self) -> Result<bool, mooring_text::yrs::encoding::read::Error> {
+        self.inner.read_parent_info()
+    }
+    fn read_type_ref(&mut self) -> Result<u8, mooring_text::yrs::encoding::read::Error> {
+        self.inner.read_type_ref()
+    }
+    fn read_len(&mut self) -> Result<u32, mooring_text::yrs::encoding::read::Error> {
+        self.inner.read_len()
+    }
+    fn read_any(&mut self) -> Result<Any, mooring_text::yrs::encoding::read::Error> {
+        self.inner.read_any()
+    }
+    fn read_json(&mut self) -> Result<Any, mooring_text::yrs::encoding::read::Error> {
+        self.inner.read_json()
+    }
+    fn read_key(
+        &mut self,
+    ) -> Result<std::sync::Arc<str>, mooring_text::yrs::encoding::read::Error> {
+        let key = self.inner.read_key()?;
+        if key.starts_with(PREFIX)
+            && !matches!(parse_key(&key), Ok(parsed) if parsed.stamp <= self.max_stamp)
+        {
+            return Err(mooring_text::yrs::encoding::read::Error::UnexpectedValue);
+        }
+        Ok(key)
+    }
+    fn read_to_end(&mut self) -> Result<&[u8], mooring_text::yrs::encoding::read::Error> {
+        self.inner.read_to_end()
+    }
+}
+
 /// Authoritative-current AGENT helper only. Human proposals require a separate
 /// qualified causal witness; global frontier clocks must not add dependencies
 /// on unrelated optimistic human operations.

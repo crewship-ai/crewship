@@ -377,6 +377,16 @@ impl Document {
         let unsupported = classify(&native).map_err(|_| AdapterError::InvalidCheckpoint)?;
         let recovered = mooring_text::recover(&update, Vec::new())
             .map_err(|_| AdapterError::InvalidCheckpoint)?;
+        if model == format::Model::V2 {
+            let total_clock = recovered
+                .document
+                .transact()
+                .state_vector()
+                .iter()
+                .try_fold(0_u64, |sum, (_, clock)| sum.checked_add(*clock as u64))
+                .ok_or(AdapterError::InvalidCheckpoint)?;
+            format::validate_stored_stamps(&update, total_clock)?;
+        }
         let result = Self {
             doc: recovered.document,
             read_only: unsupported || model == format::Model::LegacyV1,
