@@ -593,6 +593,9 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 				return
 			}
 			switch {
+			case r.Method == http.MethodPost && r.URL.Path == "/api/v1/mooring":
+				s.handleMooring(w, r)
+				return
 			case r.Method == http.MethodPost && r.URL.Path == "/api/v1/gridcraft":
 				s.handleGridCraft(w, r)
 				return

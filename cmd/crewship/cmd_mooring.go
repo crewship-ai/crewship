@@ -1,0 +1,126 @@
+package main
+
+// GET /api/v1/mooring/apps mooring apps
+// POST /api/v1/mooring/documents mooring create
+// GET /api/v1/pages/{slug}/mooring mooring read
+// POST /api/v1/pages/{slug}/mooring/commands mooring command
+// POST /api/v1/pages/{slug}/mooring/mandates mooring admit
+// DELETE /api/v1/pages/{slug}/mooring/mandates/{mandate} mooring revoke
+// POST /api/v1/internal/mooring mooring agent
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"time"
+
+	"github.com/crewship-ai/crewship/internal/appengine"
+	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/spf13/cobra"
+)
+
+func newMooringCommand() *cobra.Command {
+	root := &cobra.Command{Use: "mooring", Short: "Manifest-driven experimental application documents"}
+	for _, op := range []string{"apps", "create", "read", "command", "admit", "revoke"} {
+		operation := op
+		cmd := &cobra.Command{Use: op, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+			client, e := humanWorkbookClient()
+			if e != nil {
+				return e
+			}
+			path := "/api/v1/mooring/apps"
+			if operation != "apps" && operation != "create" {
+				path = "/api/v1/pages/" + pagePathEscape(args[0]) + "/mooring"
+			}
+			var response *http.Response
+			switch operation {
+			case "apps", "read":
+				response, e = client.Get(path)
+			case "revoke":
+				response, e = client.Delete(path + "/mandates/" + url.PathEscape(args[1]))
+			default:
+				var raw []byte
+				raw, e = workbookInput(cmd)
+				if e != nil {
+					return e
+				}
+				if operation == "create" {
+					path = "/api/v1/mooring/documents"
+				} else if operation == "command" {
+					path += "/commands"
+				} else {
+					path += "/mandates"
+				}
+				response, e = client.Post(path, json.RawMessage(raw))
+			}
+			if e != nil {
+				return e
+			}
+			return printPageArtifactResponse(cmd, response)
+		}}
+		if op == "apps" || op == "create" {
+			cmd.Args = cobra.NoArgs
+		} else {
+			cmd.Use += " <page-slug|@ID>"
+		}
+		if op == "revoke" {
+			cmd.Args = cobra.ExactArgs(2)
+			cmd.Use += " <mandate>"
+		}
+		if op == "create" || op == "command" || op == "admit" {
+			cmd.Flags().String("file", "", "Exact JSON packet; - reads stdin")
+		}
+		root.AddCommand(cmd)
+	}
+	agent := &cobra.Command{Use: "agent", Args: cobra.NoArgs, Short: "Run an explicitly admitted generic application command", RunE: func(cmd *cobra.Command, _ []string) error {
+		token := os.Getenv("CREWSHIP_AGENT_TOKEN")
+		if token == "" {
+			return errors.New("live agent token required")
+		}
+		raw, e := workbookInput(cmd)
+		if e != nil {
+			return e
+		}
+		base := os.Getenv("CREWSHIP_SIDECAR_URL")
+		if base == "" {
+			base = "http://127.0.0.1:9119"
+		}
+		u, e := url.Parse(base)
+		if e != nil || u.Scheme != "http" || u.Hostname() != "127.0.0.1" || u.RawQuery != "" || u.Path != "" || u.User != nil || u.Fragment != "" {
+			return errors.New("loopback sidecar URL required")
+		}
+		req, e := http.NewRequestWithContext(cmd.Context(), "POST", base+"/api/v1/mooring", bytes.NewReader(raw))
+		if e != nil {
+			return e
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		transport := &http.Transport{Proxy: nil}
+		defer transport.CloseIdleConnections()
+		client := &http.Client{Transport: transport, Timeout: 35 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("redirect refused") }}
+		response, e := client.Do(req)
+		if e != nil {
+			return e
+		}
+		defer response.Body.Close()
+		body, e := io.ReadAll(io.LimitReader(response.Body, appengine.MaxSnapshotBytes+16385))
+		if e != nil || len(body) > appengine.MaxSnapshotBytes+16384 || !json.Valid(body) {
+			return errors.New("invalid Mooring response")
+		}
+		if response.StatusCode != 200 {
+			return fmt.Errorf("Mooring HTTP%d; retain exact packet", response.StatusCode)
+		}
+		formatter := cli.NewFormatter(cli.ResolveFormat(flagFormat, nil))
+		formatter.Writer = cmd.OutOrStdout()
+		return formatter.Machine(cli.RawJSON(bytes.ReplaceAll(body, []byte(token), []byte("[REDACTED]"))))
+	}}
+	agent.Flags().String("file", "", "Retained agent packet; - reads stdin")
+	root.AddCommand(agent)
+	return root
+}
+func init() { rootCmd.AddCommand(newMooringCommand()) }

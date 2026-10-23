@@ -255,6 +255,7 @@ type pageWire struct {
 	HasDocument bool `json:"has_document"`
 	// HasWorkbook marks a Page holding a GridCraft workbook, viewed read-only.
 	HasWorkbook bool `json:"has_workbook,omitempty"`
+	HasMooring  bool `json:"has_mooring,omitempty"`
 	// HasProject and HasApplication answer DIFFERENT questions, and the editor
 	// needs both. HasApplication is "an application is published and running";
 	// HasProject is "this Page has application source at all", published or
@@ -325,6 +326,7 @@ type pageListWire struct {
 	PrivateAudience bool `json:"private_audience"`
 	HasDocument     bool `json:"has_document"`
 	HasWorkbook     bool `json:"has_workbook,omitempty"`
+	HasMooring      bool `json:"has_mooring,omitempty"`
 	// See pageWire.HasProject: source that exists versus source that is live.
 	HasProject         bool   `json:"has_project"`
 	HasApplication     bool   `json:"has_application"`
@@ -408,6 +410,7 @@ type pageWriteRequest struct {
 type pageRecord struct {
 	PrivateAudience    bool
 	HasDocument        bool
+	HasMooring         bool
 	HasWorkbook        bool
 	HasProject         bool
 	HasApplication     bool
@@ -555,7 +558,7 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 		       EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=p.id),
 		       COALESCE(l.published,0), COALESCE(l.version,0),
  EXISTS(SELECT 1 FROM documents WHERE page_id=p.id), p.private_audience,
- EXISTS(SELECT 1 FROM gridcraft_heads WHERE page_id=p.id)
+ EXISTS(SELECT 1 FROM gridcraft_heads WHERE page_id=p.id), EXISTS(SELECT 1 FROM mooring_documents WHERE page_id=p.id)
 		FROM pages p LEFT JOIN page_project_live l ON l.page_id=p.id
 		WHERE p.workspace_id = ? AND `+scope.where+`
 		ORDER BY p.updated_at DESC, p.slug ASC`, args...)
@@ -570,7 +573,7 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 		if err := rows.Scan(&p.ID, &p.Slug, &p.Name, &p.Description,
 			&p.OwnerUserID, &p.OwnerCrewID, &p.FolderID, &p.PagesVersion,
 			&p.Icon, &p.Color,
-			&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience, &p.HasWorkbook); err != nil {
+			&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience, &p.HasWorkbook, &p.HasMooring); err != nil {
 			return nil, err
 		}
 		records = append(records, p)
@@ -673,7 +676,7 @@ func (h *PageHandler) pageListRow(row *pageIndexRow, folders map[string]*pageFol
 	rec := &row.rec
 	out := pageListWire{
 		PrivateAudience: rec.PrivateAudience,
-		HasDocument:     rec.HasDocument, HasWorkbook: rec.HasWorkbook, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
+		HasDocument:     rec.HasDocument, HasWorkbook: rec.HasWorkbook, HasMooring: rec.HasMooring, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 		ID:                  rec.ID,
 		Slug:                rec.Slug,
 		Name:                rec.Name,
@@ -1075,7 +1078,7 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 409, "document pages cannot contain panels")
 		return
 	}
-	if len(req.Panels) != 0 && rec.HasWorkbook {
+	if len(req.Panels) != 0 && (rec.HasWorkbook || rec.HasMooring) {
 		replyError(w, 409, "workbook pages cannot contain panels")
 		return
 	}
@@ -1316,7 +1319,7 @@ func (h *PageHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if !h.hasPrivateOutputMetadata(r.Context(), rec) {
 		payload["slug"] = rec.Slug
 	}
-	if rec.HasWorkbook {
+	if rec.HasWorkbook || rec.HasMooring {
 		refusal, err := h.deleteWorkbookPage(r, wsID, rec, user)
 		if err != nil {
 			replyInternalError(w, h.logger, "delete workbook page", err)
@@ -1373,13 +1376,13 @@ func pageWorkspaceInvalidation(rec *pageRecord, hasPanels bool) map[string]any {
 }
 
 func pageHasPrivateOutputMetadata(rec *pageRecord, hasPanels bool) bool {
-	return rec.HasDocument || rec.HasWorkbook || (!hasPanels && rec.OwnerUserID != "" && !rec.HasProject && !rec.HasApplication)
+	return rec.HasDocument || rec.HasWorkbook || rec.HasMooring || (!hasPanels && rec.OwnerUserID != "" && !rec.HasProject && !rec.HasApplication)
 }
 
 // Use when panels are not already loaded, before deleting or moving the Page.
 // A failed classification must hide descriptive metadata, never disclose it.
 func (h *PageHandler) hasPrivateOutputMetadata(ctx context.Context, rec *pageRecord) bool {
-	if rec.HasDocument || rec.HasWorkbook {
+	if rec.HasDocument || rec.HasWorkbook || rec.HasMooring {
 		return true
 	}
 	if rec.OwnerUserID == "" || rec.HasProject || rec.HasApplication {
@@ -1426,11 +1429,11 @@ func (h *PageHandler) loadPageWithPrivateAudience(ctx context.Context, wsID, slu
  EXISTS(SELECT 1 FROM page_project_live WHERE page_id=pages.id AND published=1),
  COALESCE((SELECT version FROM page_project_live WHERE page_id=pages.id),0),
  EXISTS(SELECT 1 FROM documents WHERE page_id=pages.id), private_audience,
- EXISTS(SELECT 1 FROM gridcraft_heads WHERE page_id=pages.id)
+ EXISTS(SELECT 1 FROM gridcraft_heads WHERE page_id=pages.id), EXISTS(SELECT 1 FROM mooring_documents WHERE page_id=pages.id)
 		FROM pages WHERE workspace_id = ? AND `+column+` = ?`, wsID, slug).Scan(
 		&p.ID, &p.Slug, &p.Name, &p.Description, &p.OwnerUserID, &p.OwnerCrewID,
 		&p.FolderID, &p.PagesVersion, &p.Icon, &p.Color,
-		&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience, &p.HasWorkbook)
+		&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience, &p.HasWorkbook, &p.HasMooring)
 	if err != nil {
 		return nil, err
 	}
@@ -1842,7 +1845,7 @@ func (h *PageHandler) pageDocument(ctx context.Context, rec *pageRecord, panels 
 // cannot edit still sees exactly what they saw before.
 func (h *PageHandler) pageDocumentFor(ctx context.Context, rec *pageRecord, panels []*panelRecord, viewer *pageViewer, authored bool) pageWire {
 	out := pageWire{
-		HasDocument: rec.HasDocument, HasWorkbook: rec.HasWorkbook, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
+		HasDocument: rec.HasDocument, HasWorkbook: rec.HasWorkbook, HasMooring: rec.HasMooring, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 		ID:          rec.ID,
 		Slug:        rec.Slug,
 		Name:        rec.Name,

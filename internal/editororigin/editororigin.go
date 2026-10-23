@@ -425,6 +425,9 @@ func New(o Options) (*Handler, error) {
 		h.bundles[digest] = bundle{files: files, inline: extra}
 		h.order = append(h.order, digest)
 	}
+	if err := h.loadCompiledPackages(); err != nil {
+		errs = append(errs, err)
+	}
 	return h, errors.Join(errs...)
 }
 
@@ -596,7 +599,11 @@ func loadBundle(dir, digest string) (map[string]file, error) {
 		return nil, err
 	}
 	defer bundleRoot.Close()
-	raw, err := readRegular(bundleRoot, "manifest.json", maxManifestBytes)
+	return verifyBundle(digest, func(name string, limit int) ([]byte, error) { return readRegular(bundleRoot, name, limit) })
+}
+
+func verifyBundle(digest string, read func(string, int) ([]byte, error)) (map[string]file, error) {
+	raw, err := read("manifest.json", maxManifestBytes)
 	if err != nil {
 		return nil, fmt.Errorf("manifest: %w", err)
 	}
@@ -619,7 +626,7 @@ func loadBundle(dir, digest string) (map[string]file, error) {
 		if !validName(name) || !IsDigest(sum) {
 			return nil, fmt.Errorf("manifest entry %q is not a clean relative path with a digest", name)
 		}
-		body, err := readRegular(bundleRoot, name, maxBundleBytes-total)
+		body, err := read(name, maxBundleBytes-total)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", name, err)
 		}
