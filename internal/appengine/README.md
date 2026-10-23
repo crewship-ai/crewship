@@ -17,8 +17,10 @@ and `CREWSHIP_GRIDCRAFT_SERVICE_TOKEN_FILE`. The application connects to an
 authenticated Unix socket; it never launches containers or supplies run tokens.
 The service runs one candidate at a time, independently of application restarts.
 A service token authorizes only candidate computation, never database persistence.
-Portable workbook backup, fork and recovery are deferred. A workspace dump
-containing workbooks is refused rather than silently dropping their content.
+Portable workbook backup preserves snapshots and immutable receipts. Fork remaps
+artifact anchors while retaining original receipt provenance; copied live run
+intents are excluded. Recovery advances generation/token fences before any
+new work. A copied source receipt cannot impersonate an operation on a new Page.
 
 Each mutation is bound to artifact, authority and mutation ID. The canonical
 request fingerprint includes original preconditions and mandate. Current

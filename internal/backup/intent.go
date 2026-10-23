@@ -36,15 +36,13 @@ import "sort"
 // table. Drift detection catches the omission in tests so an oversight
 // surfaces before a bundle ships missing rows.
 var BackupTableIntent = map[string]ScopedTableIntent{
-	// Portable workbook backup is unavailable in the experimental pilot. Dump
-	// refuses a workspace containing workbooks instead of silently omitting them.
-	"gridcraft_heads":        IntentExcludeOperational,
-	"gridcraft_operations":   IntentExcludeOperational,
-	"gridcraft_revisions":    IntentExcludeOperational,
-	"gridcraft_audit":        IntentExcludeOperational,
-	"gridcraft_outbox":       IntentExcludeOperational,
-	"gridcraft_intents":      IntentExcludeRuntime,
-	"gridcraft_writer_fence": IntentExcludeRuntime,
+	"gridcraft_heads":        IntentInclude,
+	"gridcraft_revisions":    IntentInclude,
+	"gridcraft_operations":   IntentInclude, // immutable replay evidence; pending candidates are fenced on restore
+	"gridcraft_audit":        IntentInclude,
+	"gridcraft_outbox":       IntentInclude,
+	"gridcraft_intents":      IntentExcludeRuntime, // explicit run-bound permission must be freshly admitted after recovery
+	"gridcraft_writer_fence": IntentExcludeRuntime, // local serialization singleton
 
 	"document_iteration_intents": IntentExcludeRuntime, // original live targeted-message grants never survive restore
 	"document_creation_consents": IntentExcludeRuntime, // live creation permission must be freshly admitted after restore
