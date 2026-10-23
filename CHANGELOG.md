@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Workbook conflict notices and save status keep the editor frame stationary, preserving rapid input during refusals, including on narrow screens.
+
 - ⚠️ **Shared workbooks no longer accept direct agent mandates.** The experimental post-publication exception bypassed the required proposal path. New admissions and legacy mandate use now fail closed with `proposal_required`; proposal delivery remains unavailable. Private workbook mandates are unchanged.
 
 - **Workbook previews now explain why editing is unavailable.** A disabled workspace, unsupported browser, failed availability check or invalid editor configuration has a visible reason and next step. Failed availability checks can be retried without reloading the page.

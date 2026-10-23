@@ -203,7 +203,7 @@ function OverflowRow({ count, onDiscard }: { count: number; onDiscard: () => voi
 
 function ConflictNotice({ conflicts, refusals, overflow, queueFull, onKeepMine, onTakeTheirs, onDiscardOverflow, panel }: { conflicts: ShownConflict[]; refusals: Refusal[]; overflow: number; queueFull: ReadonlySet<number>; onKeepMine: (id: number) => void; onTakeTheirs: (id: number) => void; onDiscardOverflow: () => void; panel: React.Ref<HTMLDivElement> }) {
   if (!conflicts.length && !refusals.length && !overflow) return null
-  return <div ref={panel} data-testid="workbook-draft-conflict" className="flex flex-col gap-2 border-b border-warn/30 bg-warn/10 px-3 py-2 text-sm">
+  return <div ref={panel} data-testid="workbook-draft-conflict" role="region" aria-label="Workbook changes" className="absolute bottom-12 right-3 z-20 flex max-h-[40%] w-[min(36rem,calc(100%-1.5rem))] flex-col gap-2 overflow-y-auto rounded-md border border-warn/50 bg-background px-3 py-2 text-sm shadow-lg">
     {conflicts.map(item => <p key={item.key} data-kind="changed" role="status" aria-live="polite">
       Changed by {item.actor_label} while you were editing: {conflictCell(item.sheet, item.cell)} is now <q className="break-all">{item.input}</q>. Your draft is kept; when you commit it you can keep yours or take theirs.
     </p>)}
@@ -517,12 +517,14 @@ export function WorkbookEditorHost({ client, pageId, name, onEnd, onDirtyChange 
   }, [refusals, overflow])
 
   const label = workbookSaveLabel(save)
-  return <section aria-label="Workbook page" className="flex min-h-0 flex-1 flex-col overflow-hidden">
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b p-3">
-      <h1 className="mr-auto font-semibold">{name ?? "Workbook"}</h1>
+  return <section aria-label="Workbook page" className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+    <div className="grid h-24 shrink-0 grid-cols-[minmax(0,1fr)_auto] grid-rows-[1.25rem_minmax(0,1fr)] gap-x-3 border-b px-3 py-2">
+      <h1 className="truncate font-semibold" title={name ?? "Workbook"}>{name ?? "Workbook"}</h1>
       {rev !== undefined && rev > 0 && <span className="text-sm tabular-nums text-muted-foreground">Revision {rev}</span>}
-      <span role="status" aria-live="polite" data-testid="workbook-save-state" className="text-sm text-muted-foreground">{label}</span>
+      <span role="status" aria-live="polite" data-testid="workbook-save-state" className="col-span-2 overflow-y-auto text-sm text-muted-foreground">{label}</span>
     </div>
+    {/* Notices must not reflow the credentialless frame during a pointer gesture: Chromium can
+        leave focus on the outer iframe and deliver the next keystrokes to the host. */}
     <ConflictNotice conflicts={conflicts} refusals={refusals} overflow={overflow} queueFull={queueFull} onKeepMine={keepMine} onTakeTheirs={takeTheirs} onDiscardOverflow={discardOverflow} panel={panel} />
     <div ref={container} data-testid="workbook-editor-frame" className="relative min-h-0 flex-1" />
   </section>

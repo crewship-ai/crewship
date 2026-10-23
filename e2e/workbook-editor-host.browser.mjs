@@ -5,6 +5,8 @@
 // No live instance, provider or credentials are used.
 // Run: crewship-heavy node e2e/workbook-editor-host.browser.mjs
 import { build } from "esbuild"
+import postcss from "postcss"
+import tailwindcss from "@tailwindcss/postcss"
 import { chromium } from "@playwright/test"
 import assert from "node:assert/strict"
 import { createServer } from "node:http"
@@ -223,6 +225,7 @@ const results = []
 const step = (name, detail = {}) => { results.push({ step: name, ...detail }); console.log(JSON.stringify({ step: name, ...detail })) }
 
 try {
+  const css = await postcss([tailwindcss()]).process(await readFile("app/globals.css", "utf8"), { from: "app/globals.css" })
   await build({
     entryPoints: ["e2e/workbook-editor-host.fixture.tsx"], bundle: true, outfile: join(output, "bundle.js"), platform: "browser", format: "esm", jsx: "automatic",
     alias: { "@": process.cwd() }, define: { "process.env": '{"NODE_ENV":"test"}' }, logLevel: "error",
@@ -249,6 +252,7 @@ try {
           document.body.append(f); setTimeout(() => done(hello), 2500)
         })</script>`)
     }
+    if (url.pathname === "/host.css") { response.writeHead(200, { "content-type": "text/css" }); return response.end(css.css) }
     const workbook = /^\/api\/v1\/pages\/(?:%40|@)page-1\/workbook(.*)$/.exec(url.pathname)
     if (workbook) return workbookApi(request, response, workbook[1], url.searchParams)
     if (url.pathname === "/api/v1/feature-flags") return json(response, 200, [{ id: "f1", key: "gridcraft_editor", description: null, enabled: api.flag, percentage: 100, created_at: "", updated_at: "" }])
@@ -257,7 +261,7 @@ try {
     if (url.pathname === "/api/auth/token/refresh" && request.method === "POST") { api.refreshes++; return json(response, 200, { ok: true }) }
     if (url.pathname.startsWith("/api/")) return json(response, 404, { error: "not mocked" })
     response.writeHead(200, { "content-type": "text/html", ...studioHeaders })
-    response.end('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Host</title><div id="root"></div><script type="module" src="/bundle.js"></script>')
+    response.end('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Host</title><link rel="stylesheet" href="/host.css"><div id="root"></div><script type="module" src="/bundle.js"></script>')
   })
   await new Promise(resolve => hostServer.listen(0, "127.0.0.1", resolve))
   await new Promise(resolve => editorServer.listen(0, "127.0.0.1", resolve))
@@ -306,7 +310,7 @@ try {
     await page.close()
   }
 
-  const contextA = await browser.newContext()
+  const contextA = await browser.newContext({ viewport: { width: 320, height: 640 } })
   const contextB = await browser.newContext()
   const a = await open(contextA, "A")
   const b = await open(contextB, "B")
@@ -374,10 +378,12 @@ try {
   await frameA.locator("#cell").fill("B2")
   await frameA.locator("#value").focus() // the edit starts at the current revision
   await frameA.locator("#value").fill("mine")
+  const frameBeforeConflict = await a.locator("iframe").boundingBox()
   const conflictRev = agentCommit("B2", "7")
   // The person is warned while the draft is still open, before any commit; the draft stays.
   const warning = a.getByTestId("workbook-draft-conflict")
   await warning.getByText("Changed by Agent Ada while you were editing").waitFor({ timeout: 5000 })
+  assert.deepEqual(await a.locator("iframe").boundingBox(), frameBeforeConflict, "draft warning must not move or resize the editor under a pointer gesture")
   assert.equal(await frameA.locator("#value").inputValue(), "mine")
   await frameA.locator("#commit").click()
   const refused = await waitEditor(a, s => s.rejected.length === 1, 3000)
@@ -388,6 +394,7 @@ try {
   // At commit the refusal names the writer and keeps the person's value until they choose.
   await warning.getByRole("button", { name: "Keep mine for Sheet1!B2" }).waitFor()
   assert.match(await warning.textContent(), /Yours: .?mine.? · Theirs: .?7/)
+  assert.deepEqual(await a.locator("iframe").boundingBox(), frameBeforeConflict, "refusal must not move or resize the editor while the next input arrives")
   // Until the person decides, their value exists only in the page: leaving is guarded.
   assert.equal(await unsent(a), "true")
   await warning.getByRole("button", { name: "Take theirs for Sheet1!B2" }).click()
