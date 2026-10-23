@@ -1,0 +1,10 @@
+[package]
+name = "mooring-text"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+yrs = "=0.28.0"

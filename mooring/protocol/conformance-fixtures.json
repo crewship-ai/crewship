@@ -4106,6 +4106,574 @@
         },
         "unexpected_identity": "spoof"
       }
+    },
+    {
+      "id": "valid-validate-checkpoint",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "validate_checkpoint",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "control_profile": "mooring.prepare.v1"
+      }
+    },
+    {
+      "id": "missing-request-id-validate-checkpoint",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "validate_checkpoint",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "control_profile": "mooring.prepare.v1"
+      }
+    },
+    {
+      "id": "unknown-property-validate-checkpoint",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "validate_checkpoint",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "issuer": "spoof",
+        "control_profile": "mooring.prepare.v1"
+      }
+    },
+    {
+      "id": "valid-checkpoint-validated",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "checkpoint_validated",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "input_checkpoint_digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "inventory": [
+          {
+            "target_id": "p1",
+            "deleted": false
+          }
+        ],
+        "control_profile": "mooring.prepare.v1"
+      }
+    },
+    {
+      "id": "missing-request-id-checkpoint-validated",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "checkpoint_validated",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "input_checkpoint_digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "inventory": [
+          {
+            "target_id": "p1",
+            "deleted": false
+          }
+        ],
+        "control_profile": "mooring.prepare.v1"
+      }
+    },
+    {
+      "id": "unknown-property-checkpoint-validated",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "checkpoint_validated",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "input_checkpoint_digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "inventory": [
+          {
+            "target_id": "p1",
+            "deleted": false
+          }
+        ],
+        "issuer": "spoof",
+        "control_profile": "mooring.prepare.v1"
+      }
+    },
+    {
+      "id": "valid-prepare-atomic",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "prepare_atomic",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "context": {
+          "read_policy": "agent_confirmed_current",
+          "document_revision": "0",
+          "targets": [
+            {
+              "target_id": "p1",
+              "deleted": false,
+              "revision": "0",
+              "structure_revision": "0"
+            }
+          ],
+          "operation_revisions": [
+            {
+              "op_id": "o1",
+              "revision": "1"
+            }
+          ]
+        },
+        "change": {
+          "change_id": "c1",
+          "operations": [
+            {
+              "op_id": "o1",
+              "participant_ref": "host-ref",
+              "base_revision": "0",
+              "dependencies": [],
+              "read_preconditions": [],
+              "payload": {
+                "kind": "text",
+                "text": "Příliš žluťoučký kůň"
+              },
+              "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+            }
+          ],
+          "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+        },
+        "control_profile": "mooring.prepare.v1"
+      }
+    },
+    {
+      "id": "missing-request-id-prepare-atomic",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "prepare_atomic",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "context": {
+          "read_policy": "agent_confirmed_current",
+          "document_revision": "0",
+          "targets": [
+            {
+              "target_id": "p1",
+              "deleted": false,
+              "revision": "0",
+              "structure_revision": "0"
+            }
+          ],
+          "operation_revisions": [
+            {
+              "op_id": "o1",
+              "revision": "1"
+            }
+          ]
+        },
+        "change": {
+          "change_id": "c1",
+          "operations": [
+            {
+              "op_id": "o1",
+              "participant_ref": "host-ref",
+              "base_revision": "0",
+              "dependencies": [],
+              "read_preconditions": [],
+              "payload": {
+                "kind": "text",
+                "text": "Příliš žluťoučký kůň"
+              },
+              "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+            }
+          ],
+          "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+        },
+        "control_profile": "mooring.prepare.v1"
+      }
+    },
+    {
+      "id": "unknown-property-prepare-atomic",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "prepare_atomic",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "context": {
+          "read_policy": "agent_confirmed_current",
+          "document_revision": "0",
+          "targets": [
+            {
+              "target_id": "p1",
+              "deleted": false,
+              "revision": "0",
+              "structure_revision": "0"
+            }
+          ],
+          "operation_revisions": [
+            {
+              "op_id": "o1",
+              "revision": "1"
+            }
+          ]
+        },
+        "change": {
+          "change_id": "c1",
+          "operations": [
+            {
+              "op_id": "o1",
+              "participant_ref": "host-ref",
+              "base_revision": "0",
+              "dependencies": [],
+              "read_preconditions": [],
+              "payload": {
+                "kind": "text",
+                "text": "Příliš žluťoučký kůň"
+              },
+              "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+            }
+          ],
+          "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+        },
+        "issuer": "spoof",
+        "control_profile": "mooring.prepare.v1"
+      }
+    },
+    {
+      "id": "valid-atomic-prepared",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "atomic_prepared",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "input_checkpoint_digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "change_id": "c1",
+        "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47",
+        "outcome": {
+          "kind": "candidate",
+          "checkpoint": {
+            "encoding": "base64",
+            "state": "e30=",
+            "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+          },
+          "effects": [
+            {
+              "op_id": "o1",
+              "targets": []
+            }
+          ],
+          "inventory": [
+            {
+              "target_id": "p1",
+              "deleted": false
+            }
+          ]
+        },
+        "control_profile": "mooring.prepare.v1"
+      }
+    },
+    {
+      "id": "missing-request-id-atomic-prepared",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "atomic_prepared",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "input_checkpoint_digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "change_id": "c1",
+        "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47",
+        "outcome": {
+          "kind": "candidate",
+          "checkpoint": {
+            "encoding": "base64",
+            "state": "e30=",
+            "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+          },
+          "effects": [
+            {
+              "op_id": "o1",
+              "targets": []
+            }
+          ],
+          "inventory": [
+            {
+              "target_id": "p1",
+              "deleted": false
+            }
+          ]
+        },
+        "control_profile": "mooring.prepare.v1"
+      }
+    },
+    {
+      "id": "unknown-property-atomic-prepared",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "atomic_prepared",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "input_checkpoint_digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "change_id": "c1",
+        "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47",
+        "outcome": {
+          "kind": "candidate",
+          "checkpoint": {
+            "encoding": "base64",
+            "state": "e30=",
+            "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+          },
+          "effects": [
+            {
+              "op_id": "o1",
+              "targets": []
+            }
+          ],
+          "inventory": [
+            {
+              "target_id": "p1",
+              "deleted": false
+            }
+          ]
+        },
+        "issuer": "spoof",
+        "control_profile": "mooring.prepare.v1"
+      }
+    },
+    {
+      "id": "private-hello-profile",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "hello",
+        "request_id": "request-1",
+        "supported": [
+          {
+            "protocol_version": "0.4.0",
+            "model_version": "1.0.0",
+            "engine_version": "1.0.0"
+          }
+        ],
+        "control_profiles": [
+          "mooring.prepare.v1"
+        ]
+      }
+    },
+    {
+      "id": "private-hello-profile-unknown",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "hello",
+        "request_id": "request-1",
+        "supported": [
+          {
+            "protocol_version": "0.4.0",
+            "model_version": "1.0.0",
+            "engine_version": "1.0.0"
+          }
+        ],
+        "control_profiles": [
+          "unknown"
+        ]
+      }
+    },
+    {
+      "id": "private-ready-profile",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "runtime_ready",
+        "request_id": "startup-1",
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "selected_control_profile": "mooring.prepare.v1"
+      }
+    },
+    {
+      "id": "private-ready-profile-unknown",
+      "schema_ref": "#",
+      "schema_valid": false,
+      "message": {
+        "type": "runtime_ready",
+        "request_id": "startup-1",
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "selected_control_profile": "unknown"
+      }
+    },
+    {
+      "id": "valid-atomic-prepared-failure",
+      "schema_ref": "#",
+      "schema_valid": true,
+      "message": {
+        "type": "atomic_prepared",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "input_checkpoint_digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "change_id": "c1",
+        "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47",
+        "outcome": {
+          "kind": "failure",
+          "op_id": "o1",
+          "reason": {
+            "code": "precondition_failed",
+            "message": "changed",
+            "retry": "new_operation_after_refresh"
+          }
+        },
+        "control_profile": "mooring.prepare.v1"
+      }
     }
   ],
   "semantic_cases": [
@@ -5239,6 +5807,407 @@
       },
       "schema_valid": true,
       "expected_error": "forbidden"
+    },
+    {
+      "id": "untrusted-participant-validate_checkpoint",
+      "message": {
+        "type": "validate_checkpoint",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "control_profile": "mooring.prepare.v1"
+      },
+      "context": {
+        "check": "direction",
+        "authenticated_role": "participant",
+        "allowed_role": "host",
+        "channel": "participant_socket"
+      },
+      "schema_valid": true,
+      "expected_error": "forbidden"
+    },
+    {
+      "id": "untrusted-participant-checkpoint_validated",
+      "message": {
+        "type": "checkpoint_validated",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "input_checkpoint_digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "inventory": [
+          {
+            "target_id": "p1",
+            "deleted": false
+          }
+        ],
+        "control_profile": "mooring.prepare.v1"
+      },
+      "context": {
+        "check": "direction",
+        "authenticated_role": "participant",
+        "allowed_role": "runtime",
+        "channel": "participant_socket"
+      },
+      "schema_valid": true,
+      "expected_error": "forbidden"
+    },
+    {
+      "id": "untrusted-participant-prepare_atomic",
+      "message": {
+        "type": "prepare_atomic",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "context": {
+          "read_policy": "agent_confirmed_current",
+          "document_revision": "0",
+          "targets": [
+            {
+              "target_id": "p1",
+              "deleted": false,
+              "revision": "0",
+              "structure_revision": "0"
+            }
+          ],
+          "operation_revisions": [
+            {
+              "op_id": "o1",
+              "revision": "1"
+            }
+          ]
+        },
+        "change": {
+          "change_id": "c1",
+          "operations": [
+            {
+              "op_id": "o1",
+              "participant_ref": "host-ref",
+              "base_revision": "0",
+              "dependencies": [],
+              "read_preconditions": [],
+              "payload": {
+                "kind": "text",
+                "text": "Příliš žluťoučký kůň"
+              },
+              "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+            }
+          ],
+          "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+        },
+        "control_profile": "mooring.prepare.v1"
+      },
+      "context": {
+        "check": "direction",
+        "authenticated_role": "participant",
+        "allowed_role": "host",
+        "channel": "participant_socket"
+      },
+      "schema_valid": true,
+      "expected_error": "forbidden"
+    },
+    {
+      "id": "untrusted-participant-atomic_prepared",
+      "message": {
+        "type": "atomic_prepared",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "input_checkpoint_digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "change_id": "c1",
+        "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47",
+        "outcome": {
+          "kind": "candidate",
+          "checkpoint": {
+            "encoding": "base64",
+            "state": "e30=",
+            "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+          },
+          "effects": [
+            {
+              "op_id": "o1",
+              "targets": []
+            }
+          ],
+          "inventory": [
+            {
+              "target_id": "p1",
+              "deleted": false
+            }
+          ]
+        },
+        "control_profile": "mooring.prepare.v1"
+      },
+      "context": {
+        "check": "direction",
+        "authenticated_role": "participant",
+        "allowed_role": "runtime",
+        "channel": "participant_socket"
+      },
+      "schema_valid": true,
+      "expected_error": "forbidden"
+    },
+    {
+      "id": "noncanonical-padding-private-validation",
+      "message": {
+        "type": "validate_checkpoint",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e31=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "control_profile": "mooring.prepare.v1"
+      },
+      "context": {
+        "check": "opaque_checkpoint_bytes",
+        "authenticated_role": "host",
+        "channel": "inherited_private_rpc"
+      },
+      "schema_valid": true,
+      "expected_error": "invalid_request"
+    },
+    {
+      "id": "wrong-checkpoint-digest-private-validation",
+      "message": {
+        "type": "validate_checkpoint",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "control_profile": "mooring.prepare.v1"
+      },
+      "context": {
+        "check": "opaque_checkpoint_bytes",
+        "authenticated_role": "host",
+        "channel": "inherited_private_rpc"
+      },
+      "schema_valid": true,
+      "expected_error": "invalid_request"
+    },
+    {
+      "id": "prepare-noncontiguous-prospective-revision",
+      "message": {
+        "type": "prepare_atomic",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "context": {
+          "read_policy": "agent_confirmed_current",
+          "document_revision": "0",
+          "targets": [
+            {
+              "target_id": "p1",
+              "deleted": false,
+              "revision": "0",
+              "structure_revision": "0"
+            }
+          ],
+          "operation_revisions": [
+            {
+              "op_id": "o1",
+              "revision": "2"
+            }
+          ]
+        },
+        "change": {
+          "change_id": "c1",
+          "operations": [
+            {
+              "op_id": "o1",
+              "participant_ref": "host-ref",
+              "base_revision": "0",
+              "dependencies": [],
+              "read_preconditions": [],
+              "payload": {
+                "kind": "text",
+                "text": "Příliš žluťoučký kůň"
+              },
+              "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+            }
+          ],
+          "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+        },
+        "control_profile": "mooring.prepare.v1"
+      },
+      "context": {
+        "check": "prepare_context",
+        "authenticated_role": "host",
+        "channel": "inherited_private_rpc"
+      },
+      "schema_valid": true,
+      "expected_error": "invalid_request"
+    },
+    {
+      "id": "prepare-foreign-operation-effect",
+      "message": {
+        "type": "atomic_prepared",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "input_checkpoint_digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "change_id": "c1",
+        "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47",
+        "outcome": {
+          "kind": "candidate",
+          "checkpoint": {
+            "encoding": "base64",
+            "state": "e30=",
+            "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+          },
+          "effects": [
+            {
+              "op_id": "foreign",
+              "targets": []
+            }
+          ],
+          "inventory": [
+            {
+              "target_id": "p1",
+              "deleted": false
+            }
+          ]
+        },
+        "control_profile": "mooring.prepare.v1"
+      },
+      "context": {
+        "check": "pending_membership",
+        "authenticated_role": "runtime",
+        "channel": "inherited_private_rpc",
+        "expected_op_ids": [
+          "o1"
+        ]
+      },
+      "schema_valid": true,
+      "expected_error": "invalid_request"
+    },
+    {
+      "id": "participant-cannot-negotiate-private-profile",
+      "message": {
+        "type": "hello",
+        "request_id": "request-1",
+        "supported": [
+          {
+            "protocol_version": "0.4.0",
+            "model_version": "1.0.0",
+            "engine_version": "1.0.0"
+          }
+        ],
+        "control_profiles": [
+          "mooring.prepare.v1"
+        ]
+      },
+      "context": {
+        "check": "private_control_bootstrap",
+        "channel": "participant_socket",
+        "authenticated_role": "participant"
+      },
+      "schema_valid": true,
+      "expected_error": "forbidden"
+    },
+    {
+      "id": "private-ready-unoffered-profile",
+      "message": {
+        "type": "runtime_ready",
+        "request_id": "startup-1",
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "selected_control_profile": "mooring.prepare.v1"
+      },
+      "context": {
+        "check": "private_control_bootstrap",
+        "channel": "inherited_private_rpc",
+        "offered_control_profiles": []
+      },
+      "schema_valid": true,
+      "expected_error": "version_mismatch"
     }
   ]
 }
