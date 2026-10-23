@@ -46,3 +46,20 @@ post-bootstrap traffic closure and host cancellation. It does not exercise
 participants, leases, content dispatch or durable receipts. The explicit build
 tag excludes this dependency from ordinary Go tests; selecting it without the
 required binary fails instead of silently skipping.
+
+`DeliveryStore` is separately disabled and unused. Its authority callback must
+resolve the authenticated human/run and current scope in the same FULL writer
+transaction. Gates bind the exact private owner capability as well as public
+name/generation, permission version and boot clock. TTL is at most two seconds.
+`RevokeTx` belongs inside the canonical ACL transaction and cannot confirm before
+that transaction commits. A persistent barrier captures a monotonically assigned
+gate ordinal cutoff; later admissions cannot change its membership. Repeated
+revocation without new admission reuses the barrier, so revocation never consumes
+admission capacity. No issued gates yields only a prepared empty-set decision
+(`NoIssuedGates`), confirmable by the host after the ACL commit; it has no
+persistent status row. Otherwise completion waits for authenticated runtime
+blocked acknowledgements or every original issued expiry, including old owners.
+Portable backups omit runtime gates/barriers. Physical recovery closes gates
+and clears source acknowledgements while retaining issued expiry bounds.
+There are no tickets, API/CLI routes, production identity callbacks or content
+dispatch paths in this slice; synthetic authority tests are not live RBAC proof.

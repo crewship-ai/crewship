@@ -739,6 +739,12 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 				rep.RuntimeReset = append(rep.RuntimeReset, fmt.Sprintf("%s (%d)", r.what, n))
 			}
 		}
+		// Close source delivery capabilities, but retain issued expiry bounds for
+		// read-revocation barriers if recovery shares the same OS boot. Never
+		// interpret discarded runtime metadata as an acknowledgement.
+		if _, err := db.ExecContext(ctx, `UPDATE mooring_delivery_gates SET closed=1,blocked=0`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "no such table") {
+			return fmt.Errorf("backup: close source Mooring delivery gates: %w", err)
+		}
 		// Physical instance bundles include document bytes and their source leases.
 		// Preserve content/history, fence every source engine before first boot.
 		var documentsExist bool
