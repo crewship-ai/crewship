@@ -337,6 +337,18 @@ build. Never manually convert digests back to tokens or weaken admission
 to recover links.
 </Warning>
 
+<Warning>
+Saved resource preset choices became per-version in migration
+`20261022114610`: one routine can now hold both a v1 and a v2 choice for the
+same person. Builds from before that migration update a choice without
+checking its version. Run against the upgraded database, they would fail with
+a server error when applying a preset to such a routine. The version-skew
+guard below already refuses to start them. Do not remove migration records to
+get past it. Downgrade across this migration by restoring the matching
+pre-upgrade snapshot, which predates any v2 choice. Canonical grants are
+unaffected by the choice records.
+</Warning>
+
 
 Migrations are **forward-only**. An older binary will **refuse to start**
 against a database a newer binary already migrated — with an error naming

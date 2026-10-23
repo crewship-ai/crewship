@@ -947,6 +947,11 @@ without Edit cannot be applied while Publish is held (422 `Publish requires
 Edit`); apply v2 `none` or `edit` first. Routine Share and the person's Access
 card reject saving Publish without Edit.
 
+Per-version records (migration `20261022114610`) are a downgrade boundary.
+Earlier builds update a choice per member and resource without a version
+filter, so they must not run against this schema; the version-skew guard
+refuses them. Downgrade restores the pre-upgrade snapshot instead.
+
 In Shared definitions, an editor saves the draft, selects **Check saved draft
 structure**, then—with a current Publish hint—**Publish reviewed draft**. The
 check is the `structure_only` validation, not a test run. Both POSTs carry the
