@@ -40,7 +40,7 @@ func startRuntime(_ context.Context, c RuntimeConfig, cmd *exec.Cmd) (*Runtime, 
 		r.mu.Unlock()
 		close(r.done)
 	}()
-	if err = runtimeHandshake(r.RPC, c.Versions); err != nil {
+	if err = runtimeHandshake(r.RPC, c.Versions, c.ControlProfile); err != nil {
 		_ = r.Close()
 		return nil, err
 	}

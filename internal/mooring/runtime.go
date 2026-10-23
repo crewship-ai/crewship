@@ -15,6 +15,11 @@ import (
 
 const MaxRPCFrame = 256 * 1024
 
+// PrivatePrepareProfile is an explicit inherited-channel capability. Its
+// transport ceiling never changes the public participant/batch wire profile.
+const PrivatePrepareProfile = "mooring.prepare.v1"
+const MaxPrivatePrepareRPCFrame = 2 * 1024 * 1024
+
 var ErrRuntimeDisabled = errors.New("mooring runtime disabled")
 var ErrRPCFrame = errors.New("invalid mooring RPC frame")
 var ErrRuntimeHandshake = errors.New("incompatible mooring runtime handshake")
@@ -27,9 +32,10 @@ type RuntimeVersions struct {
 	Engine   string `json:"engine_version"`
 }
 type RuntimeConfig struct {
-	Enabled  bool
-	Binary   string
-	Versions RuntimeVersions
+	Enabled        bool
+	Binary         string
+	Versions       RuntimeVersions
+	ControlProfile string
 }
 
 // RPC owns a private authenticated host-child channel. Every content dispatcher
@@ -38,10 +44,19 @@ type RuntimeConfig struct {
 type RPC struct {
 	conn            net.Conn
 	readMu, writeMu sync.Mutex
+	// Set only after bootstrap, before publishing Runtime to callers.
+	maxFrame int
+}
+
+func (r *RPC) frameLimit() int {
+	if r.maxFrame == MaxPrivatePrepareRPCFrame {
+		return MaxPrivatePrepareRPCFrame
+	}
+	return MaxRPCFrame
 }
 
 func (r *RPC) Write(frame []byte) error {
-	if len(frame) == 0 || len(frame) > MaxRPCFrame || !utf8.Valid(frame) || !json.Valid(frame) {
+	if len(frame) == 0 || len(frame) > r.frameLimit() || !utf8.Valid(frame) || !json.Valid(frame) {
 		return ErrRPCFrame
 	}
 	r.writeMu.Lock()
@@ -80,7 +95,7 @@ func (r *RPC) Read() ([]byte, error) {
 		return nil, err
 	}
 	size := binary.BigEndian.Uint32(header[:])
-	if size == 0 || size > MaxRPCFrame {
+	if size == 0 || size > uint32(r.frameLimit()) {
 		_ = r.conn.Close()
 		return nil, ErrRPCFrame
 	}
@@ -125,20 +140,28 @@ func StartRuntime(ctx context.Context, c RuntimeConfig) (*Runtime, error) {
 	if !c.Enabled {
 		return nil, ErrRuntimeDisabled
 	}
-	if c.Binary == "" || c.Versions.Protocol == "" || c.Versions.Model == "" || c.Versions.Engine == "" {
+	if c.Binary == "" || c.Versions.Protocol == "" || c.Versions.Model == "" || c.Versions.Engine == "" || (c.ControlProfile != "" && c.ControlProfile != PrivatePrepareProfile) {
 		return nil, ErrRuntimeHandshake
 	}
 	return startRuntime(ctx, c, exec.CommandContext(ctx, c.Binary, "--rpc-fd", "3"))
 }
-func runtimeHandshake(rpc *RPC, versions RuntimeVersions) error {
+func runtimeHandshake(rpc *RPC, versions RuntimeVersions, profile string) error {
+	if profile != "" && profile != PrivatePrepareProfile {
+		return ErrRuntimeHandshake
+	}
 	if err := rpc.conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		return err
 	}
+	var offered []string
+	if profile != "" {
+		offered = []string{profile}
+	}
 	hello, _ := json.Marshal(struct {
-		Type      string            `json:"type"`
-		RequestID string            `json:"request_id"`
-		Supported []RuntimeVersions `json:"supported"`
-	}{"hello", "host-start", []RuntimeVersions{versions}})
+		Type            string            `json:"type"`
+		RequestID       string            `json:"request_id"`
+		Supported       []RuntimeVersions `json:"supported"`
+		ControlProfiles []string          `json:"control_profiles,omitempty"`
+	}{"hello", "host-start", []RuntimeVersions{versions}, offered})
 	if err := rpc.Write(hello); err != nil {
 		return err
 	}
@@ -149,12 +172,19 @@ func runtimeHandshake(rpc *RPC, versions RuntimeVersions) error {
 	// This is only a minimal readiness check. Full schema/semantic validation
 	// remains mandatory in the protocol dispatcher before handling any content.
 	var welcome struct {
-		Type      string          `json:"type"`
-		RequestID string          `json:"request_id"`
-		Selected  RuntimeVersions `json:"selected"`
+		Type           string          `json:"type"`
+		RequestID      string          `json:"request_id"`
+		Selected       RuntimeVersions `json:"selected"`
+		ControlProfile string          `json:"selected_control_profile"`
 	}
-	if json.Unmarshal(frame, &welcome) != nil || welcome.Type != "runtime_ready" || welcome.RequestID != "host-start" || welcome.Selected != versions {
+	if json.Unmarshal(frame, &welcome) != nil || welcome.Type != "runtime_ready" || welcome.RequestID != "host-start" || welcome.Selected != versions || welcome.ControlProfile != profile {
 		return ErrRuntimeHandshake
 	}
-	return rpc.conn.SetDeadline(time.Time{})
+	if err := rpc.conn.SetDeadline(time.Time{}); err != nil {
+		return err
+	}
+	if profile == PrivatePrepareProfile {
+		rpc.maxFrame = MaxPrivatePrepareRPCFrame
+	}
+	return nil
 }

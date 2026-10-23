@@ -43,9 +43,10 @@ func TestMooringRuntimeHelper(t *testing.T) {
 		t.Fatal(err)
 	}
 	var h struct {
-		Type      string            `json:"type"`
-		Request   string            `json:"request_id"`
-		Supported []RuntimeVersions `json:"supported"`
+		Type            string            `json:"type"`
+		Request         string            `json:"request_id"`
+		Supported       []RuntimeVersions `json:"supported"`
+		ControlProfiles []string          `json:"control_profiles"`
 	}
 	if json.Unmarshal(frame, &h) != nil || h.Type != "hello" || h.Request != "host-start" || len(h.Supported) != 1 {
 		t.Fatal("bad host hello")
@@ -58,9 +59,26 @@ func TestMooringRuntimeHelper(t *testing.T) {
 	if mode == "mismatch" {
 		v.Model = "different"
 	}
-	ready, _ := json.Marshal(map[string]any{"type": "runtime_ready", "request_id": h.Request, "selected": v})
+	readyValue := map[string]any{"type": "runtime_ready", "request_id": h.Request, "selected": v}
+	selected := ""
+	if len(h.ControlProfiles) > 0 && mode != "profile-missing" {
+		selected = h.ControlProfiles[0]
+	}
+	if mode == "profile-wrong" {
+		selected = "unrecognized-profile"
+	}
+	if mode == "profile-unoffered" {
+		selected = PrivatePrepareProfile
+	}
+	if selected != "" {
+		readyValue["selected_control_profile"] = selected
+	}
+	ready, _ := json.Marshal(readyValue)
 	if err = rpc.Write(ready); err != nil {
 		t.Fatal(err)
+	}
+	if selected == PrivatePrepareProfile {
+		rpc.maxFrame = MaxPrivatePrepareRPCFrame
 	}
 	if mode == "die" {
 		if _, err := rpc.Read(); err != nil {
@@ -84,9 +102,12 @@ func TestMooringRuntimeHelper(t *testing.T) {
 	_, _ = io.Copy(io.Discard, conn)
 }
 func helperRuntime(t *testing.T, ctx context.Context, mode string) (*Runtime, error) {
+	return helperRuntimeProfile(t, ctx, mode, "")
+}
+func helperRuntimeProfile(t *testing.T, ctx context.Context, mode, profile string) (*Runtime, error) {
 	t.Helper()
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMooringRuntimeHelper$", "--", "--mooring-test-mode", mode)
-	return startRuntime(ctx, RuntimeConfig{Versions: runtimeTestVersions}, cmd)
+	return startRuntime(ctx, RuntimeConfig{Versions: runtimeTestVersions, ControlProfile: profile}, cmd)
 }
 
 func TestRuntimeExchangeActualInheritedChild(t *testing.T) {
