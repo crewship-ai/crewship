@@ -98,11 +98,13 @@ func (r *RPC) Read() ([]byte, error) {
 func (r *RPC) Close() error { return r.conn.Close() }
 
 type Runtime struct {
-	RPC  *RPC
-	cmd  *exec.Cmd
-	done chan struct{}
-	mu   sync.Mutex
-	err  error
+	RPC          *RPC
+	cmd          *exec.Cmd
+	done         chan struct{}
+	mu           sync.Mutex
+	err          error
+	exchangeOnce sync.Once
+	exchangeSlot chan struct{}
 }
 
 func (r *Runtime) Done() <-chan struct{} { return r.done }
