@@ -62,6 +62,7 @@ pub struct DraftReplica {
     access: DraftAccess,
     used_origins: BTreeSet<u64>,
     proposals: BTreeMap<String, (Action, Proposal)>,
+    capture_order: Vec<String>,
 }
 /// Own unsaved evidence; never interpreted as a host checkpoint/receipt.
 pub struct RecoveryDraft {
@@ -155,6 +156,7 @@ impl DraftReplica {
             access,
             used_origins: BTreeSet::from([origin]),
             proposals: BTreeMap::new(),
+            capture_order: Vec::new(),
         })
     }
     pub fn native(&self) -> Result<serde_json::Value, AdapterError> {
@@ -256,6 +258,7 @@ impl DraftReplica {
             update,
             targets: captured.targets.into_iter().collect(),
         };
+        self.capture_order.push(operation_id.to_owned());
         self.proposals
             .insert(operation_id.to_owned(), (action, proposal.clone()));
         Ok(proposal)
@@ -348,14 +351,20 @@ impl DraftReplica {
         let draft = RecoveryDraft {
             native: self.native().map_err(|_| ClientError::InvalidState)?,
             proposals: self
-                .proposals
-                .values()
-                .map(|(_, proposal)| proposal.clone())
-                .collect(),
+                .capture_order
+                .iter()
+                .map(|id| {
+                    self.proposals
+                        .get(id)
+                        .map(|(_, proposal)| proposal.clone())
+                        .ok_or(ClientError::InvalidState)
+                })
+                .collect::<Result<Vec<_>, _>>()?,
         };
         replacement.used_origins = self.used_origins.clone();
         replacement.used_origins.insert(fresh_origin);
         replacement.proposals = std::mem::take(&mut self.proposals);
+        replacement.capture_order = std::mem::take(&mut self.capture_order);
         *self = replacement;
         Ok(draft)
     }
@@ -522,5 +531,15 @@ mod tests {
             a.document.doc.transact().state_vector(),
             b.document.doc.transact().state_vector()
         );
+    }
+    #[test]
+    fn recovery_retains_original_capture_order_independent_of_operation_id_sorting() {
+        let bytes = baseline();
+        let mut own = DraftReplica::restore(&bytes, 17, DraftAccess::Writer).unwrap();
+        let first = own.edit("z-first", insert("A")).unwrap();
+        let second = own.edit("a-second", insert("B")).unwrap();
+        let third = own.undo("m-third").unwrap();
+        let draft = own.recover(&bytes, 18, DraftAccess::Writer).unwrap();
+        assert_eq!(draft.proposals, vec![first, second, third]);
     }
 }
