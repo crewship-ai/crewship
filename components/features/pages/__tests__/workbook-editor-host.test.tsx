@@ -228,7 +228,6 @@ describe("handshake", () => {
   it.each([
     ["a real (non-sandboxed) origin", { origin: "https://editor.test" }, BUNDLE],
     ["the host origin", { origin: window.location.origin }, BUNDLE],
-    ["a wrong bundle digest", {}, "sha256:other"],
   ])("removes the frame on a hello from %s", async (_, from, bundle) => {
     const t = setup()
     await waitFor(() => expect(t.frame()).not.toBeNull())
@@ -238,6 +237,24 @@ describe("handshake", () => {
     expect(win.postMessage).not.toHaveBeenCalled()
     expect(t.frame()).toBeNull()
     expect(screen.getByTestId("workbook-editor-notice")).toHaveTextContent("The editor was closed because its frame broke the protocol")
+    expect(t.transport.closeSession).toHaveBeenCalled()
+  })
+
+  it.each([
+    ["a different bundle digest", "e".repeat(64)],
+    ["no bundle digest", null],
+  ])("says the editor bundle did not match the approved version on a hello naming %s", async (_, bundle) => {
+    const t = setup()
+    await waitFor(() => expect(t.frame()).not.toBeNull())
+    const win = t.frameWindow()
+    await t.load()
+    await t.message({ type: "gridcraft:hello", protocol: 1, bundle })
+    expect(win.postMessage).not.toHaveBeenCalled()
+    expect(t.frame()).toBeNull()
+    const notice = screen.getByTestId("workbook-editor-notice")
+    expect(notice).toHaveAttribute("data-reason", "bundle")
+    expect(notice).toHaveTextContent("The editor bundle did not match the approved version. Showing the read-only preview.")
+    expect(notice).not.toHaveTextContent("broke the protocol")
     expect(t.transport.closeSession).toHaveBeenCalled()
   })
 
@@ -503,6 +520,54 @@ describe("save state and leave guard", () => {
     expect(t.fromFrame).toContainEqual(expect.objectContaining({ type: "committed", rev: 42, ops: [{ op: "cell.set", sheet: "Sheet1", cell: "B2", input: "7" }] }))
     expect(t.fromFrame).toContainEqual(expect.objectContaining({ type: "rejected", seq: 1, code: "precondition_failed", cells: [{ cell: "B2", input: "7", rev: 42, actor_label: "Agent Ada" }] }))
     expect(t.dirty.at(-1)).toBe(false)
+  })
+
+  it("warns at once when another writer changes the cell of an open draft, without losing the draft", async () => {
+    const t = setup({ transport: { commits: vi.fn(async (since: number) => ok({ head_rev: 42, generation: 1, commits: since < 42 ? [{ rev: 42, kind: "cells", actor_label: "Agent Ada", own: false, ops: [{ sheet: "Sheet1", cell: "B3", input: "99" }] }] : [] })) } })
+    await t.connect()
+    await t.send(JSON.stringify({ type: "draft", protocol: 1, cells: [{ sheet: "Sheet1", cell: "B3" }] }))
+    await push("workbook.committed", { page_id: "page-1", rev: 42, generation: 1, kind: "cells", cells: 1 })
+    const warning = await screen.findByTestId("workbook-draft-conflict")
+    expect(warning).toHaveTextContent("Changed by Agent Ada while you were editing")
+    expect(warning).toHaveTextContent("Sheet1!B3")
+    // The draft is the editor's: the host never discards or overwrites it, and offers no choice until it is committed.
+    expect(screen.queryByRole("button", { name: "Keep mine" })).toBeNull()
+    expect(t.frame()).not.toBeNull()
+    // The draft closed (committed or cancelled): the warning goes.
+    await t.send(JSON.stringify({ type: "draft", protocol: 1, cells: [] }))
+    await waitFor(() => expect(screen.queryByTestId("workbook-draft-conflict")).toBeNull())
+  })
+
+  it("offers keep mine or take theirs when a commit is refused because another writer changed the cell", async () => {
+    const edit = vi.fn(async (id: string): Promise<TransportResponse> => id === `${SID}:h1`
+      ? ok({ operation_key: { artifact_id: "page-1", authority_id: "user:u1", mutation_id: id }, outcome: "applied", rev: 43, durability: "node" })
+      : { status: 409, body: { error: "precondition_failed", head_rev: 42, conflicts: [{ sheet: "Sheet1", cell: "B3", input: "99", rev: 42, actor_label: "Agent Ada" }] } })
+    const history = [
+      { rev: 42, kind: "cells", actor_label: "Agent Ada", own: false, ops: [{ sheet: "Sheet1", cell: "B3", input: "99" }] },
+      { rev: 43, kind: "cells", actor_label: "Owner", own: true, session_id: SID, mutation_id: `${SID}:h1`, ops: [{ sheet: "Sheet1", cell: "B3", input: "777" }] },
+    ]
+    const commits = vi.fn(async (since: number) => {
+      const visible = history.filter(c => c.rev <= (edit.mock.calls.some(([id]) => id === `${SID}:h1`) ? 43 : 42))
+      return ok({ head_rev: visible.at(-1)!.rev, generation: 1, commits: visible.filter(c => c.rev > since) })
+    })
+    const t = setup({ transport: { edit, commits } })
+    await t.connect()
+    await t.send(mutation(1, 41, "B3", "777"))
+    const panel = await screen.findByTestId("workbook-draft-conflict")
+    expect(panel).toHaveTextContent("Changed by Agent Ada while you were editing")
+    expect(panel).toHaveTextContent("777")
+    expect(panel).toHaveTextContent("99")
+    await act(async () => { screen.getByRole("button", { name: "Keep mine" }).click() })
+    await waitFor(() => expect(edit).toHaveBeenCalledWith(`${SID}:h1`, expect.stringContaining('"input":"777"')))
+    await waitFor(() => expect(screen.queryByTestId("workbook-draft-conflict")).toBeNull())
+
+    await waitFor(() => expect(t.fromFrame).toContainEqual(expect.objectContaining({ type: "committed", rev: 43 })))
+    await t.send(mutation(2, 43, "B3", "888"))
+    await screen.findByTestId("workbook-draft-conflict")
+    const edits = edit.mock.calls.length
+    await act(async () => { screen.getByRole("button", { name: "Take theirs" }).click() })
+    expect(screen.queryByTestId("workbook-draft-conflict")).toBeNull()
+    expect(edit.mock.calls.length).toBe(edits)
   })
 
   it("reads the commits feed on a workbook.committed push for its Page, and ignores other Pages", async () => {

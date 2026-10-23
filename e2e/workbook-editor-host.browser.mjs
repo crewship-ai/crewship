@@ -179,12 +179,16 @@ addEventListener("message", event => {
   render()
 })
 document.getElementById("value").addEventListener("focus", () => { if (base === null) base = rev })
+// The open cell editor's address (never its text), as the editor reports an open draft.
+const draft = cells => port && port.postMessage(JSON.stringify({ type: "draft", protocol: 1, cells }))
+document.getElementById("value").addEventListener("input", () => draft([{ sheet: "Sheet1", cell: document.getElementById("cell").value }]))
 document.getElementById("commit").addEventListener("click", () => {
   const cell = document.getElementById("cell").value, input = document.getElementById("value").value
   seq++
   port.postMessage(JSON.stringify({ type: "mutation", protocol: 1, seq, base_rev: base ?? rev, ops: [{ op: "cell.set", sheet: "Sheet1", cell, input }] }))
   cells[cell] = input
   base = null
+  draft([])
   render()
 })
 document.getElementById("away").addEventListener("click", () => { location.href = "next.html" })
@@ -371,15 +375,24 @@ try {
   await frameA.locator("#value").focus() // the edit starts at the current revision
   await frameA.locator("#value").fill("mine")
   const conflictRev = agentCommit("B2", "7")
+  // The person is warned while the draft is still open, before any commit; the draft stays.
+  const warning = a.getByTestId("workbook-draft-conflict")
+  await warning.getByText("Changed by Agent Ada while you were editing").waitFor({ timeout: 5000 })
+  assert.equal(await frameA.locator("#value").inputValue(), "mine")
   await frameA.locator("#commit").click()
   const refused = await waitEditor(a, s => s.rejected.length === 1, 3000)
   assert.equal(refused.state.rejected[0].code, "precondition_failed")
   assert.deepEqual(refused.state.rejected[0].cells, [{ cell: "B2", input: "7", rev: conflictRev, actor_label: "Agent Ada" }])
   assert.equal(refused.state.cells.B2, "7")
   await a.getByText("Not saved · a change was refused").waitFor()
+  // At commit the refusal names the writer and keeps the person's value until they choose.
+  await warning.getByRole("button", { name: "Keep mine" }).waitFor()
+  assert.match(await warning.textContent(), /Yours: .?mine.? · Theirs: .?7/)
+  await warning.getByRole("button", { name: "Take theirs" }).click()
+  await warning.waitFor({ state: "detached" })
   assert.equal(await unsent(a), "false")
   await waitEditor(b, s => s.cells.B2 === "7", 3000)
-  step("conflict", { refused: refused.state.rejected[0], aStatus: await status(a) })
+  step("conflict", { refused: refused.state.rejected[0], aStatus: await status(a), warnedBeforeCommit: true, keepOrTakeOffered: true })
 
   // 5. B's frame navigates itself after the handshake: frame removed, session closed, port not re-sent.
   const closedBefore = api.closed.length
@@ -395,7 +408,7 @@ try {
   step("navigation-kills", { reason: "navigation", frameRemoved: true, sessionClosed: api.closed.at(-1), notice: await b.getByTestId("workbook-editor-notice").textContent() })
 
   // 6. Hellos the host must refuse, each in a fresh page: the frame is removed and never connected.
-  for (const [mode, reason] of [["bad-digest", "handshake"], ["prefixed-digest", "handshake"], ["early-hello", "handshake"], ["renavigate", "navigation"]]) {
+  for (const [mode, reason] of [["bad-digest", "bundle"], ["prefixed-digest", "bundle"], ["early-hello", "handshake"], ["renavigate", "navigation"]]) {
     editorMode = mode
     const page = await open(contextA, mode)
     await page.getByTestId("workbook-editor-notice").waitFor()

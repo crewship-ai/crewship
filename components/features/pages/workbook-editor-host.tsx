@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { useRealtimeChannelSafe, useRealtimeEventSafe, useRealtimeStatusSafe, type RealtimeEventType } from "@/hooks/use-realtime"
 import { initialSaveState, losesWork, saveReducer, type SaveState } from "@/lib/editor-lifecycle/save-state"
 import { useLeaveGuard } from "@/lib/editor-lifecycle/use-leave-guard"
-import { EDITOR_FRAME_ATTRIBUTES, createWorkbookBridge, type FrameWindow, type KillReason, type WorkbookBridge } from "@/lib/workbooks/bridge"
+import { EDITOR_FRAME_ATTRIBUTES, createWorkbookBridge, type CellRef, type DraftConflict, type FrameWindow, type KillReason, type RefusedCell, type WorkbookBridge } from "@/lib/workbooks/bridge"
 import { WORKBOOK_COMMITTED_EVENT, WORKBOOK_SESSION_REOPEN_MAX_MS, createWorkbookEditorClient, editorFrameSrc, parseCommittedPush, type SessionCheck, type WorkbookEditorClient } from "@/lib/workbooks/editor-client"
 import { PageWorkbook } from "./page-workbook"
 
@@ -109,10 +109,57 @@ function endMessage(end: EditorEnd): { text: string; reopen: boolean } {
     case "disabled": return { text: `The workbook editor is turned off${unsaved}. Showing the read-only preview.`, reopen: false }
     case "expired": return { text: `The editor session ended${unsaved}. Open the editor again to continue.`, reopen: true }
     case "load": return { text: `The workbook editor could not load the workbook${unsaved}. Showing the read-only preview.`, reopen: true }
+    case "bundle": return { text: `The editor bundle did not match the approved version${unsaved}. Showing the read-only preview.`, reopen: false }
     case "timeout": return { text: "The workbook editor did not start. Showing the read-only preview.", reopen: true }
     case "generation": return { text: `This workbook changed version. Open the editor again to continue${unsaved}.`, reopen: true }
     default: return { text: `The editor was closed because its frame broke the protocol${unsaved}. Showing the read-only preview.`, reopen: true }
   }
+}
+
+/** A same-cell conflict on screen: another writer changed a cell with an open draft, or refused a commit. */
+export type ShownConflict =
+  | { key: string; kind: "changed"; sheet: string; cell: string; input: string; actor_label: string }
+  | { key: string; kind: "refused"; cells: RefusedCell[] }
+
+const conflictCell = (sheet: string, cell: string) => `${sheet}!${cell}`
+
+/**
+ * The conflicts to show after the bridge reported one. A newer report for a cell replaces the
+ * older one; a refusal replaces the early warning for its cells (the draft was committed).
+ */
+export function addConflict(shown: ShownConflict[], conflict: DraftConflict, key: string): ShownConflict[] {
+  if (conflict.kind === "changed") {
+    const cell = conflictCell(conflict.sheet, conflict.cell)
+    return [...shown.filter(item => item.kind !== "changed" || conflictCell(item.sheet, item.cell) !== cell), { key, kind: "changed", sheet: conflict.sheet, cell: conflict.cell, input: conflict.input, actor_label: conflict.actor_label }]
+  }
+  const cells = new Set(conflict.cells.map(item => conflictCell(item.sheet, item.cell)))
+  return [...shown.filter(item => item.kind !== "changed" || !cells.has(conflictCell(item.sheet, item.cell))), { key, kind: "refused", cells: conflict.cells }]
+}
+
+/** Early warnings stay only while their cell still has an open draft in the editor. */
+export function keepOpenDrafts(shown: ShownConflict[], drafts: CellRef[]): ShownConflict[] {
+  const open = new Set(drafts.map(ref => conflictCell(ref.sheet, ref.cell)))
+  const next = shown.filter(item => item.kind !== "changed" || open.has(conflictCell(item.sheet, item.cell)))
+  return next.length === shown.length ? shown : next
+}
+
+function ConflictNotice({ conflicts, onKeepMine, onTakeTheirs }: { conflicts: ShownConflict[]; onKeepMine: (item: Extract<ShownConflict, { kind: "refused" }>) => void; onTakeTheirs: (key: string) => void }) {
+  if (!conflicts.length) return null
+  return <div role="alert" data-testid="workbook-draft-conflict" className="flex flex-col gap-2 border-b border-warn/30 bg-warn/10 px-3 py-2 text-sm">
+    {conflicts.map(item => item.kind === "changed"
+      ? <p key={item.key} data-kind="changed">
+        Changed by {item.actor_label} while you were editing: {conflictCell(item.sheet, item.cell)} is now <q className="break-all">{item.input}</q>. Your draft is kept; when you commit it you can keep yours or take theirs.
+      </p>
+      : <div key={item.key} data-kind="refused" className="flex flex-wrap items-center gap-2">
+        <span className="mr-auto">
+          {item.cells.map(cell => <span key={conflictCell(cell.sheet, cell.cell)} className="block">
+            Changed by {cell.actor_label} while you were editing: {conflictCell(cell.sheet, cell.cell)}. Yours: <q className="break-all">{cell.mine}</q> · Theirs: <q className="break-all">{cell.theirs}</q>
+          </span>)}
+        </span>
+        <Button type="button" size="sm" onClick={() => onKeepMine(item)}>Keep mine</Button>
+        <Button type="button" size="sm" variant="outline" onClick={() => onTakeTheirs(item.key)}>Take theirs</Button>
+      </div>)}
+  </div>
 }
 
 /**
@@ -189,6 +236,8 @@ export function WorkbookEditorHost({ client, pageId, name, onEnd, onDirtyChange 
   const container = React.useRef<HTMLDivElement>(null)
   const [save, dispatch] = React.useReducer(saveReducer, initialSaveState)
   const [rev, setRev] = React.useState<number>()
+  const [conflicts, setConflicts] = React.useState<ShownConflict[]>([])
+  const conflictSeq = React.useRef(0)
   const bridgeRef = React.useRef<WorkbookBridge | undefined>(undefined)
   const pollRef = React.useRef<() => void>(() => {})
   const onEndRef = React.useRef(onEnd); onEndRef.current = onEnd
@@ -305,6 +354,14 @@ export function WorkbookEditorHost({ client, pageId, name, onEnd, onDirtyChange 
           if (!next.ok) return { ok: false, refusal: next.refusal }
           return { ok: true, session: next.session, transport: client.transport(next.session) }
         },
+        onConflict: conflict => {
+          if (disposed) return
+          setConflicts(shown => addConflict(shown, conflict, `c${++conflictSeq.current}`))
+        },
+        onDrafts: cells => {
+          if (disposed) return
+          setConflicts(shown => keepOpenDrafts(shown, cells))
+        },
         onKill: kill => {
           // The frame goes first: after a kill no document in it may hold anything of this session.
           detach()
@@ -351,6 +408,15 @@ export function WorkbookEditorHost({ client, pageId, name, onEnd, onDirtyChange 
   })
   useRealtimeEventSafe("realtime.reconnected", () => { bridgeRef.current?.online(); pollRef.current() })
 
+  const keepMine = React.useCallback((item: Extract<ShownConflict, { kind: "refused" }>) => {
+    // The person's value goes out against the head; if someone changed the cell again, a new conflict is shown.
+    if (bridgeRef.current?.keepMine(item.cells.map(cell => ({ sheet: cell.sheet, cell: cell.cell, input: cell.mine })))) {
+      setConflicts(shown => shown.filter(other => other.key !== item.key))
+    }
+  }, [])
+  // The editor already shows the server's value: taking theirs only dismisses the notice.
+  const takeTheirs = React.useCallback((key: string) => setConflicts(shown => shown.filter(other => other.key !== key)), [])
+
   const label = workbookSaveLabel(save)
   return <section aria-label="Workbook page" className="flex min-h-0 flex-1 flex-col overflow-hidden">
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b p-3">
@@ -358,6 +424,7 @@ export function WorkbookEditorHost({ client, pageId, name, onEnd, onDirtyChange 
       {rev !== undefined && rev > 0 && <span className="text-sm tabular-nums text-muted-foreground">Revision {rev}</span>}
       <span role="status" aria-live="polite" data-testid="workbook-save-state" className="text-sm text-muted-foreground">{label}</span>
     </div>
+    <ConflictNotice conflicts={conflicts} onKeepMine={keepMine} onTakeTheirs={takeTheirs} />
     <div ref={container} data-testid="workbook-editor-frame" className="relative min-h-0 flex-1" />
   </section>
 }

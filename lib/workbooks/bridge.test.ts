@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { SaveEvent } from "@/lib/editor-lifecycle/save-state"
-import { BRIDGE_HANDSHAKE_TIMEOUT_MS, BRIDGE_MAX_REBASES, BRIDGE_MAX_INPUT_BYTES, BRIDGE_MAX_UNCONFIRMED, EDITOR_FRAME_ATTRIBUTES, BRIDGE_MAX_MESSAGE_BYTES, BRIDGE_MAX_OPS, createWorkbookBridge, createWorkbookHttpTransport, parseCommits, parseFrameMessage, parseWorkbookSession, type HostMessage, type KillReason, type TransportResponse, type WorkbookBridgeOptions, type WorkbookSession, type WorkbookTransport } from "./bridge"
+import { BRIDGE_HANDSHAKE_TIMEOUT_MS, BRIDGE_MAX_REBASES, BRIDGE_MAX_INPUT_BYTES, BRIDGE_MAX_UNCONFIRMED, EDITOR_FRAME_ATTRIBUTES, BRIDGE_MAX_MESSAGE_BYTES, BRIDGE_MAX_OPS, createWorkbookBridge, createWorkbookHttpTransport, parseCommits, parseFrameMessage, parseWorkbookSession, type DraftConflict, type HostMessage, type KillReason, type TransportResponse, type WorkbookBridgeOptions, type WorkbookSession, type WorkbookTransport } from "./bridge"
 
 const SID = "ws_session1"
 /** The editor document is served with CSP `sandbox allow-scripts`: its origin is opaque. */
@@ -47,10 +47,11 @@ function setup(overrides: Partial<WorkbookTransport> = {}, { loaded = true, reop
   const transport = { snapshot: vi.fn(base.snapshot), edit: vi.fn(base.edit), commits: vi.fn(base.commits), operation: vi.fn(base.operation), closeSession: vi.fn(base.closeSession) }
   const events: SaveEvent[] = []
   const kills: { reason: KillReason; unsaved: number }[] = []
+  const conflicts: DraftConflict[] = []
   const bridge = createWorkbookBridge({
     session: { ...session, ...sessionOverride }, frame: () => frame, transport, pageLabel: "Budget", clientId: "client-a", reopenSession: reopen,
     createChannel: () => ({ port1: port, port2: "port2" }), random: () => 1,
-    onSaveEvent: event => events.push(event), onKill: kill => kills.push(kill),
+    onSaveEvent: event => events.push(event), onKill: kill => kills.push(kill), onConflict: conflict => conflicts.push(conflict),
   })
   if (loaded) bridge.frameLoaded()
   const toFrame = (): HostMessage[] => port.postMessage.mock.calls.map(([data]) => JSON.parse(data as string))
@@ -59,7 +60,7 @@ function setup(overrides: Partial<WorkbookTransport> = {}, { loaded = true, reop
   const send = (message: unknown) => port.onmessage?.({ data: typeof message === "string" ? message : JSON.stringify(message) })
   const connect = async () => { hello(); await flush(); port.postMessage.mockClear() }
   const editBodies = () => transport.edit.mock.calls.map(([, body]) => body)
-  return { bridge, frame, port, transport, events, kills, toFrame, types, hello, send, connect, editBodies }
+  return { bridge, frame, port, transport, events, kills, conflicts, toFrame, types, hello, send, connect, editBodies }
 }
 
 describe("handshake", () => {
@@ -116,17 +117,30 @@ describe("handshake", () => {
   })
 
   it.each([
-    ["a wrong protocol", { type: "gridcraft:hello", protocol: 2, bundle: DIGEST }],
-    ["a wrong bundle digest", { type: "gridcraft:hello", protocol: 1, bundle: "e".repeat(64) }],
-    ["the right digest with a prefix", { type: "gridcraft:hello", protocol: 1, bundle: `sha256:${DIGEST}` }],
-    ["the right digest in upper case", { type: "gridcraft:hello", protocol: 1, bundle: DIGEST.toUpperCase() }],
-    ["a missing bundle digest", { type: "gridcraft:hello", protocol: 1 }],
+      ["a wrong protocol", { type: "gridcraft:hello", protocol: 2, bundle: DIGEST }],
+    ["a missing bundle field", { type: "gridcraft:hello", protocol: 1 }],
     ["extra fields", { type: "gridcraft:hello", protocol: 1, bundle: DIGEST, token: "x" }],
   ])("kills the session on %s", async (_, data) => {
     const t = setup()
     t.hello(data)
     await flush()
     expect(t.kills).toEqual([{ reason: "handshake", unsaved: 0 }])
+    expect(t.frame.postMessage).not.toHaveBeenCalled()
+    expect(t.transport.snapshot).not.toHaveBeenCalled()
+  })
+
+  // A well-formed hello that names another bundle than the session's pin is a bundle mismatch,
+  // not a broken protocol, so the host can say which: the operator has to look at the bundle pin.
+  it.each([
+    ["a wrong bundle digest", "e".repeat(64)],
+    ["no bundle digest (null)", null],
+    ["the right digest with a prefix", `sha256:${DIGEST}`],
+    ["the right digest in upper case", DIGEST.toUpperCase()],
+  ])("kills the session as a bundle mismatch on %s", async (_, bundle) => {
+    const t = setup()
+    t.hello({ type: "gridcraft:hello", protocol: 1, bundle })
+    await flush()
+    expect(t.kills).toEqual([{ reason: "bundle", unsaved: 0 }])
     expect(t.frame.postMessage).not.toHaveBeenCalled()
     expect(t.transport.snapshot).not.toHaveBeenCalled()
   })
@@ -693,6 +707,129 @@ describe("a remote commit while a local edit is pending", () => {
       { type: "rejected", protocol: 1, seq: 1, code: "precondition_failed", current_rev: 42, cells: [{ cell: "B5", input: "agent", rev: 42, actor_label: "Agent Ada" }] },
     ])
     expect(t.bridge.pending).toBe(0)
+  })
+})
+
+describe("same-cell conflicts with an open draft", () => {
+  const draft = (cells: string[]) => ({ type: "draft", protocol: 1, cells: cells.map(cell => ({ sheet: "Sheet1", cell })) })
+
+  it("warns at once when another writer changes a cell the editor reports as an open draft, and keeps the session", async () => {
+    const t = setup({ commits: vi.fn(async () => feed(42, [remote(42, [["B3", "99"], ["C1", "x"]])])) })
+    await t.connect()
+    t.send(draft(["B3"]))
+    t.bridge.notify({ rev: 42, generation: 1 })
+    await flush()
+    // The editor still gets the revision exactly as before; the draft cell is the editor's to keep.
+    expect(t.types()).toEqual(["committed:42"])
+    expect(t.conflicts).toEqual([{ kind: "changed", sheet: "Sheet1", cell: "B3", input: "99", rev: 42, actor_label: "Agent Ada" }])
+    expect(t.kills).toEqual([])
+  })
+
+  it("warns for a change from another window of the same person too", async () => {
+    const other = { ...own(42, 7, [["B3", "other window"]]), session_id: "ws_other", mutation_id: "ws_other:7" }
+    const t = setup({ commits: vi.fn(async () => feed(42, [other])) })
+    await t.connect()
+    t.send(draft(["B3"]))
+    t.bridge.notify({ rev: 42, generation: 1 })
+    await flush()
+    expect(t.conflicts).toEqual([{ kind: "changed", sheet: "Sheet1", cell: "B3", input: "other window", rev: 42, actor_label: "Owner" }])
+  })
+
+  it("does not warn for cells without a draft, after the draft closed, or for its own revisions", async () => {
+    let head = 42
+    const history = [remote(42, [["C1", "x"]]), remote(43, [["B3", "99"]]), own(44, 1, [["D4", "mine"]])]
+    const t = setup({
+      commits: vi.fn(async (since: number) => feed(head, history.filter(c => c.rev > since && c.rev <= head))),
+      edit: vi.fn(async () => receipt(1, 44)),
+    })
+    await t.connect()
+    t.send(draft(["B3"]))
+    t.bridge.notify({ rev: 42, generation: 1 })
+    await flush()
+    t.send(draft([]))
+    head = 43
+    t.bridge.notify({ rev: 43, generation: 1 })
+    await flush()
+    t.send(draft(["D4"]))
+    t.send(mutation(1, 43, [["D4", "mine"]]))
+    head = 44
+    await flush()
+    expect(t.conflicts).toEqual([])
+    expect(t.kills).toEqual([])
+  })
+
+  it("validates the draft message: cell addresses only, bounded, exact keys", () => {
+    expect(parseFrameMessage(JSON.stringify(draft(["B3"])))).toEqual({ ok: true, value: { type: "draft", cells: [{ sheet: "Sheet1", cell: "B3" }] } })
+    expect(parseFrameMessage(JSON.stringify(draft([])))).toEqual({ ok: true, value: { type: "draft", cells: [] } })
+    expect(parseFrameMessage(JSON.stringify({ ...draft(["B3"]), text: "secret" })).ok).toBe(false)
+    expect(parseFrameMessage(JSON.stringify({ type: "draft", protocol: 1, cells: [{ sheet: "Sheet1", cell: "B3", input: "x" }] })).ok).toBe(false)
+    expect(parseFrameMessage(JSON.stringify({ type: "draft", protocol: 1, cells: [{ sheet: "Sheet1", cell: "b3" }] })).ok).toBe(false)
+    expect(parseFrameMessage(JSON.stringify(draft(Array.from({ length: BRIDGE_MAX_OPS + 1 }, (_, i) => `A${i + 1}`)))).ok).toBe(false)
+  })
+
+  it("on a refused commit names the writer and keeps the person's value for keep-mine or take-theirs", async () => {
+    const conflict: TransportResponse = { status: 409, body: { error: "precondition_failed", head_rev: 42, conflicts: [{ sheet: "Sheet1", cell: "B2", input: "7", rev: 42, actor_label: "Agent Ada" }] } }
+    const t = setup({ edit: vi.fn(async () => conflict), commits: vi.fn(async () => feed(42, [remote(42, [["B2", "7"]])])) })
+    await t.connect()
+    t.send(mutation(1, 41, [["B2", "mine"], ["C2", "also mine"]]))
+    await flush()
+    expect(t.conflicts).toEqual([{ kind: "refused", seq: 1, cells: [{ sheet: "Sheet1", cell: "B2", mine: "mine", theirs: "7", rev: 42, actor_label: "Agent Ada" }] }])
+  })
+
+  it("keep mine: sends the person's value against the head as a host edit, and the editor learns it as a committed revision", async () => {
+    const conflict: TransportResponse = { status: 409, body: { error: "precondition_failed", head_rev: 42, conflicts: [{ sheet: "Sheet1", cell: "B2", input: "7", rev: 42, actor_label: "Agent Ada" }] } }
+    const kept = { rev: 43, kind: "cells", actor_label: "Owner", own: true, session_id: SID, mutation_id: `${SID}:h1`, ops: [{ sheet: "Sheet1", cell: "B2", input: "mine" }] }
+    let head = 42
+    const t = setup({
+      edit: vi.fn(async (id: string) => id === `${SID}:h1` ? ok({ operation_key: { artifact_id: "page1", authority_id: "user:u1", mutation_id: id }, outcome: "applied", rev: 43, durability: "node" }) : conflict),
+      commits: vi.fn(async (since: number) => feed(head, [remote(42, [["B2", "7"]]), kept].filter(c => c.rev > since && c.rev <= head))),
+    })
+    await t.connect()
+    t.send(mutation(1, 41, [["B2", "mine"]]))
+    await flush()
+    head = 43
+    expect(t.bridge.keepMine([{ sheet: "Sheet1", cell: "B2", input: "mine" }])).toBe(true)
+    await flush()
+    expect(JSON.parse(t.editBodies().at(-1)!)).toEqual({ session_id: SID, mutation_id: `${SID}:h1`, base_rev: 42, generation: 1, ops: [{ kind: "cell.set", sheet: "Sheet1", cell: "B2", input: "mine" }] })
+    // The editor never sent this edit, so it gets no ack for it: it gets the revision instead.
+    expect(t.types()).toEqual(["committed:42", "rejected", "committed:43"])
+    expect(t.toFrame().at(-1)).toEqual({ type: "committed", protocol: 1, rev: 43, actor_label: "Owner", ops: ops([["B2", "mine"]]) })
+    expect(t.bridge.pending).toBe(0)
+    expect(t.bridge.confirmedRev).toBe(43)
+    expect(t.events).toContainEqual({ type: "ack", pending: 0 })
+    expect(t.kills).toEqual([])
+    // Later frame edits keep their own numbering.
+    t.send(mutation(2, 43, [["C9", "next"]]))
+    await flush()
+    expect(t.transport.edit.mock.calls.at(-1)![0]).toBe(`${SID}:2`)
+  })
+
+  it("keep mine refused again reports the new conflict to the host and tells the editor nothing it did not send", async () => {
+    const first: TransportResponse = { status: 409, body: { error: "precondition_failed", head_rev: 42, conflicts: [{ sheet: "Sheet1", cell: "B2", input: "7", rev: 42, actor_label: "Agent Ada" }] } }
+    const second: TransportResponse = { status: 409, body: { error: "precondition_failed", head_rev: 43, conflicts: [{ sheet: "Sheet1", cell: "B2", input: "8", rev: 43, actor_label: "Bob" }] } }
+    let head = 42
+    const t = setup({
+      edit: vi.fn(async (id: string) => id === `${SID}:h1` ? second : first),
+      commits: vi.fn(async (since: number) => feed(head, [remote(42, [["B2", "7"]]), remote(43, [["B2", "8"]], "Bob")].filter(c => c.rev > since && c.rev <= head))),
+    })
+    await t.connect()
+    t.send(mutation(1, 41, [["B2", "mine"]]))
+    await flush()
+    head = 43
+    t.bridge.keepMine([{ sheet: "Sheet1", cell: "B2", input: "mine" }])
+    await flush()
+    expect(t.types()).toEqual(["committed:42", "rejected", "committed:43"])
+    expect(t.conflicts.at(-1)).toEqual({ kind: "refused", cells: [{ sheet: "Sheet1", cell: "B2", mine: "mine", theirs: "8", rev: 43, actor_label: "Bob" }] })
+    expect(t.bridge.pending).toBe(0)
+  })
+
+  it("refuses keep mine for invalid cells or a session that is not live", async () => {
+    const t = setup()
+    expect(t.bridge.keepMine([{ sheet: "Sheet1", cell: "B2", input: "x" }])).toBe(false)
+    await t.connect()
+    expect(t.bridge.keepMine([])).toBe(false)
+    expect(t.bridge.keepMine([{ sheet: "Sheet1", cell: "b2", input: "x" }])).toBe(false)
+    expect(t.transport.edit).not.toHaveBeenCalled()
   })
 })
 

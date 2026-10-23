@@ -40,6 +40,14 @@
  * - Bundle pin: the plain lowercase hex SHA-256 of the bundle's manifest bytes, the same in the
  *   session's `bundle_digest`, the `/b/<digest>/` path of `editor_url` and the frame's hello. An
  *   empty or differently written pin (for example `sha256:` prefixed) never matches: fail closed.
+ *   A well-formed hello naming another bundle (or none) ends the session as `bundle`, not as a
+ *   broken handshake, so the host can say that the bundle pin is the cause.
+ * - Open drafts: the editor may report which cells have an open, uncommitted cell editor
+ *   (`draft`, addresses only, never content). A revision of another writer that changes such a
+ *   cell is reported to the host at once (`onConflict` `changed`); the draft stays the editor's.
+ *   A commit refused because another writer changed the cell is reported with the person's value
+ *   and the server's (`refused`); `keepMine` then writes the person's value against the head as
+ *   a host edit (mutation `<session_id>:h<n>`), which reaches the editor as a committed revision.
  * - The editor must say hello and receive its snapshot within `BRIDGE_HANDSHAKE_TIMEOUT_MS`, and
  *   a failed snapshot read at connect ends the session as `load`; the host shows the preview.
  *
@@ -159,9 +167,23 @@ export type RejectCode = "precondition_failed" | "invalid_ops" | "conflict" | "h
 
 /** Editor → host, after validation. */
 export interface FrameMutation { seq: number; base_rev: number; ops: CellOp[] }
+export interface CellRef { sheet: string; cell: string }
 export type FrameMessage =
   | { type: "mutation"; mutation: FrameMutation }
   | { type: "resume"; last_rev: number; pending: FrameMutation[] }
+  /** The cells with an open, uncommitted cell editor in the frame now (addresses only); empty when none. */
+  | { type: "draft"; cells: CellRef[] }
+
+/** One cell another writer changed under the person's edit: their value, and the server's with its writer. */
+export interface RefusedCell { sheet: string; cell: string; mine: string; theirs: string; rev: number; actor_label: string }
+/**
+ * A same-cell conflict the host shows. `changed`: another writer's revision changed a cell with an
+ * open draft (the draft is still in the editor). `refused`: a commit was refused because another
+ * writer changed the cell; `seq` is the editor's edit, absent for the host's own keep-mine edit.
+ */
+export type DraftConflict =
+  | { kind: "changed"; sheet: string; cell: string; input: string; rev: number; actor_label: string }
+  | { kind: "refused"; seq?: number; cells: RefusedCell[] }
 
 /**
  * How the host must create the editor frame: scripts only, no `allow-same-origin` (the origin
@@ -175,10 +197,11 @@ export const OPAQUE_ORIGIN = "null"
 /**
  * Why a session ended. `closed` is the host's own unmount and is never shown; every other reason
  * falls back to the read-only preview with a notice. `load`: the snapshot could not be read at
- * connect. `timeout`: no hello (or no snapshot) within `BRIDGE_HANDSHAKE_TIMEOUT_MS`.
+ * connect. `timeout`: no hello (or no snapshot) within `BRIDGE_HANDSHAKE_TIMEOUT_MS`. `bundle`:
+ * the frame's hello named another bundle than the session's pin (or none).
  * `disabled`, `expired` and `access` are server refusals (`EditorRefusal`).
  */
-export type KillReason = "handshake" | "protocol" | "generation" | "navigation" | "load" | "timeout" | EditorRefusal | "closed"
+export type KillReason = "handshake" | "bundle" | "protocol" | "generation" | "navigation" | "load" | "timeout" | EditorRefusal | "closed"
 
 // ---------------------------------------------------------------------------------------------
 // Validation
@@ -283,6 +306,15 @@ export function parseFrameMessage(data: unknown): Parsed<FrameMessage> {
     }
     return { ok: true, value: { type: "resume", last_rev: value.last_rev, pending } }
   }
+  if (value.type === "draft") {
+    if (!shaped(value, ["type", "protocol", "cells"]) || !Array.isArray(value.cells) || value.cells.length > BRIDGE_MAX_OPS) return { ok: false, reason: "protocol" }
+    const cells: CellRef[] = []
+    for (const item of value.cells) {
+      if (!object(item) || !shaped(item, ["sheet", "cell"]) || !text(item.sheet, BRIDGE_MAX_SHEET_LENGTH) || typeof item.cell !== "string" || !CELL.test(item.cell)) return { ok: false, reason: "protocol" }
+      cells.push({ sheet: item.sheet, cell: item.cell })
+    }
+    return { ok: true, value: { type: "draft", cells } }
+  }
   return { ok: false, reason: "protocol" }
 }
 
@@ -318,6 +350,10 @@ export interface WorkbookBridgeOptions {
   pacing?: Partial<Pacing>
   random?: () => number
   onSaveEvent?: (event: SaveEvent) => void
+  /** A same-cell conflict with the person's open draft or refused edit (see `DraftConflict`). */
+  onConflict?: (conflict: DraftConflict) => void
+  /** The editor reported which cells have an open draft now (after every `draft` message). */
+  onDrafts?: (cells: CellRef[]) => void
   /** The session is over: destroy the frame. `unsaved` writes never got a receipt. */
   onKill?: (kill: { reason: KillReason; unsaved: number }) => void
   /** Opens a new session after `editor_session_expired`; without it an expired session ends the editor. */
@@ -353,6 +389,11 @@ export interface WorkbookBridge {
   offline(): void
   /** The host learned that this session expired (the heartbeat): replace it as an edit's `editor_session_expired` would. */
   sessionExpired(sessionId?: string): void
+  /**
+   * The person chose their value after a `refused` conflict: write these cells against the head as
+   * one host edit. False when the session is not live or the cells are not valid ops.
+   */
+  keepMine(cells: { sheet: string; cell: string; input: string }[]): boolean
   /** Ends the session (a refusal the host learned of, `session_closed`, unmount). */
   close(reason?: KillReason): void
 }
@@ -373,6 +414,8 @@ interface BridgeWrite extends QueuedWrite {
   aliases: string[]
   /** Of those, the ids that may have reached the server: their status is asked before sending. */
   priors: string[]
+  /** A keep-mine edit of the host (`<session>:h<n>`), not the editor's: `seq` is 0 and the editor hears only its revision. */
+  host?: number
 }
 
 type Outcome = { type: "ack"; rev: number } | { type: "rejected"; message: HostMessage }
@@ -460,6 +503,10 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
   const known = new Map<number, { epoch: number; frameKey: string }>()
   /** What the editor was told about a seq, to answer a restatement the same way. */
   const outcomes = new Map<number, Outcome>()
+  /** Cells with an open draft in the editor, as `sheet\u0000cell`. */
+  let drafts = new Set<string>()
+  let hostWrites = 0
+  const cellKey = (sheet: string, cell: string) => `${sheet}\u0000${cell}`
 
   const queue = createWriteQueue<BridgeWrite>({
     timers,
@@ -529,7 +576,11 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
     const seq = held.get(commit.rev) ?? ownSeq(commit)
     // An edit refused as unconfirmed may still have committed: the editor then needs its value.
     if (seq !== undefined && known.get(seq)?.epoch === epoch && outcomes.get(seq)?.type !== "rejected") { ackFrame(seq, commit.rev); settle(seq) }
-    else post({ type: "committed", protocol: 1, rev: commit.rev, actor_label: commit.actor_label, ops: commit.ops.map(op => ({ op: "cell.set", ...op })) })
+    else {
+      post({ type: "committed", protocol: 1, rev: commit.rev, actor_label: commit.actor_label, ops: commit.ops.map(op => ({ op: "cell.set", ...op })) })
+      // Another writer, or another window of the same person, changed a cell being edited here.
+      if (!(commit.session_id && ownSessions.has(commit.session_id))) for (const op of commit.ops) if (drafts.has(cellKey(op.sheet, op.cell))) options.onConflict?.({ kind: "changed", sheet: op.sheet, cell: op.cell, input: op.input, rev: commit.rev, actor_label: commit.actor_label })
+    }
     held.delete(commit.rev)
     confirmedRev = commit.rev
     flushHeld()
@@ -548,9 +599,9 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
     epoch++
     const head = queue.head()
     const discarded: number[] = []
-    for (const write of queue.writes()) if (queue.remove(write.id)) discarded.push(write.seq)
+    for (const write of queue.writes()) if (queue.remove(write.id) && !write.host) discarded.push(write.seq)
     // The write in flight belongs to the old content too; its outcome is no longer the editor's.
-    if (head && queue.head() === head) discarded.unshift(head.seq)
+    if (head && queue.head() === head && !head.host) discarded.unshift(head.seq)
     emit({ type: "recount", pending: queue.size })
     held.clear()
     confirmedRev = baseRev = snapshot.rev
@@ -692,16 +743,32 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
     if (write.epoch !== epoch || phase !== "live") return true
     const rev = receipt.rev
     if (rev <= confirmedRev) return true // the commits feed delivered it already
+    // The editor never sent a host edit: it learns the revision from the feed, like any other.
+    if (write.host) { void catchUp(rev); return true }
     if (rev === confirmedRev + 1) { confirmedRev = rev; ackFrame(write.seq, rev); flushHeld(); return true }
     held.set(rev, write.seq)
     void catchUp(rev)
     return true
   }
 
+  /** The person's values for the conflicting cells of a refused write, with the server's. */
+  function refusedCells(write: BridgeWrite, cells: WorkbookConflict[]): RefusedCell[] {
+    const { ops } = JSON.parse(write.body) as { ops: ServerCellOp[] }
+    const out: RefusedCell[] = []
+    for (const conflict of cells) {
+      const mine = ops.find(op => op.cell === conflict.cell && (conflict.sheet === undefined || op.sheet === conflict.sheet))
+      if (mine) out.push({ sheet: mine.sheet, cell: mine.cell, mine: mine.input, theirs: conflict.input, rev: conflict.rev, actor_label: conflict.actor_label })
+    }
+    return out
+  }
+
   function reject(write: BridgeWrite, code: RejectCode, cells: WorkbookConflict[] = []) {
     queue.remove(write.id)
     emit({ type: "recount", pending: queue.size })
     if (write.epoch !== epoch) return
+    const refused = code === "precondition_failed" ? refusedCells(write, cells) : []
+    if (refused.length) options.onConflict?.(write.host ? { kind: "refused", cells: refused } : { kind: "refused", seq: write.seq, cells: refused })
+    if (write.host) return
     const message: HostMessage = { type: "rejected", protocol: 1, seq: write.seq, code, current_rev: confirmedRev, cells }
     outcomes.set(write.seq, { type: "rejected", message })
     post(message)
@@ -800,7 +867,7 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
         for (const write of queue.writes()) {
           write.aliases.push(write.id)
           if (write.attempted) write.priors.push(write.id)
-          write.id = `${mutationPrefix}${write.seq}`
+          write.id = write.host ? `${mutationPrefix}h${write.host}` : `${mutationPrefix}${write.seq}`
           write.body = editBody(write)
           write.uncertain = false
         }
@@ -863,6 +930,11 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
       return
     }
     const message = parsed.value
+    if (message.type === "draft") {
+      drafts = new Set(message.cells.map(ref => cellKey(ref.sheet, ref.cell)))
+      options.onDrafts?.(message.cells)
+      return
+    }
     if (message.type === "mutation") {
       if (!accept(message.mutation)) kill("protocol")
       else void drive()
@@ -936,7 +1008,9 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
       const data = event.data
       if (!object(data) || data.type !== "gridcraft:hello") return
       // No pin (no editor origin configured) or one written differently never matches: fail closed.
-      if (!shaped(data, ["type", "protocol", "bundle"]) || data.protocol !== BRIDGE_PROTOCOL || !isBundleDigest(session.bundle_digest) || data.bundle !== session.bundle_digest) { kill("handshake"); return }
+      if (!shaped(data, ["type", "protocol", "bundle"]) || data.protocol !== BRIDGE_PROTOCOL || !isBundleDigest(session.bundle_digest)) { kill("handshake"); return }
+      // A well-formed hello from another bundle (or one that cannot name its own): the bundle pin is the cause.
+      if (data.bundle !== session.bundle_digest) { kill("bundle"); return }
       // A hello before the frame's first load comes from a document the host has not seen load,
       // and that load would later be indistinguishable from a navigation: refuse it, port unsent.
       if (loads !== 1) { kill("handshake"); return }
@@ -952,6 +1026,26 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
       if (push.generation !== session.generation) { kill("generation"); return }
       if (push.rev <= confirmedRev && phase === "live") return
       void catchUp(push.rev)
+    },
+    keepMine(cells) {
+      if (phase !== "live" || !Array.isArray(cells) || cells.length === 0 || cells.length > BRIDGE_MAX_OPS) return false
+      const ops: ServerCellOp[] = [], seen = new Set<string>()
+      for (const raw of cells) {
+        const op = parseCellOp(raw, null)
+        if (!op || seen.has(cellKey(op.sheet, op.cell))) return false
+        seen.add(cellKey(op.sheet, op.cell))
+        ops.push({ kind: "cell.set", ...op })
+      }
+      if (queue.size >= BRIDGE_MAX_PENDING) return false
+      const host = ++hostWrites
+      const id = `${mutationPrefix}h${host}`
+      queue.enqueue({
+        id, seq: 0, host, frameKey: "host", epoch, attempted: false, uncertain: false, rebases: 0, unconfirmed: 0, aliases: [], priors: [],
+        body: JSON.stringify({ session_id: session.session_id, mutation_id: id, base_rev: confirmedRev, generation: session.generation, ops }),
+      })
+      emit({ type: "edit", pending: queue.size })
+      void drive()
+      return true
     },
     online() {
       if (phase !== "live") return
