@@ -420,3 +420,30 @@ func TestBatchFinalAuthorityAfterAllExpensiveWork(t *testing.T) {
 		}
 	}
 }
+
+func TestBatchStronglyConnectedCycleAndGenuineDescendant(t *testing.T) {
+	s, adapter, _, _, lease := batchFixture(t)
+	// A -> B,C; B -> A; C -> B. All three vertices are in one SCC;
+	// a DFS that only marks backedge stack ranges incorrectly misses C.
+	a := testBatchChange(t, lease.Key, "A", "", testBatchOp("A", "B", "C"))
+	b := testBatchChange(t, lease.Key, "B", "", testBatchOp("B", "A"))
+	c := testBatchChange(t, lease.Key, "C", "", testBatchOp("C", "B"))
+	d := testBatchChange(t, lease.Key, "D", "", testBatchOp("D", "C"))
+	result, err := s.Commit(t.Context(), BatchRequest{lease, "0", []BatchChange{a, b, c, d}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		op := result.Changes[i].Operations[0]
+		if op.Status != "rejected" || op.Reason.Code != "dependency_cycle" {
+			t.Fatalf("SCC vertex not cycle: %+v", op)
+		}
+	}
+	reason := result.Changes[3].Operations[0].Reason
+	if reason.Code != "dependency_rejected" || reason.RootOperationID != "C" || reason.RootCause.Code != "dependency_cycle" {
+		t.Fatalf("genuine descendant lost original cycle root: %+v", reason)
+	}
+	if adapter.calls.Load() != 0 || result.Revision != "0" {
+		t.Fatal("cyclic dependency changed checkpoint")
+	}
+}
