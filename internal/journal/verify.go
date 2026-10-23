@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"os"
 	"sort"
 	"strings"
@@ -119,8 +120,8 @@ type ChainFields struct {
 // writeFramed appends a length-framed field to h: an 8-byte big-endian length
 // prefix before the bytes, so no field value can be confused with a delimiter
 // or spill into its neighbour — "ab"+"c" and "a"+"bc" frame (and thus hash)
-// differently.
-func writeFramed(h interface{ Write([]byte) (int, error) }, s string) {
+// differently. The destination is a cryptographic hash accumulator.
+func writeFramed(h hash.Hash, s string) {
 	var n [8]byte
 	binary.BigEndian.PutUint64(n[:], uint64(len(s)))
 	_, _ = h.Write(n[:])
