@@ -46,3 +46,12 @@ post-bootstrap traffic closure and host cancellation. It does not exercise
 participants, leases, content dispatch or durable receipts. The explicit build
 tag excludes this dependency from ordinary Go tests; selecting it without the
 required binary fails instead of silently skipping.
+
+For an exclusive host-initiated dispatcher, `Runtime.Exchange` serializes whole
+request/reply pairs and bounds each exchange to five seconds or the caller's
+earlier deadline. Queued cancellation does not close an active caller's channel;
+cancellation during I/O or a transport error closes it so a late response cannot
+become another request's reply. Typed callers still validate shape, correlation,
+scope and every candidate before use. Do not mix this mode with direct RPC reads
+or unsolicited runtime requests; an asynchronous protocol needs a separate
+reviewed multiplexer. These operational timeouts are not delivery leases.
