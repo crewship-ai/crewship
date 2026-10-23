@@ -2,3 +2,4 @@
 pub mod batch;
 pub mod lease;
 pub mod resolve;
+pub mod schedule;

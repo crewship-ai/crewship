@@ -13,6 +13,24 @@ batches returned by `push` or `take_due` immediately. Transport envelope bytes
 must be reserved when configuring the batch byte limit. This primitive does not
 claim end-to-end latency or durable storage guarantees.
 
+`mooring_core::schedule::TimedQueue` adds an aggregate unsent limit of 256
+operations and 256 KiB across pending and ready batches. Atomic changes remain
+whole; backpressure returns the rejected change to its caller. The native
+`schedule::native::Scheduler` owns a worker timer using Linux `CLOCK_BOOTTIME`:
+the first enqueue starts the deadline, and another enqueue does not restart it.
+Clock failure closes handoff until explicit cancellation. The portable queue
+also compiles for WASM; a browser timer binding is still required there.
+
+Receiving a ready batch releases unsent capacity independently of a durable
+acknowledgement. A transport must separately bound inflight work, retain its
+draft journal, and reserve envelope bytes within the byte budget. Explicit
+`close()` returns all unsent changes, including after a clock failure. Dropping
+a scheduler stops its worker but discards that returned list; callers that need
+ownership must close it explicitly and always retain drafts outside this queue.
+A native socket test sends two low-load batches before a delayed mock durable
+acknowledgement. This proves timer/handoff separation, not production transport
+latency, durable acknowledgements, or browser scheduling.
+
 From the repository root:
 
 ```sh
