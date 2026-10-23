@@ -6,16 +6,22 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/chataudience"
 )
 
 func TestOriginalUserFenceSurvivesSerializedOriginAndRevokesQueuedRun(t *testing.T) {
-	db, receipt := authorityFixture(t)
+	db, _ := authorityFixture(t)
 	// Origin storage carries provenance verbatim; credential liveness belongs
 	// to the protected admission's exact-row check, not to JSON persistence.
-	receipt.SourceCredentialKind = "cli_token"
-	receipt.SourceCredentialID = "original-token"
-	receipt.SourceCredentialBinding = "sha256:" + strings.Repeat("a", 64)
+	source := auth.OriginalCredential{UserID: "human", Kind: "cli_token", ID: "original-token", Binding: "sha256:" + strings.Repeat("a", 64)}
+	if err := db.QueryRow(`SELECT CAST(authority_revision AS TEXT) FROM users WHERE id='human'`).Scan(&source.UserAuthorityRevision); err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := chataudience.CaptureTrusted(auth.WithOriginalCredential(t.Context(), source), db, "chat", "human", nil)
+	if err != nil || receipt == nil {
+		t.Fatal("original host provenance", receipt, err)
+	}
 	putEntry(t, db, "start", "root", "run.started", "sidecar", map[string]any{"chat_id": "chat", "trigger_type": "USER", "human_authority": receipt, "trigger_message_id": "trigger"})
 	tx, err := db.BeginTx(t.Context(), nil)
 	if err != nil {

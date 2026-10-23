@@ -176,6 +176,8 @@ credential provenance. Authentication carries a copied reference through the
 signed socket ticket, host-only message option, queued origin and immutable run
 principal. No raw bearer is retained. Missing legacy provenance is preserved as
 missing and cannot be refreshed from a later run bearer or current user lookup.
+Bare legacy receipt capture remains unfenced even when a current user row can
+be resolved; only an original authenticated source creates the new user fence.
 The API helpers validate the original row identity, current user/counter, status
 and explicit scope, and return the earlier original/current credential expiry.
 ADMIN references also bind the current bearer HMAC key identity. New scoped
