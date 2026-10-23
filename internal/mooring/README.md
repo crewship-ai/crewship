@@ -60,7 +60,16 @@ a transport must also account for envelope overhead and advertise lower limits
 when necessary. JCS normalization precedes application semantics.
 
 The adapter validates opaque checkpoint bytes and applies a complete change to
-the latest accepted checkpoint without external side effects. It must preserve
+the latest accepted checkpoint without external side effects.
+It returns an internal `PreparedFailure{OperationID,Reason}` naming the actual
+failed immutable member. Missing/foreign identity or uncertain engine error
+aborts without a terminal outcome. The actual failed operation receives the
+direct reason; atomic siblings and all descendants preserve that original root.
+Host admission failures use a documented deterministic first-member group root.
+Definite admission/external dependency failures propagate before SCC detection;
+internal and whole-change cycles precede acyclic internal forward-order errors.
+The shared batch-resolution vectors test this intersection with the Rust planner;
+Rust's eligible-for-host result is not a persistence receipt. It must preserve
 application format/version metadata within the qualified checkpoint contract.
 Host Go does not interpret application commands or CRDT internals. Intra-change
 operation order is immutable; cycles reject before acyclic forward dependencies.
@@ -78,6 +87,14 @@ immediately before persistence and again immediately before commit. Callback inp
 cannot change immutable authorship/membership. Outcome, task, initialization and
 checkpoint-read authority are distinct callback intents. The callback must bind
 participant references to host identities; an owner lease grants no such rights.
+
+A reused ID with different fingerprint/membership conservatively rejects the
+whole batch before admission, preserving the original ledger and emitting no
+fresh terminal result. Independent fresh work remains pending and may retry
+separately with its same immutable IDs. This is a primitive admission policy and
+remaining P4.2 integration limitation: protocol-wide conflict-attempt semantics
+must be decided and tested before enabling the wire path. It is excluded from
+the shared planner intersection, not a claim that the full PRD is complete.
 
 Operation IDs, fingerprints, memberships, task attribution, checkpoint history
 and audit are retained until artifact deletion. Quota pressure never deletes
