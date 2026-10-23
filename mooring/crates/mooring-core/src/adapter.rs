@@ -1,11 +1,16 @@
 //! Pure application preparation boundary. The host alone commits outcomes.
-use mooring_protocol::{wire::valid_identifier, AtomicChange, ErrorCode};
+use mooring_protocol::{
+    wire::valid_identifier, AtomicChange, ErrorCode, PrepareContext, PreparedOperationEffects,
+    TargetIdentity,
+};
 
 /// An owned application candidate can retain CRDT/native state, stable IDs and
 /// asset references. Its opaque checkpoint bytes represent the full candidate;
 /// they are not a host checkpoint wrapper, receipt, or durability claim.
 pub trait PreparedCandidate {
     fn checkpoint_bytes(&self) -> &[u8];
+    fn effects(&self) -> &[PreparedOperationEffects];
+    fn inventory(&self) -> &[TargetIdentity];
 }
 
 /// Implementations restore/fork the supplied authoritative state and prepare
@@ -15,6 +20,11 @@ pub trait PreparedCandidate {
 /// The caller authenticates scope/participants and normalizes payload numbers
 /// before this boundary. It enforces negotiated resource limits BEFORE restore
 /// and AFTER candidate serialization; this trait embeds no fixed byte limit.
+/// The host context is not authority inferred from JSON: the dispatcher binds
+/// it to the verified channel/scope/head/change. After restoring, implementations
+/// qualify it against the actual COMPLETE checkpoint inventory through
+/// `prepare::ConfirmedContext`, then check reads before each operation and
+/// advance only the supplied host labels after validating actual effects.
 /// Candidate installation/delivery needs a later verified host confirmation.
 pub trait PrepareAdapter {
     type Candidate: PreparedCandidate;
@@ -22,11 +32,12 @@ pub trait PrepareAdapter {
     /// rejection. This includes uncertain engine outcomes and restore failures.
     type Error;
 
-    fn validate_checkpoint(&self, checkpoint: &[u8]) -> Result<(), Self::Error>;
+    fn validate_checkpoint(&self, checkpoint: &[u8]) -> Result<Vec<TargetIdentity>, Self::Error>;
     fn prepare_atomic(
         &self,
         authoritative_checkpoint: &[u8],
         normalized: &AtomicChange,
+        context: &PrepareContext,
     ) -> Result<Prepared<Self::Candidate>, Self::Error>;
 }
 

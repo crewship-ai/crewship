@@ -2,4 +2,5 @@
 pub mod adapter;
 pub mod batch;
 pub mod lease;
+pub mod prepare;
 pub mod resolve;
