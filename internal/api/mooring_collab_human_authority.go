@@ -58,6 +58,19 @@ func (h *PageHandler) authorizeCollaborationHumanPage(ctx context.Context, tx *s
 	default:
 		return result, errCollaborationHumanAccess
 	}
+	return h.authorizeCollaborationPageSubject(ctx, tx, key, intent, *source)
+}
+
+// Current rights of an ORIGINAL human subject, not authentication of the
+// caller. Only the actual-human wrapper above or a host-validated ephemeral
+// agent mandate may supply this reference. An agent/run bearer or serialized
+// origin alone must never call this as a substitute for mandate admission.
+// This function does not fabricate an interactive AuthUser or erase markers.
+func (h *PageHandler) authorizeCollaborationPageSubject(ctx context.Context, tx *sql.Tx, key mooring.SessionKey, intent string, source auth.OriginalCredential) (collaborationHumanPageAccess, error) {
+	var result collaborationHumanPageAccess
+	if tx == nil || key.WorkspaceID == "" || key.ArtifactID == "" || key.ApplicationID != "wordcraft" || !source.Valid() {
+		return result, errCollaborationHumanAccess
+	}
 	write, initialize := false, false
 	switch intent {
 	case "read", "read_checkpoint", "outcome":
@@ -77,7 +90,7 @@ func (h *PageHandler) authorizeCollaborationHumanPage(ctx context.Context, tx *s
 	// Caller-supplied/middleware role and scope snapshots never replace current
 	// credential scope, membership and canonical Page checks in this writer.
 	ctx = context.WithValue(ctx, ctxRole, "")
-	expiry, err := validateOriginalHumanCredential(ctx, tx, *source, requiredScope)
+	expiry, err := validateOriginalHumanCredential(ctx, tx, source, requiredScope)
 	if err != nil {
 		return result, err
 	}
@@ -96,9 +109,9 @@ func (h *PageHandler) authorizeCollaborationHumanPage(ctx context.Context, tx *s
 			return result, errCollaborationHumanAccess
 		}
 	}
-	role, err := h.liveContentHumanRole(ctx, key.WorkspaceID, user.ID)
+	role, err := h.liveContentHumanRole(ctx, key.WorkspaceID, source.UserID)
 	if errors.Is(err, sql.ErrNoRows) && rec.PrivateAudience && !write {
-		reader, readErr := h.livePrivatePageReader(ctx, key.WorkspaceID, user.ID)
+		reader, readErr := h.livePrivatePageReader(ctx, key.WorkspaceID, source.UserID)
 		if readErr != nil {
 			return result, readErr
 		}
@@ -110,7 +123,7 @@ func (h *PageHandler) authorizeCollaborationHumanPage(ctx context.Context, tx *s
 		return result, err
 	}
 	ctx = context.WithValue(ctx, ctxRole, role)
-	viewer, err := h.loadViewer(ctx, key.WorkspaceID, user.ID)
+	viewer, err := h.loadViewer(ctx, key.WorkspaceID, source.UserID)
 	if err != nil {
 		return result, err
 	}
@@ -118,13 +131,13 @@ func (h *PageHandler) authorizeCollaborationHumanPage(ctx context.Context, tx *s
 	if err != nil {
 		return result, err
 	}
-	if !visible || (write && !h.mayEditSpec(ctx, key.WorkspaceID, user.ID, role, rec)) {
+	if !visible || (write && !h.mayEditSpec(ctx, key.WorkspaceID, source.UserID, role, rec)) {
 		return result, errCollaborationHumanAccess
 	}
 	if initialize {
 		// Initial custody is explicit. Ordinary workspace management cannot attach
 		// a new document to another human's Page or an existing content engine.
-		if rec.OwnerUserID != user.ID || rec.OwnerCrewID != "" || rec.HasProject || rec.HasApplication {
+		if rec.OwnerUserID != source.UserID || rec.OwnerCrewID != "" || rec.HasProject || rec.HasApplication {
 			return result, errCollaborationHumanAccess
 		}
 		privateSQL, _, err := privatePageOwnershipSQL(ctx, tx, "p")
@@ -147,7 +160,7 @@ func (h *PageHandler) authorizeCollaborationHumanPage(ctx context.Context, tx *s
 			return result, errCollaborationHumanAccess
 		}
 	}
-	if err = tx.QueryRowContext(ctx, `SELECT CAST(w.authority_revision AS TEXT),m.id,m.access_revision FROM workspaces w JOIN workspace_members m ON m.workspace_id=w.id JOIN users u ON u.id=m.user_id WHERE w.id=? AND m.user_id=? AND w.deleted_at IS NULL AND u.suspended_at IS NULL AND CAST(u.authority_revision AS TEXT)=?`, key.WorkspaceID, user.ID, source.UserAuthorityRevision).Scan(&result.permissionVersion, &result.memberID, &result.memberRevision); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT CAST(w.authority_revision AS TEXT),m.id,m.access_revision FROM workspaces w JOIN workspace_members m ON m.workspace_id=w.id JOIN users u ON u.id=m.user_id WHERE w.id=? AND m.user_id=? AND w.deleted_at IS NULL AND u.suspended_at IS NULL AND CAST(u.authority_revision AS TEXT)=?`, key.WorkspaceID, source.UserID, source.UserAuthorityRevision).Scan(&result.permissionVersion, &result.memberID, &result.memberRevision); err != nil {
 		return result, err
 	}
 	if !chataudience.ValidUserAuthorityRevision(result.permissionVersion) || result.memberID == "" || result.memberRevision < 1 || (!expiry.IsZero() && !time.Now().Before(expiry)) {
