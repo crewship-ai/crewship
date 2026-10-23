@@ -3,30 +3,64 @@ package mooring
 // batchCycles returns exactly the vertices participating in a directed cycle,
 // not descendants. Inputs and adjacency lists have stable submission order.
 func batchCycles(edges [][]int) map[int]bool {
-	state := make([]uint8, len(edges))
+	// Tarjan's strongly connected components, including edges to vertices
+	// already visited but still on the SCC stack. A DFS backedge union alone
+	// misses vertices reached after another path turns their neighbor black.
+	next := 0
+	index, low := make([]int, len(edges)), make([]int, len(edges))
+	onStack := make([]bool, len(edges))
 	stack := []int{}
 	cycles := map[int]bool{}
+	for i := range index {
+		index[i] = -1
+	}
 	var visit func(int)
 	visit = func(v int) {
-		state[v] = 1
+		index[v] = next
+		low[v] = next
+		next++
 		stack = append(stack, v)
+		onStack[v] = true
 		for _, d := range edges[v] {
-			if state[d] == 0 {
+			if index[d] < 0 {
 				visit(d)
-			} else if state[d] == 1 {
-				for i := len(stack) - 1; i >= 0; i-- {
-					cycles[stack[i]] = true
-					if stack[i] == d {
-						break
-					}
+				if low[d] < low[v] {
+					low[v] = low[d]
+				}
+			} else if onStack[d] && index[d] < low[v] {
+				low[v] = index[d]
+			}
+		}
+		if low[v] != index[v] {
+			return
+		}
+		component := []int{}
+		for {
+			last := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			onStack[last] = false
+			component = append(component, last)
+			if last == v {
+				break
+			}
+		}
+		cyclic := len(component) > 1
+		if !cyclic {
+			for _, d := range edges[v] {
+				if d == v {
+					cyclic = true
+					break
 				}
 			}
 		}
-		stack = stack[:len(stack)-1]
-		state[v] = 2
+		if cyclic {
+			for _, member := range component {
+				cycles[member] = true
+			}
+		}
 	}
 	for v := range edges {
-		if state[v] == 0 {
+		if index[v] < 0 {
 			visit(v)
 		}
 	}
