@@ -124,6 +124,7 @@ type BatchStoreConfig struct {
 	Owners      *OwnerStore
 	Authority   BatchAuthority
 	Adapter     BatchAdapter
+	Targets     *TargetStoreConfig
 	Limits      BatchLimits
 	AfterCommit func(BatchCommitEvent)
 }
