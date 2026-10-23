@@ -58,6 +58,7 @@ func (r *Router) registerAuthRoutes() {
 	// returns 200 either way (no enumeration); /reset is the
 	// token-redemption endpoint.
 	recoveryH := NewRecoveryHandler(r.db, r.logger, mail, r.sessionsStore)
+	recoveryH.streams = r.authMw.streams
 	r.mux.HandleFunc("POST /api/v1/auth/forgot", recoveryH.Forgot)
 	r.mux.HandleFunc("POST /api/v1/auth/reset", recoveryH.Reset)
 

@@ -582,7 +582,7 @@ func TestCovIICreateAgent(t *testing.T) {
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
 	seedCrewRow(t, db, "crewA", wsID, "Crew", "crew")
-	h := &InternalHandler{db: db, logger: newTestLogger(), journal: &emitRecorder{}}
+	h := &InternalHandler{db: db, logger: newTestLogger(), journal: noopEmitter{}} // agent creation chains its audit; a buffer-only recorder cannot
 
 	t.Run("missing workspace_id → 400", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader("{}"))

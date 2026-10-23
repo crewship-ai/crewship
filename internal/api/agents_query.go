@@ -6,6 +6,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -349,25 +350,48 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Deleting removes the agent from its crew with every privilege it held:
+	// the soft delete and its chained audit (with those privileges, MCP
+	// configuration redacted) commit together.
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		replyInternalError(w, h.logger, "begin agent delete", err)
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+	previous, err := agentPrivileges(r.Context(), tx, workspaceID, agentID)
+	if errors.Is(err, sql.ErrNoRows) {
+		replyError(w, http.StatusNotFound, "Agent not found")
+		return
+	}
+	if err != nil {
+		replyInternalError(w, h.logger, "read agent privileges", err)
+		return
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	res, err := h.db.ExecContext(r.Context(),
+	res, err := tx.ExecContext(r.Context(),
 		"UPDATE agents SET deleted_at = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		now, agentID, workspaceID)
 	if err != nil {
 		replyInternalError(w, h.logger, "delete agent", err)
 		return
 	}
-	affected, _ := res.RowsAffected()
-	if affected == 0 {
+	if affected, _ := res.RowsAffected(); affected != 1 {
 		replyError(w, http.StatusNotFound, "Agent not found")
 		return
 	}
-
-	userID := ""
-	if user != nil {
-		userID = user.ID
+	notify, err := appendAgentAudit(r.Context(), tx, h.journal, workspaceID, callerUserID, "delete", agentID, map[string]any{"previous": previous})
+	if err != nil {
+		replyInternalError(w, h.logger, "audit agent delete", err)
+		return
 	}
-	WriteAuditLog(r.Context(), h.db, h.journal, "delete", "AGENT", agentID, userID, workspaceID, nil)
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "commit agent delete", err)
+		return
+	}
+	if notify != nil {
+		notify()
+	}
 
 	// deleted_at is committed, so every entry point and the creation gate
 	// already refuse new runs. Stop the runs already alive — this agent's

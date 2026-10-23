@@ -1,8 +1,12 @@
 package api
 
 import (
+	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -67,6 +71,32 @@ func TestAgentPrivilegeChangesAreAuditedAtomically(t *testing.T) {
 					privilegesMoved("agent_role", "AGENT", "LEAD")(t, m)
 					if d, _ := m["demoted_leads"].([]any); len(d) != 1 || d[0] != "ap-old-lead" {
 						t.Errorf("demoted_leads = %v, want [ap-old-lead]", m["demoted_leads"])
+					}
+				}}
+		},
+		"create": func(t *testing.T, f *authorizationAuditFixture) operation {
+			seed(t, f)
+			return operation{"POST", "/api/v1/agents", `{"name":"Created","slug":"ap-created","crew_id":"ap-crew-b","agent_role":"AGENT","cli_adapter":"CLAUDE_CODE","tool_profile":"MINIMAL"}`, "create",
+				scalar(`SELECT CAST(COUNT(*) AS TEXT) FROM agents WHERE slug='ap-created'`), "0", "1",
+				func(t *testing.T, m map[string]any) {
+					cur, _ := m["current"].(map[string]any)
+					if cur["crew_id"] != "ap-crew-b" || cur["tool_profile"] != "MINIMAL" || cur["agent_role"] != "AGENT" {
+						t.Errorf("create audit current = %v", m["current"])
+					}
+				}}
+		},
+		"delete": func(t *testing.T, f *authorizationAuditFixture) operation {
+			seed(t, f)
+			execOrFatal(t, f.db, `UPDATE agents SET mcp_config_json=? WHERE id='ap-agent'`, `{"mcpServers":{"gh":{"command":"npx","env":{"GITHUB_TOKEN":"del-value-marker"}}}}`)
+			return operation{"DELETE", "/api/v1/agents/ap-agent", ``, "delete",
+				scalar(`SELECT CASE WHEN deleted_at IS NULL THEN 'live' ELSE 'deleted' END FROM agents WHERE id='ap-agent'`), "live", "deleted",
+				func(t *testing.T, m map[string]any) {
+					prev, _ := m["previous"].(map[string]any)
+					if prev["crew_id"] != "ap-crew-a" || prev["tool_profile"] != "CODING" {
+						t.Errorf("delete audit previous = %v", m["previous"])
+					}
+					if raw, _ := json.Marshal(m); strings.Contains(string(raw), "del-value-marker") || !strings.Contains(string(raw), "GITHUB_TOKEN") {
+						t.Errorf("delete audit must name MCP env keys without values: %s", raw)
 					}
 				}}
 		},
@@ -225,6 +255,8 @@ func TestMCPConfigAudit(t *testing.T) {
 		{"invalid", "{", `{"unparseable":true}`},
 		{"stdio", `{"mcpServers":{"b":{"command":"node /srv/x.js --key=v","env":{"Z":"1","A":"2"}},"a":{"url":"https://h/x?t=1"}}}`,
 			`[{"command":"","env_keys":[],"header_keys":[],"name":"a","transport":"http"},{"command":"node","env_keys":["A","Z"],"header_keys":[],"name":"b","transport":"stdio"}]`},
+		{"env assignment before the command", `{"mcpServers":{"s":{"command":"TOKEN=cmd-value-marker OTHER=x /opt/bin/npx -y srv"}}}`,
+			`[{"command":"npx","env_keys":[],"header_keys":[],"name":"s","transport":"stdio"}]`},
 		{"declared transport", `{"mcpServers":{"s":{"type":"sse","url":"https://h","headers":{"X-Key":"v"}}}}`,
 			`[{"command":"","env_keys":[],"header_keys":["X-Key"],"name":"s","transport":"sse"}]`},
 	}
@@ -235,5 +267,148 @@ func TestMCPConfigAudit(t *testing.T) {
 				t.Fatalf("got %s, want %s", got, tc.want)
 			}
 		})
+	}
+}
+
+// Paths that run on behalf of an agent carry no user: their chained records
+// name a system actor and a NULL audit_logs user, and an audit failure still
+// creates nothing.
+func TestAgentInternalPathsAuditAsSystem(t *testing.T) {
+	type path struct {
+		action string
+		// setup seeds a database and returns the call to make and the
+		// query counting the agents it created.
+		setup func(t *testing.T) (*sql.DB, func() *httptest.ResponseRecorder, string)
+	}
+	paths := map[string]path{
+		"internal hire": {"agent.hired", func(t *testing.T) (*sql.DB, func() *httptest.ResponseRecorder, string) {
+			db := setupTestDB(t)
+			_, wsID, _ := seedHireCrew(t, db, "full", 5)
+			b, _ := json.Marshal(covHire2Body(nil))
+			return db, func() *httptest.ResponseRecorder {
+				rr := httptest.NewRecorder()
+				NewHireInternalAdapter(newHireHandler(t, db)).Hire(rr, httptest.NewRequest("POST", "/?workspace_id="+wsID, bytes.NewReader(b)))
+				return rr
+			}, `SELECT CAST(COUNT(*) AS TEXT) FROM agents WHERE ephemeral=1`
+		}},
+		"internal create": {"agent.created", func(t *testing.T) (*sql.DB, func() *httptest.ResponseRecorder, string) {
+			db, wsID, crewID, _, res := autonomyRig(t, "full")
+			return db, func() *httptest.ResponseRecorder {
+				rr := httptest.NewRecorder()
+				gatedInternalHandler(t, db, res).CreateAgent(rr, boundInternalReq(http.MethodPost, "/?workspace_id="+wsID,
+					`{"crew_id":"`+crewID+`","name":"Made By Agent","tool_profile":"MINIMAL"}`, wsID, crewID))
+				return rr
+			}, `SELECT CAST(COUNT(*) AS TEXT) FROM agents WHERE name='Made By Agent'`
+		}},
+	}
+	for name, p := range paths {
+		for _, fault := range []string{"healthy", "audit_abort"} {
+			t.Run(name+"/"+fault, func(t *testing.T) {
+				db, call, countQuery := p.setup(t)
+				if fault == "audit_abort" {
+					execOrFatal(t, db, `CREATE TRIGGER stop_access_audit BEFORE INSERT ON journal_entries WHEN NEW.entry_type LIKE 'audit.entity_%' BEGIN SELECT RAISE(ABORT,'access audit unavailable'); END`)
+				}
+				rr := call()
+				var created string
+				if err := db.QueryRow(countQuery).Scan(&created); err != nil {
+					t.Fatal(err)
+				}
+				var legacy, chained int
+				if err := db.QueryRow(`SELECT COUNT(*) FROM audit_logs WHERE action=? AND entity_type='AGENT' AND user_id IS NULL`, p.action).Scan(&legacy); err != nil {
+					t.Fatal(err)
+				}
+				if err := db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE json_extract(payload,'$.action')=? AND actor_type='system' AND COALESCE(actor_id,'')=''`, p.action).Scan(&chained); err != nil {
+					t.Fatal(err)
+				}
+				if fault == "audit_abort" {
+					if rr.Code != http.StatusInternalServerError || created != "0" || legacy != 0 {
+						t.Fatalf("audit failure created the agent: HTTP%d created=%s legacy=%d: %s", rr.Code, created, legacy, rr.Body.String())
+					}
+					return
+				}
+				if rr.Code >= 300 || created != "1" || legacy != 1 || chained != 1 {
+					t.Fatalf("HTTP%d created=%s legacy(NULL user)=%d chained(system)=%d: %s", rr.Code, created, legacy, chained, rr.Body.String())
+				}
+			})
+		}
+	}
+}
+
+// When a created agent's required review row cannot be written, the agent is
+// removed again and the removal is chained next to its creation record.
+func TestAgentCreationRevertIsChained(t *testing.T) {
+	tests := []struct {
+		name, created, reverted string
+		setup                   func(t *testing.T) (*sql.DB, func() *httptest.ResponseRecorder)
+	}{
+		{"guided hire", "agent.hired", "agent.hire_reverted", func(t *testing.T) (*sql.DB, func() *httptest.ResponseRecorder) {
+			db := setupTestDB(t)
+			userID, wsID, _ := seedHireCrew(t, db, "guided", 5)
+			return db, func() *httptest.ResponseRecorder {
+				return postHire(t, newHireHandler(t, db), userID, wsID, "OWNER", covHire2Body(nil))
+			}
+		}},
+		{"guided internal create", "agent.created", "agent.create_reverted", func(t *testing.T) (*sql.DB, func() *httptest.ResponseRecorder) {
+			db, wsID, crewID, _, res := autonomyRig(t, "guided")
+			return db, func() *httptest.ResponseRecorder {
+				rr := httptest.NewRecorder()
+				gatedInternalHandler(t, db, res).CreateAgent(rr, boundInternalReq(http.MethodPost, "/?workspace_id="+wsID,
+					`{"crew_id":"`+crewID+`","name":"Held"}`, wsID, crewID))
+				return rr
+			}
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			db, call := tc.setup(t)
+			execOrFatal(t, db, `CREATE TRIGGER block_inbox BEFORE INSERT ON inbox_items BEGIN SELECT RAISE(ABORT,'inbox unavailable'); END`)
+			rr := call()
+			if rr.Code != http.StatusInternalServerError {
+				t.Fatalf("status = %d, want 500: %s", rr.Code, rr.Body.String())
+			}
+			var agents int
+			if err := db.QueryRow(`SELECT COUNT(*) FROM agents WHERE deleted_at IS NULL AND status='PENDING_REVIEW'`).Scan(&agents); err != nil {
+				t.Fatal(err)
+			}
+			if agents != 0 {
+				t.Fatalf("%d held agents left after the failed review row", agents)
+			}
+			for _, action := range []string{tc.created, tc.reverted} {
+				var legacy, chained int
+				if err := db.QueryRow(`SELECT COUNT(*) FROM audit_logs WHERE action=? AND entity_type='AGENT'`, action).Scan(&legacy); err != nil {
+					t.Fatal(err)
+				}
+				if err := db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE json_extract(payload,'$.action')=?`, action).Scan(&chained); err != nil {
+					t.Fatal(err)
+				}
+				if legacy != 1 || chained != 1 {
+					t.Errorf("%s: audit_logs=%d chained=%d, want 1/1", action, legacy, chained)
+				}
+			}
+		})
+	}
+}
+
+// The compensating removal must not depend on the request still being alive:
+// a client that disconnects after the agent was committed would otherwise
+// leave it live with no revert record.
+func TestRevertCreatedAgentSurvivesCanceledRequest(t *testing.T) {
+	db := setupTestDB(t)
+	userID, wsID, crewID := seedHireCrew(t, db, "trusted", 5)
+	id := seedEphemeralAgent(t, db, wsID, crewID, "revert-me", nil, nil, "[x] hire: test")
+	h := newHireHandler(t, db)
+	req := httptest.NewRequest("POST", "/api/v1/agents/hire", nil)
+	ctx, cancel := context.WithCancel(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
+	cancel()
+	h.revertStagedHire(req.WithContext(ctx), wsID, id, "", userID, "test")
+	var left, records int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM agents WHERE id=?`, id).Scan(&left); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM audit_logs WHERE action='agent.hire_reverted' AND entity_id=?`, id).Scan(&records); err != nil {
+		t.Fatal(err)
+	}
+	if left != 0 || records != 1 {
+		t.Fatalf("after a canceled request: agent rows=%d revert records=%d, want 0/1", left, records)
 	}
 }

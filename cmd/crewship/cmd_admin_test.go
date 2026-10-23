@@ -10,6 +10,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
@@ -28,8 +29,12 @@ func newAdminResetCmdForTest() *cobra.Command {
 
 func initTestDB(t *testing.T) string {
 	t.Helper()
-	// Local recovery owns an app keyring as well as a database file.
-	t.Setenv("CREWSHIP_DATA_DIR", t.TempDir())
+	// Local recovery signs with the booted instance's keyring in its data dir.
+	dataDir := t.TempDir()
+	t.Setenv("CREWSHIP_DATA_DIR", dataDir)
+	if _, _, err := journal.EnsureSigningKeys(dataDir, ""); err != nil {
+		t.Fatal(err)
+	}
 	db := testutil.MigratedDB(t)
 	dbURL := "file:" + db.Path()
 	// The command under test opens this URL itself, so hand back a file no
