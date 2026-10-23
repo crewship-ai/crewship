@@ -57,7 +57,20 @@ func (s *Server) handleMooring(w http.ResponseWriter, r *http.Request) {
 // One tool dispatches any installed manifest command; application discovery is
 // returned under the retained document mandate, never a caller-supplied schema.
 func mooringMCPCatalog() []memoryMCPToolDescriptor {
-	schema := json.RawMessage(`{"type":"object","additionalProperties":false,"required":["action","artifact_id","mandate_id"],"properties":{"action":{"type":"string","enum":["read","command"]},"artifact_id":{"type":"string"},"mandate_id":{"type":"string"},"request":{"type":"object","additionalProperties":false,"required":["mutation_id","base_rev","generation","command","arguments"],"properties":{"mutation_id":{"type":"string"},"base_rev":{"type":"integer","minimum":1},"generation":{"type":"integer","minimum":1},"command":{"type":"string"},"arguments":{"type":"object"}}}}}`)
+	text := map[string]any{"type": "string"}
+	integer := map[string]any{"type": "integer", "minimum": 1}
+	object := func(props map[string]any, required []string) map[string]any {
+		return map[string]any{"type": "object", "additionalProperties": false, "properties": props, "required": required}
+	}
+	packet := object(map[string]any{
+		"mutation_id": text, "base_rev": integer, "generation": integer,
+		"command": text, "arguments": map[string]any{"type": "object"},
+		"read_set": workbookReadSetMCPSchema(),
+	}, []string{"mutation_id", "base_rev", "generation", "command", "arguments"})
+	schema, _ := json.Marshal(object(map[string]any{
+		"action":      map[string]any{"type": "string", "enum": []string{"read", "command"}},
+		"artifact_id": text, "mandate_id": text, "request": packet,
+	}, []string{"action", "artifact_id", "mandate_id"}))
 	return []memoryMCPToolDescriptor{{Name: "mooring_command", Description: "Read or run a manifest-declared application command under an explicit human mandate for this live run. Read discovers the manifest and state. Preserve mutation ID and preconditions on uncertain retry. Shared DIRECT documents are refused.", InputSchema: schema}}
 }
 func (s *Server) respondMooringMCPToolCall(w http.ResponseWriter, r *http.Request, req memoryMCPRequest, name string, raw []byte) bool {
