@@ -25,7 +25,11 @@ fn run() -> std::io::Result<()> {
     // This process owns descriptor 3 from this point and never opens a listener.
     let stream = unsafe { UnixStream::from_raw_fd(3) };
     stream.peer_addr()?;
-    mooring_collab::private_rpc::serve(stream, Duration::from_secs(5))
+    mooring_collab::private_rpc::serve_registered(
+        stream,
+        Duration::from_secs(5),
+        mooring_collab::dispatch::wordcraft_registration(),
+    )
 }
 #[cfg(not(target_os = "linux"))]
 fn run() -> std::io::Result<()> {
