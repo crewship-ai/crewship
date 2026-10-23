@@ -9,6 +9,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **A confirmed application edit could remain stuck on “Saving…” during a live update.** The editor host now waits for an in-flight snapshot read and its queued fresh read before acknowledging the durable receipt, while retaining the same mutation for a failed-read retry.
+
+
 - **Mooring activity was missing from journal filters.** Creation, confirmed edits and agent mandate changes now use registered event types and appear in the Artifact activity group with matching icons.
 
 
