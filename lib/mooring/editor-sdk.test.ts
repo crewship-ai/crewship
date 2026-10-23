@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { createEditorSDK, type DocumentState, type SaveStatus } from "./editor-sdk"
 import { verifyEditorHello, type CapabilityPort, type WindowEnvelope } from "./channel"
+import { parseRevisionPush } from "./revision"
 const bundle = "a".repeat(64)
 const receipt = (rev: number) => ({ rev, outcome: "committed", issued_by: "crewship", durability: "node" })
 function setup() {
@@ -15,6 +16,11 @@ function setup() {
   return { sdk, states, statuses, sent, port, connect, receive, hello }
 }
 describe("Mooring shared handshake", () => {
+  it("binds generic revision pushes to the document and a valid generation", () => {
+    expect(parseRevisionPush({ artifact_id: "a", rev: 2, generation: 1 }, "a")).toEqual({ rev: 2, generation: 1 })
+    expect(parseRevisionPush({ artifact_id: "other", rev: 2, generation: 1 }, "a")).toBeNull()
+    expect(parseRevisionPush({ artifact_id: "a", rev: 2, generation: 0 }, "a")).toBeNull()
+  })
   const frame = {}
   const event = { source: frame, origin: "null", data: { type: "mooring:hello", protocol: 1, bundle } }
   const options = { namespace: "mooring", bundle, waiting: true, loads: 1 }

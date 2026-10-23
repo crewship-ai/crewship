@@ -5,6 +5,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { useRealtimeChannelSafe, useRealtimeEventSafe } from "@/hooks/use-realtime"
 import { useLeaveGuard } from "@/lib/editor-lifecycle/use-leave-guard"
 import { createCapabilityChannel, decodeMessage, record, revision, transferEditorPort, verifyEditorHello, type CapabilityPort } from "@/lib/mooring/channel"
+import { parseRevisionPush } from "@/lib/mooring/revision"
 import { durableReceipt } from "@/lib/mooring/editor-sdk"
 import { editorFrameSrc } from "@/lib/workbooks/editor-client"
 import { createEditorFrame, editorFrameSupported } from "./workbook-editor-host"
@@ -19,8 +20,7 @@ export function MooringEditorHost({ workspaceId, pageId, name, onDirtyChange }: 
   useLeaveGuard(dirty)
   useRealtimeChannelSafe(`page:${pageId}`)
   useRealtimeEventSafe("mooring.committed", event => {
-    const payload = event.payload
-    if (record(payload) && payload.artifact_id === pageId) refresh.current()
+    if (parseRevisionPush(event.payload, pageId)) refresh.current()
   })
   useRealtimeEventSafe("realtime.reconnected", () => refresh.current())
   React.useEffect(() => { onDirtyChange?.(dirty) }, [dirty, onDirtyChange])

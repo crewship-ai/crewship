@@ -734,13 +734,13 @@ describe("save state and leave guard", () => {
     expect(t.status()).toBe("Not saved · a change was refused")
   })
 
-  it("reads the commits feed on a workbook.committed push for its Page, and ignores other Pages", async () => {
+  it.each(["workbook.committed", "mooring.committed"])("reads the commits feed on a %s push for its Page, and ignores other Pages", async eventType => {
     const t = setup({ transport: { commits: vi.fn(async (since: number) => ok({ head_rev: 42, generation: 1, commits: since < 42 ? [{ rev: 42, kind: "cells", actor_label: "Agent Ada", own: false, ops: [{ sheet: "Sheet1", cell: "B2", input: "99" }] }] : [] })) } })
     await t.connect()
     expect(realtime.channels).toContain("page:page-1")
-    await push("workbook.committed", { page_id: "other", rev: 42, generation: 1, kind: "cells", cells: 1 })
+    await push(eventType, { page_id: "other", artifact_id: "other", rev: 42, generation: 1, kind: "cells", cells: 1 })
     expect(t.transport.commits).not.toHaveBeenCalled()
-    await push("workbook.committed", { page_id: "page-1", rev: 42, generation: 1, kind: "cells", cells: 1 })
+    await push(eventType, { page_id: "page-1", artifact_id: "page-1", rev: 42, generation: 1, kind: "cells", cells: 1 })
     await waitFor(() => expect(t.fromFrame).toContainEqual({ type: "committed", protocol: 1, rev: 42, actor_label: "Agent Ada", ops: [{ op: "cell.set", sheet: "Sheet1", cell: "B2", input: "99" }] }))
   })
 

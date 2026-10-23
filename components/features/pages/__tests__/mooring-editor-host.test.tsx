@@ -81,7 +81,7 @@ it("does not treat a non-durable response as saved and retains exact retry bytes
 it("removes the frame when authenticated state is revoked", async () => {
   await open()
   requests.mockImplementation(async () => Response.json({ error: "denied" }, { status: 403 }))
-  await act(async () => realtime.handlers.get("mooring.committed")?.({ payload: { artifact_id: "page", rev: 2 } }))
+  await act(async () => realtime.handlers.get("mooring.committed")?.({ payload: { artifact_id: "page", rev: 2, generation: 1 } }))
   await waitFor(() => expect(document.querySelector("iframe")).toBeNull())
   expect(screen.getByRole("alert")).toHaveTextContent("Access")
 })
