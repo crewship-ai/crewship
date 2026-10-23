@@ -137,3 +137,35 @@ it("retains the exact mutation when the joined snapshot read fails, then confirm
   expect(writes[1]).toBe(writes[0])
   expect(screen.getByRole("status")).toHaveTextContent("Saved")
 })
+
+it("offers a real retry after an opaque error document loads without an editor handshake", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  try {
+    render(<MooringEditorHost workspaceId="ws" pageId="page" name="Third-party application" />)
+    await waitFor(() => expect(document.querySelector("iframe")).not.toBeNull())
+    const first = document.querySelector("iframe")!
+    // A cross-origin HTTP 503 document emits iframe load, not an inspectable
+    // HTTP status or a valid Mooring hello. Keep the production deadline.
+    await act(async () => { first.dispatchEvent(new Event("load")); await vi.advanceTimersByTimeAsync(15_000) })
+    expect(screen.getByRole("alert")).toHaveTextContent("did not start")
+    expect(screen.getByRole("status")).toHaveTextContent("Editor unavailable")
+    expect(document.querySelector("iframe")).toBeNull()
+    const retry = screen.getByRole("button", { name: "Retry editor" })
+    await act(async () => { retry.click() })
+    await waitFor(() => expect(document.querySelector("iframe")).not.toBeNull())
+    expect(document.querySelector("iframe")).not.toBe(first)
+    expect(document.querySelector("iframe")!.getAttribute("sandbox")).toBe("allow-scripts")
+    expect(document.querySelector("iframe")!.hasAttribute("credentialless")).toBe(true)
+  } finally { vi.useRealTimers() }
+})
+
+it("never offers a fresh-frame retry after connecting with unsubmitted work", async () => {
+  const t = await open()
+  await t.send({ type: "draft", dirty: true })
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Not saved"))
+  requests.mockRejectedValue(new Error("Document network failure"))
+  await act(async () => { window.dispatchEvent(new Event("focus")) })
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("network failure"))
+  expect(screen.queryByRole("button", { name: "Retry editor" })).toBeNull()
+  expect(document.querySelector("iframe")).toBe(t.frame)
+})

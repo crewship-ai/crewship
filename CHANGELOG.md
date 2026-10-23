@@ -9,6 +9,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **An unavailable embedded editor offered no direct retry.** A failed startup now explains the availability problem and offers “Retry editor” after the existing connection deadline, creating a fresh isolated frame. Connected editors retain their current draft and pending changes.
+
+
 - **A confirmed application edit could remain stuck on “Saving…” during a live update.** The editor host now waits for an in-flight snapshot read and its queued fresh read before acknowledging the durable receipt, while retaining the same mutation for a failed-read retry.
 
 
