@@ -52,13 +52,31 @@ Modes come from caller-qualified host/session policy; Hello/Welcome does not yet
 implement a durability-selection field or replicated-durability qualification.
 
 This helper neither issues receipts nor applies document state. It does not yet
-validate document-update wrappers, owner/delivery grants or their session/nonces;
-those remain unsupported until their separate binding validators are connected.
+validate document-update wrappers or install grant state. Separate grant binding
+checks are described below; their transport/controller integration is still absent.
 `canonical_base64_decoded_len` checks standard alphabet, padding, unused pad bits
 and decoded size without allocating decoded data. Application decoding and
 delivery permission remain separate. Shared `boundary-semantics-fixtures.json`
 covers receipt tampering, trusted minimums and base64 boundaries; it is not live
 admission or persistence evidence.
+
+`grant::PendingGrant` checks delivery/owner renewals, initial owner acquisition and
+ticket-validation replies against immutable first-send request metadata. Exact
+session, scope, generation/fence, permission version, gate and nonce bindings are
+checked where already assigned. Initial acquisition and ticket validation accept
+host-assigned session/fence or participant/gate only from caller-attested host
+transport; selected versions and a known permission/generation floor remain bound.
+Expiry is exclusive first-send time plus granted duration, bounded by caller policy.
+Retries use the same stored bytes and private original timestamp, so a repeated
+full-duration host response cannot restart the deadline.
+
+The runtime must enforce fresh nonces and retain this same pending object across
+retries; constructing a new object for an old nonce would violate the contract.
+Native timestamps must come from CLOCK_BOOTTIME, with unavailable/regressing clocks
+failing closed. The pure helper does not authenticate a socket, register fresh gates,
+consume responses, revoke existing state or authorize content. The stateful controller
+must still check the delivery gate immediately before every send and close on clock
+failure. Debug output for bound grants omits owner fence tokens and participant data.
 
 `mooring_protocol::negotiate` initially accepts only an exact tuple of protocol,
 model and engine versions. Unsupported versions return `version_mismatch` before

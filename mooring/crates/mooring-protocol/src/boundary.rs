@@ -53,6 +53,11 @@ pub enum BoundaryError {
     Receipt,
     Encoding,
     Capacity,
+    StaleOwner,
+    PermissionRevoked,
+    VersionMismatch,
+    Expired,
+    Clock,
 }
 
 /// A checked reply from caller-attested host transport. This does not write a
