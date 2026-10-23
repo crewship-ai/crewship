@@ -4,6 +4,7 @@
 pub mod adapter;
 mod candidate;
 pub mod command;
+pub mod profile;
 pub mod read;
 
 use std::collections::HashSet;
@@ -246,7 +247,7 @@ impl Document {
 
     pub fn checkpoint(&self) -> Result<Vec<u8>, AdapterError> {
         let checkpoint = Checkpoint {
-            format: "wordcraft-0.10.0/yrs-0.28.0/v1".into(),
+            format: profile::CHECKPOINT_FORMAT.into(),
             native: self.native()?,
             block_ids: self.block_ids()?,
             update: self
@@ -270,7 +271,7 @@ impl Document {
         }
         let checkpoint: Checkpoint =
             serde_json::from_slice(bytes).map_err(|_| AdapterError::InvalidCheckpoint)?;
-        if checkpoint.format != "wordcraft-0.10.0/yrs-0.28.0/v1" {
+        if checkpoint.format != profile::CHECKPOINT_FORMAT {
             return Err(AdapterError::InvalidCheckpoint);
         }
         let read_only =
