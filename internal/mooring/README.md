@@ -196,3 +196,14 @@ Capacity failure rolls back the whole batch nonterminally, preserving drafts and
 prior durable history. Structural revisions use the same host operation revision;
 canonical decimal TEXT is ordered by length and BINARY text across the full u64
 range. Actual thousand-operation task/causal admission remains separate acceptance.
+
+The separate unused causal SQL qualifier builds compact original-read
+attestations from complete retained operation dependencies and target effects.
+It checks every intervening effect, positive zero-effect completeness markers,
+exact unsigned counters, target history continuity and original read bindings.
+Missing/corrupt history returns a nonterminal error rather than a guessed stale
+rejection. Local work budgets are 10,000 operations, 65,536 dependency edges, 100,000
+effects, 128 MiB encoded history and 1,000,000 traversal steps; exceeded budgets preserve
+pending work. The existing strict-current private profile remains unchanged.
+The 1k-task qualification test uses an explicit mock application/allow-all host
+fixture; it does not establish participant authorization or WordCraft transport.
