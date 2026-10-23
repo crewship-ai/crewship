@@ -8,8 +8,7 @@ import {
   categoryCounts,
 } from "@/lib/entities"
 import type { AgentPersona, PersonaCategory } from "@/lib/entities"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
-import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { getModelLabel } from "@/lib/cli-adapters"
@@ -35,7 +34,6 @@ interface TemplateBrowserProps {
  *  narrow viewports. */
 export function TemplateBrowser({ selected, onSelect }: TemplateBrowserProps) {
   // Upgrade lazy-loaded DiceBear styles from placeholder to real avatar.
-  useAvatarStylesVersion()
   const [source, setSource] = useState<PersonaSource>("builtin")
   const [search, setSearch] = useState("")
   const [category, setCategory] = useState<PersonaCategory | "all">("all")
@@ -203,10 +201,10 @@ function PersonaRow({
       )}
     >
       <span className="w-9 h-9 rounded-lg overflow-hidden border border-foreground/[0.08] bg-muted shrink-0">
-        <img
-          src={getAgentAvatarUrl(persona.suggestedSlug, persona.avatarStyle)}
-          alt=""
-          className="w-full h-full"
+        <AgentAvatar
+          seed={persona.suggestedSlug}
+          style={persona.avatarStyle}
+          className="w-full h-full rounded-none"
         />
       </span>
       <div className="min-w-0 flex-1">

@@ -38,7 +38,6 @@ import { ApiError, toApiError } from "@/lib/api-error"
 import { storeAgentAvatar } from "@/lib/agent-avatar-persist"
 import { AVATAR_STYLES, DEFAULT_AVATAR_STYLE } from "@/lib/agent-avatar"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
-import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
 import type { AgentPersona } from "@/lib/entities"
 import { AvatarPickerBody } from "@/components/features/crews/avatar-picker-dialog"
 import {
@@ -154,7 +153,6 @@ export function CreateAgentDialog({
   const crews = useMemo(() => agent?.crew && agent.crew_id && !listedCrews.some((crew) => crew.id === agent.crew_id)
     ? [...listedCrews, { ...agent.crew, id: agent.crew_id }] : listedCrews, [agent, listedCrews])
   // Upgrade lazy-loaded DiceBear styles from placeholder to real avatar.
-  useAvatarStylesVersion()
   const router = useRouter()
   const [section, setSection] = useState("identity")
   // A server refusal that names a field (#2862) is shown under that field

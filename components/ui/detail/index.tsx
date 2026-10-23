@@ -257,26 +257,6 @@ export function FieldLabel({ children, className, ...props }: FieldLabelProps) {
   )
 }
 
-export interface EmptyStateProps {
-  icon: React.ComponentType<{ className?: string }>
-  title: string
-  description?: string
-  action?: React.ReactNode
-}
-
-export function EmptyState({ icon: Icon, title, description, action }: EmptyStateProps) {
-  return (
-    <div className="flex flex-col items-center justify-center px-6 py-12 text-center">
-      <div className="icon-tile mb-3 flex h-12 w-12 items-center justify-center rounded-2xl">
-        <Icon className="h-6 w-6" />
-      </div>
-      <div className="text-body font-medium text-foreground">{title}</div>
-      {description && <p className="type-row mt-1.5 max-w-sm leading-relaxed text-muted-foreground">{description}</p>}
-      {action && <div className="mt-4">{action}</div>}
-    </div>
-  )
-}
-
 export interface StatItem {
   label: string
   value: React.ReactNode
