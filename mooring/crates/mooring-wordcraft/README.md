@@ -56,3 +56,20 @@ properties carried only by such a run. Those encodings therefore remain
 read-only, including zero-length runs in empty paragraphs. A canonical empty
 paragraph with no runs and explicit paragraph-mark properties is a separate
 qualification case; unit equality alone does not qualify application behavior.
+
+The application command grammar accepts only `text.insert`, `text.delete` and
+`text.format` for a stable paragraph ID. Anchors are paragraph start/end or an
+existing relative Yrs item ID with an explicit before/after association. The
+client and clock counters are canonical decimal strings, bounded before Yrs ID
+construction. Absolute offsets, identity/authority claims, unknown fields and
+raw human CRDT updates are refused. Insert properties are complete overrides;
+format properties are patches (`false` is explicit, `null` clears an override).
+
+Parsing grants no authority and does not qualify read observations. Private
+candidate mechanics resolve each relative anchor against the correct paragraph
+and reject Unicode scalar splits before editing an owned fork. They expose no
+public apply endpoint. The forthcoming host-context wrapper must validate reads
+and account for effects between operations, discard the full candidate after
+any failure, and leave durable revisions and outcomes to Go. Confirmed-read
+agent commands do not replace the separate human path: human proposals must
+preserve their authored CRDT updates and IDs rather than reexecute this grammar.
