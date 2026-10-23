@@ -40,6 +40,7 @@ func TestWorkbookHumanBinary(t *testing.T) {
 		`INSERT INTO workspaces(id,name,slug) VALUES('cworkbookworkspace000000001','Workbook','workbook')`,
 		`INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('workbook-member','cworkbookworkspace000000001','workbook-human','OWNER')`,
 		`INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,private_audience,spec_json) VALUES('workbook-binary-page','cworkbookworkspace000000001','binary-workbook','Workbook','workbook-human',1,'{}')`,
+		`INSERT INTO feature_flag_overrides(id,flag_id,workspace_id,enabled) VALUES('workbook-editor-on','ffl_gridcraft_editor','cworkbookworkspace000000001',1)`,
 	} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatal(err)
@@ -54,7 +55,7 @@ func TestWorkbookHumanBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(router.Shutdown)
-	router.RegisterGridCraft(appengine.Options{Enabled: true}, binaryWorkbookEngine{})
+	router.RegisterGridCraft(appengine.Options{Enabled: true, Editor: true}, binaryWorkbookEngine{})
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
 	binary := buildCrewshipBinary(t)
@@ -62,8 +63,7 @@ func TestWorkbookHumanBinary(t *testing.T) {
 	if err = os.WriteFile(cfg, []byte(fmt.Sprintf("server: %s\ntoken: %s\nworkspace: cworkbookworkspace000000001\nformat: json\n", server.URL, token)), 0600); err != nil {
 		t.Fatal(err)
 	}
-	runAs := func(config string, wantErr bool, input string, args ...string) []byte {
-		t.Helper()
+	command := func(config, input string, args ...string) *exec.Cmd {
 		cmd := exec.CommandContext(t.Context(), binary, args...)
 		cmd.Stdin = strings.NewReader(input)
 		for _, v := range os.Environ() {
@@ -72,7 +72,11 @@ func TestWorkbookHumanBinary(t *testing.T) {
 			}
 		}
 		cmd.Env = append(cmd.Env, "CREWSHIP_CONFIG="+config, "CREWSHIP_NO_SLUG_CACHE=1", "NO_COLOR=1")
-		out, err := cmd.CombinedOutput()
+		return cmd
+	}
+	runAs := func(config string, wantErr bool, input string, args ...string) []byte {
+		t.Helper()
+		out, err := command(config, input, args...).CombinedOutput()
 		if (err != nil) != wantErr {
 			t.Fatalf("CLI %v: err=%v want error=%v %s", args, err, wantErr, out)
 		}
@@ -121,32 +125,96 @@ func TestWorkbookHumanBinary(t *testing.T) {
 	run(`{"mandate_id":"binary-mandate","run_id":"workbook-run","base_rev":1,"generation":1,"targets":["Sheet1!B2"]}`, "workbook", "admit", "@workbook-binary-page", "--file", "-")
 	run("", "workbook", "revoke", "@workbook-binary-page", "binary-mandate")
 
-	// Human cell edits from two client sessions of the owner.
-	edit := `{"session_id":"w1","mutation_id":"w1:1","base_rev":1,"generation":1,"ops":[{"kind":"cell.set","sheet":"Sheet1","cell":"B5","input":"draft"}]}`
+	// Human cell edits from two editor sessions of the owner.
+	session := func() string {
+		t.Helper()
+		var opened struct {
+			SessionID string `json:"session_id"`
+			Rev       int64  `json:"rev"`
+			Protocol  int    `json:"protocol"`
+		}
+		out := run("", "workbook", "session", "open", "@workbook-binary-page")
+		if json.Unmarshal(out, &opened) != nil || opened.SessionID == "" || opened.Protocol != 1 {
+			t.Fatalf("session %s", out)
+		}
+		return opened.SessionID
+	}
+	w1, w2 := session(), session()
+	refusedAs := func(config string, wantExit int, input string, args ...string) string {
+		t.Helper()
+		var stdout, stderr strings.Builder
+		cmd := command(config, input, args...)
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		err := cmd.Run()
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != wantExit {
+			t.Fatalf("CLI %v exit=%v want %d: %s %s", args, err, wantExit, stdout.String(), stderr.String())
+		}
+		return stdout.String() + stderr.String()
+	}
+	refused := func(wantExit int, input string, args ...string) string {
+		t.Helper()
+		return refusedAs(cfg, wantExit, input, args...)
+	}
+	editPacket := func(session string, seq int, cell, input string) string {
+		return fmt.Sprintf(`{"session_id":%q,"mutation_id":"%s:%d","base_rev":1,"generation":1,"ops":[{"kind":"cell.set","sheet":"Sheet1","cell":%q,"input":%q}]}`, session, session, seq, cell, input)
+	}
+	if out := refused(3, editPacket("ws_neveropened", 1, "B5", "x"), "workbook", "edit", "@workbook-binary-page", "--file", "-"); !strings.Contains(out, "not found") {
+		t.Fatalf("unopened session: %s", out)
+	}
+	edit := editPacket(w1, 1, "B5", "draft")
 	edited := run(edit, "workbook", "edit", "@workbook-binary-page", "--file", "-")
 	if retried := run(edit, "workbook", "edit", "@workbook-binary-page", "--file", "-"); string(retried) != string(edited) {
 		t.Fatalf("edit receipt changed: %s %s", edited, retried)
 	}
-	if json.Unmarshal(edited, &receipt) != nil || receipt.Rev != 2 || receipt.OperationKey.MutationID != "w1:1" {
+	if json.Unmarshal(edited, &receipt) != nil || receipt.Rev != 2 || receipt.OperationKey.MutationID != w1+":1" {
 		t.Fatalf("edit receipt %s", edited)
 	}
-	cmd := exec.CommandContext(t.Context(), binary, "workbook", "edit", "@workbook-binary-page", "--file", "-")
-	cmd.Stdin = strings.NewReader(`{"session_id":"w2","mutation_id":"w2:1","base_rev":1,"generation":1,"ops":[{"kind":"cell.set","sheet":"Sheet1","cell":"B5","input":"mine"}]}`)
-	for _, v := range os.Environ() {
-		if !strings.HasPrefix(v, "CREWSHIP_") {
-			cmd.Env = append(cmd.Env, v)
-		}
+	if out := refused(5, editPacket(w2, 1, "B5", "mine"), "workbook", "edit", "@workbook-binary-page", "--file", "-"); !strings.Contains(out, `"conflicts"`) || !strings.Contains(out, `"draft"`) {
+		t.Fatalf("conflict out=%s", out)
 	}
-	cmd.Env = append(cmd.Env, "CREWSHIP_CONFIG="+cfg, "CREWSHIP_NO_SLUG_CACHE=1", "NO_COLOR=1")
-	var stdout strings.Builder
-	cmd.Stdout = &stdout
-	err = cmd.Run()
-	var exit *exec.ExitError
-	if !errors.As(err, &exit) || exit.ExitCode() != 5 || !strings.Contains(stdout.String(), `"conflicts"`) || !strings.Contains(stdout.String(), `"draft"`) {
-		t.Fatalf("conflict exit=%v out=%s", err, stdout.String())
+	run(editPacket(w2, 2, "C5", "other"), "workbook", "edit", "@workbook-binary-page", "--file", "-")
+	run("", "workbook", "status", "@workbook-binary-page", w2+":2")
+
+	// The commits feed, own revisions with their session, and paging.
+	var feed struct {
+		HeadRev int64 `json:"head_rev"`
+		Commits []struct {
+			Rev       int64  `json:"rev"`
+			Kind      string `json:"kind"`
+			Own       bool   `json:"own"`
+			SessionID string `json:"session_id"`
+			Ops       []struct {
+				Cell, Input string
+			} `json:"ops"`
+		} `json:"commits"`
 	}
-	run(`{"session_id":"w2","mutation_id":"w2:2","base_rev":1,"generation":1,"ops":[{"kind":"cell.set","sheet":"Sheet1","cell":"C5","input":"other"}]}`, "workbook", "edit", "@workbook-binary-page", "--file", "-")
-	run("", "workbook", "status", "@workbook-binary-page", "w2:2")
+	out := run("", "workbook", "commits", "@workbook-binary-page", "--since", "1")
+	if json.Unmarshal(out, &feed) != nil || feed.HeadRev != 3 || len(feed.Commits) != 2 || !feed.Commits[0].Own || feed.Commits[0].SessionID != w1 || feed.Commits[1].SessionID != w2 || feed.Commits[1].Ops[0].Input != "other" {
+		t.Fatalf("feed %s", out)
+	}
+	out = run("", "workbook", "commits", "@workbook-binary-page", "--since", "0", "--limit", "1")
+	if json.Unmarshal(out, &feed) != nil || len(feed.Commits) != 1 || feed.Commits[0].Kind != "snapshot" {
+		t.Fatalf("paged feed %s", out)
+	}
+	if out := refused(5, "", "workbook", "commits", "@workbook-binary-page", "--since", "9"); !strings.Contains(out, `"snapshot_required"`) || !strings.Contains(out, `"min_since"`) {
+		t.Fatalf("history gone: %s", out)
+	}
+	refused(2, "", "workbook", "commits", "@workbook-binary-page", "--since", "0", "--limit", "500")
+
+	// Heartbeat, close and expiry of a session.
+	run("", "workbook", "session", "open", "@workbook-binary-page", "--renew", w2)
+	run("", "workbook", "session", "close", "@workbook-binary-page", w1)
+	run("", "workbook", "session", "close", "@workbook-binary-page", w1)
+	if out := refused(5, editPacket(w1, 2, "D5", "late"), "workbook", "edit", "@workbook-binary-page", "--file", "-"); !strings.Contains(out, `"editor_session_expired"`) {
+		t.Fatalf("closed session: %s", out)
+	}
+	if _, err = db.Exec(`UPDATE feature_flag_overrides SET enabled=0 WHERE id='workbook-editor-on'`); err != nil {
+		t.Fatal(err)
+	}
+	if out := refused(7, "", "workbook", "session", "open", "@workbook-binary-page"); !strings.Contains(out, "gridcraft_editor_disabled") {
+		t.Fatalf("flag off: %s", out)
+	}
 
 	// A second human editor: explicit publication, then the ordinary page revoke.
 	const peerToken = "crewship_cli_workbook_synthetic_peer"
@@ -178,7 +246,29 @@ func TestWorkbookHumanBinary(t *testing.T) {
 		t.Fatalf("share %s", shared)
 	}
 	runAs(peerCfg, false, "", "workbook", "read", "@workbook-binary-page")
-	runAs(peerCfg, false, `{"mutation_id":"peer-import","mandate_id":"human-import","base_rev":3,"generation":1,"command":{"kind":"import","snapshot":{"sheets":[{}]}}}`, "workbook", "import", "@workbook-binary-page", "--file", "-")
+	// The named editor also edits live: the editor is switched on again, the
+	// editor opens its own session and edits, and its commits feed starts at
+	// the published revision (3), never in the private history before it.
+	if _, err = db.Exec(`UPDATE feature_flag_overrides SET enabled=1 WHERE id='workbook-editor-on'`); err != nil {
+		t.Fatal(err)
+	}
+	var peerSession struct {
+		SessionID string `json:"session_id"`
+	}
+	if out := runAs(peerCfg, false, "", "workbook", "session", "open", "@workbook-binary-page"); json.Unmarshal(out, &peerSession) != nil || peerSession.SessionID == "" {
+		t.Fatalf("editor session %s", out)
+	}
+	peerEdited := runAs(peerCfg, false, editPacket(peerSession.SessionID, 1, "E5", "peer"), "workbook", "edit", "@workbook-binary-page", "--file", "-")
+	if json.Unmarshal(peerEdited, &receipt) != nil || receipt.Rev != 4 {
+		t.Fatalf("editor edit %s", peerEdited)
+	}
+	if out := refusedAs(peerCfg, 5, "", "workbook", "commits", "@workbook-binary-page", "--since", "0"); !strings.Contains(out, `"snapshot_required"`) || !strings.Contains(out, `"min_since": 3`) {
+		t.Fatalf("editor read private history: %s", out)
+	}
+	if out := runAs(peerCfg, false, "", "workbook", "commits", "@workbook-binary-page", "--since", "3"); json.Unmarshal(out, &feed) != nil || feed.HeadRev != 4 || len(feed.Commits) != 1 || !feed.Commits[0].Own || feed.Commits[0].Ops[0].Input != "peer" {
+		t.Fatalf("editor feed %s", out)
+	}
+	runAs(peerCfg, false, `{"mutation_id":"peer-import","mandate_id":"human-import","base_rev":4,"generation":1,"command":{"kind":"import","snapshot":{"sheets":[{}]}}}`, "workbook", "import", "@workbook-binary-page", "--file", "-")
 	run("", "page", "revoke", "@workbook-binary-page", "--user", "workbook-peer@example.test")
 	runAs(peerCfg, true, "", "workbook", "read", "@workbook-binary-page")
 }

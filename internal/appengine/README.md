@@ -103,7 +103,17 @@ commands are pruned. Pruned rows keep writer, receipt and result hash and are
 marked as snapshot revisions, like rows recorded before command history, so no
 mutation is rebased across them.
 Receipts require FULL synchronous storage and report `durability: node`.
-Delivery remains `pending`: no live broadcast/presence transport is installed.
+`Store.Commits` serves the confirmed revisions after a revision (the commits
+feed) under the caller's authorization; a range reaching pruned or pre-history
+revisions, or below the principal's `HistoryFloor` (an agent mandate's base
+revision), fails with `HistoryGoneError` (`snapshot_required`, with `MinSince`).
+`Store.ClaimCommitted` claims undelivered outbox rows once, marking them `sent`
+(it checks for pending rows with a plain read before taking the writer lock);
+the host then pushes revision numbers (never content) on the Page channel.
+Delivery is at most once: a push lost after the claim is not repeated, and
+clients recover from the commits feed. Rows still `pending` when the host
+stopped are claimed by its sweeper after the next start. Presence is not
+implemented.
 No receipt detail or replay fence is deleted by this module. A fresh candidate
 always starts from the host's confirmed snapshot; no engine promotion is needed.
 

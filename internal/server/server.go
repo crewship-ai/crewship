@@ -1071,7 +1071,7 @@ func (s *Server) mountAPIRouter(
 		if cfg.GridCraft.Enabled {
 			runner, err := appengine.NewWorkerClient(cfg.GridCraft.ServiceSocket, cfg.GridCraft.ServiceTokenFile)
 			if err == nil {
-				apiRouter.RegisterGridCraft(appengine.Options{Enabled: true, MaxWorkers: cfg.GridCraft.MaxWorkers, MaxWorkspaceWorkers: cfg.GridCraft.MaxWorkspaceWorkers}, appengine.GridCraft{Runner: runner})
+				apiRouter.RegisterGridCraft(appengine.Options{Enabled: true, Editor: cfg.GridCraft.EditorEnabled, MaxWorkers: cfg.GridCraft.MaxWorkers, MaxWorkspaceWorkers: cfg.GridCraft.MaxWorkspaceWorkers}, appengine.GridCraft{Runner: runner})
 			}
 		}
 		// Provider-login refresh (docs/prd/provider-logins.md §5.3) rides the

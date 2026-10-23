@@ -194,7 +194,13 @@ func (a *DBChannelAuthorizer) isMemberOfMissionWorkspace(ctx context.Context, us
 
 func (a *DBChannelAuthorizer) isMemberOfPageWorkspace(ctx context.Context, userID, pageID string) (bool, error) {
 	var exists int
-	err := a.db.QueryRowContext(ctx, `SELECT 1 FROM pages p JOIN workspace_members wm ON wm.workspace_id=p.workspace_id AND wm.user_id=? WHERE p.id=? AND (p.private_audience=0 OR p.owner_user_id=? OR wm.role='OWNER')`+trustedChannelMember, userID, pageID, userID, userID).Scan(&exists)
+	// A published workbook keeps its content audience on the channel: the
+	// owner, the workspace OWNER and the editors the owner named (a user write
+	// grant issued by the owner), never every member of the workspace.
+	err := a.db.QueryRowContext(ctx, `SELECT 1 FROM pages p JOIN workspace_members wm ON wm.workspace_id=p.workspace_id AND wm.user_id=? WHERE p.id=? AND (
+ (p.private_audience=0 AND NOT EXISTS(SELECT 1 FROM gridcraft_heads h WHERE h.page_id=p.id))
+ OR p.owner_user_id=? OR wm.role='OWNER'
+ OR (p.private_audience=0 AND EXISTS(SELECT 1 FROM page_grants g WHERE g.page_id=p.id AND g.subject_type='user' AND g.subject_id=wm.user_id AND g.level='write' AND g.granted_by_user_id=p.owner_user_id)))`+trustedChannelMember, userID, pageID, userID, userID).Scan(&exists)
 	return existsRow(err)
 }
 

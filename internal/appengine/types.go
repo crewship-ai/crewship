@@ -55,6 +55,10 @@ type Key struct {
 type Principal struct {
 	AuthorityID, MandateID string
 	Targets                []string
+	// HistoryFloor is the oldest revision whose successors the principal may
+	// read through the commits feed: an agent mandate's base revision. Zero
+	// leaves the feed bounded by retained history only.
+	HistoryFloor int64
 }
 type Authorize func(context.Context, *sql.Tx) (Principal, error)
 
@@ -126,6 +130,11 @@ type Options struct {
 	MaxWorkers, MaxWorkspaceWorkers, MaxRevisions int
 	MaxHistoryBytes                               int64
 	LeaseDuration                                 time.Duration
+
+	// Editor is the operator switch of the live editing surface (editor
+	// sessions, human cell edits and the commits feed). The store ignores it;
+	// the host additionally requires the workspace flag gridcraft_editor.
+	Editor bool
 }
 
 func hash(data []byte) string { s := sha256.Sum256(data); return "sha256:" + hex.EncodeToString(s[:]) }
@@ -192,6 +201,9 @@ type Edit struct {
 // the ":" that separates it from the sequence in a mutation ID, nor "#",
 // whitespace or control characters that would blur the recorded writer.
 var sessionPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+
+// ValidSessionID reports whether s is a well-formed client session ID.
+func ValidSessionID(s string) bool { return sessionPattern.MatchString(s) }
 
 // Request maps an edit onto one atomic cells.set mutation.
 func (e Edit) Request() (Request, error) {

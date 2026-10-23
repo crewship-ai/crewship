@@ -18,9 +18,11 @@ type GridCraftConfig struct {
 	MaxWorkers          int    `yaml:"max_workers"`
 	MaxWorkspaceWorkers int    `yaml:"max_workspace_workers"`
 
-	// The embedded workbook editor runs foreign code in a sandboxed frame
-	// (internal/editororigin). All of it is off unless EditorEnabled and
-	// Enabled are both set. Without EditorOrigin the editor is served under a
+	// EditorEnabled is the operator switch of live workbook editing (editor
+	// sessions, cell edits, the commits feed) and of the embedded editor; the
+	// workspace flag gridcraft_editor must be on as well. The editor runs
+	// foreign code in a sandboxed frame (internal/editororigin). All of it is
+	// off unless EditorEnabled and Enabled are both set. Without EditorOrigin the editor is served under a
 	// path prefix of the Studio origin (zero-config default); EditorOrigin
 	// moves it to a dedicated host (optional hardening), and alone only
 	// isolates that host.
@@ -33,6 +35,9 @@ type GridCraftConfig struct {
 
 func (c GridCraftConfig) validate() error {
 	if !c.Enabled {
+		if c.EditorEnabled {
+			return errors.New("gridcraft editor requires the gridcraft workbook API to be enabled")
+		}
 		return nil
 	}
 	if _, err := appengine.NewWorkerClient(c.ServiceSocket, c.ServiceTokenFile); err != nil {

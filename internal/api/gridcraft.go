@@ -24,6 +24,16 @@ type gridcraftHTTP struct {
 	store      *appengine.Store
 	engine     appengine.Engine
 	operations artifacts.GridCraftOperations
+	// editor is the operator switch of the live editing surface.
+	editor bool
+	// broadcast pushes workbook.committed on a Page channel; nil disables it.
+	broadcast func(prefix, id, eventType string, payload any)
+	// editorBundle reports the qualified editor bundle digest and frame URL
+	// for new sessions; nil until an editor origin is configured.
+	editorBundle func() (digest, url string)
+	// outbox is the router's push sweeper; once started it sends pushes off
+	// the response path.
+	outbox *gridcraftOutboxWorker
 }
 
 // RegisterGridCraft installs only the explicit experimental offline surface.
@@ -38,7 +48,10 @@ func (r *Router) RegisterGridCraft(options appengine.Options, engine appengine.E
 	if !ok {
 		return
 	}
-	h := &gridcraftHTTP{pages: r.pages, store: store, engine: engine, operations: operations}
+	h := &gridcraftHTTP{pages: r.pages, store: store, engine: engine, operations: operations, editor: options.Editor}
+	if r.hub != nil {
+		h.broadcast = r.hub.BroadcastChannel
+	}
 	authed, wsCtx := r.authMw.RequireAuth, r.authMw.RequireWorkspace
 	internalAuth := func(next http.Handler) http.Handler {
 		return r.internalHandler.requireInternal(withHostChatOrigin(next))
@@ -51,6 +64,12 @@ func (r *Router) RegisterGridCraft(options appengine.Options, engine appengine.E
 	r.authedMut("POST", "/api/v1/pages/{slug}/workbook/operations", roleInline, h.importFile)
 	// openapi: responses 200,400,401,403,404,409,429,500,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/workbook/edits", roleInline, h.edit)
+	// openapi: responses 200,201,400,401,403,404,409,429,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/workbook/sessions", roleInline, h.openSession)
+	// openapi: responses 200,400,401,403,404,500,503
+	r.authedMut("DELETE", "/api/v1/pages/{slug}/workbook/sessions/{session}", roleInline, h.closeSession)
+	// openapi: responses 200,400,401,403,404,410,429,500,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/workbook/commits", authed(wsCtx(http.HandlerFunc(h.commits))))
 	// openapi: responses 200,400,401,403,404,409,429,500,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/workbook/operations/{mutation}", authed(wsCtx(http.HandlerFunc(h.status))))
 	// openapi: responses 200,400,401,403,404,409,429,500,503
@@ -63,6 +82,8 @@ func (r *Router) RegisterGridCraft(options appengine.Options, engine appengine.E
 	// independently verified by artifactAgentRequest and checked again in SQL.
 	// openapi: responses 200,400,403,404,409,429,500,503
 	r.mux.Handle("POST /api/v1/internal/gridcraft", internalAuth(http.HandlerFunc(h.agent)))
+	r.gridcraftOutbox = &gridcraftOutboxWorker{h: h}
+	h.outbox = r.gridcraftOutbox
 }
 func gridcraftError(w http.ResponseWriter, err error) {
 	if errors.Is(err, appengine.ErrUnauthenticated) {
@@ -121,8 +142,32 @@ func (h *gridcraftHTTP) humanAuthority(r *http.Request, k appengine.Key, write b
 		if capture != nil {
 			capture(rec, access)
 		}
-		return appengine.Principal{AuthorityID: "user:" + user.ID, MandateID: "human-import", Targets: []string{"*"}}, nil
+		principal := appengine.Principal{AuthorityID: "user:" + user.ID, MandateID: "human-import", Targets: []string{"*"}}
+		if access == workbookEditor {
+			// Publication shares the current head, not the private history
+			// before it: a named editor's commits feed starts there.
+			if principal.HistoryFloor, err = workbookPublicationFloor(ctx, tx, k); err != nil {
+				return appengine.Principal{}, err
+			}
+		}
+		return principal, nil
 	}
+}
+
+// workbookPublicationFloor is the head revision at which the owner published
+// the workbook (recorded with artifact.private_output_published). Without that
+// record the floor is the current head, so no earlier revision is served.
+func workbookPublicationFloor(ctx context.Context, tx *sql.Tx, k appengine.Key) (int64, error) {
+	var floor sql.NullInt64
+	err := tx.QueryRowContext(ctx, `SELECT json_extract(metadata,'$.head_rev') FROM audit_logs WHERE workspace_id=? AND entity_type='page' AND entity_id=? AND action='artifact.private_output_published' ORDER BY created_at DESC LIMIT 1`, k.WorkspaceID, k.PageID).Scan(&floor)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return 0, err
+	}
+	if floor.Valid {
+		return floor.Int64, nil
+	}
+	err = tx.QueryRowContext(ctx, `SELECT coalesce(max(head_rev),0) FROM gridcraft_heads WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&floor)
+	return floor.Int64, err
 }
 
 // auditRead keeps the workspace OWNER read audit for a private workbook and
@@ -370,9 +415,10 @@ func (h *gridcraftHTTP) importFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, result)
+	h.published(k.PageID)
 }
 
-// edit commits one atomic human cell edit from a client session. The Page
+// edit commits one atomic human cell edit from a live editor session. The Page
 // owner and, on a published workbook, the editors the owner named may edit
 // (workbookHumanAccess); the writer for cell-level concurrency is user and
 // session.
@@ -381,6 +427,10 @@ func (h *gridcraftHTTP) edit(w http.ResponseWriter, r *http.Request) {
 	k, err := h.humanKey(r, true)
 	if err != nil {
 		gridcraftError(w, err)
+		return
+	}
+	if !h.editorOn(r.Context(), h.pages.db, k.WorkspaceID) {
+		editorError(w, errGridCraftEditorDisabled)
 		return
 	}
 	var body appengine.Edit
@@ -393,26 +443,22 @@ func (h *gridcraftHTTP) edit(w http.ResponseWriter, r *http.Request) {
 		gridcraftError(w, err)
 		return
 	}
-	human := h.humanAuthority(r, k, true, nil)
-	authority := func(ctx context.Context, tx *sql.Tx) (appengine.Principal, error) {
-		p, err := human(ctx, tx)
-		if err != nil {
-			return appengine.Principal{}, err
-		}
-		p.MandateID = appengine.HumanEditMandate
-		return p, nil
-	}
-	result, err := h.operations.Apply(r.Context(), k, req, authority)
+	var seen liveEditorSession
+	result, err := h.operations.Apply(r.Context(), k, req, h.sessionAuthority(r, k, req.SessionID, &seen))
 	var precondition *appengine.PreconditionError
 	if errors.As(err, &precondition) {
 		h.writePrecondition(w, r, precondition)
 		return
 	}
 	if err != nil {
-		gridcraftError(w, err)
+		if !editorError(w, err) {
+			gridcraftError(w, err)
+		}
 		return
 	}
+	h.renewOnUse(r, req.SessionID, seen)
 	writeJSON(w, 200, result)
+	h.published(k.PageID)
 }
 
 type gridcraftConflict struct {
@@ -647,6 +693,9 @@ type gridcraftAgentRequest struct {
 	MandateID  string             `json:"mandate_id"`
 	MutationID string             `json:"mutation_id,omitempty"`
 	Request    *appengine.Request `json:"request,omitempty"`
+	// Since and Limit page the commits action.
+	Since *int64 `json:"since,omitempty"`
+	Limit int    `json:"limit,omitempty"`
 }
 
 func (h *gridcraftHTTP) agent(w http.ResponseWriter, r *http.Request) {
@@ -703,7 +752,13 @@ func (h *gridcraftHTTP) agent(w http.ResponseWriter, r *http.Request) {
 		if json.Unmarshal([]byte(targets), &bounds) != nil {
 			return appengine.Principal{}, appengine.ErrForbidden
 		}
-		return appengine.Principal{AuthorityID: "agent:" + a.AgentID + ":run:" + a.RunID + ":mandate:" + body.MandateID, MandateID: body.MandateID, Targets: bounds}, nil
+		// The mandate's base revision is also the agent's history floor: the
+		// commits feed never shows it what changed before the mandate.
+		return appengine.Principal{AuthorityID: "agent:" + a.AgentID + ":run:" + a.RunID + ":mandate:" + body.MandateID, MandateID: body.MandateID, Targets: bounds, HistoryFloor: base}, nil
+	}
+	if body.Action != "commits" && (body.Since != nil || body.Limit != 0) {
+		gridcraftError(w, appengine.ErrInvalid)
+		return
 	}
 	switch body.Action {
 	case "read":
@@ -729,6 +784,33 @@ func (h *gridcraftHTTP) agent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, 200, result)
+		h.published(k.PageID)
+	case "commits":
+		// The agent reads the same feed under its mandate's current authority;
+		// its own revisions are those of this mandate.
+		if body.Request != nil || body.MutationID != "" || body.Since == nil {
+			gridcraftError(w, appengine.ErrInvalid)
+			return
+		}
+		limit := body.Limit
+		if limit == 0 {
+			limit = appengine.DefaultFeedLimit
+		}
+		if !h.editorOn(r.Context(), h.pages.db, a.WorkspaceID) {
+			editorError(w, errGridCraftEditorDisabled)
+			return
+		}
+		feed, err := h.store.Commits(r.Context(), k, *body.Since, limit, authority)
+		var gone *appengine.HistoryGoneError
+		if errors.As(err, &gone) {
+			writeHistoryGone(w, gone)
+			return
+		}
+		if err != nil {
+			gridcraftError(w, err)
+			return
+		}
+		writeJSON(w, 200, h.renderFeed(r.Context(), feed))
 	case "status":
 		if body.Request != nil || body.MutationID == "" {
 			gridcraftError(w, appengine.ErrInvalid)

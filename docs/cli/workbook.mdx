@@ -6,10 +6,9 @@ tag: Experimental
 
 The experimental `workbook` commands are disabled on the server by default.
 They support personal, human-owned private Pages and native GridCraft JSON.
-The Page owner can edit cells from several client sessions through
-`workbook edit`, and can explicitly share a workbook with named editors (see
-below). There is no embedded spreadsheet editor or live collaborative editing
-in this pilot.
+The Page owner, and on a published workbook each named editor, can edit cells
+from several editor sessions through `workbook session open` and
+`workbook edit`, and follow every confirmed revision with `workbook commits`.
 
 Opening a workbook Page in the web app shows a read-only preview of its sheets
 (values, with formulas as tooltips) and its revision; Refresh, or returning to
@@ -59,7 +58,10 @@ many edits were not saved.
 ```bash
 crewship workbook create my-book --name "My book"
 crewship workbook import @PAGE_ID --file import.json
+crewship workbook session open @PAGE_ID
 crewship workbook edit @PAGE_ID --file edit.json
+crewship workbook commits @PAGE_ID --since 41
+crewship workbook session close @PAGE_ID SESSION_ID
 crewship workbook read @PAGE_ID
 crewship workbook status @PAGE_ID import-1
 crewship workbook admit @PAGE_ID --file mandate.json
@@ -162,7 +164,9 @@ again.
   or departed editor loses access, and so does every editor when the owner does.
 - **History is not shared.** Editors read the full current workbook, including
   every sheet and the revision number (so how many revisions it has had), but
-  not earlier revisions or other people's operation status. The Page's spec
+  not earlier revisions or other people's operation status. Their commits feed
+  (`workbook commits`) starts at the revision the workbook was published at: a
+  `since` below it answers `410` with `min_since` set to that revision. The Page's spec
   versions (name and description history) stay readable only to the owner.
 - **Only the owner deletes, renames, rolls back or moves the Page** into or out
   of a folder, before and after publication. Workbooks have no backup or
@@ -234,10 +238,13 @@ An agent retains this exact packet for apply and uncertain retries:
 
 For `read`, retain `action`, `artifact_id` and `mandate_id`; omit `request`.
 For `status`, use those fields with `action: "status"` and
-`mutation_id: "cell-edit-1"`. Agent commands use the fixed protected sidecar and
-original `CREWSHIP_AGENT_TOKEN`; human profiles, origin overrides and redirects
-are refused. MCP exposes `workbook_read`, `workbook_apply` and `workbook_status`
-only when the server configured the sidecar's workbook switch.
+`mutation_id: "cell-edit-1"`. For the commits feed, use `action: "commits"` with
+`since` (and optionally `limit`, 1 to 200); it needs live editing to be enabled
+(see below), and `own` marks the revisions of this mandate. Agent commands use
+the fixed protected sidecar and original `CREWSHIP_AGENT_TOKEN`; human profiles,
+origin overrides and redirects are refused. MCP exposes `workbook_read`,
+`workbook_apply`, `workbook_status` and `workbook_commits` only when the server
+configured the sidecar's workbook switch.
 
 API equivalents:
 
@@ -247,31 +254,95 @@ API equivalents:
 | GET | `/api/v1/pages/{slug}/workbook` | `workbook read` |
 | POST | `/api/v1/pages/{slug}/workbook/operations` | `workbook import` |
 | POST | `/api/v1/pages/{slug}/workbook/edits` | `workbook edit` |
+| POST | `/api/v1/pages/{slug}/workbook/sessions` | `workbook session open` |
+| DELETE | `/api/v1/pages/{slug}/workbook/sessions/{session}` | `workbook session close` |
+| GET | `/api/v1/pages/{slug}/workbook/commits` | `workbook commits` |
 | GET | `/api/v1/pages/{slug}/workbook/operations/{mutation}` | `workbook status` |
 | POST | `/api/v1/pages/{slug}/workbook/mandates` | `workbook admit` |
 | DELETE | `/api/v1/pages/{slug}/workbook/mandates/{mandate}` | `workbook revoke` |
 | POST | `/api/v1/pages/{slug}/workbook/editors` | `workbook share` |
 | POST | Protected sidecar workbook transport (crew transport and signed run) | `workbook agent` |
 
-Status codes: `200` confirms the response; `400` rejects an invalid request;
-`401` requires a current human credential; `403` rejects effects outside a
-mandate; `404` hides missing or inaccessible workbooks; `409` reports a conflict,
-stale candidate or operation in progress; `429` reports capacity/history limits;
-`500` reports storage failure; `503` reports an unavailable experimental runtime.
+Status codes: `200` confirms the response (`201` for a new editor session);
+`400` rejects an invalid request; `401` requires a current human credential;
+`403` rejects effects outside a mandate; `404` hides missing or inaccessible
+workbooks and sessions; `409` reports a conflict, stale candidate, operation in
+progress, or `editor_session_expired`; `410` reports a commits range outside the
+retained history; `429` reports capacity/history limits, or
+`too_many_editor_sessions` with `Retry-After`; `500` reports storage failure;
+`503` reports an unavailable experimental runtime, or
+`gridcraft_editor_disabled`. A `401` always concerns the sign-in or token
+itself, never an editor session.
 Every endpoint requires current authorization and returns `Cache-Control: no-store`.
 
-The Page owner, and on a published workbook each named editor, edits cells with
-an atomic edit from one client session:
+### Live editing
+
+Editor sessions, cell edits and the commits feed are off unless the operator
+sets `CREWSHIP_GRIDCRAFT_EDITOR_ENABLED` and the workspace flag
+`gridcraft_editor` is on (it is off by default; an administrator turns it on per
+workspace through the feature flags). With either one off these endpoints answer
+`503 {"error":"gridcraft_editor_disabled"}`, also for sessions that are already
+open; access is still checked first. Imports, reads, status and agent
+`apply` stay available.
+
+Each editor window first opens a session. The Page owner can, and on a
+published workbook so can each named editor (see "Sharing with a second
+editor"), always with a human credential (never an agent run token):
+
+```bash
+crewship workbook session open @PAGE_ID
+```
 
 ```json
-{"session_id":"s1","mutation_id":"s1:17","base_rev":41,"generation":1,"ops":[{"kind":"cell.set","sheet":"Sheet1","cell":"B5","input":"draft"}]}
+{"session_id":"ws_3q2-7wJmQk6xE0t9a1bZlA","page_id":"PAGE_ID","actor_label":"Ada","rev":41,"generation":1,"protocol":1,"expires_at":"2026-10-22T18:00:00Z","bundle_digest":""}
 ```
+
+The session ID is 128 random bits. It is bound to its user, the credential that
+opened it (the sign-in session in the web app, the token for the CLI), the Page
+and the workbook generation. In the web app the session follows the sign-in,
+not the short-lived access token: an access token refreshed from the same
+sign-in keeps using it.
+
+A session expires 15 minutes after it was last used or renewed. A confirmed
+edit renews it (at most once every 5 minutes), and so does a heartbeat:
+`--renew SESSION_ID` (a body `{"session_id":"…"}`) renews a live session of
+yours with the same ID and returns its new `expires_at`. A host should send a
+heartbeat every 5 minutes while its editor is open, and close the session when
+the editor goes away. A session never lives longer than 12 hours from opening,
+nor beyond the sign-in session or token that opened it; `expires_at` already
+reflects all of these limits.
+An optional `"protocol":1` names the editor bridge protocol; any other value is
+refused. `bundle_digest` and `editor_url` name the editor bundle a host may
+frame; while no editor origin is configured the digest is empty, no URL is sent,
+and a host must not frame anything (it should close the session it opened).
+One user may hold 32 live sessions per Page; a 33rd is
+`429 {"error":"too_many_editor_sessions"}` with `Retry-After` set to the seconds
+until the first one expires. Sessions that are never closed stop counting once
+they expire. `workbook session close` ends a session; closing it again
+succeeds.
+
+The Page owner or a named editor then edits cells with an atomic edit from one
+live session:
+
+```json
+{"session_id":"ws_3q2-7wJmQk6xE0t9a1bZlA","mutation_id":"ws_3q2-7wJmQk6xE0t9a1bZlA:17","base_rev":41,"generation":1,"ops":[{"kind":"cell.set","sheet":"Sheet1","cell":"B5","input":"draft"}]}
+```
+
+A session that was never opened, belongs to someone else or to another Page is
+`404`. An expired or closed session, one opened for an older generation, or
+your own session opened with another credential (another sign-in or token) is
+`409 {"error":"editor_session_expired"}`, for edits and heartbeats alike: open
+a new session, check the outcome of unanswered edits with `workbook status`,
+and send those without a receipt again under the new session with new mutation
+IDs. It is deliberately not a `401`, which clients treat as an expired
+sign-in.
 
 An edit holds 1 to 64 `cell.set` operations on one sheet (the active sheet), each
 with an input of at most 8 KiB; it is committed entirely or not at all, and its
 recorded form may not exceed 1 MiB of JSON. The `mutation_id` is
 `<session_id>:<seq>` and must be retried with the same bytes; `session_id` is
-1 to 128 characters from `A-Z`, `a-z`, `0-9`, `_` and `-`, and is part of the
+1 to 128 characters from `A-Z`, `a-z`, `0-9`, `_` and `-`, names a live session
+(checked in the same transaction that commits the edit), and is part of the
 request fingerprint. An import never carries a `session_id`.
 
 Concurrency is per written cell: an edit whose `base_rev` is behind the current
@@ -343,9 +414,55 @@ are dropped; edits based on older revisions then get `snapshot_required`.
 Audit rows and receipts are kept. `429 history_quota_exceeded` remains only for
 a single revision whose snapshot and command alone exceed the quota.
 
+### Commits feed and live push
+
+`workbook commits` lists the confirmed revisions after `--since`, ascending, at
+most `--limit` (1 to 200, default 100) per call:
+
+```json
+{"head_rev":44,"generation":1,"min_since":0,"commits":[
+ {"rev":42,"kind":"cells","actor_label":"Agent Ada","own":false,"ops":[{"sheet":"Sheet1","cell":"B2","input":"99"}]},
+ {"rev":43,"kind":"cells","actor_label":"Pavel","own":true,"session_id":"ws_…","mutation_id":"ws_…:17","ops":[{"sheet":"Sheet1","cell":"B5","input":"draft"}]},
+ {"rev":44,"kind":"snapshot","actor_label":"Pavel","own":true,"mutation_id":"import-2"}]}
+```
+
+It needs the same access as `workbook read`; a workspace OWNER reading another
+member's workbook is audited. A named editor reads it only from the revision
+the workbook was published at. An agent (`workbook_commits`) reads the feed only
+from its mandate's base revision on: a `since` below it answers `410` with
+`min_since` set to that base revision, so history from before the mandate,
+such as an input that was overwritten, is never shown to it. After the base
+revision the agent sees every changed cell, just as `workbook_read` shows it
+the whole current workbook; a mandate limits what an agent may write, not
+what it may read. `own` marks your revisions, and only those carry
+`session_id` and `mutation_id`; other writers appear by display name only.
+`kind: "snapshot"` is an import: reread the workbook. Continue from the last
+`rev` until it equals `head_rev`. When history was pruned (see above) the feed
+can no longer replay revisions up to `min_since`: a `--since` below it, or above
+the head, answers `410 {"error":"snapshot_required","head_rev":…,"generation":…,"min_since":…}`
+(the CLI prints it and exits with status 5); reread the workbook and continue
+from its revision.
+
+While the live editor is on for the workspace, every confirmed revision is
+also pushed on the Page's realtime channel `page:{pageId}` as
+`workbook.committed` with `{page_id, rev, generation, kind, cells}` (`cells` is
+the number of cells written), never cell content; subscribers read the content
+through the feed. The push is sent after the revision is durable, off the
+response path, and access is rechecked before every frame. On a published
+workbook the channel admits only the owner, the named editors and the
+workspace OWNER, not every workspace member. Delivery is at most
+once: a push can be lost (a dropped connection, a restart after the revision
+was claimed for its push), and is not repeated. A client treats the push as a
+hint and reads the feed from its last revision after a reconnect, after a
+revision gap and when it regains focus. Revisions committed while the editor
+is off are never pushed later. Turning the editor off does not push a
+`session_closed` frame yet; open editors learn it from the next edit, feed read
+or heartbeat (`503 gridcraft_editor_disabled`).
+
 A receipt is immutable and confirms durable storage, with `durability: node`.
-Its status response separately reports delivery and the current head. Delivery
-remains pending until a qualified live transport is implemented. Unknown
+Its status response separately reports delivery (`pending` until the revision
+was claimed for its push, then `sent`; `sent` does not prove that any client
+received it) and the current head. Unknown
 outcomes require querying status or retrying the original packet. Do not refresh
 its base revision automatically. Conflicts, revocation, an effect outside the
 mandate and exhausted worker capacity reject the candidate without a new revision.
@@ -366,8 +483,23 @@ Read the confirmed native snapshot and its revision/generation.
 ## `crewship workbook edit <page-slug|@ID>`
 
 `--file <path|->` supplies the exact edit packet. Retain it on retry. Only the
-Page owner may edit. On a conflict the command prints the `409` body and exits
+Page owner may edit, from a live session (`workbook session open`). On a conflict the command prints the `409` body and exits
 with status 5.
+
+## `crewship workbook session open <page-slug|@ID>`
+
+Open an editor session for the Page owner. `--renew <session-id>` renews one of
+your live sessions instead (heartbeat). Returns the session; see Live editing.
+
+## `crewship workbook session close <page-slug|@ID> <session-id>`
+
+Close one of your editor sessions. Repeating it succeeds.
+
+## `crewship workbook commits <page-slug|@ID>`
+
+`--since <rev>` (required) lists the confirmed revisions after it; `--limit <n>`
+(1 to 200) bounds one call. A range outside the retained history prints the
+`410` body and exits with status 5.
 
 ## `crewship workbook status <page-slug|@ID> <operation-id>`
 
@@ -396,5 +528,5 @@ Repeating the command for an existing editor re-issues the same grant.
 
 ## `crewship workbook agent`
 
-`--file <path|->` supplies the unchanged agent read/apply/status packet. This path
+`--file <path|->` supplies the unchanged agent read/apply/status/commits packet. This path
 requires the original run credential and refuses server/profile overrides.
