@@ -153,13 +153,16 @@ func TestSecurityActionsSurviveBrokenInstanceTail(t *testing.T) {
 }
 
 // Web reset sets a password, so it fails closed with a clear 503 and changes
-// nothing; host-side local recovery (shell access to the server) falls back.
+// nothing — not even the CLI-token revocation that recovery performs in the
+// same transaction. Host-side local recovery (shell access to the server)
+// completes: tokens revoked and both records written as unchained fallback.
 func TestPasswordResetWithBrokenInstanceTail(t *testing.T) {
 	t.Run("web", func(t *testing.T) {
 		h, store, user := newProfileRig(t)
 		if _, err := store.Create(t.Context(), user, "stolen", "", time.Hour); err != nil {
 			t.Fatal(err)
 		}
+		execOrFatal(t, h.db, `INSERT INTO cli_tokens(id,user_id,name,token_hash,tier) VALUES('reset-token',?,'old-password-token','synthetic-reset-fingerprint','STANDARD')`, user)
 		recovery := newRecoveryHandler(t, h.db, &stubMailer{configured: true}, h.sessions)
 		covARMintToken(t, recovery, "me@example.com", "broken-tail-reset")
 		breakInstanceAuditTail(t, h.db)
@@ -172,13 +175,20 @@ func TestPasswordResetWithBrokenInstanceTail(t *testing.T) {
 		if err := h.db.QueryRow(`SELECT COUNT(*) FROM user_sessions WHERE user_id=? AND revoked_at IS NULL`, user).Scan(&active); err != nil || active != 1 {
 			t.Fatalf("refused reset changed sessions: %d active %v", active, err)
 		}
-		if chained, fallback := instanceAuditRows(t, h.db, "auth.password_reset"); chained+fallback != 0 {
-			t.Fatalf("refused reset left a record: chained=%d fallback=%d", chained, fallback)
+		var revoked sql.NullString
+		if err := h.db.QueryRow(`SELECT revoked_at FROM cli_tokens WHERE id='reset-token'`).Scan(&revoked); err != nil || revoked.Valid {
+			t.Fatalf("refused reset revoked the CLI token: %v %v", revoked, err)
+		}
+		for _, action := range []string{"auth.password_reset", "auth.cli_token_revoked"} {
+			if chained, fallback := instanceAuditRows(t, h.db, action); chained+fallback != 0 {
+				t.Fatalf("refused reset left a %s record: chained=%d fallback=%d", action, chained, fallback)
+			}
 		}
 	})
 	t.Run("local", func(t *testing.T) {
 		db := setupTestDB(t)
 		user := seedTestUserWithPassword(t, db, "local@example.com", "oldpassword1")
+		execOrFatal(t, db, `INSERT INTO cli_tokens(id,user_id,name,token_hash,tier) VALUES('local-token',?,'old-password-token','synthetic-local-fingerprint','STANDARD')`, user)
 		breakInstanceAuditTail(t, db)
 		tx, err := db.BeginTx(t.Context(), nil)
 		if err != nil {
@@ -188,14 +198,21 @@ func TestPasswordResetWithBrokenInstanceTail(t *testing.T) {
 		if _, err := tx.Exec(`UPDATE users SET hashed_password='synthetic-reset',failed_login_count=0,locked_until=NULL,last_failed_login_at=NULL WHERE id=?`, user); err != nil {
 			t.Fatal(err)
 		}
-		if err := AuditLocalPasswordResetTx(t.Context(), tx, user, "synthetic-reset", "2026-10-22T00:00:00Z", 0); err != nil {
+		// The order `crewship admin reset-password` uses.
+		tokens, err := RevokeRecoveryCLITokensTx(t.Context(), tx, "", user, "2026-10-22T00:00:00Z")
+		if err != nil || len(tokens) != 1 {
+			t.Fatalf("local recovery token revocation held hostage: %v %v", tokens, err)
+		}
+		if err := AuditLocalPasswordResetTx(t.Context(), tx, user, "synthetic-reset", "2026-10-22T00:00:00Z", 0, len(tokens)); err != nil {
 			t.Fatalf("local reset held hostage by audit chain: %v", err)
 		}
 		if err := tx.Commit(); err != nil {
 			t.Fatal(err)
 		}
-		if chained, fallback := instanceAuditRows(t, db, "auth.password_reset"); chained != 0 || fallback != 1 {
-			t.Fatalf("chained=%d fallback=%d, want one fallback row", chained, fallback)
+		for _, action := range []string{"auth.password_reset", "auth.cli_token_revoked"} {
+			if chained, fallback := instanceAuditRows(t, db, action); chained != 0 || fallback != 1 {
+				t.Fatalf("%s: chained=%d fallback=%d, want one fallback row", action, chained, fallback)
+			}
 		}
 	})
 }

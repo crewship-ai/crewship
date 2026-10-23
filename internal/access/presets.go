@@ -32,6 +32,12 @@ func PresetCatalog() []PresetDefinition {
 		{"project-levels", 1, "project", []string{"list", "read", "contribute", "manage"}, []PresetLevel{
 			{"view", []string{"list", "read"}}, {"contribute", []string{"list", "read", "contribute"}}, {"manage", []string{"list", "read", "contribute", "manage"}},
 		}},
+		// These rights are independent of View, Results and Run; preserve any
+		// existing shares and keep the shipped v1 definitions unchanged. The
+		// lower levels revoke Publish (and Edit) through the same reviewed flow.
+		{"routine-levels", 2, "routine", []string{"edit", "publish"}, []PresetLevel{
+			{"none", []string{}}, {"edit", []string{"edit"}}, {"edit_publish", []string{"edit", "publish"}},
+		}},
 	}
 }
 func ResolvePreset(id string, version int) (PresetDefinition, bool) {
