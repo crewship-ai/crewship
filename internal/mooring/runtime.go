@@ -56,7 +56,7 @@ func (r *RPC) frameLimit() int {
 }
 
 func (r *RPC) Write(frame []byte) error {
-	if len(frame) == 0 || len(frame) > r.frameLimit() || !utf8.Valid(frame) || !json.Valid(frame) {
+	if len(frame) == 0 || len(frame) > r.frameLimit() || !utf8.Valid(frame) || !rpcJSONPreflight(frame) || !json.Valid(frame) {
 		return ErrRPCFrame
 	}
 	r.writeMu.Lock()
@@ -104,7 +104,7 @@ func (r *RPC) Read() ([]byte, error) {
 		_ = r.conn.Close()
 		return nil, err
 	}
-	if !utf8.Valid(data) || !json.Valid(data) {
+	if !utf8.Valid(data) || !rpcJSONPreflight(data) || !json.Valid(data) {
 		_ = r.conn.Close()
 		return nil, ErrRPCFrame
 	}

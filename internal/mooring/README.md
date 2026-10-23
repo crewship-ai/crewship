@@ -61,7 +61,10 @@ An operator may explicitly request `RuntimeConfig.ControlProfile` equal to
 offers this profile in Hello and requires the exact RuntimeReady selection;
 missing, different or unsolicited selection fails closed. Only after readiness
 does the private transport permit frames up to 2097152 bytes. Default runtime
-calls retain the original ceiling. This transport choice does not relax public
+calls retain the original ceiling. RuntimeReady uses closed, case-sensitive
+objects and rejects duplicate keys before selecting any profile. Every RPC
+frame is bounded to depth 64 and 32768 structural tokens before syntax parsing.
+This transport choice does not relax public
 participant/batch validation: a typed private dispatcher must accept only the
 four negotiated control envelopes with their separate raw/canonical, decoded
 checkpoint, depth and structural-token checks. Framing-helper echo tests are
