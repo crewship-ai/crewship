@@ -527,6 +527,11 @@ func (s *Server) mountAPIRouter(
 	// JournalEmitter interface to the full journal.Emitter so the
 	// orchestrator package stays independent of internal/journal.
 	orch.SetJournal(newOrchestratorJournalAdapter(s.journalWriter))
+	// A crew runtime the provider replaced because it served an outdated
+	// sidecar (#3964) is journaled as sidecar.recreated.
+	if reporter, ok := ctr.(provider.SidecarRecreatedReporter); ok {
+		reporter.SetSidecarRecreatedHook(sidecarRecreatedJournal(deps.DB, s.journalWriter, logger))
+	}
 	orch.SetSubscriptionUsageRecorder(newSubscriptionUsageRecorder(deps.DB, s.journalWriter))
 
 	// Wire the audit-log recorder into the orchestrator so a run that

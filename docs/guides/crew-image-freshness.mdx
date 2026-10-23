@@ -29,7 +29,7 @@ Two different staleness conditions exist, and they are deliberately kept apart.
 | Condition | What it means | Where it shows up |
 |---|---|---|
 | **Stale image** | The container was created from a manifest the tag no longer resolves to. Nothing is malfunctioning; the crew is running an older release. | `image.stale` on the [Crew Journal](/guides/crew-journal), notified as **Instance health** (`system.health`) |
-| **Stale sidecar** | The `crewship-sidecar` binary running inside the container predates this server build. Memory recall and egress policy may be degraded *right now*. | `sidecar.stale`, notified as **Agent errors** (`agents.error`) |
+| **Stale sidecar** | The `crewship-sidecar` binary running inside the container predates this server build. Memory recall and egress policy may be degraded *right now*. Crewship recreates the container at the crew's next idle start, so this resolves without an operator unless the sidecar artifact itself is stale. | `sidecar.stale`, notified as **Agent errors** (`agents.error`); the automatic fix as `sidecar.recreated` |
 
 They are separate categories on purpose: someone who mutes agent errors to stop
 run-failure noise should not thereby lose "every crew on this instance is three
