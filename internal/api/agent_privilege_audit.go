@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -147,20 +148,34 @@ func mcpConfigAudit(raw string) any {
 		} else if transport == "" && s.URL != "" {
 			transport = "http"
 		}
-		// Leading NAME=value assignments ("TOKEN=abc npx ...") are values,
-		// not the executable: record only the first token that is not one.
-		command := ""
-		for _, field := range strings.Fields(s.Command) {
-			if !strings.Contains(field, "=") {
-				command = path.Base(field)
-				break
-			}
-		}
+		command := auditCommandName(s.Command)
 		servers = append(servers, map[string]any{"name": name, "transport": transport, "command": command,
 			"env_keys": auditKeyNames(s.Env), "header_keys": auditKeyNames(s.Headers)})
 	}
 	sort.Slice(servers, func(i, j int) bool { return servers[i]["name"].(string) < servers[j]["name"].(string) })
 	return servers
+}
+
+// auditCommandToken is what an executable name looks like. A token outside
+// it (a quote, a shell operator, an assignment) may be part of a value.
+var auditCommandToken = regexp.MustCompile(`^[A-Za-z0-9._/+-]+$`)
+
+// auditCommandName is the base name of a server command's executable.
+// Leading NAME=value assignments ("TOKEN=abc npx ...") are skipped; the first
+// other token is recorded only when it plainly is an executable name, so a
+// quoted value split by whitespace (`TOKEN="a b" npx`) yields "" rather than
+// a fragment of it.
+func auditCommandName(command string) string {
+	for _, field := range strings.Fields(command) {
+		if strings.Contains(field, "=") {
+			continue
+		}
+		if !auditCommandToken.MatchString(field) {
+			return ""
+		}
+		return path.Base(field)
+	}
+	return ""
 }
 
 func auditKeyNames(m map[string]any) []string {
