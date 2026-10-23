@@ -3,6 +3,7 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+import subprocess
 import tarfile
 import tempfile
 import unittest
@@ -51,3 +52,58 @@ class ToolArchiveTests(unittest.TestCase):
     def test_default_marker_keeps_ordinary_builds_disabled(self):
         marker = json.loads((build.ROOT/'mooring/runtime-release.json').read_text())
         self.assertEqual(marker, {'schema_version':1,'enabled':False})
+
+    def test_unselected_members_count_toward_expansion_limit(self):
+        raw = io.BytesIO()
+        with tarfile.open(fileobj=raw, mode='w:gz') as archive:
+            member = tarfile.TarInfo('pin/unselected')
+            member.size = 2048
+            archive.addfile(member, io.BytesIO(b'x'*2048))
+        with tempfile.TemporaryDirectory() as temp:
+            with self.assertRaisesRegex(ValueError, 'expansion limit'):
+                self.prepare(raw.getvalue(), Path(temp), max_expanded_bytes=1024)
+            self.assertFalse((Path(temp)/'wasm-bindgen').exists())
+
+    def test_generated_and_build_ancestors_cannot_escape_source(self):
+        for linked in ('build', 'public/mooring-sdk', 'internal/mooringassets'):
+            with self.subTest(linked=linked), tempfile.TemporaryDirectory() as temp:
+                root, outside = Path(temp)/'source', Path(temp)/'outside'
+                root.mkdir()
+                outside.mkdir()
+                sentinel = outside/'generated/preserve'
+                sentinel.parent.mkdir()
+                sentinel.write_bytes(b'unrelated data')
+                link = root/linked
+                link.parent.mkdir(parents=True, exist_ok=True)
+                link.symlink_to(outside, target_is_directory=True)
+                with patch.object(build, 'ROOT', root):
+                    with self.assertRaisesRegex(ValueError, 'linked generated'):
+                        build.confined(link/('mooring' if linked=='build' else 'generated'))
+                self.assertEqual(sentinel.read_bytes(), b'unrelated data')
+
+    def test_source_requires_exact_clean_committed_identity(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            def git(*args):
+                return subprocess.check_output(['git', '-C', str(root), *args], stderr=subprocess.DEVNULL)
+            git('init', '-b', 'main')
+            source = root/'source'
+            source.write_text('committed')
+            git('add', 'source')
+            git('-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture')
+            sha = git('rev-parse', 'HEAD').decode().strip()
+            with patch.object(build, 'ROOT', root):
+                build.verify_source(sha)
+                with self.assertRaisesRegex(ValueError, 'SHA mismatch'):
+                    build.verify_source('0'*40)
+                source.write_text('dirty')
+                with self.assertRaisesRegex(ValueError, 'clean and committed'):
+                    build.verify_source(sha)
+                git('add', 'source')
+                with self.assertRaisesRegex(ValueError, 'clean and committed'):
+                    build.verify_source(sha)
+                source.write_text('committed')
+                git('add', 'source')
+                (root/'untracked').write_text('unadmitted source')
+                with self.assertRaisesRegex(ValueError, 'clean and committed'):
+                    build.verify_source(sha)

@@ -28,6 +28,30 @@ def command(args, cwd=ROOT, env=None):
     subprocess.run([str(arg) for arg in args], cwd=cwd, env=env, check=True)
 
 
+def confined(path):
+    """Reject linked ancestors before any creation or replacement in the tree."""
+    relative = path.relative_to(ROOT)
+    current = ROOT
+    for part in relative.parts:
+        if part in ('', '.', '..'):
+            raise ValueError('unsafe generated path')
+        current = current / part
+        if current.is_symlink():
+            raise ValueError('linked generated path ancestor')
+    if not path.resolve().is_relative_to(ROOT.resolve()):
+        raise ValueError('generated path escapes source tree')
+    return path
+
+
+def verify_source(sha):
+    if not re.fullmatch(r'[0-9a-f]{40}', sha):
+        raise ValueError('exact source SHA required')
+    if subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip() != sha:
+        raise ValueError('source SHA mismatch')
+    if subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=normal'], cwd=ROOT):
+        raise ValueError('release source must be clean and committed')
+
+
 def tool_archive(spec, destination):
     """Verified downloads, only named regular members, bounded decompression."""
     destination.mkdir(parents=True, exist_ok=True)
@@ -52,6 +76,10 @@ def tool_archive(spec, destination):
         seen = set()
         total = 0
         for member in source:
+            # Include unselected members and tar metadata/padding in the bound;
+            # tarfile must decompress them too while locating selected tools.
+            if member.offset_data + member.size > spec.get('max_expanded_bytes', 300 * 1024 * 1024):
+                raise ValueError('tool archive expansion limit')
             if member.name not in selected:
                 continue
             if member.name in seen or not member.isfile() or member.size > 256 * 1024 * 1024:
@@ -117,15 +145,14 @@ def collect_licenses(destination):
 
 
 def build(sha):
-    if not re.fullmatch(r'[0-9a-f]{40}', sha):
-        raise ValueError('exact source SHA required')
-    if subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip() != sha:
-        raise ValueError('source SHA mismatch')
+    verify_source(sha)
     if platform.system() != 'Linux' or platform.machine() != 'x86_64':
         raise ValueError('enabled dev runtime assets require Linux x86_64')
     config = json.loads((ROOT / 'mooring/build-tools.json').read_text())
     cargo, env = rust_environment(config['rust_version'], config['target'])
-    build_root = ROOT / 'build/mooring'
+    build_root = confined(ROOT / 'build/mooring')
+    confined(ROOT / 'internal/mooringassets/embedded/generated')
+    confined(ROOT / 'public/mooring-sdk/generated')
     build_root.mkdir(parents=True, exist_ok=True)
     env['CARGO_TARGET_DIR'] = str(build_root / 'target')
     env['RUSTFLAGS'] = f'--remap-path-prefix={ROOT}=/crewship'
@@ -158,8 +185,7 @@ def build(sha):
         output = ROOT / 'internal/mooringassets/embedded/generated'
         public = ROOT / 'public/mooring-sdk/generated'
         for source, target in ((embedded, output), (sdk, public)):
-            if target.is_symlink():
-                raise ValueError('refusing linked generated output')
+            confined(target)
             if target.exists():
                 shutil.rmtree(target)
             target.parent.mkdir(parents=True, exist_ok=True)
