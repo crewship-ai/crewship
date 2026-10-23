@@ -148,11 +148,13 @@ not the short-lived access token: an access token refreshed from the same
 sign-in keeps using it.
 
 A session expires 15 minutes after it was last used or renewed. A confirmed
-edit renews it (at most once every 5 minutes), and so does a heartbeat:
-`--renew SESSION_ID` (a body `{"session_id":"…"}`) renews a live session of
-yours with the same ID and returns its new `expires_at`. A host should send a
-heartbeat every 5 minutes while its editor is open, and close the session when
-the editor goes away. A session never lives longer than 12 hours from opening,
+edit renews it, and so does a heartbeat: `--renew SESSION_ID` (a body
+`{"session_id":"…"}`) checks a live session of yours with the same ID and
+returns its current `expires_at`. Both renew only once less than 10 minutes
+remain, so at most once every 5 minutes; until then the expiry stays as it is
+and nothing is written. A host should send a heartbeat at least every 5
+minutes while its editor is open (more often is cheap), and close the session
+when the editor goes away. A session never lives longer than 12 hours from opening,
 nor beyond the sign-in session or token that opened it; `expires_at` already
 reflects all of these limits.
 An optional `"protocol":1` names the editor bridge protocol; any other value is
@@ -163,7 +165,10 @@ One user may hold 32 live sessions per Page; a 33rd is
 `429 {"error":"too_many_editor_sessions"}` with `Retry-After` set to the seconds
 until the first one expires. Sessions that are never closed stop counting once
 they expire. `workbook session close` ends a session; closing it again
-succeeds.
+succeeds. Any of your own sign-ins or tokens may close your session (it then
+just ends; nobody else can use it). Expired sessions are kept for a day, so a
+late edit still learns that its session expired, and are then deleted; a
+privacy erasure deletes the subject's sessions in that workspace at once.
 
 The Page owner then edits cells with an atomic edit from one live session:
 
@@ -289,8 +294,10 @@ While the live editor is on for the workspace, every confirmed revision is
 also pushed on the Page's realtime channel `page:{pageId}` as
 `workbook.committed` with `{page_id, rev, generation, kind, cells}` (`cells` is
 the number of cells written), never cell content; subscribers read the content
-through the feed. The push is sent after the revision is durable, off the
-response path, and access is rechecked before every frame. Delivery is at most
+through the feed. The push is sent after the revision is durable and off the
+response path: a commit only wakes the server's background sweeper, which
+claims the revision and pushes it (it also sweeps every few seconds), and
+access is rechecked before every frame. Delivery is at most
 once: a push can be lost (a dropped connection, a restart after the revision
 was claimed for its push), and is not repeated. A client treats the push as a
 hint and reads the feed from its last revision after a reconnect, after a
