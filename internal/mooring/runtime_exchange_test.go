@@ -38,6 +38,11 @@ func TestRuntimeExchangeCancellationBeforeTurnDoesNotCloseActiveRequest(t *testi
 	if _, err := r.Exchange(ctx, []byte(`{"request_id":"cancelled-before-turn"}`)); !errors.Is(err, context.Canceled) {
 		t.Fatal("cancelled queued request did not return", err)
 	}
+	deadlineCtx, deadlineCancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
+	defer deadlineCancel()
+	if _, err := r.Exchange(deadlineCtx, []byte(`{"request_id":"expired-before-turn"}`)); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal("queue wait did not honor whole-exchange deadline", err)
+	}
 	close(release)
 	if err := <-active; err != nil {
 		t.Fatal("queued cancellation poisoned active exchange", err)

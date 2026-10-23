@@ -14,6 +14,8 @@ import (
 // be mistaken for the next request. This is a nonterminal transport failure,
 // never an operation rejection or evidence that a host commit did not happen.
 func (r *Runtime) Exchange(ctx context.Context, request []byte) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	r.exchangeOnce.Do(func() {
 		r.exchangeSlot = make(chan struct{}, 1)
 		r.exchangeSlot <- struct{}{}
@@ -27,10 +29,7 @@ func (r *Runtime) Exchange(ctx context.Context, request []byte) ([]byte, error) 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	deadline := time.Now().Add(5 * time.Second)
-	if limit, ok := ctx.Deadline(); ok && limit.Before(deadline) {
-		deadline = limit
-	}
+	deadline, _ := ctx.Deadline()
 	if err := r.RPC.conn.SetDeadline(deadline); err != nil {
 		_ = r.RPC.Close()
 		return nil, err
