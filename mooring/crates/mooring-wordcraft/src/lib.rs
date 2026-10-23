@@ -4,6 +4,7 @@
 pub mod adapter;
 mod candidate;
 pub mod command;
+pub mod read;
 
 use std::collections::HashSet;
 

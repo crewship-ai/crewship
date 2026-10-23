@@ -89,3 +89,13 @@ read-only documents. Text operations conservatively advance only the paragraph
 content revision (also for a semantic no-op), never paragraph existence, order or
 document metadata. Application checkpoints contain no authoritative host revision
 ledger. The default-off crate is still not wired into any production route.
+
+Native reads can project an already authenticated immutable checkpoint through
+`read::header` and `read::page`. The header retains every document field except
+body; pages retain complete native paragraphs plus their stable IDs. Both have
+explicit serialized-byte budgets (at most 262144 bytes); pages also cap paragraph
+count at 256. Unknown cursors and oversized individual paragraphs/headers are
+explicit errors, never truncation. The host reserves its envelope overhead and
+binds each after-ID cursor to the same scope, confirmed revision and checkpoint
+digest. These pure functions do not authenticate remote cursors or authorize a
+content path. Read-only native documents remain readable in full.
