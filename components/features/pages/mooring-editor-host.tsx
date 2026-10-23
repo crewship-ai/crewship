@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { Button } from "@/components/ui/button"
 import { apiFetch } from "@/lib/api-fetch"
 import { useRealtimeChannelSafe, useRealtimeEventSafe } from "@/hooks/use-realtime"
 import { useLeaveGuard } from "@/lib/editor-lifecycle/use-leave-guard"
@@ -16,6 +17,8 @@ export function MooringEditorHost({ workspaceId, pageId, name, onDirtyChange }: 
   const [label, setLabel] = React.useState("Opening editor…")
   const [error, setError] = React.useState<string>()
   const [dirty, setDirty] = React.useState(false)
+  const [canRetry, setCanRetry] = React.useState(false)
+  const [attempt, setAttempt] = React.useState(0)
   const refresh = React.useRef<() => void>(() => {})
   useLeaveGuard(dirty)
   useRealtimeChannelSafe(`page:${pageId}`)
@@ -25,6 +28,7 @@ export function MooringEditorHost({ workspaceId, pageId, name, onDirtyChange }: 
   useRealtimeEventSafe("realtime.reconnected", () => refresh.current())
   React.useEffect(() => { onDirtyChange?.(dirty) }, [dirty, onDirtyChange])
   React.useEffect(() => {
+    setError(undefined); setCanRetry(false); setLabel("Opening editor…")
     const controller = new AbortController()
     let port: CapabilityPort | undefined, frame: HTMLIFrameElement | undefined
     let loads = 0, connected = false, dead = false, wanted = false, draft = false
@@ -39,7 +43,10 @@ export function MooringEditorHost({ workspaceId, pageId, name, onDirtyChange }: 
       setDirty(draft || !!pending)
       setLabel(pending ? "Saving…" : draft ? "Not saved · draft" : connected ? "Saved" : "Connecting…")
     }
-    const stop = (message: string) => {
+    const stop = (message: string, retryStartup = false) => {
+      // A fresh frame is safe only before this editor has ever connected.
+      // Live errors must retain its draft and pending mutation instead.
+      setCanRetry(retryStartup && !connected && !draft && !pending)
       dead = true; setError(message); setLabel("Editor unavailable")
       if (port) { port.onmessage = null; port.close(); port = undefined }
       frame?.remove(); frame = undefined
@@ -140,7 +147,7 @@ export function MooringEditorHost({ workspaceId, pageId, name, onDirtyChange }: 
     window.addEventListener("focus", reconnect)
     refresh.current = () => void load()
     const poll = setInterval(reconnect, 15_000)
-    const timeout = setTimeout(() => { if (!connected) stop("The editor did not start. Reopen the document to retry.") }, 15_000)
+    const timeout = setTimeout(() => { if (!connected) stop("The editor did not start. Its address may be unavailable or blocked by this network. Retry, or ask an administrator to check the editor address.", true) }, 15_000)
     void load()
     return () => {
       dead = true; controller.abort(); clearInterval(poll); clearTimeout(timeout)
@@ -149,9 +156,12 @@ export function MooringEditorHost({ workspaceId, pageId, name, onDirtyChange }: 
       if (port) { port.onmessage = null; port.close() }
       frame?.remove()
     }
-  }, [workspaceId, pageId, name])
+  }, [workspaceId, pageId, name, attempt])
   return <section aria-label="Application editor" className="flex min-h-0 flex-1 flex-col">
     <div className="flex h-12 shrink-0 items-center gap-3 border-b px-3"><h1 className="truncate font-semibold">{name ?? "Application"}</h1><span role="status" className="text-sm">{label}</span></div>
-    <div className="relative min-h-0 flex-1"><div ref={mount} className="absolute inset-0" />{error && <p role="alert" className="absolute inset-x-2 top-2 z-10 rounded border bg-background p-3 text-sm">{error}</p>}</div>
+    <div className="relative min-h-0 flex-1"><div ref={mount} className="absolute inset-0" />{error && <div role="alert" className="absolute inset-x-2 top-2 z-10 rounded border bg-background p-3 text-sm">
+      <p>{error}</p>
+      {canRetry && <Button type="button" size="sm" variant="outline" className="mt-2" onClick={() => { setCanRetry(false); setAttempt(value => value + 1) }}>Retry editor</Button>}
+    </div>}</div>
   </section>
 }
