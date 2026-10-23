@@ -49,6 +49,14 @@ crewship-heavy cargo test --manifest-path mooring/Cargo.toml --config mooring/.c
 python3 mooring/scripts/license-inventory.py --check
 ```
 
+The `--check` path verifies both local file hashes and every vendored Git-index
+blob, so ignored upstream build sources cannot disappear from a clean checkout.
+When updating dependencies, use `cargo vendor --locked --versioned-dirs` with
+the workspace manifest, regenerate the inventory, and stage every checksum-listed
+source before running `--check`. Repository ignore rules may require exact
+`git add -f -- PATH` for legitimate upstream build/test files; never alter their
+Cargo checksums to omit them. Unexpected indexed vendor files also fail.
+
 Text input accepts one bounded Y-sync envelope; readers cannot send SyncStep2
 or Update. Raw Yjs auth, custom messages and awareness are rejected; presence
 must be bound to verified session identity separately. This is an input filter,

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Record locked dependency licenses and verify Cargo vendor integrity. No I/O network."""
 import hashlib
+import io
 import json
 from pathlib import Path
 import re
+import subprocess
 import sys
 import tomllib
 
@@ -45,15 +47,70 @@ def verify_checksums(directory, expected):
         raise ValueError('Unrecorded or absent vendored files')
 
 
+
+def verify_git_index(repository, expected):
+    """Verify release bytes in Git, not merely ignored files on a developer disk."""
+    raw = subprocess.check_output(['git', '-C', str(repository), 'ls-files', '--stage', '-z', '--', 'mooring/vendor'])
+    indexed = {}
+    for record in raw.split(b'\0'):
+        if not record:
+            continue
+        metadata, name = record.split(b'\t', 1)
+        mode, blob, stage = metadata.decode().split()
+        if stage != '0' or mode not in {'100644', '100755'}:
+            raise ValueError('Nonregular or conflicted vendored Git entry')
+        indexed[name.decode()] = blob
+    if set(indexed) != set(expected):
+        missing = sorted(set(expected) - set(indexed))
+        extra = sorted(set(indexed) - set(expected))
+        raise ValueError(f'Vendor Git index differs: missing={missing}, extra={extra}')
+    objects = list(dict.fromkeys(indexed.values()))
+    requests = ('\n'.join(objects) + '\n').encode()
+    sizes = {}
+    checked = subprocess.check_output(['git', '-C', str(repository), 'cat-file', '--batch-check'], input=requests)
+    for line in checked.decode().splitlines():
+        blob, kind, size = line.split()
+        if kind != 'blob':
+            raise ValueError('Invalid vendored Git object')
+        sizes[blob] = int(size)
+    for name, blob in indexed.items():
+        if sizes[blob] != (repository / name).stat().st_size:
+            raise ValueError('Vendored index size differs from verified source')
+    # Size preflight above prevents a staged oversized blob from allocating
+    # more than the already-verified local registry sources.
+    data = subprocess.check_output(['git', '-C', str(repository), 'cat-file', '--batch'], input=requests)
+    reader = io.BytesIO(data)
+    digests = {}
+    for blob in objects:
+        header = reader.readline().decode().split()
+        if header != [blob, 'blob', str(sizes[blob])]:
+            raise ValueError('Invalid vendored Git batch response')
+        contents = reader.read(sizes[blob])
+        if len(contents) != sizes[blob] or reader.read(1) != b'\n':
+            raise ValueError('Truncated vendored Git blob')
+        digests[blob] = hashlib.sha256(contents).hexdigest()
+    if reader.read(1):
+        raise ValueError('Trailing vendored Git batch response')
+    for name, expected_digest in expected.items():
+        if digests[indexed[name]] != expected_digest:
+            raise ValueError('Vendored Git bytes differ from recorded SHA256')
+
+
 def main():
     root = Path(__file__).resolve().parents[1]
     lock = tomllib.loads((root / 'Cargo.lock').read_text())
     entries = []
+    expected_index = {}
     for package in lock['package']:
         if 'source' not in package:
             continue
         directory = root / 'vendor' / f"{package['name']}-{package['version']}"
         verify_checksums(directory, package['checksum'])
+        checksum_path = directory / '.cargo-checksum.json'
+        checksums = json.loads(checksum_path.read_text(), object_pairs_hook=unique_object)
+        expected_index[str(checksum_path.relative_to(root.parent))] = hashlib.sha256(checksum_path.read_bytes()).hexdigest()
+        for name, digest in checksums['files'].items():
+            expected_index[str((directory / name).relative_to(root.parent))] = digest
         manifest = tomllib.loads((directory / 'Cargo.toml').read_text())['package']
         if manifest['name'] != package['name'] or manifest['version'] != package['version'] or not manifest.get('license'):
             raise ValueError('Wrong vendored identity or missing SPDX license')
@@ -75,11 +132,12 @@ def main():
     content = json.dumps(entries, indent=2, ensure_ascii=False) + '\n'
     target = root / 'licenses' / 'inventory.json'
     if '--check' in sys.argv:
+        verify_git_index(root.parent, expected_index)
         if target.read_text() != content:
             sys.exit('License inventory differs; regenerate with mooring/scripts/license-inventory.py')
     else:
         target.write_text(content)
-    print(f'{len(entries)} locked dependencies, vendor integrity and license digests verified')
+    print(f'{len(entries)} locked dependencies, vendor source/index integrity and license digests verified')
 
 
 if __name__ == '__main__':
