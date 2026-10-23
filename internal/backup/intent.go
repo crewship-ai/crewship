@@ -36,9 +36,10 @@ import "sort"
 // table. Drift detection catches the omission in tests so an oversight
 // surfaces before a bundle ships missing rows.
 var BackupTableIntent = map[string]ScopedTableIntent{
-	"mooring_documents": IntentInclude,        // durable generic application state
-	"mooring_receipts":  IntentInclude,        // immutable history and idempotence evidence
-	"mooring_intents":   IntentExcludeRuntime, // live human/run mandates never survive restore
+	"mooring_session_owners": IntentExcludeRuntime, // process-bound owner capability requires fresh admission after restore
+	"mooring_documents":      IntentInclude,        // durable generic application state
+	"mooring_receipts":       IntentInclude,        // immutable history and idempotence evidence
+	"mooring_intents":        IntentExcludeRuntime, // live human/run mandates never survive restore
 
 	// Portable workbook backup is unavailable in the experimental pilot. Dump
 	// refuses a workspace containing workbooks instead of silently omitting them.
@@ -693,6 +694,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 // Pure-mechanical tables (sqlite_*, the _migrations ledger, FTS5 shadow tables)
 // are skipped by pattern in the guard and deliberately NOT listed here.
 var NonBackedUpTables = map[string]struct{}{
+	"mooring_session_writer_fence": {}, // installation-local serialization singleton, recreated by migration
 	// ── Global / cross-workspace identities. No workspace_id; keyed by global
 	//    unique columns. users/workspaces/skills are dumped (if at all) via the
 	//    special-cased head of BackupTables, not the workspace-scoped intent map.

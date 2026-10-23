@@ -655,6 +655,7 @@ func kitEnv(kit *RecoveryKit) (map[string]string, error) {
 // must not survive a move: sign-in sessions, pairings, locks, the scheduler
 // lease, OAuth polling. Tables absent from this schema are skipped.
 var runtimeResets = []struct{ table, what string }{
+	{"mooring_session_owners", "Mooring session owner leases"},
 	{"document_creation_consents", "document creation consents"},
 	{"document_iteration_intents", "document iteration intents"},
 	{"artifact_run_principals", "artifact run principal admissions"},
