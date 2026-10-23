@@ -42,8 +42,17 @@ fn d4_atomic_failure_cascades_transitively_but_independent_change_survives() {
         Rejection::direct("A2", Code::PermissionRevoked, "revoked while batched"),
     )]);
     let result = run(&changes, &BTreeMap::new(), &failures);
+    assert_eq!(
+        rejected(&result.changes[0].operations[0].decision).code,
+        Code::DependencyRejected
+    );
+    assert_eq!(
+        rejected(&result.changes[0].operations[1].decision).code,
+        Code::PermissionRevoked
+    );
     for op in &result.changes[0].operations {
-        assert_eq!(rejected(&op.decision).code, Code::PermissionRevoked);
+        assert_eq!(rejected(&op.decision).root.op_id, "A2");
+        assert_eq!(rejected(&op.decision).root.code, Code::PermissionRevoked);
     }
     for index in [1, 2] {
         let reason = rejected(&result.changes[index].operations[0].decision);
@@ -257,10 +266,16 @@ fn d4_atomic_order_is_preserved_and_forward_internal_dependency_is_rejected() {
     let forward = change("forward", vec![op("B", &["A"]), op("A", &[])]);
     let result = run(&[forward], &BTreeMap::new(), &BTreeMap::new());
     assert!(result.execution_order.is_empty());
+    assert_eq!(
+        rejected(&result.changes[0].operations[0].decision).code,
+        Code::InvalidRequest
+    );
+    assert_eq!(
+        rejected(&result.changes[0].operations[1].decision).code,
+        Code::DependencyRejected
+    );
     for operation in &result.changes[0].operations {
-        let reason = rejected(&operation.decision);
-        assert_eq!(reason.code, Code::InvalidRequest);
-        assert_eq!(reason.root.op_id, "B");
+        assert_eq!(rejected(&operation.decision).root.op_id, "B");
     }
     let backward = change("ordered", vec![op("A", &[]), op("B", &["A"])]);
     let result = run(&[backward], &BTreeMap::new(), &BTreeMap::new());
@@ -269,4 +284,97 @@ fn d4_atomic_order_is_preserved_and_forward_internal_dependency_is_rejected() {
         .operations
         .iter()
         .all(|op| op.decision == Decision::EligibleForHost));
+}
+
+#[test]
+fn d4_complete_scc_members_are_cycles_and_true_descendant_keeps_original_root() {
+    let changes = [
+        change("a", vec![op("A", &["B", "C"])]),
+        change("b", vec![op("B", &["A"])]),
+        change("c", vec![op("C", &["B"])]),
+        change("d", vec![op("D", &["C"])]),
+    ];
+    let result = run(&changes, &BTreeMap::new(), &BTreeMap::new());
+    for (index, change) in changes.iter().enumerate().take(3) {
+        let reason = rejected(&result.changes[index].operations[0].decision);
+        assert_eq!(reason.code, Code::DependencyCycle, "{}", change.change_id);
+    }
+    let descendant = rejected(&result.changes[3].operations[0].decision);
+    assert_eq!(descendant.code, Code::DependencyRejected);
+    assert_eq!(descendant.root.code, Code::DependencyCycle);
+    assert_eq!(descendant.root.op_id, "C");
+    assert!(result.execution_order.is_empty());
+}
+
+#[test]
+fn d4_atomic_abort_and_descendant_keep_actual_failure_operation() {
+    let changes = [
+        change("a", vec![op("A1", &[]), op("A2", &[])]),
+        change("c", vec![op("C", &["A2"])]),
+    ];
+    let direct = BTreeMap::from([(
+        "A1".into(),
+        Rejection::direct("A1", Code::PreconditionFailed, "actual adapter failure"),
+    )]);
+    let result = run(&changes, &BTreeMap::new(), &direct);
+    assert_eq!(
+        rejected(&result.changes[0].operations[0].decision).code,
+        Code::PreconditionFailed
+    );
+    for (change, operation) in [(0, 1), (1, 0)] {
+        let reason = rejected(&result.changes[change].operations[operation].decision);
+        assert_eq!(reason.code, Code::DependencyRejected);
+        assert_eq!(reason.root.op_id, "A1");
+        assert_eq!(reason.root.code, Code::PreconditionFailed);
+    }
+    assert!(result.execution_order.is_empty());
+}
+
+#[test]
+fn d4_direct_failure_must_name_the_actual_operation_and_direct_root_code() {
+    let changes = [change("a", vec![op("A1", &[]), op("A2", &[])])];
+    for reason in [
+        Rejection::direct("A2", Code::PreconditionFailed, "wrong actual operation"),
+        Rejection::direct("A1", Code::DependencyRejected, "not an original cause"),
+        Rejection {
+            code: Code::PreconditionFailed,
+            root: RootCause {
+                op_id: "A1".into(),
+                code: Code::QuotaExceeded,
+                message: "mismatched cause".into(),
+            },
+        },
+    ] {
+        assert_eq!(
+            plan(
+                &changes,
+                &BTreeMap::new(),
+                &BTreeMap::from([("A1".into(), reason)]),
+                Limits::default()
+            ),
+            Err(InvalidBatch::InvalidRejection)
+        );
+    }
+}
+
+#[test]
+fn d4_indivisible_atomic_cross_dependency_cycle_cannot_be_scheduled_as_partial_changes() {
+    let changes = [
+        change("a", vec![op("A1", &["B"]), op("A2", &[])]),
+        change("b", vec![op("B", &["A2"])]),
+    ];
+    let result = run(&changes, &BTreeMap::new(), &BTreeMap::new());
+    assert_eq!(
+        rejected(&result.changes[0].operations[0].decision).code,
+        Code::DependencyCycle
+    );
+    assert_eq!(
+        rejected(&result.changes[0].operations[1].decision).code,
+        Code::DependencyRejected
+    );
+    assert_eq!(
+        rejected(&result.changes[1].operations[0].decision).code,
+        Code::DependencyCycle
+    );
+    assert!(result.execution_order.is_empty());
 }

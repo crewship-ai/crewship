@@ -77,6 +77,7 @@ impl Default for Limits {
 }
 #[derive(Debug, PartialEq)]
 pub enum InvalidBatch {
+    InvalidRejection,
     Empty,
     TooLarge,
     InvalidLimits,
@@ -215,11 +216,20 @@ pub fn plan(
     if direct.keys().any(|id| !op_to_change.contains_key(id)) {
         return Err(InvalidBatch::InvalidId);
     }
+    if direct.iter().any(|(id, reason)| {
+        reason.root.op_id != *id
+            || reason.code != reason.root.code
+            || reason.code == Code::DependencyRejected
+    }) {
+        return Err(InvalidBatch::InvalidRejection);
+    }
+    let cycles = cyclic_changes(changes, prior, direct, &op_to_change);
     let mut context = Context {
         changes,
         prior,
         direct,
         op_to_change,
+        cycles,
         visiting: vec![false; changes.len()],
         outcomes: vec![None; changes.len()],
         order: Vec::new(),
@@ -242,7 +252,13 @@ pub fn plan(
                         op_id: op.op_id.clone(),
                         decision: match outcome {
                             AtomicDecision::Eligible => Decision::EligibleForHost,
-                            AtomicDecision::Rejected(reason) => Decision::Rejected(reason.clone()),
+                            AtomicDecision::Rejected(reason) => {
+                                Decision::Rejected(if op.op_id == reason.root.op_id {
+                                    reason.clone()
+                                } else {
+                                    Rejection::dependent(reason.root.clone())
+                                })
+                            }
                             AtomicDecision::Replay(outcomes) => {
                                 Decision::Replay(outcomes[index].clone())
                             }
@@ -262,6 +278,7 @@ struct Context<'a> {
     prior: &'a BTreeMap<String, PriorOperation>,
     direct: &'a BTreeMap<String, Rejection>,
     op_to_change: BTreeMap<String, usize>,
+    cycles: Vec<Option<String>>,
     visiting: Vec<bool>,
     outcomes: Vec<Option<AtomicDecision>>,
     order: Vec<String>,
@@ -336,6 +353,13 @@ impl Context<'_> {
                 "operation dependency cycle inside atomic change",
             ));
         }
+        if let Some(root) = &self.cycles[index] {
+            return AtomicDecision::Rejected(Rejection::direct(
+                root,
+                Code::DependencyCycle,
+                "indivisible atomic changes form a dependency cycle",
+            ));
+        }
         // Atomic membership is fingerprinted in application order. Reordering
         // operations here would change the authenticated command semantics.
         for (position, op) in change.operations.iter().enumerate() {
@@ -371,14 +395,6 @@ impl Context<'_> {
                     ));
                 };
                 if let Some(reason) = failure {
-                    if reason.root.code == Code::DependencyCycle
-                        && members.contains(&reason.root.op_id)
-                    {
-                        return AtomicDecision::Rejected(Rejection {
-                            code: Code::DependencyCycle,
-                            root: reason.root,
-                        });
-                    }
                     return AtomicDecision::Rejected(Rejection::dependent(reason.root));
                 }
             }
@@ -423,4 +439,69 @@ fn internal_cycle(change: &AtomicChange) -> Option<String> {
         }
     }
     None
+}
+
+/// Every vertex reachable back to itself is a complete SCC cycle member.
+/// Bounded by at most 256 operations/changes; repeated iterative reachability
+/// avoids recursive SCC bookkeeping and DFS "already black" misclassification.
+fn cyclic_changes(
+    changes: &[AtomicChange],
+    prior: &BTreeMap<String, PriorOperation>,
+    direct: &BTreeMap<String, Rejection>,
+    owners: &BTreeMap<String, usize>,
+) -> Vec<Option<String>> {
+    let mut edges = vec![Vec::new(); changes.len()];
+    for (index, change) in changes.iter().enumerate() {
+        // Replays/conflicts and direct invalid atomic changes do not execute.
+        // They terminate dependency propagation rather than creating new edges.
+        if change
+            .operations
+            .iter()
+            .any(|op| prior.contains_key(&op.op_id) || direct.contains_key(&op.op_id))
+        {
+            continue;
+        }
+        for operation in &change.operations {
+            for dependency in &operation.dependencies {
+                if let Some(&owner) = owners.get(dependency) {
+                    if owner != index {
+                        edges[index].push(owner);
+                    }
+                }
+            }
+        }
+        edges[index].sort_unstable();
+        edges[index].dedup();
+    }
+    let mut reachable = vec![vec![false; changes.len()]; changes.len()];
+    for start in 0..changes.len() {
+        let mut pending = edges[start].clone();
+        while let Some(node) = pending.pop() {
+            if reachable[start][node] {
+                continue;
+            }
+            reachable[start][node] = true;
+            pending.extend(&edges[node]);
+        }
+    }
+    changes
+        .iter()
+        .enumerate()
+        .map(|(index, change)| {
+            if !reachable[index][index] {
+                return None;
+            }
+            change
+                .operations
+                .iter()
+                .find(|operation| {
+                    operation.dependencies.iter().any(|dependency| {
+                        owners
+                            .get(dependency)
+                            .is_some_and(|&owner| owner != index && reachable[owner][index])
+                    })
+                })
+                .map(|operation| operation.op_id.clone())
+        })
+        .collect()
 }
