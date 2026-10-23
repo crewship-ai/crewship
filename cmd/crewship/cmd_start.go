@@ -285,13 +285,13 @@ var startCmd = &cobra.Command{
 			return fmt.Errorf("failed to run migrations: %w", err)
 		}
 		// A rotate-key interrupted between its audit commit and the keyring
-		// rename is finished now; one whose entry never committed is set aside.
+		// rename is finished now; anything its audit entry does not vouch
+		// for is set aside without stopping the start.
 		if auditPath == filepath.Join(dataDir.Root, journal.SigningKeysFile) {
-			changed, err := journal.ResolvePendingSigningKeyRotations(dataDir.Root, func(id string) (bool, error) {
-				var found bool
-				err := db.QueryRowContext(context.Background(), `SELECT EXISTS(SELECT 1 FROM instance_audit_logs WHERE id=? AND action=?)`, id, journal.SigningKeyRotatedAction).Scan(&found)
-				return found, err
-			})
+			changed, notes, err := journal.ResolvePendingSigningKeyRotations(dataDir.Root, pendingRotationLookup(context.Background(), db.DB))
+			for _, note := range notes {
+				logger.Warn("pending audit key rotation", "detail", note)
+			}
 			if err != nil {
 				return fmt.Errorf("settle pending audit key rotation: %w", err)
 			}
