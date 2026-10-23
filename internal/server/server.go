@@ -408,6 +408,14 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	s.registerRoutes()
 	s.registerIPCRoutes()
 
+	// The embedded workbook editor (nil while off). Built before the API so
+	// the API can report it to administrators and, in same-host mode, show
+	// it the public origin of signed-in browser requests.
+	editor := newEditorOrigin(cfg, logger)
+	if cfg.GridCraft.Enabled && cfg.GridCraft.EditorEnabled {
+		s.editor = editor
+	}
+
 	// Mount Go API routes when database is available
 	if deps != nil && deps.DB != nil && cfg.Auth.JWTSecret != "" {
 		s.mountAPIRouter(cfg, logger, deps, orch, ctr, wsHub, logW, missionEngine, convStore, mux, ipcBase)
@@ -422,15 +430,14 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	// leak the actual API surface to a probing attacker.
 	mainHandler = pathTraversalRejectMiddleware(mainHandler)
 	// V-10: Wrap with security headers middleware
-	editor := newEditorOrigin(cfg, logger)
-	if cfg.GridCraft.Enabled && cfg.GridCraft.EditorEnabled {
-		// Reported on /healthz; in same-host mode the server also checks its
-		// public URL for a proxy that would defeat the path-scoped isolation.
-		s.editor = editor
+	if s.editor != nil {
+		// Reported on /healthz; in same-host mode the server also checks the
+		// public URL browsers use for a proxy that would defeat the
+		// path-scoped isolation.
 		if s.bgCtx == nil {
 			s.bgCtx, s.bgCancel = context.WithCancel(journal.WithSigningKeys(context.Background(), cfg.Audit.Keys))
 		}
-		startEditorProxyCheck(s.bgCtx, &s.bgWg, editor, cfg.PageStudioOrigin(), logger, newEditorProxyCheckClient(), editorProxyCheckSchedule)
+		startEditorProxyCheck(s.bgCtx, &s.bgWg, s.editor, logger, newEditorProxyCheckClient(), editorProxyCheckSchedule)
 	}
 	mainHandler = securityHeadersMiddlewareWith(mainHandler, editorHeaderOptions(cfg, editor))
 	// The editor (its host, or its path prefix on the Studio origin) serves
@@ -733,6 +740,10 @@ func (s *Server) mountAPIRouter(
 		opts = append(opts, goapi.WithGoogleOAuth(cfg.Auth.GoogleClientID, cfg.Auth.GoogleSecret, cfg.Auth.NextjsURL))
 	}
 	opts = append(opts, goapi.WithStoragePath(cfg.Storage.BasePath), goapi.WithPageProjectsPath(cfg.Storage.PageProjectsPath), goapi.WithPageBuildImage(cfg.Storage.PageBuildImage), goapi.WithPageRuntime(cfg.Storage.PageRuntimeOrigin, cfg.PageStudioOrigin(), cfg.Storage.PageRuntimeDevelopmentSameOrigin))
+	if s.editor != nil {
+		editor := s.editor
+		opts = append(opts, goapi.WithWorkbookEditor(editor.LearnOrigin, func() any { return editor.Detail() }))
+	}
 
 	// Dynamic catalog fetchers (devcontainer features + mise runtimes).
 	// They default to cached / embedded data; a background goroutine

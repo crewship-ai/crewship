@@ -88,10 +88,11 @@ func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	if detail := s.episodicDetail(); detail != "" {
 		body["episodic_error"] = detail
 	}
-	// The embedded workbook editor, only while it is enabled: same-host or
-	// dedicated mode and, in same-host mode, the proxy self-check that
-	// `crewship doctor` reports.
-	if st := s.editor.Status(); st.Mode != "" {
+	// The embedded workbook editor, only while it is enabled, as a coarse
+	// state: ok, pending, failed or disabled. /healthz is public, so origins,
+	// redirect targets and error text are only in the log and in
+	// GET /api/v1/admin/instance/workbook-editor.
+	if st := s.editor.Health(); st != "" {
 		body["workbook_editor"] = st
 	}
 	status := http.StatusOK

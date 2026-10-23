@@ -41,7 +41,11 @@ func TestEditorOriginWidensFrameSrcOfEveryUIDocumentWhenEnabled(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			securityHeadersMiddlewareWith(inner, securityHeaderOptions{editorFrameSrc: tc.editor}).ServeHTTP(w, httptest.NewRequest("GET", tc.path, nil))
+			opts := securityHeaderOptions{}
+			if tc.editor != "" {
+				opts.editorFrameSrc = func(*http.Request) string { return tc.editor }
+			}
+			securityHeadersMiddlewareWith(inner, opts).ServeHTTP(w, httptest.NewRequest("GET", tc.path, nil))
 			policy := w.Header().Get("Content-Security-Policy")
 			if got := strings.Contains(policy, "editor.example.test"); got != tc.want {
 				t.Fatalf("editor in policy = %v: %s", got, policy)
@@ -58,7 +62,7 @@ func TestEditorOriginWidensFrameSrcOfEveryUIDocumentWhenEnabled(t *testing.T) {
 		})
 	}
 	w := httptest.NewRecorder()
-	securityHeadersMiddlewareWith(inner, securityHeaderOptions{pageRuntimeOrigin: "https://apps.example.net", editorFrameSrc: editor}).ServeHTTP(w, httptest.NewRequest("GET", "/pages/budget", nil))
+	securityHeadersMiddlewareWith(inner, securityHeaderOptions{pageRuntimeOrigin: "https://apps.example.net", editorFrameSrc: func(*http.Request) string { return editor }}).ServeHTTP(w, httptest.NewRequest("GET", "/pages/budget", nil))
 	if got := frameSrcOf(w.Header().Get("Content-Security-Policy")); got != "frame-src https://apps.example.net "+editor {
 		t.Fatalf("runtime and editor frame-src: %q", got)
 	}
@@ -127,7 +131,6 @@ func writeEditorBundle(t *testing.T, dir string) string {
 // bundle path, never its own whole origin.
 func TestZeroConfigEditorServesUnderStudioPrefix(t *testing.T) {
 	cfg := config.Default()
-	cfg.Auth.NextjsURL = "https://studio.example.test"
 	dir := t.TempDir()
 	digest := writeEditorBundle(t, dir)
 	cfg.GridCraft = config.GridCraftConfig{EditorBundleDir: dir, EditorBundles: []string{digest}}
@@ -139,17 +142,17 @@ func TestZeroConfigEditorServesUnderStudioPrefix(t *testing.T) {
 	if editor == nil {
 		t.Fatal("enabled editor without an origin is not served")
 	}
-	if got := editor.IndexURL(digest); got != "https://studio.example.test/_editor/b/"+digest+"/index.html" {
+	if got := editor.IndexURL(digest); got != "/_editor/b/"+digest+"/index.html" {
 		t.Fatalf("index URL %q", got)
 	}
 	opts := editorHeaderOptions(cfg, editor)
-	if opts.editorFrameSrc != "https://studio.example.test/_editor/b/" {
-		t.Fatalf("frame-src source %q", opts.editorFrameSrc)
+	if opts.editorFrameSrc == nil || !opts.editorPerRequest {
+		t.Fatal("same-host frame-src is not per request")
 	}
 	main := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(299) })
 	handler := editororigin.Gate(editor, securityHeadersMiddlewareWith(main, opts))
 
-	r := httptest.NewRequest("GET", "/_editor/b/"+digest+"/index.html", nil)
+	r := httptest.NewRequest("GET", "https://studio.example.test/_editor/b/"+digest+"/index.html", nil)
 	r.Header.Set("Sec-Fetch-Dest", "iframe")
 	r.Header.Set("Sec-Fetch-Site", "same-origin")
 	w := httptest.NewRecorder()
@@ -159,7 +162,7 @@ func TestZeroConfigEditorServesUnderStudioPrefix(t *testing.T) {
 	}
 
 	w = httptest.NewRecorder()
-	handler.ServeHTTP(w, httptest.NewRequest("GET", "/chat", nil))
+	handler.ServeHTTP(w, httptest.NewRequest("GET", "https://studio.example.test/chat", nil))
 	policy := w.Header().Get("Content-Security-Policy")
 	if w.Code != 299 || frameSrcOf(policy) != "frame-src https://studio.example.test/_editor/b/" {
 		t.Fatalf("Studio document: %d frame-src %q", w.Code, frameSrcOf(policy))
@@ -175,7 +178,7 @@ func TestZeroConfigEditorServesUnderStudioPrefix(t *testing.T) {
 	} {
 		c := *cfg
 		off(&c.GridCraft)
-		if e := newEditorOrigin(&c, slog.Default()); e != nil || editorHeaderOptions(&c, e).editorFrameSrc != "" {
+		if e := newEditorOrigin(&c, slog.Default()); e != nil || editorHeaderOptions(&c, e).editorFrameSrc != nil {
 			t.Fatal("same-host editor served while disabled")
 		}
 	}
@@ -187,8 +190,8 @@ func TestDedicatedEditorOriginOverridesSameHost(t *testing.T) {
 	cfg.Auth.NextjsURL = "https://studio.example.test"
 	cfg.GridCraft = config.GridCraftConfig{Enabled: true, EditorEnabled: true, EditorOrigin: "https://editor.example.org"}
 	editor := newEditorOrigin(cfg, slog.Default())
-	if got := editorHeaderOptions(cfg, editor).editorFrameSrc; got != "https://editor.example.org" {
-		t.Fatalf("frame-src source %q", got)
+	if o := editorHeaderOptions(cfg, editor); o.editorFrameSrc(httptest.NewRequest("GET", "/chat", nil)) != "https://editor.example.org" || o.editorPerRequest {
+		t.Fatal("dedicated frame-src source")
 	}
 	main := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(299) })
 	w := httptest.NewRecorder()

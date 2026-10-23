@@ -52,21 +52,39 @@ func TestGridCraftEditorOriginValidation(t *testing.T) {
 		// Zero-config default: no dedicated origin serves the editor under a
 		// sandboxed path prefix of the Studio origin.
 		{"zero-config same host", func(c *Config) { c.GridCraft.EditorOrigin = ""; c.GridCraft.EditorDevelopmentSameSite = false }, "", true},
-		{"same host on loopback http", func(c *Config) {
-			c.Auth.NextjsURL = "http://localhost:3000"
+		// Out of the box nothing names the public URL: CREWSHIP_NEXTJS_URL
+		// keeps its internal default and is not the browser origin. The
+		// editor then follows each request's origin.
+		{"zero-config with internal default Next.js URL", func(c *Config) {
+			c.Auth.NextjsURL = Default().Auth.NextjsURL
 			c.GridCraft.EditorOrigin, c.GridCraft.EditorDevelopmentSameSite = "", false
 		}, "", true},
-		{"same host on cleartext studio", func(c *Config) {
+		{"zero-config ignores a cleartext Next.js URL", func(c *Config) {
 			c.Auth.NextjsURL = "http://studio.example.test"
+			c.GridCraft.EditorOrigin, c.GridCraft.EditorDevelopmentSameSite = "", false
+		}, "", true},
+		{"configured studio on loopback http", func(c *Config) {
+			c.Storage.PageStudioOrigin = "http://localhost:3000"
+			c.GridCraft.EditorOrigin, c.GridCraft.EditorDevelopmentSameSite = "", false
+		}, "", true},
+		{"configured cleartext studio", func(c *Config) {
+			c.Storage.PageStudioOrigin = "http://studio.example.test"
 			c.GridCraft.EditorOrigin, c.GridCraft.EditorDevelopmentSameSite = "", false
 		}, "", false},
 		{"same host with sibling exception set", func(c *Config) { c.GridCraft.EditorOrigin = "" }, "", false},
 		// A same-origin Page runtime puts all of Studio into frame-src; a
 		// self-navigated editor frame would then reach framable Studio documents.
-		{"same host with same-origin page runtime", func(c *Config) {
+		{"configured studio with same-origin page runtime", func(c *Config) {
 			c.GridCraft.EditorOrigin, c.GridCraft.EditorDevelopmentSameSite = "", false
+			c.Storage.PageStudioOrigin = "https://studio.example.test"
 			c.Storage.PageRuntimeOrigin = "https://studio.example.test"
 		}, "", false},
+		// Without a configured Studio origin the Page runtime host is refused
+		// per request (internal/editororigin), not at startup.
+		{"zero-config with a page runtime", func(c *Config) {
+			c.GridCraft.EditorOrigin, c.GridCraft.EditorDevelopmentSameSite = "", false
+			c.Storage.PageRuntimeOrigin = "https://studio.example.test"
+		}, "", true},
 		{"same host with separate page runtime", func(c *Config) {
 			c.GridCraft.EditorOrigin, c.GridCraft.EditorDevelopmentSameSite = "", false
 			c.Storage.PageRuntimeOrigin = "https://apps.example.net"

@@ -10,11 +10,20 @@ import (
 	"github.com/crewship-ai/crewship/internal/editororigin"
 )
 
-// editorProxyCheckSchedule spaces the same-host editor's self-check: soon
-// after start, then backing off while the public URL does not answer (the
-// proxy may come up after Crewship). Once a check gets an answer it repeats
-// at the last interval, so a later proxy change is noticed.
+// editorProxyCheckSchedule spaces the same-host editor's self-check while
+// no target answers: soon after a target is known, then backing off (the
+// proxy may come up after Crewship).
 var editorProxyCheckSchedule = []time.Duration{3 * time.Second, 15 * time.Second, time.Minute, 5 * time.Minute, time.Hour}
+
+// editorProxyCheckPassedEvery repeats the check once every target passed,
+// so a later proxy change is noticed. editorProxyCheckFailedEvery repeats it
+// while a target failed or is disabled, so a fixed proxy (or the end of a
+// maintenance window) brings the editor back after
+// editororigin.ReenableAfterPasses checks.
+var (
+	editorProxyCheckPassedEvery = time.Hour
+	editorProxyCheckFailedEvery = 5 * time.Minute
+)
 
 // editorProxyCheckConfirm is how long the self-check waits before repeating
 // a check that found an isolation failure. Only a repeated failure disables
@@ -30,66 +39,122 @@ func newEditorProxyCheckClient() *http.Client {
 	return &http.Client{Timeout: 10 * time.Second, Transport: transport}
 }
 
-// startEditorProxyCheck verifies, through the public Studio URL, that nothing
-// in front of Crewship redirects or normalises the same-host editor prefix.
-// A failure that defeats the path-scoped isolation disables the editor
-// (editororigin.Handler.SetProxyCheck); an unreachable URL decides nothing,
-// because many deployments cannot reach their own public name from inside.
-// `crewship doctor` runs the same check from the operator's side.
-func startEditorProxyCheck(ctx context.Context, wg *sync.WaitGroup, h *editororigin.Handler, studio string, logger *slog.Logger, client *http.Client, schedule []time.Duration) {
-	if h == nil || h.Status().Mode != "same-host" || len(schedule) == 0 {
+// startEditorProxyCheck verifies, through each public Studio URL browsers
+// use, that nothing in front of Crewship redirects or rewrites the same-host
+// editor prefix. The targets are the configured Studio origin, or the
+// origins learned from signed-in browser requests: until a browser has used
+// Studio there is nothing to probe and the state stays pending, never
+// passed. A confirmed isolation failure disables the editor on that origin
+// until editororigin.ReenableAfterPasses consecutive checks pass; an
+// unreachable URL decides nothing, because many deployments cannot reach
+// their own public name from inside. `crewship doctor` runs the same check
+// from the operator's side.
+func startEditorProxyCheck(ctx context.Context, wg *sync.WaitGroup, h *editororigin.Handler, logger *slog.Logger, client *http.Client, schedule []time.Duration) {
+	if h == nil || h.Detail().Mode != "same-host" || len(schedule) == 0 {
 		return
 	}
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for i := 0; ; i++ {
-			delay := schedule[min(i, len(schedule)-1)]
-			timer := time.NewTimer(delay)
+		backoff := 0
+		delay := schedule[0]
+		// Without a target there is nothing to wait for but a learned origin.
+		waiting := len(h.CheckTargets()) == 0
+		for {
+			var timer *time.Timer
+			var tick <-chan time.Time
+			if !waiting {
+				timer = time.NewTimer(delay)
+				tick = timer.C
+			}
 			select {
 			case <-ctx.Done():
-				timer.Stop()
+				if timer != nil {
+					timer.Stop()
+				}
 				return
-			case <-timer.C:
-			}
-			c := editororigin.CheckProxy(ctx, client, studio)
-			if c.Isolation {
-				confirm := time.NewTimer(editorProxyCheckConfirm)
-				select {
-				case <-ctx.Done():
-					confirm.Stop()
-					return
-				case <-confirm.C:
+			case <-h.Wake():
+				// A newly learned origin is checked soon, not at the next
+				// interval. At most a handful of origins are ever learned.
+				if timer != nil {
+					timer.Stop()
 				}
-				if again := editororigin.CheckProxy(ctx, client, studio); again.Status != editororigin.ProxyCheckUnreachable {
-					c = again
-				}
-			}
-			if ctx.Err() != nil {
-				return
-			}
-			switch c.Status {
-			case editororigin.ProxyCheckUnreachable:
-				if h.Status().ProxyCheck == editororigin.ProxyCheckPending {
-					logger.Warn("gridcraft editor (same host): public URL not reachable for the proxy self-check; run `crewship doctor` from outside", "url", studio, "detail", c.Warnings)
-				}
+				waiting, delay = false, schedule[0]
 				continue
-			case editororigin.ProxyCheckFailed:
-				h.SetProxyCheck(c)
-				if c.Isolation {
-					logger.Error("gridcraft editor (same host) disabled: a proxy redirects or rewrites /_editor/", "problems", c.Problems)
-				} else {
-					logger.Warn("gridcraft editor (same host): /_editor/ does not reach Crewship through the public URL", "problems", c.Problems)
-				}
-			default:
-				h.SetProxyCheck(c)
-				if len(c.Warnings) > 0 {
-					logger.Warn("gridcraft editor (same host) proxy self-check", "warnings", c.Warnings)
-				}
+			case <-tick:
 			}
-			if i < len(schedule)-1 {
-				i = len(schedule) - 2 // answered: continue at the last interval
+			targets := h.CheckTargets()
+			if len(targets) == 0 {
+				waiting = true
+				continue
+			}
+			answered := false
+			for _, origin := range targets {
+				c := checkEditorOrigin(ctx, client, origin)
+				if ctx.Err() != nil {
+					return
+				}
+				before := originDisabled(h, origin)
+				h.RecordCheck(origin, c)
+				after := originDisabled(h, origin)
+				switch c.Status {
+				case editororigin.ProxyCheckUnreachable:
+					logger.Warn("gridcraft editor (same host): public URL not reachable for the proxy self-check; run `crewship doctor` from outside", "origin", origin, "detail", c.Warnings)
+					continue
+				case editororigin.ProxyCheckFailed:
+					if c.Isolation {
+						logger.Error("gridcraft editor (same host) disabled on this origin: a proxy redirects or rewrites /_editor/", "origin", origin, "cause", c.Cause, "problems", c.Problems)
+					} else {
+						logger.Warn("gridcraft editor (same host): /_editor/ does not work through the public URL", "origin", origin, "cause", c.Cause, "problems", c.Problems)
+					}
+				default:
+					if before && !after {
+						logger.Info("gridcraft editor (same host) re-enabled: the proxy self-check passed repeatedly", "origin", origin)
+					}
+					if len(c.Warnings) > 0 {
+						logger.Warn("gridcraft editor (same host) proxy self-check", "origin", origin, "warnings", c.Warnings)
+					}
+				}
+				answered = true
+			}
+			switch {
+			case !answered:
+				backoff = min(backoff+1, len(schedule)-1)
+				delay = schedule[backoff]
+			case h.Health() == editororigin.HealthOK:
+				backoff, delay = 0, editorProxyCheckPassedEvery
+			default:
+				backoff, delay = 0, editorProxyCheckFailedEvery
 			}
 		}
 	}()
+}
+
+// checkEditorOrigin runs CheckProxy; an isolation failure is checked again
+// after editorProxyCheckConfirm and only a repeated one stands.
+func checkEditorOrigin(ctx context.Context, client *http.Client, origin string) editororigin.ProxyCheck {
+	c := editororigin.CheckProxy(ctx, client, origin)
+	if !c.Isolation {
+		return c
+	}
+	confirm := time.NewTimer(editorProxyCheckConfirm)
+	defer confirm.Stop()
+	select {
+	case <-ctx.Done():
+		return c
+	case <-confirm.C:
+	}
+	if again := editororigin.CheckProxy(ctx, client, origin); again.Status != editororigin.ProxyCheckUnreachable {
+		return again
+	}
+	return c
+}
+
+func originDisabled(h *editororigin.Handler, origin string) bool {
+	for _, o := range h.Detail().Origins {
+		if o.Origin == origin {
+			return o.Disabled
+		}
+	}
+	return false
 }

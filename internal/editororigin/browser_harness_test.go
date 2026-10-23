@@ -73,7 +73,11 @@ var harnessWasm = string([]byte{0, 'a', 's', 'm', 1, 0, 0, 0})
 // With CREWSHIP_TEST_EDITOR_MODE=same-host it is the front server of the
 // Studio origin, as the Crewship server is: Gate sends the editor prefix to
 // the same-host handler and reverse-proxies everything else, unchanged, to
-// the Studio stand-in at CREWSHIP_TEST_STUDIO_UPSTREAM. A front layer in the
+// the Studio stand-in at CREWSHIP_TEST_STUDIO_UPSTREAM, telling it the
+// frame-src source Crewship would add for that request
+// (X-Test-Editor-Frame-Src). No Studio origin is configured, as after
+// install, unless CREWSHIP_TEST_EDITOR_PINNED=1 configures this server's
+// own address. A front layer in the
 // same process can play a load balancer that sets its own SameSite=None
 // cookie on editor responses (/__proxycookie?on=1) and records the Cookie
 // headers the editor prefix receives (/__editorcookies).
@@ -113,7 +117,10 @@ func TestEditorOriginBrowserHarness(t *testing.T) {
 	opts := Options{Origin: origin, StudioOrigin: os.Getenv("CREWSHIP_TEST_STUDIO_ORIGIN"), BundleDir: dir, Bundles: []string{digest}}
 	sameHost := os.Getenv("CREWSHIP_TEST_EDITOR_MODE") == "same-host"
 	if sameHost {
-		opts = Options{SameHost: true, StudioOrigin: origin, BundleDir: dir, Bundles: []string{digest}}
+		opts = Options{SameHost: true, BundleDir: dir, Bundles: []string{digest}}
+		if os.Getenv("CREWSHIP_TEST_EDITOR_PINNED") == "1" {
+			opts.StudioOrigin = origin
+		}
 	}
 	h, err := New(opts)
 	if err != nil {
@@ -125,7 +132,11 @@ func TestEditorOriginBrowserHarness(t *testing.T) {
 		if err != nil || upstream.Host == "" {
 			t.Fatalf("same-host harness needs CREWSHIP_TEST_STUDIO_UPSTREAM: %v", err)
 		}
-		studio := &httputil.ReverseProxy{Rewrite: func(pr *httputil.ProxyRequest) { pr.SetURL(upstream); pr.Out.Host = pr.In.Host }}
+		studio := &httputil.ReverseProxy{Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.SetURL(upstream)
+			pr.Out.Host = pr.In.Host
+			pr.Out.Header.Set("X-Test-Editor-Frame-Src", h.FrameSourceFor(pr.In))
+		}}
 		serve = Gate(h, studio)
 	}
 	var proxyCookie atomic.Bool
@@ -166,6 +177,8 @@ func TestEditorOriginBrowserHarness(t *testing.T) {
 	defer server.Close()
 	go server.Serve(listener)
 	info, _ := json.Marshal(map[string]string{"origin": origin, "digest": digest, "index": h.IndexURL(digest), "frameSrc": h.FrameSource()})
+	// Same host: index is a path the host page resolves against its origin,
+	// and frameSrc is per request (X-Test-Editor-Frame-Src).
 	if err := os.WriteFile(out, info, 0o600); err != nil {
 		t.Fatal(err)
 	}

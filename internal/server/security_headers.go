@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"path"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/editororigin"
@@ -33,17 +34,20 @@ func securityHeadersMiddleware(next http.Handler, pageRuntimeOrigin ...string) h
 // securityHeaderOptions are the operator-configured origins Studio may frame.
 type securityHeaderOptions struct {
 	pageRuntimeOrigin string
-	// editorFrameSrc is the embedded workbook editor's frame-src source, set
-	// only while the editor is enabled: a dedicated editor origin, or the
-	// bundle path on the Studio origin (zero-config default, never the bare
-	// Studio origin, so a self-navigated editor frame cannot reach a Studio
-	// document). It is added to frame-src of every UI document: the policy
-	// belongs to the document, and the UI routes on the client, so a
-	// document first loaded on /chat may later show a workbook Page. The
-	// editor document is CSP-sandboxed and holds no credential; frame-src
-	// governs only what Studio frames, not who may frame Studio
+	// editorFrameSrc returns the embedded workbook editor's frame-src source
+	// for a request; nil while the editor is off. It is a dedicated editor
+	// origin, or the bundle path on the request's Studio origin (zero-config
+	// default, never the bare Studio origin, so a self-navigated editor frame
+	// cannot reach a Studio document). It is added to frame-src of every UI
+	// document: the policy belongs to the document, and the UI routes on the
+	// client, so a document first loaded on /chat may later show a workbook
+	// Page. The editor document is CSP-sandboxed and holds no credential;
+	// frame-src governs only what Studio frames, not who may frame Studio
 	// (frame-ancestors stays 'none').
-	editorFrameSrc string
+	editorFrameSrc func(*http.Request) string
+	// editorPerRequest: the source depends on the request's Host and
+	// scheme, so UI documents are kept out of shared caches.
+	editorPerRequest bool
 }
 
 func appendFrameSrc(frameSrc, origin string) string {
@@ -57,8 +61,11 @@ func appendFrameSrc(frameSrc, origin string) string {
 }
 
 func securityHeadersMiddlewareWith(next http.Handler, o securityHeaderOptions) http.Handler {
-	editorFrameSrc := o.editorFrameSrc
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		editorFrameSrc := ""
+		if o.editorFrameSrc != nil {
+			editorFrameSrc = o.editorFrameSrc(r)
+		}
 		frameSrc := appendFrameSrc(appendFrameSrc(pages.FrameSrcDirective(), o.pageRuntimeOrigin), editorFrameSrc)
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -167,6 +174,14 @@ func securityHeadersMiddlewareWith(next http.Handler, o securityHeaderOptions) h
 					"frame-ancestors 'none'; "+
 					"base-uri 'self'; "+
 					"form-action 'self'")
+			if o.editorPerRequest && isUIDocumentPath(path) {
+				// The same-host editor's frame-src names this request's own
+				// origin. Caches key on host and scheme, but one that maps
+				// several hosts to one entry would replay another host's
+				// policy: documents stay out of shared caches. Hashed static
+				// assets carry no policy that matters and stay cacheable.
+				w.Header().Set("Cache-Control", "private")
+			}
 		default:
 			w.Header().Set("Content-Security-Policy",
 				"default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
@@ -174,4 +189,11 @@ func securityHeadersMiddlewareWith(next http.Handler, o securityHeaderOptions) h
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// isUIDocumentPath reports whether a UI path can serve an HTML document: no
+// file extension (client routes) or .html.
+func isUIDocumentPath(p string) bool {
+	ext := path.Ext(p)
+	return ext == "" || ext == ".html"
 }

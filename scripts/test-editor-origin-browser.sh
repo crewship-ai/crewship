@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Chromium contract for the sandboxed editor: dedicated origin (three host
-# variants) and the zero-config same-host mode. Missing prerequisites fail.
+# variants) and the zero-config same-host mode (direct, behind a proxy on
+# another host:port, and with a configured origin the browser does not use).
+# Missing prerequisites fail.
 #
 #   crewship-heavy scripts/test-editor-origin-browser.sh
 #
@@ -22,3 +24,8 @@ timeout 120s node e2e/editor-origin-sandbox.mjs | tee "$out/browser.log"
 HOST_COEP=1 timeout 120s node e2e/editor-origin-sandbox.mjs | tee "$out/browser-coep.log"
 HOST_SANDBOX=1 timeout 120s node e2e/editor-origin-sandbox.mjs | tee "$out/browser-host-sandbox.log"
 EDITOR_MODE=same-host timeout 180s node e2e/editor-origin-sandbox.mjs | tee "$out/browser-same-host.log"
+# Zero-config behind a reverse proxy on another host:port: no public origin is
+# configured anywhere, the editor must still load.
+EDITOR_MODE=same-host EDITOR_PROXY=1 timeout 180s node e2e/editor-origin-sandbox.mjs | tee "$out/browser-same-host-proxy.log"
+# A configured public origin that the browser does not use: fail closed.
+EDITOR_MODE=same-host EDITOR_PROXY=1 EDITOR_PINNED=1 timeout 120s node e2e/editor-origin-sandbox.mjs | tee "$out/browser-same-host-pinned.log"

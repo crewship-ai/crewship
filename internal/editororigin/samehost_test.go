@@ -14,7 +14,21 @@ import (
 
 const sameHostSelf = studio + "/_editor/b/"
 
+// sameHostFixture is a same-host editor whose operator configured the public
+// Studio origin (studio).
 func sameHostFixture(t *testing.T) (*Handler, string) {
+	t.Helper()
+	return sameHostWith(t, Options{StudioOrigin: studio})
+}
+
+// zeroConfigFixture is the default after install: no Studio origin is
+// configured, each request's own origin is used.
+func zeroConfigFixture(t *testing.T) (*Handler, string) {
+	t.Helper()
+	return sameHostWith(t, Options{})
+}
+
+func sameHostWith(t *testing.T, o Options) (*Handler, string) {
 	t.Helper()
 	dir := t.TempDir()
 	digest := writeBundle(t, dir, map[string]string{
@@ -22,7 +36,8 @@ func sameHostFixture(t *testing.T) (*Handler, string) {
 		"app.js":      "console.log(1)",
 		"app_bg.wasm": "\x00asm",
 	})
-	h, err := New(Options{SameHost: true, StudioOrigin: studio, BundleDir: dir, Bundles: []string{digest}})
+	o.SameHost, o.BundleDir, o.Bundles = true, dir, []string{digest}
+	h, err := New(o)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,10 +113,17 @@ func TestSameHostServesBundleOnlyUnderPrefix(t *testing.T) {
 			}
 		})
 	}
-	// The prefix is served on whatever host reaches the server: the gate does
-	// not depend on proxies preserving Host.
-	if w := serve(gate, "GET", "internal-upstream:8080", index, frameNav...); w.Code != 200 {
-		t.Fatalf("prefix depends on Host: %d", w.Code)
+	// The prefix belongs to the editor on every host. With a configured
+	// Studio origin, another Host is refused there (fail closed), never
+	// handed to the application.
+	if w := serve(gate, "GET", "internal-upstream:8080", index, frameNav...); w.Code != http.StatusMisdirectedRequest || w.Header().Get("X-Main") != "" || w.Header().Get(RouteHeader) != "editor" {
+		t.Fatalf("configured origin, other Host: %d %v", w.Code, w.Header())
+	}
+	// Without one (the default), the editor is served on the host the
+	// request reached.
+	z, zDigest := zeroConfigFixture(t)
+	if w := serve(Gate(z, main), "GET", "internal-upstream:8080", "/_editor/b/"+zDigest+"/index.html", frameNav...); w.Code != 200 {
+		t.Fatalf("zero-config editor depends on a configured origin: %d", w.Code)
 	}
 }
 
@@ -266,19 +288,31 @@ func TestSameHostHeadersAreExact(t *testing.T) {
 }
 
 func TestSameHostFrameSourceAndIndexURL(t *testing.T) {
+	req := func(host string) *http.Request {
+		r, _ := http.NewRequest("GET", "http://"+host+"/chat", nil)
+		return r
+	}
 	h, digest := sameHostFixture(t)
-	if got := h.FrameSource(); got != sameHostSelf {
+	if got := h.FrameSourceFor(req("studio.example.test")); got != sameHostSelf {
 		t.Fatalf("same-host frame-src source %q", got)
 	}
-	if got := h.IndexURL(digest); got != studio+"/_editor/b/"+digest+"/index.html" {
+	if got := h.FrameSourceFor(req("internal-upstream:8080")); got != "" {
+		t.Fatalf("configured origin framed on another host: %q", got)
+	}
+	// The host page resolves the path against its own origin; the server
+	// never guesses the scheme or host a proxy hides from it.
+	if got := h.IndexURL(digest); got != "/_editor/b/"+digest+"/index.html" {
 		t.Fatalf("same-host index URL %q", got)
 	}
+	if h.FrameSource() != "" {
+		t.Fatal("same-host editor has no fixed frame source")
+	}
 	d, dDigest := fixture(t)
-	if d.FrameSource() != editor || d.IndexURL(dDigest) != editor+"/b/"+dDigest+"/index.html" {
+	if d.FrameSource() != editor || d.FrameSourceFor(req("studio.example.test")) != editor || d.IndexURL(dDigest) != editor+"/b/"+dDigest+"/index.html" {
 		t.Fatalf("dedicated frame-src %q index %q", d.FrameSource(), d.IndexURL(dDigest))
 	}
 	var none *Handler
-	if none.FrameSource() != "" || none.IndexURL(digest) != "" || Deny().FrameSource() != "" {
+	if none.FrameSource() != "" || none.FrameSourceFor(req("x.test")) != "" || none.IndexURL(digest) != "" || Deny().FrameSource() != "" || Deny().IndexURL(digest) != "" {
 		t.Fatal("disabled or denying handler named a frame source")
 	}
 }
@@ -296,8 +330,8 @@ func TestSameHostWithoutUsableStudioOriginOwnsOnlyThePrefix(t *testing.T) {
 	if w := serve(Gate(h, main), "GET", "studio.example.test", "/", nil...); w.Code != 299 {
 		t.Fatalf("same-host failure took the application down: %d", w.Code)
 	}
-	if h.FrameSource() != "" {
-		t.Fatal("unusable same-host editor widened frame-src")
+	if r, _ := http.NewRequest("GET", "https://studio.example.test/", nil); h.FrameSourceFor(r) != "" || h.IndexURL("x") != "" || h.Health() != HealthDisabled {
+		t.Fatal("unusable same-host editor widened frame-src or reported itself usable")
 	}
 	if _, err := New(Options{SameHost: true, Origin: editor, StudioOrigin: studio}); err == nil {
 		t.Fatal("same-host mode accepted a dedicated origin as well")
@@ -310,6 +344,9 @@ func TestValidateSameHost(t *testing.T) {
 		allowed               []string
 		ok                    bool
 	}{
+		{"zero-config: no configured studio", "", "", nil, true},
+		{"zero-config with a page runtime", "", "https://apps.example.net", nil, true},
+		{"zero-config with opaque origin trusted", "", "", []string{"null"}, false},
 		{"https studio", studio, "", nil, true},
 		{"separate page runtime", studio, "https://apps.example.net", nil, true},
 		{"loopback http", "http://localhost:3000", "", nil, true},

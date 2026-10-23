@@ -5,14 +5,16 @@ package main
 // Workbook editor proxy check for `crewship doctor`. In the zero-config
 // same-host mode the embedded workbook editor is served under /_editor/ on
 // the Studio origin, and its isolation relies on nothing in front of Crewship
-// redirecting or normalising that prefix. The server checks this itself
-// where it can reach its own public URL (reported on /healthz); doctor runs
-// the same requests from the operator's side, through whatever proxy, CDN or
-// load balancer a browser goes through.
+// redirecting or rewriting that prefix. The server checks this itself through
+// the public origins signed-in browsers use (or the configured one); /healthz
+// reports only a coarse state and instance administrators get the detail.
+// Doctor runs the same requests from the operator's side, through whatever
+// proxy, CDN or load balancer a browser goes through.
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,17 +25,50 @@ import (
 	"github.com/crewship-ai/crewship/internal/editororigin"
 )
 
-const workbookEditorProxyHint = "the proxy must pass /_editor/ to Crewship unchanged: no redirect, no path decoding or normalisation (nginx: proxy_pass without a URI), no SSO or authentication gate; see docs/configuration/environment#same-host-mode, then restart Crewship"
+const workbookEditorProxyHint = "the proxy must pass /_editor/ to Crewship unchanged and forward the original Host: no redirect, no path decoding or normalisation (nginx: proxy_pass without a URI), no SSO or authentication gate; see docs/configuration/environment#same-host-mode"
+
+const workbookEditorDetailHint = "run 'crewship admin instance workbook-editor' as an instance administrator for the cause"
+
+// errEditorDetailForbidden: the caller is not an instance administrator.
+var errEditorDetailForbidden = errors.New("not an instance administrator")
 
 func runCheckWorkbookEditorProxy(ctx context.Context) checkResult {
-	return checkWorkbookEditorProxy(ctx, cli.EffectiveServer(flagServer, flagProfile, cliCfg))
+	var detail func(context.Context) (*editororigin.Detail, error)
+	if cli.EnvToken() != "" || (cliCfg != nil && cliCfg.Token != "") {
+		detail = func(ctx context.Context) (*editororigin.Detail, error) {
+			return fetchWorkbookEditorDetail(ctx, newAPIClient())
+		}
+	}
+	return checkWorkbookEditorProxy(ctx, cli.EffectiveServer(flagServer, flagProfile, cliCfg), detail)
 }
 
-// checkWorkbookEditorProxy reads the editor status from <serverURL>/healthz
-// and, for a same-host editor, runs editororigin.CheckProxy against the
-// public Studio URL that status names. Anything that is not a same-host
-// editor is INFO, as is a server or public URL this machine cannot reach.
-func checkWorkbookEditorProxy(ctx context.Context, serverURL string) checkResult {
+// fetchWorkbookEditorDetail reads GET /api/v1/admin/instance/workbook-editor.
+func fetchWorkbookEditorDetail(ctx context.Context, client *cli.Client) (*editororigin.Detail, error) {
+	resp, err := client.WithContext(ctx).Get("/api/v1/admin/instance/workbook-editor")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return nil, errEditorDetailForbidden
+	default:
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	var d editororigin.Detail
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&d); err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
+// checkWorkbookEditorProxy reads the coarse editor state from
+// <serverURL>/healthz and, with detail (an instance administrator's login),
+// runs editororigin.CheckProxy against every public Studio origin the server
+// checks. PASS needs both this machine's check and the server's own check
+// to pass. An editor that is off or on a dedicated origin is INFO.
+func checkWorkbookEditorProxy(ctx context.Context, serverURL string, detail func(context.Context) (*editororigin.Detail, error)) checkResult {
 	const name = "workbook editor proxy"
 	client := &http.Client{Timeout: 5 * time.Second}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(serverURL, "/")+"/healthz", nil)
@@ -46,38 +81,99 @@ func checkWorkbookEditorProxy(ctx context.Context, serverURL string) checkResult
 	}
 	defer resp.Body.Close()
 	var body struct {
-		Editor *editororigin.Status `json:"workbook_editor"`
+		Editor json.RawMessage `json:"workbook_editor"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
 		return checkResult{name: name, status: "INFO", detail: "server does not report the workbook editor — skipped"}
 	}
-	if body.Editor == nil || body.Editor.Mode == "" {
+	if len(body.Editor) == 0 {
 		return checkResult{name: name, status: "INFO", detail: "workbook editor is off"}
 	}
-	if body.Editor.Mode != "same-host" {
-		return checkResult{name: name, status: "INFO", detail: fmt.Sprintf("workbook editor served from a dedicated origin (%s); no same-host proxy rules apply", body.Editor.URL)}
+	var health string
+	if err := json.Unmarshal(body.Editor, &health); err != nil {
+		return checkResult{name: name, status: "INFO", detail: "server reports the workbook editor in an older format — skipped"}
 	}
-	if body.Editor.Disabled {
-		return checkResult{name: name, status: "FAIL", detail: "the server disabled the workbook editor: " + body.Editor.Detail, hint: workbookEditorProxyHint}
+
+	var d *editororigin.Detail
+	var detailErr error
+	if detail == nil {
+		detailErr = errEditorDetailForbidden
+	} else {
+		d, detailErr = detail(ctx)
 	}
-	studio, ok := strings.CutSuffix(body.Editor.URL, editororigin.SameHostPrefix+editororigin.BundlePrefix)
-	if !ok || editororigin.CanonicalOrigin(studio) == "" {
-		return checkResult{name: name, status: "INFO", detail: fmt.Sprintf("unexpected editor URL %q — skipped", body.Editor.URL)}
-	}
-	c := editororigin.CheckProxy(ctx, &http.Client{Timeout: 10 * time.Second}, studio)
-	switch c.Status {
-	case editororigin.ProxyCheckFailed:
-		kind := "/_editor/ does not reach the editor"
-		if c.Isolation {
-			kind = "a redirect or path rewrite in front of Crewship defeats the editor isolation"
+	if detailErr != nil {
+		// Only the coarse state: say what it means and how to see more.
+		why := "log in as an instance administrator to check the public path from here"
+		if detail != nil && !errors.Is(detailErr, errEditorDetailForbidden) {
+			why = "editor detail unavailable (" + detailErr.Error() + ")"
 		}
-		return checkResult{name: name, status: "FAIL", detail: kind + ": " + strings.Join(c.Problems, "; "), hint: workbookEditorProxyHint}
-	case editororigin.ProxyCheckUnreachable:
-		return checkResult{name: name, status: "INFO", detail: fmt.Sprintf("%s not reachable from here (server self-check: %s) — run doctor where a browser would reach it", studio, body.Editor.ProxyCheck)}
+		switch health {
+		case editororigin.HealthDisabled:
+			return checkResult{name: name, status: "FAIL", detail: "the server disabled the workbook editor: a proxy in front of Crewship redirects or rewrites /_editor/; " + workbookEditorDetailHint, hint: workbookEditorProxyHint}
+		case editororigin.HealthFailed:
+			return checkResult{name: name, status: "WARN", detail: "the server's own check of /_editor/ through the public URL failed; " + workbookEditorDetailHint, hint: workbookEditorProxyHint}
+		case editororigin.HealthPending:
+			return checkResult{name: name, status: "WARN", detail: "server self-check pending (it starts once a browser has used Studio); " + why}
+		default:
+			return checkResult{name: name, status: "INFO", detail: "server self-check: " + health + "; " + why}
+		}
 	}
-	detail := fmt.Sprintf("%s/_editor/ passes unchanged (server self-check: %s)", studio, body.Editor.ProxyCheck)
-	if len(c.Warnings) > 0 {
-		return checkResult{name: name, status: "WARN", detail: detail + "; " + strings.Join(c.Warnings, "; ")}
+	switch d.Mode {
+	case "same-host":
+	case "dedicated":
+		return checkResult{name: name, status: "INFO", detail: fmt.Sprintf("workbook editor served from a dedicated origin (%s); no same-host proxy rules apply", d.Origin)}
+	default:
+		return checkResult{name: name, status: "INFO", detail: "workbook editor is off"}
 	}
-	return checkResult{name: name, status: "PASS", detail: detail}
+	if len(d.Origins) == 0 {
+		return checkResult{name: name, status: "WARN", detail: "server self-check pending: no browser has used Studio since the server started, so the public URL is not known yet; open Studio in a browser, then run doctor again"}
+	}
+
+	var fails, warns, passes []string
+	for _, o := range d.Origins {
+		server := o.ProxyCheck
+		if o.Disabled {
+			fails = append(fails, fmt.Sprintf("%s: the server disabled the editor (%s: %s)", o.Origin, o.Cause, strings.Join(o.Problems, "; ")))
+			continue
+		}
+		if o.Cause == editororigin.CauseHostRewritten {
+			warns = append(warns, fmt.Sprintf("%s: %s", o.Origin, strings.Join(o.Problems, "; ")))
+			continue
+		}
+		c := editororigin.CheckProxy(ctx, &http.Client{Timeout: 10 * time.Second}, o.Origin)
+		switch c.Status {
+		case editororigin.ProxyCheckFailed:
+			kind := "/_editor/ does not work through the public URL"
+			if c.Isolation {
+				kind = "a redirect or path rewrite in front of Crewship defeats the editor isolation"
+			}
+			fails = append(fails, fmt.Sprintf("%s: %s: %s", o.Origin, kind, strings.Join(c.Problems, "; ")))
+			continue
+		case editororigin.ProxyCheckUnreachable:
+			warns = append(warns, fmt.Sprintf("%s is not reachable from here (server self-check: %s); run doctor where a browser would reach it", o.Origin, server))
+			continue
+		}
+		if server != editororigin.ProxyCheckPassed {
+			// N5: passing from here does not make up for the server's own
+			// check, which is what keeps the editor enabled.
+			msg := fmt.Sprintf("%s passes from here, but the server self-check is %s", o.Origin, server)
+			if len(o.Problems) > 0 {
+				msg += " (" + strings.Join(o.Problems, "; ") + ")"
+			}
+			warns = append(warns, msg)
+			continue
+		}
+		if len(c.Warnings) > 0 {
+			warns = append(warns, o.Origin+": "+strings.Join(c.Warnings, "; "))
+			continue
+		}
+		passes = append(passes, o.Origin)
+	}
+	switch {
+	case len(fails) > 0:
+		return checkResult{name: name, status: "FAIL", detail: strings.Join(append(fails, warns...), "; "), hint: workbookEditorProxyHint}
+	case len(warns) > 0:
+		return checkResult{name: name, status: "WARN", detail: strings.Join(warns, "; "), hint: workbookEditorProxyHint}
+	}
+	return checkResult{name: name, status: "PASS", detail: strings.Join(passes, ", ") + ": /_editor/ reaches the editor unchanged, nothing in front redirects it or routes a path under it elsewhere in Crewship, and the server self-check passed"}
 }
