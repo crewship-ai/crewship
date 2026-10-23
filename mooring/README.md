@@ -13,6 +13,26 @@ batches returned by `push` or `take_due` immediately. Transport envelope bytes
 must be reserved when configuring the batch byte limit. This primitive does not
 claim end-to-end latency or durable storage guarantees.
 
+`mooring_core::schedule::TimedQueue` adds an aggregate unsent limit of 256
+operations and 256 KiB across pending and ready batches. Atomic changes remain
+whole; backpressure returns the rejected change to its caller. The native
+`schedule::native::Scheduler` owns a worker timer using Linux `CLOCK_BOOTTIME`:
+the first enqueue starts the deadline, and another enqueue does not restart it.
+Clock failure closes handoff until explicit cancellation. The portable queue
+also compiles for WASM; a browser timer binding is still required there.
+
+Receiving a ready batch releases unsent capacity independently of a durable
+acknowledgement. A transport must separately bound inflight work, retain its
+draft journal, and reserve envelope bytes within the byte budget. Explicit
+`close()` returns all unsent changes, including after a clock failure.
+`shutdown(&self)` wakes receive workers through a shared handle, allowing them
+to release their handles before an exclusive `close()` joins and returns work.
+Dropping a scheduler stops its worker but discards that returned list; callers that need
+ownership must close it explicitly and always retain drafts outside this queue.
+A native socket test sends two low-load batches before a delayed mock durable
+acknowledgement. This proves timer/handoff separation, not production transport
+latency, durable acknowledgements, or browser scheduling.
+
 From the repository root:
 
 ```sh
@@ -48,6 +68,14 @@ Run from the repository root with the vendored source configuration:
 crewship-heavy cargo test --manifest-path mooring/Cargo.toml --config mooring/.cargo/config.toml --locked --offline
 python3 mooring/scripts/license-inventory.py --check
 ```
+
+The `--check` path verifies both local file hashes and every vendored Git-index
+blob, so ignored upstream build sources cannot disappear from a clean checkout.
+When updating dependencies, use `cargo vendor --locked --versioned-dirs` with
+the workspace manifest, regenerate the inventory, and stage every checksum-listed
+source before running `--check`. Repository ignore rules may require exact
+`git add -f -- PATH` for legitimate upstream build/test files; never alter their
+Cargo checksums to omit them. Unexpected indexed vendor files also fail.
 
 Text input accepts one bounded Y-sync envelope; readers cannot send SyncStep2
 or Update. Raw Yjs auth, custom messages and awareness are rejected; presence
