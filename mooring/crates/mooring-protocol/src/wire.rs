@@ -20,7 +20,11 @@ pub enum WireError {
 /// oversized input must remain an unsaved draft or use another negotiated path.
 pub fn validate_bounded_envelope(raw: &[u8]) -> Result<CanonicalValue, WireError> {
     let normalized = normalize_bounded(raw)?;
-    if !crate::shape::envelope(normalized.value()) {
+    if crate::control::is_control_type(normalized.value()["type"].as_str().unwrap_or(""))
+        || normalized.value().get("control_profiles").is_some()
+        || normalized.value().get("selected_control_profile").is_some()
+        || !crate::shape::envelope(normalized.value())
+    {
         return Err(WireError::InvalidShape);
     }
     Ok(normalized)
@@ -46,7 +50,11 @@ pub fn valid_identifier(value: &str) -> bool {
 /// Strict parsing afterwards rejects bad syntax, escapes, duplicate keys,
 /// invalid Unicode, nonfinite numbers and trailing content.
 pub(crate) fn preflight(raw: &[u8]) -> Result<(), WireError> {
-    if raw.is_empty() || raw.len() > MAX_FRAME_BYTES {
+    preflight_with_limit(raw, MAX_FRAME_BYTES)
+}
+
+pub(crate) fn preflight_with_limit(raw: &[u8], maximum: usize) -> Result<(), WireError> {
+    if raw.is_empty() || raw.len() > maximum {
         return Err(WireError::ResourceLimit);
     }
     let (mut quoted, mut escaped) = (false, false);
@@ -123,12 +131,23 @@ mod tests {
         for case in fixtures["schema_cases"].as_array().unwrap() {
             if case["schema_ref"] == "#" && case["schema_valid"] == true {
                 let raw = serde_json::to_vec(&case["message"]).unwrap();
-                validate_bounded_envelope(&raw)
-                    .unwrap_or_else(|error| panic!("{}: {error:?}", case["id"]));
+                let message = &case["message"];
+                if crate::control::is_control_type(message["type"].as_str().unwrap_or(""))
+                    || message.get("control_profiles").is_some()
+                    || message.get("selected_control_profile").is_some()
+                {
+                    assert_eq!(
+                        validate_bounded_envelope(&raw).unwrap_err(),
+                        WireError::InvalidShape
+                    );
+                } else {
+                    validate_bounded_envelope(&raw)
+                        .unwrap_or_else(|error| panic!("{}: {error:?}", case["id"]));
+                }
                 count += 1;
             }
         }
-        assert_eq!(count, 54); // Some message shapes have multiple valid vectors.
+        assert_eq!(count, 61); // Some message shapes have multiple valid vectors.
         for raw in [
             br#"{"type":"hello","type":"hello"}"#.as_slice(),
             br#"{"type":"hello","\u0074ype":"hello"}"#,

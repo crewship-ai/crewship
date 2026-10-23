@@ -76,3 +76,13 @@ fn p21_draft_byte_quota_rejects_before_changing_text() {
     }
     assert!(rejected, "full-text drafts must have a bounded byte budget");
 }
+
+#[test]
+fn participant_sdk_cannot_offer_inherited_control_profile() {
+    assert_eq!(
+        negotiate_json(
+            r#"{"type":"hello","request_id":"r","supported":[{"protocol_version":"0.4.0","model_version":"1.0.0","engine_version":"0.28.0"}],"control_profiles":["mooring.prepare.v1"]}"#
+        ),
+        Err("invalid_request".into())
+    );
+}

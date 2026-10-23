@@ -99,10 +99,13 @@ export interface ChangeResult {
 
 export type HelloType = "hello";
 
+export type HelloControlProfilesItem = "mooring.prepare.v1";
+
 export interface Hello {
   type: HelloType;
   request_id: Identifier;
   supported: Array<Versions>;
+  control_profiles?: Array<HelloControlProfilesItem>;
 }
 
 export type WelcomeType = "welcome";
@@ -799,12 +802,139 @@ export type TaskChangeState = ChangeResult | TaskChangeStateVariant2;
 
 export type RuntimeReadyType = "runtime_ready";
 
+export type RuntimeReadySelectedControlProfile = "mooring.prepare.v1";
+
 export interface RuntimeReady {
   type: RuntimeReadyType;
   request_id: Identifier;
   selected: Versions;
+  selected_control_profile?: RuntimeReadySelectedControlProfile;
 }
 
 export type Identifier = string;
 
-export type Message = Hello | Welcome | CommitBatch | CommitResult | StatusRequest | StatusResult | SessionTicketRequest | SessionTicket | OwnerAcquire | OwnerRenew | OwnerGrant | DeliveryRenew | DeliveryGrant | SessionClosed | DeliveryBlocked | RevocationConfirmed | ReadRequest | ReadResult | CheckpointRequest | CheckpointResult | Presence | TaskStatus | TaskResult | TaskCancel | Proposal | ProposalAccept | UndoRequest | ProtocolError | ManifestRequest | ManifestResult | LifecycleRequest | LifecycleResult | SessionJoin | SessionJoined | SessionLeave | SubmitChanges | ChangesReceived | TaskSubmit | ProposalRequest | CollaborationUpdate | DocumentUpdate | AssetRequest | AssetResult | TicketValidationRequest | TicketValidationResult | RevocationNotice | RuntimeReady;
+export type OpaquePreparedCheckpointEncoding = "base64";
+
+export interface OpaquePreparedCheckpoint {
+  encoding: OpaquePreparedCheckpointEncoding;
+  state: string;
+  digest: Digest;
+}
+
+export interface TargetIdentity {
+  target_id: Identifier;
+  deleted: boolean;
+}
+
+export interface TargetVersion {
+  target_id: Identifier;
+  revision: Counter;
+  structure_revision: Counter;
+  deleted: boolean;
+}
+
+export interface PreparedOperationRevision {
+  op_id: Identifier;
+  revision: PositiveCounter;
+}
+
+export type PrepareContextReadPolicy = "agent_confirmed_current";
+
+export interface PrepareContext {
+  read_policy: PrepareContextReadPolicy;
+  document_revision: Counter;
+  targets: Array<TargetVersion>;
+  operation_revisions: Array<PreparedOperationRevision>;
+}
+
+export interface TargetEffect {
+  target_id: Identifier;
+  content_changed: boolean;
+  structure_changed: boolean;
+  created: boolean;
+  deleted: boolean;
+}
+
+export interface PreparedOperationEffects {
+  op_id: Identifier;
+  targets: Array<TargetEffect>;
+}
+
+export type ValidateCheckpointType = "validate_checkpoint";
+
+export type ValidateCheckpointControlProfile = "mooring.prepare.v1";
+
+export interface ValidateCheckpoint {
+  type: ValidateCheckpointType;
+  request_id: Identifier;
+  scope: Scope;
+  selected: Versions;
+  checkpoint: OpaquePreparedCheckpoint;
+  control_profile: ValidateCheckpointControlProfile;
+}
+
+export type CheckpointValidatedType = "checkpoint_validated";
+
+export type CheckpointValidatedControlProfile = "mooring.prepare.v1";
+
+export interface CheckpointValidated {
+  type: CheckpointValidatedType;
+  request_id: Identifier;
+  scope: Scope;
+  selected: Versions;
+  input_checkpoint_digest: Digest;
+  inventory: Array<TargetIdentity>;
+  control_profile: CheckpointValidatedControlProfile;
+}
+
+export type PrepareAtomicType = "prepare_atomic";
+
+export type PrepareAtomicControlProfile = "mooring.prepare.v1";
+
+export interface PrepareAtomic {
+  type: PrepareAtomicType;
+  request_id: Identifier;
+  scope: Scope;
+  selected: Versions;
+  checkpoint: OpaquePreparedCheckpoint;
+  context: PrepareContext;
+  change: AtomicChange;
+  control_profile: PrepareAtomicControlProfile;
+}
+
+export type PreparedCandidateKind = "candidate";
+
+export interface PreparedCandidate {
+  kind: PreparedCandidateKind;
+  checkpoint: OpaquePreparedCheckpoint;
+  effects: Array<PreparedOperationEffects>;
+  inventory: Array<TargetIdentity>;
+}
+
+export type PreparedDirectFailureKind = "failure";
+
+export interface PreparedDirectFailure {
+  kind: PreparedDirectFailureKind;
+  op_id: Identifier;
+  reason: Rejection;
+}
+
+export type AtomicPreparedType = "atomic_prepared";
+
+export type AtomicPreparedOutcome = PreparedCandidate | PreparedDirectFailure;
+
+export type AtomicPreparedControlProfile = "mooring.prepare.v1";
+
+export interface AtomicPrepared {
+  type: AtomicPreparedType;
+  request_id: Identifier;
+  scope: Scope;
+  selected: Versions;
+  input_checkpoint_digest: Digest;
+  change_id: Identifier;
+  membership_hash: Digest;
+  outcome: AtomicPreparedOutcome;
+  control_profile: AtomicPreparedControlProfile;
+}
+
+export type Message = Hello | Welcome | CommitBatch | CommitResult | StatusRequest | StatusResult | SessionTicketRequest | SessionTicket | OwnerAcquire | OwnerRenew | OwnerGrant | DeliveryRenew | DeliveryGrant | SessionClosed | DeliveryBlocked | RevocationConfirmed | ReadRequest | ReadResult | CheckpointRequest | CheckpointResult | Presence | TaskStatus | TaskResult | TaskCancel | Proposal | ProposalAccept | UndoRequest | ProtocolError | ManifestRequest | ManifestResult | LifecycleRequest | LifecycleResult | SessionJoin | SessionJoined | SessionLeave | SubmitChanges | ChangesReceived | TaskSubmit | ProposalRequest | CollaborationUpdate | DocumentUpdate | AssetRequest | AssetResult | TicketValidationRequest | TicketValidationResult | RevocationNotice | RuntimeReady | ValidateCheckpoint | CheckpointValidated | PrepareAtomic | AtomicPrepared;

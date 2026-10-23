@@ -234,11 +234,19 @@ pub enum HelloType {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum HelloControlProfilesItem {
+    #[serde(rename = "mooring.prepare.v1")]
+    MooringPrepareV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Hello {
     pub r#type: HelloType,
     pub request_id: Identifier,
     pub supported: Vec<Versions>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_profiles: Option<Vec<HelloControlProfilesItem>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1404,14 +1412,225 @@ pub enum RuntimeReadyType {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum RuntimeReadySelectedControlProfile {
+    #[serde(rename = "mooring.prepare.v1")]
+    MooringPrepareV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimeReady {
     pub r#type: RuntimeReadyType,
     pub request_id: Identifier,
     pub selected: Versions,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_control_profile: Option<RuntimeReadySelectedControlProfile>,
 }
 
 pub type Identifier = String;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum OpaquePreparedCheckpointEncoding {
+    #[serde(rename = "base64")]
+    Base64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpaquePreparedCheckpoint {
+    pub encoding: OpaquePreparedCheckpointEncoding,
+    pub state: String,
+    pub digest: Digest,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetIdentity {
+    pub target_id: Identifier,
+    pub deleted: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetVersion {
+    pub target_id: Identifier,
+    pub revision: Counter,
+    pub structure_revision: Counter,
+    pub deleted: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreparedOperationRevision {
+    pub op_id: Identifier,
+    pub revision: PositiveCounter,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum PrepareContextReadPolicy {
+    #[serde(rename = "agent_confirmed_current")]
+    AgentConfirmedCurrent,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PrepareContext {
+    pub read_policy: PrepareContextReadPolicy,
+    pub document_revision: Counter,
+    pub targets: Vec<TargetVersion>,
+    pub operation_revisions: Vec<PreparedOperationRevision>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetEffect {
+    pub target_id: Identifier,
+    pub content_changed: bool,
+    pub structure_changed: bool,
+    pub created: bool,
+    pub deleted: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreparedOperationEffects {
+    pub op_id: Identifier,
+    pub targets: Vec<TargetEffect>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ValidateCheckpointType {
+    #[serde(rename = "validate_checkpoint")]
+    ValidateCheckpoint,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ValidateCheckpointControlProfile {
+    #[serde(rename = "mooring.prepare.v1")]
+    MooringPrepareV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ValidateCheckpoint {
+    pub r#type: ValidateCheckpointType,
+    pub request_id: Identifier,
+    pub scope: Scope,
+    pub selected: Versions,
+    pub checkpoint: OpaquePreparedCheckpoint,
+    pub control_profile: ValidateCheckpointControlProfile,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum CheckpointValidatedType {
+    #[serde(rename = "checkpoint_validated")]
+    CheckpointValidated,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum CheckpointValidatedControlProfile {
+    #[serde(rename = "mooring.prepare.v1")]
+    MooringPrepareV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CheckpointValidated {
+    pub r#type: CheckpointValidatedType,
+    pub request_id: Identifier,
+    pub scope: Scope,
+    pub selected: Versions,
+    pub input_checkpoint_digest: Digest,
+    pub inventory: Vec<TargetIdentity>,
+    pub control_profile: CheckpointValidatedControlProfile,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum PrepareAtomicType {
+    #[serde(rename = "prepare_atomic")]
+    PrepareAtomic,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum PrepareAtomicControlProfile {
+    #[serde(rename = "mooring.prepare.v1")]
+    MooringPrepareV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PrepareAtomic {
+    pub r#type: PrepareAtomicType,
+    pub request_id: Identifier,
+    pub scope: Scope,
+    pub selected: Versions,
+    pub checkpoint: OpaquePreparedCheckpoint,
+    pub context: PrepareContext,
+    pub change: AtomicChange,
+    pub control_profile: PrepareAtomicControlProfile,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum PreparedCandidateKind {
+    #[serde(rename = "candidate")]
+    Candidate,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreparedCandidate {
+    pub kind: PreparedCandidateKind,
+    pub checkpoint: OpaquePreparedCheckpoint,
+    pub effects: Vec<PreparedOperationEffects>,
+    pub inventory: Vec<TargetIdentity>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum PreparedDirectFailureKind {
+    #[serde(rename = "failure")]
+    Failure,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreparedDirectFailure {
+    pub kind: PreparedDirectFailureKind,
+    pub op_id: Identifier,
+    pub reason: Rejection,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum AtomicPreparedType {
+    #[serde(rename = "atomic_prepared")]
+    AtomicPrepared,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum AtomicPreparedOutcome {
+    PreparedCandidate(PreparedCandidate),
+    PreparedDirectFailure(PreparedDirectFailure),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum AtomicPreparedControlProfile {
+    #[serde(rename = "mooring.prepare.v1")]
+    MooringPrepareV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AtomicPrepared {
+    pub r#type: AtomicPreparedType,
+    pub request_id: Identifier,
+    pub scope: Scope,
+    pub selected: Versions,
+    pub input_checkpoint_digest: Digest,
+    pub change_id: Identifier,
+    pub membership_hash: Digest,
+    pub outcome: AtomicPreparedOutcome,
+    pub control_profile: AtomicPreparedControlProfile,
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -1463,4 +1682,8 @@ pub enum Message {
     TicketValidationResult(TicketValidationResult),
     RevocationNotice(RevocationNotice),
     RuntimeReady(RuntimeReady),
+    ValidateCheckpoint(ValidateCheckpoint),
+    CheckpointValidated(CheckpointValidated),
+    PrepareAtomic(PrepareAtomic),
+    AtomicPrepared(AtomicPrepared),
 }

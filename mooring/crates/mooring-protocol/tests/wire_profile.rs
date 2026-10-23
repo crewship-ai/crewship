@@ -104,6 +104,7 @@ fn shared_resource_identifier_and_version_boundaries() {
         };
         let supported = [version.clone()];
         let hello = Hello {
+            control_profiles: None,
             request_id: "request".into(),
             supported: vec![version],
             r#type: mooring_protocol::HelloType::Hello,
