@@ -86,3 +86,29 @@ counter is `precondition_failed`, attributed to the actual operation. This initi
 `agent_confirmed_current` capability rejects causal stale and provisional reads;
 the shared context fixtures qualify only this pure intersection, not host commits
 or the remaining broader collaboration modes.
+
+
+The default-off Go agent mandate prototype has no registered endpoint or
+production dispatcher call. `StartTask` accepts a current authenticated human
+source and original chat receipt, intersects canonical Page rights with an
+explicit live agent grant and crew application policy, and inserts a fresh
+host-generated work ID in the caller's transaction. All private targets are
+refused in this first agent capability. Read grants cannot become write tasks.
+Work input is bounded host-built instruction data, never an authority source.
+
+Pending consent and attached mandates exist only in host memory. Attachment
+requires the exact confirmed running ledger attempt and original strict source
+principal; a journal-only run, restored queued row, serialized origin or old
+agent bearer cannot recreate consent. Each check binds the original member,
+permission version, work/attempt/runtime tuple, run credential and ingress
+stamp. Its returned horizon is bounded by the source, principal, attempt lease,
+work deadline and suspend-aware mandate TTL.
+
+These checks are authority primitives, not delivery permits. The caller must
+acquire the shared ingress lease before opening its SQL writer and retain it
+through commit and the bounded response. Short internal checks do not provide
+that coverage. Actual dispatcher principal capture, participant/RPC binding,
+run cancellation and mandate revocation closing issued delivery gates, and
+restore drain/barrier integration remain required before enabling any content
+path. Tests use canonical SQL with synthetic trusted transport contexts and a
+synthetic suspend-aware clock; they do not establish live agent E3 acceptance.
