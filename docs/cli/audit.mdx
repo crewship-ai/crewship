@@ -184,9 +184,14 @@ rotating.
 The rotated keyring is first written beside the live one as
 `audit-keyring.json.pending-<entry id>` and renamed into place only after its
 audit entry committed. If the server stops in between, the next start installs
-the pending keyring when that entry exists, and otherwise sets it aside as
-`audit-keyring.json.discarded-<entry id>` (never installed, never deleted). A
-second rotation while one is pending is refused with 409.
+the pending keyring only when that entry exists, is the newest
+`audit.signing_key_rotated` entry, names exactly the staged active key, and that
+key is not already in the keyring. Anything else — an uncommitted rotation, a
+stale or replayed pending file — is set aside as
+`audit-keyring.json.discarded-<entry id>` (with a numeric suffix if that name is
+taken; never installed, never overwritten or deleted), logged as a warning, and
+the start continues. If the audit log cannot be read, the pending file is left
+for the next start. A second rotation while one is pending is refused with 409.
 
 The authenticated `POST /api/v1/admin/audit/signing-keys/rotate` requires the
 same authority as an instance reseal: the configured instance OWNER with

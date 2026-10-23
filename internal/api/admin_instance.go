@@ -341,6 +341,11 @@ func (h *InstanceAdminHandler) Suspend(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "suspend", err)
 		return
 	}
+	// Durable: a suspension lifted before a run's next step still stops it.
+	if err := MarkAccessRevokedTx(ctx, tx, id); err != nil {
+		replyInternalError(w, h.logger, "suspend: access revocation marker", err)
+		return
+	}
 	// Suspension only removes access, so it proceeds with a broken chain tail.
 	auditCtx := withSecurityAuditFallback(ctx)
 	ids, err := revokeCLITokensAuditedTx(auditCtx, tx, actor.ID, id, now)

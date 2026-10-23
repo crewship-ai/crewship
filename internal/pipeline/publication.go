@@ -106,7 +106,7 @@ func (s *Store) PublishDraftIn(ctx context.Context, tx *sql.Tx, publisher string
 	}
 	// The existing publication trigger increments changed recipes. An exact
 	// content/authority dedup still consumes a draft and advances its base once.
-	result, err = tx.ExecContext(ctx, `UPDATE pipelines SET publication_revision=CASE WHEN name IS ? AND description IS ? AND definition_json IS ? AND head_version IS ? THEN publication_revision+1 ELSE publication_revision END,name=?,description=?,definition_json=?,definition_hash=?,head_version=?,publication_authority_fingerprint=?,updated_at=? WHERE id=? AND workspace_id=? AND deleted_at IS NULL AND publication_revision=?`, content.Name, content.Description, raw, version, content.Name, content.Description, raw, hash, version, fingerprint, tsformat.Format(time.Now()), draft.BasePipelineID, draft.WorkspaceID, draft.BaseRevision)
+	result, err = tx.ExecContext(ctx, `UPDATE pipelines SET publication_revision=CASE WHEN name IS ? AND description IS ? AND definition_json IS ? AND head_version IS ? THEN publication_revision+1 ELSE publication_revision END,name=?,description=?,definition_json=?,definition_hash=?,head_version=?,publication_authority_fingerprint=?,publication_withdrawn_at=NULL,updated_at=? WHERE id=? AND workspace_id=? AND deleted_at IS NULL AND publication_revision=?`, content.Name, content.Description, raw, version, content.Name, content.Description, raw, hash, version, fingerprint, tsformat.Format(time.Now()), draft.BasePipelineID, draft.WorkspaceID, draft.BaseRevision)
 	if err != nil {
 		return 0, err
 	}

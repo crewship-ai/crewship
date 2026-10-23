@@ -401,6 +401,7 @@ export const TYPE_TO_GROUP: Record<string, EntryGroup> = {
   "provisioning.build_failed": "provisioning",
   "provisioning.step": "provisioning",
   "sidecar.stale": "provisioning",
+  "sidecar.recreated": "provisioning",
   "image.stale": "provisioning",
 
   // ── Skills.

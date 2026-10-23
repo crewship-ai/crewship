@@ -142,7 +142,7 @@ func (h *AdminUsersHandler) mutateSecurity(w http.ResponseWriter, r *http.Reques
 		// Durable, session-independent marker in the same transaction: a
 		// Guest-published run accepted earlier stops at its next step even
 		// when the user had already logged out and no session row changed.
-		err = markAccessRevokedTx(r.Context(), tx, target)
+		err = MarkAccessRevokedTx(r.Context(), tx, target)
 	}
 	if errors.Is(err, sessions.ErrNotFound) {
 		replyError(w, 404, "session not found")
@@ -244,9 +244,10 @@ func readAdminSessionRevocations(r *http.Request, tx *sql.Tx, target string, ids
 	return values, nil
 }
 
-// markAccessRevokedTx records an administrator revocation of a user's access.
-// Every admin session-revocation path writes it in its own transaction.
-func markAccessRevokedTx(ctx context.Context, tx *sql.Tx, user string) error {
+// MarkAccessRevokedTx records an administrator revocation or account recovery
+// of a user's access. Every such path, including host-side CLI recovery,
+// writes it in its own transaction; it stops accepted Guest-published runs.
+func MarkAccessRevokedTx(ctx context.Context, tx *sql.Tx, user string) error {
 	result, err := tx.ExecContext(ctx, `UPDATE users SET access_revoked_at=? WHERE id=?`, tsformat.Format(time.Now()), user)
 	if err != nil {
 		return err

@@ -166,6 +166,7 @@ var AllEntryTypes = []EntryType{
 	EntryRunSessionInit,
 	EntryRunStarted,
 	EntryRunTimeout,
+	EntrySidecarRecreated,
 	EntrySidecarStale,
 	EntrySkillArchived,
 	EntrySkillAssigned,
