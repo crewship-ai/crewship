@@ -42,7 +42,10 @@ return `{app_id,manifest,state,editor}`. State is `{rev,generation,snapshot}`.
 Commands take `{mutation_id,base_rev,generation,command,arguments}`. The same
 mutation ID and authority with the same packet return the original receipt;
 a different packet with that key is a conflict. Preserve the exact packet on an
-uncertain response. The history cap is 1000 revisions per document; the profile
+uncertain response. Workspace backups retain generic JSON state and immutable receipts. Live run
+mandates are excluded and require fresh human admission after restore.
+
+The history cap is 1000 revisions per document; the profile
 refuses further changes without pruning confirmed history.
 
 A successful receipt contains `mutation_id`, `rev`, `outcome: committed`,

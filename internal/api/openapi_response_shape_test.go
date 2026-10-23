@@ -15,6 +15,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/costvis"
 	"github.com/crewship-ai/crewship/internal/groupchat"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
+	"github.com/crewship-ai/crewship/internal/mooring"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
 	"github.com/crewship-ai/crewship/internal/slides"
@@ -75,6 +76,12 @@ var responseShapeContracts = []struct {
 	{name: "DocumentCheckpointSummary", pointer: "/components/schemas/DocumentCheckpointList/properties/checkpoints/items", value: documentCheckpointSummary{}},
 	{name: "DocumentCheckpoint", pointer: "/components/schemas/DocumentCheckpoint", value: documentCheckpointResponse{}},
 	{name: "DocumentRestoreReceipt", pointer: "/components/schemas/DocumentRestoreReceipt", value: documentRestoreResponse{}},
+	{name: "MooringManifest", pointer: "/components/schemas/MooringManifest", value: mooring.Manifest{}},
+	{name: "MooringCreated", pointer: "/components/schemas/MooringCreated", value: mooringCreated{}},
+	{name: "MooringRead", pointer: "/components/schemas/MooringRead", value: mooringRead{}},
+	{name: "MooringReceipt", pointer: "/components/schemas/MooringReceipt", value: mooring.Receipt{}},
+	{name: "MooringMandate", pointer: "/components/schemas/MooringMandate", value: mooringMandate{}},
+	{name: "MooringRevoked", pointer: "/components/schemas/MooringRevoked", value: mooringRevoked{}},
 	{name: "WorkbookState", pointer: "/components/schemas/WorkbookState", value: appengine.State{}},
 	{name: "WorkbookReceipt", pointer: "/components/schemas/WorkbookReceipt", value: appengine.Receipt{}},
 	{name: "WorkbookStatus", pointer: "/components/schemas/WorkbookStatus", value: appengine.Status{}},

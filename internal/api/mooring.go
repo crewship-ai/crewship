@@ -32,6 +32,9 @@ type mooringHTTP struct {
 func (r *Router) registerMooring(h *gridcraftHTTP) {
 	m := &mooringHTTP{h, mooring.JSONAdapter{}}
 	authed, wsCtx := r.authMw.RequireAuth, r.authMw.RequireWorkspace
+	internalAuth := func(next http.Handler) http.Handler {
+		return r.internalHandler.requireInternal(withHostChatOrigin(next))
+	}
 	// openapi: responses 200,401,403
 	r.mux.Handle("GET /api/v1/mooring/apps", authed(wsCtx(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) { writeJSON(w, 200, mooring.Applications()) }))))
 	// openapi: responses 200,201,400,401,403,404,409,500,503
@@ -45,7 +48,7 @@ func (r *Router) registerMooring(h *gridcraftHTTP) {
 	// openapi: responses 200,400,401,403,404,500,503
 	r.authedMut("DELETE", "/api/v1/pages/{slug}/mooring/mandates/{mandate}", roleInline, m.revoke)
 	// openapi: responses 200,400,403,404,409,500,503
-	r.mux.Handle("POST /api/v1/internal/mooring", r.internalHandler.requireInternal(withHostChatOrigin(http.HandlerFunc(m.agent))))
+	r.mux.Handle("POST /api/v1/internal/mooring", internalAuth(http.HandlerFunc(m.agent)))
 }
 func mooringError(w http.ResponseWriter, e error) {
 	if errors.Is(e, mooring.ErrConflict) {
@@ -143,7 +146,7 @@ func (m *mooringHTTP) create(w http.ResponseWriter, r *http.Request) {
 			mooringError(w, mooring.ErrConflict)
 			return
 		}
-		writeJSON(w, 200, map[string]string{"page_id": id, "slug": req.Slug, "name": name, "app_id": app})
+		writeJSON(w, 200, mooringCreated{PageID: id, Slug: req.Slug, Name: name, AppID: app})
 		return
 	}
 	if !errors.Is(e, sql.ErrNoRows) {
@@ -189,7 +192,7 @@ func (m *mooringHTTP) create(w http.ResponseWriter, r *http.Request) {
 	if notify != nil {
 		notify()
 	}
-	writeJSON(w, 201, map[string]string{"page_id": id, "slug": req.Slug, "name": req.Name, "app_id": req.AppID})
+	writeJSON(w, 201, mooringCreated{PageID: id, Slug: req.Slug, Name: req.Name, AppID: req.AppID})
 }
 func (m *mooringHTTP) document(ctx context.Context, tx *sql.Tx, k appengine.Key) (mooring.Manifest, mooring.State, error) {
 	var app string
@@ -231,7 +234,7 @@ func (m *mooringHTTP) read(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, 200, map[string]any{"app_id": manifest.ID, "manifest": manifest, "state": state, "editor": editor})
+	writeJSON(w, 200, mooringRead{AppID: manifest.ID, Manifest: manifest, State: state, Editor: editor})
 }
 func (m *mooringHTTP) command(w http.ResponseWriter, r *http.Request) {
 	var req mooring.Request
@@ -324,4 +327,20 @@ func (m *mooringHTTP) createAuthority(r *http.Request, tx *sql.Tx, ws, user stri
 		return appengine.ErrForbidden
 	}
 	return nil
+}
+
+type mooringCreated struct {
+	PageID string `json:"page_id"`
+	Slug   string `json:"slug"`
+	Name   string `json:"name"`
+	AppID  string `json:"app_id"`
+}
+type mooringRead struct {
+	AppID    string            `json:"app_id"`
+	Manifest mooring.Manifest  `json:"manifest"`
+	State    mooring.State     `json:"state"`
+	Editor   map[string]string `json:"editor"`
+}
+type mooringRevoked struct {
+	Status string `json:"status"`
 }
