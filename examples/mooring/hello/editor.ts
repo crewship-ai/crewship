@@ -11,13 +11,17 @@ let dirty = false, submitted: string | undefined
 let draftVersion = 0, submittedVersion = 0, confirmedText = ""
 const labels: Record<SaveStatus, string> = { connecting: "Connecting…", saved: "Saved", draft: "Not saved · draft", saving: "Saving…", offline: "Offline · changes are not confirmed", error: "Not saved" }
 const config = new URL(location.href)
+const parentOrigin = config.searchParams.get("parent_origin") ?? ""
 const sdk = createEditorSDK({
-  parentOrigin: config.searchParams.get("parent_origin") ?? "",
+  parentOrigin,
   bundle: location.pathname.split("/").at(-2) ?? "",
   environment: {
     parent: window.parent,
     listen(handler) {
-      const listener = (event: MessageEvent) => handler({ source: event.source, origin: event.origin, data: event.data, ports: event.ports.map(capabilityPort) })
+      const listener = (event: MessageEvent) => {
+        if (event.source !== window.parent || event.origin !== parentOrigin) return
+        handler({ source: event.source, origin: event.origin, data: event.data, ports: event.ports.map(capabilityPort) })
+      }
       window.addEventListener("message", listener)
       return () => window.removeEventListener("message", listener)
     },

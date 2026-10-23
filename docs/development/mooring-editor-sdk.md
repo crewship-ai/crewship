@@ -29,7 +29,8 @@ editor.command("set", { text: "Hello" })
 ```
 
 `environment` supplies the parent window, a window-message listener and the
-initial hello sender. The SDK accepts the private port only from that exact
+initial hello sender. The reference editor also checks the parent window and
+configured origin before forwarding any window event to the SDK. The SDK accepts the private port only from that exact
 parent and configured origin with protocol 1. The host accepts a hello only
 from its own opaque iframe after the first load, with the exact approved bundle
 pin. Navigation or a second handshake ends the capability. All subsequent
