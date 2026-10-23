@@ -105,3 +105,12 @@ before a full response allocation. The Go host must hold its writer transaction,
 recheck authority/fencing, commit content/outcomes/target versions together, and
 only then acknowledge or deliver. Human Yrs updates and causal/provisional reads
 remain unsupported by the first negotiated capability.
+
+The separate pure `causal::CausalContext` API consumes compact host-qualified
+original reads and checks every earlier atomic member effect against immutable
+dependencies. It does not change `agent_confirmed_current` or enable a transport
+profile. The trusted SQL host must qualify the entire retained history, including
+zero-effect dependency connectors and every intervening target effect, before
+constructing these non-deserializable values. Missing history is nonterminal.
+The shared causal vectors distinguish host SQL cases, pure Rust cases and the
+optional-null wire negative; they are not live authorization/convergence proof.

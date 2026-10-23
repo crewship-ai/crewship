@@ -2446,6 +2446,191 @@
       "tamper": {
         "remove_qualification_index": "0"
       }
+    },
+    {
+      "id": "tampered-false-current-observation",
+      "document_revision": "0",
+      "initial_targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "ledger": [],
+      "operations": [
+        {
+          "op_id": "b",
+          "base_revision": "0",
+          "dependencies": [],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "b",
+          "revision": "1"
+        }
+      ],
+      "qualified_reads": [
+        {
+          "op_id": "b",
+          "read_index": "0",
+          "target_id": "p",
+          "observed_revision": "0",
+          "entry": {
+            "revision": "0",
+            "structure_revision": "0",
+            "deleted": false
+          },
+          "covered": true
+        }
+      ],
+      "steps": [],
+      "expected": {
+        "host": "qualified",
+        "rust": "nonterminal"
+      },
+      "tamper": {
+        "qualification_index": "0",
+        "field": "covered",
+        "value": false
+      }
+    },
+    {
+      "id": "all-bindings-before-any-terminal-read",
+      "document_revision": "1",
+      "initial_targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p",
+          "revision": "1",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "ledger": [
+        {
+          "op_id": "a",
+          "revision": "1",
+          "dependencies": [],
+          "effects_complete": true,
+          "effects": [
+            {
+              "op_id": "a",
+              "target_id": "p",
+              "before": {
+                "revision": "0",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "after": {
+                "revision": "1",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ],
+          "status": "saved"
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "first",
+          "base_revision": "0",
+          "dependencies": [],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        },
+        {
+          "op_id": "second",
+          "base_revision": "0",
+          "dependencies": [
+            "a"
+          ],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "first",
+          "revision": "2"
+        },
+        {
+          "op_id": "second",
+          "revision": "3"
+        }
+      ],
+      "qualified_reads": [
+        {
+          "op_id": "first",
+          "read_index": "0",
+          "target_id": "p",
+          "observed_revision": "0",
+          "entry": {
+            "revision": "1",
+            "structure_revision": "0",
+            "deleted": false
+          },
+          "covered": false
+        },
+        {
+          "op_id": "second",
+          "read_index": "0",
+          "target_id": "p",
+          "observed_revision": "0",
+          "entry": {
+            "revision": "1",
+            "structure_revision": "0",
+            "deleted": false
+          },
+          "covered": true
+        }
+      ],
+      "steps": [],
+      "expected": {
+        "host": "qualified",
+        "rust": "nonterminal"
+      },
+      "tamper": {
+        "qualification_index": "1",
+        "field": "observed_revision",
+        "value": "1"
+      }
     }
   ],
   "scale_cases": [
