@@ -188,7 +188,12 @@ mod tests {
         .unwrap();
         let result = candidate.native().unwrap();
         assert_eq!(result["body"][0]["text"], "Č😀Xe\u{301}");
-        assert_eq!(result["body"][1], original.native().unwrap()["body"][1]);
+        let mut expected = original.native().unwrap();
+        expected["body"][0]["text"] = json!("Č😀Xe\u{301}");
+        expected["body"][0]["runs"] = json!([
+            {"len":6}, {"len":1,"props":{}}, {"len":3}
+        ]);
+        assert_eq!(result, expected);
         assert_eq!(
             Document::restore(&candidate.checkpoint().unwrap())
                 .unwrap()

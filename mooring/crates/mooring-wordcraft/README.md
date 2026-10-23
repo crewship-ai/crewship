@@ -5,7 +5,8 @@ imports complete native WordCraft 0.10.0 JSON into Yrs 0.28.0, projects it back,
 and restores the same native data and stable paragraph IDs from a full CRDT
 checkpoint. Export and checkpoint bytes are candidates, never Saved receipts.
 The host alone owns authentication, scope, permission checks, durable commits,
-history and audit. This initial slice exposes no mutation/update entrypoint.
+history and audit. It exposes stateless candidate preparation, with no authoritative mutation or raw
+human update entrypoint.
 
 The model retains document metadata, explicit paragraph order and caller-issued
 stable IDs. Each paragraph has a nested Y.Text, so an empty paragraph's shared
@@ -68,8 +69,23 @@ format properties are patches (`false` is explicit, `null` clears an override).
 Parsing grants no authority and does not qualify read observations. Private
 candidate mechanics resolve each relative anchor against the correct paragraph
 and reject Unicode scalar splits before editing an owned fork. They expose no
-public apply endpoint. The forthcoming host-context wrapper must validate reads
-and account for effects between operations, discard the full candidate after
-any failure, and leave durable revisions and outcomes to Go. Confirmed-read
+public raw apply endpoint. `adapter::WordCraftAdapter` restores once into an
+owned candidate, qualifies the complete host context against actual inventory,
+checks bound original reads before every operation, and advances only the
+host-assigned revision labels after paragraph effects. Every text command must
+explicitly observe its affected paragraph. A failure discards the full candidate
+prefix; invalid/incomplete context and corrupt state are nonterminal errors.
+Durable revisions and outcomes remain in Go. Confirmed-read
 agent commands do not replace the separate human path: human proposals must
 preserve their authored CRDT updates and IDs rather than reexecute this grammar.
+
+The caller must authenticate and bind the private context to the exact scope,
+confirmed checkpoint/head and immutable change before calling `PrepareAdapter`.
+The first policy supports confirmed-read agent commands only; it does not qualify
+provisional reads, a human CRDT update stream or speculative causal chains.
+Inventory includes all paragraph IDs plus the disjoint reserved targets
+`wordcraft:document-structure` and `wordcraft:document-metadata`, including for
+read-only documents. Text operations conservatively advance only the paragraph
+content revision (also for a semantic no-op), never paragraph existence, order or
+document metadata. Application checkpoints contain no authoritative host revision
+ledger. The default-off crate is still not wired into any production route.
