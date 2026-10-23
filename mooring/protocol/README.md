@@ -119,3 +119,22 @@ this first capability. Prepared checkpoints and effects are speculative; only
 the host can commit them or issue a durable receipt. Invalid checkpoints and
 uncertain engine errors close the private channel as a nonterminal failure;
 there is no fifth large ProtocolError envelope.
+
+The separate `mooring.prepare-causal.v1` contract defines four distinct
+`*_causal` envelopes and `agent_dependency_covered` context. Its validator
+requires the corresponding private profile, direction and message type. The
+original four definitions and strict-current context are unchanged. The shared
+causal-control vectors pin those definitions and reject profile substitution,
+participant access, missing nullable entry state, noncanonical read indices and
+null in an originally optional structure observation.
+
+Each compact qualification binds the original operation, read index, target and
+unchanged observed counters to the complete entry inventory. Only the trusted
+host may attest coverage after checking every intervening retained effect and
+the complete immutable dependency closure. Missing history aborts nonterminally.
+Rust additionally checks all effects of earlier atomic members against the
+original dependency closure; no observation is rewritten. `CausalPrepareAdapter`
+requires explicit application implementation and has no forwarding default.
+The existing WordCraft runtime selects only `mooring.prepare.v1`, even when a
+host offers both profiles. These declarations enable no causal application path,
+human updates, provisional reads, Saved receipts or additional authority.

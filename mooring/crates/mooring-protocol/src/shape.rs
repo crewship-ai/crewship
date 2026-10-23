@@ -242,6 +242,9 @@ fn pattern(expression: &str, text: &str) -> Option<bool> {
         // This exact bounded decimal language is equivalent to Counter's
         // canonical u64 parse. Do not accept an unknown future regex by shape.
         COUNTER_PATTERN => crate::Counter::try_from(text.to_owned()).is_ok(),
+        "^(0|[1-9][0-9]?|1[0-9]{2}|2[0-4][0-9]|25[0-5])$" => text
+            .parse::<u8>()
+            .is_ok_and(|index| index.to_string() == text),
         _ => return None,
     })
 }

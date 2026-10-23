@@ -99,7 +99,7 @@ export interface ChangeResult {
 
 export type HelloType = "hello";
 
-export type HelloControlProfilesItem = "mooring.prepare.v1";
+export type HelloControlProfilesItem = "mooring.prepare.v1" | "mooring.prepare-causal.v1";
 
 export interface Hello {
   type: HelloType;
@@ -802,7 +802,7 @@ export type TaskChangeState = ChangeResult | TaskChangeStateVariant2;
 
 export type RuntimeReadyType = "runtime_ready";
 
-export type RuntimeReadySelectedControlProfile = "mooring.prepare.v1";
+export type RuntimeReadySelectedControlProfile = "mooring.prepare.v1" | "mooring.prepare-causal.v1";
 
 export interface RuntimeReady {
   type: RuntimeReadyType;
@@ -937,4 +937,94 @@ export interface AtomicPrepared {
   control_profile: AtomicPreparedControlProfile;
 }
 
-export type Message = Hello | Welcome | CommitBatch | CommitResult | StatusRequest | StatusResult | SessionTicketRequest | SessionTicket | OwnerAcquire | OwnerRenew | OwnerGrant | DeliveryRenew | DeliveryGrant | SessionClosed | DeliveryBlocked | RevocationConfirmed | ReadRequest | ReadResult | CheckpointRequest | CheckpointResult | Presence | TaskStatus | TaskResult | TaskCancel | Proposal | ProposalAccept | UndoRequest | ProtocolError | ManifestRequest | ManifestResult | LifecycleRequest | LifecycleResult | SessionJoin | SessionJoined | SessionLeave | SubmitChanges | ChangesReceived | TaskSubmit | ProposalRequest | CollaborationUpdate | DocumentUpdate | AssetRequest | AssetResult | TicketValidationRequest | TicketValidationResult | RevocationNotice | RuntimeReady | ValidateCheckpoint | CheckpointValidated | PrepareAtomic | AtomicPrepared;
+export type CausalReadIndex = string;
+
+export interface CausalEntryVersion {
+  revision: Counter;
+  structure_revision: Counter;
+  deleted: boolean;
+}
+
+export type QualifiedCausalReadEntry = CausalEntryVersion | null;
+
+export interface QualifiedCausalRead {
+  op_id: Identifier;
+  read_index: CausalReadIndex;
+  target_id: Identifier;
+  observed_revision: Counter;
+  observed_structure_revision?: Counter;
+  entry: QualifiedCausalReadEntry;
+  covered: boolean;
+}
+
+export type CausalPrepareContextReadPolicy = "agent_dependency_covered";
+
+export interface CausalPrepareContext {
+  read_policy: CausalPrepareContextReadPolicy;
+  document_revision: Counter;
+  targets: Array<TargetVersion>;
+  operation_revisions: Array<PreparedOperationRevision>;
+  qualified_reads: Array<QualifiedCausalRead>;
+}
+
+export type ValidateCheckpointCausalType = "validate_checkpoint_causal";
+
+export type ValidateCheckpointCausalControlProfile = "mooring.prepare-causal.v1";
+
+export interface ValidateCheckpointCausal {
+  type: ValidateCheckpointCausalType;
+  request_id: Identifier;
+  scope: Scope;
+  selected: Versions;
+  checkpoint: OpaquePreparedCheckpoint;
+  control_profile: ValidateCheckpointCausalControlProfile;
+}
+
+export type CheckpointValidatedCausalType = "checkpoint_validated_causal";
+
+export type CheckpointValidatedCausalControlProfile = "mooring.prepare-causal.v1";
+
+export interface CheckpointValidatedCausal {
+  type: CheckpointValidatedCausalType;
+  request_id: Identifier;
+  scope: Scope;
+  selected: Versions;
+  input_checkpoint_digest: Digest;
+  inventory: Array<TargetIdentity>;
+  control_profile: CheckpointValidatedCausalControlProfile;
+}
+
+export type PrepareAtomicCausalType = "prepare_atomic_causal";
+
+export type PrepareAtomicCausalControlProfile = "mooring.prepare-causal.v1";
+
+export interface PrepareAtomicCausal {
+  type: PrepareAtomicCausalType;
+  request_id: Identifier;
+  scope: Scope;
+  selected: Versions;
+  checkpoint: OpaquePreparedCheckpoint;
+  context: CausalPrepareContext;
+  change: AtomicChange;
+  control_profile: PrepareAtomicCausalControlProfile;
+}
+
+export type AtomicPreparedCausalType = "atomic_prepared_causal";
+
+export type AtomicPreparedCausalOutcome = PreparedCandidate | PreparedDirectFailure;
+
+export type AtomicPreparedCausalControlProfile = "mooring.prepare-causal.v1";
+
+export interface AtomicPreparedCausal {
+  type: AtomicPreparedCausalType;
+  request_id: Identifier;
+  scope: Scope;
+  selected: Versions;
+  input_checkpoint_digest: Digest;
+  change_id: Identifier;
+  membership_hash: Digest;
+  outcome: AtomicPreparedCausalOutcome;
+  control_profile: AtomicPreparedCausalControlProfile;
+}
+
+export type Message = Hello | Welcome | CommitBatch | CommitResult | StatusRequest | StatusResult | SessionTicketRequest | SessionTicket | OwnerAcquire | OwnerRenew | OwnerGrant | DeliveryRenew | DeliveryGrant | SessionClosed | DeliveryBlocked | RevocationConfirmed | ReadRequest | ReadResult | CheckpointRequest | CheckpointResult | Presence | TaskStatus | TaskResult | TaskCancel | Proposal | ProposalAccept | UndoRequest | ProtocolError | ManifestRequest | ManifestResult | LifecycleRequest | LifecycleResult | SessionJoin | SessionJoined | SessionLeave | SubmitChanges | ChangesReceived | TaskSubmit | ProposalRequest | CollaborationUpdate | DocumentUpdate | AssetRequest | AssetResult | TicketValidationRequest | TicketValidationResult | RevocationNotice | RuntimeReady | ValidateCheckpoint | CheckpointValidated | PrepareAtomic | AtomicPrepared | ValidateCheckpointCausal | CheckpointValidatedCausal | PrepareAtomicCausal | AtomicPreparedCausal;

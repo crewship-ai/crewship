@@ -191,6 +191,41 @@ fn real_private_socket_negotiates_profile_then_prepares_actual_wordcraft() {
     assert!(service.join().unwrap().is_ok());
 }
 
+#[cfg(unix)]
+#[test]
+fn causal_offer_cannot_enable_or_relabel_strict_runtime_capability() {
+    use std::{os::unix::net::UnixStream, thread, time::Duration};
+    for profiles in [
+        json!([control::CAUSAL_PROFILE]),
+        json!([control::CAUSAL_PROFILE, control::PROFILE]),
+    ] {
+        let (mut host, child) = UnixStream::pair().unwrap();
+        host.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        host.set_write_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let service = thread::spawn(move || {
+            mooring_collab::private_rpc::serve_registered(
+                child,
+                Duration::from_secs(2),
+                wordcraft_registration(),
+            )
+        });
+        let hello = json!({"type":"hello","request_id":"causal-offer","supported":[mooring_collab::dispatch::wordcraft_versions()],"control_profiles":profiles});
+        mooring_collab::write_frame(&mut host, &serde_json::to_vec(&hello).unwrap()).unwrap();
+        let ready: Value =
+            serde_json::from_slice(&mooring_collab::read_frame(&mut host).unwrap().unwrap())
+                .unwrap();
+        if profiles.as_array().unwrap().len() == 1 {
+            assert!(ready.get("selected_control_profile").is_none());
+        } else {
+            assert_eq!(ready["selected_control_profile"], control::PROFILE);
+        }
+        // A schema declaration never enables an unimplemented application path.
+        mooring_collab::write_frame(&mut host, br#"{"type":"prepare_atomic_causal"}"#).unwrap();
+        assert!(service.join().unwrap().is_err());
+    }
+}
+
 #[test]
 fn valid_checkpoint_component_that_cannot_fit_response_never_escapes_as_candidate() {
     use mooring_core::adapter::{Prepared, PreparedCandidate};

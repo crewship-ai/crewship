@@ -1,0 +1,1136 @@
+{
+  "profile": "mooring.prepare-causal.v1",
+  "baseline_definition_hashes": {
+    "ValidateCheckpoint": "sha256:7ca5a982904ecb887c51ef06f4770a86ffdc6ec94335254d5b7e23d357eab15e",
+    "CheckpointValidated": "sha256:3c0eebd821bec5f4edf4c043e0f93e2c191d65ed2fae50c08c7e8521c011c4f3",
+    "PrepareAtomic": "sha256:35e1a71d3d7322ff9a4fca482d8557ef883c8ac4b3ac5af607baa847cb5e25fc",
+    "AtomicPrepared": "sha256:ea379dab3ceb82781c06bfa7732f6417f7171fc854d8e29f6adb9687df3753ad",
+    "PrepareContext": "sha256:744f1b210eebd9fb1ff91f27bfadb974b028bb1e9a36ccc8aa332957e8a8541c"
+  },
+  "notes": [
+    "Shape and direction cases only, not SQL qualification or authenticated transport proof.",
+    "Old strict-current four envelopes and context definitions remain byte-equivalent as JSON values.",
+    "This profile does not admit human deltas or provisional target reads."
+  ],
+  "cases": [
+    {
+      "id": "validate_checkpoint-causal",
+      "message": {
+        "type": "validate_checkpoint_causal",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "control_profile": "mooring.prepare-causal.v1"
+      },
+      "valid": true,
+      "sender": "host"
+    },
+    {
+      "id": "validate_checkpoint-strict-profile",
+      "message": {
+        "type": "validate_checkpoint_causal",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "control_profile": "mooring.prepare.v1"
+      },
+      "valid": false,
+      "sender": "host"
+    },
+    {
+      "id": "validate_checkpoint-strict-type",
+      "message": {
+        "type": "validate_checkpoint",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "control_profile": "mooring.prepare-causal.v1"
+      },
+      "valid": false,
+      "sender": "host"
+    },
+    {
+      "id": "checkpoint_validated-causal",
+      "message": {
+        "type": "checkpoint_validated_causal",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "input_checkpoint_digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "inventory": [
+          {
+            "target_id": "p1",
+            "deleted": false
+          }
+        ],
+        "control_profile": "mooring.prepare-causal.v1"
+      },
+      "valid": true,
+      "sender": "runtime"
+    },
+    {
+      "id": "checkpoint_validated-strict-profile",
+      "message": {
+        "type": "checkpoint_validated_causal",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "input_checkpoint_digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "inventory": [
+          {
+            "target_id": "p1",
+            "deleted": false
+          }
+        ],
+        "control_profile": "mooring.prepare.v1"
+      },
+      "valid": false,
+      "sender": "runtime"
+    },
+    {
+      "id": "checkpoint_validated-strict-type",
+      "message": {
+        "type": "checkpoint_validated",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "input_checkpoint_digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "inventory": [
+          {
+            "target_id": "p1",
+            "deleted": false
+          }
+        ],
+        "control_profile": "mooring.prepare-causal.v1"
+      },
+      "valid": false,
+      "sender": "runtime"
+    },
+    {
+      "id": "prepare_atomic-causal",
+      "message": {
+        "type": "prepare_atomic_causal",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "context": {
+          "read_policy": "agent_dependency_covered",
+          "document_revision": "0",
+          "targets": [
+            {
+              "target_id": "p1",
+              "deleted": false,
+              "revision": "0",
+              "structure_revision": "0"
+            }
+          ],
+          "operation_revisions": [
+            {
+              "op_id": "o1",
+              "revision": "1"
+            }
+          ],
+          "qualified_reads": [
+            {
+              "op_id": "o1",
+              "read_index": "0",
+              "target_id": "target",
+              "observed_revision": "0",
+              "entry": null,
+              "covered": false
+            }
+          ]
+        },
+        "change": {
+          "change_id": "c1",
+          "operations": [
+            {
+              "op_id": "o1",
+              "participant_ref": "host-ref",
+              "base_revision": "0",
+              "dependencies": [],
+              "read_preconditions": [],
+              "payload": {
+                "kind": "text",
+                "text": "Příliš žluťoučký kůň"
+              },
+              "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+            }
+          ],
+          "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+        },
+        "control_profile": "mooring.prepare-causal.v1"
+      },
+      "valid": true,
+      "sender": "host"
+    },
+    {
+      "id": "prepare_atomic-strict-profile",
+      "message": {
+        "type": "prepare_atomic_causal",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "context": {
+          "read_policy": "agent_dependency_covered",
+          "document_revision": "0",
+          "targets": [
+            {
+              "target_id": "p1",
+              "deleted": false,
+              "revision": "0",
+              "structure_revision": "0"
+            }
+          ],
+          "operation_revisions": [
+            {
+              "op_id": "o1",
+              "revision": "1"
+            }
+          ],
+          "qualified_reads": []
+        },
+        "change": {
+          "change_id": "c1",
+          "operations": [
+            {
+              "op_id": "o1",
+              "participant_ref": "host-ref",
+              "base_revision": "0",
+              "dependencies": [],
+              "read_preconditions": [],
+              "payload": {
+                "kind": "text",
+                "text": "Příliš žluťoučký kůň"
+              },
+              "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+            }
+          ],
+          "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+        },
+        "control_profile": "mooring.prepare.v1"
+      },
+      "valid": false,
+      "sender": "host"
+    },
+    {
+      "id": "prepare_atomic-strict-type",
+      "message": {
+        "type": "prepare_atomic",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "context": {
+          "read_policy": "agent_dependency_covered",
+          "document_revision": "0",
+          "targets": [
+            {
+              "target_id": "p1",
+              "deleted": false,
+              "revision": "0",
+              "structure_revision": "0"
+            }
+          ],
+          "operation_revisions": [
+            {
+              "op_id": "o1",
+              "revision": "1"
+            }
+          ],
+          "qualified_reads": []
+        },
+        "change": {
+          "change_id": "c1",
+          "operations": [
+            {
+              "op_id": "o1",
+              "participant_ref": "host-ref",
+              "base_revision": "0",
+              "dependencies": [],
+              "read_preconditions": [],
+              "payload": {
+                "kind": "text",
+                "text": "Příliš žluťoučký kůň"
+              },
+              "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+            }
+          ],
+          "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+        },
+        "control_profile": "mooring.prepare-causal.v1"
+      },
+      "valid": false,
+      "sender": "host"
+    },
+    {
+      "id": "atomic_prepared-causal",
+      "message": {
+        "type": "atomic_prepared_causal",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "input_checkpoint_digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "change_id": "c1",
+        "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47",
+        "outcome": {
+          "kind": "candidate",
+          "checkpoint": {
+            "encoding": "base64",
+            "state": "e30=",
+            "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+          },
+          "effects": [
+            {
+              "op_id": "o1",
+              "targets": []
+            }
+          ],
+          "inventory": [
+            {
+              "target_id": "p1",
+              "deleted": false
+            }
+          ]
+        },
+        "control_profile": "mooring.prepare-causal.v1"
+      },
+      "valid": true,
+      "sender": "runtime"
+    },
+    {
+      "id": "atomic_prepared-strict-profile",
+      "message": {
+        "type": "atomic_prepared_causal",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "input_checkpoint_digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "change_id": "c1",
+        "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47",
+        "outcome": {
+          "kind": "candidate",
+          "checkpoint": {
+            "encoding": "base64",
+            "state": "e30=",
+            "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+          },
+          "effects": [
+            {
+              "op_id": "o1",
+              "targets": []
+            }
+          ],
+          "inventory": [
+            {
+              "target_id": "p1",
+              "deleted": false
+            }
+          ]
+        },
+        "control_profile": "mooring.prepare.v1"
+      },
+      "valid": false,
+      "sender": "runtime"
+    },
+    {
+      "id": "atomic_prepared-strict-type",
+      "message": {
+        "type": "atomic_prepared",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "input_checkpoint_digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "change_id": "c1",
+        "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47",
+        "outcome": {
+          "kind": "candidate",
+          "checkpoint": {
+            "encoding": "base64",
+            "state": "e30=",
+            "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+          },
+          "effects": [
+            {
+              "op_id": "o1",
+              "targets": []
+            }
+          ],
+          "inventory": [
+            {
+              "target_id": "p1",
+              "deleted": false
+            }
+          ]
+        },
+        "control_profile": "mooring.prepare-causal.v1"
+      },
+      "valid": false,
+      "sender": "runtime"
+    },
+    {
+      "id": "invalid-read_index-01",
+      "message": {
+        "type": "prepare_atomic_causal",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "context": {
+          "read_policy": "agent_dependency_covered",
+          "document_revision": "0",
+          "targets": [
+            {
+              "target_id": "p1",
+              "deleted": false,
+              "revision": "0",
+              "structure_revision": "0"
+            }
+          ],
+          "operation_revisions": [
+            {
+              "op_id": "o1",
+              "revision": "1"
+            }
+          ],
+          "qualified_reads": [
+            {
+              "op_id": "o1",
+              "read_index": "01",
+              "target_id": "target",
+              "observed_revision": "0",
+              "entry": null,
+              "covered": false
+            }
+          ]
+        },
+        "change": {
+          "change_id": "c1",
+          "operations": [
+            {
+              "op_id": "o1",
+              "participant_ref": "host-ref",
+              "base_revision": "0",
+              "dependencies": [],
+              "read_preconditions": [],
+              "payload": {
+                "kind": "text",
+                "text": "Příliš žluťoučký kůň"
+              },
+              "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+            }
+          ],
+          "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+        },
+        "control_profile": "mooring.prepare-causal.v1"
+      },
+      "valid": false,
+      "sender": "host"
+    },
+    {
+      "id": "invalid-read_index-256",
+      "message": {
+        "type": "prepare_atomic_causal",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "context": {
+          "read_policy": "agent_dependency_covered",
+          "document_revision": "0",
+          "targets": [
+            {
+              "target_id": "p1",
+              "deleted": false,
+              "revision": "0",
+              "structure_revision": "0"
+            }
+          ],
+          "operation_revisions": [
+            {
+              "op_id": "o1",
+              "revision": "1"
+            }
+          ],
+          "qualified_reads": [
+            {
+              "op_id": "o1",
+              "read_index": "256",
+              "target_id": "target",
+              "observed_revision": "0",
+              "entry": null,
+              "covered": false
+            }
+          ]
+        },
+        "change": {
+          "change_id": "c1",
+          "operations": [
+            {
+              "op_id": "o1",
+              "participant_ref": "host-ref",
+              "base_revision": "0",
+              "dependencies": [],
+              "read_preconditions": [],
+              "payload": {
+                "kind": "text",
+                "text": "Příliš žluťoučký kůň"
+              },
+              "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+            }
+          ],
+          "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+        },
+        "control_profile": "mooring.prepare-causal.v1"
+      },
+      "valid": false,
+      "sender": "host"
+    },
+    {
+      "id": "invalid-read_index-0",
+      "message": {
+        "type": "prepare_atomic_causal",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "context": {
+          "read_policy": "agent_dependency_covered",
+          "document_revision": "0",
+          "targets": [
+            {
+              "target_id": "p1",
+              "deleted": false,
+              "revision": "0",
+              "structure_revision": "0"
+            }
+          ],
+          "operation_revisions": [
+            {
+              "op_id": "o1",
+              "revision": "1"
+            }
+          ],
+          "qualified_reads": [
+            {
+              "op_id": "o1",
+              "read_index": 0,
+              "target_id": "target",
+              "observed_revision": "0",
+              "entry": null,
+              "covered": false
+            }
+          ]
+        },
+        "change": {
+          "change_id": "c1",
+          "operations": [
+            {
+              "op_id": "o1",
+              "participant_ref": "host-ref",
+              "base_revision": "0",
+              "dependencies": [],
+              "read_preconditions": [],
+              "payload": {
+                "kind": "text",
+                "text": "Příliš žluťoučký kůň"
+              },
+              "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+            }
+          ],
+          "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+        },
+        "control_profile": "mooring.prepare-causal.v1"
+      },
+      "valid": false,
+      "sender": "host"
+    },
+    {
+      "id": "invalid-observed_structure_revision-None",
+      "message": {
+        "type": "prepare_atomic_causal",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "context": {
+          "read_policy": "agent_dependency_covered",
+          "document_revision": "0",
+          "targets": [
+            {
+              "target_id": "p1",
+              "deleted": false,
+              "revision": "0",
+              "structure_revision": "0"
+            }
+          ],
+          "operation_revisions": [
+            {
+              "op_id": "o1",
+              "revision": "1"
+            }
+          ],
+          "qualified_reads": [
+            {
+              "op_id": "o1",
+              "read_index": "0",
+              "target_id": "target",
+              "observed_revision": "0",
+              "entry": null,
+              "covered": false,
+              "observed_structure_revision": null
+            }
+          ]
+        },
+        "change": {
+          "change_id": "c1",
+          "operations": [
+            {
+              "op_id": "o1",
+              "participant_ref": "host-ref",
+              "base_revision": "0",
+              "dependencies": [],
+              "read_preconditions": [],
+              "payload": {
+                "kind": "text",
+                "text": "Příliš žluťoučký kůň"
+              },
+              "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+            }
+          ],
+          "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+        },
+        "control_profile": "mooring.prepare-causal.v1"
+      },
+      "valid": false,
+      "sender": "host"
+    },
+    {
+      "id": "entry-required",
+      "message": {
+        "type": "prepare_atomic_causal",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "context": {
+          "read_policy": "agent_dependency_covered",
+          "document_revision": "0",
+          "targets": [
+            {
+              "target_id": "p1",
+              "deleted": false,
+              "revision": "0",
+              "structure_revision": "0"
+            }
+          ],
+          "operation_revisions": [
+            {
+              "op_id": "o1",
+              "revision": "1"
+            }
+          ],
+          "qualified_reads": [
+            {
+              "op_id": "o1",
+              "read_index": "0",
+              "target_id": "target",
+              "observed_revision": "0",
+              "covered": false
+            }
+          ]
+        },
+        "change": {
+          "change_id": "c1",
+          "operations": [
+            {
+              "op_id": "o1",
+              "participant_ref": "host-ref",
+              "base_revision": "0",
+              "dependencies": [],
+              "read_preconditions": [],
+              "payload": {
+                "kind": "text",
+                "text": "Příliš žluťoučký kůň"
+              },
+              "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+            }
+          ],
+          "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+        },
+        "control_profile": "mooring.prepare-causal.v1"
+      },
+      "valid": false,
+      "sender": "host"
+    },
+    {
+      "id": "entry-null-allowed",
+      "message": {
+        "type": "prepare_atomic_causal",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "context": {
+          "read_policy": "agent_dependency_covered",
+          "document_revision": "0",
+          "targets": [
+            {
+              "target_id": "p1",
+              "deleted": false,
+              "revision": "0",
+              "structure_revision": "0"
+            }
+          ],
+          "operation_revisions": [
+            {
+              "op_id": "o1",
+              "revision": "1"
+            }
+          ],
+          "qualified_reads": [
+            {
+              "op_id": "o1",
+              "read_index": "0",
+              "target_id": "target",
+              "observed_revision": "0",
+              "entry": null,
+              "covered": false
+            }
+          ]
+        },
+        "change": {
+          "change_id": "c1",
+          "operations": [
+            {
+              "op_id": "o1",
+              "participant_ref": "host-ref",
+              "base_revision": "0",
+              "dependencies": [],
+              "read_preconditions": [],
+              "payload": {
+                "kind": "text",
+                "text": "Příliš žluťoučký kůň"
+              },
+              "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+            }
+          ],
+          "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+        },
+        "control_profile": "mooring.prepare-causal.v1"
+      },
+      "valid": true,
+      "sender": "host"
+    },
+    {
+      "id": "structure-absent-allowed",
+      "message": {
+        "type": "prepare_atomic_causal",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "context": {
+          "read_policy": "agent_dependency_covered",
+          "document_revision": "0",
+          "targets": [
+            {
+              "target_id": "p1",
+              "deleted": false,
+              "revision": "0",
+              "structure_revision": "0"
+            }
+          ],
+          "operation_revisions": [
+            {
+              "op_id": "o1",
+              "revision": "1"
+            }
+          ],
+          "qualified_reads": [
+            {
+              "op_id": "o1",
+              "read_index": "0",
+              "target_id": "target",
+              "observed_revision": "0",
+              "entry": null,
+              "covered": false
+            }
+          ]
+        },
+        "change": {
+          "change_id": "c1",
+          "operations": [
+            {
+              "op_id": "o1",
+              "participant_ref": "host-ref",
+              "base_revision": "0",
+              "dependencies": [],
+              "read_preconditions": [],
+              "payload": {
+                "kind": "text",
+                "text": "Příliš žluťoučký kůň"
+              },
+              "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+            }
+          ],
+          "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+        },
+        "control_profile": "mooring.prepare-causal.v1"
+      },
+      "valid": true,
+      "sender": "host"
+    },
+    {
+      "id": "index255",
+      "message": {
+        "type": "prepare_atomic_causal",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "context": {
+          "read_policy": "agent_dependency_covered",
+          "document_revision": "0",
+          "targets": [
+            {
+              "target_id": "p1",
+              "deleted": false,
+              "revision": "0",
+              "structure_revision": "0"
+            }
+          ],
+          "operation_revisions": [
+            {
+              "op_id": "o1",
+              "revision": "1"
+            }
+          ],
+          "qualified_reads": [
+            {
+              "op_id": "o1",
+              "read_index": "255",
+              "target_id": "target",
+              "observed_revision": "0",
+              "entry": null,
+              "covered": false
+            }
+          ]
+        },
+        "change": {
+          "change_id": "c1",
+          "operations": [
+            {
+              "op_id": "o1",
+              "participant_ref": "host-ref",
+              "base_revision": "0",
+              "dependencies": [],
+              "read_preconditions": [],
+              "payload": {
+                "kind": "text",
+                "text": "Příliš žluťoučký kůň"
+              },
+              "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+            }
+          ],
+          "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+        },
+        "control_profile": "mooring.prepare-causal.v1"
+      },
+      "valid": true,
+      "sender": "host"
+    },
+    {
+      "id": "index-u64-overflow",
+      "message": {
+        "type": "prepare_atomic_causal",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "context": {
+          "read_policy": "agent_dependency_covered",
+          "document_revision": "0",
+          "targets": [
+            {
+              "target_id": "p1",
+              "deleted": false,
+              "revision": "0",
+              "structure_revision": "0"
+            }
+          ],
+          "operation_revisions": [
+            {
+              "op_id": "o1",
+              "revision": "1"
+            }
+          ],
+          "qualified_reads": [
+            {
+              "op_id": "o1",
+              "read_index": "0",
+              "target_id": "target",
+              "observed_revision": "18446744073709551616",
+              "entry": null,
+              "covered": false
+            }
+          ]
+        },
+        "change": {
+          "change_id": "c1",
+          "operations": [
+            {
+              "op_id": "o1",
+              "participant_ref": "host-ref",
+              "base_revision": "0",
+              "dependencies": [],
+              "read_preconditions": [],
+              "payload": {
+                "kind": "text",
+                "text": "Příliš žluťoučký kůň"
+              },
+              "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+            }
+          ],
+          "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+        },
+        "control_profile": "mooring.prepare-causal.v1"
+      },
+      "valid": false,
+      "sender": "host"
+    }
+  ]
+}
