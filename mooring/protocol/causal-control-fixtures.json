@@ -1131,6 +1131,290 @@
       },
       "valid": false,
       "sender": "host"
+    },
+    {
+      "id": "index-trailing-lf",
+      "message": {
+        "type": "prepare_atomic_causal",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "context": {
+          "read_policy": "agent_dependency_covered",
+          "document_revision": "0",
+          "targets": [
+            {
+              "target_id": "p1",
+              "deleted": false,
+              "revision": "0",
+              "structure_revision": "0"
+            }
+          ],
+          "operation_revisions": [
+            {
+              "op_id": "o1",
+              "revision": "1"
+            }
+          ],
+          "qualified_reads": [
+            {
+              "op_id": "o1",
+              "read_index": "1\n",
+              "target_id": "target",
+              "observed_revision": "0",
+              "entry": null,
+              "covered": false
+            }
+          ]
+        },
+        "change": {
+          "change_id": "c1",
+          "operations": [
+            {
+              "op_id": "o1",
+              "participant_ref": "host-ref",
+              "base_revision": "0",
+              "dependencies": [],
+              "read_preconditions": [],
+              "payload": {
+                "kind": "text",
+                "text": "Příliš žluťoučký kůň"
+              },
+              "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+            }
+          ],
+          "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+        },
+        "control_profile": "mooring.prepare-causal.v1"
+      },
+      "valid": false,
+      "sender": "host"
+    },
+    {
+      "id": "index-trailing-crlf",
+      "message": {
+        "type": "prepare_atomic_causal",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "context": {
+          "read_policy": "agent_dependency_covered",
+          "document_revision": "0",
+          "targets": [
+            {
+              "target_id": "p1",
+              "deleted": false,
+              "revision": "0",
+              "structure_revision": "0"
+            }
+          ],
+          "operation_revisions": [
+            {
+              "op_id": "o1",
+              "revision": "1"
+            }
+          ],
+          "qualified_reads": [
+            {
+              "op_id": "o1",
+              "read_index": "1\r\n",
+              "target_id": "target",
+              "observed_revision": "0",
+              "entry": null,
+              "covered": false
+            }
+          ]
+        },
+        "change": {
+          "change_id": "c1",
+          "operations": [
+            {
+              "op_id": "o1",
+              "participant_ref": "host-ref",
+              "base_revision": "0",
+              "dependencies": [],
+              "read_preconditions": [],
+              "payload": {
+                "kind": "text",
+                "text": "Příliš žluťoučký kůň"
+              },
+              "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+            }
+          ],
+          "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+        },
+        "control_profile": "mooring.prepare-causal.v1"
+      },
+      "valid": false,
+      "sender": "host"
+    },
+    {
+      "id": "index-trailing-unicode-line",
+      "message": {
+        "type": "prepare_atomic_causal",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "context": {
+          "read_policy": "agent_dependency_covered",
+          "document_revision": "0",
+          "targets": [
+            {
+              "target_id": "p1",
+              "deleted": false,
+              "revision": "0",
+              "structure_revision": "0"
+            }
+          ],
+          "operation_revisions": [
+            {
+              "op_id": "o1",
+              "revision": "1"
+            }
+          ],
+          "qualified_reads": [
+            {
+              "op_id": "o1",
+              "read_index": "1 ",
+              "target_id": "target",
+              "observed_revision": "0",
+              "entry": null,
+              "covered": false
+            }
+          ]
+        },
+        "change": {
+          "change_id": "c1",
+          "operations": [
+            {
+              "op_id": "o1",
+              "participant_ref": "host-ref",
+              "base_revision": "0",
+              "dependencies": [],
+              "read_preconditions": [],
+              "payload": {
+                "kind": "text",
+                "text": "Příliš žluťoučký kůň"
+              },
+              "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+            }
+          ],
+          "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+        },
+        "control_profile": "mooring.prepare-causal.v1"
+      },
+      "valid": false,
+      "sender": "host"
+    },
+    {
+      "id": "index-trailing-unicode-paragraph",
+      "message": {
+        "type": "prepare_atomic_causal",
+        "request_id": "prepare-1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "editor"
+        },
+        "selected": {
+          "protocol_version": "0.4.0",
+          "model_version": "1.0.0",
+          "engine_version": "1.0.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "context": {
+          "read_policy": "agent_dependency_covered",
+          "document_revision": "0",
+          "targets": [
+            {
+              "target_id": "p1",
+              "deleted": false,
+              "revision": "0",
+              "structure_revision": "0"
+            }
+          ],
+          "operation_revisions": [
+            {
+              "op_id": "o1",
+              "revision": "1"
+            }
+          ],
+          "qualified_reads": [
+            {
+              "op_id": "o1",
+              "read_index": "1 ",
+              "target_id": "target",
+              "observed_revision": "0",
+              "entry": null,
+              "covered": false
+            }
+          ]
+        },
+        "change": {
+          "change_id": "c1",
+          "operations": [
+            {
+              "op_id": "o1",
+              "participant_ref": "host-ref",
+              "base_revision": "0",
+              "dependencies": [],
+              "read_preconditions": [],
+              "payload": {
+                "kind": "text",
+                "text": "Příliš žluťoučký kůň"
+              },
+              "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+            }
+          ],
+          "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+        },
+        "control_profile": "mooring.prepare-causal.v1"
+      },
+      "valid": false,
+      "sender": "host"
     }
   ]
 }

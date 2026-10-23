@@ -27,7 +27,7 @@ fn old_strict_definitions_are_unchanged() {
 fn causal_shapes_require_exact_profile_type_direction_and_private_channel() {
     let cases = fixture();
     let cases = cases["cases"].as_array().unwrap();
-    assert_eq!(cases.len(), 21);
+    assert_eq!(cases.len(), 25);
     for case in cases {
         let bytes = serde_json::to_vec(&case["message"]).unwrap();
         let host = case["sender"] == "host";
