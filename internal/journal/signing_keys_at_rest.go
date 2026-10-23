@@ -257,38 +257,102 @@ func FinishSigningKeyRotation(dataDir, pending string) error {
 	return syncDir(dataDir)
 }
 
-// ResolvePendingSigningKeyRotations settles rotations a crash interrupted:
-// one whose audit entry committed is installed; one without is never
-// installed and is kept beside the keyring as .discarded-<auditID>. It
-// reports whether the live keyring changed.
-func ResolvePendingSigningKeyRotations(dataDir string, committed func(auditID string) (bool, error)) (bool, error) {
+// PendingRotation is what the instance audit log says about one staged
+// rotation: whether its entry exists, the active key it names, and whether
+// it is the newest rotation entry.
+type PendingRotation struct {
+	Found       bool
+	ActiveKeyID string
+	Newest      bool
+}
+
+// ResolvePendingSigningKeyRotations settles rotations a crash interrupted.
+// A staged keyring is installed only when its audit entry exists, is the
+// newest rotation, names exactly the staged active key, and that key is not
+// already in the live keyring (a replayed or stale file is not a rotation).
+// Anything else is set aside as .discarded-<auditID> (never installed, never
+// overwritten) without failing the start; a lookup error leaves the file in
+// place for the next start. It reports whether the live keyring changed and
+// one note per file it did not install.
+func ResolvePendingSigningKeyRotations(dataDir string, lookup func(auditID string) (PendingRotation, error)) (bool, []string, error) {
 	path := filepath.Join(dataDir, SigningKeysFile)
 	staged, err := filepath.Glob(path + pendingRotationSuffix + "*")
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	changed := false
+	var notes []string
 	for _, pending := range staged {
 		auditID := strings.TrimPrefix(filepath.Base(pending), SigningKeysFile+pendingRotationSuffix)
-		ok := false
-		if rotationAuditID.MatchString(auditID) {
-			if ok, err = committed(auditID); err != nil {
-				return changed, err
+		reason := ""
+		if !rotationAuditID.MatchString(auditID) {
+			reason = "invalid audit entry id"
+		} else if record, err := lookup(auditID); err != nil {
+			notes = append(notes, filepath.Base(pending)+": left for the next start: "+err.Error())
+			continue
+		} else {
+			reason = pendingRotationMismatch(path, pending, record)
+		}
+		if reason == "" {
+			if err := FinishSigningKeyRotation(dataDir, pending); err != nil {
+				reason = err.Error()
+			} else {
+				changed = true
+				continue
 			}
 		}
-		if ok {
-			if err := FinishSigningKeyRotation(dataDir, pending); err != nil {
-				return changed, err
-			}
-			changed = true
+		kept, err := setAsideRotation(dataDir, pending, path+".discarded-"+auditID)
+		if err != nil {
+			return changed, notes, err
+		}
+		notes = append(notes, filepath.Base(pending)+" not installed ("+reason+"); kept as "+filepath.Base(kept))
+	}
+	return changed, notes, nil
+}
+
+func pendingRotationMismatch(path, pending string, record PendingRotation) string {
+	switch {
+	case !record.Found:
+		return "its audit entry never committed"
+	case !record.Newest:
+		return "a newer rotation was recorded"
+	}
+	staged, err := LoadSigningKeys(pending)
+	if err != nil {
+		return err.Error()
+	}
+	if staged.ActiveID() != record.ActiveKeyID {
+		return "its active key is not the one the audit entry names"
+	}
+	current, err := LoadSigningKeys(path)
+	if err != nil {
+		return err.Error()
+	}
+	if _, applied := current.keys[record.ActiveKeyID]; applied {
+		return "that rotation is already applied"
+	}
+	return ""
+}
+
+// setAsideRotation links pending to a name that does not exist yet (target,
+// then target.1, target.2, …) and removes pending only after that link.
+func setAsideRotation(dataDir, pending, target string) (string, error) {
+	for i := 0; i < 100; i++ {
+		name := target
+		if i > 0 {
+			name = fmt.Sprintf("%s.%d", target, i)
+		}
+		err := os.Link(pending, name)
+		if errors.Is(err, os.ErrExist) {
 			continue
 		}
-		if err := os.Rename(pending, path+".discarded-"+auditID); err != nil {
-			return changed, errors.New("audit keyring: cannot set aside an uncommitted rotation")
+		if err != nil {
+			return "", errors.New("audit keyring: cannot set aside a staged rotation")
 		}
-		if err := syncDir(dataDir); err != nil {
-			return changed, err
+		if err := os.Remove(pending); err != nil {
+			return "", err
 		}
+		return name, syncDir(dataDir)
 	}
-	return changed, nil
+	return "", errors.New("audit keyring: too many set-aside rotations")
 }

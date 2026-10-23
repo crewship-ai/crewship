@@ -130,11 +130,13 @@ func TestAuditKeyringSealedAtRest(t *testing.T) {
 	}
 }
 
-// A rotation is staged beside the keyring, installed only after its audit
-// entry committed, and a crash in between is settled at the next start by
-// whether that entry exists. Earlier keys always survive.
+// A rotation is staged beside the keyring and installed only after its audit
+// entry committed. At the next start a staged file is installed only when that
+// entry exists, is the newest rotation, names the staged active key and is not
+// yet applied; anything else is kept aside without failing the start and
+// without overwriting an earlier set-aside copy. Earlier keys always survive.
 func TestStagedSigningKeyRotation(t *testing.T) {
-	for _, tc := range []string{"finish", "stale_expected", "crash_committed", "crash_uncommitted"} {
+	for _, tc := range []string{"finish", "stale_expected", "crash_committed", "crash_uncommitted", "not_newest", "wrong_active_key", "replayed_after_apply", "lookup_error", "discarded_name_taken"} {
 		t.Run(tc, func(t *testing.T) {
 			t.Setenv("ENCRYPTION_KEY", atRestKeyV1)
 			t.Setenv("CREWSHIP_ENCRYPTION_KEY_VERSION", "")
@@ -167,44 +169,92 @@ func TestStagedSigningKeyRotation(t *testing.T) {
 			if _, _, _, err := StageSigningKeyRotation(dir, "", "audit-row-2"); !errors.Is(err, ErrSigningKeyRotationConflict) {
 				t.Fatalf("second rotation while one is pending: %v", err)
 			}
+			stagedBytes, _ := os.ReadFile(pending)
+			record := PendingRotation{Found: true, ActiveKeyID: active, Newest: true}
+			var lookupErr error
 			switch tc {
-			case "finish":
+			case "crash_uncommitted":
+				record = PendingRotation{}
+			case "not_newest":
+				record.Newest = false
+			case "wrong_active_key":
+				record.ActiveKeyID = "key-someone-else"
+			case "replayed_after_apply":
+				// The rotation was installed; an old copy of its staged file
+				// shows up again (restored from a backup, say).
+				if err := FinishSigningKeyRotation(dir, pending); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(pending, stagedBytes, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			case "lookup_error":
+				lookupErr = errors.New("database unavailable")
+			case "discarded_name_taken":
+				record = PendingRotation{}
+				if err := os.WriteFile(path+".discarded-audit-row-1", []byte("earlier copy"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc == "finish" {
 				err = FinishSigningKeyRotation(dir, pending)
-			default:
+			} else {
 				var changed bool
-				changed, err = ResolvePendingSigningKeyRotations(dir, func(id string) (bool, error) {
-					return id == "audit-row-1" && tc == "crash_committed", nil
+				var notes []string
+				changed, notes, err = ResolvePendingSigningKeyRotations(dir, func(id string) (PendingRotation, error) {
+					if id != "audit-row-1" {
+						t.Errorf("lookup for %q", id)
+					}
+					return record, lookupErr
 				})
-				if err == nil && changed != (tc == "crash_committed") {
-					t.Errorf("changed=%v", changed)
+				installs := tc == "crash_committed"
+				if err == nil && (changed != installs || (len(notes) == 0) == !installs) {
+					t.Errorf("changed=%v notes=%v", changed, notes)
 				}
 			}
 			if err != nil {
 				t.Fatal(err)
-			}
-			if staged, _ := filepath.Glob(path + ".pending-*"); len(staged) != 0 {
-				t.Errorf("staged rotation left behind: %v", staged)
 			}
 			now, err := LoadSigningKeys(path)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if tc == "crash_uncommitted" {
-				if now.ActiveID() != keys.ActiveID() {
-					t.Error("an uncommitted rotation was installed")
-				}
-				if _, err := LoadSigningKeys(path + ".discarded-audit-row-1"); err != nil {
-					t.Errorf("discarded rotation was not kept: %v", err)
+			if tc == "lookup_error" {
+				if _, err := os.Stat(pending); err != nil || now.ActiveID() != keys.ActiveID() {
+					t.Fatalf("lookup failure did not leave the staged file for the next start: %v", err)
 				}
 				return
 			}
-			if now.ActiveID() != active {
-				t.Fatalf("active key %s, want %s", now.ActiveID(), active)
+			if staged, _ := filepath.Glob(path + ".pending-*"); len(staged) != 0 {
+				t.Errorf("staged rotation left behind: %v", staged)
 			}
-			for id, key := range keys.keys {
-				if !bytes.Equal(now.keys[id], key) {
-					t.Errorf("rotation dropped verification key %s", id)
+			switch tc {
+			case "finish", "crash_committed", "replayed_after_apply":
+				if now.ActiveID() != active {
+					t.Fatalf("active key %s, want %s", now.ActiveID(), active)
 				}
+				for id, key := range keys.keys {
+					if !bytes.Equal(now.keys[id], key) {
+						t.Errorf("rotation dropped verification key %s", id)
+					}
+				}
+			default:
+				if now.ActiveID() != keys.ActiveID() {
+					t.Error("a rotation its audit entry does not vouch for was installed")
+				}
+			}
+			if tc == "finish" || tc == "crash_committed" {
+				return
+			}
+			kept := path + ".discarded-audit-row-1"
+			if tc == "discarded_name_taken" {
+				if earlier, _ := os.ReadFile(kept); string(earlier) != "earlier copy" {
+					t.Error("setting a rotation aside overwrote an earlier copy")
+				}
+				kept += ".1"
+			}
+			if raw, err := os.ReadFile(kept); err != nil || !bytes.Equal(raw, stagedBytes) {
+				t.Errorf("set-aside rotation not kept at %s: %v", kept, err)
 			}
 		})
 	}
