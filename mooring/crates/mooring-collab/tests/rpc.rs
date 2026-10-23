@@ -97,3 +97,52 @@ mod unix {
         assert!(child.join().unwrap().is_err());
     }
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn actual_child_owns_fd3_and_marks_host_capability_close_on_exec() {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::{net::UnixStream, process::CommandExt};
+    use std::process::{Command, Stdio};
+    use std::time::Duration;
+    let (mut host, inherited) = UnixStream::pair().unwrap();
+    host.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+    let child_fd = inherited.as_raw_fd();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_mooring-collab"));
+    command
+        .args(["--rpc-fd", "3"])
+        .env_clear()
+        .env("LANG", "C.UTF-8")
+        .env("TZ", "UTC")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    // Async-signal-safe syscalls only between fork and exec. The inherited
+    // socket is owned by the parent until spawn completes, and duplicated only
+    // in the child. Runtime startup must restore CLOEXEC after this exec.
+    unsafe {
+        command.pre_exec(move || {
+            if libc::dup2(child_fd, 3) == -1 || libc::fcntl(3, libc::F_SETFD, 0) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let mut child = command.spawn().unwrap();
+    drop(inherited);
+    write_frame(&mut host, br#"{"type":"hello","request_id":"fd-test","supported":[{"protocol_version":"0.4.0","model_version":"1.0.0","engine_version":"0.1.0"}]}"#).unwrap();
+    assert!(read_frame(&mut host).unwrap().is_some());
+    let info = std::fs::read_to_string(format!("/proc/{}/fdinfo/3", child.id())).unwrap();
+    let flags = info
+        .lines()
+        .find_map(|line| line.strip_prefix("flags:\t"))
+        .unwrap();
+    let flags = u32::from_str_radix(flags, 8).unwrap();
+    assert_ne!(
+        flags & libc::O_CLOEXEC as u32,
+        0,
+        "host capability could leak across exec"
+    );
+    drop(host);
+    assert!(child.wait().unwrap().success());
+}

@@ -13,7 +13,12 @@ fn run() -> std::io::Result<()> {
     }
     // Validate the descriptor before taking ownership (including a standalone
     // invocation without Go). No other thread can close it during bootstrap.
-    if unsafe { libc::fcntl(3, libc::F_GETFD) } == -1 {
+    let descriptor_flags = unsafe { libc::fcntl(3, libc::F_GETFD) };
+    if descriptor_flags == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // FD3 authenticates the host channel; never pass it to future descendants.
+    if unsafe { libc::fcntl(3, libc::F_SETFD, descriptor_flags | libc::FD_CLOEXEC) } == -1 {
         return Err(std::io::Error::last_os_error());
     }
     // Go owns bootstrap and passes exactly one socketpair end as ExtraFiles[0].
