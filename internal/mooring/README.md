@@ -233,3 +233,14 @@ Capacity failure rolls back the whole batch nonterminally, preserving drafts and
 prior durable history. Structural revisions use the same host operation revision;
 canonical decimal TEXT is ordered by length and BINARY text across the full u64
 range. Actual thousand-operation task/causal admission remains separate acceptance.
+
+
+The dormant human Page authority adapter uses canonical current Page grants,
+crew membership, folder ACLs and private custody in the protected SQLite writer.
+It requires the host-captured original session/CLI credential and current scope;
+request role snapshots cannot grant access. Cross-workspace folder references
+fail closed. Initialization requires an empty Page owned explicitly by that
+human. The result is a current permission/member binding, not a ticket or Saved
+receipt. Outer admission must preserve its original captured values, qualify
+engine versions and host incarnation, audit private owner reads, and require a
+send-time delivery gate for every protected response. No route is enabled here.
