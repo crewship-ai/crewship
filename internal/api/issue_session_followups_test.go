@@ -7,14 +7,11 @@ package api
 // review on #2342 found it could never reach a RUNNING or freshly-PENDING
 // winner.
 //
-// Driven directly against the AssignmentHandler method rather than through
-// a real finishAssignment lifecycle: setupMentionFixture wires no resolver,
-// so a real dispatched run fails near-instantly, which makes racing "still
-// RUNNING when the second comment lands" against a background goroutine
-// exactly the kind of flaky timing dependency these tests exist to avoid.
-// Seeding the precondition (a terminal "winner" run, 'pending' deliveries
-// behind it) and calling the method directly is deterministic and tests
-// the same code finishAssignment calls.
+// Initial terminal winners and pending deliveries are deterministic fixtures.
+// Newly accepted follow-ups run through the real shared dispatcher, authorizer,
+// AssignmentRuntime and durable projection before consumption is asserted.
+// The fixture has no orchestrator, so each new attempt fails before process
+// creation while retaining the production settlement and delivery lifecycle.
 
 import (
 	"context"
@@ -22,6 +19,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/crewship-ai/crewship/internal/dispatch"
+	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/work"
 )
 
 // seedFollowUpFixture seeds one session with a TERMINAL "winner" run (the
@@ -74,7 +76,7 @@ func TestDispatchQueuedFollowUps_OneRunCarriesTheFollowUpText(t *testing.T) {
 	deliveryIDs := seedFollowUpFixture(t, f, "sess_fu_a", "asg_fu_a_winner", "COMPLETED", 1)
 
 	f.assign.dispatchQueuedFollowUpsForSession(ctx, "asg_fu_a_winner", f.wsID)
-	f.assign.WaitDispatches()
+	drainMentionWork(t, f)
 
 	newRunID := onlyNewRunForSession(t, f, "sess_fu_a", "asg_fu_a_winner")
 
@@ -86,14 +88,9 @@ func TestDispatchQueuedFollowUps_OneRunCarriesTheFollowUpText(t *testing.T) {
 		t.Errorf("follow-up run's task does not contain the queued comment's text: %q", task)
 	}
 
-	// By the time WaitDispatches returns, the follow-up run has already
-	// gone through claim -> consumed — this fixture wires no resolver, so
-	// the run fails (and finishAssignment runs) near-instantly, exercising
-	// dispatchQueuedFollowUpsForSession's own catch-up path for a run that
-	// finishes before its claim lands (see that function's doc comment).
-	// Checking the FINAL state (consumed, claimed_by_run_id = the
-	// follow-up run) rather than the transient 'claimed' state in between
-	// is what makes this assertion race-free instead of timing-dependent.
+	// Canonical terminal projection consumes exactly the delivery this run
+	// claimed; assert final state after the dispatcher drain.
+
 	var state, claimedBy string
 	if err := f.db.QueryRow(`SELECT state, COALESCE(claimed_by_run_id,'') FROM mission_comment_mentions WHERE id = ?`,
 		deliveryIDs[0]).Scan(&state, &claimedBy); err != nil {
@@ -122,7 +119,7 @@ func TestDispatchQueuedFollowUps_TenFollowUpsProduceOneRun(t *testing.T) {
 	deliveryIDs := seedFollowUpFixture(t, f, "sess_fu_b", "asg_fu_b_winner", "COMPLETED", n)
 
 	f.assign.dispatchQueuedFollowUpsForSession(ctx, "asg_fu_b_winner", f.wsID)
-	f.assign.WaitDispatches()
+	drainMentionWork(t, f)
 
 	newRunID := onlyNewRunForSession(t, f, "sess_fu_b", "asg_fu_b_winner")
 
@@ -137,11 +134,9 @@ func TestDispatchQueuedFollowUps_TenFollowUpsProduceOneRun(t *testing.T) {
 		}
 	}
 
-	// Final state, not transient — see the sibling test's comment on why:
-	// this fixture's no-resolver run fails fast enough that
-	// dispatchQueuedFollowUpsForSession's own catch-up path (or the
-	// ordinary finishAssignment one) has already consumed every delivery
-	// this one follow-up run claimed by the time WaitDispatches returns.
+	// Both execution settlement and domain projection completed in the
+	// drain, so all ten claimed deliveries must now be consumed.
+
 	var consumed int
 	if err := f.db.QueryRow(
 		`SELECT COUNT(*) FROM mission_comment_mentions WHERE state = 'consumed' AND claimed_by_run_id = ?`,
@@ -210,14 +205,11 @@ func TestDispatchQueuedFollowUps_FailedDispatchLeavesDeliveriesPending(t *testin
 //
 // Three comments at ~1800 runes each (~5400 total, comfortably over the
 // 4000 budget once the header is subtracted) force an overflow: the first
-// two fit, the third does not — on the FIRST fold. This fixture's
-// no-resolver run fails near-instantly, so the follow-up run this test
-// dispatches itself finishes fast enough to trigger its OWN
-// dispatchQueuedFollowUpsForSession call before this test's single
-// WaitDispatches returns — the overflow comment left behind by the first
-// fold is picked up automatically by that second, chained fold, not by a
-// second call this test has to make itself. That self-draining chain is
-// exactly the point: nothing here manufactures a "next round" by hand.
+// two fit, the third does not — on the FIRST fold. The shared dispatcher
+// settles that follow-up and its projection accepts the overflow automatically.
+// Draining the queue exercises this self-draining chain without manually
+// manufacturing a second dispatch round.
+
 func TestDispatchQueuedFollowUps_OversizedDigestLeavesTheOverflowPending(t *testing.T) {
 	f := setupMentionFixture(t)
 	ctx := context.Background()
@@ -255,7 +247,7 @@ func TestDispatchQueuedFollowUps_OversizedDigestLeavesTheOverflowPending(t *test
 	}
 
 	f.assign.dispatchQueuedFollowUpsForSession(ctx, winnerID, f.wsID)
-	f.assign.WaitDispatches()
+	drainMentionWork(t, f)
 
 	// The overflow forced at least a SECOND follow-up run to exist for the
 	// session — one digest could not carry all three comments — proving
@@ -293,7 +285,7 @@ func TestDispatchQueuedFollowUps_OversizedDigestLeavesTheOverflowPending(t *test
 	// Every delivery ends up 'consumed' — the self-draining chain (each
 	// follow-up run's own completion re-triggers dispatchQueuedFollowUpsForSession)
 	// keeps folding the backlog in until nothing is left pending, all within
-	// the ONE WaitDispatches call above.
+	// the shared dispatcher drain above.
 	for _, id := range deliveryIDs {
 		var state string
 		if err := f.db.QueryRow(`SELECT state FROM mission_comment_mentions WHERE id = ?`, id).Scan(&state); err != nil {
@@ -309,7 +301,7 @@ func TestDispatchQueuedFollowUps_OversizedDigestLeavesTheOverflowPending(t *test
 // onlyNewRunForSession asserts exactly one assignment exists for sessionID
 // besides excludeID (the seeded "winner") and returns its id.
 //
-// Callers read this AFTER WaitDispatches, so the count is final, not
+// Callers read this AFTER draining the shared dispatcher, so the count is final, not
 // eventual: every run the fold dispatched has finished and its own
 // re-entry into dispatchQueuedFollowUpsForSession has run to completion
 // under followUpMu. More than one row therefore means the fold selected
@@ -334,7 +326,7 @@ func onlyNewRunForSession(t *testing.T, f *mentionFixture, sessionID, excludeID 
 		t.Fatalf("rows: %v", err)
 	}
 	if len(ids) != 1 {
-		t.Fatalf("new runs for session %s = %d (%v), want exactly 1 — dispatches are drained (WaitDispatches), "+
+		t.Fatalf("new runs for session %s = %d (%v), want exactly 1 — the shared dispatcher and projection are drained, "+
 			"so this is not load: the fold selected the same pending batch twice (followUpMu, #2437)", sessionID, len(ids), ids)
 	}
 	return ids[0]
@@ -361,6 +353,42 @@ func TestDispatchQueuedFollowUps_ConcurrentCallbacksDispatchOnce(t *testing.T) {
 	}
 	close(start)
 	callers.Wait()
-	f.assign.WaitDispatches()
+	drainMentionWork(t, f)
 	onlyNewRunForSession(t, f, "sess_concurrent", "asg_concurrent_winner")
+}
+
+// drainMentionWork executes accepted work through the shared dispatcher and
+// canonical projection. With no orchestrator this fixture authoritatively
+// fails each run before process creation; projection still consumes the exact
+// deliveries carried by its brief and accepts any overflow follow-up.
+func drainMentionWork(t *testing.T, f *mentionFixture) {
+	t.Helper()
+	f.assign.WaitDispatches()
+	writer := journal.NewWriter(f.db, quietLogger(), journal.WriterOptions{FlushSize: 1})
+	t.Cleanup(func() { _ = writer.Close() })
+	f.assign.SetJournal(writer)
+	internal := NewInternalHandler(f.db, "token", quietLogger())
+	internal.SetJournal(writer)
+	resolver := &outcomeProjectionResolver{handler: internal}
+	base := NewWebhookRuntime(NewWebhookHandler(f.db, quietLogger(), resolver, nil, nil, nil, nil))
+	runtime := &agentWorkRuntime{WebhookRuntime: base, assignment: &AssignmentRuntime{base: base, h: f.assign}}
+	d := dispatch.New(work.NewStore(f.db), runtime, assignmentWorkAuthorizer{h: f.assign}, dispatch.Config{Owner: "mention-fixture", Limits: work.SerialAgentLimits(), Kinds: []work.Kind{{Source: work.SourceAssignment, DomainKind: work.DomainAssignment}}}, quietLogger())
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	for {
+		worked, err := d.RunOne(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = runtime.FlushRunOutcomes(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if !worked {
+			break
+		}
+	}
+	var pending int
+	if err := f.db.QueryRow(`SELECT count(*) FROM work_items WHERE source='assignment' AND state NOT IN ('succeeded','failed','cancelled','expired')`).Scan(&pending); err != nil || pending != 0 {
+		t.Fatalf("dispatcher did not drain accepted work: pending=%d err=%v", pending, err)
+	}
 }

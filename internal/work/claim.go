@@ -210,12 +210,12 @@ type liveCounts struct {
 
 func (s *Store) countLiveTx(ctx context.Context, tx *sql.Tx) (liveCounts, error) {
 	var c liveCounts
-	err := tx.QueryRowContext(ctx, `
+	err := tx.QueryRowContext(ctx, liveSlotsCTE+`
 		SELECT
 			COUNT(*),
 			COALESCE(SUM(CASE WHEN class = 'chat' THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN class = 'background' THEN 1 ELSE 0 END), 0)
-		FROM work_items WHERE state IN (`+sqlHoldsExecutionSlot+`)`,
+		FROM live_slots`,
 	).Scan(&c.total, &c.chat, &c.background)
 	if err != nil {
 		return c, fmt.Errorf("work: count live: %w", err)
@@ -271,7 +271,7 @@ const candidateBatch = 50
 //     tiebreak so the scan is deterministic
 func (s *Store) scanCandidatesTx(ctx context.Context, tx *sql.Tx, opts ClaimOptions, classes []Class, now time.Time) ([]*Item, error) {
 	args := []any{tsformat.Format(now)}
-	q := `SELECT ` + itemColumns + ` FROM work_items w
+	q := liveSlotsCTE + `SELECT ` + itemColumns + ` FROM work_items w
 	      WHERE w.state IN ('queued','retry_wait') AND w.eligible_at <= ?`
 
 	placeholders := make([]string, 0, len(classes))
@@ -307,28 +307,34 @@ func (s *Store) scanCandidatesTx(ctx context.Context, tx *sql.Tx, opts ClaimOpti
 	// previous turn's runtime may still be alive.
 	q += ` AND (w.session_id = '' OR NOT EXISTS (
 	          SELECT 1 FROM work_items s
-	          WHERE s.session_id = w.session_id AND s.state IN (` + sqlOccupiesSession + `)))`
+	          WHERE s.session_id = w.session_id AND s.state IN (` + sqlOccupiesSession + `))
+              AND NOT EXISTS (SELECT 1 FROM live_slots ls WHERE ls.session_id=w.session_id))`
 
 	// Per-agent total and per-class caps.
 	q += ` AND (w.agent_id = '' OR (
-	          SELECT COUNT(*) FROM work_items a
-	          WHERE a.agent_id = w.agent_id AND a.state IN (` + sqlHoldsExecutionSlot + `)) < ?)`
+	          SELECT COUNT(*) FROM live_slots a
+	          WHERE a.agent_id = w.agent_id) < ?)`
 	args = append(args, opts.Limits.AgentTotal)
 
 	q += ` AND (w.agent_id = '' OR (
-	          SELECT COUNT(*) FROM work_items a
-	          WHERE a.agent_id = w.agent_id AND a.class = w.class
-	            AND a.state IN (` + sqlHoldsExecutionSlot + `))
+	          SELECT COUNT(*) FROM live_slots a
+	          WHERE a.agent_id = w.agent_id AND a.class = w.class)
 	          < CASE w.class WHEN 'chat' THEN ? ELSE ? END)`
 	args = append(args, opts.Limits.AgentChat, opts.Limits.AgentBackground)
+
+	crewBudget, err := crewBudgetExpression(ctx, tx, "w.crew_id")
+	if err != nil {
+		return nil, err
+	}
+	q += ` AND (w.crew_id = '' OR (SELECT COUNT(*) FROM live_slots cs WHERE cs.crew_id=w.crew_id) < ` + crewBudget + `)`
 
 	q += ` ORDER BY
 	        w.priority DESC,
 	        CASE WHEN w.eligible_at <= ? THEN 0 ELSE 1 END ASC,
-	        (SELECT COUNT(*) FROM work_items ws
-	           WHERE ws.workspace_id = w.workspace_id AND ws.state IN (` + sqlHoldsExecutionSlot + `)) ASC,
-	        (SELECT COUNT(*) FROM work_items ag
-	           WHERE ag.agent_id = w.agent_id AND ag.state IN (` + sqlHoldsExecutionSlot + `)) ASC,
+	        (SELECT COUNT(*) FROM live_slots ws
+	           WHERE ws.workspace_id = w.workspace_id) ASC,
+	        (SELECT COUNT(*) FROM live_slots ag
+	           WHERE ag.agent_id = w.agent_id) ASC,
 	        w.eligible_at ASC, w.created_at ASC, w.id ASC
 	      LIMIT ?`
 	args = append(args, tsformat.Format(now.Add(-AgingThreshold)), candidateBatch)
@@ -379,8 +385,8 @@ func (s *Store) admitsTx(ctx context.Context, tx *sql.Tx, it *Item, lim Limits, 
 	if it.SessionID != "" {
 		var n int
 		if err := tx.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM work_items WHERE session_id = ? AND state IN (`+sqlOccupiesSession+`)`,
-			it.SessionID).Scan(&n); err != nil {
+			liveSlotsCTE+`SELECT (SELECT COUNT(*) FROM work_items WHERE session_id = ? AND state IN (`+sqlOccupiesSession+`)) + (SELECT COUNT(*) FROM live_slots WHERE session_id=?)`,
+			it.SessionID, it.SessionID).Scan(&n); err != nil {
 			return false, fmt.Errorf("work: count session turns: %w", err)
 		}
 		if n > 0 {
@@ -390,12 +396,12 @@ func (s *Store) admitsTx(ctx context.Context, tx *sql.Tx, it *Item, lim Limits, 
 
 	if it.AgentID != "" {
 		var agentTotal, agentChat, agentBackground int
-		if err := tx.QueryRowContext(ctx, `
+		if err := tx.QueryRowContext(ctx, liveSlotsCTE+`
 			SELECT
 				COUNT(*),
 				COALESCE(SUM(CASE WHEN class = 'chat' THEN 1 ELSE 0 END), 0),
 				COALESCE(SUM(CASE WHEN class = 'background' THEN 1 ELSE 0 END), 0)
-			FROM work_items WHERE agent_id = ? AND state IN (`+sqlHoldsExecutionSlot+`)`,
+			FROM live_slots WHERE agent_id = ?`,
 			it.AgentID).Scan(&agentTotal, &agentChat, &agentBackground); err != nil {
 			return false, fmt.Errorf("work: count agent runs: %w", err)
 		}
@@ -406,6 +412,19 @@ func (s *Store) admitsTx(ctx context.Context, tx *sql.Tx, it *Item, lim Limits, 
 			return false, nil
 		}
 		if it.Class == ClassBackground && agentBackground >= lim.AgentBackground {
+			return false, nil
+		}
+	}
+	if it.CrewID != "" {
+		budget, err := crewBudgetExpression(ctx, tx, "?")
+		if err != nil {
+			return false, err
+		}
+		var allowed bool
+		if err := tx.QueryRowContext(ctx, liveSlotsCTE+`SELECT (SELECT COUNT(*) FROM live_slots WHERE crew_id=?) < `+budget, it.CrewID, it.CrewID).Scan(&allowed); err != nil {
+			return false, fmt.Errorf("work: count crew slots: %w", err)
+		}
+		if !allowed {
 			return false, nil
 		}
 	}

@@ -530,26 +530,20 @@ func TestMentions_DeliveryAckedBeforeDispatch(t *testing.T) {
 	if err := f.db.QueryRow(`SELECT state FROM mission_comment_mentions WHERE id = ?`, frame.Payload.DeliveryID).Scan(&state); err != nil {
 		t.Fatalf("read delivery state: %v", err)
 	}
-	// consumed, not just claimed: finishAssignment's consumeDeliveriesForRun
-	// call (assignments_run.go) has already run by the time WaitDispatches
-	// (inside f.comment) returns — the test environment has no real
-	// container executor, so runAssignment fails fast and finishAssignment
-	// still runs the terminal path for a FAILED run, which is exactly the
-	// "did a run consume this, independent of whether it succeeded" property
-	// §9.3 draws the state/dispatch_state distinction for.
-	//
-	// There are two writers of that 'consumed', and which one lands depends
-	// on the ordering between the spawned run and the handler that spawned
-	// it: the run's own consumeDeliveriesForRun when persist's upsert
-	// attached claimed_by_run_id first, or persist's terminal re-check
-	// (issue_mentions.go) when the run finished before the upsert — the
-	// fast-run ordering that made this exact assertion flake under CI load
-	// (#2407, #2437) until that re-check existed. Both are synchronous with
-	// what f.comment waits on, so the state read here is final: a 'claimed'
-	// is a broken guard (see TestMentionPersist_LateClaimAfterRunFinished
-	// for the ordering pinned deterministically), not a slow runner.
+	// The acknowledged delivery is already durable before any dispatcher
+	// executes it; accepting work must not depend on finishing the run.
+	if state != "claimed" {
+		t.Fatalf("acked delivery state=%q before dispatch, want claimed", state)
+	}
+	drainMentionWork(t, f)
+	if err := f.db.QueryRow(`SELECT state FROM mission_comment_mentions WHERE id=?`, frame.Payload.DeliveryID).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	// Failure before process creation still settles and consumes the exact
+	// delivery through canonical projection.
+
 	if state != "consumed" {
-		t.Errorf("delivery state = %q, want consumed — the run is already drained (WaitDispatches), so this is not load: "+
+		t.Errorf("delivery state = %q, want consumed — the shared dispatcher and projection are drained: "+
 			"either finishAssignment's consumeDeliveriesForRun or persist's terminal re-check must have closed the claim (#2407, #2437)", state)
 	}
 }
