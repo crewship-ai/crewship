@@ -38,7 +38,9 @@ def verify_checksums(directory, expected):
             raise ValueError('Unsafe or absent vendored path')
         if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
             raise ValueError('Changed vendored file')
-    actual = {str(p.relative_to(directory)) for p in directory.rglob('*') if p.is_file() and p.name != '.cargo-checksum.json'}
+    if any(p.is_symlink() for p in directory.rglob('*')):
+        raise ValueError('Unexpected vendor symlink')
+    actual = {str(p.relative_to(directory)) for p in directory.rglob('*') if p.is_file() and p != directory / '.cargo-checksum.json'}
     if actual != set(files):
         raise ValueError('Unrecorded or absent vendored files')
 

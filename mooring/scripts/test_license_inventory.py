@@ -29,7 +29,18 @@ class IntegrityTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 inventory.verify_checksums(directory, 'a' * 64)
             source.write_text('harmless source')
-            (directory / 'unrecorded').write_text('extra')
+            extra = directory / 'unrecorded'
+            extra.write_text('extra')
+            with self.assertRaises(ValueError):
+                inventory.verify_checksums(directory, 'a' * 64)
+            extra.unlink()
+            nested = directory / 'nested'
+            nested.mkdir()
+            (nested / '.cargo-checksum.json').write_text('unrecorded nested data')
+            with self.assertRaises(ValueError):
+                inventory.verify_checksums(directory, 'a' * 64)
+            (nested / '.cargo-checksum.json').unlink()
+            (nested / 'linked').symlink_to(source)
             with self.assertRaises(ValueError):
                 inventory.verify_checksums(directory, 'a' * 64)
 
