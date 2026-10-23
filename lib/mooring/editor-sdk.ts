@@ -1,15 +1,15 @@
 /** Browser editor SDK. Contains no authentication or Crewship dependencies.
  * The host owns durable state; an editor owns its unsubmitted drafts. */
-import { MOORING_PROTOCOL, MOORING_MAX_MESSAGE_BYTES, bundleDigest, decodeMessage, record, revision, type CapabilityPort, type WindowEnvelope } from "./channel"
+import { MOORING_PROTOCOL, MOORING_MAX_MESSAGE_BYTES, record, revision } from "./channel"
+
+import { createEditorConnection, type EditorEnvironment } from "./editor-connection"
+import { createNativeProfile, type NativeEditorSDKOptions } from "./native-profile"
+export type { EditorEnvironment } from "./editor-connection"
+export type { NativeEditorSDKOptions } from "./native-profile"
 
 export interface DocumentState { rev: number; generation: number; snapshot: unknown }
 export type SaveStatus = "connecting" | "saved" | "draft" | "saving" | "offline" | "error"
 export interface DurableReceipt { rev: number; outcome: string; issued_by: string; durability: string; [key: string]: unknown }
-export interface EditorEnvironment {
-  parent: unknown
-  listen(handler: (event: WindowEnvelope & { ports?: CapabilityPort[] }) => void): () => void
-  hello(message: unknown, targetOrigin: string): void
-}
 export interface EditorSDKOptions {
   parentOrigin: string
   bundle: string
@@ -21,10 +21,13 @@ export interface EditorSDKOptions {
 export function durableReceipt(value: unknown, rev: number, issuer?: string): value is DurableReceipt {
   return record(value) && value.rev === rev && value.outcome === "committed" && typeof value.issued_by === "string" && value.issued_by.length > 0 && (issuer === undefined || value.issued_by === issuer) && value.durability === "node"
 }
-export function createEditorSDK(options: EditorSDKOptions) {
-  const parentURL = new URL(options.parentOrigin)
-  if (parentURL.origin !== options.parentOrigin || !["https:", "http:"].includes(parentURL.protocol) || !bundleDigest(options.bundle)) throw new Error("Invalid host configuration")
-  let port: CapabilityPort | undefined, state: DocumentState | undefined
+export function createEditorSDK(options: NativeEditorSDKOptions): ReturnType<typeof createNativeProfile>
+export function createEditorSDK(options: EditorSDKOptions): ReturnType<typeof createJSONProfile>
+export function createEditorSDK(options: EditorSDKOptions | NativeEditorSDKOptions) {
+  return "profile" in options ? createNativeProfile(options) : createJSONProfile(options)
+}
+function createJSONProfile(options: EditorSDKOptions) {
+  let state: DocumentState | undefined
   let dirty = false, online = true, failed = false, closed = false, sequence = 0
   const pending = new Map<number, Record<string, unknown>>()
   const receipts = new Map<number, DurableReceipt>()
@@ -35,14 +38,12 @@ export function createEditorSDK(options: EditorSDKOptions) {
     }
   }
   function status(message?: string) {
-    options.onStatus(failed ? "error" : !online ? "offline" : !port || !state ? "connecting" : pending.size ? "saving" : dirty ? "draft" : "saved", message)
+    options.onStatus(failed ? "error" : !online ? "offline" : !connection.connected || !state ? "connecting" : pending.size ? "saving" : dirty ? "draft" : "saved", message)
   }
   function error(message: string) { failed = true; status(message) }
-  function send(message: Record<string, unknown>) { port?.postMessage(JSON.stringify({ ...message, protocol: MOORING_PROTOCOL })) }
-  function receive(raw: unknown) {
+  function send(message: Record<string, unknown>) { connection.send(JSON.stringify({ ...message, protocol: MOORING_PROTOCOL })) }
+  function receive(message: Record<string, unknown>) {
     if (closed) return
-    const message = decodeMessage(raw)
-    if (!message) { error("Invalid host message"); return }
     if (message.type === "snapshot" || message.type === "committed") {
       if (!revision(message.rev) || !revision(message.generation) || message.generation < 1 || !("snapshot" in message)) { error("Invalid document state"); return }
       if (state && message.generation !== state.generation) { error("Document generation changed; reopen the editor"); return }
@@ -66,21 +67,15 @@ export function createEditorSDK(options: EditorSDKOptions) {
     if (message.type === "online" || message.type === "offline") { online = message.type === "online"; status(); return }
     error("Unsupported host message")
   }
-  const unlisten = options.environment.listen(event => {
-    if (closed || event.source !== options.environment.parent || event.origin !== options.parentOrigin) return
-    const data = event.data
-    if (!record(data) || data.type !== "mooring:connect") return
-    if (port || data.protocol !== MOORING_PROTOCOL || event.ports?.length !== 1) { error("Unsupported protocol or duplicate connection"); return }
-    port = event.ports[0]; port.onmessage = event => receive(event.data); port.start?.(); status()
-  })
+  const connection = createEditorConnection({ ...options, namespace: "mooring", onConnect: () => status(), onMessage: message => receive(message), onError: error })
   status()
   return {
-    hello() { if (!closed) options.environment.hello({ type: "mooring:hello", protocol: MOORING_PROTOCOL, bundle: options.bundle }, options.parentOrigin) },
+    hello() { connection.hello() },
     get state() { return state },
     get pending() { return pending.size },
     draft(value: boolean) { dirty = value; if (!value && !pending.size) failed = false; send({ type: "draft", dirty }); status() },
     command(command: string, args: unknown): boolean {
-      if (!port || !state || !online || pending.size || closed) return false
+      if (!connection.connected || !state || !online || pending.size || closed) return false
       const mutation = { type: "command", seq: sequence + 1, base_rev: state.rev, generation: state.generation, command, arguments: args }
       let encoded: string
       try {
@@ -91,8 +86,9 @@ export function createEditorSDK(options: EditorSDKOptions) {
         dirty = true; error("This change exceeds the message limit; your draft is not saved"); return false
       }
       sequence++
-      pending.set(sequence, mutation); dirty = false; failed = false; port.postMessage(encoded); status(); return true
+      pending.set(sequence, mutation); dirty = false; failed = false; if (!connection.send(encoded)) { pending.delete(sequence); dirty = true; status(); return false }
+      status(); return true
     },
-    close() { closed = true; unlisten(); if (port) { port.onmessage = null; port.close() } },
+    close() { closed = true; connection.close() },
   }
 }

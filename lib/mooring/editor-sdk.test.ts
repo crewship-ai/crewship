@@ -128,3 +128,12 @@ it("bounds outgoing UTF-8 bytes and preserves local work on serialization failur
   expect(t.sdk.command("set", { text: "retained" })).toBe(true)
   expect(t.sent.at(-1)).toMatchObject({ seq: 1, arguments: { text: "retained" } })
 })
+it("the JSON profile ignores a native connection and retains its 64-KiB host-message cap", () => {
+  const t = setup()
+  t.connect({ data: { type: "gridcraft:connect", protocol: 1 } })
+  expect(t.port.onmessage).toBeNull()
+  t.connect()
+  t.receive({ type: "snapshot", rev: 1, generation: 1, snapshot: { text: "x".repeat(64 << 10) } })
+  expect(t.states).toHaveLength(0)
+  expect(t.statuses.at(-1)).toBe("error")
+})
