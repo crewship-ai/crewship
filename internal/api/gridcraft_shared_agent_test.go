@@ -120,6 +120,17 @@ func TestGridCraftSharedWorkbookAgentNeedsPostPublicationOwnerMandate(t *testing
 	if head() != 3 {
 		t.Fatalf("head after shared agent apply = %d", head())
 	}
+	// The shared path exists only with live workbook editing on: with the
+	// workspace flag off the admitted mandate and a new admission are refused.
+	mustExec(t, f.rig.db, `UPDATE feature_flag_overrides SET enabled=0 WHERE id='ffo-shared-agent'`)
+	proposalRequired(agent(read("shared-edit")), "shared agent read with the editor off")
+	proposalRequired(agent(apply("shared-edit", 3, "agent-flag-off")), "shared agent apply with the editor off")
+	proposalRequired(serve(h.mandate, owner("POST", mandate("flag-off", 3, "Sheet1!B2"))), "shared admit with the editor off")
+	if head() != 3 {
+		t.Fatalf("head moved with the editor off: %d", head())
+	}
+	mustExec(t, f.rig.db, `UPDATE feature_flag_overrides SET enabled=1 WHERE id='ffo-shared-agent'`)
+
 	// Agents never import, also not on a shared workbook.
 	proposalRequired(agent(`{"action":"apply","artifact_id":"grid-shared-page","mandate_id":"shared-edit","request":{"mutation_id":"agent-import","mandate_id":"shared-edit","base_rev":3,"generation":1,"command":{"kind":"import","snapshot":{"sheets":[{}]}}}}`), "agent import on shared")
 

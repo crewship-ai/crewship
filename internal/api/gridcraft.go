@@ -569,9 +569,10 @@ func (h *gridcraftHTTP) mandate(w http.ResponseWriter, r *http.Request) {
 	// A shared workbook accepts a direct agent mandate only from its owner,
 	// bounded to an explicit cell. Anything else needs a proposal, which
 	// workbooks do not support yet. Publication revoked every mandate admitted
-	// before it, so a mandate admitted here is always post-publication.
+	// before it, so a mandate admitted here is always post-publication. The
+	// shared path exists only with live workbook editing switched on.
 	wildcard := req.Targets[0] == "*"
-	if record == nil || access != workbookOwner || (!record.PrivateAudience && wildcard) {
+	if record == nil || access != workbookOwner || (!record.PrivateAudience && (wildcard || !h.editorOn(r.Context(), tx, k.WorkspaceID))) {
 		gridcraftError(w, errWorkbookProposalRequired)
 		return
 	}
@@ -741,7 +742,11 @@ func (h *gridcraftHTTP) agent(w http.ResponseWriter, r *http.Request) {
 		if shared {
 			// The run's human must still be the workbook owner by the
 			// ordinary human rule, and the mandate one the owner admitted
-			// after publication (sharedAgentMandate).
+			// after publication (sharedAgentMandate), with live workbook
+			// editing switched on.
+			if !h.editorOn(ctx, tx, a.WorkspaceID) {
+				return appengine.Principal{}, errWorkbookProposalRequired
+			}
 			if _, access, accessErr := h.pages.workbookHumanAccess(ctx, a.WorkspaceID, k.PageID, a.HumanUserID, true); accessErr != nil || access != workbookOwner {
 				return appengine.Principal{}, errWorkbookProposalRequired
 			}
