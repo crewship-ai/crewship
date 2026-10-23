@@ -75,15 +75,12 @@ pub mod private_rpc {
         }
     }
 
-    pub fn serve(mut stream: UnixStream, bootstrap_timeout: Duration) -> io::Result<()> {
+    pub fn bootstrap(stream: &mut UnixStream, bootstrap_timeout: Duration) -> io::Result<()> {
         let deadline = Instant::now()
             .checked_add(bootstrap_timeout)
             .ok_or_else(|| invalid("invalid bootstrap timeout"))?;
-        let frame = read_frame(&mut BootstrapReader {
-            stream: &mut stream,
-            deadline,
-        })?
-        .ok_or_else(|| invalid("missing host hello"))?;
+        let frame = read_frame(&mut BootstrapReader { stream, deadline })?
+            .ok_or_else(|| invalid("missing host hello"))?;
         // Concrete structs reject duplicate/unknown fields, including version keys.
         let hello: Hello = serde_json::from_slice(&frame).map_err(|_| invalid("invalid hello"))?;
         let supported = [versions()];
@@ -99,9 +96,14 @@ pub mod private_rpc {
             .filter(|remaining| !remaining.is_zero())
             .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "bootstrap deadline"))?;
         stream.set_write_timeout(Some(remaining))?;
-        write_frame(&mut stream, &response)?;
+        write_frame(stream, &response)?;
         stream.set_read_timeout(None)?;
         stream.set_write_timeout(None)?;
+        Ok(())
+    }
+
+    pub fn serve(mut stream: UnixStream, bootstrap_timeout: Duration) -> io::Result<()> {
+        bootstrap(&mut stream, bootstrap_timeout)?;
         // Future dispatch must validate scope, host authority, fencing, JCS and
         // delivery gates. Today any post-bootstrap message fails closed.
         if read_frame(&mut stream)?.is_some() {

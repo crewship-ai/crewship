@@ -172,8 +172,11 @@ name = "mooring-collab"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "mooring-core",
  "mooring-protocol",
+ "mooring-text",
  "serde_json",
+ "yrs",
 ]
 
 [[package]]
