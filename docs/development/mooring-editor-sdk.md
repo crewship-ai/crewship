@@ -14,7 +14,7 @@ refusal decisions and legacy `gridcraft:*` wire adapter remain in
 `lib/workbooks/bridge.ts`; those rules are application-specific and are not
 replaced by a whole-document generic merge.
 
-`createEditorSDK` provides the small non-Rust editor interface:
+`createEditorSDK` provides the JSON editor interface and the native adapter profile:
 
 ```ts
 const editor = createEditorSDK({
@@ -29,8 +29,8 @@ editor.command("set", { text: "Hello" })
 ```
 
 `environment` supplies the parent window, a window-message listener and the
-initial hello sender. The reference editor also checks the parent window and
-configured origin before forwarding any window event to the SDK. The SDK accepts the private port only from that exact
+initial hello sender. The shared browser environment checks the parent window and configured origin
+before forwarding a window event to the SDK. The SDK accepts the private port only from that exact
 parent and configured origin with protocol 1. The host accepts a hello only
 from its own opaque iframe after the first load, with the exact approved bundle
 pin. Navigation or a second handshake ends the capability. All subsequent
@@ -92,3 +92,21 @@ XLSX fidelity, Rust SDK, public conformance and capacity qualification remain
 outside this pilot. Rich GridCraft mutations remain blocked until their storage
 and synchronization paths are supported. Customer-installation isolation policy
 is a separate release decision; a development deployment is not its approval.
+
+The JSON reference editor and the native GridCraft adapter both construct
+`createEditorSDK`. Its connection core owns the exact parent origin/source check,
+protocol negotiation, capability port and bounded wire transport. The JSON
+profile reconciles JSON revisions and drafts. The native profile delivers the
+original native envelopes to GridCraft's Rust model; that model remains responsible
+for cells, snapshots, pending mutations, drafts and undo, then reports its applied
+revision and save state back through the SDK. A transport error overrides a native
+Saved state.
+
+GridCraft vendors this canonical source and a generated ES module. Run
+`node scripts/vendor-mooring-sdk.mjs <gridcraft-checkout>` from the Crewship
+checkout after committing the SDK. The resulting provenance file identifies the
+source commit, each source SHA-256, the compiler version and generated module
+SHA-256. The module is bundled into the WASM package as a local wasm-bindgen
+module; it is not fetched from a separate runtime service. Native snapshot bodies
+retain their 1 MiB limit with a bounded metadata envelope. JSON messages and
+outgoing messages retain their 64 KiB limit.

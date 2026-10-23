@@ -32,8 +32,8 @@ export function transferEditorPort(frame: CapabilityWindow, channel: { port1: Ca
   frame.postMessage({ ...metadata, type: `${namespace}:connect`, protocol: MOORING_PROTOCOL }, "*", [channel.port2])
   return channel.port1
 }
-export function decodeMessage(raw: unknown): Record<string, unknown> | null {
-  if (typeof raw !== "string" || new TextEncoder().encode(raw).length > MOORING_MAX_MESSAGE_BYTES) return null
+export function decodeMessage(raw: unknown, maxBytes = MOORING_MAX_MESSAGE_BYTES): Record<string, unknown> | null {
+  if (typeof raw !== "string" || new TextEncoder().encode(raw).length > maxBytes) return null
   try {
     const value: unknown = JSON.parse(raw)
     return record(value) && value.protocol === MOORING_PROTOCOL ? value : null

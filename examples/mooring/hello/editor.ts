@@ -1,6 +1,8 @@
 /** A non-Rust editor using only the public Mooring TypeScript SDK. */
 import { createEditorSDK, type SaveStatus } from "../../../lib/mooring/editor-sdk"
-import { capabilityPort, record } from "../../../lib/mooring/channel"
+import { record } from "../../../lib/mooring/channel"
+
+import { createBrowserEditorEnvironment, helloAfterLoad } from "../../../lib/mooring/editor-connection"
 
 const input = document.querySelector<HTMLTextAreaElement>("textarea")!
 const save = document.querySelector<HTMLButtonElement>("button")!
@@ -15,18 +17,7 @@ const parentOrigin = config.searchParams.get("parent_origin") ?? ""
 const sdk = createEditorSDK({
   parentOrigin,
   bundle: location.pathname.split("/").at(-2) ?? "",
-  environment: {
-    parent: window.parent,
-    listen(handler) {
-      const listener = (event: MessageEvent) => {
-        if (event.source !== window.parent || event.origin !== parentOrigin) return
-        handler({ source: event.source, origin: event.origin, data: event.data, ports: event.ports.map(capabilityPort) })
-      }
-      window.addEventListener("message", listener)
-      return () => window.removeEventListener("message", listener)
-    },
-    hello: (message, origin) => window.parent.postMessage(message, origin),
-  },
+  environment: createBrowserEditorEnvironment(parentOrigin),
   onState(state) {
     const text = record(state.snapshot) && typeof state.snapshot.text === "string" ? state.snapshot.text : ""
     confirmedText = text
@@ -53,7 +44,5 @@ save.addEventListener("click", () => {
   submittedVersion = draftVersion
   if (!sdk.command("set", { text: submitted })) submitted = undefined
 })
-// The child load event precedes the parent's iframe load notification. Posting
-// hello in the next task lets the host bind it to the document it just loaded.
-window.addEventListener("load", () => setTimeout(() => sdk.hello(), 0), { once: true })
-window.addEventListener("pagehide", () => sdk.close(), { once: true })
+const cancelHello = helloAfterLoad(() => sdk.hello())
+window.addEventListener("pagehide", () => { cancelHello(); sdk.close() }, { once: true })
