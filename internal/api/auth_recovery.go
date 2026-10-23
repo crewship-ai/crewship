@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"github.com/crewship-ai/crewship/internal/mailer"
 )
@@ -41,6 +42,9 @@ type RecoveryHandler struct {
 	logger   *slog.Logger
 	mail     mailer.Mailer
 	sessions sessions.Store
+	// streams closes open CLI-token streams after a committed reset. Nil in
+	// handler-only tests; the router wires the middleware's registry.
+	streams *auth.StreamCredentials
 	// publicBase is the validated CREWSHIP_PUBLIC_URL from env, parsed
 	// once at construction. Nil when the env var is unset. Used as the
 	// authoritative origin for reset links — never falls back to
@@ -379,7 +383,14 @@ func (h *RecoveryHandler) Reset(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "reset password: revoke sessions", err)
 		return
 	}
-	if err := auditPasswordTx(r.Context(), tx, userID, "auth.password_reset", now, len(ids), 0); err != nil {
+	tokenIDs, err := RevokeRecoveryCLITokensTx(r.Context(), tx, userID, userID, now)
+	if err != nil {
+		replyPasswordAuditError(w, h.logger, "reset password: revoke cli tokens", err)
+		return
+	}
+	// The reset itself grants access, so its record never falls back: a
+	// broken chain tail refuses here and rolls the whole reset back (503).
+	if err := auditPasswordTx(r.Context(), tx, userID, "auth.password_reset", now, len(ids), len(tokenIDs)); err != nil {
 		replyPasswordAuditError(w, h.logger, "reset password: audit", err)
 		return
 	}
@@ -401,6 +412,14 @@ func (h *RecoveryHandler) Reset(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "reset password: acknowledge lockout", err)
 		return
 	}
+	if err := ackCLITokenRevocationsTx(r.Context(), tx, tokenIDs, userID, now); err != nil {
+		replyInternalError(w, h.logger, "reset password: acknowledge cli tokens", err)
+		return
+	}
+	if err := acknowledgeNoCLITokensTx(r.Context(), tx, userID); err != nil {
+		replyInternalError(w, h.logger, "reset password: acknowledge cli tokens", err)
+		return
+	}
 
 	if err := tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "reset password: commit", err)
@@ -408,6 +427,9 @@ func (h *RecoveryHandler) Reset(w http.ResponseWriter, r *http.Request) {
 	}
 	if notify != nil {
 		notify()
+	}
+	if len(tokenIDs) > 0 && h.streams != nil {
+		h.streams.NotifyTokensRevoked(userID)
 	}
 
 	h.logger.Info("password reset succeeded", "user_id", userID)

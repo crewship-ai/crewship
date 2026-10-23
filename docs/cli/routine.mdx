@@ -2395,7 +2395,7 @@ crewship routine shared-draft save ROUTINE_ID --file - < draft.json
 
 `shared-draft <routine-id-or-slug>` supports table, JSON and YAML output. Save
 requires `--file` containing one complete JSON snapshot; `-` reads stdin.
-`can_edit` is a read-only server hint and is removed before saving. Unknown
+`can_edit` and `can_publish` are read-only server hints and are removed before saving. Unknown
 fields and incomplete snapshots fail locally. PUT requires the existing
 `workspace:admin` token scope and rechecks current rights, issuers and account.
 A 409 preserves the conflict for review; the CLI performs no hidden GET or retry.
@@ -2411,9 +2411,16 @@ crewship routine draft publish ROUTINE_ID --draft-id ID --revision N --base-revi
 ```
 
 Both commands send the exact reviewed reference without refreshing or retrying.
-Validate checks structure only; publish additionally requires current View, Edit,
-Publish and the referenced agent execution grants. A stale reference or busy
-writer returns 409; existing triggers return 422 and must be removed explicitly.
+The web editor provides the same flow through **Save shared draft → Check
+saved draft structure → Publish reviewed draft**. A further edit clears the
+check; conflicts require explicit reload. Publication displays its version
+without starting a run. A 422 refusal shows the server's reason and changes
+nothing, so the editor can fix the cause and check again.
+Validate checks structure only (`"scope": "structure_only"`); it is not a test
+run. Publish additionally requires current View, Edit, Publish and the
+referenced agent execution grants. A stale reference or busy writer returns 409.
+Existing triggers, and other saved routines whose `call_pipeline` steps target
+this routine, return 422 and must be removed explicitly before publishing.
 A null description is rejected with 400. Publication stores an immutable authority
 manifest and consumes the draft atomically with its audit event. It does not run
 agents: the generic runner, nested calls and automatic trigger writers refuse the

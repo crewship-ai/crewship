@@ -212,7 +212,7 @@ func TestPresetPreviewValidationAndRoutineWarnings(t *testing.T) {
 	}
 	base := presetRequest(t, s, "routine", "r1", "view")
 	for name, alter := range map[string]func(*PresetRequest){
-		"version": func(r *PresetRequest) { r.Version = 2 }, "level": func(r *PresetRequest) { r.Level = "publish" }, "kind": func(r *PresetRequest) { r.Resource.Kind = "agent" },
+		"version": func(r *PresetRequest) { r.Version = 999 }, "level": func(r *PresetRequest) { r.Level = "publish" }, "kind": func(r *PresetRequest) { r.Resource.Kind = "agent" },
 		"new-reissue": func(r *PresetRequest) { r.Reissue = []Right{{"routine", "r1", "view"}} },
 		"duplicate": func(r *PresetRequest) {
 			r.Reissue = []Right{{"routine", "r1", "results"}, {"routine", "r1", "results"}}
