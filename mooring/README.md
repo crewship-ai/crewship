@@ -5,6 +5,15 @@ by Crewship, so it does not start a service or change the deployed application.
 The Go host remains the authority for permissions, fencing, durable writes and
 receipts. Draining a Rust batch never means the changes have been saved.
 
+`mooring_core::adapter::PrepareAdapter` is a pure application boundary: validate
+an opaque checkpoint and prepare one normalized immutable atomic change from a
+restored/forked authoritative state. Its candidate owns a full checkpoint and
+application state. There is no installation, publication, receipt or outcome
+ledger API. The caller bounds input before restore and output after serialization,
+then waits for verified host confirmation. An adapter's failed member must pass
+`PreparedFailure::qualify`; foreign/ambiguous members and uncertain outcomes
+remain nonterminal errors instead of guessed persisted rejections.
+
 `mooring-core` begins with bounded batches of atomic changes: 100 ms from the
 first operation, 256 operations, or 256 KiB, whichever comes first. These are
 initial defaults, configurable by the runtime. Oversized atomic changes return
