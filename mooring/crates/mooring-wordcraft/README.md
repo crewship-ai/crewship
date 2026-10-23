@@ -1,0 +1,52 @@
+# WordCraft native model adapter
+
+This default-off crate is not connected to Crewship routes or the runtime. It
+imports complete native WordCraft 0.10.0 JSON into Yrs 0.28.0, projects it back,
+and restores the same native data and stable paragraph IDs from a full CRDT
+checkpoint. Export and checkpoint bytes are candidates, never Saved receipts.
+The host alone owns authentication, scope, permission checks, durable commits,
+history and audit. This initial slice exposes no mutation/update entrypoint.
+
+The model retains document metadata, explicit paragraph order and caller-issued
+stable IDs. Each paragraph has a nested Y.Text, so an empty paragraph's shared
+type identity survives storage recovery. The adapter converts UTF-8 byte run
+lengths to UTF-16 positions at checked Unicode scalar boundaries. Basic native
+character flags use separate Yrs attributes: independent bold and italic edits
+can merge without replacing each other's properties. A presence attribute keeps
+absent formatting distinct from explicit empty properties and explicit false.
+Paragraph style/list references, marks and full native metadata are retained.
+
+Initial support covers the qualified D1 paragraph model: basic inline flags,
+paragraph style and numbering metadata. Unsupported blocks, inline objects,
+review/comment content, unknown native fields and unsupported character or
+paragraph properties make the **whole document read-only**, retaining its full
+native data. Invalid native field types/run boundaries are refused. Inspect
+`read_only_reason()` before any future mutation admission; no per-block lossy
+fallback is offered. Richer supported fields require qualification first.
+
+Host callers must generate fresh IDs once during initial import, then include
+those IDs and full Yrs state in the same confirmed checkpoint. Body indexes are
+not identities. `restore` accepts only host-authenticated, scope/revision-verified
+storage state; it is not a remote-update endpoint. Native/checkpoint byte and
+block-count bounds are additional local limits; the host must enforce tighter
+negotiated bounds before decoding and after candidate serialization. The
+checkpoint validates that native projection, stable IDs and CRDT state agree.
+
+Tests distinguish synthetic model/Unicode/concurrency cases from actual upstream
+engine/WASM qualification. A two-replica attribute merge is not an authenticated
+multiuser integration. Undo, rejected dependencies, native UI integration and
+host prepare/commit wiring remain separate work.
+
+Offline qualification accepts explicit stable IDs rather than generating index
+IDs:
+
+```sh
+crewship-heavy cargo run --manifest-path mooring/Cargo.toml \
+  --config mooring/.cargo/config.toml --locked --offline \
+  -p mooring-wordcraft --example roundtrip -- \
+  native.json stable-ids.json existing-output-directory
+```
+
+The executable writes native projection, full checkpoint and restored native
+JSON. These output files still need actual WordCraft engine/WASM load, save and
+reopen checks; a JSON equality assertion alone is not that evidence.
