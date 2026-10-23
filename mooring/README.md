@@ -114,3 +114,12 @@ zero-effect dependency connectors and every intervening target effect, before
 constructing these non-deserializable values. Missing history is nonterminal.
 The shared causal vectors distinguish host SQL cases, pure Rust cases and the
 optional-null wire negative; they are not live authorization/convergence proof.
+
+`dispatch_causal` is an explicit generic adapter opt-in for the separate
+`mooring.prepare-causal.v1` private profile. It validates original membership,
+checkpoint digest, complete inventory and every host-qualified read binding;
+then it independently checks the returned candidate's ordered effects and causal
+working reads. Selection happens once on the inherited channel, and messages
+cannot switch profiles. The existing native WordCraft entry point still selects
+only the strict profile. Synthetic adapter and real Unix-stream tests establish
+these generic boundaries, not application causal support or SQL authorization.

@@ -1,6 +1,7 @@
 //! Private inherited host control. Stateless preparation is not a host commit.
 use std::io::{self, Read, Write};
 pub mod dispatch;
+pub mod dispatch_causal;
 
 pub const MAX_FRAME: usize = 262_144;
 
@@ -78,6 +79,30 @@ pub mod private_rpc {
     use std::os::unix::net::UnixStream;
     use std::time::{Duration, Instant};
 
+    #[derive(Clone, Copy)]
+    enum ControlProfile {
+        Strict,
+        Causal,
+    }
+    impl ControlProfile {
+        fn offer(self) -> mooring_protocol::HelloControlProfilesItem {
+            match self {
+                Self::Strict => mooring_protocol::HelloControlProfilesItem::MooringPrepareV1,
+                Self::Causal => mooring_protocol::HelloControlProfilesItem::MooringPrepareCausalV1,
+            }
+        }
+        fn selection(self) -> mooring_protocol::RuntimeReadySelectedControlProfile {
+            match self {
+                Self::Strict => {
+                    mooring_protocol::RuntimeReadySelectedControlProfile::MooringPrepareV1
+                }
+                Self::Causal => {
+                    mooring_protocol::RuntimeReadySelectedControlProfile::MooringPrepareCausalV1
+                }
+            }
+        }
+    }
+
     /// Recomputes the remaining absolute bootstrap budget after every read.
     /// Fragmentation cannot extend the deadline by resetting a per-read timeout.
     struct BootstrapReader<'a> {
@@ -115,6 +140,24 @@ pub mod private_rpc {
         supported_version: &Versions,
         supports_control: bool,
     ) -> io::Result<bool> {
+        bootstrap_profiles(
+            stream,
+            bootstrap_timeout,
+            supported_version,
+            if supports_control {
+                &[ControlProfile::Strict]
+            } else {
+                &[]
+            },
+        )
+        .map(|selected| selected.is_some())
+    }
+    fn bootstrap_profiles(
+        stream: &mut UnixStream,
+        bootstrap_timeout: Duration,
+        supported_version: &Versions,
+        available: &[ControlProfile],
+    ) -> io::Result<Option<ControlProfile>> {
         let deadline = Instant::now()
             .checked_add(bootstrap_timeout)
             .ok_or_else(|| invalid("invalid bootstrap timeout"))?;
@@ -129,14 +172,18 @@ pub mod private_rpc {
             .map_err(|_| invalid("invalid hello"))?;
         let supported = [supported_version.clone()];
         let selected = negotiate(&hello, &supported).map_err(invalid)?;
-        let selected_control = supports_control
-            && hello.control_profiles.as_ref().is_some_and(|profiles| {
-                profiles.contains(&mooring_protocol::HelloControlProfilesItem::MooringPrepareV1)
-            });
+        let selected_control = available
+            .iter()
+            .find(|profile| {
+                hello
+                    .control_profiles
+                    .as_ref()
+                    .is_some_and(|offers| offers.contains(&profile.offer()))
+            })
+            .copied();
         let ready = RuntimeReady {
             r#type: RuntimeReadyType::RuntimeReady,
-            selected_control_profile: selected_control
-                .then_some(mooring_protocol::RuntimeReadySelectedControlProfile::MooringPrepareV1),
+            selected_control_profile: selected_control.map(ControlProfile::selection),
             request_id: hello.request_id,
             selected: selected.clone(),
         };
@@ -179,6 +226,36 @@ pub mod private_rpc {
         }
         while let Some(frame) = read_profile_frame(&mut stream, true)? {
             let response = registration.respond(&frame)?;
+            write_profile_frame(&mut stream, &response, true)?;
+        }
+        Ok(())
+    }
+
+    /// Explicit application opt-in only. The existing native entry point does
+    /// not call this function. An offered causal profile is preferred only when
+    /// the compiled adapter implements its distinct preparation method.
+    pub fn serve_causal_registered<A: mooring_core::adapter::CausalPrepareAdapter>(
+        mut stream: UnixStream,
+        bootstrap_timeout: Duration,
+        registration: crate::dispatch::Registration<A>,
+    ) -> io::Result<()> {
+        let selected = bootstrap_profiles(
+            &mut stream,
+            bootstrap_timeout,
+            &registration.selected,
+            &[ControlProfile::Causal, ControlProfile::Strict],
+        )?;
+        let Some(selected) = selected else {
+            if read_frame(&mut stream)?.is_some() {
+                return Err(invalid("private profile not selected"));
+            }
+            return Ok(());
+        };
+        while let Some(frame) = read_profile_frame(&mut stream, true)? {
+            let response = match selected {
+                ControlProfile::Strict => registration.respond(&frame)?,
+                ControlProfile::Causal => registration.respond_causal(&frame)?,
+            };
             write_profile_frame(&mut stream, &response, true)?;
         }
         Ok(())
