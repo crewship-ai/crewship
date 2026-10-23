@@ -1,5 +1,7 @@
 ---
 title: Mooring applications
+stability: experimental
+tag: Experimental
 ---
 
 The experimental personal-document API uses the existing workspace context and
@@ -22,7 +24,7 @@ native GridCraft uses its existing creation/import protocol.
 **Statuses:** 201 created, 200 exact retry, 400 invalid declaration, 401 revoked
 credential, 403 denied, 404 unavailable, 409 conflict, 500 persistence failure.
 
-## GET /api/v1/pages/{slug}/mooring
+## GET /api/v1/pages/\{slug\}/mooring
 
 **Auth:** current private Page owner and human workspace credential.
 **Request:** `slug` path parameter, also accepting `@ID`.
@@ -31,7 +33,7 @@ credential, 403 denied, 404 unavailable, 409 conflict, 500 persistence failure.
 **Statuses:** 200, 401 invalid credential, 404 unavailable or unauthorized,
 500 persistence failure, 503 unavailable application.
 
-## POST /api/v1/pages/{slug}/mooring/commands
+## POST /api/v1/pages/\{slug\}/mooring/commands
 
 **Auth:** current private Page owner and human workspace credential.
 **Request:** `{mutation_id,base_rev,generation,command,arguments}`; arguments must
@@ -43,7 +45,7 @@ durability and visibility. Identical retries return the original receipt.
 404 unavailable or unauthorized, 409 stale base or conflicting mutation key,
 500 persistence failure, 503 unavailable application.
 
-## POST /api/v1/pages/{slug}/mooring/mandates
+## POST /api/v1/pages/\{slug\}/mooring/mandates
 
 **Auth:** current private Page owner and human workspace credential.
 **Request:** `{mandate_id,run_id,base_rev,generation,command}`. The run must retain
@@ -53,7 +55,7 @@ that human's live host-dispatched chat authority and current workspace policy.
 credential, 404 unavailable or unauthorized, 409 changed preconditions,
 500 persistence failure.
 
-## DELETE /api/v1/pages/{slug}/mooring/mandates/{mandate}
+## DELETE /api/v1/pages/\{slug\}/mooring/mandates/\{mandate\}
 
 **Auth:** current private Page owner and human workspace credential.
 **Request:** slug and mandate path parameters; no body.

@@ -78,3 +78,12 @@ GridCraft adapter share the private MessagePort handshake; native GridCraft
 operation semantics remain in its adapter.
 
 <!-- docs-inventory: ignore-api /api/v1/internal/mooring — protected host IPC, deliberately excluded from public OpenAPI. -->
+
+## Isolation and release scope
+
+The pilot uses an explicitly configured, separately served editor origin and
+opaque credentialless frames. Its development deployment approval does not
+approve a default isolation policy for customer installations. The same-host
+transport remains experimental and requires a release decision before enabling
+it for customers. Application packages receive neither a host credential nor
+general host API access.
