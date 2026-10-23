@@ -123,3 +123,31 @@ are refused before any destination deletion/write. Fingerprints bind original
 scope; re-keying history, dropping it or presenting it as new-scope Saved would
 violate that identity. Qualified clone/import provenance belongs to the later
 recovery integration. No transformed restore support is claimed by this primitive.
+
+The optional target preparation primitive records host-owned stable target
+versions and per-operation effect provenance in the same SQL transaction as
+checkpoints and immutable outcomes. It is separately default-off and never falls
+back to a context-free adapter when enabled. `agent_confirmed_current` requires
+complete qualified checkpoint inventory, exact current read observations and
+host prospective operation labels. Missing targets, retained tombstones and
+stale observations have distinct member failures; corrupt inventory or runtime
+binding errors abort nonterminally. Causal stale reads, provisional targets and
+human updates require later qualification; this primitive does not complete E3.
+
+Target and effect rows, normalized dependency arrays, and explicit provenance
+completeness survive exact-ID backup/restore as durable history. Legacy records
+are marked incomplete rather than invented as no-effect history. Tombstone IDs
+cannot be reused; there is no history pruning to make quotas pass. Count defaults
+are 65536 target identities, 1000000 effect rows, 256 effects per operation. The
+additional provenance default is 128 MiB of logical serialized UTF-8 bytes:
+exact `encoding/json` dependency arrays plus complete effect `record_json`
+objects (scope, operation/target IDs, before/after revision labels and flags).
+This is independent of SQLite file size and private/public frame budgets. Blob
+length counts UTF-8 bytes, without numeric casts of u64 counters. SQL binds each
+accounting record to indexed columns so a short unrelated JSON object cannot
+hide long identifiers. Known dependency bytes are checked before preparation;
+actual bounded prepared effect bytes must fit before ledger/checkpoint commit.
+Capacity failure rolls back the whole batch nonterminally, preserving drafts and
+prior durable history. Structural revisions use the same host operation revision;
+canonical decimal TEXT is ordered by length and BINARY text across the full u64
+range. Actual thousand-operation task/causal admission remains separate acceptance.

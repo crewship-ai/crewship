@@ -25,6 +25,11 @@ func TestMooringCollaborationBackupPreservesLedgerCheckpointTaskAudit(t *testing
 			{`INSERT INTO mooring_collab_tasks(page_id,workspace_id,task_id,participant_ref,allow_partial,status) VALUES(?,?,'task','original-author',1,'cancelled')`, []any{page, ws}},
 			{`INSERT INTO mooring_collab_changes(page_id,workspace_id,change_id,membership_hash,task_id,result_json) VALUES(?,?,'change','sha256:immutable','task',?)`, []any{page, ws, marker}},
 			{`INSERT INTO mooring_collab_operations(page_id,workspace_id,op_id,change_id,participant_ref,fingerprint,result_json) VALUES(?,?,'op','change','original-author','sha256:immutable',?)`, []any{page, ws, marker}},
+			{`INSERT INTO mooring_collab_target_versions(page_id,workspace_id,target_id,revision,structure_revision,deleted) VALUES(?,?,'p','18446744073709551615','9223372036854775808',0)`, []any{page, ws}},
+			{`INSERT INTO mooring_collab_target_effects(page_id,workspace_id,op_id,target_id,revision,before_revision,before_structure_revision,content_changed,structure_changed,created,deleted,record_json) VALUES(?,?,'op','p','18446744073709551615','9223372036854775808','9223372036854775808',1,0,0,0,?)`, []any{page, ws, func() string {
+				b, _ := json.Marshal(map[string]any{"workspace_id": ws, "page_id": page, "op_id": "op", "target_id": "p", "revision": "18446744073709551615", "before_revision": "9223372036854775808", "before_structure_revision": "9223372036854775808", "content_changed": true, "structure_changed": false, "created": false, "deleted": false})
+				return string(b)
+			}()}},
 			{`INSERT INTO mooring_collab_checkpoints(page_id,workspace_id,revision,checkpoint_base64,decoded_bytes) VALUES(?,?,'18446744073709551615','AP9h',3)`, []any{page, ws}},
 			{`INSERT INTO mooring_collab_audit(id,page_id,workspace_id,kind,detail_json) VALUES(?,?,?,'change_saved',?)`, []any{"audit-" + page, page, ws, marker}},
 			{`INSERT INTO mooring_session_owners(page_id,workspace_id,application_id,owner_id,generation,token_hash,boot_id,expires_ns) VALUES(?,?,'editor','live-owner',1,?,'source-boot',999999)`, []any{page, ws, bytes.Repeat([]byte{1}, 32)}},
@@ -41,7 +46,7 @@ func TestMooringCollaborationBackupPreservesLedgerCheckpointTaskAudit(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	tables := []string{"mooring_collab_documents", "mooring_collab_tasks", "mooring_collab_changes", "mooring_collab_operations", "mooring_collab_checkpoints", "mooring_collab_audit"}
+	tables := []string{"mooring_collab_documents", "mooring_collab_tasks", "mooring_collab_changes", "mooring_collab_operations", "mooring_collab_target_versions", "mooring_collab_target_effects", "mooring_collab_checkpoints", "mooring_collab_audit"}
 	for _, table := range tables {
 		if len(dump.Tables[table]) != 1 {
 			t.Fatal("durable table missing", table)

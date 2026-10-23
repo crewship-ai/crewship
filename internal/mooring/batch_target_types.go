@@ -52,9 +52,12 @@ type BatchTargetLimits struct {
 	Targets             int
 	Effects             int
 	EffectsPerOperation int
+	ProvenanceBytes     int64
 }
 
-func DefaultBatchTargetLimits() BatchTargetLimits { return BatchTargetLimits{65536, 1000000, 256} }
+func DefaultBatchTargetLimits() BatchTargetLimits {
+	return BatchTargetLimits{65536, 1000000, 256, 128 << 20}
+}
 
 // TargetStoreConfig is separately default-off. Enabled configuration never falls
 // back to the legacy context-free adapter or ignores target read observations.

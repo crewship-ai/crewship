@@ -166,6 +166,9 @@ func (s *BatchStore) Commit(ctx context.Context, request BatchRequest) (BatchRes
 		if e != nil {
 			return e
 		}
+		if e = s.requireTargetMode(ctx, tx, key.ArtifactID); e != nil {
+			return e
+		}
 		rev, e := batchCounter(revision)
 		if e != nil {
 			return e
@@ -175,6 +178,9 @@ func (s *BatchStore) Commit(ctx context.Context, request BatchRequest) (BatchRes
 			return e
 		}
 		if e = s.ledgerCapacity(ctx, tx, key.ArtifactID, changes, known); e != nil {
+			return e
+		}
+		if e = s.targetCapacity(ctx, tx, key.ArtifactID, changes, known); e != nil {
 			return e
 		}
 		taskReasons, e := s.validateTasks(ctx, tx, key, changes, known)
@@ -278,10 +284,33 @@ func (s *BatchStore) Commit(ctx context.Context, request BatchRequest) (BatchRes
 				}
 			}
 			var candidate []byte
+			var targetRows []preparedTargetRow
+			var targetCandidate BatchTargetCandidate
+			var targetContext BatchPrepareContext
 			if reason == nil {
 				isolated := cloneBatchChange(c)
 				var failure *PreparedFailure
-				candidate, failure, e = s.config.Adapter.Apply(ctx, append([]byte(nil), checkpoint...), isolated)
+				if s.targetsEnabled() {
+					targetContext, e = s.targetContext(ctx, tx, key, c, rev)
+					if e != nil {
+						return e
+					}
+					if e = s.confirmTargetContext(ctx, checkpoint, c, targetContext); e != nil {
+						return e
+					}
+					failure = confirmedTargetReadFailure(c, targetContext)
+					rawContext, _ := json.Marshal(targetContext)
+					var isolatedContext BatchPrepareContext
+					if e = json.Unmarshal(rawContext, &isolatedContext); e != nil {
+						return e
+					}
+					if failure == nil {
+						targetCandidate, failure, e = s.config.Targets.Adapter.PrepareTargets(ctx, append([]byte(nil), checkpoint...), isolated, isolatedContext)
+					}
+					candidate = append([]byte(nil), targetCandidate.Checkpoint...)
+				} else {
+					candidate, failure, e = s.config.Adapter.Apply(ctx, append([]byte(nil), checkpoint...), isolated)
+				}
 				if failure != nil {
 					if !validPreparedFailure(c, failure) {
 						return ErrInvalid
@@ -298,6 +327,15 @@ func (s *BatchStore) Commit(ctx context.Context, request BatchRequest) (BatchRes
 				if reason == nil {
 					if len(candidate) > s.config.Limits.CheckpointBytes {
 						reason = batchReason("quota_exceeded")
+					} else if s.targetsEnabled() {
+						validated, e := s.config.Targets.Adapter.ValidateTargets(ctx, append([]byte(nil), candidate...))
+						if e != nil {
+							return e
+						}
+						targetRows, e = s.validateTargetCandidate(c, targetContext, targetCandidate, validated)
+						if e != nil {
+							return e
+						}
 					} else if e = s.config.Adapter.ValidateCheckpoint(ctx, append([]byte(nil), candidate...)); e != nil {
 						return e
 					}
@@ -332,6 +370,11 @@ func (s *BatchStore) Commit(ctx context.Context, request BatchRequest) (BatchRes
 				if e != nil {
 					return e
 				}
+				if s.targetsEnabled() {
+					if e = s.targetPreparedByteCapacity(ctx, tx, key, c, targetRows); e != nil {
+						return e
+					}
+				}
 				if e = s.saveCheckpoint(ctx, tx, key, stored.LastRevision, candidate); e != nil {
 					return e
 				}
@@ -343,6 +386,11 @@ func (s *BatchStore) Commit(ctx context.Context, request BatchRequest) (BatchRes
 			}
 			if e = s.saveChange(ctx, tx, key, c, stored); e != nil {
 				return e
+			}
+			if stored.Status == "saved" && s.targetsEnabled() {
+				if e = persistTargetRows(ctx, tx, key, targetRows); e != nil {
+					return e
+				}
 			}
 			eventChanges = append(eventChanges, stored)
 			accepted[next] = stored
