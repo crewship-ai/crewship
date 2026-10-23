@@ -464,6 +464,16 @@ reason) — and every OWNER reseal reach the instance admins:
 The alert is written by a background task after detection, never inside the
 writer transaction that detected it.
 
+The server also verifies the full instance chain and every retained workspace
+journal at startup and hourly, using read snapshots outside writer transactions.
+Each sweep has a five-minute deadline; verification errors are logged and retried
+on the next sweep. `post_upgrade_invalid` raises the same deduplicated incident.
+Any `unchained_fallback > 0` raises a separate, stable seq-zero incident, even
+when the chained segment is healthy; the alert itself cannot generate an endless
+series of fallback incidents. Deleted workspaces with retained journal rows are
+included. No verification request or refused append is needed to detect history
+damage.
+
 There is no new quarantine state; with a broken tail, audit-producing writes
 on that chain fail while reads and unrelated chains retain their own authority
 checks (security-reducing instance actions are the exception below). Database
