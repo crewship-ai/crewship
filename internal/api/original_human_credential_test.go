@@ -241,3 +241,62 @@ func TestOriginalCredentialResolveHumanRejectsUntrustedOrMalformedSource(t *test
 		t.Fatal("workspace token asserted original human source", response.Code)
 	}
 }
+
+func TestOriginalCredentialAdminKeyRotationRevokesOriginalSource(t *testing.T) {
+	t.Setenv(adminTokenHMACKeyEnv, strings.Repeat("ab", 32))
+	f := newArtifactPrincipalFixture(t)
+	key, err := adminHMACKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := cliTokenAdminPrefix + "synthetic-original-admission"
+	mustExec(t, f.rig.db, `INSERT INTO cli_tokens(id,user_id,name,token_hash,tier) VALUES('original-admin',?,'fixture',?,'ADMIN')`, f.a.HumanUserID, hashAdmin(token, key))
+	source, err := captureOriginalHumanCredential(t.Context(), f.rig.db, &AuthUser{ID: f.a.HumanUserID, TokenID: "original-admin"}, AuthKindCLIToken, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := validateOriginalHumanCredential(t.Context(), f.rig.db, *source, "pages:read"); err != nil {
+		t.Fatal(err)
+	}
+	// Canonical bearer auth changes on key rotation even though the exact
+	// credential row and user counter have not changed.
+	t.Setenv(adminTokenHMACKeyEnv, strings.Repeat("cd", 32))
+	if _, err := ValidateCLITokenFull(t.Context(), f.rig.db, token, ValidateAuditContext{}); err == nil {
+		t.Fatal("canonical auth unexpectedly accepts rotated key")
+	}
+	if _, err := validateOriginalHumanCredential(t.Context(), f.rig.db, *source, "pages:read"); err == nil {
+		t.Fatal("original credential survived canonical ADMIN key revocation")
+	}
+}
+
+func TestOriginalCredentialScopedReferenceRejectsMalformedPolicy(t *testing.T) {
+	f := newArtifactPrincipalFixture(t)
+	token := cliTokenStandardPrefix + "synthetic-strict-scope"
+	mustExec(t, f.rig.db, `INSERT INTO cli_tokens(id,user_id,name,token_hash,tier) VALUES('strict-scope-cli',?,'fixture',?,'STANDARD')`, f.a.HumanUserID, hashStandard(token))
+	for _, tc := range []struct {
+		name    string
+		value   any
+		allowed bool
+	}{
+		{"sql-null", nil, true}, {"empty", "", true}, {"whitespace", "  ", true}, {"empty-array", "[]", true},
+		{"read", `["pages:read"]`, true}, {"resource-wildcard", `["pages:*"]`, true}, {"all-wildcard", `["*"]`, true},
+		{"write-only", `["pages:write"]`, false}, {"malformed", "{", false}, {"object", "{}", false}, {"json-null", "null", false},
+		{"scalar", `"pages:read"`, false}, {"null-member", `[null]`, false}, {"numeric-member", `[1]`, false}, {"empty-member", `[""]`, false},
+		{"unknown-member", `["pages:read","unrecognized:scope"]`, false}, {"mixed-null", `["pages:read",null]`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mustExec(t, f.rig.db, `UPDATE cli_tokens SET scopes=? WHERE id='strict-scope-cli'`, tc.value)
+			source, err := captureOriginalHumanCredential(t.Context(), f.rig.db, &AuthUser{ID: f.a.HumanUserID, TokenID: "strict-scope-cli"}, AuthKindCLIToken, token)
+			if err != nil {
+				t.Fatal("capture provenance", err)
+			}
+			if _, err := validateOriginalHumanCredential(t.Context(), f.rig.db, *source, scopeSelf); err != nil {
+				t.Fatal("generic provenance policy changed", err)
+			}
+			_, err = validateOriginalHumanCredential(t.Context(), f.rig.db, *source, "pages:read")
+			if (err == nil) != tc.allowed {
+				t.Errorf("scoped admission allowed=%t want=%t", err == nil, tc.allowed)
+			}
+		})
+	}
+}
