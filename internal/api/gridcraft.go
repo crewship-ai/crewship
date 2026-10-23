@@ -159,7 +159,9 @@ func (h *gridcraftHTTP) humanKey(r *http.Request, write bool) (appengine.Key, er
 	if h.pages.db.QueryRowContext(r.Context(), "SELECT id FROM pages WHERE workspace_id=? AND "+column+"=?", k.WorkspaceID, ref).Scan(&k.PageID) != nil {
 		return k, appengine.ErrForbidden
 	}
-	tx, err := h.pages.db.BeginTx(r.Context(), nil)
+	// A read transaction: resolving the key never writes, so it must not
+	// take the database-wide write lock.
+	tx, err := h.pages.db.BeginTx(r.Context(), &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return k, err
 	}

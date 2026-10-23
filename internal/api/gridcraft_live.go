@@ -32,9 +32,15 @@ const gridcraftEditorFlag = "gridcraft_editor"
 const (
 	gridcraftSessionIdle = 15 * time.Minute
 	gridcraftSessionTTL  = 12 * time.Hour
-	// An edit renews the idle expiry only once less than idle minus this step
-	// remains, so at most one edit per step and session writes the renewal.
+	// An edit or heartbeat renews the idle expiry only once less than idle
+	// minus this step remains, so at most one renewal per step and session is
+	// written.
 	gridcraftSessionRenewStep = 5 * time.Minute
+	// Expired sessions linger this long, so a late edit still learns that its
+	// session expired rather than that it never existed; then they are pruned.
+	gridcraftSessionLinger = 24 * time.Hour
+	// The outbox sweeper prunes lingering sessions at most this often.
+	gridcraftSessionPruneInterval = 10 * time.Minute
 )
 
 // gridcraftMaxSessions bounds the live editor sessions of one user on one Page.
@@ -181,6 +187,12 @@ func (h *gridcraftHTTP) openSession(w http.ResponseWriter, r *http.Request) {
 		gridcraftError(w, appengine.ErrForbidden)
 		return
 	}
+	if req.SessionID != "" {
+		if out, p, ok := h.quietHeartbeat(r, k, credential, req.SessionID); ok {
+			h.writeSession(w, r, 200, out, p)
+			return
+		}
+	}
 	ctx := r.Context()
 	tx, err := h.pages.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -240,9 +252,7 @@ func (h *gridcraftHTTP) openSession(w http.ResponseWriter, r *http.Request) {
 			gridcraftError(w, appengine.ErrForbidden)
 			return
 		}
-		// Expired sessions linger a day, so a late edit still learns that its
-		// session expired rather than that it never existed.
-		if _, err = tx.ExecContext(ctx, `DELETE FROM gridcraft_sessions WHERE page_id=? AND expires_at<?`, k.PageID, now.Add(-24*time.Hour).UnixMilli()); err != nil {
+		if _, err = tx.ExecContext(ctx, `DELETE FROM gridcraft_sessions WHERE page_id=? AND expires_at<?`, k.PageID, now.Add(-gridcraftSessionLinger).UnixMilli()); err != nil {
 			gridcraftError(w, err)
 			return
 		}
@@ -278,11 +288,52 @@ func (h *gridcraftHTTP) openSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out.ExpiresAt = tsformat.Format(time.UnixMilli(stored).UTC())
-	out.ActorLabel = h.actorLabel(ctx, p.AuthorityID)
+	h.writeSession(w, r, status, out, p)
+}
+
+func (h *gridcraftHTTP) writeSession(w http.ResponseWriter, r *http.Request, status int, out gridcraftEditorSession, p appengine.Principal) {
+	out.ActorLabel = h.actorLabel(r.Context(), p.AuthorityID)
 	if h.editorBundle != nil {
 		out.BundleDigest, out.EditorURL = h.editorBundle()
 	}
 	writeJSON(w, status, out)
+}
+
+// quietHeartbeat answers a heartbeat that has nothing to write: the session is
+// live, more than idle minus a renew step remains, and no limit (the absolute
+// lifetime, the sign-in or token) now ends it earlier. Like an edit's renewal
+// it then writes nothing and takes no write lock; it reports the stored
+// expiry. It reports false whenever the writing path has to run, which also
+// answers every refusal.
+func (h *gridcraftHTTP) quietHeartbeat(r *http.Request, k appengine.Key, credential, session string) (gridcraftEditorSession, appengine.Principal, bool) {
+	ctx := r.Context()
+	out := gridcraftEditorSession{SessionID: session, PageID: k.PageID, Protocol: gridcraftEditorProtocol}
+	tx, err := h.pages.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return out, appengine.Principal{}, false
+	}
+	defer tx.Rollback()
+	p, err := h.humanAuthority(r, k, true, nil)(ctx, tx)
+	if err != nil || !h.editorOn(ctx, tx, k.WorkspaceID) {
+		return out, p, false
+	}
+	if tx.QueryRowContext(ctx, `SELECT head_rev,generation FROM gridcraft_heads WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&out.Rev, &out.Generation) != nil {
+		return out, p, false
+	}
+	limit, err := credentialLimit(ctx, tx, r)
+	if err != nil {
+		return out, p, false
+	}
+	live, err := h.liveSession(ctx, tx, k, UserFromContext(ctx).ID, credential, session)
+	if err != nil {
+		return out, p, false
+	}
+	now := time.Now()
+	if live.expires.Sub(now) <= gridcraftSessionIdle-gridcraftSessionRenewStep || sessionDeadline(live.created, now, limit).Before(live.expires) {
+		return out, p, false
+	}
+	out.ExpiresAt = tsformat.Format(live.expires.UTC())
+	return out, p, true
 }
 
 // closeSession ends one of the caller's own editor sessions on this Page.
@@ -588,6 +639,9 @@ type gridcraftOutboxWorker struct {
 	cancel context.CancelFunc
 	kick   chan struct{}
 	wg     sync.WaitGroup
+	// pruned is when the sweeper last pruned sessions; only its goroutine
+	// touches it.
+	pruned time.Time
 }
 
 const gridcraftOutboxInterval = 5 * time.Second
@@ -657,6 +711,30 @@ func (w *gridcraftOutboxWorker) sweep(ctx context.Context) {
 	if err := w.h.publish(attempt, ""); err != nil && ctx.Err() == nil && w.h.pages.logger != nil {
 		w.h.pages.logger.Warn("workbook outbox sweep", "error", err)
 	}
+	if now := time.Now(); now.Sub(w.pruned) >= gridcraftSessionPruneInterval {
+		w.pruned = now
+		if _, err := w.h.pruneSessions(attempt, now); err != nil && ctx.Err() == nil && w.h.pages.logger != nil {
+			w.h.pages.logger.Warn("workbook editor session prune", "error", err)
+		}
+	}
+}
+
+// pruneSessions deletes the editor sessions of every Page that expired more
+// than the linger period before now, and reports how many. Opening a session
+// prunes its own Page too; this reaches Pages nobody opens again. It checks
+// for such rows with a plain read first, so a prune with nothing to delete
+// takes no write lock.
+func (h *gridcraftHTTP) pruneSessions(ctx context.Context, now time.Time) (int64, error) {
+	cutoff := now.Add(-gridcraftSessionLinger).UnixMilli()
+	var due bool
+	if err := h.pages.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM gridcraft_sessions WHERE expires_at<?)`, cutoff).Scan(&due); err != nil || !due {
+		return 0, err
+	}
+	result, err := h.pages.db.ExecContext(ctx, `DELETE FROM gridcraft_sessions WHERE expires_at<?`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 func (w *gridcraftOutboxWorker) stop() {
