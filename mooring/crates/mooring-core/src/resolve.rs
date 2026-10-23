@@ -336,6 +336,21 @@ impl Context<'_> {
                 "operation dependency cycle inside atomic change",
             ));
         }
+        // Atomic membership is fingerprinted in application order. Reordering
+        // operations here would change the authenticated command semantics.
+        for (position, op) in change.operations.iter().enumerate() {
+            if op.dependencies.iter().any(|dependency| {
+                change.operations[position..]
+                    .iter()
+                    .any(|later| later.op_id == *dependency)
+            }) {
+                return AtomicDecision::Rejected(Rejection::direct(
+                    &op.op_id,
+                    Code::InvalidRequest,
+                    "dependency must precede its operation inside atomic change",
+                ));
+            }
+        }
         for op in &change.operations {
             for dependency in &op.dependencies {
                 let failure = if let Some(&owner) = self.op_to_change.get(dependency) {

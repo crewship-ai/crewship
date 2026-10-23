@@ -251,3 +251,22 @@ fn p21_invalid_configuration_cannot_remove_recursion_bound() {
         Err(InvalidBatch::InvalidLimits)
     );
 }
+
+#[test]
+fn d4_atomic_order_is_preserved_and_forward_internal_dependency_is_rejected() {
+    let forward = change("forward", vec![op("B", &["A"]), op("A", &[])]);
+    let result = run(&[forward], &BTreeMap::new(), &BTreeMap::new());
+    assert!(result.execution_order.is_empty());
+    for operation in &result.changes[0].operations {
+        let reason = rejected(&operation.decision);
+        assert_eq!(reason.code, Code::InvalidRequest);
+        assert_eq!(reason.root.op_id, "B");
+    }
+    let backward = change("ordered", vec![op("A", &[]), op("B", &["A"])]);
+    let result = run(&[backward], &BTreeMap::new(), &BTreeMap::new());
+    assert_eq!(result.execution_order, vec!["ordered"]);
+    assert!(result.changes[0]
+        .operations
+        .iter()
+        .all(|op| op.decision == Decision::EligibleForHost));
+}
