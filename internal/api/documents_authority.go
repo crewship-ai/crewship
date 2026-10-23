@@ -157,7 +157,7 @@ func (h *documentAuthority) authorizeWithReadRecord(r *http.Request, k documents
 		if _, _, e := privatePageOwnershipSQL(ctx, tx, "p"); e != nil {
 			return "", errDocumentAccess
 		}
-		for _, table := range []string{"slides_heads", "page_boards", "page_artifacts", "gridcraft_heads", "mooring_documents"} {
+		for _, table := range []string{"slides_heads", "page_boards", "page_artifacts", "gridcraft_heads", "mooring_documents", "mooring_collab_documents"} {
 			var installed, attached bool
 			if tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name=? COLLATE NOCASE)", table).Scan(&installed) != nil {
 				return "", errDocumentAccess

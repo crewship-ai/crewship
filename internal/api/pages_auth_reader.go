@@ -36,6 +36,7 @@ func privatePageOwnershipSQL(ctx context.Context, q pageAuthQueryer, alias strin
 		// (gridcraft_require_personal_page_*), so a departing owner's workbook
 		// waits for an explicit human successor instead of going to a crew.
 		{"gridcraft_heads", "workbook"}, {"mooring_documents", "mooring"},
+		{"mooring_collab_documents", "mooring_collaboration"},
 	} {
 		var schemaType string
 		err := q.QueryRowContext(ctx, `SELECT type FROM sqlite_schema WHERE name=? COLLATE NOCASE AND type IN ('table','view')`, extension.table).Scan(&schemaType)
@@ -54,6 +55,12 @@ func privatePageOwnershipSQL(ctx context.Context, q pageAuthQueryer, alias strin
 		}
 		if !exists {
 			return "", "", fmt.Errorf("private output schema %s is missing page_id", extension.table)
+		}
+		if extension.table == "mooring_collab_documents" {
+			var scoped bool
+			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pragma_table_info(?) WHERE name='workspace_id')`, extension.table).Scan(&scoped); err != nil || !scoped {
+				return "", "", fmt.Errorf("unsupported collaboration output scope schema")
+			}
 		}
 		// Names come exclusively from the fixed list above and internal aliases.
 		term := "EXISTS(SELECT 1 FROM " + extension.table + " WHERE page_id=" + alias + ".id)"

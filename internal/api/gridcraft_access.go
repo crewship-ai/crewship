@@ -137,10 +137,20 @@ func (h *PageHandler) deleteWorkbookPage(r *http.Request, workspace string, rec 
 	if validateContentHumanCredential(r.WithContext(ctx), tx, "pages:write") != nil {
 		return workbookHumanDeleteRefusal, nil
 	}
+	// The loaded Page may have changed content type before this transaction.
+	// Never erase collaboration history via the legacy owner/orphan path, and
+	// do not append a deletion audit for a type we cannot retire yet.
+	var collaboration bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM mooring_collab_documents WHERE page_id=? AND workspace_id=?)`, rec.ID, workspace).Scan(&collaboration); err != nil {
+		return "", err
+	}
+	if collaboration {
+		return "collaboration documents cannot be deleted yet", nil
+	}
 	var notify func()
 	var res sql.Result
 	if rec.OwnerUserID != "" && rec.OwnerUserID == user.ID {
-		res, err = tx.ExecContext(ctx, `DELETE FROM pages WHERE id = ? AND workspace_id = ? AND owner_user_id = ?`, rec.ID, workspace, user.ID)
+		res, err = tx.ExecContext(ctx, `DELETE FROM pages WHERE id = ? AND workspace_id = ? AND owner_user_id = ? AND NOT EXISTS(SELECT 1 FROM mooring_collab_documents WHERE page_id=pages.id)`, rec.ID, workspace, user.ID)
 	} else {
 		role, roleErr := h.liveContentHumanRole(ctx, workspace, user.ID)
 		if roleErr != nil && !errors.Is(roleErr, sql.ErrNoRows) {
@@ -164,7 +174,7 @@ func (h *PageHandler) deleteWorkbookPage(r *http.Request, workspace string, rec 
 		if err != nil {
 			return "", err
 		}
-		res, err = tx.ExecContext(ctx, `DELETE FROM pages WHERE id = ? AND workspace_id = ? AND `+workbookOrphanSQL+` AND EXISTS(SELECT 1 FROM workspace_members m JOIN users u ON u.id = m.user_id AND u.suspended_at IS NULL WHERE m.workspace_id = pages.workspace_id AND m.user_id = ? AND m.role = 'OWNER')`, rec.ID, workspace, user.ID)
+		res, err = tx.ExecContext(ctx, `DELETE FROM pages WHERE id = ? AND workspace_id = ? AND NOT EXISTS(SELECT 1 FROM mooring_collab_documents WHERE page_id=pages.id) AND `+workbookOrphanSQL+` AND EXISTS(SELECT 1 FROM workspace_members m JOIN users u ON u.id = m.user_id AND u.suspended_at IS NULL WHERE m.workspace_id = pages.workspace_id AND m.user_id = ? AND m.role = 'OWNER')`, rec.ID, workspace, user.ID)
 	}
 	if err != nil {
 		return "", err
