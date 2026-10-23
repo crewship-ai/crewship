@@ -55,6 +55,10 @@
  *   comes back as an open refusal (`reloaded`) instead of being dropped. Only when no refusal is
  *   open and nothing is unsent does the save state leave "refused", and the editor reloads the
  *   head (the only message on which it drops its own refusal notices).
+ * - Overflow: past `BRIDGE_MAX_REFUSALS` open refusals a new edit is refused at once
+ *   (`too_many_pending`) and only the editor keeps its values. The bridge counts such edits (a
+ *   number, never their values): they count as refused in the save state, as unsaved on kill, and
+ *   hold back the head reload, until the person discards them (`discardOverflow`).
  * - The editor must say hello and receive its snapshot within `BRIDGE_HANDSHAKE_TIMEOUT_MS`, and
  *   a failed snapshot read at connect ends the session as `load`; the host shows the preview.
  *
@@ -367,8 +371,11 @@ export interface WorkbookBridgeOptions {
   onSaveEvent?: (event: SaveEvent) => void
   /** Another writer changed a cell with the person's open draft (see `DraftConflict`). */
   onConflict?: (conflict: DraftConflict) => void
-  /** The refused edits waiting for the person's decision, after every change to them. */
-  onRefusals?: (refusals: Refusal[]) => void
+  /**
+   * The refused edits waiting for the person's decision, after every change to them; `overflow`:
+   * edits refused past `BRIDGE_MAX_REFUSALS` whose values only the editor holds.
+   */
+  onRefusals?: (refusals: Refusal[], overflow: number) => void
   /** The editor reported which cells have an open draft now (after every `draft` message). */
   onDrafts?: (cells: CellRef[]) => void
   /** The editor got a fresh snapshot: warnings about the content it replaced no longer apply (open refusals do). */
@@ -393,6 +400,8 @@ export interface WorkbookBridge {
   readonly pending: number
   /** Refused edits waiting for the person's decision, oldest first. */
   readonly refusals: Refusal[]
+  /** Edits refused past `BRIDGE_MAX_REFUSALS`: only the editor holds their values. */
+  readonly overflow: number
   /** Feed every `window` "message" event here. */
   handleWindowMessage(event: WindowMessage): void
   /**
@@ -425,6 +434,12 @@ export interface WorkbookBridge {
    * not open.
    */
   takeTheirs(id: number): boolean
+  /**
+   * The person discards the edits refused past `BRIDGE_MAX_REFUSALS` (only the editor holds them):
+   * the count is cleared and the editor reloads the head once nothing else is open or unsent. False
+   * when the session is not live or there is nothing to discard.
+   */
+  discardOverflow(): boolean
   /** Ends the session (a refusal the host learned of, `session_closed`, unmount). */
   close(reason?: KillReason): void
 }
@@ -545,6 +560,8 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
   let refusalIds = 0
   /** The person took theirs: reload the head once no refusal is open and nothing is unsent. */
   let reloadWanted = false, reloading = false
+  /** Edits refused past the refusal bound: the editor alone holds their values (a count only). */
+  let overflow = 0
   const openRefusals = () => [...refusals.values()].filter(refusal => refusal.state === "open").length
   const copyRefusals = () => [...refusals.values()].map(refusal => ({ ...refusal, cells: refusal.cells.map(cell => ({ ...cell })) }))
 
@@ -564,7 +581,7 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
   function kill(reason: KillReason) {
     if (phase === "killed") return
     // An open refusal holds the person's values only here: they are lost with the session too.
-    const unsaved = queue.size + openRefusals()
+    const unsaved = queue.size + openRefusals() + overflow
     phase = "killed"
     queue.stop()
     timers.clearTimeout(driveTimer); timers.clearTimeout(catchUpTimer); timers.clearTimeout(handshakeTimer)
@@ -638,7 +655,7 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
     let response: TransportResponse
     try { response = await transport.snapshot() } catch { return false }
     if (phase === "killed") return false
-    if (idle && (phase !== "live" || queue.size > 0 || refusals.size > 0 || drafts.size > 0 || catching)) return false
+    if (idle && (phase !== "live" || queue.size > 0 || refusals.size > 0 || overflow > 0 || drafts.size > 0 || catching)) return false
     const refusal = editorRefusal(response)
     // Nothing is unsent on an idle reload: a session that expired unnoticed is replaced, then the reload tried again.
     if (refusal === "expired" && idle) { void renew(session.session_id).then(() => { reloading = false; maybeReload() }); return false }
@@ -814,8 +831,8 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
 
   function reportRefusals() {
     if (phase === "killed") return
-    options.onRefusals?.(copyRefusals())
-    emit({ type: "refusals", open: openRefusals() })
+    options.onRefusals?.(copyRefusals(), overflow)
+    emit({ type: "refusals", open: openRefusals() + overflow })
   }
 
   /** Every cell of a refused write with the person's value; the server's where another writer changed it. */
@@ -859,19 +876,20 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
 
   /** After the person took theirs: once nothing is open, unsent or being edited, the editor reloads the head. */
   function maybeReload() {
-    if (!reloadWanted || reloading || phase !== "live" || queue.size > 0 || refusals.size > 0 || drafts.size > 0 || catching) return
+    // An overflow edit lives only in the editor's notice, which the reload would drop.
+    if (!reloadWanted || reloading || phase !== "live" || queue.size > 0 || refusals.size > 0 || overflow > 0 || drafts.size > 0 || catching) return
     reloading = true
     void reloadSnapshot(true).finally(() => { reloading = false })
   }
 
-  /** `hold`: keep it as an open refusal (not past the bound, where only the editor keeps it). */
+  /** `hold`: keep it as an open refusal (not past the bound, where only the editor keeps it and the bridge counts it). */
   function reject(write: BridgeWrite, code: RejectCode, cells: WorkbookConflict[] = [], hold = true) {
     queue.remove(write.id)
     emit({ type: "recount", pending: queue.size })
     if (write.host) { refuse(write, write.epoch === epoch ? code : "reloaded", cells); return }
     if (write.epoch !== epoch) return
     if (hold) refuse(write, code, code === "precondition_failed" ? cells : [])
-    else emit({ type: "rejected" })
+    else { overflow++; emit({ type: "rejected" }); reportRefusals() }
     const message: HostMessage = { type: "rejected", protocol: 1, seq: write.seq, code, current_rev: confirmedRev, cells }
     outcomes.set(write.seq, { type: "rejected", message })
     post(message)
@@ -1104,6 +1122,7 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
     get confirmedRev() { return confirmedRev },
     get pending() { return queue.size },
     get refusals() { return copyRefusals() },
+    get overflow() { return overflow },
     handleWindowMessage(event) {
       if (phase === "killed") return
       const frame = options.frame()
@@ -1149,6 +1168,14 @@ export function createWorkbookBridge(options: WorkbookBridgeOptions): WorkbookBr
       const rest = conflicting ? refusal.cells.filter(cell => cell.theirs === undefined) : []
       if (rest.length) { if (!writeDecision(refusal, rest)) return false }
       else { refusals.delete(id); reportRefusals() }
+      reloadWanted = true
+      maybeReload()
+      return true
+    },
+    discardOverflow() {
+      if (phase !== "live" || overflow === 0) return false
+      overflow = 0
+      reportRefusals()
       reloadWanted = true
       maybeReload()
       return true

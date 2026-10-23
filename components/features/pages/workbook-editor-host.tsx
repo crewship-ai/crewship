@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { useRealtimeChannelSafe, useRealtimeEventSafe, useRealtimeStatusSafe, type RealtimeEventType } from "@/hooks/use-realtime"
 import { initialSaveState, losesWork, saveReducer, type SaveState } from "@/lib/editor-lifecycle/save-state"
 import { useLeaveGuard } from "@/lib/editor-lifecycle/use-leave-guard"
-import { EDITOR_FRAME_ATTRIBUTES, createWorkbookBridge, type CellRef, type DraftConflict, type FrameWindow, type KillReason, type Refusal, type RefusalReason, type WorkbookBridge } from "@/lib/workbooks/bridge"
+import { BRIDGE_MAX_PENDING, EDITOR_FRAME_ATTRIBUTES, createWorkbookBridge, type CellRef, type DraftConflict, type FrameWindow, type KillReason, type Refusal, type RefusalReason, type WorkbookBridge } from "@/lib/workbooks/bridge"
 import { WORKBOOK_COMMITTED_EVENT, WORKBOOK_SESSION_REOPEN_MAX_MS, createWorkbookEditorClient, editorFrameSrc, parseCommittedPush, type SessionCheck, type WorkbookEditorClient } from "@/lib/workbooks/editor-client"
 import { PageWorkbook } from "./page-workbook"
 
@@ -160,14 +160,19 @@ const REFUSAL_TEXT: Record<RefusalReason, string> = {
   reloaded: "the workbook was reloaded before your choice was saved",
 }
 
-function RefusalRow({ refusal, onKeepMine, onTakeTheirs }: { refusal: Refusal; onKeepMine: (id: number) => void; onTakeTheirs: (id: number) => void }) {
+/** Shown on a row whose decision could not be queued because the save queue is full. */
+export const QUEUE_FULL_TEXT = "Too many changes are waiting to be saved. Try again once they are saved."
+
+function RefusalRow({ refusal, queueFull, onKeepMine, onTakeTheirs }: { refusal: Refusal; queueFull: boolean; onKeepMine: (id: number) => void; onTakeTheirs: (id: number) => void }) {
   const conflicting = refusal.cells.filter(cell => cell.theirs !== undefined)
   const rest = refusal.cells.filter(cell => cell.theirs === undefined)
   const sending = refusal.state === "sending"
   const take = conflicting.length
     ? `Take theirs for ${cellList(conflicting)}${rest.length ? ` and save ${cellList(rest)}` : ""}`
     : `Discard mine for ${cellList(refusal.cells)}`
-  return <div data-kind="refused" data-state={refusal.state} className="flex flex-wrap items-center gap-2">
+  // Focus goes to the row itself after a decision (tabIndex -1), never to its buttons: a repeated
+  // Enter must not decide the next refusal too.
+  return <div data-kind="refused" data-state={refusal.state} tabIndex={-1} className="flex flex-wrap items-center gap-2 outline-none focus-visible:ring-2 focus-visible:ring-ring">
     {/* Each row announces itself once, politely; the buttons stay out of the live region. */}
     <span role="status" aria-live="polite" className="mr-auto">
       {!conflicting.length && <span className="block">Not saved: {REFUSAL_TEXT[refusal.reason]}.</span>}
@@ -178,19 +183,32 @@ function RefusalRow({ refusal, onKeepMine, onTakeTheirs }: { refusal: Refusal; o
       </span>)}
       {conflicting.length > 0 && rest.length > 0 && <span className="block text-muted-foreground">Take theirs keeps their value for {cellList(conflicting)} and still saves your other cells.</span>}
       {sending && <span className="block text-muted-foreground">Saving your choice…</span>}
+      {queueFull && !sending && <span className="block">{QUEUE_FULL_TEXT}</span>}
     </span>
     {refusal.retryable && <Button type="button" size="sm" disabled={sending} aria-label={`Keep mine for ${cellList(refusal.cells)}`} onClick={() => onKeepMine(refusal.id)}>Keep mine</Button>}
     <Button type="button" size="sm" variant="outline" disabled={sending} aria-label={take} onClick={() => onTakeTheirs(refusal.id)}>{conflicting.length ? "Take theirs" : "Discard mine"}</Button>
   </div>
 }
 
-function ConflictNotice({ conflicts, refusals, onKeepMine, onTakeTheirs, panel }: { conflicts: ShownConflict[]; refusals: Refusal[]; onKeepMine: (id: number) => void; onTakeTheirs: (id: number) => void; panel: React.Ref<HTMLDivElement> }) {
-  if (!conflicts.length && !refusals.length) return null
+/** Edits refused past the open-refusal bound: the editor alone holds them; the page counts them. */
+function OverflowRow({ count, onDiscard }: { count: number; onDiscard: () => void }) {
+  const changes = count === 1 ? "1 refused change" : `${count} refused changes`
+  return <div data-kind="overflow" tabIndex={-1} className="flex flex-wrap items-center gap-2 outline-none focus-visible:ring-2 focus-visible:ring-ring">
+    <span role="status" aria-live="polite" className="mr-auto">
+      {count === 1 ? "1 more change was" : `${count} more changes were`} refused because too many were waiting to be saved. Only the editor still shows {count === 1 ? "it" : "them"}; they are not saved.
+    </span>
+    <Button type="button" size="sm" variant="outline" aria-label={`Discard ${changes} held in the editor`} onClick={onDiscard}>Discard them</Button>
+  </div>
+}
+
+function ConflictNotice({ conflicts, refusals, overflow, queueFull, onKeepMine, onTakeTheirs, onDiscardOverflow, panel }: { conflicts: ShownConflict[]; refusals: Refusal[]; overflow: number; queueFull: ReadonlySet<number>; onKeepMine: (id: number) => void; onTakeTheirs: (id: number) => void; onDiscardOverflow: () => void; panel: React.Ref<HTMLDivElement> }) {
+  if (!conflicts.length && !refusals.length && !overflow) return null
   return <div ref={panel} data-testid="workbook-draft-conflict" className="flex flex-col gap-2 border-b border-warn/30 bg-warn/10 px-3 py-2 text-sm">
     {conflicts.map(item => <p key={item.key} data-kind="changed" role="status" aria-live="polite">
       Changed by {item.actor_label} while you were editing: {conflictCell(item.sheet, item.cell)} is now <q className="break-all">{item.input}</q>. Your draft is kept; when you commit it you can keep yours or take theirs.
     </p>)}
-    {refusals.map(refusal => <RefusalRow key={refusal.id} refusal={refusal} onKeepMine={onKeepMine} onTakeTheirs={onTakeTheirs} />)}
+    {refusals.map(refusal => <RefusalRow key={refusal.id} refusal={refusal} queueFull={queueFull.has(refusal.id)} onKeepMine={onKeepMine} onTakeTheirs={onTakeTheirs} />)}
+    {overflow > 0 && <OverflowRow count={overflow} onDiscard={onDiscardOverflow} />}
   </div>
 }
 
@@ -271,6 +289,10 @@ export function WorkbookEditorHost({ client, pageId, name, onEnd, onDirtyChange 
   const [conflicts, setConflicts] = React.useState<ShownConflict[]>([])
   /** The bridge's open refusals: they survive reloads until the person decides each one. */
   const [refusals, setRefusals] = React.useState<Refusal[]>([])
+  /** Edits refused past the open-refusal bound, held only by the editor (a count). */
+  const [overflow, setOverflow] = React.useState(0)
+  /** Refusals whose decision could not be queued (the save queue was full): they say to try again. */
+  const [queueFull, setQueueFull] = React.useState<ReadonlySet<number>>(() => new Set())
   const conflictSeq = React.useRef(0)
   const panel = React.useRef<HTMLDivElement>(null)
   /** After a decision: where focus goes once the notice re-rendered. */
@@ -395,9 +417,10 @@ export function WorkbookEditorHost({ client, pageId, name, onEnd, onDirtyChange 
           if (disposed) return
           setConflicts(shown => addConflict(shown, conflict, `c${++conflictSeq.current}`))
         },
-        onRefusals: open => {
+        onRefusals: (open, overflowed) => {
           if (disposed) return
           setRefusals(open)
+          setOverflow(overflowed)
           setConflicts(shown => withoutRefused(shown, open))
         },
         onDrafts: cells => {
@@ -459,16 +482,26 @@ export function WorkbookEditorHost({ client, pageId, name, onEnd, onDirtyChange 
   // Keep mine writes every cell of the refused edit against the head; take theirs drops only the
   // conflicting cells and still writes the others. The bridge reports the refusal as sending, then
   // drops it on the receipt or opens it again; the status says "refused" until none is open.
-  const keepMine = React.useCallback((id: number) => { if (bridgeRef.current?.keepMine(id)) refocus.current = true }, [])
-  const takeTheirs = React.useCallback((id: number) => { if (bridgeRef.current?.takeTheirs(id)) refocus.current = true }, [])
-  // The clicked row went away or its buttons are disabled: focus moves to the next decision, or the editor.
+  // A decision the full save queue cannot take yet is not silently dropped: the row says to try again.
+  const decided = React.useCallback((id: number, done: boolean | undefined) => {
+    const bridge = bridgeRef.current
+    if (done) { refocus.current = true; setQueueFull(shown => shown.has(id) ? new Set([...shown].filter(item => item !== id)) : shown) }
+    else if (bridge && bridge.phase === "live" && bridge.pending >= BRIDGE_MAX_PENDING) setQueueFull(shown => shown.has(id) ? shown : new Set([...shown, id]))
+  }, [])
+  const keepMine = React.useCallback((id: number) => decided(id, bridgeRef.current?.keepMine(id)), [decided])
+  const takeTheirs = React.useCallback((id: number) => decided(id, bridgeRef.current?.takeTheirs(id)), [decided])
+  const discardOverflow = React.useCallback(() => { if (bridgeRef.current?.discardOverflow()) refocus.current = true }, [])
+  // Once the queue has room, the "try again" notes are stale.
+  React.useEffect(() => { if (save.pending < BRIDGE_MAX_PENDING) setQueueFull(shown => shown.size ? new Set() : shown) }, [save.pending])
+  // The clicked row went away or its buttons are disabled: focus moves to the next open notice
+  // itself (not to a button in it, so a repeated Enter decides nothing), or the editor.
   React.useEffect(() => {
     if (!refocus.current) return
     refocus.current = false
-    const next = panel.current?.querySelector<HTMLButtonElement>("[data-kind='refused'] button:not([disabled])")
+    const next = panel.current?.querySelector<HTMLElement>("[data-kind='refused'][data-state='open'], [data-kind='overflow']")
     if (next) next.focus()
     else container.current?.querySelector("iframe")?.focus()
-  }, [refusals])
+  }, [refusals, overflow])
 
   const label = workbookSaveLabel(save)
   return <section aria-label="Workbook page" className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -477,7 +510,7 @@ export function WorkbookEditorHost({ client, pageId, name, onEnd, onDirtyChange 
       {rev !== undefined && rev > 0 && <span className="text-sm tabular-nums text-muted-foreground">Revision {rev}</span>}
       <span role="status" aria-live="polite" data-testid="workbook-save-state" className="text-sm text-muted-foreground">{label}</span>
     </div>
-    <ConflictNotice conflicts={conflicts} refusals={refusals} onKeepMine={keepMine} onTakeTheirs={takeTheirs} panel={panel} />
+    <ConflictNotice conflicts={conflicts} refusals={refusals} overflow={overflow} queueFull={queueFull} onKeepMine={keepMine} onTakeTheirs={takeTheirs} onDiscardOverflow={discardOverflow} panel={panel} />
     <div ref={container} data-testid="workbook-editor-frame" className="relative min-h-0 flex-1" />
   </section>
 }

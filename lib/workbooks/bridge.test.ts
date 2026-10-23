@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { initialSaveState, saveReducer, saveWordOf, type SaveEvent } from "@/lib/editor-lifecycle/save-state"
+import { initialSaveState, losesWork, saveReducer, saveWordOf, type SaveEvent } from "@/lib/editor-lifecycle/save-state"
 import { BRIDGE_HANDSHAKE_TIMEOUT_MS, BRIDGE_MAX_REFUSALS, BRIDGE_MAX_REBASES, BRIDGE_MAX_INPUT_BYTES, BRIDGE_MAX_UNCONFIRMED, EDITOR_FRAME_ATTRIBUTES, BRIDGE_MAX_MESSAGE_BYTES, BRIDGE_MAX_OPS, createWorkbookBridge, createWorkbookHttpTransport, parseCommits, parseFrameMessage, parseWorkbookSession, type DraftConflict, type HostMessage, type Refusal, type KillReason, type TransportResponse, type WorkbookBridgeOptions, type WorkbookSession, type WorkbookTransport } from "./bridge"
 
 const SID = "ws_session1"
@@ -1110,6 +1110,41 @@ describe("same-cell conflicts with an open draft", () => {
     expect(t.bridge.pending).toBe(0)
     expect(t.toFrame().at(-1)).toEqual({ type: "rejected", protocol: 1, seq: BRIDGE_MAX_REFUSALS + 2, code: "too_many_pending", current_rev: 41, cells: [] })
     expect(t.transport.edit).toHaveBeenCalledTimes(BRIDGE_MAX_REFUSALS)
+  })
+
+  it("counts edits refused past BRIDGE_MAX_REFUSALS: deciding every held refusal leaves the status unsaved and no reload until the person discards them", async () => {
+    const t = setup({ edit: vi.fn(async (): Promise<TransportResponse> => ({ status: 400, body: { error: "invalid_ops" } })), snapshot: vi.fn(async () => ok({ schema_version: 1, rev: 41, generation: 1, snapshot: {} })) })
+    await t.connect()
+    for (let seq = 1; seq <= BRIDGE_MAX_REFUSALS + 1; seq++) { t.send(mutation(seq, 41, [["B2", `x${seq}`]])); await flush() }
+    expect(t.toFrame().at(-1)).toMatchObject({ type: "rejected", seq: BRIDGE_MAX_REFUSALS + 1, code: "too_many_pending" })
+    expect(t.bridge.overflow).toBe(1)
+    expect(t.state().refused).toBe(BRIDGE_MAX_REFUSALS + 1)
+    const snapshots = t.transport.snapshot.mock.calls.length
+    for (const r of t.refusals()) expect(t.bridge.takeTheirs(r.id)).toBe(true)
+    await flush()
+    expect(t.refusals()).toEqual([])
+    // Edit 257 exists only in the editor: never clean, the leave guard holds, the editor keeps its notice.
+    expect(t.state().refused).toBe(1)
+    expect(saveWordOf(t.state())).toBe("unsaved")
+    expect(losesWork(t.state())).toBe(true)
+    expect(t.types()).not.toContain("snapshot")
+    expect(t.transport.snapshot).toHaveBeenCalledTimes(snapshots)
+    // The person discards it: only now does the editor reload and the status clear.
+    expect(t.bridge.discardOverflow()).toBe(true)
+    await flush()
+    expect(t.bridge.overflow).toBe(0)
+    expect(t.types().at(-1)).toBe("snapshot")
+    expect(t.state().refused).toBe(0)
+    expect(losesWork(t.state())).toBe(false)
+    expect(t.bridge.discardOverflow()).toBe(false)
+  })
+
+  it("counts overflow refusals as unsaved when the session ends", async () => {
+    const t = setup({ edit: vi.fn(async (): Promise<TransportResponse> => ({ status: 400, body: { error: "invalid_ops" } })) })
+    await t.connect()
+    for (let seq = 1; seq <= BRIDGE_MAX_REFUSALS + 2; seq++) { t.send(mutation(seq, 41, [["B2", `x${seq}`]])); await flush() }
+    t.bridge.close("disabled")
+    expect(t.kills).toEqual([{ reason: "disabled", unsaved: BRIDGE_MAX_REFUSALS + 2 }])
   })
 
   it("refuses keep mine and take theirs for an unknown refusal or a session that is not live", async () => {

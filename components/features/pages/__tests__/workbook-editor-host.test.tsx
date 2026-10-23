@@ -1,7 +1,7 @@
 import React from "react"
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { BRIDGE_HANDSHAKE_TIMEOUT_MS, type TransportResponse, type WorkbookSession, type WorkbookTransport } from "@/lib/workbooks/bridge"
+import { BRIDGE_HANDSHAKE_TIMEOUT_MS, BRIDGE_MAX_PENDING, BRIDGE_MAX_REFUSALS, type TransportResponse, type WorkbookSession, type WorkbookTransport } from "@/lib/workbooks/bridge"
 import { WORKBOOK_SESSION_REOPEN_MAX_MS, type WorkbookEditorClient } from "@/lib/workbooks/editor-client"
 import { PageWorkbookSurface, WORKBOOK_HEAD_POLL_CONNECTED_MS, WORKBOOK_HEAD_POLL_MS, WORKBOOK_SESSION_HEARTBEAT_MS, WORKBOOK_SESSION_REOPEN_MIN_MS, createEditorFrame, workbookSaveLabel } from "../workbook-editor-host"
 import { initialSaveState } from "@/lib/editor-lifecycle/save-state"
@@ -602,12 +602,50 @@ describe("save state and leave guard", () => {
     expect(screen.getAllByRole("button", { name: /^Take theirs/ })).toHaveLength(1)
     expect(t.status()).toBe("Not saved · a change was refused")
     expect(vi.mocked(t.transport.snapshot).mock.calls.length).toBe(snapshots)
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Keep mine for Sheet1!C5" }))
+    // Focus lands on the next notice itself, not on its Keep mine: a repeated Enter decides nothing.
+    const next = screen.getByRole("button", { name: "Keep mine for Sheet1!C5" }).closest<HTMLElement>("[data-kind='refused']")!
+    expect(document.activeElement).toBe(next)
+    expect(next.tabIndex).toBe(-1)
+    expect(document.activeElement?.tagName).not.toBe("BUTTON")
     await act(async () => { screen.getByRole("button", { name: "Take theirs for Sheet1!C5" }).click() })
     await waitFor(() => expect(t.status()).toBe("No unsaved changes"))
     // No notice left: focus goes to the editor, not to the page body.
     expect(document.activeElement).toBe(t.frame())
   })
+
+  it("past the open-refusal cap, counts the refused changes only the editor holds and stays unsaved until the person discards them", async () => {
+    const t = setup({ transport: { edit: vi.fn(async (): Promise<TransportResponse> => ({ status: 400, body: { error: "invalid_ops" } })) } })
+    await t.connect()
+    for (let seq = 1; seq <= BRIDGE_MAX_REFUSALS + 1; seq++) await t.send(mutation(seq, 41, "B2", `x${seq}`))
+    await waitFor(() => expect(t.status()).toBe(`Not saved · ${BRIDGE_MAX_REFUSALS + 1} changes were refused`))
+    const overflow = screen.getByTestId("workbook-draft-conflict").querySelector<HTMLElement>("[data-kind='overflow']")!
+    expect(overflow).toHaveTextContent("1 more change was refused because too many were waiting to be saved")
+    expect(t.dirty.at(-1)).toBe(true)
+    const snapshots = vi.mocked(t.transport.snapshot).mock.calls.length
+    await act(async () => { screen.getByRole("button", { name: "Discard 1 refused change held in the editor" }).click() })
+    expect(screen.getByTestId("workbook-draft-conflict").querySelector("[data-kind='overflow']")).toBeNull()
+    expect(t.status()).toBe(`Not saved · ${BRIDGE_MAX_REFUSALS} changes were refused`)
+    // The held refusals are still open: no reload yet.
+    expect(vi.mocked(t.transport.snapshot).mock.calls.length).toBe(snapshots)
+  }, 30_000)
+
+  it("keep mine with the save queue full says to try again instead of doing nothing", async () => {
+    let calls = 0
+    const edit = vi.fn(async (): Promise<TransportResponse> => ++calls === 1
+      ? { status: 409, body: { error: "precondition_failed", head_rev: 42, conflicts: [{ sheet: "Sheet1", cell: "B4", input: "77", rev: 42, actor_label: "Agent Ada" }] } }
+      : new Promise<TransportResponse>(() => {}))
+    const t = setup({ transport: { edit, commits: agentChanged({ B4: "77" }) } })
+    await t.connect()
+    await t.send(mutation(1, 41, "B4", "mine-B4"))
+    const keep = await screen.findByRole("button", { name: "Keep mine for Sheet1!B4" })
+    for (let seq = 2; seq <= BRIDGE_MAX_PENDING + 1; seq++) await t.send(mutation(seq, 42, "C9", `v${seq}`))
+    await waitFor(() => expect(edit).toHaveBeenCalledTimes(2))
+    await act(async () => { keep.click() })
+    const row = keep.closest<HTMLElement>("[data-kind='refused']")!
+    expect(row).toHaveTextContent("Too many changes are waiting to be saved. Try again once they are saved.")
+    expect(row.querySelector("[role='status']")).toHaveTextContent("Try again")
+    expect(edit).toHaveBeenCalledTimes(2)
+  }, 30_000)
 
   it("a refused multi-cell edit shows every cell, says which one conflicts, and keep mine sends them all; never Saved before the receipt", async () => {
     const kept = deferred<TransportResponse>()
