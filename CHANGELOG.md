@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **A full workbook history could silently erase earlier revisions.** Writes now fail visibly with `quota_exceeded` when history or checkpoint capacity is exhausted, preserving the confirmed workbook and every previous revision.
+
 - **An unavailable embedded editor offered no direct retry.** A failed startup now explains the availability problem and offers “Retry editor” after the existing connection deadline, creating a fresh isolated frame. Connected editors retain their current draft and pending changes.
 
 

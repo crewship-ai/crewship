@@ -96,12 +96,9 @@ head is always a full snapshot. Any revision can be rebuilt from the nearest
 checkpoint at or below it by replaying the recorded cells with the pinned engine,
 and each step is verified against the recorded result hash (tested with the real
 engine). The history quota counts checkpoint snapshots and recorded commands
-(default 64 MiB) and at most 1000 checkpoints. Reaching it prunes history no
-rebase can use (before the newest checkpoint at least 256 revisions back); if
-that is not enough, the new revision becomes a checkpoint and all earlier
-commands are pruned. Pruned rows keep writer, receipt and result hash and are
-marked as snapshot revisions, like rows recorded before command history, so no
-mutation is rebased across them.
+(default 64 MiB) and at most 1000 checkpoints. Reaching either limit rejects
+new writes with `quota_exceeded` without changing the head or deleting history.
+Retention must be an explicit operation; a commit never prunes earlier revisions.
 Receipts require FULL synchronous storage and report `durability: node`.
 `Store.Commits` serves the confirmed revisions after a revision (the commits
 feed) under the caller's authorization; a range reaching pruned or pre-history

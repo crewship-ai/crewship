@@ -41,10 +41,10 @@ func TestPrescanDoesNotHoldTheWriteLock(t *testing.T) {
 	}
 }
 
-// A forced checkpoint that prunes the window after the prescan read it must
+// Explicit retention that prunes the window after the prescan read it must
 // still make the stale edit reread, exactly as without the prescan.
 func TestPruneAfterPrescanRequiresSnapshot(t *testing.T) {
-	s, _, a, k := fixture(t)
+	s, db, a, k := fixture(t)
 	e := &fakeEngine{}
 	imported(t, s, a, k, e)
 	for i := 0; i < 10; i++ {
@@ -59,13 +59,20 @@ func TestPruneAfterPrescanRequiresSnapshot(t *testing.T) {
 			return
 		}
 		fired = true
-		s.options.MaxHistoryBytes = 9000
-		_, nested = s.Execute(context.Background(), k, bigEdit(10, strings.Repeat("y", 4000)), a, e)
+		tx, err := db.BeginTx(context.Background(), nil)
+		if err != nil {
+			nested = err
+			return
+		}
+		defer tx.Rollback()
+		if nested = pruneHistory(context.Background(), tx, k.PageID, 10); nested == nil {
+			nested = tx.Commit()
+		}
 	}
 	late := Request{MutationID: "s3:1", MandateID: "human-import", SessionID: "s3", BaseRev: 5, Generation: 1, Command: Command{Kind: "cell.set", Sheet: "Sheet1", Cell: "Z9", Input: "1"}}
 	_, err := s.Execute(t.Context(), k, late, a, e)
 	if nested != nil {
-		t.Fatalf("forced prune: %v", nested)
+		t.Fatalf("explicit prune: %v", nested)
 	}
 	var p *PreconditionError
 	if !errors.As(err, &p) || !p.SnapshotRequired {
