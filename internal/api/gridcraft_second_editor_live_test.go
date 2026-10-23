@@ -105,11 +105,23 @@ func TestGridCraftSecondEditorLiveSessionsPushAndFeedFloor(t *testing.T) {
 	revokedAt := time.Now()
 	// Revocation ends the editor's session, edits and feed.
 	wantCode(t, f.do(ann, "DELETE", "/api/v1/pages/live-shared/grants"+q+"&subject_type=user&subject=bob@ex.com", ""), 200, "revoke editor")
+	var revokedSessionIDs []string
 	select {
 	case raw := <-observer.Frames():
 		var frame ws.ServerMessage
 		if json.Unmarshal(raw, &frame) != nil || frame.Type != "session_closed" {
 			t.Fatalf("missing terminal workbook control: %s", raw)
+		}
+		payload, _ := json.Marshal(frame.Payload)
+		var target struct {
+			Sessions []string `json:"session_ids"`
+		}
+		if json.Unmarshal(payload, &target) != nil {
+			t.Fatal("invalid session targets")
+		}
+		revokedSessionIDs = target.Sessions
+		if len(revokedSessionIDs) != 1 || revokedSessionIDs[0] != editor.SessionID {
+			t.Fatalf("wrong revoked sessions: %+v", revokedSessionIDs)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("revocation did not close the open workbook within 5s")

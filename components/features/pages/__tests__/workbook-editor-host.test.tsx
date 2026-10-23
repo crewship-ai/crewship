@@ -129,11 +129,21 @@ function setup(options: { enabled?: boolean; flagError?: boolean; open?: Awaited
 it("ends only the targeted workbook when the host revokes its session", async () => {
   const t = setup()
   await t.connect()
-  await push("session_closed", { artifact_id: "different-workbook", reason: "access_revoked" })
+  await push("session_closed", { artifact_id: "different-workbook", session_ids: [SID], reason: "access_revoked" })
   expect(t.frame()).not.toBeNull()
-  await push("session_closed", { artifact_id: "page-1", reason: "access_revoked" })
+  await push("session_closed", { artifact_id: "page-1", session_ids: [SID], reason: "access_revoked" })
   await waitFor(() => expect(t.frame()).toBeNull())
   expect(screen.getByTestId("workbook-editor-notice")).toHaveAttribute("data-reason", "access")
+})
+
+it("keeps a newly authorized editor when an older session closure arrives late", async () => {
+  const t = setup()
+  await t.connect()
+  // The current SID was issued after access was restored; this old control
+  // belongs to an editor session that the revoke transaction already closed.
+  await push("session_closed", { artifact_id: "page-1", session_ids: ["older-editor-session"], reason: "access_revoked" })
+  expect(t.frame()).not.toBeNull()
+  expect(t.transport.closeSession).not.toHaveBeenCalled()
 })
 
 describe("createEditorFrame", () => {

@@ -406,9 +406,11 @@ shares its access rule with `crew`. File-change events are broadcast on the
 
 ### Workbook session closure (connection control)
 
-`session_closed` has no channel and carries only `{ artifact_id, reason }`.
-It ends the affected workbook editor after access revocation; it carries no
-workbook content. Other page subscriptions on the connection remain active.
+`session_closed` has no channel and carries only `{ artifact_id, session_ids, reason }`.
+Only the listed persisted editor session IDs are closed; a late control cannot
+terminate a newly authorized session. It carries no
+workbook content. A channel is removed only while current read access is denied; retained or
+restored read access and other subscriptions remain active.
 Grant removal closes the persisted editor session in the grant transaction,
 so granting access again cannot revive that session ID. The host rechecks
 current rights before each protected frame and drops queued frames after

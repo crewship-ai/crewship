@@ -31,11 +31,13 @@ func expectWorkbookClosed(t *testing.T, c *Client, page string) {
 	select {
 	case raw := <-c.send:
 		var frame struct {
-			Type    string            `json:"type"`
-			Channel string            `json:"channel"`
-			Payload map[string]string `json:"payload"`
+			Type    string `json:"type"`
+			Channel string `json:"channel"`
+			Payload struct {
+				ArtifactID string `json:"artifact_id"`
+			} `json:"payload"`
 		}
-		if json.Unmarshal(raw, &frame) != nil || frame.Type != "session_closed" || frame.Channel != "" || frame.Payload["artifact_id"] != page {
+		if json.Unmarshal(raw, &frame) != nil || frame.Type != "session_closed" || frame.Channel != "" || frame.Payload.ArtifactID != page {
 			t.Fatalf("terminal control: %s", raw)
 		}
 	case <-time.After(5 * time.Second):
@@ -146,5 +148,44 @@ func TestWorkbookSweepBudgetDoesNotStarveLaterParticipants(t *testing.T) {
 	expectWorkbookClosed(t, second, "two")
 	if elapsed := time.Since(start); elapsed > 4*time.Second {
 		t.Fatalf("budget applied per participant: %v", elapsed)
+	}
+}
+
+// A delayed old close must not unsubscribe a channel that has already gained
+// valid read authority again. The UI fences the control by editor session ID.
+func TestDelayedWorkbookSessionCloseKeepsRestoredReadSubscription(t *testing.T) {
+	db := workbookAuthorizationDB(t)
+	hub := newRunningHub(t)
+	hub.SetChannelAuthorizer(NewDBChannelAuthorizer(db))
+	hub.TrackWorkbookPage("one")
+	client := newClient(t, hub, "work-editor")
+	client.subscribe("page:one")
+	// Access was revoked and a persisted old editor closed, then restored before
+	// the post-commit notification reached this already-authenticated connection.
+	hub.RecheckWorkbookAccess(t.Context(), "one", WorkbookSessionClosures{"work-editor": {"old-editor-session"}})
+	select {
+	case raw := <-client.send:
+		var frame struct {
+			Type    string `json:"type"`
+			Payload struct {
+				IDs []string `json:"session_ids"`
+			} `json:"payload"`
+		}
+		if json.Unmarshal(raw, &frame) != nil || frame.Type != "session_closed" || len(frame.Payload.IDs) != 1 || frame.Payload.IDs[0] != "old-editor-session" {
+			t.Fatalf("wrong delayed session control: %s", raw)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("missing old editor close")
+	}
+	client.mu.Lock()
+	subscribed := client.channels["page:one"]
+	client.mu.Unlock()
+	if !subscribed {
+		t.Fatal("old editor close removed currently authorized read channel")
+	}
+	select {
+	case <-client.ctx.Done():
+		t.Fatal("old close killed restored shared connection")
+	default:
 	}
 }

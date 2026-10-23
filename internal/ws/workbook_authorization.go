@@ -6,9 +6,12 @@ import (
 	"time"
 )
 
+// WorkbookSessionClosures lists closed editor session IDs by participant.
+type WorkbookSessionClosures map[string][]string
+
 // WorkbookSessionRechecker is the host's canonical writer-session authority.
-// It closes persisted editor sessions transactionally and returns affected users.
-type WorkbookSessionRechecker func(context.Context, string) ([]string, error)
+// It closes persisted editor sessions transactionally and returns affected IDs.
+type WorkbookSessionRechecker func(context.Context, string) (WorkbookSessionClosures, error)
 
 // TrackWorkbookPage records resource kind only. It never caches permission.
 // Successful editor-session issuance calls this before any editor is shown.
@@ -34,12 +37,12 @@ func (h *Hub) isWorkbookPage(pageID string) bool {
 	return known
 }
 
-// RecheckWorkbookAccess runs after a committed rights change. closedUsers are
+// RecheckWorkbookAccess runs after a committed rights change. closures are
 // trusted host decisions made in the grant transaction (loss of editor access,
 // including a participant who retains an auditor's read-only access).
 // The terminal control has no document content and no protected channel, so
 // loss of content permission cannot prevent it from reaching that participant.
-func (h *Hub) RecheckWorkbookAccess(ctx context.Context, pageID string, closedUsers ...string) {
+func (h *Hub) RecheckWorkbookAccess(ctx context.Context, pageID string, closures ...WorkbookSessionClosures) {
 	if h == nil {
 		return
 	}
@@ -56,17 +59,14 @@ func (h *Hub) RecheckWorkbookAccess(ctx context.Context, pageID string, closedUs
 		observers = append(observers, o)
 	}
 	h.mu.RUnlock()
-	forced := map[string]bool{}
-	for _, user := range closedUsers {
-		forced[user] = true
+	closed := WorkbookSessionClosures{}
+	if len(closures) > 0 && closures[0] != nil {
+		closed = closures[0]
 	}
 	checked, allowed, failed := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	canKeep := func(user string) bool {
 		if ctx.Err() != nil {
 			failed[user] = true
-			return false
-		}
-		if forced[user] {
 			return false
 		}
 		if !checked[user] {
@@ -79,33 +79,48 @@ func (h *Hub) RecheckWorkbookAccess(ctx context.Context, pageID string, closedUs
 		}
 		return allowed[user]
 	}
-	frame, _ := json.Marshal(ServerMessage{Type: "session_closed", Payload: map[string]string{"artifact_id": pageID, "reason": "access_revoked"}})
+
+	frameFor := func(user string) []byte {
+		ids := closed[user]
+		if ids == nil {
+			ids = []string{}
+		}
+		frame, _ := json.Marshal(ServerMessage{Type: "session_closed", Payload: map[string]any{"artifact_id": pageID, "session_ids": ids, "reason": "access_revoked"}})
+		return frame
+	}
 	for _, c := range clients {
-		if canKeep(c.userID) {
+		readable := canKeep(c.userID)
+		if readable && len(closed[c.userID]) == 0 {
 			continue
 		}
-		c.unsubscribe(channel)
-		if sent := c.trySend(frame); !sent || failed[c.userID] {
+		// The read channel can outlive an editor session or be authorized again
+		// before this older close arrives. Only actual read denial unsubscribes it.
+		if !readable {
+			c.unsubscribe(channel)
+		}
+		if sent := c.trySend(frameFor(c.userID)); !sent || failed[c.userID] {
 			c.forceDisconnect()
 		}
 	}
 	for _, o := range observers {
-		if canKeep(o.userID) {
+		readable := canKeep(o.userID)
+		if readable && len(closed[o.userID]) == 0 {
 			continue
 		}
-		// RemoveObserver cannot close the channel while this read lock protects
-		// its membership. Never send to an already detached observer.
 		h.mu.RLock()
 		if h.observers[channel][o] {
 			select {
-			case o.ch <- frame:
+			case o.ch <- frameFor(o.userID):
 			default:
 				o.dropped.Store(true)
 			}
 		}
 		h.mu.RUnlock()
-		h.revokeObserver(channel, o)
+		if !readable {
+			h.revokeObserver(channel, o)
+		}
 	}
+
 }
 
 func (h *Hub) maybeStartWorkbookSweep(ctx context.Context) {
@@ -131,7 +146,7 @@ func (h *Hub) maybeStartWorkbookSweep(ctx context.Context) {
 			h.mu.RLock()
 			recheck := h.workbookPages[page]
 			h.mu.RUnlock()
-			var closed []string
+			var closed WorkbookSessionClosures
 			if recheck != nil {
 				var err error
 				closed, err = recheck(ctx, page)
@@ -145,7 +160,7 @@ func (h *Hub) maybeStartWorkbookSweep(ctx context.Context) {
 					continue
 				}
 			}
-			h.RecheckWorkbookAccess(ctx, page, closed...)
+			h.RecheckWorkbookAccess(ctx, page, closed)
 		}
 	}()
 }

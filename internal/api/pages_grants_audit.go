@@ -198,7 +198,7 @@ func (h *PageHandler) commitPageGrantMutation(ctx context.Context, tx *sql.Tx, r
 		return err
 	}
 	if rec.HasWorkbook && h.hub != nil {
-		h.hub.RecheckWorkbookAccess(ctx, rec.ID, closedUsers...)
+		h.hub.RecheckWorkbookAccess(ctx, rec.ID, closedUsers)
 	}
 	for _, publish := range notify {
 		publish()
