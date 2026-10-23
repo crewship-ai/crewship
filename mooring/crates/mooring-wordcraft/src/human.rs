@@ -203,7 +203,11 @@ mod tests {
         )
     }
     fn client(checkpoint: &[u8], origin: u64) -> Doc {
-        let checkpoint: crate::Checkpoint = serde_json::from_slice(checkpoint).unwrap();
+        let checkpoint = Document::restore(checkpoint).unwrap();
+        let update = checkpoint
+            .doc
+            .transact()
+            .encode_state_as_update_v1(&mooring_text::yrs::StateVector::default());
         let doc = Doc::with_options(Options {
             client_id: ClientID::new(origin),
             offset_kind: OffsetKind::Utf16,
@@ -211,7 +215,7 @@ mod tests {
             ..Options::default()
         });
         doc.transact_mut()
-            .apply_update(Update::decode_v1(&checkpoint.update).unwrap())
+            .apply_update(Update::decode_v1(&update).unwrap())
             .unwrap();
         doc
     }
@@ -255,7 +259,7 @@ mod tests {
         .unwrap();
         let restored = Document::restore(&accepted_b.checkpoint().unwrap()).unwrap();
         let writer_checkpoint = crate::Checkpoint {
-            format: crate::profile::CHECKPOINT_FORMAT.into(),
+            format: crate::profile::LEGACY_CHECKPOINT_FORMAT.into(),
             native: accepted_b.native().unwrap(),
             block_ids: ids.clone(),
             update: writer

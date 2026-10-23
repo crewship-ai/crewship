@@ -4,7 +4,10 @@
 pub mod adapter;
 mod candidate;
 pub mod command;
-pub mod human;
+mod format;
+#[cfg(test)]
+mod human;
+#[cfg(test)]
 mod human_decode;
 pub mod profile;
 pub mod read;
@@ -56,6 +59,22 @@ struct Checkpoint {
     update: Vec<u8>,
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PackedCheckpoint {
+    format: String,
+    native: Value,
+    block_ids: Vec<String>,
+    update_base64: String,
+}
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum StoredCheckpoint {
+    Packed(PackedCheckpoint),
+    Legacy(Checkpoint),
+}
+const MAX_CRDT_UPDATE_BYTES: usize = 16 * 1024 * 1024;
+
 impl std::fmt::Display for AdapterError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
@@ -71,6 +90,8 @@ impl std::error::Error for AdapterError {}
 pub struct Document {
     doc: Doc,
     read_only: bool,
+    project_text: bool,
+    model: format::Model,
 }
 
 impl Document {
@@ -134,7 +155,12 @@ impl Document {
                 }
             }
         }
-        Ok(Self { doc, read_only })
+        Ok(Self {
+            doc,
+            read_only,
+            project_text: !read_only,
+            model: format::Model::V2,
+        })
     }
 
     pub fn native(&self) -> Result<Value, AdapterError> {
@@ -157,7 +183,7 @@ impl Document {
                 .ok_or(AdapterError::InvalidCheckpoint)?;
             let mut block: Value = serde_json::from_str(&string(blocks.get(&txn, &id))?)
                 .map_err(|_| AdapterError::InvalidCheckpoint)?;
-            if !self.read_only {
+            if self.project_text {
                 let texts = txn
                     .get_map("wordcraft.texts")
                     .ok_or(AdapterError::InvalidCheckpoint)?;
@@ -169,33 +195,24 @@ impl Document {
                 for chunk in text.diff(&txn, YChange::identity) {
                     let value = string(Some(chunk.insert))?;
                     let attrs = chunk.attributes.unwrap_or_default();
-                    let mut properties = JsonMap::new();
-                    let present = matches!(attrs.get(PROPS_PRESENT), Some(Any::Bool(true)));
-                    for (key, value) in attrs.iter() {
-                        if key.as_ref() == PROPS_PRESENT {
-                            if !matches!(value, Any::Bool(true)) {
-                                return Err(AdapterError::InvalidCheckpoint);
-                            }
-                            continue;
-                        }
-                        let flag = key
-                            .strip_prefix(CHARACTER_PREFIX)
-                            .ok_or(AdapterError::InvalidCheckpoint)?;
-                        if !CHARACTER_FLAGS.contains(&flag) || !present {
-                            return Err(AdapterError::InvalidCheckpoint);
-                        }
-                        let Any::Bool(value) = value else {
-                            return Err(AdapterError::InvalidCheckpoint);
-                        };
-                        properties.insert(flag.into(), json!(value));
-                    }
+                    let properties = format::properties(&attrs, self.model)?;
                     let mut run = JsonMap::new();
-                    if present {
-                        run.insert("props".into(), Value::Object(properties));
+                    if let Some(properties) = properties {
+                        run.insert("props".into(), properties);
                     }
                     run.insert("len".into(), json!(value.len()));
                     content.push_str(&value);
-                    runs.push(Value::Object(run));
+                    let run = Value::Object(run);
+                    if self.model == format::Model::V2
+                        && runs
+                            .last()
+                            .is_some_and(|last: &Value| last.get("props") == run.get("props"))
+                    {
+                        let last = runs.last_mut().unwrap();
+                        last["len"] = json!(last["len"].as_u64().unwrap() + value.len() as u64);
+                    } else {
+                        runs.push(run);
+                    }
                 }
                 // Yrs coalesces adjacent identical attributes and has no
                 // zero-length text item. Retain native segmentation/empty-run
@@ -242,22 +259,73 @@ impl Document {
     }
 
     pub fn read_only_reason(&self) -> Option<&'static str> {
-        self.read_only.then_some(
-            "unsupported WordCraft block, inline feature, review content or native field",
-        )
+        if self.model == format::Model::LegacyV1 {
+            Some("legacy WordCraft model requires explicit migration before writing")
+        } else {
+            self.read_only.then_some(
+                "unsupported WordCraft block, inline feature, review content or native field",
+            )
+        }
+    }
+
+    fn validate_shape(&self) -> Result<(), AdapterError> {
+        use std::collections::BTreeSet;
+        let txn = self.doc.transact();
+        let ids = self.block_ids()?;
+        let allowed = [
+            "wordcraft.metadata",
+            "wordcraft.blocks",
+            "wordcraft.order",
+            "wordcraft.texts",
+        ];
+        if txn.root_refs().any(|(name, _)| {
+            !allowed.contains(&name) || (!self.project_text && name == "wordcraft.texts")
+        }) {
+            return Err(AdapterError::InvalidCheckpoint);
+        }
+        for name in ["wordcraft.metadata", "wordcraft.blocks", "wordcraft.texts"] {
+            let expected: BTreeSet<_> = if name == "wordcraft.metadata" {
+                ["document".to_owned()].into_iter().collect()
+            } else if name == "wordcraft.texts" && !self.project_text {
+                BTreeSet::new()
+            } else {
+                ids.iter().cloned().collect()
+            };
+            let actual = txn
+                .get_map(name)
+                .map(|map| map.keys(&txn).map(String::from).collect::<BTreeSet<_>>())
+                .unwrap_or_default();
+            if actual != expected {
+                return Err(AdapterError::InvalidCheckpoint);
+            }
+        }
+        Ok(())
     }
 
     pub fn checkpoint(&self) -> Result<Vec<u8>, AdapterError> {
-        let checkpoint = Checkpoint {
-            format: profile::CHECKPOINT_FORMAT.into(),
-            native: self.native()?,
-            block_ids: self.block_ids()?,
-            update: self
-                .doc
-                .transact()
-                .encode_state_as_update_v1(&StateVector::default()),
-        };
-        let bytes = serde_json::to_vec(&checkpoint).map_err(|_| AdapterError::InvalidCheckpoint)?;
+        let update = self
+            .doc
+            .transact()
+            .encode_state_as_update_v1(&StateVector::default());
+        let bytes = if self.model == format::Model::LegacyV1 {
+            serde_json::to_vec(&Checkpoint {
+                format: profile::LEGACY_CHECKPOINT_FORMAT.into(),
+                native: self.native()?,
+                block_ids: self.block_ids()?,
+                update,
+            })
+        } else {
+            let update_base64 =
+                mooring_protocol::boundary::encode_base64(&update, MAX_CRDT_UPDATE_BYTES)
+                    .map_err(|_| AdapterError::Limit)?;
+            serde_json::to_vec(&PackedCheckpoint {
+                format: profile::CHECKPOINT_FORMAT.into(),
+                native: self.native()?,
+                block_ids: self.block_ids()?,
+                update_base64,
+            })
+        }
+        .map_err(|_| AdapterError::InvalidCheckpoint)?;
         if bytes.len() > MAX_CHECKPOINT_BYTES {
             return Err(AdapterError::Limit);
         }
@@ -271,20 +339,52 @@ impl Document {
         if bytes.len() > MAX_CHECKPOINT_BYTES {
             return Err(AdapterError::Limit);
         }
-        let checkpoint: Checkpoint =
+        // Deserialize ORIGINAL JSON: opaque native u64 values must never pass
+        // through protocol binary64 normalization. Both wrapper shapes are closed.
+        let stored: StoredCheckpoint =
             serde_json::from_slice(bytes).map_err(|_| AdapterError::InvalidCheckpoint)?;
-        if checkpoint.format != profile::CHECKPOINT_FORMAT {
-            return Err(AdapterError::InvalidCheckpoint);
-        }
-        let read_only =
-            classify(&checkpoint.native).map_err(|_| AdapterError::InvalidCheckpoint)?;
-        let recovered = mooring_text::recover(&checkpoint.update, Vec::new())
+        let (native, ids, update, model) = match stored {
+            StoredCheckpoint::Packed(checkpoint)
+                if checkpoint.format == profile::CHECKPOINT_FORMAT =>
+            {
+                let update = mooring_protocol::boundary::decode_base64(
+                    &checkpoint.update_base64,
+                    MAX_CRDT_UPDATE_BYTES,
+                )
+                .map_err(|_| AdapterError::InvalidCheckpoint)?;
+                (
+                    checkpoint.native,
+                    checkpoint.block_ids,
+                    update,
+                    format::Model::V2,
+                )
+            }
+            StoredCheckpoint::Legacy(checkpoint)
+                if checkpoint.format == profile::LEGACY_CHECKPOINT_FORMAT =>
+            {
+                if checkpoint.update.len() > MAX_CRDT_UPDATE_BYTES {
+                    return Err(AdapterError::Limit);
+                }
+                (
+                    checkpoint.native,
+                    checkpoint.block_ids,
+                    checkpoint.update,
+                    format::Model::LegacyV1,
+                )
+            }
+            _ => return Err(AdapterError::InvalidCheckpoint),
+        };
+        let unsupported = classify(&native).map_err(|_| AdapterError::InvalidCheckpoint)?;
+        let recovered = mooring_text::recover(&update, Vec::new())
             .map_err(|_| AdapterError::InvalidCheckpoint)?;
         let result = Self {
             doc: recovered.document,
-            read_only,
+            read_only: unsupported || model == format::Model::LegacyV1,
+            project_text: !unsupported,
+            model,
         };
-        if result.block_ids()? != checkpoint.block_ids || result.native()? != checkpoint.native {
+        result.validate_shape()?;
+        if result.block_ids()? != ids || result.native()? != native {
             return Err(AdapterError::InvalidCheckpoint);
         }
         Ok(result)
@@ -506,3 +606,6 @@ pub fn utf16_to_byte(text: &str, offset: u32) -> Result<usize, AdapterError> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod model_v2_tests;

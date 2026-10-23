@@ -5,14 +5,15 @@ use mooring_protocol::Versions;
 use serde_json::{json, Value};
 
 pub const APPLICATION_ID: &str = "wordcraft";
-pub const CHECKPOINT_FORMAT: &str = "wordcraft-0.10.0/yrs-0.28.0/v1";
+pub const LEGACY_CHECKPOINT_FORMAT: &str = "wordcraft-0.10.0/yrs-0.28.0/v1";
+pub const CHECKPOINT_FORMAT: &str = "wordcraft-0.10.0/yrs-0.28.0/v2";
 pub const SOURCE_PIN: &str = "668d7ce3a4b1dcf241a9c50a20754a85647a02c4";
 pub const SOURCE_DESCRIBE: &str = "v0.10.0-64-g668d7ce3";
 
 pub fn qualified_versions() -> Versions {
     Versions {
         protocol_version: "0.4.0".into(),
-        model_version: "0.1.0".into(),
+        model_version: "0.2.0".into(),
         engine_version: "0.10.0".into(),
     }
 }

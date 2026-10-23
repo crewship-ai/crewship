@@ -239,3 +239,96 @@ fn unqualified_empty_run_encoding_opens_whole_document_read_only() {
         assert_eq!(restored.native().unwrap(), native);
     }
 }
+
+#[test]
+fn v2_checkpoint_packs_original_update_and_preserves_opaque_native_integer() {
+    let mut native = d1();
+    native["opaque_future_native"] = json!({"integer":9_007_199_254_740_993_u64});
+    let document = Document::import(native.clone(), ids(&native)).unwrap();
+    let bytes = document.checkpoint().unwrap();
+    let stored: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(stored["format"], profile::CHECKPOINT_FORMAT);
+    assert!(stored.get("update").is_none());
+    assert!(stored["update_base64"].is_string());
+    drop(document);
+    let restored = Document::restore(&bytes).unwrap();
+    assert_eq!(restored.native().unwrap(), native);
+    assert!(serde_json::to_string(&restored.native().unwrap())
+        .unwrap()
+        .contains("9007199254740993"));
+    assert!(restored.is_read_only());
+}
+#[test]
+fn legacy_checkpoint_keeps_original_native_and_ids_but_never_becomes_writable() {
+    let native = d1();
+    let stable = ids(&native);
+    let source = Document::import(native.clone(), stable.clone()).unwrap();
+    let legacy = Checkpoint {
+        format: profile::LEGACY_CHECKPOINT_FORMAT.into(),
+        native: native.clone(),
+        block_ids: stable.clone(),
+        update: source
+            .doc
+            .transact()
+            .encode_state_as_update_v1(&StateVector::default()),
+    };
+    let bytes = serde_json::to_vec(&legacy).unwrap();
+    drop(source);
+    let mut restored = Document::restore(&bytes).unwrap();
+    assert_eq!(restored.native().unwrap(), native);
+    assert_eq!(restored.block_ids().unwrap(), stable);
+    assert!(restored.is_read_only());
+    assert!(restored.read_only_reason().unwrap().contains("migration"));
+    let command = command::Command::Insert {
+        target_id: stable[0].clone(),
+        at: command::Anchor::Start {},
+        text: "unsafe".into(),
+        properties: None,
+    };
+    assert_eq!(
+        candidate::apply(&mut restored, &command),
+        Err(candidate::CandidateError::ReadOnly)
+    );
+    let exported: Value = serde_json::from_slice(&restored.checkpoint().unwrap()).unwrap();
+    assert_eq!(exported["format"], profile::LEGACY_CHECKPOINT_FORMAT);
+    assert!(exported.get("update").is_some() && exported.get("update_base64").is_none());
+}
+#[test]
+fn packed_checkpoint_rejects_noncanonical_base64_and_cross_format_wrappers() {
+    let native = d1();
+    let document = Document::import(native.clone(), ids(&native)).unwrap();
+    let stored: Value = serde_json::from_slice(&document.checkpoint().unwrap()).unwrap();
+    for encoded in ["AB==", "AAB=", " AA==", "AA==\n", "AA", "====", "", "é=="] {
+        let mut bad = stored.clone();
+        bad["update_base64"] = json!(encoded);
+        assert!(
+            Document::restore(&serde_json::to_vec(&bad).unwrap()).is_err(),
+            "accepted {encoded:?}"
+        );
+    }
+    let mut bad = stored.clone();
+    bad["format"] = json!(profile::LEGACY_CHECKPOINT_FORMAT);
+    assert!(Document::restore(&serde_json::to_vec(&bad).unwrap()).is_err());
+    let mut bad = stored;
+    bad["update"] = json!([0, 0]);
+    assert!(Document::restore(&serde_json::to_vec(&bad).unwrap()).is_err());
+}
+#[test]
+fn checkpoint_rejects_hidden_roots_and_unprojected_metadata_keys() {
+    let native = d1();
+    let document = Document::import(native.clone(), ids(&native)).unwrap();
+    document.doc.get_or_insert_text("hidden.root").insert(
+        &mut document.doc.transact_mut(),
+        0,
+        "invisible",
+    );
+    let bytes = document.checkpoint().unwrap();
+    assert!(Document::restore(&bytes).is_err());
+    let document = Document::import(native.clone(), ids(&native)).unwrap();
+    document.doc.get_or_insert_map("wordcraft.metadata").insert(
+        &mut document.doc.transact_mut(),
+        "hidden",
+        "invisible",
+    );
+    assert!(Document::restore(&document.checkpoint().unwrap()).is_err());
+}

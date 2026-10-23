@@ -11,10 +11,11 @@ human update entrypoint.
 The model retains document metadata, explicit paragraph order and caller-issued
 stable IDs. Each paragraph has a nested Y.Text, so an empty paragraph's shared
 type identity survives storage recovery. The adapter converts UTF-8 byte run
-lengths to UTF-16 positions at checked Unicode scalar boundaries. Basic native
-character flags use separate Yrs attributes: independent bold and italic edits
-can merge without replacing each other's properties. A presence attribute keeps
-absent formatting distinct from explicit empty properties and explicit false.
+lengths to UTF-16 positions at checked Unicode scalar boundaries. Model 0.2 uses action-scoped
+Yrs property keys, so an equal-value peer format keeps its own identity during
+selective own undo. Independent bold/italic slots and explicit empty-properties
+intent retain the distinction between inheritance, explicit empty properties
+and explicit false.
 Paragraph style/list references, marks and full native metadata are retained.
 
 Initial support covers the qualified D1 paragraph model: basic inline flags,
@@ -35,8 +36,10 @@ checkpoint validates that native projection, stable IDs and CRDT state agree.
 
 Tests distinguish synthetic model/Unicode/concurrency cases from actual upstream
 engine/WASM qualification. A two-replica attribute merge is not an authenticated
-multiuser integration. Undo, rejected dependencies, native UI integration and
-host prepare/commit wiring remain separate work.
+multiuser integration. Full-native selective undo/redo has model regressions for peer same/different,
+inherit and explicit-empty properties. Authenticated human admission, rejected
+independent intent recovery, native UI integration and host wiring remain
+separate qualification.
 
 Offline qualification accepts explicit stable IDs rather than generating index
 IDs:
@@ -100,14 +103,26 @@ binds each after-ID cursor to the same scope, confirmed revision and checkpoint
 digest. These pure functions do not authenticate remote cursors or authorize a
 content path. Read-only native documents remain readable in full.
 
-`human::validate_delta` is an experimental application-only fork validator. It
-preserves original client-authored Yrs IDs and checks bounded text/known-format
-encoding, exact affected paragraph IDs, unchanged roots/order/metadata, complete
-causal integration and full native consistency. A reader fails before decoding.
-The host must separately authenticate the writer, bind a unique 53-bit origin
-and current epoch, qualify original causal reads and commit atomically; this
-function does none of those things and is not connected to `PrepareAdapter`, a
-network route or SyncStep2. Host authority must gate every update-bearing frame
-before invoking it. Independent deltas and selective-origin undo have native
-regressions; native WordApp hooks, browser human edits, recovery origin grants
-and a complete human service admission contract remain separate qualification.
+Model 0.2 serializes `wordcraft-0.10.0/yrs-0.28.0/v2` checkpoints with a
+canonical base64 CRDT update. Decoded size and pad bits are checked before
+allocation; the native JSON is parsed from original bytes, preserving opaque
+integers beyond binary64 precision. Restore also rejects hidden roots and map
+keys not represented by the complete native model.
+
+Legacy `.../v1` checkpoints remain readable with their full native data, stable
+paragraph IDs and original CRDT identity. They are always read-only, and export
+retains the v1 marker. Importing a new v2 artifact is an explicit host operation;
+retiring old sessions/origins and binding a new epoch are not performed here.
+A restore never silently migrates an existing artifact into writable v2 state.
+
+Action keys contain a canonical bounded logical stamp and origin, never a Saved
+host revision. The current agent helper derives its stamp only from the
+host-authoritative confirmed CRDT state. It must not be used for human proposals:
+a qualified causal witness must avoid coupling an independent operation to
+unrelated optimistic changes. Human origin binding, stamp/read qualification and
+current authority still require their own closed protocol capability.
+
+The earlier v1 raw-delta structural validator now compiles only in tests. Its
+text-preservation checks are not full peer-format undo qualification; model-v2
+production code exposes no raw human update admission. No native WordApp command
+hook, browser human service or deployment is implied by these model regressions.
