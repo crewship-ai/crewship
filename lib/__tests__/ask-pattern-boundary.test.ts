@@ -75,16 +75,16 @@ describe("Ask author patterns stay outside the native JavaScript regex engine", 
     expect(trap.calls).toHaveLength(2)
   })
 
-  it.each(sharedCases)("shared Go corpus: $name", ({ pattern, value, matches }) => {
+  it.each(sharedCases)("defers shared Go corpus pattern to server: $name", ({ pattern, value }) => {
     const trap = trapNativePattern(pattern)
     let errors: ReturnType<typeof validateAskAnswers>
     try { errors = validateAskAnswers(formOf(pattern), { answer: value }) }
     finally { trap.restore() }
     expect(trap.calls, "author regex source crossed the native engine boundary").toEqual([])
-    expect(errors!.map((error) => error.code)).toEqual(matches ? [] : ["pattern"])
+    expect(errors!).toEqual([])
   })
 
-  it.each(cases)("$name matches and refuses without native compilation or execution", ({ pattern, yes, no }) => {
+  it.each(cases)("$name defers matching and nonmatching values without native compilation or execution", ({ pattern, yes, no }) => {
     const trap = trapNativePattern(pattern)
     let accepted: ReturnType<typeof validateAskAnswers>
     let refused: ReturnType<typeof validateAskAnswers>
@@ -94,7 +94,7 @@ describe("Ask author patterns stay outside the native JavaScript regex engine", 
     } finally { trap.restore() }
     expect(trap.calls, "author regex source crossed the native engine boundary").toEqual([])
     expect(accepted!).toEqual([])
-    expect(refused!).toEqual([{ field: "answer", code: "pattern", message: "Answer is not in the expected format." }])
+    expect(refused!).toEqual([])
   })
 
   it.each(["textarea", "quantum-flux"])("keeps the same boundary for %s fields", (type) => {
@@ -104,7 +104,7 @@ describe("Ask author patterns stay outside the native JavaScript regex engine", 
     try { errors = validateAskAnswers(formOf(pattern, type), { answer: "a".repeat(4096) + "!" }) }
     finally { trap.restore() }
     expect(trap.calls).toEqual([])
-    expect(errors![0]?.code).toBe("pattern")
+    expect(errors!).toEqual([])
   })
 
   it("keeps an uncompilable legacy pattern answerable without native fallback", () => {

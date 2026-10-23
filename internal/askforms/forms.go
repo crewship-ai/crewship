@@ -501,11 +501,9 @@ func checkConstraints(where string, fl Field) error {
 // thing an HTML `pattern=` attribute means and the only reading that does not
 // silently accept `xxCZ25788001xx` for `CZ[0-9]{8}`.
 //
-// Compiled with Go's RE2 on the way IN, which is what makes it safe to hand
-// the same string to JavaScript's engine on the way out: RE2 has no
-// backreferences and no lookaround, so a pattern that compiles here is a
-// pattern the other side can run without a catastrophic-backtracking case.
-// The reverse would not hold.
+// The same Go matcher validates definitions and submitted answers. A Go-valid
+// pattern can still backtrack pathologically in a JavaScript engine, so the
+// browser must never compile or execute this source with native RegExp.
 func compilePattern(pattern string) (*regexp.Regexp, error) {
 	return regexp.Compile("^(?:" + pattern + ")$")
 }

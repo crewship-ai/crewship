@@ -18,14 +18,10 @@ package askforms
 // WHERE EACH CONSTRAINT IS ENFORCED, and why:
 //
 //   - `required`, `min`, `max`, `pattern`, `multiple`, options membership —
-//     checked wherever answers are turned into a message. There is no
-//     server-side submit endpoint to enforce them at: a form submit IS an
-//     ordinary chat message (PRD decision 2), and that is not being reopened
-//     for a validator. What the server owns instead is the DEFINITION: a
-//     constraint that this file would not enforce cannot be saved at all
-//     (Validate), so "the client skipped the check" is the only remaining
-//     failure and it costs a badly-formed message rather than a broken
-//     guarantee.
+//     checked here by CLI preview and the server's ask submission boundary
+//     before persistence. The browser also checks inexpensive constraints,
+//     but never executes an author's regex. Plain chat messages remain plain;
+//     an explicit submission envelope must describe a valid current form.
 //   - The field TYPE verdict — enforced in both places and in that order:
 //     refused on save, and failed closed at submit for rows that predate the
 //     rule. See fieldtypes.go.

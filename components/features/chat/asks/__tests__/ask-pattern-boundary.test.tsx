@@ -6,6 +6,7 @@ vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "w
 const toastError = vi.fn()
 vi.mock("sonner", () => ({ toast: { error: (message: string) => toastError(message), success: vi.fn(), info: vi.fn() } }))
 
+import { AskSubmissionError } from "@/lib/ask-submission-error"
 import { AskFormSheet } from "../ask-form-sheet"
 import { AskFormsBuilder } from "@/components/features/crews/ask-forms-builder"
 import { renderAskTemplate, type AskForm } from "@/lib/ask-template"
@@ -51,7 +52,8 @@ const onClose = vi.fn()
 
 beforeEach(() => {
   useComposerStore.setState({ attachments: {}, drafts: {} })
-  onSubmit.mockClear()
+  onSubmit.mockReset()
+  onSubmit.mockResolvedValue(true)
   onClose.mockClear()
   toastError.mockClear()
 })
@@ -59,6 +61,7 @@ beforeEach(() => {
 describe("Ask pattern boundary in the answering UI", () => {
   it.each(["button", "form"] as const)("%s submit validates a long near-match without native regex or HTML pattern", async (mode) => {
     const pattern = "(a+)+$"
+    onSubmit.mockRejectedValueOnce(new AskSubmissionError("Answer is not in the expected format.", [{ field: "answer", code: "pattern", message: "Answer is not in the expected format." }]))
     const trap = trapNativePattern(pattern)
     try {
       const { container } = render(<AskFormSheet form={formOf(pattern)} agentId="agent-1" sessionId="sess-1" onSubmit={onSubmit} onClose={onClose} renderTemplate={renderAskTemplate} />)
@@ -70,7 +73,9 @@ describe("Ask pattern boundary in the answering UI", () => {
       // sends the invalid answer, so the failing boundary cannot be hidden.
       expect(trap.calls).toEqual([])
       await waitFor(() => expect(toastError).toHaveBeenCalledWith("Answer is not in the expected format."))
-      expect(onSubmit).not.toHaveBeenCalled()
+      expect(onSubmit).toHaveBeenCalledTimes(1)
+      expect(screen.getByRole("alert")).toHaveTextContent("Answer is not in the expected format.")
+      expect((screen.getByLabelText("Answer") as HTMLInputElement).value.length).toBeGreaterThan(0)
       expect(onClose).not.toHaveBeenCalled()
     } finally { trap.restore() }
   })
@@ -121,6 +126,7 @@ describe("Ask authoring does not execute pattern source", () => {
 describe("Ask preview keeps author regexes outside native execution", () => {
   it("updates the actual message preview for a long near-match, then refuses submit safely", async () => {
     const pattern = "(a+)+$"
+    onSubmit.mockRejectedValueOnce(new AskSubmissionError("Answer is not in the expected format.", [{ field: "answer", code: "pattern", message: "Answer is not in the expected format." }]))
     const trap = trapNativePattern(pattern)
     try {
       const { container } = render(<AskFormSheet form={formOf(pattern)} agentId="agent-1" sessionId="sess-1" onSubmit={onSubmit} onClose={onClose} renderTemplate={renderAskTemplate} />)
@@ -137,7 +143,9 @@ describe("Ask preview keeps author regexes outside native execution", () => {
       fireEvent.click(screen.getByTestId("ask-submit"))
       expect(trap.calls).toEqual([])
       await waitFor(() => expect(toastError).toHaveBeenCalledWith("Answer is not in the expected format."))
-      expect(onSubmit).not.toHaveBeenCalled()
+      expect(onSubmit).toHaveBeenCalledTimes(1)
+      expect(screen.getByRole("alert")).toHaveTextContent("Answer is not in the expected format.")
+      expect((screen.getByLabelText("Answer") as HTMLInputElement).value.length).toBeGreaterThan(0)
     } finally { trap.restore() }
   })
 
@@ -146,6 +154,7 @@ describe("Ask preview keeps author regexes outside native execution", () => {
     { name: "nonmatching ordinary pattern", value: "xxCZ25788001xx", accepted: false },
   ])("previews and submits $name without native regex or HTML pattern", async ({ value, accepted }) => {
     const pattern = "CZ[0-9]{8}"
+    if (!accepted) onSubmit.mockRejectedValueOnce(new AskSubmissionError("Answer is not in the expected format.", [{ field: "answer", code: "pattern", message: "Answer is not in the expected format." }]))
     const trap = trapNativePattern(pattern)
     try {
       const { container } = render(<AskFormSheet form={formOf(pattern)} agentId="agent-1" sessionId="sess-1" onSubmit={onSubmit} onClose={onClose} renderTemplate={renderAskTemplate} />)
@@ -162,7 +171,9 @@ describe("Ask preview keeps author regexes outside native execution", () => {
         expect(toastError).not.toHaveBeenCalled()
       } else {
         await waitFor(() => expect(toastError).toHaveBeenCalledWith("Answer is not in the expected format."))
-        expect(onSubmit).not.toHaveBeenCalled()
+        expect(onSubmit).toHaveBeenCalledTimes(1)
+      expect(screen.getByRole("alert")).toHaveTextContent("Answer is not in the expected format.")
+      expect((screen.getByLabelText("Answer") as HTMLInputElement).value.length).toBeGreaterThan(0)
       }
     } finally { trap.restore() }
   })

@@ -45,7 +45,8 @@ type ChatMessageOption struct {
 	//
 	// It arrives from an untrusted client, so no consumer may store it
 	// verbatim — see chatbridge.HandleChatMessage, which round-trips it
-	// through askforms.EnvelopeFromMetadata and keeps only what parses.
+	// through the current agent definition and askforms.ValidateAnswers before
+	// persistence, rejecting malformed explicit submissions.
 	Metadata map[string]any
 }
 

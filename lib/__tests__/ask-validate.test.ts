@@ -89,7 +89,8 @@ describe("ask answer constraints", () => {
   it.each(fixture.answers)("$name", (tc) => {
     const errors = validateAskAnswers(formOf(tc.field), { [tc.field.name]: tc.value })
 
-    expect(errors.map((e) => ({ code: e.code, message: e.message }))).toEqual(tc.errors)
+    // Patterns are enforced by the server; local checks retain all cheap constraints.
+    expect(errors.map((e) => ({ code: e.code, message: e.message }))).toEqual(tc.errors.filter((error) => error.code !== "pattern"))
     for (const e of errors) {
       // A message that does not name the field is a message the user cannot
       // act on — six inputs on screen and "must be at least 3 characters"

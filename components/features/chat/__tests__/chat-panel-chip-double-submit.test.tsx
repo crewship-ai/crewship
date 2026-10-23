@@ -65,6 +65,7 @@ vi.mock("sonner", () => ({
   toast: { error: toastError, success: vi.fn(), info: vi.fn(), warning: vi.fn(), message: vi.fn() },
 }))
 
+import { AskSubmissionError } from "@/lib/ask-submission-error"
 import { ChatPanel } from "../chat-panel"
 import { checkChatMessageSize } from "../hooks/use-message-submit"
 import { WS_MAX_OUTBOUND_FRAME_BYTES } from "@/hooks/use-websocket"
@@ -138,6 +139,53 @@ describe("ChatPanel — chip double-click during session create (#2121)", () => 
     expect(sendMessage.mock.calls[1][1]).toEqual({ page_context: { slug: "fleet" } })
     act(() => ownMessageSaved?.(`${sendMessage.mock.calls[1][0]}\n\n[Page context]`, { page_context: { slug: "fleet" } }))
     expect(screen.queryByTestId("page-context-chip")).not.toBeInTheDocument()
+  })
+
+  it("consumes Page context in the same event that confirms a pending Ask", async () => {
+    let confirm!: (accepted: boolean) => void
+    sendMessage.mockReturnValueOnce(new Promise<boolean>((resolve) => { confirm = resolve }))
+    const forms = JSON.stringify([{ id: "receipt", label: "Receipt", template: "{{answer}}", fields: [{ name: "answer", label: "Answer", type: "text", pattern: "CZ[0-9]{8}" }] }])
+    render(<ChatPanel {...panelProps} askForms={forms} pageContextSlug="fleet" />)
+    expect(await screen.findByText(/Page: Fleet/)).toBeInTheDocument()
+    fireEvent.click(await screen.findByTestId("ask-chip-form-receipt"))
+    fireEvent.change(screen.getByLabelText("Answer"), { target: { value: "CZ25788001" } })
+    fireEvent.click(screen.getByTestId("ask-submit"))
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1))
+    expect(screen.getByTestId("page-context-chip")).toBeInTheDocument()
+    const [content, metadata] = sendMessage.mock.calls[0]
+    expect(metadata.ask_submission.submission_id).toEqual(expect.any(String))
+    await act(async () => {
+      // useChat resolves the promise before invoking onOwnMessageSaved in the
+      // same receipt callback. Promise continuations have not run yet.
+      confirm(true)
+      ownMessageSaved?.(`${content}\n\n[Page context]`, { ...metadata, author_user_id: "user-1" })
+    })
+    expect(screen.queryByTestId("page-context-chip")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("ask-sheet")).not.toBeInTheDocument()
+    fireEvent.click(await firstChip())
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(2))
+    expect(sendMessage.mock.calls[1][1]?.page_context).toBeUndefined()
+  })
+
+  it("keeps Page context on a rejected Ask and clears its stale pending marker", async () => {
+    let reject!: (error: Error) => void
+    sendMessage.mockReturnValueOnce(new Promise<boolean>((_resolve, rejectPromise) => { reject = rejectPromise }))
+    const forms = JSON.stringify([{ id: "receipt", label: "Receipt", template: "{{answer}}", fields: [{ name: "answer", label: "Answer", type: "text", pattern: "CZ[0-9]{8}" }] }])
+    render(<ChatPanel {...panelProps} askForms={forms} pageContextSlug="fleet" />)
+    expect(await screen.findByText(/Page: Fleet/)).toBeInTheDocument()
+    fireEvent.click(await screen.findByTestId("ask-chip-form-receipt"))
+    fireEvent.change(screen.getByLabelText("Answer"), { target: { value: "wrong" } })
+    fireEvent.click(screen.getByTestId("ask-submit"))
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1))
+    const [content, metadata] = sendMessage.mock.calls[0]
+    await act(async () => { reject(new AskSubmissionError("Answer is not in the expected format.", [{ field: "answer", code: "pattern", message: "Answer is not in the expected format." }])) })
+    expect(screen.getByTestId("page-context-chip")).toBeInTheDocument()
+    expect(screen.getByLabelText("Answer")).toHaveValue("wrong")
+    // A later echo with the same text must not spend the rejected request's Page.
+    act(() => ownMessageSaved?.(`${content}\n\n[Page context]`, { ...metadata, author_user_id: "user-1" }))
+    expect(screen.getByTestId("page-context-chip")).toBeInTheDocument()
+    expect(toastError).toHaveBeenCalledTimes(1)
+    expect(toastError.mock.calls[0][0]).toBe("Answer is not in the expected format.")
   })
 
   it("does not send Page metadata after the context is removed", async () => {

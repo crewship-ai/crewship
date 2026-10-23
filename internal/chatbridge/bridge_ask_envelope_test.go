@@ -28,11 +28,16 @@ func groupBridge(t *testing.T) *Bridge {
 	t.Helper()
 	info := baseInfo()
 	info.Visibility = "group"
+	info.AskForms = `[{"id":"receipt","label":"Add a receipt","version":2,"template":"Receipt from {{vendor}} for {{amount}}","fields":[{"name":"vendor","type":"text"},{"name":"amount","type":"text"},{"name":"photo","type":"file"}]}]`
 	b, _ := testBridge(t, &capResolver{info: info})
 	return b
 }
 
-func envelopeMetadata(submissionID string) map[string]any {
+func envelopeMetadata(submissionID string, chatIDs ...string) map[string]any {
+	chatID := "chat-1"
+	if len(chatIDs) > 0 {
+		chatID = chatIDs[0]
+	}
 	return map[string]any{
 		askforms.EnvelopeMetadataKey: map[string]any{
 			"submission_id": submissionID,
@@ -41,7 +46,7 @@ func envelopeMetadata(submissionID string) map[string]any {
 			"form_version":  float64(2),
 			"values":        map[string]any{"vendor": "Acme", "amount": "12.50"},
 			"field_attachment_ids": map[string]any{
-				"photo": []any{"attachments/chat-1/receipt.png"},
+				"photo": []any{"attachments/" + chatID + "/receipt.png"},
 			},
 			"rendered_text": "Receipt from Acme for 12.50",
 		},
@@ -54,6 +59,7 @@ func TestHandleChatMessagePersistsAskEnvelope(t *testing.T) {
 		metadata     map[string]any
 		wantEnvelope bool
 		wantSubID    string
+		wantRefused  bool
 	}{
 		{
 			name:         "a form submission",
@@ -72,14 +78,16 @@ func TestHandleChatMessagePersistsAskEnvelope(t *testing.T) {
 			wantEnvelope: false,
 		},
 		{
-			name: "an envelope missing the identity content could not be",
+			name:        "an envelope missing the identity content could not be",
+			wantRefused: true,
 			metadata: map[string]any{
 				askforms.EnvelopeMetadataKey: map[string]any{"form_id": "receipt"},
 			},
 			wantEnvelope: false,
 		},
 		{
-			name: "an envelope that is not even an object",
+			name:        "an envelope that is not even an object",
+			wantRefused: true,
 			metadata: map[string]any{
 				askforms.EnvelopeMetadataKey: "not an object",
 			},
@@ -92,11 +100,19 @@ func TestHandleChatMessagePersistsAskEnvelope(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := groupBridge(t)
-			chatID := "sess-" + tt.name
+			chatID := "chat-1"
 
 			opt := ws.ChatMessageOption{Metadata: tt.metadata}
-			if err := b.HandleChatMessage(context.Background(), "user-1", chatID, content, func(ws.ChatEvent) {}, opt); err != nil {
-				t.Fatalf("HandleChatMessage: %v", err)
+			submitErr := b.HandleChatMessage(context.Background(), "user-1", chatID, content, func(ws.ChatEvent) {}, opt)
+			if tt.wantRefused {
+				msgs, err := b.convStore.Read(context.Background(), chatID, 0, 0)
+				if submitErr == nil || err != nil || len(msgs) != 0 {
+					t.Fatalf("invalid envelope persisted: submit=%v read=%v messages=%v", submitErr, err, msgs)
+				}
+				return
+			}
+			if submitErr != nil {
+				t.Fatalf("HandleChatMessage: %v", submitErr)
 			}
 
 			msgs, err := b.convStore.Read(context.Background(), chatID, 0, 0)
@@ -145,7 +161,7 @@ func TestHandleChatMessagePersistsAskEnvelope(t *testing.T) {
 // own submission id.
 func TestTwoIdenticalSubmissionsKeepTheirOwnIDs(t *testing.T) {
 	b := groupBridge(t)
-	const chatID = "sess-twice"
+	const chatID = "chat-1"
 	const content = "Receipt from Acme for 12.50"
 
 	for _, id := range []string{"sub_a", "sub_b"} {
