@@ -1,6 +1,7 @@
 //! Experimental partial wire shapes. Not an authenticated endpoint or a full
 //! JSON-schema validator. Numeric, size and cross-field validation is explicit.
 use serde::{Deserialize, Serialize};
+pub mod canonical;
 mod generated;
 pub use generated::*;
 

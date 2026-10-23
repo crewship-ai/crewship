@@ -126,3 +126,7 @@ a5e52eb700be14e985b892b1a87ddb6215d5e613:mooring/vendor/syn-3.0.9/.cargo-checksu
 077cac2b941758220cb54b9f5b0e817f3dfc9b73:mooring/vendor/rustversion-1.0.23/.cargo-checksum.json:generic-api-key:1
 077cac2b941758220cb54b9f5b0e817f3dfc9b73:mooring/vendor/serde_json-1.0.154/.cargo-checksum.json:generic-api-key:1
 077cac2b941758220cb54b9f5b0e817f3dfc9b73:mooring/vendor/syn-3.0.9/.cargo-checksum.json:generic-api-key:1
+
+# Pinned RustCrypto source checksum maps, verified by license-inventory.py.
+mooring/vendor/digest-0.10.7/.cargo-checksum.json:generic-api-key:1
+mooring/vendor/sha2-0.10.9/.cargo-checksum.json:generic-api-key:1

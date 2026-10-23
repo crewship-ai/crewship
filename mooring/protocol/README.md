@@ -26,3 +26,23 @@ expected errors. `fingerprint-fixtures.json` defines required cross-language
 JCS golden vectors; the shape generator does not implement canonical hashing.
 Generic numeric payloads must be normalized to the specified binary64 model
 before adapter validation as well as before hashing.
+
+
+`mooring_protocol::canonical::normalize` is a separate bounded input helper. It
+rejects raw duplicate properties (including escaped aliases), invalid Unicode,
+nonfinite numbers, trailing JSON and oversized input/output. It then emits JCS
+with exact pinned `serde_json_canonicalizer` and reparses those bytes. Adapter
+validation must consume the returned normalized value, so an unsafe integer
+JSON number cannot hash as one value while applying as a different exact u64.
+Strings containing exact large integers remain strings.
+
+`fingerprint_atomic` hashes full ordered membership, authenticated participant
+references, scope, payloads, read preconditions, dependencies and immutable task
+identity. It excludes supplied fingerprints and transport/session-owner fields.
+Hosts use `matches_wire` after their own schema and authority validation; client
+construction may use `with_fingerprints`. This helper does not authenticate a
+participant, determine ownership, validate application semantics or issue Saved.
+The shared golden tests cover numeric/UTF-16 ordering and escaping, malformed
+raw JSON, membership perturbations, stable retry identity and normalized adapter
+input. Checkpoint tests currently verify canonical preimages only; they do not
+implement checkpoint wire decoding/integrity or recovery authority.
