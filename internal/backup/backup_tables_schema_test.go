@@ -43,10 +43,11 @@ import (
 // either add it to BackupTables (FK-safe order, plus BackupTableIntent) or
 // write its reason here. "It is not important" is not a reason; see #1437.
 var workspaceTablesNotBundled = map[string]string{
-	"gridcraft_heads":      "experimental workbook portability is unavailable; dumping a workspace with workbooks is refused",
-	"gridcraft_operations": "experimental workbook portability is unavailable; dumping a workspace with workbooks is refused",
-	"gridcraft_intents":    "run-bound permission cannot travel in a portable backup",
-	"gridcraft_sessions":   "editor sessions are bound to a live credential and expire within hours",
+	"mooring_session_owners": "process-bound owner capability must not travel in a portable backup",
+	"gridcraft_heads":        "experimental workbook portability is unavailable; dumping a workspace with workbooks is refused",
+	"gridcraft_operations":   "experimental workbook portability is unavailable; dumping a workspace with workbooks is refused",
+	"gridcraft_intents":      "run-bound permission cannot travel in a portable backup",
+	"gridcraft_sessions":     "editor sessions are bound to a live credential and expire within hours",
 
 	"document_iteration_intents":        "targeted human-message authority requires fresh admission after recovery",
 	"document_creation_consents":        "one-use human creation permission is bound to the original installation and run",
