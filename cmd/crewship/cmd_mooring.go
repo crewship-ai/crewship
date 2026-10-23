@@ -33,31 +33,30 @@ func newMooringCommand() *cobra.Command {
 			if e != nil {
 				return e
 			}
-			path := "/api/v1/mooring/apps"
-			if operation != "apps" && operation != "create" {
-				path = "/api/v1/pages/" + pagePathEscape(args[0]) + "/mooring"
-			}
+
 			var response *http.Response
-			switch operation {
-			case "apps", "read":
-				response, e = client.Get(path)
-			case "revoke":
-				response, e = client.Delete(path + "/mandates/" + url.PathEscape(args[1]))
-			default:
-				var raw []byte
+			var raw []byte
+			if operation == "create" || operation == "command" || operation == "admit" {
 				raw, e = workbookInput(cmd)
 				if e != nil {
 					return e
 				}
-				if operation == "create" {
-					path = "/api/v1/mooring/documents"
-				} else if operation == "command" {
-					path += "/commands"
-				} else {
-					path += "/mandates"
-				}
-				response, e = client.Post(path, json.RawMessage(raw))
 			}
+			switch operation {
+			case "apps":
+				response, e = client.Get("/api/v1/mooring/apps")
+			case "read":
+				response, e = client.Get("/api/v1/pages/" + pagePathEscape(args[0]) + "/mooring")
+			case "create":
+				response, e = client.Post("/api/v1/mooring/documents", json.RawMessage(raw))
+			case "command":
+				response, e = client.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/mooring/commands", json.RawMessage(raw))
+			case "admit":
+				response, e = client.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/mooring/mandates", json.RawMessage(raw))
+			case "revoke":
+				response, e = client.Delete("/api/v1/pages/" + pagePathEscape(args[0]) + "/mooring/mandates/" + url.PathEscape(args[1]))
+			}
+
 			if e != nil {
 				return e
 			}

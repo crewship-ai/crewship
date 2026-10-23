@@ -70,6 +70,7 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	"POST /agent/run/end":           guardHandlerIdentity,
 	"POST /api/v1/documents/create": guardHandlerIdentity,
 	"POST /api/v1/gridcraft":        guardHandlerIdentity,
+	"POST /api/v1/mooring":          guardHandlerIdentity, // handleMooring binds and forwards the signed live run
 	"GET /api/v1/documents/draft":   guardHandlerIdentity,
 	"POST /api/v1/documents/draft":  guardHandlerIdentity,
 	// Proposals require a verified token-bound live run in both handlers.
