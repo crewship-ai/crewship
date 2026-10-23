@@ -202,6 +202,9 @@ type Router struct {
 	// workbookEditorDetail answers GET /api/v1/admin/instance/workbook-editor;
 	// nil while the embedded workbook editor is off.
 	workbookEditorDetail func() any
+	// workbookEditorBundle names the editor bundle new workbook editor
+	// sessions frame; nil while the embedded workbook editor is off.
+	workbookEditorBundle func(*http.Request) (digest, url string)
 	pageStudioOrigin     string
 	storagePath          string // base path for crew file storage
 	catalogFetcher       *devcontainer.CatalogFetcher

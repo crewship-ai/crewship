@@ -29,8 +29,8 @@ type gridcraftHTTP struct {
 	// broadcast pushes workbook.committed on a Page channel; nil disables it.
 	broadcast func(prefix, id, eventType string, payload any)
 	// editorBundle reports the qualified editor bundle digest and frame URL
-	// for new sessions; nil until an editor origin is configured.
-	editorBundle func() (digest, url string)
+	// for a new session opened by the request; nil while the editor is off.
+	editorBundle func(*http.Request) (digest, url string)
 	// outbox is the router's push sweeper; once started it sends pushes off
 	// the response path.
 	outbox *gridcraftOutboxWorker
@@ -48,7 +48,7 @@ func (r *Router) RegisterGridCraft(options appengine.Options, engine appengine.E
 	if !ok {
 		return
 	}
-	h := &gridcraftHTTP{pages: r.pages, store: store, engine: engine, operations: operations, editor: options.Editor}
+	h := &gridcraftHTTP{pages: r.pages, store: store, engine: engine, operations: operations, editor: options.Editor, editorBundle: r.workbookEditorBundle}
 	if r.hub != nil {
 		h.broadcast = r.hub.BroadcastChannel
 	}

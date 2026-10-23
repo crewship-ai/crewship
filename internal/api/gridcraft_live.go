@@ -140,8 +140,10 @@ type gridcraftEditorSession struct {
 	Protocol   int    `json:"protocol"`
 	ExpiresAt  string `json:"expires_at"`
 	// BundleDigest and EditorURL name the qualified editor bundle the host
-	// may frame. They stay empty until an editor origin is configured, and a
-	// host must then not frame anything.
+	// may frame: in same-host mode EditorURL is the path
+	// /_editor/b/<digest>/index.html on the host's own origin, with a
+	// dedicated editor origin it is absolute. Both stay empty while nothing
+	// may be framed, and a host must then not frame anything.
 	BundleDigest string `json:"bundle_digest"`
 	EditorURL    string `json:"editor_url,omitempty"`
 }
@@ -294,7 +296,7 @@ func (h *gridcraftHTTP) openSession(w http.ResponseWriter, r *http.Request) {
 func (h *gridcraftHTTP) writeSession(w http.ResponseWriter, r *http.Request, status int, out gridcraftEditorSession, p appengine.Principal) {
 	out.ActorLabel = h.actorLabel(r.Context(), p.AuthorityID)
 	if h.editorBundle != nil {
-		out.BundleDigest, out.EditorURL = h.editorBundle()
+		out.BundleDigest, out.EditorURL = h.editorBundle(r)
 	}
 	writeJSON(w, status, out)
 }

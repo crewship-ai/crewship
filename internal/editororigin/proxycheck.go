@@ -238,6 +238,15 @@ func (h *Handler) CheckTargets() []string {
 	return out
 }
 
+// originDisabled reports whether the proxy self-check disabled the editor on
+// origin.
+func (h *Handler) originDisabled(origin string) bool {
+	h.check.mu.Lock()
+	defer h.check.mu.Unlock()
+	s := h.check.origins[origin]
+	return s != nil && s.disabled
+}
+
 // RecordCheck records a check of origin. A failure that defeats the
 // path-scoped isolation disables the editor on that origin: the prefix stays
 // with the editor handler, which serves no bundle file there. A disabled

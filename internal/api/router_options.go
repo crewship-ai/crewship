@@ -476,6 +476,13 @@ func WithWorkbookEditor(observe func(*http.Request), detail func() any) RouterOp
 	}
 }
 
+// WithWorkbookEditorBundle names the editor bundle (digest and frame URL)
+// that a new workbook editor session may frame for the request; "" while
+// nothing may be framed.
+func WithWorkbookEditorBundle(bundle func(*http.Request) (digest, url string)) RouterOption {
+	return func(r *Router) { r.workbookEditorBundle = bundle }
+}
+
 // WithMemoryInventoryRoot enables read-only workspace knowledge discovery.
 func WithMemoryInventoryRoot(path string) RouterOption {
 	return func(r *Router) { r.memoryInventoryRoot = path }

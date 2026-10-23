@@ -743,6 +743,7 @@ func (s *Server) mountAPIRouter(
 	if s.editor != nil {
 		editor := s.editor
 		opts = append(opts, goapi.WithWorkbookEditor(editor.LearnOrigin, func() any { return editor.Detail() }))
+		opts = append(opts, goapi.WithWorkbookEditorBundle(editor.SessionBundle))
 	}
 
 	// Dynamic catalog fetchers (devcontainer features + mise runtimes).

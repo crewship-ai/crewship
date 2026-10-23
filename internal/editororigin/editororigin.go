@@ -159,7 +159,10 @@ type Handler struct {
 	runtime string
 	scheme  func(*http.Request) string
 	bundles map[string]bundle
-	check   proxyState
+	// order lists the loaded bundles in allowlist order; the first one is
+	// the bundle new editor sessions frame (SessionBundle).
+	order []string
+	check proxyState
 }
 
 // IsDigest reports whether s is a lowercase hex SHA-256 digest, the only
@@ -413,6 +416,7 @@ func New(o Options) (*Handler, error) {
 			extra += " " + hash
 		}
 		h.bundles[digest] = bundle{files: files, inline: extra}
+		h.order = append(h.order, digest)
 	}
 	return h, errors.Join(errs...)
 }
@@ -876,6 +880,29 @@ func (h *Handler) IndexURL(digest string) string {
 		return SameHostPrefix + BundlePrefix + digest + "/index.html"
 	}
 	return h.base + BundlePrefix + digest + "/index.html"
+}
+
+// SessionBundle names the bundle a host page frames for a new editor session
+// opened by r, and that bundle's editor document URL (IndexURL): the first
+// bundle of the allowlist that loaded. Both are "" while nothing may be framed
+// for r: no editor, no loaded bundle, an unusable same-host configuration, a
+// request whose origin the same-host editor does not answer on, or an origin
+// the proxy self-check disabled.
+func (h *Handler) SessionBundle(r *http.Request) (digest, indexURL string) {
+	if h == nil || h.all || h.broken || len(h.order) == 0 {
+		return "", ""
+	}
+	if h.sameHost {
+		origin, err := h.StudioOriginFor(r)
+		if err != nil || h.originDisabled(origin) {
+			return "", ""
+		}
+	}
+	digest = h.order[0]
+	if indexURL = h.IndexURL(digest); indexURL == "" {
+		return "", ""
+	}
+	return digest, indexURL
 }
 
 // IsCrewshipCookie reports whether a cookie name is one Crewship issues on

@@ -321,8 +321,14 @@ nor beyond the sign-in session or token that opened it; `expires_at` already
 reflects all of these limits.
 An optional `"protocol":1` names the editor bridge protocol; any other value is
 refused. `bundle_digest` and `editor_url` name the editor bundle a host may
-frame; while no editor origin is configured the digest is empty, no URL is sent,
-and a host must not frame anything (it should close the session it opened).
+frame: the first bundle of `CREWSHIP_GRIDCRAFT_EDITOR_BUNDLES` that loaded. In
+the zero-config same-host mode `editor_url` is the path
+`/_editor/b/<digest>/index.html` on the origin the host page uses; with a
+dedicated editor origin it is that origin's `/b/<digest>/index.html`. While no
+bundle loaded, the configured Studio origin is not the one the request reached,
+or the proxy self-check disabled the editor on that origin, the digest is
+empty, no URL is sent, and a host must not frame anything (it should close the
+session it opened).
 One user may hold 32 live sessions per Page; a 33rd is
 `429 {"error":"too_many_editor_sessions"}` with `Retry-After` set to the seconds
 until the first one expires. Sessions that are never closed stop counting once
