@@ -17,11 +17,11 @@ derive = '#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]'
 
 
 def title(name):
-    return ''.join(p[:1].upper() + p[1:] for p in re.split(r'[_-]', name))
+    return ''.join(p[:1].upper() + p[1:] for p in re.split(r'[_\-.]', name))
 
 
 def go_title(name):
-    return ''.join(p.upper() if p.lower() in ('id', 'ttl', 'url') else title(p) for p in re.split(r'[_-]', name))
+    return ''.join(p.upper() if p.lower() in ('id', 'ttl', 'url') else title(p) for p in re.split(r'[_\-.]', name))
 
 
 def named(name, node):

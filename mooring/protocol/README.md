@@ -38,6 +38,28 @@ verify canonical base64 pad bits; or validate adapter semantics and causal reads
 Those checks must precede dispatch. The semantic fixtures continue to describe
 requirements, not execution evidence for those unimplemented integrations.
 
+`boundary::validate_commit_result` is a separate pure check against an exact
+pending request. Its non-deserializable transport context must come from verified
+host admission; an issuer string or runtime message cannot construct that proof.
+It checks scope, request ID, owner generation, immutable atomic membership,
+per-operation revision continuity and disjoint saved ranges. Older replay ranges
+may coexist with newer ranges and need not be adjacent. The outer durability is
+a conservative lower bound over saved members and must meet the caller's required
+minimum; original per-operation receipts are not rewritten. An all-rejected reply
+makes no saved claim. `crewship` is the logical host identity across restarts;
+history from another issuer needs a future explicit provenance protocol.
+Modes come from caller-qualified host/session policy; Hello/Welcome does not yet
+implement a durability-selection field or replicated-durability qualification.
+
+This helper neither issues receipts nor applies document state. It does not yet
+validate document-update wrappers, owner/delivery grants or their session/nonces;
+those remain unsupported until their separate binding validators are connected.
+`canonical_base64_decoded_len` checks standard alphabet, padding, unused pad bits
+and decoded size without allocating decoded data. Application decoding and
+delivery permission remain separate. Shared `boundary-semantics-fixtures.json`
+covers receipt tampering, trusted minimums and base64 boundaries; it is not live
+admission or persistence evidence.
+
 `mooring_protocol::negotiate` initially accepts only an exact tuple of protocol,
 model and engine versions. Unsupported versions return `version_mismatch` before
 any document content. Minor/patch compatibility needs shared evidence before
@@ -71,3 +93,29 @@ The shared golden tests cover numeric/UTF-16 ordering and escaping, malformed
 raw JSON, membership perturbations, stable retry identity and normalized adapter
 input. Checkpoint tests currently verify canonical preimages only; they do not
 implement checkpoint wire decoding/integrity or recovery authority.
+
+The inherited-channel `mooring.prepare.v1` control profile adds exactly four
+shapes: `validate_checkpoint`, `checkpoint_validated`, `prepare_atomic`, and
+`atomic_prepared`. Bootstrap remains limited to 262144 bytes. The host must
+explicitly offer the profile and verify the exact runtime selection before a
+private transport raises its frame limit. Participant transports cannot offer
+or select this profile. The public bounded validator and SDK reject the private
+control messages and negotiation fields.
+
+The separate control validator permits 2097152 raw and canonical bytes, depth
+64 and 32768 structural tokens, only on caller-attested inherited transport and
+in the correct direction. Checkpoints use canonical standard base64 with zero
+padding bits, at most 1572864 decoded bytes, and SHA256 of those exact opaque
+bytes before application interpretation. A component that fits its own limit
+may exceed the whole frame limit; it must fail without truncation. Public and
+atomic batch limits remain unchanged. These helpers do not establish channel
+provenance or advertise runtime support on their own.
+
+The first prepare capability is `agent_confirmed_current`: host-owned complete
+target versions and prospective per-operation revision labels accompany the
+immutable change without becoming part of its fingerprint. Human updates,
+provisional target reads, and causal stale-read overlays remain unsupported in
+this first capability. Prepared checkpoints and effects are speculative; only
+the host can commit them or issue a durable receipt. Invalid checkpoints and
+uncertain engine errors close the private channel as a nonterminal failure;
+there is no fifth large ProtocolError envelope.

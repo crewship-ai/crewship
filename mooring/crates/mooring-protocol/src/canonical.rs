@@ -35,7 +35,7 @@ impl CanonicalValue {
         digest(&self.bytes)
     }
 }
-fn digest(bytes: &[u8]) -> String {
+pub(crate) fn digest(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
 }
 
@@ -100,14 +100,23 @@ impl<'de> Deserialize<'de> for Strict {
 /// serde_json's nesting bound and rejects duplicate keys, invalid UTF-8/lone
 /// surrogates, trailing data and nonfinite/out-of-range binary64 numbers.
 pub fn normalize(raw: &[u8]) -> Result<CanonicalValue, CanonicalError> {
-    if raw.is_empty() || raw.len() > MAX_CANONICAL_BYTES {
+    normalize_with_limit(raw, MAX_CANONICAL_BYTES)
+}
+
+// Crate-private so a payload cannot choose arbitrary limits. Only a separately
+// negotiated inherited-control profile may use a larger bound than public JCS.
+pub(crate) fn normalize_with_limit(
+    raw: &[u8],
+    maximum: usize,
+) -> Result<CanonicalValue, CanonicalError> {
+    if raw.is_empty() || raw.len() > maximum {
         return Err(CanonicalError::Size);
     }
     let Strict(value) =
         serde_json::from_slice::<Strict>(raw).map_err(|_| CanonicalError::InvalidJson)?;
     let bytes =
         serde_json_canonicalizer::to_vec(&value).map_err(|_| CanonicalError::Canonicalization)?;
-    if bytes.len() > MAX_CANONICAL_BYTES {
+    if bytes.len() > maximum {
         return Err(CanonicalError::Size);
     }
     let value = serde_json::from_slice(&bytes).map_err(|_| CanonicalError::Canonicalization)?;

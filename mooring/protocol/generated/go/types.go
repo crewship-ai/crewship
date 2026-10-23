@@ -170,10 +170,17 @@ const (
 	HelloTypeHello HelloType = "hello"
 )
 
+type HelloControlProfilesItem string
+
+const (
+	HelloControlProfilesItemMooringPrepareV1 HelloControlProfilesItem = "mooring.prepare.v1"
+)
+
 type Hello struct {
-	Type      HelloType  `json:"type"`
-	RequestID Identifier `json:"request_id"`
-	Supported []Versions `json:"supported"`
+	Type            HelloType                   `json:"type"`
+	RequestID       Identifier                  `json:"request_id"`
+	Supported       []Versions                  `json:"supported"`
+	ControlProfiles *[]HelloControlProfilesItem `json:"control_profiles,omitempty"`
 }
 
 type WelcomeType string
@@ -1160,12 +1167,191 @@ const (
 	RuntimeReadyTypeRuntimeReady RuntimeReadyType = "runtime_ready"
 )
 
+type RuntimeReadySelectedControlProfile string
+
+const (
+	RuntimeReadySelectedControlProfileMooringPrepareV1 RuntimeReadySelectedControlProfile = "mooring.prepare.v1"
+)
+
 type RuntimeReady struct {
-	Type      RuntimeReadyType `json:"type"`
-	RequestID Identifier       `json:"request_id"`
-	Selected  Versions         `json:"selected"`
+	Type                   RuntimeReadyType                    `json:"type"`
+	RequestID              Identifier                          `json:"request_id"`
+	Selected               Versions                            `json:"selected"`
+	SelectedControlProfile *RuntimeReadySelectedControlProfile `json:"selected_control_profile,omitempty"`
 }
 
 type Identifier string
+
+type OpaquePreparedCheckpointEncoding string
+
+const (
+	OpaquePreparedCheckpointEncodingBase64 OpaquePreparedCheckpointEncoding = "base64"
+)
+
+type OpaquePreparedCheckpoint struct {
+	Encoding OpaquePreparedCheckpointEncoding `json:"encoding"`
+	State    string                           `json:"state"`
+	Digest   Digest                           `json:"digest"`
+}
+
+type TargetIdentity struct {
+	TargetID Identifier `json:"target_id"`
+	Deleted  bool       `json:"deleted"`
+}
+
+type TargetVersion struct {
+	TargetID          Identifier `json:"target_id"`
+	Revision          Counter    `json:"revision"`
+	StructureRevision Counter    `json:"structure_revision"`
+	Deleted           bool       `json:"deleted"`
+}
+
+type PreparedOperationRevision struct {
+	OpID     Identifier      `json:"op_id"`
+	Revision PositiveCounter `json:"revision"`
+}
+
+type PrepareContextReadPolicy string
+
+const (
+	PrepareContextReadPolicyAgentConfirmedCurrent PrepareContextReadPolicy = "agent_confirmed_current"
+)
+
+type PrepareContext struct {
+	ReadPolicy         PrepareContextReadPolicy    `json:"read_policy"`
+	DocumentRevision   Counter                     `json:"document_revision"`
+	Targets            []TargetVersion             `json:"targets"`
+	OperationRevisions []PreparedOperationRevision `json:"operation_revisions"`
+}
+
+type TargetEffect struct {
+	TargetID         Identifier `json:"target_id"`
+	ContentChanged   bool       `json:"content_changed"`
+	StructureChanged bool       `json:"structure_changed"`
+	Created          bool       `json:"created"`
+	Deleted          bool       `json:"deleted"`
+}
+
+type PreparedOperationEffects struct {
+	OpID    Identifier     `json:"op_id"`
+	Targets []TargetEffect `json:"targets"`
+}
+
+type ValidateCheckpointType string
+
+const (
+	ValidateCheckpointTypeValidateCheckpoint ValidateCheckpointType = "validate_checkpoint"
+)
+
+type ValidateCheckpointControlProfile string
+
+const (
+	ValidateCheckpointControlProfileMooringPrepareV1 ValidateCheckpointControlProfile = "mooring.prepare.v1"
+)
+
+type ValidateCheckpoint struct {
+	Type           ValidateCheckpointType           `json:"type"`
+	RequestID      Identifier                       `json:"request_id"`
+	Scope          Scope                            `json:"scope"`
+	Selected       Versions                         `json:"selected"`
+	Checkpoint     OpaquePreparedCheckpoint         `json:"checkpoint"`
+	ControlProfile ValidateCheckpointControlProfile `json:"control_profile"`
+}
+
+type CheckpointValidatedType string
+
+const (
+	CheckpointValidatedTypeCheckpointValidated CheckpointValidatedType = "checkpoint_validated"
+)
+
+type CheckpointValidatedControlProfile string
+
+const (
+	CheckpointValidatedControlProfileMooringPrepareV1 CheckpointValidatedControlProfile = "mooring.prepare.v1"
+)
+
+type CheckpointValidated struct {
+	Type                  CheckpointValidatedType           `json:"type"`
+	RequestID             Identifier                        `json:"request_id"`
+	Scope                 Scope                             `json:"scope"`
+	Selected              Versions                          `json:"selected"`
+	InputCheckpointDigest Digest                            `json:"input_checkpoint_digest"`
+	Inventory             []TargetIdentity                  `json:"inventory"`
+	ControlProfile        CheckpointValidatedControlProfile `json:"control_profile"`
+}
+
+type PrepareAtomicType string
+
+const (
+	PrepareAtomicTypePrepareAtomic PrepareAtomicType = "prepare_atomic"
+)
+
+type PrepareAtomicControlProfile string
+
+const (
+	PrepareAtomicControlProfileMooringPrepareV1 PrepareAtomicControlProfile = "mooring.prepare.v1"
+)
+
+type PrepareAtomic struct {
+	Type           PrepareAtomicType           `json:"type"`
+	RequestID      Identifier                  `json:"request_id"`
+	Scope          Scope                       `json:"scope"`
+	Selected       Versions                    `json:"selected"`
+	Checkpoint     OpaquePreparedCheckpoint    `json:"checkpoint"`
+	Context        PrepareContext              `json:"context"`
+	Change         AtomicChange                `json:"change"`
+	ControlProfile PrepareAtomicControlProfile `json:"control_profile"`
+}
+
+type PreparedCandidateKind string
+
+const (
+	PreparedCandidateKindCandidate PreparedCandidateKind = "candidate"
+)
+
+type PreparedCandidate struct {
+	Kind       PreparedCandidateKind      `json:"kind"`
+	Checkpoint OpaquePreparedCheckpoint   `json:"checkpoint"`
+	Effects    []PreparedOperationEffects `json:"effects"`
+	Inventory  []TargetIdentity           `json:"inventory"`
+}
+
+type PreparedDirectFailureKind string
+
+const (
+	PreparedDirectFailureKindFailure PreparedDirectFailureKind = "failure"
+)
+
+type PreparedDirectFailure struct {
+	Kind   PreparedDirectFailureKind `json:"kind"`
+	OpID   Identifier                `json:"op_id"`
+	Reason Rejection                 `json:"reason"`
+}
+
+type AtomicPreparedType string
+
+const (
+	AtomicPreparedTypeAtomicPrepared AtomicPreparedType = "atomic_prepared"
+)
+
+type AtomicPreparedOutcome = json.RawMessage
+
+type AtomicPreparedControlProfile string
+
+const (
+	AtomicPreparedControlProfileMooringPrepareV1 AtomicPreparedControlProfile = "mooring.prepare.v1"
+)
+
+type AtomicPrepared struct {
+	Type                  AtomicPreparedType           `json:"type"`
+	RequestID             Identifier                   `json:"request_id"`
+	Scope                 Scope                        `json:"scope"`
+	Selected              Versions                     `json:"selected"`
+	InputCheckpointDigest Digest                       `json:"input_checkpoint_digest"`
+	ChangeID              Identifier                   `json:"change_id"`
+	MembershipHash        Digest                       `json:"membership_hash"`
+	Outcome               AtomicPreparedOutcome        `json:"outcome"`
+	ControlProfile        AtomicPreparedControlProfile `json:"control_profile"`
+}
 
 type Message = json.RawMessage

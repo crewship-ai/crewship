@@ -1,7 +1,9 @@
 //! Experimental wire shapes and bounded validation of the bundled schema.
 //! Not an authenticated endpoint; application and authority checks remain explicit.
 use serde::{Deserialize, Serialize};
+pub mod boundary;
 pub mod canonical;
+pub mod control;
 mod generated;
 mod shape;
 pub mod wire;

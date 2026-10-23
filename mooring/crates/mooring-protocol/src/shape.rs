@@ -460,7 +460,7 @@ mod tests {
             );
             count += 1;
         }
-        assert_eq!(count, 173);
+        assert_eq!(count, 190);
         assert!(!vocabulary(&serde_json::json!({"minProperties": 1})));
         assert!(!vocabulary(
             &serde_json::json!({"not":{"pattern":"unknown-regex"}})

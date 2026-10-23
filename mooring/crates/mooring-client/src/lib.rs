@@ -145,6 +145,9 @@ pub fn negotiate_json(input: &str) -> Result<String, String> {
         engine_version: env!("CARGO_PKG_VERSION").into(),
     };
     let supported = [versions];
+    if hello.control_profiles.is_some() {
+        return Err("invalid_request".into());
+    }
     let selected = negotiate(&hello, &supported)?;
     serde_json::to_string(selected).map_err(|error| error.to_string())
 }

@@ -87,6 +87,7 @@ pub mod private_rpc {
         let selected = negotiate(&hello, &supported).map_err(invalid)?;
         let ready = RuntimeReady {
             r#type: RuntimeReadyType::RuntimeReady,
+            selected_control_profile: None,
             request_id: hello.request_id,
             selected: selected.clone(),
         };
