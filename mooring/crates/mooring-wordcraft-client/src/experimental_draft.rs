@@ -165,4 +165,15 @@ impl WordCraftLocalRecoveryDraft {
     pub fn proposal_count(&self) -> usize {
         self.draft.proposals.len()
     }
+    /// Original capture order and bytes; never reexecute these as new intents.
+    pub fn proposal(&self, index: &str) -> Result<WordCraftLocalProposal, String> {
+        let index = super::bound(index)?;
+        let proposal = self
+            .draft
+            .proposals
+            .get(index)
+            .cloned()
+            .ok_or("invalid_request")?;
+        Ok(WordCraftLocalProposal { proposal })
+    }
 }
