@@ -147,7 +147,7 @@ export function MooringEditorHost({ workspaceId, pageId, name, onDirtyChange }: 
     window.addEventListener("focus", reconnect)
     refresh.current = () => void load()
     const poll = setInterval(reconnect, 15_000)
-    const timeout = setTimeout(() => { if (!connected) stop("The editor did not start. Its address may be unavailable or blocked by this network. Retry, or ask an administrator to check the editor address.", true) }, 15_000)
+    const timeout = setTimeout(() => { if (!connected && !dead) stop("The editor did not start. Its address may be unavailable or blocked by this network. Retry, or ask an administrator to check the editor address.", true) }, 15_000)
     void load()
     return () => {
       dead = true; controller.abort(); clearInterval(poll); clearTimeout(timeout)

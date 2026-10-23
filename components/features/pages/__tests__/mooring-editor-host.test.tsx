@@ -169,3 +169,16 @@ it("never offers a fresh-frame retry after connecting with unsubmitted work", as
   expect(screen.queryByRole("button", { name: "Retry editor" })).toBeNull()
   expect(document.querySelector("iframe")).toBe(t.frame)
 })
+
+it("keeps an access refusal terminal when the startup deadline later expires", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  try {
+    requests.mockResolvedValue(Response.json({ error: "denied" }, { status: 403 }))
+    render(<MooringEditorHost workspaceId="ws" pageId="page" name="Third-party application" />)
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Access"))
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000) })
+    expect(screen.getByRole("alert")).toHaveTextContent("Access")
+    expect(screen.queryByRole("button", { name: "Retry editor" })).toBeNull()
+    expect(document.querySelector("iframe")).toBeNull()
+  } finally { vi.useRealTimers() }
+})
