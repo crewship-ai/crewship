@@ -169,15 +169,7 @@ func runtimeHandshake(rpc *RPC, versions RuntimeVersions, profile string) error 
 	if err != nil {
 		return err
 	}
-	// This is only a minimal readiness check. Full schema/semantic validation
-	// remains mandatory in the protocol dispatcher before handling any content.
-	var welcome struct {
-		Type           string          `json:"type"`
-		RequestID      string          `json:"request_id"`
-		Selected       RuntimeVersions `json:"selected"`
-		ControlProfile string          `json:"selected_control_profile"`
-	}
-	if json.Unmarshal(frame, &welcome) != nil || welcome.Type != "runtime_ready" || welcome.RequestID != "host-start" || welcome.Selected != versions || welcome.ControlProfile != profile {
+	if !validateRuntimeReady(frame, versions, profile) {
 		return ErrRuntimeHandshake
 	}
 	if err := rpc.conn.SetDeadline(time.Time{}); err != nil {
