@@ -492,16 +492,16 @@ save checks the exact draft ID/revision and publication base. A stale editor or
 changed published base receives 409 without automatic refresh or retry; an audit
 failure rolls back the edit. Saving does not change executable bytes or version
 history, create a trigger, run a test or approve risk. Server-owned draft metadata
-and origin remain intact. The trusted authoring workflow must review and test the
-exact revision before publishing. Direct Guest publication and full Routine Edit
-acceptance remain unfinished PRD work.
+and origin remain intact. The trusted authoring workflow retains its own review
+and test gates. Direct Guest publication uses a separate current Publish share
+and exact saved-revision review; structural validation is not a test receipt.
 
 The Guest definition view offers **Edit shared draft** only with current View,
 Edit and mutation scope. Transient errors/conflicts retain local work; hard
 access loss clears the editor. The CLI reads the same JSON snapshot with
 `crewship routine shared-draft ROUTINE` and saves it with
 `crewship routine shared-draft save ROUTINE --file draft.json` (or `--file -`).
-Read-only `can_edit` is removed before PUT; the CLI performs no hidden GET or
+Read-only `can_edit` and `can_publish` are removed before PUT; the CLI performs no hidden GET or
 conflict retry.
 
 
@@ -931,9 +931,46 @@ requires live View and active account/issuers. Policy, invitation, provisioning
 and preset preview/apply reject Publish without Edit with 422 before writes.
 The v1 preset catalog is unchanged.
 
+The immutable `routine-levels` v2 definition explicitly manages only Edit and
+Publish, with the ordered levels `none` (removes both), `edit` (keeps Edit,
+removes Publish) and `edit_publish` (**Edit + Publish**). It adds neither View,
+Results nor Run; existing grants and their issuers remain orthogonal and
+unchanged unless explicitly reissued. Preview shows these consequences, including
+a `PUBLISH_REVOKED` warning when Publish is removed, before the existing
+confirmation/apply flow. Revoking Publish therefore needs no raw policy replace.
+
+Saved preset choices are recorded per member, resource, preset and version.
+Applying v2 never rewrites a v1 record; each record stays `selected` only while
+its own managed operations match. A change to a record's managed operations
+deletes that record, so a v1 choice disappears when v2 removes Edit. A v1 level
+without Edit cannot be applied while Publish is held (422 `Publish requires
+Edit`); apply v2 `none` or `edit` first. Routine Share and the person's Access
+card reject saving Publish without Edit.
+
+Per-version records (migration `20261022114610`) are a downgrade boundary.
+Earlier builds update a choice per member and resource without a version
+filter, so they must not run against this schema; the version-skew guard
+refuses them. Downgrade restores the pre-upgrade snapshot instead.
+
+In Shared definitions, an editor saves the draft, selects **Check saved draft
+structure**, then—with a current Publish hint—**Publish reviewed draft**. The
+check is the `structure_only` validation, not a test run. Both POSTs carry the
+saved draft ID/revision/base revision. Editing or saving again clears the check;
+unsaved content cannot be checked or published. A 422 refusal (unsupported
+steps or profiles, existing triggers, saved `call_pipeline` callers) shows the
+server's reason and changes nothing. A conflict or uncertain publication
+requires explicit reload/review without hidden retry. Hard access loss clears
+cached draft content. Publication acknowledges its version without starting a
+run. Hints never replace the endpoint's live checks.
+
+Publication refuses a routine that other saved routines target through
+`call_pipeline` (at any nesting depth), mirroring the existing refusal to save a
+caller of an already published routine.
+
 Publication archives retain physical authority across backup/restore. Generic
 Run, nested calls and trigger writers refuse bounded publication authority;
 trusted archives retain their existing behavior. Shared publication captures an
 exact draft ID/revision/base revision and live explicit rights in one writer
 transaction with audit. Validation is structural only; publishing creates no
-run, chat or attempt. The bounded manual runtime remains a separate slice.
+run, chat or attempt. Bounded manual runs of a published routine are described
+in [restricted workflows](restricted-workflows.md#guest-published-routines).

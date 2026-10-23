@@ -19,6 +19,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // `crewship admin ...` is the operator-on-the-host recovery surface.
@@ -505,7 +506,12 @@ func runAdminInvalidateSessions(cmd *cobra.Command, _ []string) error {
 	// Already-expired rows are unreachable to clients anyway, so
 	// skipping them is purely a count/wording alignment, not a
 	// security regression.
-	res, err := db.ExecContext(ctx, `
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin session revocation: %w", err)
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `
 		UPDATE user_sessions
 		SET revoked_at = ?, revoked_reason = 'admin_invalidate'
 		WHERE user_id = ?
@@ -517,6 +523,14 @@ func runAdminInvalidateSessions(cmd *cobra.Command, _ []string) error {
 	revoked, err := res.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("revoke sessions rows affected: %w", err)
+	}
+	// The durable marker also stops Guest-published runs accepted before
+	// this revocation, including when the user had no active session left.
+	if _, err = tx.ExecContext(ctx, `UPDATE users SET access_revoked_at = ? WHERE id = ?`, tsformat.Format(time.Now()), userID); err != nil {
+		return fmt.Errorf("record access revocation: %w", err)
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("commit session revocation: %w", err)
 	}
 
 	displayName := fullName
@@ -567,7 +581,13 @@ func runAdminResetPassword(cmd *cobra.Command, _ []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	ctx, err = localAuditSigningContext(ctx)
+	// The same environment-only resolution openGatedLocalDB just used: the
+	// keyring must belong to the instance whose database this writes.
+	target, err := resolveLocalDBTarget()
+	if err != nil {
+		return err
+	}
+	ctx, err = localAuditSigningContext(ctx, target)
 	if err != nil {
 		return fmt.Errorf("load local audit signing authority: %w", err)
 	}
@@ -648,11 +668,18 @@ func runAdminResetPassword(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("revoke sessions rows affected: %w", err)
 	}
 
+	// Every CLI token minted under the old password goes too: recovery proves
+	// control of the account, not of the credentials already handed out.
+	tokenIDs, err := api.RevokeRecoveryCLITokensTx(ctx, tx, "", userID, now)
+	if err != nil {
+		return fmt.Errorf("revoke cli tokens: %w", err)
+	}
+
 	// Local recovery shares the configured instance chain and final password /
-	// session acknowledgement with the HTTP writer, inside this same commit.
-	// This process has no access to the running server's stream registry;
-	// it cannot notify already-open streams in that process.
-	if err := api.AuditLocalPasswordResetTx(ctx, tx, userID, string(hashed), now, revoked); err != nil {
+	// session / token acknowledgement with the HTTP writer, inside this same
+	// commit. This process has no access to the running server's stream
+	// registry; it cannot notify already-open streams in that process.
+	if err := api.AuditLocalPasswordResetTx(ctx, tx, userID, string(hashed), now, revoked, len(tokenIDs)); err != nil {
 		return fmt.Errorf("audit local password reset: %w", err)
 	}
 
@@ -667,6 +694,9 @@ func runAdminResetPassword(cmd *cobra.Command, _ []string) error {
 	fmt.Fprintf(cmd.OutOrStdout(), "✓ Password reset for %s (%s).\n", displayName, email)
 	if revoked > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "  %d active session(s) revoked.\n", revoked)
+	}
+	if len(tokenIDs) > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "  %d CLI token(s) revoked.\n", len(tokenIDs))
 	}
 	fmt.Fprintln(cmd.OutOrStdout(), "  Lockout (if any) cleared.")
 	return nil

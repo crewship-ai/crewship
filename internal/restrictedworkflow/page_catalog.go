@@ -44,6 +44,9 @@ func (s *Service) authorizedPageActionFingerprint(ctx context.Context, user, wor
 	if err != nil {
 		return "", err
 	}
+	if graph.Publication != nil {
+		return "", ErrDenied
+	}
 	for _, right := range graph.Rights {
 		if store.Check(ctx, user, workspace, right) != nil {
 			return "", ErrDenied
