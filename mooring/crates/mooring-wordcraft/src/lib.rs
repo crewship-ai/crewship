@@ -4,6 +4,7 @@
 pub mod adapter;
 mod candidate;
 mod checkpoint_description;
+mod checkpoint_origins;
 mod checkpoint_wire;
 pub mod command;
 mod core_fields;
