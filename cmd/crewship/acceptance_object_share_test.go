@@ -24,16 +24,23 @@ func TestAcceptanceObjectShareCLI(t *testing.T) {
 		wantError      bool
 		wantOperations []string
 		wantReissue    bool
+		initialRoutine []string
 	}{
-		{"share project by email", []string{"share", "project", "project-1", "--with", "CLIENT@example.test", "--operation", "list,read", "--format", "yaml"}, "restricted", 200, false, []string{"list", "read"}, false},
-		{"share project management", []string{"share", "project", "project-1", "--with", "member-1", "--operation", "read,manage", "--format", "json"}, "restricted", 200, false, []string{"read", "manage"}, false},
-		{"share explicit issue deletion", []string{"share", "project", "project-1", "--with", "member-1", "--operation", "read,manage,delete_issues", "--format", "json"}, "restricted", 200, false, []string{"read", "manage", "delete_issues"}, false},
-		{"share routine results", []string{"share", "routine", "routine-1", "--with", "member-1", "--operation", "view,results", "--format", "json"}, "restricted", 200, false, []string{"run", "view", "results"}, false},
-		{"share routine draft editing", []string{"share", "routine", "routine-1", "--with", "member-1", "--operation", "view,edit", "--format", "json"}, "restricted", 200, false, []string{"run", "view", "edit"}, false},
-		{"unshare routine by user", []string{"unshare", "routine", "routine-1", "--with", "user-1", "--operation", "run"}, "restricted", 200, false, []string{}, false},
-		{"explicit reissue", []string{"share", "routine", "routine-1", "--with", "member-1", "--operation", "run,run", "--reissue"}, "restricted", 200, false, []string{"run"}, true},
-		{"conflict no retry", []string{"unshare", "routine", "routine-1", "--with", "member-1", "--operation", "run"}, "restricted", 409, true, []string{}, false},
-		{"trusted mode unchanged", []string{"share", "routine", "routine-1", "--with", "member-1", "--operation", "run"}, "trusted", 200, true, nil, false},
+		{"share project by email", []string{"share", "project", "project-1", "--with", "CLIENT@example.test", "--operation", "list,read", "--format", "yaml"}, "restricted", 200, false, []string{"list", "read"}, false, nil},
+		{"share project management", []string{"share", "project", "project-1", "--with", "member-1", "--operation", "read,manage", "--format", "json"}, "restricted", 200, false, []string{"read", "manage"}, false, nil},
+		{"share explicit issue deletion", []string{"share", "project", "project-1", "--with", "member-1", "--operation", "read,manage,delete_issues", "--format", "json"}, "restricted", 200, false, []string{"read", "manage", "delete_issues"}, false, nil},
+		{"share routine results", []string{"share", "routine", "routine-1", "--with", "member-1", "--operation", "view,results", "--format", "json"}, "restricted", 200, false, []string{"run", "view", "results"}, false, nil},
+		{"share routine draft editing", []string{"share", "routine", "routine-1", "--with", "member-1", "--operation", "view,edit", "--format", "json"}, "restricted", 200, false, []string{"run", "view", "edit"}, false, nil},
+		{"unshare routine by user", []string{"unshare", "routine", "routine-1", "--with", "user-1", "--operation", "run"}, "restricted", 200, false, []string{}, false, nil},
+		{"explicit reissue", []string{"share", "routine", "routine-1", "--with", "member-1", "--operation", "run,run", "--reissue"}, "restricted", 200, false, []string{"run"}, true, nil},
+		{"conflict no retry", []string{"unshare", "routine", "routine-1", "--with", "member-1", "--operation", "run"}, "restricted", 409, true, []string{}, false, nil},
+		{"trusted mode unchanged", []string{"share", "routine", "routine-1", "--with", "member-1", "--operation", "run"}, "trusted", 200, true, nil, false, nil},
+		{"share edit and publish", []string{"share", "routine", "routine-1", "--with", "member-1", "--operation", "edit,publish"}, "restricted", 200, false, []string{"run", "edit", "publish"}, false, nil},
+		{"share publish with existing edit", []string{"share", "routine", "routine-1", "--with", "member-1", "--operation", "publish"}, "restricted", 200, false, []string{"run", "edit", "publish"}, false, []string{"edit"}},
+		{"unshare publish preserves edit", []string{"unshare", "routine", "routine-1", "--with", "member-1", "--operation", "publish"}, "restricted", 200, false, []string{"run", "edit"}, false, []string{"edit", "publish"}},
+		{"publish conflict no retry", []string{"share", "routine", "routine-1", "--with", "member-1", "--operation", "edit,publish"}, "restricted", 409, true, []string{"run", "edit", "publish"}, false, nil},
+		{"server refuses publish without edit", []string{"share", "routine", "routine-1", "--with", "member-1", "--operation", "publish"}, "restricted", 422, true, []string{"run", "publish"}, false, nil},
+		{"server refuses removing edit while publish remains", []string{"unshare", "routine", "routine-1", "--with", "member-1", "--operation", "edit"}, "restricted", 422, true, []string{"run", "publish"}, false, []string{"edit", "publish"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			original := access.Policy{Membership: access.Membership{ID: "member-1", Mode: tc.mode, Revision: 7}, Rights: []access.Right{
@@ -41,6 +48,9 @@ func TestAcceptanceObjectShareCLI(t *testing.T) {
 				{Kind: "routine", ID: "routine-1", Operation: "run"},
 				{Kind: "routine", ID: "routine-1", Operation: "future-operation"},
 			}, GrantDetails: []access.GrantDetail{{Right: access.Right{Kind: "routine", ID: "routine-1", Operation: "run"}, IssuerID: "old-admin", Live: false}}}
+			for _, op := range tc.initialRoutine {
+				original.Rights = append(original.Rights, access.Right{Kind: "routine", ID: "routine-1", Operation: op})
+			}
 			var mu sync.Mutex
 			var submitted access.Policy
 			puts, policyReads := 0, 0
@@ -68,6 +78,10 @@ func TestAcceptanceObjectShareCLI(t *testing.T) {
 						t.Error(err)
 					}
 					w.WriteHeader(tc.status)
+					if tc.status == 422 {
+						_, _ = io.WriteString(w, `{"error":"Publish requires Edit on the same routine"}`)
+						return
+					}
 					if tc.status == 409 {
 						_, _ = io.WriteString(w, `{"error":"policy changed"}`)
 						return
@@ -84,6 +98,9 @@ func TestAcceptanceObjectShareCLI(t *testing.T) {
 			out, err := runGuestCLI(t, server.URL, "", tc.args...)
 			if (err != nil) != tc.wantError {
 				t.Fatalf("err=%v output=%s", err, out)
+			}
+			if tc.status == 422 && !strings.Contains(out, "Publish requires Edit") {
+				t.Fatalf("server dependency reason lost: %s", out)
 			}
 			if tc.name == "share project by email" {
 				var document map[string]any
@@ -112,7 +129,7 @@ func TestAcceptanceObjectShareCLI(t *testing.T) {
 				t.Fatalf("unrelated/future rights lost: %+v", submitted)
 			}
 			kind, id := tc.args[1], tc.args[2]
-			for _, operation := range []string{"run", "view", "list", "read", "contribute", "manage", "delete_issues"} {
+			for _, operation := range []string{"run", "view", "edit", "publish", "results", "list", "read", "contribute", "manage", "delete_issues"} {
 				right := access.Right{Kind: kind, ID: id, Operation: operation}
 				if slices.Contains(submitted.Rights, right) != slices.Contains(tc.wantOperations, operation) {
 					t.Fatalf("wrong operation %s: %+v", operation, submitted)
