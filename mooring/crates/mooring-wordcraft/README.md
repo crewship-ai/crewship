@@ -194,3 +194,31 @@ failed/rejected sources must retire instead of rewinding their allocation clock.
 A new host-issued fresh origin is required for recovery. The legacy adapter
 methods, wire profile and write classification are unchanged. Retaining the live
 CRDT with serialized bytes has a memory cost; no new runtime RSS bound is claimed.
+
+`producer_overlay` is a separate pure-data prototype for a resident producer;
+it is not selected by a host profile or the browser/native UI. Its latest owned
+Doc may contain A+B before acknowledgement. Immutable cuts retain the exact
+supplied original atomic bytes, actual emitted Yrs delta, authored frontier,
+checkpoint and bounded context/effect metadata. Existing operation fingerprints
+are checked without creating a new hash domain. A data-only FIFO cut acknowledgement
+requires exact sequence/checkpoint correlation and never rewinds the latest Doc
+or installs the global actor's confirmed document. The caller must first verify
+the complete real host receipt and authority; this API cannot attest Saved.
+
+Unknown outcomes retain the whole producer and original cuts. Consuming prepare
+failure blocks the producer and retains every prior cut and current original;
+post-prepare overflow also retains the actual speculative Doc for Draft recovery.
+No output is published before those checks. Terminal failure retires the source
+without resetting its clock. Recovery needs a separately host-issued fresh origin;
+returned data never authorizes continuation. Existing experimental human draft
+code, global confirmed state and wire profiles are unchanged.
+
+Prototype limits are four pending cuts, 8MiB aggregate retained payload bytes,
+4096 remembered change/operation identities, 262144-byte originals/deltas,
+1572864-byte checkpoints, 2MiB context/effect metadata and64KiB frontiers.
+Identity memory remains charged after acknowledging cuts; it is not pruned to
+permit reuse. These are explicit local experiment budgets, not changes to PRD
+quotas or RSS guarantees. The underlying app restore/serialization bounds and
+caller-side transport/authority requirements still apply. Source issuance,
+original-author/burn continuity, qualified raw ingress, causal admission and
+receipt-controlled distribution remain separate integration prerequisites.
