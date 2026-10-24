@@ -186,3 +186,15 @@ never opens a closed delivery gate. Informational revisions in OwnerGrant do
 not install checkpoints or invent Saved outcomes. The initial grant getter is
 identity/fence metadata; current permission knowledge has its own accessor.
 The event-loop renewal and participant-gate wiring remain separate work.
+
+The unselected native settlement primitive consumes acknowledged startup once
+into a non-cloneable owner controller and one owned confirmed WordCraft document.
+The actor can replace that document only after the closed session receipt verifier
+and complete application checkpoint/inventory restoration succeed. Fresh saved
+revisions must cover the entire advancement in immutable batch order; a rejected
+or already-confirmed result keeps the original checkpoint identity. Invalid or
+uncertain replies close owner metadata and require the driver to recover all
+original intents. Actual FIFO request correlation and participant delivery gates
+remain driver obligations. The current experimental private checkpoint digest is
+opaque-content SHA256; generic full-tuple checkpoint identity is not qualified by
+these tests. No live transport or writable application profile is enabled here.

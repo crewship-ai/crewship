@@ -293,3 +293,6 @@ pub mod session_driver;
 
 #[cfg(unix)]
 mod session_owner_guard;
+
+#[cfg(unix)]
+pub mod session_confirmed;

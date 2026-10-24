@@ -25,6 +25,17 @@ pub struct ConfirmedDocument {
     targets: Vec<TargetVersion>,
 }
 impl ConfirmedDocument {
+    pub(crate) fn committed(
+        document: Document,
+        checkpoint: Checkpoint,
+        targets: Vec<TargetVersion>,
+    ) -> Self {
+        Self {
+            document,
+            checkpoint,
+            targets,
+        }
+    }
     pub fn document(&self) -> &Document {
         &self.document
     }
@@ -227,6 +238,26 @@ impl OwnerAccepted {
     }
 }
 impl ReadySession {
+    /// Consume startup exactly once. The live actor receives the one owned Doc;
+    /// only owner metadata moves into the non-cloneable controller.
+    pub fn into_running(
+        self,
+        now: Tick,
+    ) -> io::Result<(crate::session_confirmed::OwnerController, ConfirmedDocument)> {
+        if !self.acknowledged || !self.guard.may_own(now) {
+            self.guard.close();
+            return Err(invalid("session was not acknowledged under a live owner"));
+        }
+        Ok((
+            crate::session_confirmed::OwnerController::from_parts(
+                self.open,
+                self.owner,
+                self.host_issuer,
+                self.guard,
+            ),
+            self.confirmed,
+        ))
+    }
     pub fn confirmed(&self) -> &ConfirmedDocument {
         &self.confirmed
     }
