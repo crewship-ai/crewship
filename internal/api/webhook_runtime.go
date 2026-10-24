@@ -68,6 +68,10 @@ func NewWebhookRuntime(h *WebhookHandler) *WebhookRuntime { return &WebhookRunti
 // creation, and a write that fails refuses the creation.
 type webhookLaunch struct {
 	mu sync.Mutex
+	// Host-only narrowing gate. It must own original authority and the exact
+	// requested transition in one writer, returning only after COMMIT. Nil
+	// preserves the existing generic store transition. Never a request field.
+	requestCreation func(context.Context) error
 	// cancel ends the run's own context. A stop before the gate uses it to
 	// abort a preparation that honours its context; one that does not is
 	// refused at the gate.
@@ -192,7 +196,13 @@ func (l *webhookLaunch) RequestCreation(ctx context.Context) error {
 	if l.store == nil {
 		return fmt.Errorf("%w: no ledger to record the creation request against", errWebhookBeforeAgent)
 	}
-	if err := l.store.MarkRuntimeRequested(ctx, l.workID, l.runID, l.generation); err != nil {
+	var err error
+	if l.requestCreation != nil {
+		err = l.requestCreation(ctx)
+	} else {
+		err = l.store.MarkRuntimeRequested(ctx, l.workID, l.runID, l.generation)
+	}
+	if err != nil {
 		// Not recorded, so not created. The attempt stays `starting`, and the
 		// failure is a before-agent one: nothing happened.
 		return fmt.Errorf("%w: the creation request could not be recorded: %w", errWebhookBeforeAgent, err)
