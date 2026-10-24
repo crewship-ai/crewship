@@ -6942,6 +6942,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Accepted deferred routine starts disappeared when execution capacity was busy or dispatch failed.** Capacity rejection now retries with bounded backoff until TTL, and errors/expiry remain inspectable through `routine pending get` and `pending list --status`. Retry preserves the accepted recipe and occurrence identity. ⚠️ **Behaviour change:** starts without TTL stop after ten capacity rejections; attempted debounce starts keep their payload while newer triggers open a separate window, and attempted one-time starts cannot be rewritten by another save. (#3010)
 
+- **Content inspection allocates less on repeated matches (#4006).** Redaction emits spans once per rule and encoded-content scanning collects only the existing first 256 candidates, preserving finding order and results.
+
 ## [1.0.0-rc.1] — 2026-07-12
 
 ### Security
