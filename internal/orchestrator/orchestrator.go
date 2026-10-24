@@ -156,6 +156,7 @@ type AgentRunRequest struct {
 	// a turn of their own. Default false — a new dispatch path is watchable by
 	// construction, which is the point of #1823.
 	SuppressSessionStream bool
+	strictContentPrivacy  bool              // Host-only; JSON cannot create or clear this policy.
 	NetworkMode           string            // "free" (default) or "restricted" — crew-level network policy
 	AllowedDomains        []string          // Extra allowed domains for restricted mode
 	AllowPrivateEndpoints bool              // #961: crew opted in to reach a private/LAN model endpoint (RFC1918/loopback). Link-local/metadata stay blocked regardless.
@@ -1120,6 +1121,9 @@ func (o *Orchestrator) getSkillInvocationObserver() SkillInvocationObserver {
 // testable without driving a full agent run. event MUST be a tool_call
 // event; the caller guards the type check.
 func (o *Orchestrator) dispatchToolCallObservers(req AgentRunRequest, event AgentEvent) {
+	if req.strictContentPrivacy {
+		return
+	}
 	toolName := event.Content
 	if toolName == "" {
 		if m, ok := event.Metadata.(map[string]interface{}); ok {
