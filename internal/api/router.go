@@ -62,6 +62,7 @@ func (b *keeperWSBroadcaster) BroadcastInboxUpdated(workspaceID string, source s
 }
 
 type Router struct {
+	mooringStartupErr      error
 	mooringHTTPConfig      MooringHTTPConfig
 	mooringHTTP            *collaborationHTTPManager
 	documentsServiceSocket string
@@ -916,6 +917,10 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	r.sessionsStore = newNotifyingSessionStore(r.sessionsStore, notifiers...)
 
 	r.registerRoutes()
+	if r.mooringStartupErr != nil {
+		r.Shutdown()
+		return nil, fmt.Errorf("new router: Mooring initialization failed: %w", r.mooringStartupErr)
+	}
 
 	// Close the method-routing hole every Go 1.22 ServeMux has: a request
 	// whose method is not registered for a literal path falls through to a

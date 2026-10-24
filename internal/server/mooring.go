@@ -38,6 +38,7 @@ func (s *Server) configureMooringHTTP(opts []goapi.RouterOption) []goapi.RouterO
 		Binary:       prepared.Path,
 		BinarySHA256: prepared.Manifest.BinarySHA256,
 		PublicOrigin: s.cfg.PageStudioOrigin(),
+		SDKPrefix:    prepared.Manifest.SDKPrefix,
 		DeliveryTTL:  lease,
 	}))
 }

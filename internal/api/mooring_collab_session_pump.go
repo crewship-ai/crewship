@@ -28,7 +28,10 @@ type collaborationSessionPumpHandlers struct {
 	Renew    func(context.Context, protocol.OwnerRenew) (protocol.OwnerGrant, error)
 	Ticket   func(context.Context, protocol.TicketValidationRequest) (protocol.TicketValidationResult, error)
 	Delivery func(context.Context, protocol.DeliveryRenew) (protocol.DeliveryGrant, error)
-	Output   func(context.Context, protocol.SessionParticipantOutput) error
+	// Optional host synchronization, not authority. It spans callback AND the
+	// actual correlated reply write, including every error/panic exit.
+	DeliveryGuard func(context.Context, protocol.DeliveryRenew) (func(), error)
+	Output        func(context.Context, protocol.SessionParticipantOutput) error
 }
 
 type collaborationSessionPump struct {
@@ -288,6 +291,15 @@ func (p *collaborationSessionPump) control(ctx context.Context, token mooring.Se
 		request, err := pumpRequest[protocol.DeliveryRenew](ctx, raw)
 		if err != nil || p.handlers.Delivery == nil {
 			return errCollaborationSessionPump
+		}
+		if p.handlers.DeliveryGuard != nil {
+			release, e := p.handlers.DeliveryGuard(ctx, request)
+			if release != nil {
+				defer release()
+			}
+			if e != nil || release == nil {
+				return errCollaborationSessionPump
+			}
 		}
 		result, err := p.handlers.Delivery(ctx, request)
 		if err == nil && (result.RequestID != request.RequestID ||
