@@ -12,6 +12,8 @@ func documentBinaryColumn(table, column string) bool {
 	switch table {
 	case "documents", "document_checkpoints":
 		return column == "snapshot" || column == "projection"
+	case "mooring_collab_raw_changes":
+		return column == "raw_atomic" || column == "canonical_atomic"
 	case "document_updates":
 		return column == "payload"
 	}

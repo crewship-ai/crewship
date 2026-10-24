@@ -188,6 +188,7 @@ var TableCategory = map[string]string{
 	"mooring_collab_changes":         CategoryPages,
 	"mooring_collab_target_versions": CategoryPages,
 	"mooring_collab_target_effects":  CategoryPages,
+	"mooring_collab_raw_changes":     CategoryPages,
 	"mooring_collab_operations":      CategoryPages,
 	"mooring_collab_checkpoints":     CategoryPages,
 	"mooring_collab_audit":           CategoryPages,

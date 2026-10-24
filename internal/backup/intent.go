@@ -41,6 +41,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"mooring_delivery_barriers":      IntentExcludeRuntime,
 	"mooring_collab_documents":       IntentInclude, // durable collaboration state; no runtime capabilities
 	"mooring_collab_tasks":           IntentInclude, // durable collaboration state; no runtime capabilities
+	"mooring_collab_raw_changes":     IntentInclude, // bounded caller-supplied content data, never source authority
 	"mooring_collab_changes":         IntentInclude, // durable collaboration state; no runtime capabilities
 	"mooring_collab_target_versions": IntentInclude,
 	"mooring_collab_target_effects":  IntentInclude,

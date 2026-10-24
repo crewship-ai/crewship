@@ -477,3 +477,30 @@ HTTP/confirmed-attempt fixtures. It issues no origin or participant capability.
 Read-only D3 checkpoint access does not qualify its origin inventory: the app
 explicitly rejects that inventory. The host integration verifies this refusal
 reaches neither consumer nor an empty-inventory fallback for either reader.
+
+
+### Inactive raw atomic data storage
+
+`mooring_collab_raw_changes` reserves portable content storage for one exact
+caller-supplied atomic fragment and its canonical counterpart per Saved change.
+The fixed data format and semantic tuple describe interpretation only. These
+bytes and digests are not an original SDK/source seal, replay permission or a
+writer capability. No issuer, ingress path or commit method writes the table yet.
+Legacy changes remain absent; no payload is inferred or backfilled.
+
+Rows require a same-workspace Saved parent, bounded BLOBs and immutable identity.
+Replacement cannot silently overwrite them, including with recursive triggers
+disabled. Their lifecycle follows explicit collaboration content deletion; this
+is not the target-local origin exclusion journal. Portable bundles preserve the
+exact BLOB representation and refuse missing target columns, invalid digests,
+oversized binary decoding and ignored insert failures. Replacement and rollback
+use the actual workspace content transaction.
+
+Future `CommitFullWithRawData` mechanics must match the complete original atomic
+membership/order/operations against the normalized request, preserve exact-byte
+retry identity, write only for Saved in the same content COMMIT and charge all
+stored bytes before final author/owner/output fences. Caller bytes remain DATA
+ONLY until a separately qualified opaque producer captures original ingress
+before JCS under the original source authority. Missing legacy/rejected raw rows
+must not be upgraded; ordinary status outcomes stay separate. External history
+reads and physical/portable recovery require their own qualification.

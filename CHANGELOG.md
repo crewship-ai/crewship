@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Raw history groundwork:** additive, inactive storage preserves bounded atomic content data through portable backup and replacement. No writer, source issuance or replay authority is enabled.
+
 - **Mooring agent reads:** an inactive session checkpoint reader retains the original agent mandate and confirmed attempt under the existing immutable authority; it grants no write or external delivery access.
 
 - **Independent collaboration authors:** dormant admission callbacks distinguish original author generations from broad delivery invalidation, so another user's grant revocation does not reject an unaffected original author. Current source and Page policy remain required; missing tracking or schema drift stays nonterminal, and no content path is enabled.

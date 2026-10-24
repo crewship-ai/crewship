@@ -325,6 +325,7 @@ var BackupTables = []string{
 	"mooring_collab_documents",
 	"mooring_collab_tasks",
 	"mooring_collab_changes",
+	"mooring_collab_raw_changes",
 	"mooring_collab_operations",
 	"mooring_collab_target_versions",
 	"mooring_collab_target_effects",
@@ -1225,6 +1226,9 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			return stats, fmt.Errorf("backup: probe %s: %w", table, err)
 		}
 		if !exists {
+			if table == "mooring_collab_raw_changes" {
+				return stats, fmt.Errorf("backup: target cannot preserve raw atomic data")
+			}
 			// Target lacks this table — skip rather than failing so a
 			// bundle from a newer schema can restore (partially) here.
 			continue
@@ -1232,6 +1236,13 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 		allowed, err := tableColumns(ctx, tx, table)
 		if err != nil {
 			return stats, fmt.Errorf("backup: columns of %s: %w", table, err)
+		}
+		if table == "mooring_collab_raw_changes" {
+			for _, column := range mooringRawDataColumns {
+				if !allowed[column] {
+					return stats, fmt.Errorf("backup: target cannot preserve raw atomic column %s", column)
+				}
+			}
 		}
 		// Dropping an admission fence is a security downgrade, not ordinary
 		// schema skew: an older target would classify this work as autonomous.
@@ -1292,6 +1303,12 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 					return stats, fmt.Errorf("backup: fence existing document writer: %w", err)
 				}
 			}
+			if table == "mooring_collab_raw_changes" {
+				row, err = validateMooringRawRestoreRow(row)
+				if err != nil {
+					return stats, fmt.Errorf("backup: raw atomic data: %w", err)
+				}
+			}
 			if err := validateSlidesRestoreRow(table, row); err != nil {
 				return stats, err
 			}
@@ -1345,7 +1362,11 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 				}
 				val := row[k]
 				if documentBinaryColumn(table, k) {
-					val, err = restoreDocumentBinary(val)
+					if table == "mooring_collab_raw_changes" {
+						val, err = restoreMooringRawDataBinary(val)
+					} else {
+						val, err = restoreDocumentBinary(val)
+					}
 					if err != nil {
 						return stats, fmt.Errorf("backup: %s.%s: %w", table, k, err)
 					}
@@ -1410,7 +1431,8 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 				)
 				args = append(args, row[guard.column])
 			}
-			if replaceWork {
+			if replaceWork || table == "mooring_collab_raw_changes" {
+				// Raw content must never disappear behind ignored CHECK/PK failures.
 				query = strings.Replace(query, "INSERT OR IGNORE", "INSERT", 1)
 			}
 			res, err := tx.ExecContext(ctx, query, args...)
