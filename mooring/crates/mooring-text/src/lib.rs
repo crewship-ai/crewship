@@ -7,6 +7,11 @@ use yrs::updates::decoder::{Decode, Decoder, DecoderV1};
 use yrs::{Doc, OffsetKind, Options, ReadTxn, Transact, Update};
 
 pub use yrs;
+mod client_origin;
+pub use client_origin::{
+    new_document_with_origin, recover_with_origin, CheckedClientOrigin, InvalidClientOrigin,
+    MAX_CLIENT_ORIGIN,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Access {
@@ -125,6 +130,15 @@ pub fn recover(
     authoritative: &[u8],
     unsaved: Vec<UnsavedDraft>,
 ) -> Result<Recovery, RecoveryError> {
+    recover_using(authoritative, unsaved, new_document, None)
+}
+
+pub(crate) fn recover_using(
+    authoritative: &[u8],
+    unsaved: Vec<UnsavedDraft>,
+    make_document: impl FnOnce() -> Doc,
+    fresh_origin: Option<CheckedClientOrigin>,
+) -> Result<Recovery, RecoveryError> {
     let mut decoder = DecoderV1::from(authoritative);
     let update = match Update::decode(&mut decoder) {
         Ok(update) => update,
@@ -154,7 +168,7 @@ pub fn recover(
     // Recovery requires a FULL snapshot, including deleted/GC'ed history.
     let mut encoded_ranges = update.insertions(true);
     encoded_ranges.merge_with(update.delete_set().clone());
-    let document = new_document();
+    let document = make_document();
     if let Err(error) = document.transact_mut().apply_update(update) {
         return Err(RecoveryError {
             unsaved,
@@ -175,6 +189,15 @@ pub fn recover(
         return Err(RecoveryError {
             unsaved,
             reason: "snapshot contains unmaterialized history ranges".into(),
+        });
+    }
+    // A deleted or GC'ed allocation still occupies its client identity. A new
+    // local document must never restart that identity from the confirmed clock.
+    // Absence here is NOT evidence that the host never issued or burned it.
+    if fresh_origin.is_some_and(|origin| frontier.get(&yrs::ClientID::new(origin.get())) != 0) {
+        return Err(RecoveryError {
+            unsaved,
+            reason: "fresh origin is already allocated in snapshot history".into(),
         });
     }
     Ok(Recovery { document, unsaved })
