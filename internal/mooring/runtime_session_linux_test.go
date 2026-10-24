@@ -87,7 +87,21 @@ func TestSessionTransportHelper(t *testing.T) {
 		}
 		switch v["type"] {
 		case "owner_grant":
+			if mode == "activation" {
+				continue
+			}
 			write(map[string]any{"type": "session_opened", "request_id": open["request_id"], "control_profile": PrivateSessionProfile, "scope": open["scope"], "session_id": open["session_id"], "runtime_ref": open["runtime_ref"], "versions": sessionTestVersions, "fence": v["fence"], "confirmed_basis": map[string]any{"revision": "0", "digest": "sha256:" + string(makeDigestZeros())}})
+
+		case "session_restore":
+			if mode != "activation" {
+				return
+			}
+			cp := v["checkpoint"].(map[string]any)
+			result := map[string]any{"type": "session_restored", "request_id": v["request_id"], "control_profile": PrivateSessionProfile, "scope": v["scope"], "session_id": v["session_id"], "runtime_ref": v["runtime_ref"], "versions": v["versions"], "fence": v["fence"], "confirmed_basis": map[string]any{"revision": cp["revision"], "digest": cp["digest"]}}
+			write(result)
+			result["type"] = "session_opened"
+			result["request_id"] = open["request_id"]
+			write(result)
 		case "validate_checkpoint_causal":
 			write(map[string]any{"type": "checkpoint_validated_causal", "request_id": v["request_id"], "scope": v["scope"], "selected": sessionTestVersions, "input_checkpoint_digest": v["checkpoint"].(map[string]any)["digest"], "inventory": []any{}, "control_profile": PrivateCausalPrepareProfile})
 		}
@@ -101,10 +115,13 @@ func makeDigestZeros() []byte {
 	return b
 }
 func sessionPeer(t *testing.T, mode string) *SessionRuntime {
+	return sessionPeerKey(t, mode, SessionKey{WorkspaceID: "workspace", ArtifactID: "artifact", ApplicationID: "wordcraft"})
+}
+func sessionPeerKey(t *testing.T, mode string, key SessionKey) *SessionRuntime {
 	t.Helper()
 	ctx := t.Context()
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestSessionTransportHelper$", "--", "--session-peer", mode)
-	s, err := startSessionRuntimeCommand(ctx, SessionRuntimeConfig{Runtime: RuntimeConfig{Versions: sessionTestVersions, ControlProfile: PrivateSessionProfile}, Scope: SessionKey{WorkspaceID: "workspace", ArtifactID: "artifact", ApplicationID: "wordcraft"}}, cmd)
+	s, err := startSessionRuntimeCommand(ctx, SessionRuntimeConfig{Runtime: RuntimeConfig{Versions: sessionTestVersions, ControlProfile: PrivateSessionProfile}, Scope: key}, cmd)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +129,7 @@ func sessionPeer(t *testing.T, mode string) *SessionRuntime {
 	return s
 }
 func sessionTestOpen(s *SessionRuntime) []byte {
-	b, _ := json.Marshal(map[string]any{"type": "session_open", "request_id": "open", "control_profile": PrivateSessionProfile, "scope": map[string]any{"workspace_id": "workspace", "artifact_id": "artifact", "application_id": "wordcraft"}, "session_id": "host-session", "runtime_ref": s.RuntimeRef(), "versions": sessionTestVersions})
+	b, _ := json.Marshal(map[string]any{"type": "session_open", "request_id": "open", "control_profile": PrivateSessionProfile, "scope": map[string]any{"workspace_id": s.scope.WorkspaceID, "artifact_id": s.scope.ArtifactID, "application_id": s.scope.ApplicationID}, "session_id": "host-session", "runtime_ref": s.RuntimeRef(), "versions": sessionTestVersions})
 	return b
 }
 func TestSessionRuntimeInheritedPrepareProgressWhileOpenAwaitsOwner(t *testing.T) {
