@@ -56,6 +56,7 @@ public contract here. Superseded a spec? Move it to
 
 ## Pages and project files
 
+- [Mooring pilot JSON profile](mooring-pilot.md): manifest-driven personal documents, typed commands, durable receipts and isolated editors.
 - [Pages](pages.md): panel schemas, freshness, permissions, data model and
   API/CLI surface. Code references its section anchors; preserve them.
   Explicit historical design sections are not claims of current implementation.

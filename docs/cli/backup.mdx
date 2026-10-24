@@ -295,6 +295,7 @@ crewship backup restore bundle.tar.zst --use-keyring
 | `--passphrase-file` | `string` | | Read the passphrase from a file instead of prompting. |
 | `--use-keyring` | `bool` | `false` | Read the passphrase from `~/.crewship/backup-keyring.enc` before prompting. |
 | `--replace` | `bool` | `false` | Disaster-recovery path: wipe existing target rows matching the bundle's workspace (by id **or** slug) **before** restore, so the bundle lands with its original IDs after a `nuke` or fresh-instance bootstrap re-took the slug under a new id. Mutually exclusive with `--as-workspace` / `--as-crew`. |
+| `--discard-workbooks` | `bool` | `false` | With `--replace` only. Backups never contain workbooks, so `--replace` refuses (`409`) a target workspace that holds any workbook and names the workbook page IDs. This flag acknowledges that they are destroyed. API: `discard_workbooks`. |
 | `--dry-run` | `bool` | `false` | Verify format / checksum / decrypt, replay the restore tx, then roll back. Writes a `backup.restore.dry_run` audit row. |
 | `--recover-services` | `bool` | `false` | Recover selected interrupted quota service maintenance after prior producer and writer leases expire. |
 
@@ -377,6 +378,16 @@ rather than producing a fork whose journal reads as tampered. See
 
 A dry-run leaves only the audit row — no DB rows, no docker changes.
 Use it to prove a bundle is restorable before cutover.
+
+<Warning>
+  Backups never contain experimental workbooks. `--replace` therefore refuses
+  (`409`) a target workspace that holds any workbook, naming the workbook
+  page IDs, before anything is changed. Save the workbooks first
+  (`crewship workbook read`), restore under a new slug with `--as-workspace`,
+  or add `--discard-workbooks` to acknowledge that they are destroyed.
+  [`crewship recover --force`](/cli/recover) applies the same check to the
+  whole target database.
+</Warning>
 
 Restore also warns when the bundle carries columns this instance's schema
 does not have — they are dropped, and any row that needed one of them to

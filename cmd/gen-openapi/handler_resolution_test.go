@@ -321,6 +321,10 @@ var requiredQueryParametersInSpec = []string{
 	"GET /api/v1/models ?provider",
 	"GET /api/v1/oauth/callback ?code",
 	"GET /api/v1/oauth/callback ?state",
+	// Verified against gridcraftHTTP.commits (internal/api/gridcraft_live.go):
+	// a feed request without since is 400. Pinned by
+	// TestGridCraftCommitsFeedUnderReadAccess.
+	"GET /api/v1/pages/{slug}/workbook/commits ?since",
 	"GET /api/v1/skills/proposed ?crew_id",
 	// pipeline-schedules/preview used to list ?cron_expr here (B9, #2362). It takes
 	// cron_expr OR phrase since ODCH-RT-15, so neither is required on its own.

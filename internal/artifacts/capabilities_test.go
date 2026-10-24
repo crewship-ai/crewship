@@ -40,7 +40,7 @@ func TestEveryCompiledFormatHasExplicitOperationDeclarations(t *testing.T) {
 			t.Fatalf("%s/%d: incomplete declarations: %#v", descriptor.TypeID, descriptor.SchemaVersion, capabilities)
 		}
 		for _, capability := range capabilities {
-			want := descriptor.TypeID == "doc" && capability.Operation != Export
+			want := descriptor.TypeID == "doc" && capability.Operation != Export || descriptor.TypeID == "gridcraft-workbook" && (capability.Operation == Create || capability.Operation == Read || capability.Operation == Apply)
 			if capability.Supported != want || capability.Available != want {
 				t.Fatalf("%#v: %#v", descriptor, capability)
 			}

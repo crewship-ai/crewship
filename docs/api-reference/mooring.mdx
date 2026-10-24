@@ -1,0 +1,69 @@
+---
+title: Mooring applications
+stability: experimental
+tag: Experimental
+---
+
+The experimental personal-document API uses the existing workspace context and
+human credentials. Its JSON profile is documented in the
+[pilot contract](/specs/mooring-pilot). All errors use JSON `{error}`. Shared
+DIRECT agent changes are refused. Native GridCraft retains its existing routes.
+
+## `GET /api/v1/mooring/apps`
+
+**Auth:** current human workspace credential. **Request:** no body.
+**Response:** installed manifests with protocol version, format, editor entry and
+command JSON Schemas. **Statuses:** 200, 401, 403, 404.
+
+## `POST /api/v1/mooring/documents`
+
+**Auth:** current human workspace credential and Page creation permission.
+**Request:** `{app_id,slug,name}`. The JSON profile creates a personal private Page;
+native GridCraft uses its existing creation/import protocol.
+**Response:** `{page_id,slug,name,app_id}`. The slug is the creation retry key.
+**Statuses:** 201 created, 200 exact retry, 400 invalid declaration, 401 revoked
+credential, 403 denied, 404 unavailable, 409 conflict, 500 persistence failure.
+
+## `GET /api/v1/pages/{slug}/mooring`
+
+**Auth:** current private Page owner and human workspace credential.
+**Request:** `slug` path parameter, also accepting `@ID`.
+**Response:** `{app_id,manifest,state,editor}` with state
+`{rev,generation,snapshot}`. Editor availability includes pinned URL and digest.
+**Statuses:** 200, 401 invalid credential, 404 unavailable or unauthorized,
+500 persistence failure, 503 unavailable application.
+
+## `POST /api/v1/pages/{slug}/mooring/commands`
+
+**Auth:** current private Page owner and human workspace credential.
+**Request:** `{mutation_id,base_rev,generation,command,arguments}`; arguments must
+validate against the compiled manifest schema. Full-state replacement requires
+an exact base revision and generation.
+**Response:** durable receipt with mutation ID, revision, issuer, state hash,
+durability and visibility. Identical retries return the original receipt.
+**Statuses:** 200 committed, 400 invalid command, 401 invalid credential,
+404 unavailable or unauthorized, 409 stale base or conflicting mutation key,
+500 persistence failure, 503 unavailable application.
+
+## `POST /api/v1/pages/{slug}/mooring/mandates`
+
+**Auth:** current private Page owner and human workspace credential.
+**Request:** `{mandate_id,run_id,base_rev,generation,command}`. The run must retain
+that human's live host-dispatched chat authority and current workspace policy.
+**Response:** retained mandate packet. Identity and scope cannot be widened.
+**Statuses:** 200 admitted or exact retry, 400 invalid request, 401 invalid
+credential, 404 unavailable or unauthorized, 409 changed preconditions,
+500 persistence failure.
+
+## `DELETE /api/v1/pages/{slug}/mooring/mandates/{mandate}`
+
+**Auth:** current private Page owner and human workspace credential.
+**Request:** slug and mandate path parameters; no body.
+**Response:** `{status: revoked}`. Revocation is terminal and exact retries are safe.
+**Statuses:** 200, 401 invalid credential, 404 unavailable or unauthorized,
+500 persistence failure.
+
+The generic `mooring_command` MCP tool and `crewship mooring agent` CLI forward
+signed live-run authority through protected host IPC. No browser or editor
+receives the host or agent credential. Every commit rechecks current authority
+and retained mandate before issuing its receipt.

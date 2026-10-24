@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -184,6 +185,11 @@ func (c *Client) writeFrame(msg []byte) bool {
 		allowed, err := gate.CanDeliver(ctx, c.userID, envelope.Channel)
 		cancel()
 		if err != nil || !allowed {
+			if page, ok := strings.CutPrefix(envelope.Channel, "page:"); ok && c.hub.isWorkbookPage(page) {
+				// Drop protected frames already queued before revocation. The separate
+				// channel-less session_closed control must still pass this shared socket.
+				return true
+			}
 			return false
 		}
 	}

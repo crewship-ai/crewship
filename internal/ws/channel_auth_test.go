@@ -194,6 +194,8 @@ func openTestDB(t *testing.T) *sql.DB {
 			private_audience INTEGER NOT NULL DEFAULT 0,
 			workspace_id TEXT NOT NULL
 		);
+		CREATE TABLE gridcraft_heads (page_id TEXT PRIMARY KEY);
+		CREATE TABLE page_grants (page_id TEXT, subject_type TEXT, subject_id TEXT, level TEXT, granted_by_user_id TEXT);
 	`
 	if _, err := db.Exec(schema); err != nil {
 		t.Fatalf("schema: %v", err)
@@ -227,5 +229,47 @@ func TestDBChannelAuthorizer_PrivateArtifactAudience(t *testing.T) {
 	}
 	if mustVerdict(t, a, "private-owner", "page:private-page") {
 		t.Error("revoked OWNER retained private channel")
+	}
+}
+
+// A published workbook keeps its content audience on the Page channel, so
+// workbook.committed reaches the owner, the workspace OWNER and the editors
+// the owner named, but not every member. An ordinary published Page keeps
+// the workspace membership gate.
+func TestDBChannelAuthorizer_PublishedWorkbookAudience(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	for _, q := range []string{
+		`INSERT INTO users(id) VALUES('wb-owner'),('wb-boss'),('wb-editor'),('wb-member'),('wb-admin-granted')`,
+		`INSERT INTO workspace_members(workspace_id,user_id,role) VALUES('ws1','wb-owner','MEMBER'),('ws1','wb-boss','OWNER'),('ws1','wb-editor','MEMBER'),('ws1','wb-member','MEMBER'),('ws1','wb-admin-granted','MEMBER')`,
+		`INSERT INTO pages(id,workspace_id,owner_user_id,private_audience) VALUES('wb','ws1','wb-owner',0),('plain','ws1','wb-owner',0)`,
+		`INSERT INTO gridcraft_heads(page_id) VALUES('wb')`,
+		`INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('wb','user','wb-editor','write','wb-owner'),('wb','user','wb-admin-granted','write','wb-boss'),('wb','user','wb-member','read','wb-owner')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a := NewDBChannelAuthorizer(db)
+	for _, tc := range []struct {
+		user, channel string
+		allowed       bool
+	}{
+		{"wb-owner", "page:wb", true},
+		{"wb-boss", "page:wb", true},
+		{"wb-editor", "page:wb", true},
+		{"wb-member", "page:wb", false},
+		{"wb-admin-granted", "page:wb", false},
+		{"wb-member", "page:plain", true},
+	} {
+		if got := mustVerdict(t, a, tc.user, tc.channel); got != tc.allowed {
+			t.Errorf("%s on %s: subscription=%v want %v", tc.user, tc.channel, got, tc.allowed)
+		}
+	}
+	if _, err := db.Exec(`DELETE FROM page_grants WHERE subject_id='wb-editor'`); err != nil {
+		t.Fatal(err)
+	}
+	if mustVerdict(t, a, "wb-editor", "page:wb") {
+		t.Error("revoked editor kept the workbook channel")
 	}
 }

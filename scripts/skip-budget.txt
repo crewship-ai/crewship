@@ -207,4 +207,7 @@
 #                     groups execute as UID65534 in the required managed lane;
 #                     its source-list check and verifier reject omissions/skips.
 #                     Track an ordinary/race isolated-UID runner in #3055.
-159
+# 2026-10-23 (#3967): 159 -> 172. Explicit GridCraft pinned-engine,
+# sandbox, stress and harness guards. Real engine qualification now requires
+# all ten selected tests to execute and pass; no skip counts as qualification.
+172

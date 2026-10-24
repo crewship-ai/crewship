@@ -92,6 +92,8 @@ type ContentFacts struct {
 	HasBoard        bool   `json:"has_board"`
 	BoardFormat     string `json:"board_format"`
 	HasArtifact     bool   `json:"has_artifact"`
+	HasMooring      bool   `json:"has_mooring"`
+	HasWorkbook     bool   `json:"has_workbook"`
 	ArtifactProfile string `json:"artifact_profile"`
 	ArtifactVersion int    `json:"artifact_version"`
 	HasProject      bool   `json:"has_project"`
@@ -119,7 +121,7 @@ func contentReference(id string, version int) ContentReference {
 func DeriveContentTypes(facts ContentFacts) ContentDerivation {
 	result := ContentDerivation{ContentDescriptor: contentReference("panels", 1)}
 	specialized := 0
-	for _, present := range []bool{facts.HasSlides, facts.HasDocument, facts.HasBoard, facts.HasArtifact} {
+	for _, present := range []bool{facts.HasSlides, facts.HasDocument, facts.HasBoard, facts.HasArtifact, facts.HasWorkbook, facts.HasMooring} {
 		if present {
 			specialized++
 		}
@@ -139,6 +141,10 @@ func DeriveContentTypes(facts ContentFacts) ContentDerivation {
 			result.ContentDescriptor.Supported = false
 			result.ContentDescriptor.Reason = "unsupported-profile"
 		}
+	case facts.HasMooring:
+		result.ContentDescriptor = contentReference("mooring-app", 1)
+	case facts.HasWorkbook:
+		result.ContentDescriptor = contentReference("gridcraft-workbook", 1)
 	case facts.HasArtifact:
 		result.ContentDescriptor = contentReference("html", facts.ArtifactVersion)
 		if facts.ArtifactProfile != "static-html-v1" {

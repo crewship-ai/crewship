@@ -530,6 +530,7 @@ type ContainerBusyProbe func(ctx context.Context, crewID, containerID string) bo
 type StatsRegisterFunc func(containerID, crewID, workspaceID string)
 
 type Orchestrator struct {
+	gridCraftEnabled         bool // startup-only, experimental offline workbook tools
 	hostOutputRoot           string
 	hostOutputCapacityBytes  int64
 	hostOutputCapacityRuns   int
@@ -1707,3 +1708,6 @@ func (o *Orchestrator) SetFeedbackPreferenceReader(reader func(context.Context, 
 	defer o.mu.Unlock()
 	o.feedbackPreferenceReader = reader
 }
+
+// SetGridCraftEnabled is called only during server construction, before runs.
+func (o *Orchestrator) SetGridCraftEnabled(enabled bool) { o.gridCraftEnabled = enabled }

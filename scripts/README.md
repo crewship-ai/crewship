@@ -39,6 +39,8 @@ running the full suite with a deliberately adjusted timeout. Mutation tests
 | [embed-web-out.sh](embed-web-out.sh) | Stages/verifies the static export in `web/out/`; preserves the placeholder |
 | [check-chat-table-worker.mjs](check-chat-table-worker.mjs), [check-chat-xlsx-worker.mjs](check-chat-xlsx-worker.mjs) | Chromium acceptance of built `out/chat-workers` bundles with synthetic CSV/XLSX; runs through `pnpm test:chat-worker` / `pnpm test:chat-xlsx-worker` in CI Playwright PR subset; no live server or external parser |
 | [prepare-chat-workers.mjs](prepare-chat-workers.mjs) | Bundles chat preview workers as local JavaScript before frontend dev/build; public output is generated and ignored |
+| [prepare-mooring-editors.mjs](prepare-mooring-editors.mjs) | Reproducibly bundles the small reference editor and prints its manifest pin; writes reviewed embedded packages in `internal/editororigin/packages/`. See [SDK workflow](../docs/development/mooring-editor-sdk.md). |
+| [vendor-mooring-sdk.mjs](vendor-mooring-sdk.mjs) | Copies the committed editor SDK into a supplied GridCraft checkout and records source hashes, compiler version and reproducible native module bytes. See [SDK workflow](../docs/development/mooring-editor-sdk.md). |
 | [prepare-pdf-assets.mjs](prepare-pdf-assets.mjs) | Prepares browser PDF assets; invoked by frontend dev/build commands |
 | [gen-avatar-fixtures.mjs](gen-avatar-fixtures.mjs) | Regenerates avatar validator test fixtures |
 | [generate-team-avatars.mjs](generate-team-avatars.mjs) | Generates demo team portraits; distinct from validator fixtures |

@@ -114,9 +114,9 @@ func TestCov2OnbSetup_PreferredLanguageWriteFailureIsSoft(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
-	// Blocks the preferred_language UPDATE; workspace_name stays empty so
-	// the service never updates workspaces again.
-	cov2OnbAbortTrigger(t, db, "cov2_onb_ws_upd", "UPDATE ON workspaces")
+	// Block only the preference write. Creating crew membership may also
+	// advance the workspace authority counter; that is not this injected fault.
+	cov2OnbAbortTrigger(t, db, "cov2_onb_ws_upd", "UPDATE OF preferred_language ON workspaces")
 
 	svc := services.NewOnboardingService(db, testLogger(), generateCUID)
 	h := NewOnboardingHandler(db, svc, testLogger())
