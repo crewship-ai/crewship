@@ -299,3 +299,34 @@ identity/full-metadata transplants and the actual read-only D3 refusal. This doe
 not reserve origins, construct writers, issue Saved, admit participants or enable
 the production session CLI. A concrete opaque Go result with original-source and
 owner checks in the same writer remains the required host integration.
+
+
+### Inactive origin burn journal
+
+`OriginBurnJournal` is an unwired local data provider. An explicit existing,
+absolute application data root holds one private file with an exclusive lifetime
+lock. Fresh creation refuses an existing file; reopening requires the original
+lineage and journal correlation. Neither operation establishes author permission,
+fresh lineage, complete inventory or a source capability.
+
+Each bounded append records only an origin, source identifier and binding digest.
+The complete record is fsynced before acknowledgement. Exact retries preserve the
+original digest; source/origin rebinding, corruption, uncertain writes and capacity
+exhaustion refuse. There is no truncation, repair, eviction or origin reuse API.
+The current limits are 4096 records, 2KiB per line and 8MiB per file. Unsupported
+platforms refuse rather than dropping locking guarantees.
+
+A valid older whole-record prefix can still open after physical rollback. Hashes,
+a matching journal identifier and successful open therefore do not prove that all
+issued-unused or rejected origins survived. An independent continuity/recovery
+anchor remains required before issuance, cold-host recovery or document reopening;
+missing history must never become a new empty namespace. Local filesystem locks
+coordinate cooperating processes, not privileged external file modification.
+
+No application startup, backup path, restore hook or issuer selects this provider.
+Future integration must reserve a root outside portable store payloads, preserve
+its complete burned union through recovery, hold the original host/author/owner
+fences and durably burn before SQL source publication. Portable SQL metadata is
+not a bearer and cannot recreate these live capabilities. This provider supplies
+neither offhost recovery coverage nor replayable Saved history; replayable raw
+history requires a separate portable write in the same content transaction.

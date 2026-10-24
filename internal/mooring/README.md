@@ -477,3 +477,43 @@ HTTP/confirmed-attempt fixtures. It issues no origin or participant capability.
 Read-only D3 checkpoint access does not qualify its origin inventory: the app
 explicitly rejects that inventory. The host integration verifies this refusal
 reaches neither consumer nor an empty-inventory fallback for either reader.
+
+`OriginInventoryData` normalizes bounded canonical scalar tuples and computes a
+candidate against supplied baseline and issued exclusions. These helpers are
+data only: even a normalized empty list proves nothing about a checkpoint.
+They cannot reserve an origin or construct a writer/source capability. Actual
+issuance still requires opaque runtime inventory evidence, original author and
+owner checks in the same writer, persistent burned exclusions and COMMIT before
+publication. The current 4,096-entry inspector bound is not an unbounded
+document-lifetime entitlement. No ingress or issuance route uses these helpers.
+
+
+Origin ingress metadata is a dormant target-local record contract. Permanent
+origin exclusions include baseline and issued-but-unused reservations; immutable
+source and operation identities retain their original ordinal order and hashes.
+Owner correlation stores a token hash, never the live owner bearer. SQL rows and
+author digests cannot recreate host capabilities after restart or restore.
+
+Portable content carries only an immutable lineage marker. Portable bundles
+exclude the four local metadata tables, and replacement preserves target burns
+while closing retired sources. A matching marker is correlation, not proof that
+the union includes all previously issued origins. Missing lineage or lost
+physical history remains unqualified; this change supplies no recovery journal,
+issuance, raw Saved history, native constructor or participant route. Logical
+operation metadata is bounded to 100,000 rows and 64 MiB per lineage; the 4,096
+origin-exclusion bound is conservative capacity refusal, not an unlimited
+lifetime entitlement or permission to recycle an origin.
+
+
+Original-author references are an inactive host-only precursor to an origin
+issuer. They retain an existing human admission or actual fixed-attempt agent
+proof, derive read/write scope from that original, and return only after the
+capture writer commits. Copies and serialized values cannot recreate them.
+Every use retains the original operation/runtime/owner binding and rechecks
+canonical rights without refreshing the original credential or horizon.
+
+These references provide neither inventory nor burned-history coverage, and
+the author-only check does not qualify a caller-owned transaction's database.
+A future issuer must use the exact opaque inventory writer, real covered burn
+history and reserved-origin constructors. No source, ordinal, grant, allocation,
+route, raw Saved history or execution is enabled by the references.

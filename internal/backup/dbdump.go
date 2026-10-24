@@ -1233,6 +1233,18 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 		if err != nil {
 			return stats, fmt.Errorf("backup: columns of %s: %w", table, err)
 		}
+		// Losing a nonempty content-lineage marker must not silently make it a
+		// legacy document eligible for guessed origin installation on this target.
+		// The marker remains correlation only, never proof of burned-ID coverage.
+		if table == "mooring_collab_documents" && !allowed["origin_lineage_id"] {
+			for _, row := range rows {
+				if marker, exists := row["origin_lineage_id"]; exists && marker != nil {
+					if text, ok := marker.(string); !ok || text != "" {
+						return stats, fmt.Errorf("backup: target cannot preserve origin lineage")
+					}
+				}
+			}
+		}
 		// Dropping an admission fence is a security downgrade, not ordinary
 		// schema skew: an older target would classify this work as autonomous.
 		if !allowed["chat_origin_id"] {

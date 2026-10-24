@@ -11,6 +11,14 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Mooring agent reads:** an inactive session checkpoint reader retains the original agent mandate and confirmed attempt under the existing immutable authority; it grants no write or external delivery access.
 
+- **Origin journal groundwork:** an unwired bounded local provider fsyncs immutable burn records before acknowledgement. It grants no source authority and does not qualify recovery after history loss.
+
+- **Original author groundwork:** inactive host references retain existing human and fixed-attempt agent proofs without upgrading read scope, recapturing credentials or assigning origins.
+
+- **Origin metadata groundwork:** retain target-local origin exclusions and immutable source ordinals across portable replacement. A portable lineage marker supplies correlation only; issuance, recovery coverage and content ingress remain disabled.
+
+- **Mooring origin groundwork:** bounded data helpers preserve occupied and issued origin exclusions when computing a candidate. They provide no inventory provenance, reservation, source capability or enabled ingress path.
+
 - **Independent collaboration authors:** dormant admission callbacks distinguish original author generations from broad delivery invalidation, so another user's grant revocation does not reject an unaffected original author. Current source and Page policy remain required; missing tracking or schema drift stays nonterminal, and no content path is enabled.
 
 - **Collaboration revocation metadata:** prepare persistent author-relevant generations from canonical policy mutations, separate from broad delivery invalidation. Portable restore preserves target tombstones. Admission integration remains unqualified and disabled.
