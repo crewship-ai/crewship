@@ -9,8 +9,6 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Content inspection allocates less on repeated matches (#4006).** Redaction emits spans once per rule and encoded-content scanning collects only the existing first 256 candidates, preserving finding order and results.
-
 - **Audit history damage is detected without operator requests.** Full instance and workspace verification now runs at startup and hourly outside writer transactions; post-upgrade defects and unchained fallback records alert instance admins. Delivery receipts commit with the inbox notice and survive inbox purge/retention, so handled security notices are not repeatedly restored or resent.
 - **Crews pick up a new sidecar after an upgrade without `crewship crew restart-agents`.** A crew container keeps running the `crewship-sidecar` it was created with, so after an upgrade agents silently lacked whatever the new sidecar adds (such as new MCP tools) until an operator recycled the crew. Crew containers are now stamped with the hash of their sidecar (`crewship.sidecar-hash`); at a crew's next start a container with a different or missing stamp is recreated when it is stopped or idle, keeping its volumes, workspace data and credentials wiring, and a `sidecar.recreated` journal entry records the old and new hash. A container with an active run is never interrupted: the run keeps the existing `sidecar.stale` signal and the container is replaced at its next idle start. Runs that start together recreate it at most once. ⚠️ The first start of each idle crew after upgrading to this version recreates its container once, because existing containers carry no stamp yet.
 - ⚠️ **Downgrade boundary: saved preset choices are per version.** After migration `20261022114610`, a routine can carry both a v1 and a v2 preset choice. Earlier builds cannot handle that and are refused at start by the version-skew guard. Downgrade by restoring the pre-upgrade snapshot (see Upgrades → Rollback / downgrade), never by deleting migration records.
@@ -6941,6 +6939,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Long routine runs no longer drop out of the overview and the Activity menu.** Running and waiting runs load from their own list instead of the 200 newest runs. When those 200 runs do not reach back seven days, the routine run summary reads "newest N runs · since …" instead of "7d"; partial and needs-a-person results count as finished, not as successes. The run detail shows the result and next step before provenance and evidence. (#3011)
 
 - **Accepted deferred routine starts disappeared when execution capacity was busy or dispatch failed.** Capacity rejection now retries with bounded backoff until TTL, and errors/expiry remain inspectable through `routine pending get` and `pending list --status`. Retry preserves the accepted recipe and occurrence identity. ⚠️ **Behaviour change:** starts without TTL stop after ten capacity rejections; attempted debounce starts keep their payload while newer triggers open a separate window, and attempted one-time starts cannot be rewritten by another save. (#3010)
+
+- **Content inspection allocates less on repeated matches (#4006).** Redaction emits spans once per rule and encoded-content scanning collects only the existing first 256 candidates, preserving finding order and results.
 
 ## [1.0.0-rc.1] — 2026-07-12
 
