@@ -490,3 +490,11 @@ recipient authority. Callers must retain the complete original host operation,
 check current source/owner and delivery policy, bound original raw ingress and
 retain original proposal bytes separately. These methods create no public route,
 join confirmation, terminal result, Saved receipt or production profile.
+
+The optional actual actor join probe composes the pinned inherited Rust actor
+with the original API session activation, single-use human ticket and real SQL
+delivery gate. It checks committed gate identity before returning the ticket
+result, exact outer/inner SessionJoined correlation, burned ticket replay denial
+and original credential revocation refusing both new tickets and gate renewal.
+HTTP/work contexts remain synthetic fixtures; no document content is delivered,
+no source origin is issued and this is not Saved or production-path acceptance.
