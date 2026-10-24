@@ -8,12 +8,18 @@ mod checkpoint_origins;
 mod checkpoint_wire;
 pub mod command;
 mod core_fields;
+pub mod document_update;
+pub mod experimental_draft;
+pub mod experimental_human_basis;
+pub mod experimental_human_current;
 mod format;
 #[cfg(test)]
 mod human;
+mod human_current_wire;
 #[cfg(test)]
 mod human_decode;
 mod native_qualification;
+mod native_transition;
 pub mod origin_inventory;
 pub mod profile;
 pub mod read;
@@ -242,6 +248,25 @@ impl Document {
         Ok(native)
     }
 
+    /// Canonical sorted-client CRDT frontier. This is observed state only,
+    /// never a durable host receipt, permission or qualified human witness.
+    pub fn state_vector(&self) -> Vec<u8> {
+        use mooring_text::yrs::encoding::write::Write;
+        let vector = self.doc.transact().state_vector();
+        let mut entries = vector
+            .iter()
+            .map(|(client, clock)| (client.get(), *clock))
+            .collect::<Vec<_>>();
+        entries.sort_unstable();
+        let mut bytes = Vec::new();
+        bytes.write_var(entries.len() as u32);
+        for (client, clock) in entries {
+            bytes.write_var(client);
+            bytes.write_var(clock);
+        }
+        bytes
+    }
+
     pub fn block_ids(&self) -> Result<Vec<String>, AdapterError> {
         let txn = self.doc.transact();
         // An empty root array has no Yrs items to encode. Its implicit root
@@ -338,10 +363,65 @@ impl Document {
         Ok(bytes)
     }
 
+    /// Origin-preserving CRDT difference from an exact earlier checkpoint.
+    /// DATA only: callers must authenticate both complete host checkpoint
+    /// identities and current content permission before delivery. This proves
+    /// app-state replay consistency, not receipt authority or durable lineage.
+    pub fn update_since(&self, previous_checkpoint: &[u8]) -> Result<Vec<u8>, AdapterError> {
+        use mooring_text::yrs::updates::decoder::Decode;
+        let previous = Self::restore(previous_checkpoint)?;
+        if previous.model != self.model || previous.block_ids()? != self.block_ids()? {
+            return Err(AdapterError::InvalidCheckpoint);
+        }
+        let previous_vector = previous.doc.transact().state_vector();
+        let current_vector = self.doc.transact().state_vector();
+        if previous_vector
+            .iter()
+            .any(|(client, clock)| *clock > current_vector.get(client))
+        {
+            return Err(AdapterError::InvalidCheckpoint);
+        }
+        let delta = self
+            .doc
+            .transact()
+            .encode_state_as_update_v1(&previous_vector);
+        if delta.len() > 262144 {
+            return Err(AdapterError::Limit);
+        }
+        checkpoint_wire::preflight(&delta)?;
+        previous
+            .doc
+            .transact_mut()
+            .apply_update(
+                mooring_text::yrs::Update::decode_v1(&delta)
+                    .map_err(|_| AdapterError::InvalidCheckpoint)?,
+            )
+            .map_err(|_| AdapterError::InvalidCheckpoint)?;
+        if previous.doc.transact().has_missing_updates() {
+            return Err(AdapterError::InvalidCheckpoint);
+        }
+        // Exact checkpoint equality includes native metadata, stable IDs,
+        // retired attributes and all historical CRDT namespaces, not just SV.
+        if Self::restore(&previous.checkpoint()?)?.checkpoint()? != self.checkpoint()? {
+            return Err(AdapterError::InvalidCheckpoint);
+        }
+        Ok(delta)
+    }
+
     /// Only host-authenticated, scope/revision-verified storage checkpoints may
     /// reach this function. It is not an arbitrary remote Yrs update endpoint.
     /// Decode into a fresh document so errors cannot mutate a live replica.
     pub fn restore(bytes: &[u8]) -> Result<Self, AdapterError> {
+        Self::restore_with_history(bytes, false)
+    }
+
+    // Disposable author-view replay only: mirrors the live producer retention
+    // policy. This never changes authoritative/global Saved restore semantics.
+    pub(crate) fn restore_author_view(bytes: &[u8]) -> Result<Self, AdapterError> {
+        Self::restore_with_history(bytes, true)
+    }
+
+    fn restore_with_history(bytes: &[u8], author_history: bool) -> Result<Self, AdapterError> {
         if bytes.len() > MAX_CHECKPOINT_BYTES {
             return Err(AdapterError::Limit);
         }
@@ -394,14 +474,34 @@ impl Document {
                 .ok_or(AdapterError::InvalidCheckpoint)?;
             format::validate_stored_stamps(&update, total_clock)?;
         }
-        let project_text = !unsupported
-            || recovered
-                .document
-                .transact()
-                .get_map("wordcraft.texts")
-                .is_some();
+        // Normal recovery above proves complete encoded allocation/delete
+        // coverage before this bounded second decode. Retain ORIGINAL history
+        // for the author view, rather than importing the already-GCed snapshot.
+        let document = if author_history {
+            use mooring_text::yrs::updates::decoder::Decode;
+            let doc = Doc::with_options(mooring_text::yrs::Options {
+                offset_kind: mooring_text::yrs::OffsetKind::Utf16,
+                skip_gc: true,
+                ..Default::default()
+            });
+            doc.transact_mut()
+                .apply_update(
+                    mooring_text::yrs::Update::decode_v1(&update)
+                        .map_err(|_| AdapterError::InvalidCheckpoint)?,
+                )
+                .map_err(|_| AdapterError::InvalidCheckpoint)?;
+            if doc.transact().has_missing_updates()
+                || doc.transact().state_vector() != recovered.document.transact().state_vector()
+            {
+                return Err(AdapterError::InvalidCheckpoint);
+            }
+            doc
+        } else {
+            recovered.document
+        };
+        let project_text = !unsupported || document.transact().get_map("wordcraft.texts").is_some();
         let result = Self {
-            doc: recovered.document,
+            doc: document,
             read_only: unsupported || model == format::Model::LegacyV1,
             project_text,
             model,
