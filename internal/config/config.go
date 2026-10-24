@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/httpsafe"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"gopkg.in/yaml.v3"
 )
@@ -45,20 +46,21 @@ func envBool(name string) (val, ok bool) {
 type Config struct {
 	pathSources map[string]string // effective explicit path origins, populated while loading
 
-	Server    ServerConfig    `yaml:"server"`
-	IPC       IPCConfig       `yaml:"ipc"`
-	Container ContainerConfig `yaml:"container"`
-	Storage   StorageConfig   `yaml:"storage"`
-	State     StateConfig     `yaml:"state"`
-	Logging   LoggingConfig   `yaml:"logging"`
-	Auth      AuthConfig      `yaml:"auth"`
-	LLMProxy  LLMProxyConfig  `yaml:"llm_proxy"`
-	Keeper    KeeperConfig    `yaml:"keeper"`
-	License   LicenseConfig   `yaml:"license"`
-	Composio  ComposioConfig  `yaml:"composio"`
-	Documents DocumentsConfig `yaml:"documents"`
-	Slides    SlidesConfig    `yaml:"slides"`
-	Audit     AuditConfig     `yaml:"audit"`
+	Skills    httpsafe.GitImportPolicy `yaml:"skills"`
+	Server    ServerConfig             `yaml:"server"`
+	IPC       IPCConfig                `yaml:"ipc"`
+	Container ContainerConfig          `yaml:"container"`
+	Storage   StorageConfig            `yaml:"storage"`
+	State     StateConfig              `yaml:"state"`
+	Logging   LoggingConfig            `yaml:"logging"`
+	Auth      AuthConfig               `yaml:"auth"`
+	LLMProxy  LLMProxyConfig           `yaml:"llm_proxy"`
+	Keeper    KeeperConfig             `yaml:"keeper"`
+	License   LicenseConfig            `yaml:"license"`
+	Composio  ComposioConfig           `yaml:"composio"`
+	Documents DocumentsConfig          `yaml:"documents"`
+	Slides    SlidesConfig             `yaml:"slides"`
+	Audit     AuditConfig              `yaml:"audit"`
 
 	LocalModels  LocalModelsConfig  `yaml:"local_models"`
 	Orchestrator OrchestratorConfig `yaml:"orchestrator"`
@@ -428,6 +430,9 @@ var (
 // Validate checks that all configuration values are within acceptable ranges
 // and required fields are set. Returns an error describing the first invalid value.
 func (c *Config) Validate() error {
+	if err := httpsafe.ValidateGitImportPolicy(c.Skills); err != nil {
+		return err
+	}
 	if err := c.Documents.validate(); err != nil {
 		return err
 	}
@@ -539,6 +544,14 @@ func loadFromFile(cfg *Config, path string) error {
 }
 
 func applyEnvOverrides(cfg *Config) {
+	if raw, ok := os.LookupEnv("CREWSHIP_SKILLS_PRIVATE_HOSTS"); ok {
+		cfg.Skills.PrivateHosts = nil
+		if raw != "" {
+			for _, entry := range strings.Split(raw, ",") {
+				cfg.Skills.PrivateHosts = append(cfg.Skills.PrivateHosts, strings.TrimSpace(entry))
+			}
+		}
+	}
 	for name, target := range map[string]*int{
 		"CREWSHIP_DOCUMENTS_MAX_DOCUMENTS_PER_WORKSPACE": &cfg.Documents.MaxDocumentsPerWorkspace,
 		"CREWSHIP_DOCUMENTS_MAX_OPERATIONS_PER_WINDOW":   &cfg.Documents.MaxOperationsPerWindow,

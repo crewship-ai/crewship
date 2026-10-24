@@ -26,6 +26,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
+	"github.com/crewship-ai/crewship/internal/skills"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -503,4 +504,11 @@ func WithDocumentLimits(c config.DocumentsConfig) RouterOption {
 // WithDocumentService connects the public Pages bridge to a private engine.
 func WithDocumentService(socket string) RouterOption {
 	return func(r *Router) { r.documentsServiceSocket = socket }
+}
+
+// WithSkillGitImportPolicy snapshots boot-owned policy; this is not an API
+// setting and workspace roles cannot change it.
+func WithSkillGitImportPolicy(policy skills.GitImportPolicy) RouterOption {
+	copyPolicy := skills.GitImportPolicy{PrivateHosts: append([]string(nil), policy.PrivateHosts...)}
+	return func(r *Router) { r.skillGitImportPolicy = copyPolicy }
 }

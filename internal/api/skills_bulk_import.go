@@ -14,13 +14,18 @@ import (
 // which walks a git repo or local path for SKILL.md files and upserts each
 // through the v65-aware path with license gating and built-in scanning.
 type SkillBulkImportHandler struct {
-	db     *sql.DB
-	logger *slog.Logger
+	db        *sql.DB
+	logger    *slog.Logger
+	gitPolicy skills.GitImportPolicy
 }
 
 // NewSkillBulkImportHandler wires the handler against an open *sql.DB.
-func NewSkillBulkImportHandler(db *sql.DB, logger *slog.Logger) *SkillBulkImportHandler {
-	return &SkillBulkImportHandler{db: db, logger: logger}
+func NewSkillBulkImportHandler(db *sql.DB, logger *slog.Logger, policies ...skills.GitImportPolicy) *SkillBulkImportHandler {
+	policy := skills.GitImportPolicy{}
+	if len(policies) > 0 {
+		policy.PrivateHosts = append([]string(nil), policies[0].PrivateHosts...)
+	}
+	return &SkillBulkImportHandler{db: db, logger: logger, gitPolicy: policy}
 }
 
 type skillBulkImportRequest struct {
@@ -124,7 +129,11 @@ func (h *SkillBulkImportHandler) Import(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	imp := skills.NewImporter(h.db, h.logger)
+	imp, err := skills.NewImporterWithGitPolicy(h.db, h.logger, h.gitPolicy)
+	if err != nil {
+		writeProblem(w, r, http.StatusInternalServerError, "bulk import policy is invalid")
+		return
+	}
 	res, err := imp.BulkImport(r.Context(), skills.BulkImportRequest{
 		GitURL:             body.GitURL,
 		GitRef:             body.GitRef,

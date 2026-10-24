@@ -14,6 +14,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **CLI object sharing accepts routine Publish.** `crewship share` and `unshare` now accept `--operation publish`, matching the Share dialog. The server still requires Edit in the resulting policy; unrelated grants and issuer provenance are preserved, and conflicts are never retried.
 
 - **Guest access explanations match the supported resource policy.** Member settings name agents, routines and projects; CLI help explains the runtime prerequisites, and Edit explains the separate Publish share instead of claiming publication always needs a trusted reviewer.
+- **Skill repository imports use verified, pinned HTTPS connections.** Redirects and inherited Git/proxy/credential configuration are disabled. Administrators can allow exact private Git hosts with `skills.private_hosts`; loopback and metadata targets stay blocked. Imported `SKILL.md` files are read within the chosen import root, with bounded regular-file reads.
+
 
 - Mooring SDK recovery refuses incomplete full snapshots even when Yrs reports no missing updates, preserving every original unsaved draft instead of accepting silently omitted history.
 

@@ -672,7 +672,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// pattern is {workspaceId} everywhere else in the API, and changing
 	// it broke the workspace lookup on this route in the prior commit.
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/skills/generate", roleInline, skillGen.Generate)
-	skillBulk := NewSkillBulkImportHandler(r.db, r.logger)
+	skillBulk := NewSkillBulkImportHandler(r.db, r.logger, r.skillGitImportPolicy)
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/skills/bulk-import", roleCreate, skillBulk.Import)
 
 	// Devcontainer feature catalog (auth required, no workspace context needed).
