@@ -15,6 +15,7 @@ mod human;
 mod human_current_wire;
 #[cfg(test)]
 mod human_decode;
+mod native_transition;
 pub mod profile;
 pub mod read;
 

@@ -34,6 +34,7 @@ pub struct Proposal {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Action {
     Edit(Command),
+    Native([u8; 32]),
     Undo,
     Redo,
 }
@@ -172,15 +173,56 @@ impl DraftReplica {
         self.document.checkpoint()
     }
     pub fn edit(&mut self, operation_id: &str, command: Command) -> Result<Proposal, ClientError> {
-        self.perform(operation_id, Action::Edit(command))
+        self.perform(operation_id, Action::Edit(command), None)
+    }
+    /// Inactive local native connector, not server admission.
+    pub fn native_transition(
+        &mut self,
+        operation_id: &str,
+        before: &serde_json::Value,
+        after: &serde_json::Value,
+    ) -> Result<Proposal, ClientError> {
+        self.require_native_access()?;
+        let identity =
+            crate::native_transition::identity(before, after).map_err(|_| ClientError::Limit)?;
+        self.perform(
+            operation_id,
+            Action::Native(identity),
+            Some((before, after)),
+        )
+    }
+    /// Pure outer-native post-gate: emits nothing and changes no client state.
+    pub fn validate_native_transition(
+        &self,
+        before: &serde_json::Value,
+        after: &serde_json::Value,
+    ) -> Result<(), ClientError> {
+        self.require_native_access()?;
+        crate::native_transition::Plan::prepare(&self.document, before, after)
+            .map(|_| ())
+            .map_err(|_| ClientError::InvalidCommand)
+    }
+    fn require_native_access(&self) -> Result<(), ClientError> {
+        if self.blocked {
+            return Err(ClientError::RecoveryRequired);
+        }
+        if self.access != DraftAccess::Writer || self.document.is_read_only() {
+            return Err(ClientError::Forbidden);
+        }
+        Ok(())
     }
     pub fn undo(&mut self, operation_id: &str) -> Result<Proposal, ClientError> {
-        self.perform(operation_id, Action::Undo)
+        self.perform(operation_id, Action::Undo, None)
     }
     pub fn redo(&mut self, operation_id: &str) -> Result<Proposal, ClientError> {
-        self.perform(operation_id, Action::Redo)
+        self.perform(operation_id, Action::Redo, None)
     }
-    fn perform(&mut self, operation_id: &str, action: Action) -> Result<Proposal, ClientError> {
+    fn perform(
+        &mut self,
+        operation_id: &str,
+        action: Action,
+        native: Option<(&serde_json::Value, &serde_json::Value)>,
+    ) -> Result<Proposal, ClientError> {
         if self.blocked {
             return Err(ClientError::RecoveryRequired);
         }
@@ -208,6 +250,24 @@ impl DraftReplica {
         if self.proposals.len() >= 256 {
             return Err(ClientError::Limit);
         }
+        // All native refusal/full-model preflight happens BEFORE capture/live
+        // mutation. Exact retries above never rebuild a changed native basis.
+        let native_plan = if matches!(&action, Action::Native(_)) {
+            let (before, after) = native.ok_or(ClientError::InvalidCommand)?;
+            Some(
+                crate::native_transition::Plan::prepare(&self.document, before, after).map_err(
+                    |error| {
+                        if error == crate::native_transition::TransitionError::NoChange {
+                            ClientError::NoChange
+                        } else {
+                            ClientError::InvalidCommand
+                        }
+                    },
+                )?,
+            )
+        } else {
+            None
+        };
         // Capture ONCE before any own operation allocates IDs or changes the
         // frontier. Retry/recovery retain this exact observation with bytes.
         let authored_frontier = self.document.state_vector();
@@ -235,6 +295,16 @@ impl DraftReplica {
             )
             .map(|_| true)
             .map_err(|_| ClientError::InvalidCommand),
+            Action::Native(_) => native_plan
+                .as_ref()
+                .unwrap()
+                .apply(
+                    &mut self.document,
+                    Origin::from(ClientID::new(self.origin)),
+                    (local_stamp, self.origin),
+                )
+                .map(|_| true)
+                .map_err(|_| ClientError::RecoveryRequired),
             Action::Undo => Ok(self.undo.undo_blocking()),
             Action::Redo => Ok(self.undo.redo_blocking()),
         };
@@ -589,5 +659,89 @@ mod tests {
         .unwrap();
         assert_eq!(candidate.native().unwrap(), local.native().unwrap());
         assert_eq!(proposal, local.edit("actual", insert("Č😀")).unwrap());
+    }
+}
+
+#[cfg(test)]
+mod native_transition_tests {
+    use super::*;
+    use serde_json::{json, Value};
+    fn base() -> (Value, Vec<u8>) {
+        let mut native: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/d1-native.json")).unwrap();
+        native["body"] = json!([{"kind":"para","text":"Č😀e\u{301}","runs":[{"len":9}]}]);
+        native["core"]["opaqueConnectorInteger"] = json!(9007199254740993_u64);
+        let doc = Document::import(native.clone(), vec!["p_one".into()]).unwrap();
+        (native, doc.checkpoint().unwrap())
+    }
+    #[test]
+    fn native_connector_one_original_proposal_prepares_and_selectively_undoes() {
+        let (before, checkpoint) = base();
+        let mut client = DraftReplica::restore(&checkpoint, 17, DraftAccess::Writer).unwrap();
+        let frontier = client.state_vector();
+        let mut after = before.clone();
+        after["body"][0]["text"] = json!("Č😀Xe\u{301}");
+        after["body"][0]["runs"] =
+            json!([{"len":6},{"len":1,"props":{"bold":false,"italicCs":true}},{"len":3}]);
+        let proposal = client
+            .native_transition("native_1", &before, &after)
+            .unwrap();
+        assert_eq!(proposal.targets, vec!["p_one"]);
+        assert_eq!(proposal.authored_frontier, frontier);
+        assert_eq!(client.native().unwrap(), after);
+        assert_eq!(
+            client
+                .native_transition("native_1", &before, &after)
+                .unwrap(),
+            proposal
+        );
+        let authority = crate::experimental_human_current::Authority::Writer(
+            crate::experimental_human_current::HostWriter::current(&checkpoint, 17).unwrap(),
+        );
+        let candidate = crate::experimental_human_current::prepare_current(
+            authority,
+            &proposal.authored_frontier,
+            &proposal.update,
+            &proposal.targets,
+        )
+        .unwrap();
+        assert_eq!(
+            Document::restore(&candidate.checkpoint().unwrap())
+                .unwrap()
+                .native()
+                .unwrap(),
+            after
+        );
+        client.undo("undo_1").unwrap();
+        assert_eq!(client.native().unwrap(), before);
+        client.redo("redo_1").unwrap();
+        assert_eq!(client.native().unwrap(), after);
+        assert_eq!(
+            client
+                .native_transition("native_1", &before, &after)
+                .unwrap(),
+            proposal
+        );
+    }
+    #[test]
+    fn native_connector_reader_and_structural_refusal_emit_nothing() {
+        let (before, checkpoint) = base();
+        let mut reader = DraftReplica::restore(&checkpoint, 17, DraftAccess::Reader).unwrap();
+        assert_eq!(
+            reader.native_transition("reader", &Value::Null, &Value::Null),
+            Err(ClientError::Forbidden)
+        );
+        let mut client = DraftReplica::restore(&checkpoint, 18, DraftAccess::Writer).unwrap();
+        let frontier = client.state_vector();
+        let mut after = before.clone();
+        after["body"][0]["props"] = json!({"keepNext":true});
+        assert_eq!(
+            client.native_transition("bad_structure", &before, &after),
+            Err(ClientError::InvalidCommand)
+        );
+        assert_eq!(client.native().unwrap(), before);
+        assert_eq!(client.state_vector(), frontier);
+        assert!(client.proposals.is_empty());
+        assert!(!client.blocked);
     }
 }
