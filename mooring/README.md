@@ -104,3 +104,13 @@ HTTP/WS route, application initialization, native participant dispatcher or
 restore hook installs this component yet. Registry unit tests use real SQL and
 FULL owner handles but explicitly synthetic runtime identities; actual process
 qualification is a separate integration requirement.
+
+
+The inactive human registry also has an explicit causal constructor. It verifies
+only the actual causal-negotiated runtime and retains that adapter/read policy;
+there is no fallback from failed strict negotiation. A separately selected Linux
+integration test binds a real signed HTTP session, canonical SQL Page authority,
+CLOCK_BOOTTIME owner, actual model0.2 Rust child and FULL host commit. It checks
+host-only status/retry after child death and source revocation closing the SQL
+gate. Its initializer/native command are fixtures: it does not qualify raw human
+deltas, a live participant actor/socket, production packaging or editor UI.

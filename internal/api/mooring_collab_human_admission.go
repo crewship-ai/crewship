@@ -54,28 +54,50 @@ type collaborationHumanJoinTicket struct {
 }
 
 type collaborationHumanRegistry struct {
-	mu           sync.Mutex
-	fence        *collaborationIngressFence
-	pages        *PageHandler
-	owners       *mooring.OwnerStore
-	runtime      *mooring.Runtime
-	clock        mooring.OwnerClock
-	scope        mooring.SessionKey
-	versions     mooring.RuntimeVersions
-	sessionID    string
-	limit        int
-	reservations int
-	admissions   map[string]collaborationHumanAdmission
-	tickets      map[string]collaborationHumanJoinTicket
+	mu            sync.Mutex
+	fence         *collaborationIngressFence
+	pages         *PageHandler
+	owners        *mooring.OwnerStore
+	runtime       *mooring.Runtime
+	targetAdapter mooring.TargetBatchAdapter
+	readPolicy    string
+	clock         mooring.OwnerClock
+	scope         mooring.SessionKey
+	versions      mooring.RuntimeVersions
+	sessionID     string
+	limit         int
+	reservations  int
+	admissions    map[string]collaborationHumanAdmission
+	tickets       map[string]collaborationHumanJoinTicket
 }
 
 func newCollaborationHumanRegistry(enabled bool, pages *PageHandler, owners *mooring.OwnerStore, runtime *mooring.Runtime, clock mooring.OwnerClock, fence *collaborationIngressFence, scope mooring.SessionKey, versions mooring.RuntimeVersions, limit int) (*collaborationHumanRegistry, error) {
+	return newCollaborationHumanRegistryPolicy(enabled, pages, owners, runtime, clock, fence, scope, versions, limit, "")
+}
+
+// Causal is a distinct host-configured capability, never fallback after a
+// failed strict factory or a version/profile supplied by a participant.
+func newCollaborationCausalHumanRegistry(enabled bool, pages *PageHandler, owners *mooring.OwnerStore, runtime *mooring.Runtime, clock mooring.OwnerClock, fence *collaborationIngressFence, scope mooring.SessionKey, versions mooring.RuntimeVersions, limit int) (*collaborationHumanRegistry, error) {
+	return newCollaborationHumanRegistryPolicy(enabled, pages, owners, runtime, clock, fence, scope, versions, limit, mooring.CausalTargetReadPolicy)
+}
+
+func newCollaborationHumanRegistryPolicy(enabled bool, pages *PageHandler, owners *mooring.OwnerStore, runtime *mooring.Runtime, clock mooring.OwnerClock, fence *collaborationIngressFence, scope mooring.SessionKey, versions mooring.RuntimeVersions, limit int, policy string) (*collaborationHumanRegistry, error) {
 	if !enabled || fence == nil || pages == nil || pages.db == nil || owners == nil || clock == nil || limit < 1 || limit > 1000 || scope.ApplicationID != "wordcraft" {
 		return nil, errCollaborationAdmission
 	}
 	// Only an actual negotiated host-child runtime can establish this binding.
 	// A copied RuntimeReady body or client-selected version strings cannot.
-	if _, err := mooring.NewRPCPrepareAdapter(runtime, scope, versions); err != nil {
+	var adapter mooring.TargetBatchAdapter
+	var err error
+	switch policy {
+	case "":
+		adapter, err = mooring.NewRPCPrepareAdapter(runtime, scope, versions)
+	case mooring.CausalTargetReadPolicy:
+		adapter, err = mooring.NewCausalRPCPrepareAdapter(runtime, scope, versions)
+	default:
+		return nil, errCollaborationAdmission
+	}
+	if err != nil {
 		return nil, err
 	}
 	if _, _, err := clock.Now(); err != nil {
@@ -85,7 +107,7 @@ func newCollaborationHumanRegistry(enabled bool, pages *PageHandler, owners *moo
 	if err != nil {
 		return nil, err
 	}
-	return &collaborationHumanRegistry{fence: fence, pages: pages, owners: owners, runtime: runtime, clock: clock, scope: scope, versions: versions, sessionID: session, limit: limit, admissions: make(map[string]collaborationHumanAdmission), tickets: make(map[string]collaborationHumanJoinTicket)}, nil
+	return &collaborationHumanRegistry{targetAdapter: adapter, readPolicy: policy, fence: fence, pages: pages, owners: owners, runtime: runtime, clock: clock, scope: scope, versions: versions, sessionID: session, limit: limit, admissions: make(map[string]collaborationHumanAdmission), tickets: make(map[string]collaborationHumanJoinTicket)}, nil
 }
 
 func collaborationOpaqueID() (string, error) {

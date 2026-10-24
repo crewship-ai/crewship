@@ -68,6 +68,12 @@ func collaborationAdmissionFixture(t *testing.T) (*pagesTransferRig, *collaborat
 	if _, err := newCollaborationHumanRegistry(true, pages, owners, runtime, clock, fence, scope, mooring.RuntimeVersions{Protocol: "0.4.0", Model: "0.1.0", Engine: "0.10.0"}, 4); err == nil {
 		t.Fatal("forged unnegotiated runtime accepted")
 	}
+	if _, err := newCollaborationCausalHumanRegistry(true, pages, owners, runtime, clock, fence, scope, mooring.RuntimeVersions{Protocol: "0.4.0", Model: "0.2.0", Engine: "0.10.0"}, 4); err == nil {
+		t.Fatal("copied runtime gained causal capability")
+	}
+	if _, err := newCollaborationHumanRegistryPolicy(true, pages, owners, runtime, clock, fence, scope, mooring.RuntimeVersions{}, 4, "unknown"); err == nil {
+		t.Fatal("unknown preparation policy accepted")
+	}
 	registry := &collaborationHumanRegistry{fence: fence, pages: pages, owners: owners, runtime: runtime, clock: clock, scope: scope, sessionID: "admission-document-session", limit: 4, admissions: make(map[string]collaborationHumanAdmission), tickets: make(map[string]collaborationHumanJoinTicket)}
 	return r, registry, owner, ctx, clock
 }
