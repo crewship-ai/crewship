@@ -216,3 +216,18 @@ fn owner_epoch_advances_without_mutating_confirmed_document_or_granting_old_gate
     ready.close_owner();
     assert!(!ready.may_own(at(7)));
 }
+
+#[test]
+fn new_owner_restores_unchanged_prior_generation_checkpoint() {
+    let (startup, acquire) = Startup::from_open(&open(), at(0)).unwrap();
+    let owner = startup.accept_owner(&grant(&acquire), &host(), at(1)).unwrap();
+    let (raw, native, ids) = restore();
+    let mut value: Value = serde_json::from_slice(&raw).unwrap();
+    value["checkpoint"]["generation"] = json!("1");
+    let raw = serde_json::to_vec(&value).unwrap();
+    let ready = owner.restore(&raw, || Ok(at(2))).unwrap();
+    assert_eq!(ready.owner().fence.generation, Counter(7));
+    assert_eq!(ready.confirmed().checkpoint().generation, Counter(1));
+    assert_eq!(ready.confirmed().document().native().unwrap(), native);
+    assert_eq!(ready.confirmed().document().block_ids().unwrap(), ids);
+}

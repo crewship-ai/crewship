@@ -147,8 +147,10 @@ impl OwnerAccepted {
             return Err(invalid("restore owner binding"));
         }
         let checkpoint = &request.checkpoint;
+        // Checkpoint generation is creator provenance. The authenticated host
+        // must verify it against retained SQL provenance; a fresh owner fence
+        // must not relabel an unchanged checkpoint during takeover.
         if checkpoint.scope != self.open.scope
-            || checkpoint.generation != self.grant.fence.generation
             || checkpoint.versions != self.open.versions
             || checkpoint.revision != self.grant.revision
             || checkpoint.format_version != mooring_wordcraft::profile::CHECKPOINT_FORMAT
