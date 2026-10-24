@@ -138,3 +138,14 @@ integration still must provide trusted channel/admission provenance, keep one
 controller per fresh registered gate and check it immediately before every
 participant frame/chunk. No production caller or session profile selection is
 introduced by this composition.
+
+`session_startup` composes the inactive session transport with an actual owned
+WordCraft document. Startup consumes one host admission per fresh runtime ref,
+retains the first-send owner request across retries, binds OwnerGrant to the
+pending SessionOpen, and restores only the exact checkpoint/inventory matching
+its scope, generation, revision, application tuple and checkpoint format.
+Restoration checks the trusted clock before and after work; each startup reply
+checks ownership again after encoding and writer wait. Tests use real Unix
+frames and the real application document with an injected deterministic clock.
+No CLI selects this profile, no participant join or mutation is admitted, and
+caller-trusted transport metadata still needs the actual inherited-FD factory.

@@ -88,6 +88,20 @@ impl Output {
         }
         self.write_checked(bytes, || Ok(()))
     }
+    pub fn close(&self) {
+        self.shared.close();
+    }
+    /// Owner-bound controls use the same final check after writer wait.
+    pub fn send_control_checked(
+        &self,
+        bytes: &[u8],
+        gate: impl FnOnce() -> io::Result<()>,
+    ) -> io::Result<()> {
+        if validate_outgoing(bytes)? {
+            return Err(invalid("participant control bypass"));
+        }
+        self.write_checked(bytes, gate)
+    }
     /// Driver supplies an actual BOOTTIME gate check. It runs AFTER validation,
     /// writer queuing and encoding, immediately before the first frame byte.
     /// This callback is not itself authenticated proof; Go independently checks
