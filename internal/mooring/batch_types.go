@@ -131,13 +131,14 @@ type BatchCommitEvent struct {
 	Result BatchResult
 }
 type BatchStoreConfig struct {
-	Enabled     bool
-	Owners      *OwnerStore
-	Authority   BatchAuthority
-	Adapter     BatchAdapter
-	Targets     *TargetStoreConfig
-	Limits      BatchLimits
-	AfterCommit func(BatchCommitEvent)
+	CheckpointIdentity *BatchCheckpointIdentityConfig
+	Enabled            bool
+	Owners             *OwnerStore
+	Authority          BatchAuthority
+	Adapter            BatchAdapter
+	Targets            *TargetStoreConfig
+	Limits             BatchLimits
+	AfterCommit        func(BatchCommitEvent)
 }
 type BatchStore struct {
 	db     *sql.DB

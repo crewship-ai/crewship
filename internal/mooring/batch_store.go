@@ -121,11 +121,18 @@ func (s *BatchStore) Initialize(ctx context.Context, lease OwnerLease, checkpoin
 		} else if err := s.config.Adapter.ValidateCheckpoint(ctx, append([]byte(nil), checkpoint...)); err != nil {
 			return err
 		}
+		metadata, err := s.describeCheckpoint(ctx, checkpoint)
+		if err != nil {
+			return err
+		}
+		if err = s.checkpointCapacity(ctx, tx, lease.Key.ArtifactID, len(checkpoint), metadata); err != nil {
+			return err
+		}
 		encoded := base64.StdEncoding.EncodeToString(checkpoint)
 		if _, err := tx.ExecContext(ctx, `INSERT INTO mooring_collab_documents(page_id,workspace_id,application_id,revision,checkpoint_base64,target_tracking) VALUES(?,?,?,'0',?,?)`, lease.Key.ArtifactID, lease.Key.WorkspaceID, lease.Key.ApplicationID, encoded, s.targetsEnabled()); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO mooring_collab_checkpoints(page_id,workspace_id,revision,checkpoint_base64,decoded_bytes,checkpoint_generation) VALUES(?,?,'0',?,?,?)`, lease.Key.ArtifactID, lease.Key.WorkspaceID, encoded, len(checkpoint), strconv.FormatInt(lease.Generation, 10))
+		_, err = tx.ExecContext(ctx, `INSERT INTO mooring_collab_checkpoints(page_id,workspace_id,revision,checkpoint_base64,decoded_bytes,checkpoint_generation,checkpoint_metadata_json) VALUES(?,?,'0',?,?,?,?)`, lease.Key.ArtifactID, lease.Key.WorkspaceID, encoded, len(checkpoint), strconv.FormatInt(lease.Generation, 10), checkpointMetadataSQL(metadata))
 		if err != nil {
 			return err
 		}
@@ -133,6 +140,9 @@ func (s *BatchStore) Initialize(ctx context.Context, lease OwnerLease, checkpoin
 			return err
 		}
 		if err = s.audit(ctx, tx, lease.Key, "initialized", map[string]string{"revision": "0"}); err != nil {
+			return err
+		}
+		if err = s.checkpointStoredCapacity(ctx, tx, lease.Key.ArtifactID); err != nil {
 			return err
 		}
 		if err = s.config.Authority(ctx, tx, BatchAccess{store: s, final: true, Intent: "initialize", Scope: lease.Key}); err != nil {
@@ -260,22 +270,36 @@ func (s *BatchStore) saveChange(ctx context.Context, tx *sql.Tx, k SessionKey, c
 	}
 	return s.audit(ctx, tx, k, "change_"+result.Status, result)
 }
-func (s *BatchStore) checkpointCapacity(ctx context.Context, tx *sql.Tx, page string, size int) error {
+func (s *BatchStore) checkpointCapacity(ctx context.Context, tx *sql.Tx, page string, size int, metadata []byte) error {
 	var count int
 	var bytes int64
-	if err := tx.QueryRowContext(ctx, `SELECT count(*),coalesce(sum(decoded_bytes),0) FROM mooring_collab_checkpoints WHERE page_id=?`, page).Scan(&count, &bytes); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT count(*),coalesce(sum(decoded_bytes+coalesce(length(CAST(checkpoint_metadata_json AS BLOB)),0)),0) FROM mooring_collab_checkpoints WHERE page_id=?`, page).Scan(&count, &bytes); err != nil {
 		return err
 	}
 	l := s.config.Limits
-	if size > l.CheckpointBytes || count >= l.Checkpoints || int64(size) > l.TotalCheckpointBytes-bytes {
+	if size > l.CheckpointBytes || count >= l.Checkpoints || int64(size)+int64(len(metadata)) > l.TotalCheckpointBytes-bytes {
 		return ErrBatchCapacity
 	}
 	return nil
 }
-func (s *BatchStore) saveCheckpoint(ctx context.Context, tx *sql.Tx, lease OwnerLease, revision string, checkpoint []byte) error {
+
+// Recheck complete persisted usage after audit/output/trigger effects, before
+// final authority and owner fences. No checkpoint payload is scanned into Go.
+func (s *BatchStore) checkpointStoredCapacity(ctx context.Context, tx *sql.Tx, page string) error {
+	var count int
+	var bytes int64
+	if err := tx.QueryRowContext(ctx, `SELECT count(*),coalesce(sum(decoded_bytes+coalesce(length(CAST(checkpoint_metadata_json AS BLOB)),0)),0) FROM mooring_collab_checkpoints WHERE page_id=?`, page).Scan(&count, &bytes); err != nil {
+		return err
+	}
+	if count > s.config.Limits.Checkpoints || bytes < 0 || bytes > s.config.Limits.TotalCheckpointBytes {
+		return ErrBatchCapacity
+	}
+	return nil
+}
+func (s *BatchStore) saveCheckpoint(ctx context.Context, tx *sql.Tx, lease OwnerLease, revision string, checkpoint, metadata []byte) error {
 	k := lease.Key
 	encoded := base64.StdEncoding.EncodeToString(checkpoint)
-	if _, err := tx.ExecContext(ctx, `INSERT INTO mooring_collab_checkpoints(page_id,workspace_id,revision,checkpoint_base64,decoded_bytes,checkpoint_generation) VALUES(?,?,?,?,?,?)`, k.ArtifactID, k.WorkspaceID, revision, encoded, len(checkpoint), strconv.FormatInt(lease.Generation, 10)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO mooring_collab_checkpoints(page_id,workspace_id,revision,checkpoint_base64,decoded_bytes,checkpoint_generation,checkpoint_metadata_json) VALUES(?,?,?,?,?,?,?)`, k.ArtifactID, k.WorkspaceID, revision, encoded, len(checkpoint), strconv.FormatInt(lease.Generation, 10), checkpointMetadataSQL(metadata)); err != nil {
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `UPDATE mooring_collab_documents SET revision=?,checkpoint_base64=? WHERE page_id=?`, revision, encoded, k.ArtifactID)
