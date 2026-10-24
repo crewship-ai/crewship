@@ -343,3 +343,24 @@ canonical current rights, durable SQL decisions and independent final send
 fences. Unsupported actor controls and uncertain results close the channel with
 owned pending intents retained. Large snapshot distribution, complete task/read
 handling and human-origin admission remain separate qualification work.
+
+
+### Participant delivery maintenance
+
+The actor schedules participant delivery renewal at one-eighth of the actual
+host duration (at most250ms), anchored to the original request-send time.
+There is one pending nonce per original ReadLease; retries reuse exact bytes.
+A delayed accepted reply can make the next renewal immediately due. One exact
+completed canonical reply is harmless and cannot move the deadline, raise
+permissions or replace a different pending nonce. Retained encoded renewal/cache
+bytes are charged to the existing4MiB participant metadata budget.
+
+The core ReadLease and2s maximum are unchanged. Owner/permission/read-gate
+checks run again after writer wait. A reply arriving after the CURRENT gate
+expired cannot reopen it even if the reply's own request window would still fit.
+Owner permission advancement revokes stale participant gates; it does not grant
+new rights. Preparation continues independently while renewal is pending.
+Deterministic-clock actual-socket tests cover delayed replies, retry/duplicate
+binding, eight transplants, permission advancement and strict expiry. Actual Go
+SQL renewal and retained terminal-delivery/status recovery are separate paired
+qualifications; this slice alone does not repair dropped receipt recovery.

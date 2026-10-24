@@ -390,3 +390,6 @@ pub mod session_confirmed;
 
 #[cfg(unix)]
 mod session_description;
+
+#[cfg(unix)]
+mod participant_maintenance;

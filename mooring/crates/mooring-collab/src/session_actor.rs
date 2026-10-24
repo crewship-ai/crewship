@@ -124,9 +124,12 @@ impl RunningDriver {
         }
         self.check_owner()?;
         self.renew_due()?;
+        self.renew_participants()?;
         self.flush_input()?;
         self.dispatch_due()?;
-        let wait = self.driver.maintenance.wait((self.driver.clock)()?, wait);
+        let now = (self.driver.clock)()?;
+        let wait = self.driver.maintenance.wait(now, wait);
+        let wait = self.participants.wait(&self.owner, now, wait);
         if let Some(raw) = self
             .driver
             .lane
@@ -138,6 +141,12 @@ impl RunningDriver {
                 serde_json::from_slice(&raw).map_err(|_| invalid("actor control"))?;
             match value["type"].as_str() {
                 Some("owner_grant") => self.accept_owner(&raw, host)?,
+                Some("delivery_grant") => self.participants.accept_renewal(
+                    &raw,
+                    host,
+                    &self.owner,
+                    (self.driver.clock)()?,
+                )?,
                 Some("session_participant_open") => {
                     let opening: SessionParticipantOpen =
                         serde_json::from_slice(&raw).map_err(|_| invalid("participant opening"))?;
@@ -166,9 +175,22 @@ impl RunningDriver {
                 _ => return Err(invalid("unsupported live actor control")),
             }
         }
+        self.renew_participants()?;
         self.flush_input()?;
         self.dispatch_due()?;
         self.check_owner()
+    }
+    fn renew_participants(&mut self) -> io::Result<()> {
+        let requests = self
+            .participants
+            .renewals(&self.owner, (self.driver.clock)()?)?;
+        for (connection, raw) in requests {
+            self.driver.lane.output().send_control_checked(&raw, || {
+                self.participants
+                    .may_send(&connection, &self.owner, (self.driver.clock)()?)
+            })?;
+        }
+        Ok(())
     }
     fn renew_due(&mut self) -> io::Result<()> {
         let now = (self.driver.clock)()?;

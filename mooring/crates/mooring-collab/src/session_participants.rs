@@ -30,6 +30,8 @@ pub(crate) struct Participant {
     pub granted: Capabilities,
     pub bounded_transfer: bool,
     pub lease: ReadLease,
+    maintenance: crate::participant_maintenance::Maintenance,
+    renewal_charge: usize,
 }
 pub(crate) struct Participants {
     pending: BTreeMap<String, Pending>,
@@ -149,6 +151,12 @@ impl Participants {
             .grant
             .validate_reply(raw, host, now.0)
             .map_err(|_| invalid("ticket response binding"))?;
+        let first = bound
+            .expires_at()
+            .checked_sub(bound.duration())
+            .ok_or_else(|| invalid("ticket first-send clock"))?;
+        let maintenance =
+            crate::participant_maintenance::Maintenance::new(Tick(first), bound.duration())?;
         let lease = ReadLease::admit(bound, owner.initial_owner().fence.clone(), LEASE, now)
             .map_err(|_| invalid("ticket read lease"))?;
         let retained = raw
@@ -175,9 +183,103 @@ impl Participants {
                     SessionParticipantOpenJoin::SessionJoinBounded(_)
                 ),
                 lease,
+                maintenance,
+                renewal_charge: 0,
             },
         );
         Ok((pending.opening, connection))
+    }
+    /// Scheduling creates no rights. Every fresh/retried request remains owned
+    /// by the original ReadLease and must pass a final live check before write.
+    pub fn renewals(
+        &mut self,
+        owner: &OwnerController,
+        now: Tick,
+    ) -> io::Result<Vec<(String, Vec<u8>)>> {
+        if !owner.may_own(now) {
+            return Err(invalid("owner expired before delivery renewal"));
+        }
+        let mut ready = Vec::new();
+        for (connection, p) in &mut self.live {
+            if p.permission < owner.known_permission() || !p.lease.may_deliver(now) {
+                p.lease.revoke();
+                p.maintenance.abandon();
+                self.bytes -= p.renewal_charge;
+                p.renewal_charge = 0;
+                continue;
+            }
+            let raw = if p.maintenance.begin_due(now) {
+                let raw = p
+                    .lease
+                    .begin(now)
+                    .map_err(|_| invalid("delivery renewal start"))?
+                    .to_vec();
+                p.maintenance.started(now)?;
+                let charge = raw
+                    .len()
+                    .checked_mul(2)
+                    .and_then(|n| n.checked_add(p.maintenance.completed.len()))
+                    .ok_or_else(|| invalid("delivery metadata bound"))?;
+                update_charge(&mut self.bytes, p, charge)?;
+                Some(raw)
+            } else if p.maintenance.retry_due(now) {
+                let raw = p
+                    .lease
+                    .retry_bytes()
+                    .map_err(|_| invalid("delivery renewal retry"))?
+                    .to_vec();
+                p.maintenance.retried(now)?;
+                Some(raw)
+            } else {
+                None
+            };
+            if let Some(raw) = raw {
+                ready.push((connection.clone(), raw));
+            }
+        }
+        Ok(ready)
+    }
+    pub fn accept_renewal(
+        &mut self,
+        raw: &[u8],
+        host: &Transport<'_>,
+        owner: &OwnerController,
+        now: Tick,
+    ) -> io::Result<()> {
+        let response: mooring_protocol::DeliveryGrant =
+            serde_json::from_slice(raw).map_err(|_| invalid("delivery grant shape"))?;
+        let p = self
+            .live
+            .values_mut()
+            .find(|p| p.gate == response.gate_id && p.participant == response.participant_ref)
+            .ok_or_else(|| invalid("unrelated delivery grant"))?;
+        if !owner.may_own(now)
+            || p.permission < owner.known_permission()
+            || !p.lease.may_deliver(now)
+        {
+            p.lease.revoke();
+            return Err(invalid("delivery grant cannot revive closed gate"));
+        }
+        // One exact completed canonical response is harmless. It neither
+        // changes deadline nor suppresses a different current pending nonce.
+        if p.maintenance.completed == raw {
+            return Ok(());
+        }
+        p.lease
+            .accept(raw, host, now)
+            .map_err(|_| invalid("delivery grant binding"))?;
+        update_charge(&mut self.bytes, p, raw.len())?;
+        p.maintenance
+            .completed(Duration::from_millis(response.duration_ms.0), raw.to_vec())
+    }
+    pub fn wait(&mut self, owner: &OwnerController, now: Tick, maximum: Duration) -> Duration {
+        let mut wait = maximum;
+        for p in self.live.values_mut() {
+            if p.permission >= owner.known_permission() && p.lease.may_deliver(now) {
+                wait = p.maintenance.wait(now, wait);
+            }
+        }
+        wait
     }
     pub fn input(
         &mut self,
@@ -231,4 +333,20 @@ impl Participants {
         }
         self.pending.clear();
     }
+}
+
+fn update_charge(bytes: &mut usize, p: &mut Participant, charge: usize) -> io::Result<()> {
+    let base = bytes
+        .checked_sub(p.renewal_charge)
+        .ok_or_else(|| invalid("delivery metadata accounting"))?;
+    if charge
+        > BYTES
+            .checked_sub(base)
+            .ok_or_else(|| invalid("delivery metadata accounting"))?
+    {
+        return Err(invalid("delivery metadata capacity"));
+    }
+    *bytes = base + charge;
+    p.renewal_charge = charge;
+    Ok(())
 }

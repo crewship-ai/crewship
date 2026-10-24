@@ -279,6 +279,15 @@ fn renewing_driver() -> (
     UnixStream,
     std::sync::Arc<std::sync::atomic::AtomicU64>,
 ) {
+    renewing_driver_with_duration(1000)
+}
+fn renewing_driver_with_duration(
+    duration: u64,
+) -> (
+    Driver,
+    UnixStream,
+    std::sync::Arc<std::sync::atomic::AtomicU64>,
+) {
     use std::sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -292,7 +301,7 @@ fn renewing_driver() -> (
         mooring_collab::write_frame(&mut peer, &open()).unwrap();
         let acquire = mooring_collab::read_frame(&mut peer).unwrap().unwrap();
         let mut granted: Value = serde_json::from_slice(&grant(&acquire)).unwrap();
-        granted["lease_duration_ms"] = json!("1000");
+        granted["lease_duration_ms"] = json!(duration.to_string());
         mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&granted).unwrap()).unwrap();
         mooring_collab::write_frame(&mut peer, &restored).unwrap();
         for _ in 0..2 {
@@ -322,7 +331,18 @@ fn admitted_actor() -> (mooring_collab::session_actor::RunningDriver, UnixStream
 fn admitted_actor_with_write(
     write: bool,
 ) -> (mooring_collab::session_actor::RunningDriver, UnixStream) {
-    let (driver, mut peer, _now) = renewing_driver();
+    let (actor, peer, _) = admitted_actor_with_clock(write, 1000);
+    (actor, peer)
+}
+fn admitted_actor_with_clock(
+    write: bool,
+    owner_duration: u64,
+) -> (
+    mooring_collab::session_actor::RunningDriver,
+    UnixStream,
+    std::sync::Arc<std::sync::atomic::AtomicU64>,
+) {
+    let (driver, mut peer, now) = renewing_driver_with_duration(owner_duration);
     let scope = driver.confirmed().checkpoint().scope.clone();
     let versions = driver.confirmed().checkpoint().versions.clone();
     let mut actor = driver.into_actor().unwrap();
@@ -352,7 +372,7 @@ fn admitted_actor_with_write(
             "mock ticket handshake stalled"
         );
     }
-    (actor, host_worker.join().unwrap())
+    (actor, host_worker.join().unwrap(), now)
 }
 fn agent_change(
     scope: &mooring_protocol::Scope,
@@ -1112,5 +1132,169 @@ fn actor_ready_wake_idle_stays_at_bounded_owner_wait_frequency() {
     eprintln!(
         "actor wake idle steps={steps} wall_us={} (existing20msownerwait,no1mspoll)",
         started.elapsed().as_micros()
+    );
+}
+
+fn drive_actor_to_control_error(actor: &mut mooring_collab::session_actor::RunningDriver) {
+    // A readiness wake may precede FD-reader validation or be coalesced with a
+    // timer wake. One step need not consume a just-written host frame.
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        if actor.step(&host(), Duration::from_millis(20)).is_err() {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "host denial was never processed"
+        );
+    }
+}
+
+fn drive_peer_control<T: Send + 'static>(
+    actor: &mut mooring_collab::session_actor::RunningDriver,
+    peer: UnixStream,
+    exchange: impl FnOnce(UnixStream) -> T + Send + 'static,
+) -> T {
+    let worker = std::thread::spawn(move || exchange(peer));
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    while !worker.is_finished() {
+        actor.step(&host(), Duration::from_millis(20)).unwrap();
+        assert!(
+            std::time::Instant::now() < deadline,
+            "peer exchange stalled"
+        );
+    }
+    worker.join().unwrap()
+}
+
+fn delivery_reply(request: &[u8]) -> Value {
+    let request: Value = serde_json::from_slice(request).unwrap();
+    json!({"type":"delivery_grant","request_id":request["request_id"],"scope":request["scope"],"session_id":request["session_id"],
+        "participant_ref":request["participant_ref"],"generation":request["fence"]["generation"],"permission_version":request["permission_version"],
+        "renewal_nonce":request["renewal_nonce"],"duration_ms":"2000","gate_id":request["gate_id"]})
+}
+#[test]
+fn actor_delivery_renewal_retains_first_send_and_immediately_catches_up_after_delayed_reply() {
+    use std::sync::atomic::Ordering;
+    let (mut actor, mut peer, now) = admitted_actor_with_clock(true, 60_000);
+    let before = actor.confirmed().document().checkpoint().unwrap();
+    now.store(250, Ordering::SeqCst);
+    actor.step(&host(), Duration::ZERO).unwrap();
+    let (first, request) = receive_json(&mut peer);
+    assert_eq!(request["type"], "delivery_renew");
+    let cp = actor.confirmed().checkpoint();
+    let identity = mooring_protocol::checkpoint::verify(
+        cp,
+        mooring_protocol::checkpoint::Limits {
+            decoded_bytes: 1572864,
+            preimage_bytes: 2097152,
+        },
+    )
+    .unwrap();
+    let prepare = json!({"type":"validate_checkpoint_causal","request_id":"prepare-while-delivery-pending","scope":cp.scope,"selected":cp.versions,"checkpoint":{"encoding":"base64","state":cp.state,"digest":identity.content_digest()},"control_profile":"mooring.prepare-causal.v1"});
+    mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&prepare).unwrap()).unwrap();
+    assert_eq!(
+        receive_json(&mut peer).1["type"],
+        "checkpoint_validated_causal"
+    );
+    let response = serde_json::to_vec(&delivery_reply(&first)).unwrap();
+    now.store(1900, Ordering::SeqCst); // Original ticket deadline2000 has NOT expired.
+    let initial_reply = response.clone();
+    let (peer, second) = drive_peer_control(&mut actor, peer, move |mut peer| {
+        mooring_collab::write_frame(&mut peer, &initial_reply).unwrap();
+        let (retry, _) = receive_json(&mut peer);
+        assert_eq!(retry, first); // Same first-send and nonce on retry.
+        let (second, second_value) = receive_json(&mut peer);
+        assert_ne!(second_value["renewal_nonce"], request["renewal_nonce"]);
+        (peer, second)
+    });
+    // The late response immediately starts the next request: due time was
+    // firstsend250+interval250, NOT receive1900+interval250.
+    now.store(2200, Ordering::SeqCst);
+    let (mut peer, third) = drive_peer_control(&mut actor, peer, move |mut peer| {
+        mooring_collab::write_frame(&mut peer, &response).unwrap(); // exactduplicate
+        mooring_collab::write_frame(
+            &mut peer,
+            &serde_json::to_vec(&delivery_reply(&second)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(receive_json(&mut peer).0, second);
+        let (third, _) = receive_json(&mut peer);
+        (peer, third)
+    });
+    assert_eq!(actor.confirmed().document().checkpoint().unwrap(), before);
+    // A pending newer reply would fit its OWN first-send window, but cannot
+    // resurrect the previous live gate once that gate actually expired.
+    now.store(3900, Ordering::SeqCst); // second firstsend1900+2000, exclusiveexpiry
+    mooring_collab::write_frame(
+        &mut peer,
+        &serde_json::to_vec(&delivery_reply(&third)).unwrap(),
+    )
+    .unwrap();
+    drive_actor_to_control_error(&mut actor);
+    let (document, _, originals) = actor.into_recovery();
+    assert_eq!(document.document().checkpoint().unwrap(), before);
+    assert!(originals.is_empty());
+}
+#[test]
+fn actor_delivery_transplants_never_renew_current_gate_or_modify_document() {
+    use std::sync::atomic::Ordering;
+    for mode in [
+        "scope",
+        "session",
+        "participant",
+        "gate",
+        "generation",
+        "permission",
+        "nonce",
+        "duration",
+    ] {
+        let (mut actor, mut peer, now) = admitted_actor_with_clock(true, 60_000);
+        let before = actor.confirmed().document().checkpoint().unwrap();
+        now.store(250, Ordering::SeqCst);
+        actor.step(&host(), Duration::ZERO).unwrap();
+        let (request, _) = receive_json(&mut peer);
+        let mut reply = delivery_reply(&request);
+        match mode {
+            "scope" => reply["scope"]["artifact_id"] = json!("other"),
+            "session" => reply["session_id"] = json!("other"),
+            "participant" => reply["participant_ref"] = json!("other"),
+            "gate" => reply["gate_id"] = json!("other"),
+            "generation" => reply["generation"] = json!("8"),
+            "permission" => reply["permission_version"] = json!("4"),
+            "nonce" => reply["renewal_nonce"] = json!("other"),
+            "duration" => reply["duration_ms"] = json!("2001"),
+            _ => unreachable!(),
+        }
+        mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&reply).unwrap()).unwrap();
+        drive_actor_to_control_error(&mut actor);
+        assert_eq!(
+            actor.into_recovery().0.document().checkpoint().unwrap(),
+            before,
+            "{mode}"
+        );
+    }
+}
+#[test]
+fn owner_permission_advance_cannot_refresh_old_participant_rights_or_pending_delivery() {
+    use std::sync::atomic::Ordering;
+    let (mut actor, mut peer, now) = admitted_actor_with_clock(true, 1000);
+    let before = actor.confirmed().document().checkpoint().unwrap();
+    now.store(500, Ordering::SeqCst);
+    actor.step(&host(), Duration::ZERO).unwrap();
+    let (owner_request, _) = receive_json(&mut peer);
+    let (delivery, _) = receive_json(&mut peer);
+    mooring_collab::write_frame(&mut peer, &renewal_reply(&owner_request, "4")).unwrap();
+    actor.step(&host(), Duration::from_millis(20)).unwrap();
+    assert_eq!(actor.known_owner_permission(), Counter(4));
+    mooring_collab::write_frame(
+        &mut peer,
+        &serde_json::to_vec(&delivery_reply(&delivery)).unwrap(),
+    )
+    .unwrap();
+    drive_actor_to_control_error(&mut actor);
+    assert_eq!(
+        actor.into_recovery().0.document().checkpoint().unwrap(),
+        before
     );
 }
