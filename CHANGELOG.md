@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Origin journal groundwork:** an unwired bounded local provider fsyncs immutable burn records before acknowledgement. It grants no source authority and does not qualify recovery after history loss.
+
 - **Original author groundwork:** inactive host references retain existing human and fixed-attempt agent proofs without upgrading read scope, recapturing credentials or assigning origins.
 
 - **Origin metadata groundwork:** retain target-local origin exclusions and immutable source ordinals across portable replacement. A portable lineage marker supplies correlation only; issuance, recovery coverage and content ingress remain disabled.
