@@ -1657,7 +1657,20 @@ fn native_whole_public_groups_send_before_ack_and_forward_only_host_public_recei
                 let delta = &deltas[*position];
                 let to = delta["revision"].as_str().unwrap().parse::<u64>().unwrap();
                 assert_eq!(output["message"]["type"], "document_update");
-                assert_eq!(output["request_id"], format!("actor-update:{to}"));
+                let recipient = serde_json::to_vec(&[
+                    connection,
+                    output["participant_ref"].as_str().unwrap(),
+                    output["gate_id"].as_str().unwrap(),
+                ])
+                .unwrap();
+                let digest = mooring_protocol::canonical::normalize(&recipient)
+                    .unwrap()
+                    .digest();
+                assert_eq!(output["request_id"], format!("actor-update:{to}:{digest}"));
+                assert_eq!(
+                    output["message"]["request_id"],
+                    format!("actor-update:{to}")
+                );
                 assert_eq!(output["message"]["from_revision"], from.to_string());
                 assert_eq!(output["message"]["to_revision"], to.to_string());
                 assert_eq!(

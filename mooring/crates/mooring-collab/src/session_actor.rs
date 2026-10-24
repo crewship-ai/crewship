@@ -470,16 +470,56 @@ impl RunningDriver {
             "change_ids":change_ids,"state":"pending"}))
     }
     fn flush_input(&mut self) -> io::Result<()> {
-        while let Some(queued) = self.input.pop_front() {
-            if self.owner.native_humans() {
-                if self.feeding_group.is_none() {
-                    self.feeding_group = queued.group.clone();
+        if self.owner.native_humans() {
+            if self.feeding_group.is_some() || self.input.is_empty() {
+                return Ok(());
+            }
+            let group = self
+                .input
+                .front()
+                .and_then(|q| q.group.clone())
+                .ok_or_else(|| invalid("missing queued public group"))?;
+            let count = self
+                .input
+                .iter()
+                .take_while(|q| q.group.as_ref() == Some(&group))
+                .count();
+            let queued: Vec<_> = self.input.drain(..count).collect();
+            let mut metadata = Vec::with_capacity(count);
+            let mut changes = Vec::with_capacity(count);
+            for q in queued {
+                metadata.push((q.connection, q.change.bytes.get()));
+                changes.push(q.change);
+            }
+            match self.actor.enqueue_group(changes) {
+                Ok(()) => {
+                    for (connection, bytes) in metadata {
+                        self.input_bytes -= bytes;
+                        *self.gate_bytes.get_mut(&connection).unwrap() -= bytes;
+                    }
+                    self.feeding_group = Some(group);
                 }
-                if self.feeding_group != queued.group {
-                    self.input.push_front(queued);
-                    break;
+                Err(refused) => {
+                    let capacity = matches!(
+                        refused.reason,
+                        mooring_core::schedule::EnqueueReason::Backpressure
+                    );
+                    for ((connection, _), change) in metadata.into_iter().zip(refused.changes).rev()
+                    {
+                        self.input.push_front(Queued {
+                            connection,
+                            change,
+                            group: Some(group.clone()),
+                        });
+                    }
+                    if !capacity {
+                        return Err(invalid("actor scheduler refused original group"));
+                    }
                 }
             }
+            return Ok(());
+        }
+        while let Some(queued) = self.input.pop_front() {
             let bytes = queued.change.bytes.get();
             match self.actor.enqueue(queued.change) {
                 Ok(()) => {
@@ -739,7 +779,26 @@ impl RunningDriver {
                         let update = &delivery.updates[position];
                         let request = update.request_id.clone();
                         let message = serde_json::json!({"type":"document_update","request_id":request,"scope":self.owner.scope(),"session_id":self.owner.session_id(),"generation":self.owner.initial_owner().fence.generation,"from_revision":update.from,"to_revision":update.to,"encoding":"json","data":update.data,"receipt":delivery.peer_receipt});
-                        self.output(&connection, &request, message)?;
+                        // The transport request namespace is global, whereas
+                        // this SAME committed cut is delivered to many gates.
+                        // Keep its inner cut ID unchanged and scope ONLY the
+                        // outer notification ID to the actual recipient.
+                        let p = self
+                            .participants
+                            .live
+                            .get(&connection)
+                            .ok_or_else(|| invalid("lost peer recipient"))?;
+                        let recipient = serde_json::to_vec(&[
+                            connection.as_str(),
+                            p.participant.as_str(),
+                            p.gate.as_str(),
+                        ])
+                        .map_err(|_| invalid("peer recipient encoding"))?;
+                        let digest = mooring_protocol::canonical::normalize(&recipient)
+                            .map_err(|_| invalid("peer recipient encoding"))?
+                            .digest();
+                        let notification = format!("{request}:{digest}");
+                        self.output(&connection, &notification, message)?;
                         position += 1;
                         self.deliveries[index]
                             .peer_positions

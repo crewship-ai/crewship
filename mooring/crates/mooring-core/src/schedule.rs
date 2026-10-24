@@ -16,6 +16,12 @@ pub struct NotEnqueued<T> {
     pub reason: EnqueueReason,
     pub change: Change<T>,
 }
+/// An already closed transport group returns every original on refusal.
+#[derive(Debug, PartialEq, Eq)]
+pub struct GroupNotEnqueued<T> {
+    pub reason: EnqueueReason,
+    pub changes: Vec<Change<T>>,
+}
 #[derive(Debug, PartialEq, Eq)]
 pub struct InvalidLimits;
 
@@ -334,6 +340,77 @@ pub mod native {
                 }
             }
             result
+        }
+        /// Atomically admits one complete group into an EMPTY unsent queue.
+        /// One clock sample and the existing mutex keep timer preemption from
+        /// splitting it. No configured operation/byte/timer limit is enlarged.
+        pub fn enqueue_group(&self, changes: Vec<Change<T>>) -> Result<(), GroupNotEnqueued<T>> {
+            let mut state = self.shared.lock();
+            let operations = changes
+                .iter()
+                .try_fold(0usize, |n, c| n.checked_add(c.operations.get()));
+            let bytes = changes
+                .iter()
+                .try_fold(0usize, |n, c| n.checked_add(c.bytes.get()));
+            let reason = if state.closed {
+                Some(EnqueueReason::Closed)
+            } else if state.failure.is_some() {
+                Some(EnqueueReason::ClockUnavailable)
+            } else if changes.is_empty()
+                || operations.is_none_or(|n| n > state.queue.limits.max_operations.get())
+            {
+                Some(EnqueueReason::Batch(Rejection::TooManyOperations))
+            } else if bytes.is_none_or(|n| n > state.queue.limits.max_bytes.get()) {
+                Some(EnqueueReason::Batch(Rejection::TooManyBytes))
+            } else if state.queue.operations != 0 {
+                Some(EnqueueReason::Backpressure)
+            } else {
+                None
+            };
+            if let Some(reason) = reason {
+                return Err(GroupNotEnqueued { reason, changes });
+            }
+            let now = match self.clock.now() {
+                Ok(now) => now,
+                Err(_) => {
+                    state.failure = Some(Failure::ClockUnavailable);
+                    self.shared.changed.notify_all();
+                    if let Some(wake) = &self.shared.wake {
+                        wake.notify();
+                    }
+                    return Err(GroupNotEnqueued {
+                        reason: EnqueueReason::ClockUnavailable,
+                        changes,
+                    });
+                }
+            };
+            let mut remaining = changes.into_iter();
+            while let Some(change) = remaining.next() {
+                if let Err(refused) = state.queue.enqueue(now, change) {
+                    // Aggregate bounds/empty queue/same time guarantee that a
+                    // healthy clock cannot fail midway. Still retain everything
+                    // and close on uncertainty rather than publishing a prefix.
+                    let mut originals = state.queue.close();
+                    originals.push(refused.change);
+                    originals.extend(remaining);
+                    state.failure = Some(Failure::ClockInvalid);
+                    self.shared.changed.notify_all();
+                    if let Some(wake) = &self.shared.wake {
+                        wake.notify();
+                    }
+                    return Err(GroupNotEnqueued {
+                        reason: refused.reason,
+                        changes: originals,
+                    });
+                }
+            }
+            self.shared.changed.notify_all();
+            if !state.queue.ready.is_empty() {
+                if let Some(wake) = &self.shared.wake {
+                    wake.notify();
+                }
+            }
+            Ok(())
         }
         /// A local wait timeout is not a delivery lease and grants no authority.
         pub fn receive(&self, timeout: Duration) -> Result<Option<Vec<Change<T>>>, Failure> {

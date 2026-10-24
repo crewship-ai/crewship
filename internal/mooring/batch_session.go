@@ -513,7 +513,7 @@ func validateSessionParticipantBudgets(result protocol.SessionCommitResult) erro
 			"session_id": result.SessionID, "generation": result.Fence.Generation,
 			"from_revision": "18446744073709551615", "to_revision": cut.Revision,
 			"encoding": "json", "data": string(data), "receipt": result.Receipt}
-		if err := check(request, message); err != nil {
+		if err := check(maximumID, message); err != nil {
 			return err
 		}
 	}
