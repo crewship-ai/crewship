@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Mooring ingress groundwork:** an inactive bounded host registry retains original operation membership and authenticated author proofs after admission COMMIT. Session transport remains disabled pending independent review and mixed-author revocation qualification.
+
 - **Mooring session groundwork:** inactive queued commits retain their exact owner and original author proofs; uncertain authorization cannot become a durable refusal. No session transport or agent execution is enabled.
 
 - **Mooring recovery groundwork:** inactive human admissions can retain their original identity and authority across a verified Rust-only replacement. Old store bindings and join tickets cannot follow the new process; issued delivery gates remain recorded until blocked or expired.

@@ -130,3 +130,18 @@ fingerprints, original participant, task and read/dependency arrays. It is pure
 and does not seal authority or admit raw network input. The complete original
 transport wrapper still requires its own raw and canonical byte limits before
 parsing; a normalized change is not evidence that those checks ran.
+
+The inactive host submission registry retains bounded original human/agent
+proofs and complete normalized immutable membership. Its own admission writer
+must COMMIT before publishing a seal. Commit-only processing captures one exact
+owner/runtime binding and a complete-operation original incarnation lease;
+external status continues to require current reader authority. No expired or
+uncertain author proof becomes a durable refusal. A canonical fence change can
+be classified only after successful scalar and original-horizon checks.
+
+This is not raw transport or application-delta admission. It remains inactive,
+with synthetic runtime identities in its SQL authority tests. The current broad
+workspace epoch may over-invalidate an independent author when another person
+is revoked; actual mixed-author D3 qualification is explicitly blocked until a
+separate regression and reviewed subject-relevance design resolve that case.
+No session FIFO, provider execution, participant delivery or editor UI is enabled.
