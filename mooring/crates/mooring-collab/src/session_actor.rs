@@ -33,6 +33,13 @@ struct PendingBatch {
     membership: Vec<PendingAtomic>,
 }
 
+struct TerminalDelivery {
+    request_id: String,
+    receipt: Arc<mooring_protocol::CommitResult>,
+    participants: std::collections::BTreeSet<String>,
+    _budget: crate::session_lane::RetainedControl,
+}
+
 // Stable order of NEW nodes only. Dependencies outside this batch stay exact
 // and unresolved for the host; an earlier SENT node is never called Saved here.
 // Cycles and their descendants stay last in original order for host rejection.
@@ -105,6 +112,7 @@ pub struct RunningDriver {
     originals: BTreeMap<String, Arc<AtomicChange>>,
     operation_changes: BTreeMap<String, String>,
     refused: Vec<Change<Arc<AtomicChange>>>,
+    deliveries: VecDeque<TerminalDelivery>,
 }
 impl RunningDriver {
     /// One bounded live step. Only authenticated inherited-host controls can
@@ -125,6 +133,7 @@ impl RunningDriver {
         self.check_owner()?;
         self.renew_due()?;
         self.renew_participants()?;
+        self.flush_deliveries()?;
         self.flush_input()?;
         self.dispatch_due()?;
         let now = (self.driver.clock)()?;
@@ -176,6 +185,7 @@ impl RunningDriver {
             }
         }
         self.renew_participants()?;
+        self.flush_deliveries()?;
         self.flush_input()?;
         self.dispatch_due()?;
         self.check_owner()
@@ -473,6 +483,34 @@ impl RunningDriver {
             host,
             || (self.driver.clock)(),
         )?;
+        // Reserve the shared control budget BEFORE installing a host snapshot
+        // or removing originals. A racing reader can consume the free slot;
+        // reservation failure is nonterminal recovery, never a local rejection.
+        let result: mooring_protocol::SessionCommitResult =
+            serde_json::from_slice(raw).map_err(|_| invalid("verified receipt shape"))?;
+        let participants: std::collections::BTreeSet<_> = pending
+            .changes
+            .iter()
+            .flat_map(|change| {
+                change
+                    .operations
+                    .iter()
+                    .map(|op| op.participant_ref.clone())
+            })
+            .collect();
+        if participants.is_empty() || participants.len() > session_control::MAX_PARTICIPANTS {
+            return Err(invalid("receipt recipient capacity"));
+        }
+        let charge = serde_json::to_vec(&(&pending.request_id, &result.receipt, &participants))
+            .map_err(|_| invalid("receipt accounting"))?
+            .len();
+        let budget = self.driver.lane.output().reserve_control(charge)?;
+        let delivery = TerminalDelivery {
+            request_id: pending.request_id.clone(),
+            receipt: Arc::new(result.receipt),
+            participants,
+            _budget: budget,
+        };
         let replacement = document.map(|doc| {
             let revision = doc.checkpoint().revision.0;
             (doc, revision)
@@ -487,35 +525,64 @@ impl RunningDriver {
                 self.operation_changes.remove(&op.op_id);
             }
         }
-        // Only verified host receipt bytes are forwarded. No prepare candidate,
-        // local clock or changes_received acknowledgement can create Saved.
-        let result: mooring_protocol::SessionCommitResult =
-            serde_json::from_slice(raw).map_err(|_| invalid("verified receipt shape"))?;
-        let recipients: Vec<_> = self
-            .participants
-            .live
-            .iter()
-            .filter(|(_, p)| {
-                pending.changes.iter().any(|c| {
-                    c.operations
-                        .iter()
-                        .any(|op| op.participant_ref == p.participant)
-                })
-            })
-            .map(|(connection, _)| connection.clone())
-            .collect();
-        for connection in recipients {
-            if self
+        self.deliveries.push_back(delivery);
+        self.flush_deliveries()
+    }
+    fn flush_deliveries(&mut self) -> io::Result<()> {
+        // One closed author must not block independent readers. For each
+        // stable participant, however, retained terminal results stay FIFO.
+        let mut blocked = std::collections::BTreeSet::new();
+        let mut index = 0;
+        while index < self.deliveries.len() {
+            let participants: Vec<_> = self.deliveries[index]
                 .participants
-                .may_send(&connection, &self.owner, (self.driver.clock)()?)
-                .is_ok()
-            {
-                self.output(
-                    &connection,
-                    &pending.request_id,
-                    serde_json::to_value(&result.receipt)
-                        .map_err(|_| invalid("receipt forwarding"))?,
-                )?;
+                .iter()
+                .cloned()
+                .collect();
+            let request = self.deliveries[index].request_id.clone();
+            let receipt = self.deliveries[index].receipt.clone();
+            for participant in participants {
+                if blocked.contains(&participant) {
+                    continue;
+                }
+                let connections: Vec<_> = self
+                    .participants
+                    .live
+                    .iter()
+                    .filter(|(_, p)| p.participant == participant)
+                    .map(|(connection, _)| connection.clone())
+                    .collect();
+                let mut delivered = false;
+                for connection in connections {
+                    // A fresh ticket may authorize a NEW gate for this SAME
+                    // participant. No old lease object is recreated or revived.
+                    if self
+                        .participants
+                        .may_send(&connection, &self.owner, (self.driver.clock)()?)
+                        .is_err()
+                    {
+                        continue;
+                    }
+                    // Current checks precede encoding AND run after writer
+                    // wait in output(). Only verified host receipts reach here.
+                    self.output(
+                        &connection,
+                        &request,
+                        serde_json::to_value(receipt.as_ref())
+                            .map_err(|_| invalid("receipt forwarding"))?,
+                    )?;
+                    delivered = true;
+                }
+                if delivered {
+                    self.deliveries[index].participants.remove(&participant);
+                } else {
+                    blocked.insert(participant);
+                }
+            }
+            if self.deliveries[index].participants.is_empty() {
+                self.deliveries.remove(index);
+            } else {
+                index += 1;
             }
         }
         Ok(())
@@ -567,6 +634,7 @@ impl RunningDriver {
             originals: BTreeMap::new(),
             operation_changes: BTreeMap::new(),
             refused: Vec::new(),
+            deliveries: VecDeque::new(),
         })
     }
     pub fn confirmed(&self) -> &ConfirmedDocument {

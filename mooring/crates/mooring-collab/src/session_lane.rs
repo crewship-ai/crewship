@@ -25,6 +25,8 @@ struct Queues {
     bytes: usize,
     count: usize,
     closed: bool,
+    retained_bytes: usize,
+    retained_count: usize,
 }
 struct Shared {
     state: Mutex<Queues>,
@@ -111,12 +113,60 @@ impl Inbox {
         take()
     }
 }
+/// Private owned budget reservation, not a receipt/authentication capability.
+/// Drop releases accounting even after closure; it carries no protocol bytes.
+pub(crate) struct RetainedControl {
+    shared: Arc<Shared>,
+    bytes: usize,
+}
+impl Drop for RetainedControl {
+    fn drop(&mut self) {
+        let mut q = self.shared.state.lock().unwrap_or_else(|p| p.into_inner());
+        if let (Some(bytes), Some(count)) = (
+            q.retained_bytes.checked_sub(self.bytes),
+            q.retained_count.checked_sub(1),
+        ) {
+            q.retained_bytes = bytes;
+            q.retained_count = count;
+        } else {
+            // An internal accounting failure can never reopen budget/capacity.
+            q.closed = true;
+            self.shared.ready.notify_all();
+            self.shared.wake_actor();
+            drop(q);
+            let _ = self.shared.stop.shutdown(Shutdown::Both);
+        }
+    }
+}
 #[derive(Clone)]
 pub struct Output {
     shared: Arc<Shared>,
     writer: Arc<Mutex<UnixStream>>,
 }
 impl Output {
+    /// Inbound queues and retained verified deliveries share EXACTLY the same
+    /// 128-control/4MiB aggregate. The caller must reserve before settlement.
+    pub(crate) fn reserve_control(&self, bytes: usize) -> io::Result<RetainedControl> {
+        let mut q = self.shared.state.lock().unwrap();
+        let available = session_control::MAX_QUEUED_CONTROL_BYTES
+            .checked_sub(q.bytes)
+            .and_then(|n| n.checked_sub(q.retained_bytes))
+            .ok_or_else(|| invalid("control accounting"))?;
+        if q.closed
+            || bytes == 0
+            || q.count + q.retained_count >= session_control::MAX_QUEUED_CONTROLS
+            || bytes > available
+        {
+            return Err(invalid("retained control capacity"));
+        }
+        q.retained_bytes += bytes;
+        q.retained_count += 1;
+        Ok(RetainedControl {
+            shared: self.shared.clone(),
+            bytes,
+        })
+    }
+
     /// Private control writes do not carry participant content. Participant
     /// outputs must use the separate final-gate API, even on this private FD.
     pub fn send(&self, bytes: &[u8]) -> io::Result<()> {
@@ -215,6 +265,8 @@ impl Lane {
                 bytes: 0,
                 count: 0,
                 closed: false,
+                retained_bytes: 0,
+                retained_count: 0,
             }),
             ready: Condvar::new(),
             stop,
@@ -231,8 +283,9 @@ impl Lane {
                     };
                     let mut q = read_shared.state.lock().unwrap();
                     if q.closed
-                        || q.count >= session_control::MAX_QUEUED_CONTROLS
-                        || canonical.len() > session_control::MAX_QUEUED_CONTROL_BYTES - q.bytes
+                        || q.count + q.retained_count >= session_control::MAX_QUEUED_CONTROLS
+                        || canonical.len()
+                            > session_control::MAX_QUEUED_CONTROL_BYTES - q.bytes - q.retained_bytes
                     {
                         break;
                     }
@@ -599,5 +652,98 @@ mod tests {
         }
         lane.close();
         assert!(inbox.receive_parked(Duration::from_secs(2), &wake).is_err());
+    }
+    #[test]
+    fn retained_delivery_bytes_share_both_inboxes_and_release_exactly_once() {
+        let (lane, mut host) = pair();
+        let actor = fixture("valid-SessionParticipantOpen");
+        let prepare = causal("validate_checkpoint-causal");
+        let charge = session_control::MAX_QUEUED_CONTROL_BYTES - actor.len() - prepare.len();
+        let reservation = lane.output().reserve_control(charge).unwrap();
+        super::super::write_profile_frame(&mut host, &actor, true).unwrap();
+        super::super::write_profile_frame(&mut host, &prepare, true).unwrap();
+        let q = lane.shared.state.lock().unwrap();
+        let (q, timeout) = lane
+            .shared
+            .ready
+            .wait_timeout_while(q, Duration::from_secs(2), |q| q.count != 2 && !q.closed)
+            .unwrap();
+        assert!(!timeout.timed_out());
+        assert!(!q.closed);
+        assert_eq!(
+            q.bytes + q.retained_bytes,
+            session_control::MAX_QUEUED_CONTROL_BYTES
+        );
+        drop(q);
+        assert!(lane.output().reserve_control(1).is_err());
+        assert_eq!(
+            lane.inbox(Route::Actor)
+                .receive(Duration::ZERO)
+                .unwrap()
+                .unwrap(),
+            actor
+        );
+        let replacement = lane.output().reserve_control(actor.len()).unwrap();
+        assert_eq!(
+            lane.inbox(Route::Prepare)
+                .receive(Duration::ZERO)
+                .unwrap()
+                .unwrap(),
+            prepare
+        );
+        drop(replacement);
+        drop(reservation);
+        let q = lane.shared.state.lock().unwrap();
+        assert_eq!(
+            (q.bytes, q.count, q.retained_bytes, q.retained_count),
+            (0, 0, 0, 0)
+        );
+    }
+    #[test]
+    fn retained_control_count_and_closed_drain_never_reset_live_reservations() {
+        let (lane, mut host) = pair();
+        let mut reservations: Vec<_> = (0..session_control::MAX_QUEUED_CONTROLS)
+            .map(|_| lane.output().reserve_control(1).unwrap())
+            .collect();
+        assert!(lane.output().reserve_control(1).is_err());
+        assert!(lane
+            .inbox(Route::Actor)
+            .receive(Duration::ZERO)
+            .unwrap()
+            .is_none());
+        drop(reservations.pop());
+        super::super::write_profile_frame(
+            &mut host,
+            &fixture("valid-SessionParticipantOpen"),
+            true,
+        )
+        .unwrap();
+        let q = lane.shared.state.lock().unwrap();
+        let (q, timeout) = lane
+            .shared
+            .ready
+            .wait_timeout_while(q, Duration::from_secs(2), |q| q.count != 1 && !q.closed)
+            .unwrap();
+        assert!(!timeout.timed_out());
+        assert_eq!(
+            q.retained_count + q.count,
+            session_control::MAX_QUEUED_CONTROLS
+        );
+        drop(q);
+        assert!(lane.output().reserve_control(1).is_err());
+        lane.close();
+        assert_eq!(lane.drain_closed().unwrap().len(), 1);
+        assert!(lane.output().reserve_control(1).is_err());
+        assert_eq!(
+            lane.shared.state.lock().unwrap().retained_count,
+            reservations.len()
+        );
+        drop(reservations);
+        let q = lane.shared.state.lock().unwrap();
+        assert!(q.closed);
+        assert_eq!(
+            (q.retained_bytes, q.retained_count, q.bytes, q.count),
+            (0, 0, 0, 0)
+        );
     }
 }

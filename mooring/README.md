@@ -364,3 +364,24 @@ Deterministic-clock actual-socket tests cover delayed replies, retry/duplicate
 binding, eight transplants, permission advancement and strict expiry. Actual Go
 SQL renewal and retained terminal-delivery/status recovery are separate paired
 qualifications; this slice alone does not repair dropped receipt recovery.
+
+### Retained terminal delivery
+
+After validating an actual correlated host receipt and complete checkpoint, the
+actor reserves receipt bytes and recipient metadata in the same aggregate
+128-control/4MiB budget used by both inherited inboxes. Reservation precedes
+snapshot installation and removal of original pending intents. Capacity failure
+closes the session with those originals retained for host status recovery; it
+never creates a terminal rejection or truncates a Saved result.
+
+Verified terminal receipts remain FIFO for each stable participant while an old
+read gate is expired or revoked. A separately authenticated new gate for that
+same participant can receive them after current owner, permission and ReadLease
+checks, repeated after writer wait. Another participant cannot inherit them.
+No old gate is revived and one blocked author does not block independent
+recipients. Dropping delivered entries releases their shared reservation, even
+when the transport has already closed. Process loss still requires current
+host-authorized status recovery; retained memory is not a durable outcome log.
+Large receipt chunking and the native status path remain separate work. Tests
+use actual inherited sockets with deterministic clocks and mock host authority;
+actual slow FULL-SQL renewal/delivery remains a paired integration check.

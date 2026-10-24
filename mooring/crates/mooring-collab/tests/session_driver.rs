@@ -1298,3 +1298,88 @@ fn owner_permission_advance_cannot_refresh_old_participant_rights_or_pending_del
         before
     );
 }
+
+#[test]
+fn verified_saved_receipts_wait_for_a_new_authenticated_gate_and_keep_author_fifo() {
+    use std::sync::atomic::Ordering;
+    let (mut actor, peer, now) = admitted_actor_with_clock(true, 60_000);
+    let mut checkpoint = actor.confirmed().checkpoint().clone();
+    let mut targets = actor.confirmed().targets().to_vec();
+    let initial = checkpoint.clone();
+    let a = agent_change(&checkpoint.scope, "A", None, " A");
+    let b = agent_change(&checkpoint.scope, "B", Some("A"), " B");
+    let scope = checkpoint.scope.clone();
+    let (peer, first, second) = drive_peer_control(&mut actor, peer, move |mut peer| {
+        mooring_collab::write_frame(
+            &mut peer,
+            &serde_json::to_vec(&participant_input(&scope, &[a], "client-A")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(receive_json(&mut peer).1["message"]["state"], "pending");
+        let first = receive_json(&mut peer).1;
+        mooring_collab::write_frame(
+            &mut peer,
+            &serde_json::to_vec(&participant_input(&scope, &[b], "client-B")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(receive_json(&mut peer).1["message"]["state"], "pending");
+        let second = receive_json(&mut peer).1;
+        (peer, first, second)
+    });
+    assert_eq!(actor.confirmed().checkpoint(), &initial);
+    let a_receipt = mock_commit(&first, &mut checkpoint, &mut targets);
+    let b_receipt = mock_commit(&second, &mut checkpoint, &mut targets);
+    now.store(2100, Ordering::SeqCst); // Old gate expired; no late renewal is sent.
+    let mut peer = peer;
+    mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&a_receipt).unwrap()).unwrap();
+    mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&b_receipt).unwrap()).unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    while actor.confirmed().checkpoint().revision != Counter(12) {
+        actor.step(&host(), Duration::from_millis(20)).unwrap();
+        assert!(std::time::Instant::now() < deadline);
+    }
+    let scope = checkpoint.scope.clone();
+    let versions = checkpoint.versions.clone();
+    let peer = drive_peer_control(&mut actor, peer, move |mut peer| {
+        let opening = json!({"type":"session_participant_open","request_id":"new-private-open","control_profile":"mooring.session-causal.v1",
+            "scope":scope,"session_id":"host-session","runtime_ref":"fresh-authenticated-child","fence":{"generation":"7","token":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},
+            "connection_ref":"new-connection","join":{"type":"session_join","request_id":"new-public-join","ticket":"NEW_AUTHENTICATED_HOST_TICKET","versions":versions}});
+        // A newly authorized DIFFERENT participant may read through its own
+        // status path, but must never inherit this author's retained receipts.
+        let mut other = opening.clone();
+        other["request_id"] = json!("other-private-open");
+        other["connection_ref"] = json!("other-connection");
+        other["join"]["request_id"] = json!("other-public-join");
+        mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&other).unwrap()).unwrap();
+        let other_ticket = receive_json(&mut peer).1;
+        assert_eq!(other_ticket["type"], "ticket_validate");
+        let other_reply = json!({"type":"ticket_validated","request_id":other_ticket["request_id"],"scope":other_ticket["scope"],"session_id":other_ticket["session_id"],
+            "generation":"7","participant_ref":"other-participant","permission_version":"3","granted":{"read":true,"write":false},"versions":versions,
+            "expires_in_ms":"2000","validation_nonce":other_ticket["validation_nonce"],"gate_id":"other-gate"});
+        mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&other_reply).unwrap()).unwrap();
+        let other_joined = receive_json(&mut peer).1;
+        assert_eq!(other_joined["message"]["type"], "session_joined");
+        assert_eq!(other_joined["connection_ref"], "other-connection");
+        mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&opening).unwrap()).unwrap();
+        let ticket = receive_json(&mut peer).1;
+        // No Saved was emitted to either the expired old gate or another
+        // participant: the next frame is the SAME author's ticket validation.
+        // must be the actual new ticket validation, followed by new Joined.
+        assert_eq!(ticket["type"], "ticket_validate");
+        let reply = json!({"type":"ticket_validated","request_id":ticket["request_id"],"scope":ticket["scope"],"session_id":ticket["session_id"],
+            "generation":"7","participant_ref":"participant","permission_version":"3","granted":{"read":true,"write":false},"versions":versions,
+            "expires_in_ms":"2000","validation_nonce":ticket["validation_nonce"],"gate_id":"new-gate"});
+        mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&reply).unwrap()).unwrap();
+        let joined = receive_json(&mut peer).1;
+        assert_eq!(joined["message"]["type"], "session_joined");
+        for expected in [a_receipt, b_receipt] {
+            let delivered = receive_json(&mut peer).1;
+            assert_eq!(delivered["connection_ref"], "new-connection");
+            assert_eq!(delivered["gate_id"], "new-gate");
+            assert_eq!(delivered["message"], expected["receipt"]);
+        }
+        peer
+    });
+    assert_eq!(actor.confirmed().checkpoint(), &checkpoint);
+    drop(peer);
+}
