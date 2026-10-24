@@ -276,3 +276,12 @@ writer against immutable dependency closure before the existing commit fences.
 The empty policy retains strict-current behavior. This store primitive does not
 select a private runtime profile or establish application/participant authority;
 those require separately qualified integration.
+
+`OwnerStore.Release` is a host-only voluntary shutdown primitive. The exact
+current token/scope/generation must pass under the FULL SQL writer; expiry and
+closure of its gates commit together. It never deletes the owner generation,
+changes original gate expiry/ordinal, or fabricates a blocked acknowledgement.
+The manager must stop/drain the actual old runtime. A subsequent Acquire may
+immediately issue a new owner generation, but replacement content admission
+must still wait for the original outstanding delivery barrier. A stale release
+cannot affect that new owner. This does not enable any session or public route.

@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Mooring ownership groundwork:** a host can voluntarily release its exact current owner lease, preserving its generation and every issued delivery expiry. Replacement ownership does not acknowledge pending delivery gates.
+
 - **Mooring admission groundwork:** an inactive human registry preserves original Page authority, burns bounded join tickets once and opens current SQL delivery gates. Its store wrapper holds the restore fence through the complete operation.
 
 - **Mooring authorization groundwork:** an inactive human Page authority adapter checks current canonical grants, folder scope and original credential inside the protected writer transaction.
