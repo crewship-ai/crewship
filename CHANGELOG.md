@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **CLI object sharing accepts routine Publish.** `crewship share` and `unshare` now accept `--operation publish`, matching the Share dialog. The server still requires Edit in the resulting policy; unrelated grants and issuer provenance are preserved, and conflicts are never retried.
+
 - Mooring SDK recovery refuses incomplete full snapshots even when Yrs reports no missing updates, preserving every original unsaved draft instead of accepting silently omitted history.
 
 - **Audit history damage is detected without operator requests.** Full instance and workspace verification now runs at startup and hourly outside writer transactions; post-upgrade defects and unchained fallback records alert instance admins. Delivery receipts commit with the inbox notice and survive inbox purge/retention, so handled security notices are not repeatedly restored or resent.
