@@ -33,6 +33,12 @@ only a fixed summary and a small numeric/boolean outcome metadata whitelist;
 provider errors, argv, arbitrary reason strings and references are omitted.
 The shared logger and ordinary journal behavior are unchanged.
 
+A private detached watcher's panic stops that observer with a fixed supervision
+warning, without exposing its value or stack. It retains the uncertain runtime's
+hold, admission and capacity and emits no terminal outcome. Restarting supervision
+and independently confirming runtime death remain integration requirements;
+panic containment does not qualify private execution or authorize cleanup.
+
 `mooring_core::adapter::PrepareAdapter` is a pure application boundary: validate
 an opaque checkpoint and prepare one normalized immutable atomic change from a
 restored/forked authoritative state. Its candidate owns a full checkpoint and

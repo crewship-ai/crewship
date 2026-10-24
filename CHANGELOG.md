@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Private detached supervision:** an observer panic emits an opaque warning while retaining the unconfirmed runtime's admission and capacity. It cannot publish completion or release resources; private execution remains disabled.
+
 - **Private diagnostic boundaries:** strict unused runtimes discard request-local helper logs and publish only fixed journal summaries with bounded outcome metadata, including gate and exec-creation failures. Ordinary diagnostics remain unchanged; execution stays disabled and unqualified.
 
 - **Private runtime diagnostics:** strict host-only suppression also masks loop-guard and inspection diagnostics and returns opaque errors for private panics. Ordinary diagnostics remain unchanged; private execution is still unqualified and disabled.
