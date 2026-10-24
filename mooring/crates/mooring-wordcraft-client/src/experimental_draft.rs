@@ -153,6 +153,18 @@ impl WordCraftLocalDraft {
             .apply_verified_document_update(data)
             .map_err(error)
     }
+    /// Local self-echo classification only AFTER retained original membership
+    /// was checked against the actual authenticated host's selected atomic cut.
+    /// This is not an acknowledgement, receipt issuer or permission grant.
+    pub fn apply_verified_own_document_update(
+        &mut self,
+        data: &str,
+        operation_id: &str,
+    ) -> Result<(), String> {
+        self.client
+            .apply_verified_own_document_update(data, operation_id)
+            .map_err(error)
+    }
     pub fn undo(&mut self, operation_id: &str) -> Result<WordCraftLocalProposal, String> {
         Ok(WordCraftLocalProposal {
             proposal: self.client.undo_e3(operation_id).map_err(error)?,
@@ -175,6 +187,26 @@ pub struct WordCraftLocalProposal {
 }
 #[wasm_bindgen]
 impl WordCraftLocalProposal {
+    /// Synchronous immutable intent capture. The supplied checkpoint is NOT a
+    /// Saved cut or authority; host author-view replay must verify this digest.
+    pub fn human_payload_json(&self, authored_checkpoint: &[u8]) -> Result<String, String> {
+        use mooring_protocol::{boundary::encode_base64, control::encode_checkpoint};
+        if authored_checkpoint.len() > MAX_CHECKPOINT {
+            return Err("quota_exceeded".into());
+        }
+        let digest = encode_checkpoint(authored_checkpoint)
+            .map_err(|_| "quota_exceeded")?
+            .digest;
+        let payload = serde_json::json!({"kind":"humancrdt.update","operation_id":self.proposal.operation_id,
+            "origin":self.proposal.origin.to_string(),"update":encode_base64(&self.proposal.update,262144).map_err(|_|"quota_exceeded")?,
+            "authored_frontier":encode_base64(&self.proposal.authored_frontier,262144).map_err(|_|"quota_exceeded")?,
+            "targets":self.proposal.targets,"authored_checkpoint_state_digest":digest});
+        let raw = encode(&payload)?;
+        if raw.len() > 262144 {
+            return Err("quota_exceeded".into());
+        }
+        Ok(raw)
+    }
     pub fn operation_id(&self) -> String {
         self.proposal.operation_id.clone()
     }
@@ -235,6 +267,48 @@ mod tests {
             .checkpoint()
             .unwrap();
         (v, cp)
+    }
+    #[test]
+    fn own_host_echo_preserves_pending_b_originals_and_peer_format_through_undo() {
+        let (_, cp) = fixture();
+        let mut own = WordCraftLocalDraft::new(&cp, "17", "writer").unwrap();
+        let mut peer = WordCraftLocalDraft::new(&cp, "18", "writer").unwrap();
+        let command = |text: &str, bold: bool| {
+            json!({"kind":"text.insert","target_id":"p_one","at":{"kind":"start"},"text":text,"properties":{"bold":bold,"italic":true}}).to_string()
+        };
+        let a = own.edit("A", &command("A", false)).unwrap();
+        let cut_a = own.optimistic_checkpoint().unwrap();
+        let immutable_payload = a.human_payload_json(&cut_a).unwrap();
+        let b = own.edit("B", &command("B😀", false)).unwrap();
+        let before_echo = own.optimistic_checkpoint().unwrap();
+        let data =
+            mooring_wordcraft::document_update::encode(&a.update(), &["p_one".into()]).unwrap();
+        own.apply_verified_document_update(&data).unwrap();
+        assert_eq!(own.optimistic_checkpoint().unwrap(), before_echo);
+        assert_eq!(a.human_payload_json(&cut_a).unwrap(), immutable_payload);
+        let payload: Value = serde_json::from_str(&immutable_payload).unwrap();
+        assert_eq!(
+            payload["authored_checkpoint_state_digest"],
+            mooring_protocol::control::encode_checkpoint(&cut_a)
+                .unwrap()
+                .digest
+        );
+        assert_eq!(payload["origin"], "17");
+        assert_eq!(
+            payload["update"],
+            mooring_protocol::boundary::encode_base64(&a.update(), 262144).unwrap()
+        );
+        peer.apply_verified_document_update(&data).unwrap();
+        let c = peer.edit("C", &command("PEER", true)).unwrap();
+        let data_c =
+            mooring_wordcraft::document_update::encode(&c.update(), &["p_one".into()]).unwrap();
+        own.apply_verified_document_update(&data_c).unwrap();
+        let after_peer = own.native_json().unwrap();
+        own.undo("undo-B").unwrap();
+        assert_eq!(own.native_json().unwrap(), peer.native_json().unwrap());
+        own.redo("redo-B").unwrap();
+        assert_eq!(own.native_json().unwrap(), after_peer);
+        assert!(!b.update().is_empty());
     }
     #[test]
     fn native_selection_facade_preserves_original_native_bytes_and_retry() {

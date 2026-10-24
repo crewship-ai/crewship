@@ -6,8 +6,8 @@
 use crate::{command::Command, AdapterError, Document};
 use mooring_text::yrs::undo::UndoManager;
 use mooring_text::yrs::{
-    updates::decoder::Decode, ClientID, Doc, Map, Observable, OffsetKind, Options, Origin, Out,
-    ReadTxn, Transact, Update,
+    updates::decoder::Decode, ClientID, Doc, IdSet, Map, Observable, OffsetKind, Options, Origin,
+    Out, ReadTxn, Transact, Update,
 };
 use std::{
     cell::RefCell,
@@ -90,6 +90,10 @@ pub struct DraftReplica {
     used_origins: BTreeSet<u64>,
     proposals: BTreeMap<String, (Action, Proposal)>,
     capture_order: Vec<String>,
+    // Local conservative refusal evidence, NOT precise delete ownership.
+    // Whole foreign/unclassified cumulative deletion sets can over-refuse.
+    // Always a subset of the qualified live checkpoint's deletion set.
+    foreign_or_unclassified_deletions: IdSet,
 }
 /// Own unsaved evidence; never interpreted as a host checkpoint/receipt.
 pub struct RecoveryDraft {
@@ -188,6 +192,7 @@ impl DraftReplica {
             used_origins: BTreeSet::from([origin]),
             proposals: BTreeMap::new(),
             capture_order: Vec::new(),
+            foreign_or_unclassified_deletions: IdSet::default(),
         })
     }
     pub fn native(&self) -> Result<serde_json::Value, AdapterError> {
@@ -340,7 +345,16 @@ impl DraftReplica {
         self.require_native_access()?;
         if !self.proposals.contains_key(operation_id) {
             let item = self.undo.undo_stack().last().ok_or(ClientError::NoChange)?;
-            if item.meta != UndoKind::InsertOrFormat {
+            if item.meta != UndoKind::InsertOrFormat
+                || !item
+                    .insertions()
+                    .intersect(&self.foreign_or_unclassified_deletions)
+                    .is_empty()
+                || !item
+                    .deletions()
+                    .intersect(&self.foreign_or_unclassified_deletions)
+                    .is_empty()
+            {
                 return Err(ClientError::UnsupportedUndo);
             }
         }
@@ -350,7 +364,16 @@ impl DraftReplica {
         self.require_native_access()?;
         if !self.proposals.contains_key(operation_id) {
             let item = self.undo.redo_stack().last().ok_or(ClientError::NoChange)?;
-            if item.meta != UndoKind::InsertOrFormat {
+            if item.meta != UndoKind::InsertOrFormat
+                || !item
+                    .insertions()
+                    .intersect(&self.foreign_or_unclassified_deletions)
+                    .is_empty()
+                || !item
+                    .deletions()
+                    .intersect(&self.foreign_or_unclassified_deletions)
+                    .is_empty()
+            {
                 return Err(ClientError::UnsupportedUndo);
             }
         }
@@ -524,6 +547,15 @@ impl DraftReplica {
         update: &[u8],
         targets: &[String],
     ) -> Result<(), ClientError> {
+        self.apply_verified_delta(origin, update, targets, true)
+    }
+    fn apply_verified_delta(
+        &mut self,
+        origin: u64,
+        update: &[u8],
+        targets: &[String],
+        foreign_or_unclassified: bool,
+    ) -> Result<(), ClientError> {
         if origin == 0 || origin >= (1 << 53) || update.len() > 262_144 {
             return Err(ClientError::InvalidState);
         }
@@ -577,11 +609,22 @@ impl DraftReplica {
         if before_native != after_native {
             return Err(ClientError::InvalidState);
         }
+        // Do NOT subtract optimistic tombstones: an already locally undone X
+        // can still be claimed deleted by a foreign original. Conservatively
+        // retain the incoming whole set only after full disposable validation.
+        let incoming_deletions = Update::decode_v1(update)
+            .map_err(|_| ClientError::InvalidState)?
+            .delete_set()
+            .clone();
         self.document
             .doc
             .transact_mut_with("verified-host")
             .apply_update(Update::decode_v1(update).map_err(|_| ClientError::InvalidState)?)
             .map_err(|_| ClientError::InvalidState)?;
+        if foreign_or_unclassified {
+            self.foreign_or_unclassified_deletions
+                .merge_with(incoming_deletions);
+        }
         Ok(())
     }
     /// Apply data from an already authenticated/correlated host frame. No
@@ -591,6 +634,21 @@ impl DraftReplica {
     pub fn apply_verified_document_update(&mut self, data: &str) -> Result<(), ClientError> {
         let parsed = crate::document_update::decode(data).map_err(|_| ClientError::InvalidState)?;
         self.apply_verified_host_delta(self.origin, &parsed.update, &parsed.targets)
+    }
+    /// Local self-echo classification ONLY after the caller matched the actual
+    /// host atomic cut to this exact retained original operation membership.
+    /// Knowing an operation ID alone authenticates no transport or permission.
+    /// This still validates/merges actual bytes; it emits no ACK or Saved state.
+    pub fn apply_verified_own_document_update(
+        &mut self,
+        data: &str,
+        operation_id: &str,
+    ) -> Result<(), ClientError> {
+        if !self.proposals.contains_key(operation_id) {
+            return Err(ClientError::InvalidOperation);
+        }
+        let parsed = crate::document_update::decode(data).map_err(|_| ClientError::InvalidState)?;
+        self.apply_verified_delta(self.origin, &parsed.update, &parsed.targets, false)
     }
     /// Observed optimistic state only; never a confirmed receipt or authority.
     pub fn state_vector(&self) -> Vec<u8> {

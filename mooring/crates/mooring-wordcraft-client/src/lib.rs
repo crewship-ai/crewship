@@ -3,7 +3,9 @@
 //! install, receipt minting or human CRDT update admission is implemented here.
 mod experimental_draft;
 mod receipt;
-pub use receipt::WordCraftPendingCommit;
+pub use receipt::{
+    validate_host_bootstrap, validate_host_peer_document_update, WordCraftPendingCommit,
+};
 
 use mooring_core::adapter::{PrepareAdapter, Prepared, PreparedCandidate};
 use mooring_protocol::{
