@@ -588,7 +588,7 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 	// store is slow or stuck. ExecID lives on the provider ExecResult so we
 	// record it in the payload for correlation with the exec.command end
 	// event.
-	if req.HostOutputDir != "" {
+	if req.HostOutputDir != "" || req.strictContentPrivacy {
 		return string(captureBuf)
 	}
 	emitCtx := ctx

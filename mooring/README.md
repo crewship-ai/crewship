@@ -5,6 +5,21 @@ by Crewship, so it does not start a service or change the deployed application.
 The Go host remains the authority for permissions, fencing, durable writes and
 receipts. Draining a Rust batch never means the changes have been saved.
 
+`AgentRunRequest.WithStrictContentPrivacy` is unused host-side groundwork for a
+future task runtime. Its private Go bit cannot be selected or cleared by JSON.
+It suppresses generic session/caller events, response and raw-output journals,
+terminal CLI diagnostic journals, tool observers, episodic prompt queries,
+approval prompt previews and tmux wrapping. Ordinary runs keep their existing
+behavior. Private errors carry no child diagnostic and remain unqualified
+outcomes, never evidence of a canonical permission denial or successful save.
+
+This option does not qualify private execution. Native CLI histories, tool side
+effects, writable container files, shared mounts and existing container/log API
+readouts still block enabling Mooring task execution. A future runtime needs a
+qualified isolated task environment or Page-scoped readout fencing, plus the
+actual dispatcher, participant and retirement barriers. No paid provider launch,
+content route or runtime profile is enabled by this option.
+
 `mooring_core::adapter::PrepareAdapter` is a pure application boundary: validate
 an opaque checkpoint and prepare one normalized immutable atomic change from a
 restored/forked authoritative state. Its candidate owns a full checkpoint and

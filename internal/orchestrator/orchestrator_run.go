@@ -140,6 +140,13 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// private egress on a shared/cloud host — the operator must also set
 	// CREWSHIP_ALLOW_PRIVATE_ENDPOINTS. Normalizing once (rather than at each
 	// read site) keeps a future third consumer safe by construction.
+	if req.strictContentPrivacy {
+		req = req.WithStrictContentPrivacy()
+		// The private runtime confirms process existence through OnExecStarted.
+		// No generic event callback receives text, tool inputs or CLI metadata.
+		handler = nil
+	}
+	defer func() { err = privateRunError(req, err) }()
 	req.AllowPrivateEndpoints = effectiveAllowPrivateEndpoints(req.AllowPrivateEndpoints)
 
 	// E0 run identity. Normalised HERE, once, ahead of everything that derives
@@ -191,7 +198,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 			// one just reuses the captured stack.
 			telemetry.RecoverPanic(span, r)
 		}
-		telemetry.RecordError(span, err)
+		telemetry.RecordError(span, privateRunError(req, err))
 		span.End()
 	}()
 
@@ -302,7 +309,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// rather than storing {"user_prompt": "", "user_prompt_truncated":
 	// false} on every gated run regardless of ApprovalMode.
 	var review map[string]any
-	if req.UserMessage != "" {
+	if req.UserMessage != "" && !req.strictContentPrivacy {
 		review = map[string]any{
 			"user_prompt":           userPreview,
 			"user_prompt_truncated": userTruncated,
@@ -862,7 +869,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	const responseCap = 8 * 1024
 	var responseBuf strings.Builder
 	journalTap := EventHandler(func(event AgentEvent) {
-		if event.Type == "text" && responseBuf.Len() < responseCap {
+		if !req.strictContentPrivacy && event.Type == "text" && responseBuf.Len() < responseCap {
 			remaining := responseCap - responseBuf.Len()
 			if len(event.Content) <= remaining {
 				responseBuf.WriteString(event.Content)
@@ -907,7 +914,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	usageModel := req.LLMModel
 	tappedHandler := EventHandler(func(event AgentEvent) {
 		inBand.observe(event)
-		if event.Type == "system" {
+		if !req.strictContentPrivacy && event.Type == "system" {
 			if meta, ok := event.Metadata.(map[string]any); ok {
 				if model, ok := meta["model"].(string); ok && model != "" {
 					usageModel = model
@@ -920,7 +927,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		// per run: the dropped field is data the CLI sent us and nothing else
 		// reports its loss, which is how a shape change stays invisible until
 		// somebody notices a surface has gone quiet (#1954).
-		if !loggedDecodeError {
+		if !req.strictContentPrivacy && !loggedDecodeError {
 			if m, ok := event.Metadata.(map[string]interface{}); ok {
 				if note, _ := m["decode_error"].(string); note != "" {
 					loggedDecodeError = true
@@ -937,7 +944,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		// ground truth for what the API served (the subscription may serve
 		// a lower tier than the requested --model). Compare against the
 		// requested override and WARN loudly on a family fallback.
-		if event.Type == "system" {
+		if !req.strictContentPrivacy && event.Type == "system" {
 			if m, ok := event.Metadata.(map[string]interface{}); ok {
 				if !loggedModel {
 					if actual, ok := m["model"].(string); ok && actual != "" {
@@ -1026,7 +1033,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// so any secret straddling the final chunk (or short output held back
 	// entirely) is scrubbed and the redacted tail still reaches the user.
 	flushScrub()
-	if response := strings.TrimSpace(responseBuf.String()); response != "" && req.HostOutputDir == "" {
+	if response := strings.TrimSpace(responseBuf.String()); response != "" && req.HostOutputDir == "" && !req.strictContentPrivacy {
 		responseSummary := response
 		if len(responseSummary) > 240 {
 			responseSummary = responseSummary[:240] + "…"
@@ -1182,14 +1189,16 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		// An exit-0 run the agent itself called failed must not read as a clean
 		// exec in Crow's Nest just because the process was polite about it.
 		endPayload["in_band_error"] = true
-		// Persist terminal diagnostics separately from the bounded raw-output
-		// prefix: a long run's final result is outside that prefix.
-		diagnosticScrub := scrubber.New()
-		diagnosticScrub.AddSecretValues(secretValues...)
-		endPayload["error_subtype"] = diagnosticScrub.Scrub(inBand.subtype)
-		endPayload["num_turns"] = inBand.turns
-		if cause := inBand.Err(); cause != nil {
-			endPayload["error_message"] = diagnosticScrub.Scrub(cause.Error())
+		if !req.strictContentPrivacy {
+			// Persist terminal diagnostics separately from the bounded raw-output
+			// prefix: a long run's final result is outside that prefix.
+			diagnosticScrub := scrubber.New()
+			diagnosticScrub.AddSecretValues(secretValues...)
+			endPayload["error_subtype"] = diagnosticScrub.Scrub(inBand.subtype)
+			endPayload["num_turns"] = inBand.turns
+			if cause := inBand.Err(); cause != nil {
+				endPayload["error_message"] = diagnosticScrub.Scrub(cause.Error())
+			}
 		}
 	}
 	if running {
@@ -1329,7 +1338,9 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// drift those two apart, and a quiet session writes no entry thanks
 	// to hash-based dedup. Best-effort: failures are swallowed inside
 	// recordContainerSnapshot so a probe error never breaks the run.
-	o.recordContainerSnapshot(ctx, req, req.ContainerID)
+	if !req.strictContentPrivacy {
+		o.recordContainerSnapshot(ctx, req, req.ContainerID)
+	}
 
 	return execErr
 }
@@ -1409,7 +1420,7 @@ func (o *Orchestrator) assembleSystemPrompt(ctx context.Context, req *AgentRunRe
 	// — a recall failure logs and continues so a flaky Ollama embed
 	// service never blocks a run. Budget is 2 KB of the 8 KB headroom
 	// reserved in promptBuf.Grow above.
-	if recaller := o.getEpisodicRecall(); recaller != nil && req.UserMessage != "" {
+	if recaller := o.getEpisodicRecall(); recaller != nil && req.UserMessage != "" && !req.strictContentPrivacy {
 		recallCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		rendered, err := recaller.Recall(recallCtx, EpisodicRecallInput{
 			WorkspaceID: req.WorkspaceID,
@@ -2096,6 +2107,20 @@ func shellJoin(args ...string) string {
 // the run. Pure extraction from RunAgent; the only error is the shared E2BIG
 // guard for arg-path adapters.
 func (o *Orchestrator) buildExecCommand(ctx context.Context, req AgentRunRequest, cmd, env []string, workDir string) (provider.ExecConfig, error) {
+	if req.strictContentPrivacy {
+		// Bypass tmux and its writable argv/env/script files. This does not
+		// qualify the native CLI's own histories or a shared container.
+		if req.HostOutputDir != "" || req.DurableOutputDir != "" || req.managedLaunch != nil {
+			return provider.ExecConfig{}, ErrPrivateRunUnqualified
+		}
+		cfg := provider.ExecConfig{ContainerID: req.ContainerID, Cmd: directRunCommand(req.RunID, cmd), Env: env, WorkingDir: workDir, User: "1001:1001"}
+		if getAdapter(req.CLIAdapter).PromptViaStdin(req) {
+			cfg.Stdin = strings.NewReader(req.UserMessage)
+		} else if tooLarge, _ := firstOversizedArg(cmd); tooLarge {
+			return provider.ExecConfig{}, ErrPrivateRunUnqualified
+		}
+		return cfg, nil
+	}
 	if req.HostOutputDir != "" {
 		if req.managedLaunch != nil {
 			return managedExecConfig(req, cmd, env, workDir)
