@@ -498,3 +498,16 @@ result, exact outer/inner SessionJoined correlation, burned ticket replay denial
 and original credential revocation refusing both new tickets and gate renewal.
 HTTP/work contexts remain synthetic fixtures; no document content is delivered,
 no source origin is issued and this is not Saved or production-path acceptance.
+
+The actual production-actor composition probe joins an original human, retains
+structured sealed A/B inputs, and uses the reviewed host FIFO and full committer.
+A single-reader observational enqueue counter witnesses both mutation tokens
+arriving before A is released; it grants no authority. Real native preparation
+and FULL SQL produce revisions1/2, native receipt forwarding follows verification,
+and a subsequent C request carries B's exact full basis. Intentional uncertainty
+for C closes the child with no C SQL operation. The independent late-owner probe
+requires zero SQL/Saved and no later submit callback. Authentication/original
+commands remain synthetic fixtures and output is a private collector. Normal Go
+with an optimized actor passes; race-instrumented SQL can exceed the initial2s
+delivery gate, so continuous participant renewal/status recovery is still an
+explicit missing qualification. No route, raw source issuer or deployment is added.
