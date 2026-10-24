@@ -23,6 +23,7 @@ import (
 // its confirmed attempt. It is not a serialized run origin, an agent bearer,
 // or a participant capability. No route or dispatcher uses these dormant types.
 type collaborationAgentTaskBinding struct {
+	authorVector       collaborationAuthorVector
 	key                mooring.SessionKey
 	intent             string
 	work               collaborationAgentWorkBinding
@@ -106,6 +107,8 @@ type collaborationAgentMandateEntry struct {
 // derived from these authenticated fields, never a payload or projected user.
 // Private registry/reference fields prevent JSON from creating a host proof.
 type collaborationAgentPageAccess struct {
+	authorVector              collaborationAuthorVector
+	currentDeliveryPermission string
 	collaborationHumanPageAccess
 	agentID, crewID, runID, workID string
 	attempt, generation            int64
@@ -243,6 +246,10 @@ func (s *collaborationAgentMandateStore) prepareAcceptedTask(ctx context.Context
 	if e != nil || !live || !messageMatches || !s.pages.artifactAgentPolicyAllows(pageCtx, w.workspaceID, w.crewID) || !collaborationAgentGrantAllows(pageCtx, s.pages, key.WorkspaceID, proof.record, w.agentID, write) {
 		return nil, errCollaborationAgentAccess
 	}
+	vector, e := captureCollaborationAuthorVector(ctx, tx, key, source.UserID, w.agentID, w.crewID)
+	if e != nil {
+		return nil, e
+	}
 	s.pruneLocked(boot, tick)
 	if len(s.pending)+len(s.attached) >= s.capacity {
 		return nil, errCollaborationAgentAccess
@@ -260,7 +267,7 @@ func (s *collaborationAgentMandateStore) prepareAcceptedTask(ctx context.Context
 	if tickNow >= expiry {
 		return nil, errCollaborationAgentAccess
 	}
-	task := collaborationAgentTaskBinding{key: key, intent: intent, work: w, messageID: message, originalHuman: *receipt, originalCredential: *source, permissionVersion: proof.permissionVersion, memberID: proof.memberID, memberRevision: proof.memberRevision, ingress: stamp}
+	task := collaborationAgentTaskBinding{authorVector: vector, key: key, intent: intent, work: w, messageID: message, originalHuman: *receipt, originalCredential: *source, permissionVersion: proof.permissionVersion, memberID: proof.memberID, memberRevision: proof.memberRevision, ingress: stamp}
 	s.pending[id] = collaborationAgentPendingEntry{task: task, boot: boot, expiresTick: expiry}
 	return &collaborationAgentPending{store: s, id: id}, nil
 }
@@ -389,7 +396,9 @@ func (s *collaborationAgentMandateStore) Check(r *http.Request, tx *sql.Tx, hand
 	if !time.Now().Before(page.credentialExpiry) {
 		return result, errCollaborationAgentAccess
 	}
-	result = collaborationAgentPageAccess{collaborationHumanPageAccess: page, agentID: a.agentID, crewID: a.crewID, runID: a.runID, workID: a.workID, attempt: a.attempt, generation: a.generation, store: s, mandateRef: handle, credentialBinding: entry.binding.credentialSHA256, intent: intent}
+	deliveryPermission := page.permissionVersion
+	page.permissionVersion = entry.binding.task.permissionVersion // immutable original metadata
+	result = collaborationAgentPageAccess{authorVector: entry.binding.task.authorVector, currentDeliveryPermission: deliveryPermission, collaborationHumanPageAccess: page, agentID: a.agentID, crewID: a.crewID, runID: a.runID, workID: a.workID, attempt: a.attempt, generation: a.generation, store: s, mandateRef: handle, credentialBinding: entry.binding.credentialSHA256, intent: intent}
 	return result, nil
 }
 

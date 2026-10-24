@@ -362,10 +362,17 @@ func (s *collaborationSubmissionRegistry) bind(owner mooring.OwnerLease, binding
 // Only successful canonical scalar reads (or known canonical absence) classify
 // revocation. Loader/policy/storage errors remain nonterminal. This is not an ACL.
 func collaborationHumanCapturedFenceChanged(ctx context.Context, tx *sql.Tx, key mooring.SessionKey, admission collaborationHumanAdmission) (bool, error) {
+	if !admission.authorVector.matches(key, admission.source.UserID, "", "") {
+		return false, errCollaborationAuthorUnqualified
+	}
+	changed, err := collaborationAuthorVectorChanged(ctx, tx, admission.authorVector)
+	if err != nil {
+		return false, err
+	}
 	var workspaceRevision string
 	var userRevision, memberID, workspaceDeleted, userSuspended sql.NullString
 	var memberRevision sql.NullInt64
-	err := tx.QueryRowContext(ctx, `SELECT CAST(w.authority_revision AS TEXT),CAST(u.authority_revision AS TEXT),m.id,m.access_revision,w.deleted_at,u.suspended_at
+	err = tx.QueryRowContext(ctx, `SELECT CAST(w.authority_revision AS TEXT),CAST(u.authority_revision AS TEXT),m.id,m.access_revision,w.deleted_at,u.suspended_at
  FROM workspaces w LEFT JOIN users u ON u.id=? LEFT JOIN workspace_members m ON m.workspace_id=w.id AND m.user_id=? WHERE w.id=?`, admission.source.UserID, admission.source.UserID, key.WorkspaceID).Scan(&workspaceRevision, &userRevision, &memberID, &memberRevision, &workspaceDeleted, &userSuspended)
 	if errors.Is(err, sql.ErrNoRows) {
 		return true, nil
@@ -376,5 +383,5 @@ func collaborationHumanCapturedFenceChanged(ctx context.Context, tx *sql.Tx, key
 	if !chataudience.ValidUserAuthorityRevision(workspaceRevision) || (userRevision.Valid && !chataudience.ValidUserAuthorityRevision(userRevision.String)) || (memberID.Valid && memberID.String == "") || (memberRevision.Valid && memberRevision.Int64 < 1) {
 		return false, errCollaborationSubmission
 	}
-	return workspaceDeleted.Valid || userSuspended.Valid || !userRevision.Valid || !memberID.Valid || !memberRevision.Valid || workspaceRevision != admission.permission || userRevision.String != admission.source.UserAuthorityRevision || memberID.String != admission.member || memberRevision.Int64 != admission.memberRevision, nil
+	return changed || workspaceDeleted.Valid || userSuspended.Valid || !userRevision.Valid || !memberID.Valid || !memberRevision.Valid || userRevision.String != admission.source.UserAuthorityRevision || memberID.String != admission.member || memberRevision.Int64 != admission.memberRevision, nil
 }

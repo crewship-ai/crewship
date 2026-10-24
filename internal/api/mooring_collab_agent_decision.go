@@ -58,7 +58,7 @@ func (s *collaborationAgentMandateStore) DecideCaptured(ctx context.Context, tx 
 	write, valid := collaborationAgentIntent(intent)
 	capturedWrite, capturedValid := collaborationAgentIntent(captured.intent)
 	allowedWrite, _ := collaborationAgentIntent(task.intent)
-	if !valid || !capturedValid || capturedWrite && !allowedWrite || write && !capturedWrite || captured.agentID != a.agentID || captured.crewID != a.crewID || captured.runID != a.runID || captured.workID != a.workID || captured.attempt != a.attempt || captured.generation != a.generation || captured.credentialBinding != entry.binding.credentialSHA256 || captured.permissionVersion != task.permissionVersion || captured.memberID != task.memberID || captured.memberRevision != task.memberRevision || captured.credentialExpiry.IsZero() || !time.Now().Before(captured.credentialExpiry) {
+	if !valid || !capturedValid || capturedWrite && !allowedWrite || write && !capturedWrite || captured.agentID != a.agentID || captured.crewID != a.crewID || captured.runID != a.runID || captured.workID != a.workID || captured.attempt != a.attempt || captured.generation != a.generation || captured.credentialBinding != entry.binding.credentialSHA256 || captured.permissionVersion != task.permissionVersion || captured.authorVector != task.authorVector || captured.memberID != task.memberID || captured.memberRevision != task.memberRevision || captured.credentialExpiry.IsZero() || !time.Now().Before(captured.credentialExpiry) {
 		return result, errCollaborationAgentAccess
 	}
 	release, err := s.fence.acquireOriginal(task.ingress)
@@ -116,6 +116,8 @@ func (s *collaborationAgentMandateStore) DecideCaptured(ctx context.Context, tx 
 		return result, errCollaborationAgentAccess
 	}
 	verified := captured
+	verified.currentDeliveryPermission = page.permissionVersion
+	page.permissionVersion = captured.permissionVersion // do not refresh original metadata
 	verified.collaborationHumanPageAccess = page
 	return collaborationAgentDecision{kind: collaborationAgentAllowed, access: verified}, nil
 }
@@ -155,10 +157,17 @@ func collaborationAgentCapturedRunHorizon(ctx context.Context, tx *sql.Tx, task 
 // row) establish a changed fence. This is not a second ACL: all current Page,
 // source, grant and crew policy still runs above before an allowed decision.
 func collaborationAgentCapturedFenceChanged(ctx context.Context, tx *sql.Tx, task collaborationAgentTaskBinding) (bool, error) {
+	if !task.authorVector.matches(task.key, task.originalCredential.UserID, task.work.agentID, task.work.crewID) {
+		return false, errCollaborationAuthorUnqualified
+	}
+	changed, err := collaborationAuthorVectorChanged(ctx, tx, task.authorVector)
+	if err != nil {
+		return false, err
+	}
 	var workspaceRevision string
 	var userRevision, memberID, workspaceDeleted, userSuspended sql.NullString
 	var memberRevision sql.NullInt64
-	err := tx.QueryRowContext(ctx, `SELECT CAST(w.authority_revision AS TEXT),CAST(u.authority_revision AS TEXT),m.id,m.access_revision,w.deleted_at,u.suspended_at
+	err = tx.QueryRowContext(ctx, `SELECT CAST(w.authority_revision AS TEXT),CAST(u.authority_revision AS TEXT),m.id,m.access_revision,w.deleted_at,u.suspended_at
  FROM workspaces w LEFT JOIN users u ON u.id=? LEFT JOIN workspace_members m ON m.workspace_id=w.id AND m.user_id=? WHERE w.id=?`, task.originalCredential.UserID, task.originalCredential.UserID, task.key.WorkspaceID).Scan(&workspaceRevision, &userRevision, &memberID, &memberRevision, &workspaceDeleted, &userSuspended)
 	if errors.Is(err, sql.ErrNoRows) {
 		return true, nil
@@ -169,5 +178,5 @@ func collaborationAgentCapturedFenceChanged(ctx context.Context, tx *sql.Tx, tas
 	if !chataudience.ValidUserAuthorityRevision(workspaceRevision) || (userRevision.Valid && !chataudience.ValidUserAuthorityRevision(userRevision.String)) || (memberID.Valid && memberID.String == "") || (memberRevision.Valid && memberRevision.Int64 < 1) {
 		return false, errCollaborationAgentAccess
 	}
-	return workspaceDeleted.Valid || userSuspended.Valid || !userRevision.Valid || !memberID.Valid || !memberRevision.Valid || workspaceRevision != task.permissionVersion || userRevision.String != task.originalCredential.UserAuthorityRevision || memberID.String != task.memberID || memberRevision.Int64 != task.memberRevision, nil
+	return changed || workspaceDeleted.Valid || userSuspended.Valid || !userRevision.Valid || !memberID.Valid || !memberRevision.Valid || userRevision.String != task.originalCredential.UserAuthorityRevision || memberID.String != task.memberID || memberRevision.Int64 != task.memberRevision, nil
 }

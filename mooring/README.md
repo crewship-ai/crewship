@@ -5,6 +5,30 @@ by Crewship, so it does not start a service or change the deployed application.
 The Go host remains the authority for permissions, fencing, durable writes and
 receipts. Draining a Rust batch never means the changes have been saved.
 
+Dormant human admissions and agent mandates capture original canonical author
+generations at fresh authenticated admission, in the same writer transaction as
+current source and Page checks. Human vectors bind the user and Page; agent
+vectors additionally bind the exact agent and crew-app ceiling. Existing proofs
+only read these generations. Missing legacy tracking, storage errors and schema
+drift remain nonterminal uncertainty; relevant changes cannot be undone by an ACL
+delete/reinsert. Current canonical policy, original source/member/run identity,
+scope and unextended horizons remain mandatory.
+
+The broad workspace epoch still invalidates delivery gates. An unaffected author
+can pass current policy under its unchanged original vector while a separate
+current epoch is returned for delivery. This never reopens an old closed gate,
+refreshes the original author, extends a mandate or qualifies raw mixed-author
+transport, native deltas, FIFO, Saved or end-to-end D3/E3 acceptance.
+
+Optional board/artifact schemas, even empty, are refused before fresh tracking
+and at every author revalidation/classification. An immutable positive bounded
+SQLite schema cookie also detects ordinary create/drop drift between checks;
+differences are uncertainty, not permission denial. This is not protection from
+privileged PRAGMA resets or general runtime DDL. Schema installation requires
+startup host-incarnation drain; optional installers must add exclusion and
+generation tracking before qualification. Per-workspace recipient generations
+remain conservative for one principal's grants on different Pages.
+
 `mooring_core::adapter::PrepareAdapter` is a pure application boundary: validate
 an opaque checkpoint and prepare one normalized immutable atomic change from a
 restored/forked authoritative state. Its candidate owns a full checkpoint and

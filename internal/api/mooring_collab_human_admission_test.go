@@ -134,10 +134,10 @@ func TestCollaborationHumanTicketIsSingleUseAndPreservesOriginalPolicy(t *testin
 	}
 	check(false, true)
 	check(true, false)
-	// Even an unrelated canonical ACL change advances this captured epoch.
-	// A reconnect must not replace it with today's version.
+	// An unrelated recipient changes the delivery epoch, not this original
+	// author vector. Reconnect retains the original author and source.
 	mustExec(t, r.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('admission-page','user',?,'read',?)`, r.adminID, r.userID)
-	check(false, false)
+	check(false, true)
 	_, fresh, err := s.issue(ctx, owner, false)
 	if err != nil || fresh.participant == admission.participant || fresh.permission == admission.permission {
 		t.Fatal("fresh policy silently reused old participant", fresh, err)

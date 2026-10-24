@@ -103,6 +103,13 @@ func collaborationAgentGrantAllows(ctx context.Context, h *PageHandler, workspac
 // actual human StartTask and consumed by the trusted dispatcher reaches it.
 func (s *collaborationAgentMandateStore) checkTaskAuthority(ctx context.Context, tx *sql.Tx, task collaborationAgentTaskBinding, a collaborationAgentAttemptBinding) (collaborationHumanPageAccess, time.Time, error) {
 	var proof collaborationHumanPageAccess
+	if !task.authorVector.matches(task.key, task.originalCredential.UserID, a.agentID, a.crewID) {
+		return proof, time.Time{}, errCollaborationAuthorUnqualified
+	}
+	changed, err := collaborationAuthorVectorChanged(ctx, tx, task.authorVector)
+	if err != nil || changed {
+		return proof, time.Time{}, errCollaborationAuthorUnqualified
+	}
 	ctx = context.WithValue(ctx, pageAuthReaderKey{}, tx)
 	receipt := task.originalHuman
 	source := task.originalCredential
@@ -127,7 +134,7 @@ func (s *collaborationAgentMandateStore) checkTaskAuthority(ctx context.Context,
 	}
 	proof, e = s.pages.authorizeCollaborationPageSubject(ctx, tx, task.key, task.intent, source)
 	write, valid := collaborationAgentIntent(task.intent)
-	if e != nil || !valid || proof.record == nil || proof.record.PrivateAudience || proof.permissionVersion != task.permissionVersion || proof.memberID != task.memberID || proof.memberRevision != task.memberRevision || !collaborationAgentGrantAllows(ctx, s.pages, a.workspaceID, proof.record, a.agentID, write) {
+	if e != nil || !valid || proof.record == nil || proof.record.PrivateAudience || proof.memberID != task.memberID || proof.memberRevision != task.memberRevision || !collaborationAgentGrantAllows(ctx, s.pages, a.workspaceID, proof.record, a.agentID, write) {
 		return collaborationHumanPageAccess{}, time.Time{}, errCollaborationAgentAccess
 	}
 	return proof, principalExpiry, nil
