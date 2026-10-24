@@ -707,6 +707,16 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		}
 		slotTransferredToHold = true
 	}
+	// A private direct exec has no tmux identity. Until the actual provider
+	// confirms termination, every return (including panic unwinding) must
+	// retain its original admission, runtime, HOME and credentials.
+	privateExecMayLive := false
+	privateExecID := ""
+	defer func() {
+		if privateExecMayLive && !slotTransferredToHold {
+			transferHostHold(privateExecID)
+		}
+	}()
 	env, workDir, err := o.preparePreflightDirs(ctx, req, env, fileCreds, keeperEnabled, runState.ID)
 	if err != nil {
 		return err
@@ -835,13 +845,20 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 			return refused
 		}
 	}
+	privateExecMayLive = req.strictContentPrivacy
 	var result *provider.ExecResult
 	if req.HostOutputDir != "" {
 		result, err = o.startHostExec(execCtx, req, runState, execCfg, secretValues)
 	} else {
 		result, err = o.container.Exec(execCtx, execCfg)
 	}
+	if result != nil {
+		privateExecID = result.ExecID
+	}
 	if err != nil {
+		if req.strictContentPrivacy {
+			return ErrPrivateRunUnqualified
+		}
 		if req.HostOutputDir != "" && errors.Is(err, ErrHostCaptureUnconfirmed) {
 			transferHostHold("")
 			return err
@@ -1108,6 +1125,9 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		transferHostHold(result.ExecID)
 		return fmt.Errorf("%w: controller observer ended", ErrHostCaptureUnconfirmed)
 	}
+	if req.strictContentPrivacy && (guard.Tripped() || ctx.Err() != nil || execCtx.Err() != nil) {
+		return ErrPrivateRunUnqualified
+	}
 	if guard.Tripped() {
 		cleanCtx := context.Background()
 		o.failRun(cleanCtx, req, runState.ID, "error")
@@ -1160,6 +1180,14 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		exitCode = snapshot.Result.ExitCode
 	} else {
 		running, exitCode, inspErr = o.awaitExecTerminalWithLogger(ctx, result.ExecID, o.loggerForRun(req))
+	}
+	if inspErr == nil && !running {
+		privateExecMayLive = false
+	}
+	if req.strictContentPrivacy && (inspErr != nil || running) {
+		// A tmux stop/probe cannot confirm this direct exec's death. Keep
+		// its original hold and publish no terminal/stopped/online claim.
+		return ErrPrivateRunUnqualified
 	}
 
 	if inspErr != nil {

@@ -121,6 +121,28 @@ func (o *Orchestrator) watchDetachedHold(h *detachedHold, poll time.Duration) {
 			}
 			capTimer.Reset(detachedWatchCap)
 		case <-t.C:
+			if h.req.strictContentPrivacy {
+				// Private runs execute directly. An absent tmux session is
+				// not evidence that this original native exec has stopped.
+				ctx, cancel := context.WithTimeout(context.Background(), preflightExecTimeout)
+				terminal := false
+				uncertain := h.execID == ""
+				if h.execID != "" {
+					running, _, err := o.container.ExecInspect(ctx, h.execID)
+					terminal = err == nil && !running
+					uncertain = err != nil
+				}
+				if uncertain {
+					absent, err := o.containerRuntimeAbsent(ctx, h.containerID)
+					terminal = err == nil && absent
+				}
+				cancel()
+				if terminal {
+					o.closeDetachedHold(h, true)
+					return
+				}
+				continue
+			}
 			if h.req.HostOutputDir != "" {
 				ctx, cancel := context.WithTimeout(context.Background(), preflightExecTimeout)
 				raw, readErr := o.state.Get(ctx, "agent_runs", h.runID)

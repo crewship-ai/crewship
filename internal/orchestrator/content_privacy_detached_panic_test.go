@@ -17,6 +17,7 @@ func TestDetachedProbePanicRetainsUncertainRuntimeOwnership(t *testing.T) {
 		t.Run(map[bool]string{false: "ordinary", true: "private"}[private], func(t *testing.T) {
 			c := covNewRunContainer(covRunOpts{})
 			c.route = func(provider.ExecConfig) (*provider.ExecResult, error) { panic(marker) }
+			c.inspect = func(string) (bool, int, error) { panic(marker) }
 			var logs bytes.Buffer
 			state := newMemState()
 			o := New(c, state, slog.New(slog.NewJSONHandler(&logs, nil)))
@@ -34,7 +35,7 @@ func TestDetachedProbePanicRetainsUncertainRuntimeOwnership(t *testing.T) {
 			}
 			defer release()
 			released, finalized := false, false
-			h := &detachedHold{runID: req.RunID, containerID: req.ContainerID, agentSlug: req.AgentSlug, req: req, done: make(chan struct{}), alertAfter: time.Hour,
+			h := &detachedHold{runID: req.RunID, containerID: req.ContainerID, agentSlug: req.AgentSlug, execID: "private-exec", req: req, done: make(chan struct{}), alertAfter: time.Hour,
 				release: func() { released = true; release() }, finalize: func() { finalized = true }}
 			o.detached[h.runID] = h
 			var caught any

@@ -24,7 +24,7 @@ func TestOrdinaryRunRetainsLoopAndInspectDiagnostics(t *testing.T) {
 	}
 }
 
-func TestStrictContentPrivacyPanicIsOpaqueAndReleasesAdmissions(t *testing.T) {
+func TestStrictContentPrivacyPanicIsOpaqueAndKeepsUnconfirmedAdmissions(t *testing.T) {
 	const marker = "synthetic-private-panic"
 	for _, private := range []bool{false, true} {
 		c := covNewRunContainer(covRunOpts{})
@@ -55,6 +55,16 @@ func TestStrictContentPrivacyPanicIsOpaqueAndReleasesAdmissions(t *testing.T) {
 		}
 		if _, active := o.agentRuns.Load(req.RunID); active {
 			t.Fatal("panic leaked tracked run")
+		}
+		if private {
+			if id, held := o.detachedHoldRunID(req.AgentID); !held || id != req.RunID {
+				t.Fatal("private panic lost the unconfirmed original runtime")
+			}
+			if release, admissionErr := o.acquireAgentAdmissionMode(context.Background(), req.AgentID, true); admissionErr == nil {
+				release()
+				t.Fatal("private panic allowed a second runtime without death confirmation")
+			}
+			continue
 		}
 		release, admissionErr := o.acquireAgentAdmissionMode(context.Background(), req.AgentID, true)
 		if admissionErr != nil {

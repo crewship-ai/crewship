@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Private collaborative tasks preserve their original authorization.** An inactive task dispatcher binds confirmation to the original human request and canonical work attempt. Private usage diagnostics stay out of shared logs, and unconfirmed direct processes retain their admission and capacity until actual termination is verified. Agent execution still requires a separately qualified private environment and is not enabled.
+
 - Add a default-off authenticated Mooring HTTP/WebSocket controller with one-use human joins and current SQL-gated checkpoint delivery. Raw editing remains refused until the native human prepare capability is integrated; in-process backup restore requires disabling the controller and restarting.
 
 - Mooring SDK recovery refuses incomplete full snapshots even when Yrs reports no missing updates, preserving every original unsaved draft instead of accepting silently omitted history.

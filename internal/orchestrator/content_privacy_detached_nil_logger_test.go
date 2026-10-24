@@ -20,6 +20,7 @@ func testDetachedPanicNilLogger(t *testing.T, private bool) {
 	const marker = "synthetic-private-nil-logger-probe"
 	c := covNewRunContainer(covRunOpts{})
 	c.route = func(provider.ExecConfig) (*provider.ExecResult, error) { panic(marker) }
+	c.inspect = func(string) (bool, int, error) { panic(marker) }
 	o := New(c, newMemState(), nil)
 	req := covRunReq()
 	if private {
@@ -32,7 +33,7 @@ func testDetachedPanicNilLogger(t *testing.T, private bool) {
 	}
 	defer release()
 	released, finalized := false, false
-	h := &detachedHold{runID: req.RunID, containerID: req.ContainerID, agentSlug: req.AgentSlug, req: req, done: make(chan struct{}), alertAfter: time.Hour, release: func() { released = true; release() }, finalize: func() { finalized = true }}
+	h := &detachedHold{runID: req.RunID, containerID: req.ContainerID, agentSlug: req.AgentSlug, execID: "private-exec", req: req, done: make(chan struct{}), alertAfter: time.Hour, release: func() { released = true; release() }, finalize: func() { finalized = true }}
 	o.detached[h.runID] = h
 	var escaped any
 	func() { defer func() { escaped = recover() }(); o.watchDetachedHold(h, time.Millisecond) }()
