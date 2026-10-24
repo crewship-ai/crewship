@@ -8,6 +8,7 @@ pub mod command;
 mod core_fields;
 /// Unqualified local-draft experiment; no human protocol capability.
 pub mod experimental_draft;
+pub mod experimental_human_basis;
 /// Pure host-only current-frontier experiment; no advertised human capability.
 pub mod experimental_human_current;
 mod format;

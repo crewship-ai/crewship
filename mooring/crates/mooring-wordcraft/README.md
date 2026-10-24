@@ -164,3 +164,24 @@ proposals, requires a fresh unused origin and refuses old operation IDs. Input
 labelled verified-host is authenticated by the caller; disposable-fork validation
 is a model integrity check, not proof of host authority or a complete human delta
 auditor. No receipt, durable Saved status or native WordApp hook is supplied.
+
+The inactive native-only `experimental_human_basis` helper qualifies a borrowed
+original human proposal on its retained confirmed basis, then applies the SAME
+bytes to the newer confirmed document. A bounded transcript of actual
+host-qualified Saved CRDT deltas must reconstruct the exact current checkpoint;
+matching state vectors alone is insufficient. The first slice refuses optimistic
+predecessors and additional same-origin transcript entries. It permits at most
+256 committed entries and 262144 cumulative delta bytes; unavailable history or
+order remains an unqualified UnsavedDraft.
+
+Its non-Deserialize constructors are trusted host STORE inputs, not proof
+verification. They require the unchanged complete atomic fingerprint plus the
+separate immutable original source/session/epoch/mandate/horizon proof, a fresh
+host-issued origin and original participant ordinal. No new fingerprint domain,
+WASM authority constructor, wire profile, durable outcome or admission ledger is
+implemented. Test host seals and Saved labels are synthetic qualification inputs,
+not production authority. Reader denial precedes checkpoint/update decoding;
+the existing exact-frontier validator retains its behavior. Tests qualify
+same-word insert/format, disjoint native-selected deletion, full peer-only undo
+and redo using retained committed own-format history; broader human interaction
+and actual WordApp/host admission remain separate qualification.
