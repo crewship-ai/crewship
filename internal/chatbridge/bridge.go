@@ -572,6 +572,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		return errors.New("Document iteration is unavailable")
 	}
 	msgOpt.DocumentIterationIntent = documentIteration
+	// Replay the original human submission after provisioning; server Page
+	// context is rebuilt only after current form and access checks run again.
+	originalContent := content
 	var pageContext *PageChatContext
 	if hasPage {
 		if b.pageContextResolver == nil {
@@ -874,7 +877,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			if !b.provisioning.AttachPendingMessage(info.CrewID, PendingChatMessage{
 				UserID:  userID,
 				ChatID:  chatID,
-				Content: content,
+				Content: originalContent,
 				Opts:    msgOpt,
 			}) {
 				b.logger.Warn("could not attach deferred message to provisioning job",
