@@ -258,16 +258,21 @@ impl Graph {
             }
             match &**block {
                 Block::Table(table) if body => {
-                    if table.rows.is_empty() || table.rows.len() > 256 {
+                    if !table.controls.is_empty() || table.rows.is_empty() || table.rows.len() > 256
+                    {
                         return false;
                     }
                     for row in &table.rows {
-                        if row.cells.is_empty() || row.cells.len() > 256 {
+                        if !row.controls.is_empty() || row.cells.is_empty() || row.cells.len() > 256
+                        {
                             return false;
                         }
                         for cell in &row.cells {
                             self.cells += 1;
-                            if self.cells > 4096 || !self.blocks(&cell.blocks, depth + 1, true) {
+                            if !cell.controls.is_empty()
+                                || self.cells > 4096
+                                || !self.blocks(&cell.blocks, depth + 1, true)
+                            {
                                 return false;
                             }
                         }
