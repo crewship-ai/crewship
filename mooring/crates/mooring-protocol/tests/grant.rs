@@ -76,7 +76,7 @@ fn shared_host_grant_binding_and_first_send_deadline_cases() {
         required: Durability::Node,
     };
     let cases = fixture["cases"].as_array().unwrap();
-    assert_eq!(cases.len(), 49);
+    assert_eq!(cases.len(), 51);
     for case in cases {
         let kind = case["kind"].as_str().unwrap();
         let request = pending(
@@ -169,4 +169,42 @@ fn lost_response_same_nonce_retry_cannot_rebind_send_time_or_grant_late_permissi
             .unwrap_err(),
         BoundaryError::Clock
     );
+}
+
+#[test]
+fn owner_reply_may_advance_permission_but_never_lower_the_known_floor() {
+    let mut data = fixture();
+    let host = Transport::AuthenticatedHost {
+        issuer: "crewship",
+        durabilities: &[Durability::Node],
+        required: Durability::Node,
+    };
+    data["requests"]["owner_renew"]["permission_version"] = Value::String("1".into());
+    data["replies"]["owner_renew"]["permission_version"] = Value::String("2".into());
+    let first = pending("owner_renew", &data, Duration::from_millis(1000));
+    let raw = serde_json::to_vec(&data["replies"]["owner_renew"]).unwrap();
+    let advanced = first.validate_reply(&raw, &host, Duration::from_millis(1100));
+    assert!(
+        advanced.is_ok(),
+        "host current permission advance was rejected"
+    );
+    // A subsequent request retains the NEW accepted floor and fresh nonce.
+    data["requests"]["owner_renew"]["permission_version"] = Value::String("2".into());
+    data["requests"]["owner_renew"]["renewal_nonce"] = Value::String("next-owner-nonce".into());
+    data["replies"]["owner_renew"]["renewal_nonce"] = Value::String("next-owner-nonce".into());
+    data["replies"]["owner_renew"]["permission_version"] = Value::String("1".into());
+    let next = pending("owner_renew", &data, Duration::from_millis(1200));
+    let lower = serde_json::to_vec(&data["replies"]["owner_renew"]).unwrap();
+    assert_eq!(
+        next.validate_reply(&lower, &host, Duration::from_millis(1300))
+            .unwrap_err(),
+        BoundaryError::PermissionRevoked
+    );
+    // Raising owner knowledge cannot mutate or relax a participant grant.
+    data["replies"]["delivery"]["permission_version"] = Value::String("6".into());
+    let delivery = pending("delivery", &data, Duration::from_millis(1000));
+    let raw = serde_json::to_vec(&data["replies"]["delivery"]).unwrap();
+    assert!(delivery
+        .validate_reply(&raw, &host, Duration::from_millis(1100))
+        .is_err());
 }

@@ -4,7 +4,7 @@
   "rules": {
     "first_send": "Create pending once for a NEW nonce. Retries use identical bytes and original private first-send timestamp. Controller must enforce nonce freshness; never reconstruct pending for the same nonce at a newer time.",
     "clock": "Native timestamps must be CLOCK_BOOTTIME. Expiry is exclusive first_send+granted duration; reply arrival never restarts it.",
-    "initial_assignment": "OwnerAcquire assigns session/fence; ticket validation assigns participant/gate/current permissions. Accept these only from trusted host; subsequent renewals bind exact registered fields."
+    "initial_assignment": "OwnerAcquire assigns session/fence; ticket validation assigns participant/gate/current permissions. Subsequent owner renewals retain exact identity/fence/nonce and may advance the known permission floor; delivery renewals retain exact participant permission version."
   },
   "context": {
     "first_send_ms": 1000,
@@ -519,9 +519,9 @@
       ]
     },
     {
-      "id": "owner-renew-permission_version",
+      "id": "owner-renew-permission-advance",
       "kind": "owner_renew",
-      "expected_error": "StaleOwner",
+      "expected_error": null,
       "mutations": [
         {
           "path": "/permission_version",
@@ -637,6 +637,28 @@
         {
           "path": "/session_id",
           "value": "other"
+        }
+      ]
+    },
+    {
+      "id": "owner-renew-permission-regression",
+      "kind": "owner_renew",
+      "expected_error": "PermissionRevoked",
+      "mutations": [
+        {
+          "path": "/permission_version",
+          "value": "4"
+        }
+      ]
+    },
+    {
+      "id": "owner-renew-permission-full-u64",
+      "kind": "owner_renew",
+      "expected_error": null,
+      "mutations": [
+        {
+          "path": "/permission_version",
+          "value": "18446744073709551615"
         }
       ]
     }

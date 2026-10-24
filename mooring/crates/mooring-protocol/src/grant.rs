@@ -239,12 +239,15 @@ impl PendingGrant {
             }
             Kind::OwnerRenew { runtime_ref } => {
                 equal(value, "type", &Value::String("owner_grant".into()))?;
-                same(
-                    value,
-                    request,
-                    &["session_id", "fence", "permission_version", "renewal_nonce"],
-                )?;
+                same(value, request, &["session_id", "fence", "renewal_nonce"])?;
                 equal(value, "runtime_ref", &Value::String(runtime_ref.clone()))?;
+                // Owner renewal reports the host's current permission epoch.
+                // This only raises owner knowledge; participant grants remain
+                // separately bound and are never renewed by this response.
+                if counter(&value["permission_version"])? < counter(&request["permission_version"])?
+                {
+                    return Err(BoundaryError::PermissionRevoked);
+                }
                 "lease_duration_ms"
             }
             Kind::OwnerAcquire { minimum_generation } => {

@@ -143,3 +143,11 @@ No host `Saved`, admission, live distribution or recovery guarantee follows
 from a valid shape. The actual driver must compose the existing causal prepare
 validator explicitly and keep preparation progressing while durable replies
 are pending on its single inherited-channel reader.
+
+Owner renewal echoes the host's current permission epoch: it may advance the
+request's last-known version and must never lower it. Exact request ID, nonce,
+scope, session, runtime reference, owner fence and first-send deadline remain
+mandatory. This raises owner knowledge only; participant delivery renewal still
+requires its exact registered permission version and no participant right or
+closed gate is reopened. The stateful owner controller must retain the accepted
+floor and a single pending request so delayed replies cannot lower knowledge.
