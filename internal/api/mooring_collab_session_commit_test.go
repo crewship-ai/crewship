@@ -14,6 +14,9 @@ func TestCollaborationSessionCommitterRefusesUnverifiedFactory(t *testing.T) {
 		}
 	}
 	for _, s := range []*collaborationSessionCommitter{nil, {}} {
+		if result, cuts, err := s.submitWithCuts(t.Context(), protocol.SessionSubmitBatch{}); err == nil || result.Checkpoint.State != "" || result.Receipt.Changes != nil || len(cuts) != 0 {
+			t.Fatal("unverified handler returned atomic cuts")
+		}
 		if result, err := s.submit(t.Context(), protocol.SessionSubmitBatch{}); err == nil || result.Checkpoint.State != "" || result.Receipt.Changes != nil {
 			t.Fatal("unverified handler returned a receipt or checkpoint")
 		}
