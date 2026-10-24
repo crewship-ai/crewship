@@ -209,3 +209,41 @@ func TestSessionParticipantTransportCanceledPhysicalWritePoisonsActualChild(t *t
 		t.Fatal("later notification crossed uncertain stream")
 	}
 }
+
+func TestSessionParticipantTransportRejectsNestedIdentityBeforeWrite(t *testing.T) {
+	f := sessionOriginsFixture(t, "participant-notifications", false)
+	open, input := participantTransportRequests(t, f)
+	var status protocol.StatusRequest
+	if err := json.Unmarshal(input.Message, &status); err != nil {
+		t.Fatal(err)
+	}
+	status.Scope.ArtifactID = "foreign"
+	input.Message, _ = json.Marshal(status)
+	if err := f.runtime.SendParticipantInput(t.Context(), f.activation, input); err == nil {
+		t.Fatal("foreign inner scope sent")
+	}
+	leave := protocol.SessionLeave{Type: "session_leave", RequestID: "leave", Scope: open.Scope, SessionID: "foreign"}
+	input.Message, _ = json.Marshal(leave)
+	if err := f.runtime.SendParticipantInput(t.Context(), f.activation, input); err == nil {
+		t.Fatal("foreign inner session sent")
+	}
+	presence := protocol.Presence{Type: "presence", RequestID: "presence", Scope: open.Scope, SessionID: open.SessionID, ParticipantRef: "foreign", TTLMs: "100", View: map[string]json.RawMessage{}}
+	input.Message, _ = json.Marshal(presence)
+	if err := f.runtime.SendParticipantInput(t.Context(), f.activation, input); err == nil {
+		t.Fatal("foreign inner participant sent")
+	}
+	var join protocol.SessionJoin
+	if err := json.Unmarshal(open.Join, &join); err != nil {
+		t.Fatal(err)
+	}
+	join.Versions.EngineVersion = "99.0.0"
+	open.Join, _ = json.Marshal(join)
+	if err := f.runtime.SendParticipantOpen(t.Context(), f.activation, open); err == nil {
+		t.Fatal("foreign inner versions sent")
+	}
+	open, input = participantTransportRequests(t, f)
+	if err := f.runtime.SendParticipantInput(t.Context(), f.activation, input); err != nil {
+		t.Fatal("negative correlations poisoned original", err)
+	}
+	participantTransportReceive(t, f, string(input.RequestID))
+}

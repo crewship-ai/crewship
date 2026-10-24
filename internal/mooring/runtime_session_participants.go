@@ -71,6 +71,11 @@ func (s *SessionRuntime) sendParticipant(ctx context.Context, activation *Sessio
 	if err != nil || len(normalized) > sessionParticipantFrameBytes || (header.kind != "session_participant_open" && header.kind != "session_participant_input") {
 		return ErrSessionRuntime
 	}
+	// Closed schema validates shape, not equality between outer and inner
+	// identities. Check those correlations before reserving or writing bytes.
+	if !s.participantInnerBinding(normalized, header.kind) {
+		return ErrSessionRuntime
+	}
 	// Charge the same global control budget while queued and during I/O. The
 	// normalized bytes are now owned; no caller slice is retained after return.
 	s.mu.Lock()
@@ -120,4 +125,36 @@ func (s *SessionRuntime) sendParticipant(ctx context.Context, activation *Sessio
 		s.fail(err)
 	}
 	return err
+}
+
+// All fields below have already passed the closed canonical wire schema.
+// Their equality is transport correlation, never source/recipient authority.
+func (s *SessionRuntime) participantInnerBinding(raw []byte, kind string) bool {
+	type inner struct {
+		Scope          *protocol.Scope      `json:"scope"`
+		SessionID      *protocol.Identifier `json:"session_id"`
+		ParticipantRef *protocol.Identifier `json:"participant_ref"`
+		Versions       *protocol.Versions   `json:"versions"`
+	}
+	var envelope struct {
+		Scope          protocol.Scope      `json:"scope"`
+		SessionID      protocol.Identifier `json:"session_id"`
+		ParticipantRef protocol.Identifier `json:"participant_ref"`
+		Join           inner               `json:"join"`
+		Message        inner               `json:"message"`
+	}
+	if json.Unmarshal(raw, &envelope) != nil {
+		return false
+	}
+	nested := envelope.Message
+	if kind == "session_participant_open" {
+		nested = envelope.Join
+	}
+	if nested.Scope != nil && *nested.Scope != envelope.Scope || nested.SessionID != nil && *nested.SessionID != envelope.SessionID || nested.ParticipantRef != nil && *nested.ParticipantRef != envelope.ParticipantRef {
+		return false
+	}
+	if nested.Versions != nil && (nested.Versions.ProtocolVersion != s.versions.Protocol || nested.Versions.ModelVersion != s.versions.Model || nested.Versions.EngineVersion != s.versions.Engine) {
+		return false
+	}
+	return true
 }
