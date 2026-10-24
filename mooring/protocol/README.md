@@ -125,8 +125,12 @@ reserve a separate inherited-channel session contract. They do not select the
 profile in a running child. Existing strict and causal preparation definitions
 remain identical. The fixed limits in `SessionOpen` describe the initial
 profile; generic protocol maxima are not an advertised session capability.
-Batch envelopes and ordinary inner participant messages retain the 256 KiB
-raw/canonical bound. Larger checkpoint, document-update or host-receipt payloads
+Batch envelopes and complete ordinary private participant/status wrappers
+(including metadata) retain the 256 KiB raw/canonical bound. This conservative
+implementation includes wrapper overhead in the budget and rejects oversized
+ingress before sealing while retaining its draft. Escaped original raw bytes
+cannot disappear through normalization. Only full SessionRestore and
+SessionCommitResult may use the larger private session-frame bound. Larger checkpoint, document-update or host-receipt payloads
 require explicit `bounded_transfer_v1` selection and bounded chunks; wrapping
 an ordinary public message cannot enlarge its limit.
 
