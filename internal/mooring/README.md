@@ -454,3 +454,26 @@ native peer and a fresh D1 checkpoint. It proves pre-OwnerGrant prepare progress
 creator-1 provenance under owner 2, and activated writer-scoped inventory access
 with real BOOTTIME ownership. Participant authority remains mocked; the test
 reserves no origin and claims no participant delivery, Saved or enabled route.
+After activation, a separate private agent-read operation retains the actual
+HTTP ingress and original confirmed-attempt mandate for the whole host read.
+It checks the original request through `Check` before invoking work, then uses
+`DecideCaptured` under every retained-reader writer without refreshing authority.
+It retains the same concrete store, mandate database, runtime, owner, scope and
+private callback lifetime. Human-context transplants, copied stores, escaped
+contexts and any write purpose are rejected. Agent-grant revocation and regrant
+cannot refresh the original proof or revoke an independent human's access.
+
+This operation supplies host checkpoint/inventory processing only. It grants no
+writer-source admission, participant output, private-owner audit or qualified
+agent execution environment. Tests use synthetic original HTTP contexts and
+confirmed work rows with an actual pinned native process, FULL SQL and BOOTTIME.
+
+A separate API integration probe connects that actual native inventory to the
+original activated cell authority for both a human and a confirmed-agent read.
+Source/grant ABA inside the inventory writer must roll back provisional SQL;
+committed agent revocation prevents work while an independent human stays valid.
+It uses real native inspection, FULL SQL and BOOTTIME, but synthetic original
+HTTP/confirmed-attempt fixtures. It issues no origin or participant capability.
+Read-only D3 checkpoint access does not qualify its origin inventory: the app
+explicitly rejects that inventory. The host integration verifies this refusal
+reaches neither consumer nor an empty-inventory fallback for either reader.
