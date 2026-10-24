@@ -42,6 +42,11 @@ impl OwnerController {
             guard,
         }
     }
+    pub(crate) fn native_humans(&self) -> bool {
+        self.open
+            .required_capabilities
+            .contains(&mooring_protocol::SessionOpenRequiredCapabilitiesItem::HumanNativePrepareV1)
+    }
     pub fn scope(&self) -> &Scope {
         &self.open.scope
     }

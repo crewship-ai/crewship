@@ -288,6 +288,16 @@ fn renewing_driver_with_duration(
     UnixStream,
     std::sync::Arc<std::sync::atomic::AtomicU64>,
 ) {
+    renewing_driver_selected(duration, false)
+}
+fn renewing_driver_selected(
+    duration: u64,
+    native: bool,
+) -> (
+    Driver,
+    UnixStream,
+    std::sync::Arc<std::sync::atomic::AtomicU64>,
+) {
     use std::sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -298,7 +308,18 @@ fn renewing_driver_with_duration(
     peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
     let (restored, _, _) = restore();
     let worker = std::thread::spawn(move || {
-        mooring_collab::write_frame(&mut peer, &open()).unwrap();
+        let opening = if native {
+            let mut v: Value = serde_json::from_slice(&open()).unwrap();
+            v["required_capabilities"] = json!([
+                "checkpoint_identity_v1",
+                "human_native_prepare_v1",
+                "origin_inventory_v1"
+            ]);
+            serde_json::to_vec(&v).unwrap()
+        } else {
+            open()
+        };
+        mooring_collab::write_frame(&mut peer, &opening).unwrap();
         let acquire = mooring_collab::read_frame(&mut peer).unwrap().unwrap();
         let mut granted: Value = serde_json::from_slice(&grant(&acquire)).unwrap();
         granted["lease_duration_ms"] = json!(duration.to_string());
@@ -309,10 +330,12 @@ fn renewing_driver_with_duration(
         }
         peer
     });
-    let driver = Driver::from_negotiated_inherited_stream(child, &host(), move || {
-        Ok(at(clock.load(Ordering::SeqCst)))
-    })
-    .unwrap();
+    let constructor = if native {
+        Driver::from_negotiated_inherited_stream_with_native_humans
+    } else {
+        Driver::from_negotiated_inherited_stream
+    };
+    let driver = constructor(child, &host(), move || Ok(at(clock.load(Ordering::SeqCst)))).unwrap();
     (driver, worker.join().unwrap(), now)
 }
 fn renewal_reply(request: &[u8], permission: &str) -> Vec<u8> {
@@ -353,7 +376,19 @@ fn admitted_actor_with_delivery_clock(
     UnixStream,
     std::sync::Arc<std::sync::atomic::AtomicU64>,
 ) {
-    let (driver, mut peer, now) = renewing_driver_with_duration(owner_duration);
+    admitted_actor_selected(write, owner_duration, delivery_duration, false)
+}
+fn admitted_actor_selected(
+    write: bool,
+    owner_duration: u64,
+    delivery_duration: u64,
+    native: bool,
+) -> (
+    mooring_collab::session_actor::RunningDriver,
+    UnixStream,
+    std::sync::Arc<std::sync::atomic::AtomicU64>,
+) {
+    let (driver, mut peer, now) = renewing_driver_selected(owner_duration, native);
     let scope = driver.confirmed().checkpoint().scope.clone();
     let versions = driver.confirmed().checkpoint().versions.clone();
     let mut actor = driver.into_actor().unwrap();
@@ -416,6 +451,14 @@ fn mock_commit(
     checkpoint: &mut mooring_protocol::Checkpoint,
     targets: &mut Vec<TargetVersion>,
 ) -> Value {
+    mock_commit_selected(batch, checkpoint, targets, false)
+}
+fn mock_commit_selected(
+    batch: &Value,
+    checkpoint: &mut mooring_protocol::Checkpoint,
+    targets: &mut Vec<TargetVersion>,
+    native: bool,
+) -> Value {
     use mooring_core::{
         adapter::{CausalPrepareAdapter, Prepared, PreparedCandidate},
         causal::{CausalPrepareContext, EntryVersion, QualifiedRead},
@@ -423,6 +466,7 @@ fn mock_commit(
     let changes: Vec<mooring_protocol::AtomicChange> =
         serde_json::from_value(batch["changes"].clone()).unwrap();
     let mut outcomes = Vec::new();
+    let mut native_deltas = Vec::new();
     for change in changes {
         let before = mooring_protocol::checkpoint::verify(
             checkpoint,
@@ -471,6 +515,21 @@ fn mock_commit(
             panic!("mock host app rejected");
         };
         let opaque = control::encode_checkpoint(candidate.checkpoint_bytes()).unwrap();
+        if native {
+            let updated = Document::restore(candidate.checkpoint_bytes()).unwrap();
+            let raw = updated.update_since(before.state()).unwrap();
+            let allocations = mooring_wordcraft::document_update::allocation_origins(&raw)
+                .unwrap()
+                .iter()
+                .map(u64::to_string)
+                .collect::<Vec<_>>();
+            let affected: std::collections::BTreeSet<_> = candidate
+                .effects()
+                .iter()
+                .flat_map(|e| e.targets.iter().map(|t| t.target_id.clone()))
+                .collect();
+            native_deltas.push(json!({"change_id":change.change_id,"membership_hash":change.membership_hash,"revision":next.to_string(),"checkpoint_state_digest":opaque.digest,"native_delta":{"writer_origin":candidate.native_writer_origin().unwrap().to_string(),"allocation_origins":allocations,"update":mooring_protocol::boundary::encode_base64(&raw,262144).unwrap(),"targets":affected}}));
+        }
         checkpoint.state = opaque.state;
         checkpoint.revision = Counter(next);
         for effect in candidate.effects().iter().flat_map(|op| &op.targets) {
@@ -490,10 +549,14 @@ fn mock_commit(
         outcomes.push(json!({"change_id":change.change_id,"status":"saved","first_revision":next.to_string(),"last_revision":next.to_string(),
             "operations":[{"op_id":change.operations[0].op_id,"status":"saved","revision":next.to_string(),"issuer":"crewship","durability":"node"}]}));
     }
-    json!({"type":"session_commit_result","request_id":batch["request_id"],"control_profile":"mooring.session-causal.v1",
+    let mut result = json!({"type":"session_commit_result","request_id":batch["request_id"],"control_profile":"mooring.session-causal.v1",
         "scope":batch["scope"],"session_id":batch["session_id"],"runtime_ref":batch["runtime_ref"],"fence":batch["fence"],"versions":batch["versions"],
         "receipt":{"type":"commit_result","request_id":batch["request_id"],"scope":batch["scope"],"generation":"7","revision":checkpoint.revision,
-            "issuer":"crewship","durability":"node","changes":outcomes},"checkpoint":checkpoint,"targets":targets})
+            "issuer":"crewship","durability":"node","changes":outcomes},"checkpoint":checkpoint,"targets":targets});
+    if native {
+        result["native_deltas"] = json!(native_deltas);
+    }
+    result
 }
 
 #[test]
@@ -1509,4 +1572,194 @@ fn transplanted_leave_cannot_remove_connection_or_forget_original_pending_change
     assert_eq!(revision, 10);
     assert_eq!(originals.len(), 1);
     assert_eq!(originals[0].value.operations[0].op_id, "A");
+}
+
+#[test]
+fn native_whole_public_groups_send_before_ack_and_forward_only_host_public_receipt() {
+    let (mut actor, peer, _) = admitted_actor_selected(true, 60000, 5000, true);
+    let scope = actor.confirmed().checkpoint().scope.clone();
+    let versions = actor.confirmed().checkpoint().versions.clone();
+    let mut peer = drive_peer_control(&mut actor, peer, move |mut peer| {
+        let opening = json!({"type":"session_participant_open","request_id":"reader-open","control_profile":"mooring.session-causal.v1",
+            "scope":scope,"session_id":"host-session","runtime_ref":"fresh-authenticated-child","fence":{"generation":"7","token":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},
+            "connection_ref":"reader-connection","join":{"type":"session_join","request_id":"reader-join","ticket":"HOST_READER_TICKET","versions":versions}});
+        mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&opening).unwrap()).unwrap();
+        let ticket = receive_json(&mut peer).1;
+        let reply = json!({"type":"ticket_validated","request_id":ticket["request_id"],"scope":ticket["scope"],"session_id":ticket["session_id"],
+            "generation":"7","participant_ref":"reader","permission_version":"3","granted":{"read":true,"write":false},"versions":versions,
+            "expires_in_ms":"5000","validation_nonce":ticket["validation_nonce"],"gate_id":"reader-gate"});
+        mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&reply).unwrap()).unwrap();
+        let joined = receive_json(&mut peer).1;
+        assert_eq!(joined["message"]["type"], "session_joined");
+        peer
+    });
+    let mut cp = actor.confirmed().checkpoint().clone();
+    let mut targets = actor.confirmed().targets().to_vec();
+    let scope = cp.scope.clone();
+    let a1 = agent_change(&scope, "group-A1", None, " A1");
+    let a2 = agent_change(&scope, "group-A2", Some("group-A1"), " A2");
+    let b = agent_change(&scope, "group-B", Some("group-A2"), " B");
+    let originals = [a1.clone(), a2.clone(), b.clone()];
+    let (events, receive) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        for input in [
+            participant_input(&scope, &[a1.clone(), a2.clone()], "public-A"),
+            participant_input(&scope, std::slice::from_ref(&b), "public-B"),
+        ] {
+            mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&input).unwrap()).unwrap();
+        }
+        let mut batches = Vec::new();
+        let mut pending = 0;
+        while batches.len() < 2 {
+            let (_, m) = receive_json(&mut peer);
+            match m["type"].as_str().unwrap() {
+                "session_submit_batch" => batches.push(m),
+                "session_participant_output" => {
+                    assert_eq!(m["message"]["type"], "changes_received");
+                    pending += 1;
+                }
+                _ => panic!("unexpected control"),
+            }
+        }
+        assert_eq!(pending, 2);
+        assert_eq!(batches[0]["changes"], json!([a1, a2]));
+        assert_eq!(batches[1]["changes"], json!([b]));
+        assert_eq!(batches[1]["confirmed_basis"]["revision"], "10");
+        events.send(false).unwrap(); // BOTH actual FD batches precede any ACK.
+        for (batch, public_id, outer_id) in [
+            (&batches[0], "public-A", "private-public-A"),
+            (&batches[1], "public-B", "private-public-B"),
+        ] {
+            let mut response = mock_commit_selected(batch, &mut cp, &mut targets, true);
+            let mut public = response["receipt"].clone();
+            public["request_id"] = json!(public_id);
+            response["public_receipt"] = public.clone();
+            mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&response).unwrap())
+                .unwrap();
+            let initial_from = if public_id == "public-B" { 12 } else { 10 };
+            let deltas = response["native_deltas"].as_array().unwrap();
+            let mut positions = std::collections::BTreeMap::from([
+                ("connection".to_owned(), (0usize, initial_from)),
+                ("reader-connection".to_owned(), (0usize, initial_from)),
+            ]);
+            let mut own_receipts = 0;
+            for _ in 0..deltas.len() * 2 + 1 {
+                let (_, output) = receive_json(&mut peer);
+                let connection = output["connection_ref"].as_str().unwrap();
+                if output["message"]["type"] == "commit_result" {
+                    assert_eq!(connection, "connection");
+                    assert_eq!(output["request_id"], outer_id);
+                    assert_eq!(output["message"], public, "host public receipt unchanged");
+                    own_receipts += 1;
+                    continue;
+                }
+                let (position, from) = positions.get_mut(connection).unwrap();
+                let delta = &deltas[*position];
+                let to = delta["revision"].as_str().unwrap().parse::<u64>().unwrap();
+                assert_eq!(output["message"]["type"], "document_update");
+                assert_eq!(output["request_id"], format!("actor-update:{to}"));
+                assert_eq!(output["message"]["from_revision"], from.to_string());
+                assert_eq!(output["message"]["to_revision"], to.to_string());
+                assert_eq!(
+                    output["message"]["receipt"], response["receipt"],
+                    "unchanged full private receipt at every cut"
+                );
+                let data = mooring_wordcraft::document_update::decode(
+                    output["message"]["data"].as_str().unwrap(),
+                )
+                .unwrap();
+                assert_eq!(
+                    mooring_protocol::boundary::encode_base64(&data.update, 262144).unwrap(),
+                    delta["native_delta"]["update"]
+                );
+                *from = to;
+                *position += 1;
+            }
+            assert_eq!(own_receipts, 1);
+            assert!(positions.values().all(|(n, _)| *n == deltas.len()));
+        }
+        events.send(true).unwrap();
+        peer
+    });
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        actor.step(&host(), Duration::from_millis(20)).unwrap();
+        if let Ok(done) = receive.try_recv() {
+            if done {
+                break;
+            }
+            assert_eq!(actor.confirmed().checkpoint().revision, Counter(10));
+        }
+        assert!(std::time::Instant::now() < deadline);
+    }
+    worker.join().unwrap();
+    assert_eq!(actor.confirmed().checkpoint().revision, Counter(13));
+    let (_, _, remaining) = actor.into_recovery();
+    assert!(remaining.is_empty());
+    assert_eq!(originals[1].operations[0].dependencies, vec!["group-A1"]);
+}
+
+#[test]
+fn native_public_receipt_or_cut_transplant_retains_originals_without_installation() {
+    for mode in [
+        "missing-public",
+        "public-id",
+        "public-membership",
+        "cut-membership",
+        "delta-origin",
+    ] {
+        let (mut actor, mut peer, _) = admitted_actor_selected(true, 60000, 5000, true);
+        let initial = actor.confirmed().checkpoint().clone();
+        let mut cp = initial.clone();
+        let mut targets = actor.confirmed().targets().to_vec();
+        let change = agent_change(&cp.scope, "original-A", None, " A");
+        let original = change.clone();
+        let input = participant_input(&cp.scope, &[change], "public-A");
+        let worker = std::thread::spawn(move || {
+            mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&input).unwrap()).unwrap();
+            let batch = loop {
+                let (_, m) = receive_json(&mut peer);
+                if m["type"] == "session_submit_batch" {
+                    break m;
+                }
+            };
+            let mut response = mock_commit_selected(&batch, &mut cp, &mut targets, true);
+            let mut public = response["receipt"].clone();
+            public["request_id"] = json!("public-A");
+            response["public_receipt"] = public;
+            match mode {
+                "missing-public" => {
+                    response.as_object_mut().unwrap().remove("public_receipt");
+                }
+                "public-id" => response["public_receipt"]["request_id"] = json!("another-public"),
+                "public-membership" => {
+                    response["public_receipt"]["changes"][0]["change_id"] = json!("another-change")
+                }
+                "cut-membership" => {
+                    response["native_deltas"][0]["membership_hash"] =
+                        json!(format!("sha256:{}", "0".repeat(64)))
+                }
+                "delta-origin" => {
+                    response["native_deltas"][0]["native_delta"]["allocation_origins"] = json!([])
+                }
+                _ => unreachable!(),
+            }
+            mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&response).unwrap())
+                .unwrap();
+            peer
+        });
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if actor.step(&host(), Duration::from_millis(20)).is_err() {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "{mode}");
+        }
+        worker.join().unwrap();
+        let (confirmed, revision, originals) = actor.into_recovery();
+        assert_eq!(confirmed.checkpoint(), &initial, "{mode}");
+        assert_eq!(revision, 10, "{mode}");
+        assert_eq!(originals.len(), 1, "{mode}");
+        assert_eq!(originals[0].value.as_ref(), &original, "{mode}");
+    }
 }

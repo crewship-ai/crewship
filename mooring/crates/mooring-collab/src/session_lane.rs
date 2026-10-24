@@ -389,7 +389,10 @@ fn validate_incoming(raw: &[u8], native: bool) -> io::Result<(Route, Vec<u8>)> {
         return Ok((Route::Prepare, value.bytes().to_vec()));
     }
     if let Ok(value) = session_control::validate(raw, Peer::InheritedHost) {
-        if value.value().get("native_deltas").is_some() && !native {
+        if (value.value().get("native_deltas").is_some()
+            || value.value().get("public_receipt").is_some())
+            && !native
+        {
             return Err(invalid("unselected native result data"));
         }
         let route = if matches!(

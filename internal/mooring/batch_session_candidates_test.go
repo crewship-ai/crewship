@@ -53,7 +53,7 @@ func TestSessionPreparedCandidatesSameWriterNeverSavedBeforeCommit(t *testing.T)
 				if rollback {
 					return nil, errors.New("injected output failure")
 				}
-				return fullTestOutput(ctx, tx, pending)
+				return sessionNativeTestOutput(ctx, tx, pending)
 			}
 			c := sessionTestCommitter(t, s, lease, []BatchChange{a, b}, nil, output)
 			r, err := c.CommitFull(t.Context(), SessionFullBatchRequest{lease, basis, []BatchChange{b, a}})

@@ -3,6 +3,7 @@ package mooring
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -76,7 +77,7 @@ func TestSessionHumanResolverWriterLifetimeAndImmutableCapture(t *testing.T) {
 		escapedCtx = ctx
 		return nil, nil // An actual agent has no human source context.
 	}
-	committer := sessionTestCommitter(t, s, lease, []BatchChange{one}, nil, fullTestOutput)
+	committer := sessionTestCommitter(t, s, lease, []BatchChange{one}, nil, sessionNativeTestOutput)
 	// Configuration mutation cannot replace the callback captured by this
 	// committer; a replacement owner/runtime needs a newly constructed one.
 	s.config.Targets.SessionHumanPrepare = func(context.Context, *sql.Tx, SessionHumanPrepareAccess) (*protocol.SessionHumanPrepareContext, error) {
@@ -123,7 +124,7 @@ func TestSessionHumanResolverFailurePrecedesTerminalReadClassification(t *testin
 		called = true
 		return nil, ErrInvalid
 	}
-	committer := sessionTestCommitter(t, s, lease, []BatchChange{change}, nil, fullTestOutput)
+	committer := sessionTestCommitter(t, s, lease, []BatchChange{change}, nil, sessionNativeTestOutput)
 	result, err := committer.CommitFull(t.Context(), SessionFullBatchRequest{lease, basis, []BatchChange{change}})
 	if err == nil || !called || adapter.sessionCalls != 0 || len(result.EncodedOutput) != 0 || batchCount(t, s, "mooring_collab_operations") != 0 {
 		t.Fatal("unqualified human source became a terminal read outcome", err, called)
@@ -163,11 +164,28 @@ func TestSessionHumanResolverHistoricalReadBudgetAndOrdinaryIsolation(t *testing
 		}
 		return nil, err
 	}
-	next := sessionTestCommitter(t, s, lease, []BatchChange{three}, nil, fullTestOutput)
+	next := sessionTestCommitter(t, s, lease, []BatchChange{three}, nil, sessionNativeTestOutput)
 	if result, err := next.CommitFull(t.Context(), SessionFullBatchRequest{lease, basis, []BatchChange{three}}); err == nil || len(result.EncodedOutput) != 0 || batchCount(t, s, "mooring_collab_operations") != 2 {
 		t.Fatal("overbudget resolver committed", err)
 	}
 	if result, err := s.Commit(t.Context(), BatchRequest{lease, "2", []BatchChange{three}}); err != nil || result.Revision != "3" || called != 1 || adapter.sessionCalls != 0 {
 		t.Fatal("ordinary causal path invoked session resolver", err, called, adapter.sessionCalls)
 	}
+}
+
+// MOCK original public group correlation; production derives this ID from its
+// sealed whole submission. No callback may relabel a receipt after COMMIT.
+func sessionNativeTestOutput(ctx context.Context, tx *sql.Tx, p SessionPendingOutput) ([]byte, error) {
+	raw, err := fullTestOutput(ctx, tx, p)
+	if err != nil {
+		return nil, err
+	}
+	var result protocol.SessionCommitResult
+	if err = json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	receipt := result.Receipt
+	receipt.RequestID = "public-original"
+	result.PublicReceipt = &receipt
+	return json.Marshal(result)
 }

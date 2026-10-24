@@ -61,7 +61,7 @@ func TestSessionNativeCandidateValidationBeforeSaveAndFinalFences(t *testing.T) 
 				if mode == "output-rollback" {
 					return nil, errors.New("injected rollback")
 				}
-				raw, err := fullTestOutput(ctx, tx, p)
+				raw, err := sessionNativeTestOutput(ctx, tx, p)
 				if mode == "duplicate-output" {
 					raw = []byte(strings.Replace(string(raw), `"type":"session_commit_result"`, `"type":"session_commit_result","type":"session_commit_result"`, 1))
 				}
@@ -115,7 +115,7 @@ func TestSessionNativeCandidateValidatorCannotBeMissing(t *testing.T) {
 	s.config.Targets.SessionHumanPrepare = func(context.Context, *sql.Tx, SessionHumanPrepareAccess) (*protocol.SessionHumanPrepareContext, error) {
 		return nil, nil
 	}
-	if _, err := NewSessionCommitter(s, lease, func(context.Context, *sql.Tx, SessionBatchAccess) error { return nil }, fullTestOutput); err == nil {
+	if _, err := NewSessionCommitter(s, lease, func(context.Context, *sql.Tx, SessionBatchAccess) error { return nil }, sessionNativeTestOutput); err == nil {
 		t.Fatal("native session omitted candidate validation")
 	}
 }

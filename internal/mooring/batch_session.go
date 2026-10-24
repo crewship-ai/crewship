@@ -416,6 +416,24 @@ func validateFullSessionOutputSelected(raw []byte, lease OwnerLease, result Batc
 		return nil, ErrPrivateControl
 	}
 	if native {
+		if message.PublicReceipt == nil {
+			return nil, ErrPrivateControl
+		}
+		expectedPublic := message.Receipt
+		expectedPublic.RequestID = message.PublicReceipt.RequestID
+		if !reflect.DeepEqual(*message.PublicReceipt, expectedPublic) {
+			return nil, ErrPrivateControl
+		}
+		publicBytes, e := json.Marshal(message.PublicReceipt)
+		if e != nil {
+			return nil, e
+		}
+		if _, e = CanonicalE3WireJSON(publicBytes); e != nil {
+			return nil, e
+		}
+		if e := validateSessionParticipantBudgets(message); e != nil {
+			return nil, e
+		}
 		if message.NativeDeltas == nil {
 			return nil, ErrPrivateControl
 		}
@@ -424,7 +442,7 @@ func validateFullSessionOutputSelected(raw []byte, lease OwnerLease, result Batc
 		if !bytes.Equal(actual, expected) {
 			return nil, ErrPrivateControl
 		}
-	} else if message.NativeDeltas != nil {
+	} else if message.NativeDeltas != nil || message.PublicReceipt != nil {
 		return nil, ErrPrivateControl
 	}
 	if message.Scope != cp.Scope || message.Versions != cp.Versions || message.Fence.Generation != protocol.Counter(strconv.FormatInt(lease.Generation, 10)) || message.Fence.Token != lease.Token || !reflect.DeepEqual(message.Checkpoint, cp) || message.Receipt.RequestID != message.RequestID || message.Receipt.Issuer != "crewship" || message.Receipt.Scope != cp.Scope || message.Receipt.Generation != message.Fence.Generation || string(message.Receipt.Revision) != result.Revision {
@@ -454,4 +472,50 @@ func validateFullSessionOutputSelected(raw []byte, lease OwnerLease, result Batc
 		}
 	}
 	return canonical, nil
+}
+
+// Ordinary participant wrappers retain their original 256KiB raw/JCS bound.
+// Reserve the largest valid recipient identifiers/counter before COMMIT, since
+// a fresh authenticated gate may receive an already retained terminal result.
+func validateSessionParticipantBudgets(result protocol.SessionCommitResult) error {
+	maximumID := strings.Repeat("\x01", 200) // six JSON bytes per valid scalar
+	check := func(request string, message any) error {
+		wrapper := map[string]any{"type": "session_participant_output", "request_id": request,
+			"control_profile": result.ControlProfile, "scope": result.Scope, "session_id": result.SessionID,
+			"runtime_ref": result.RuntimeRef, "fence": result.Fence, "connection_ref": maximumID,
+			"participant_ref": maximumID, "gate_id": maximumID, "permission_version": "18446744073709551615", "message": message}
+		raw, err := json.Marshal(wrapper)
+		if err != nil {
+			return err
+		}
+		_, err = CanonicalE3WireJSON(raw)
+		return err
+	}
+	if result.PublicReceipt == nil || result.NativeDeltas == nil {
+		return ErrPrivateControl
+	}
+	if err := check(maximumID, result.PublicReceipt); err != nil {
+		return err
+	}
+	for _, cut := range *result.NativeDeltas {
+		// This is only the closed DATA codec. The concrete Rust adapter validates
+		// the original encoded Yrs delta and targets before this SQL output seam.
+		data, err := json.Marshal(struct {
+			Kind    string                `json:"kind"`
+			Update  string                `json:"update"`
+			Targets []protocol.Identifier `json:"targets"`
+		}{"wordcraft.yrs-update.v1", cut.NativeDelta.Update, cut.NativeDelta.Targets})
+		if err != nil {
+			return err
+		}
+		request := "actor-update:" + string(cut.Revision)
+		message := map[string]any{"type": "document_update", "request_id": request, "scope": result.Scope,
+			"session_id": result.SessionID, "generation": result.Fence.Generation,
+			"from_revision": "18446744073709551615", "to_revision": cut.Revision,
+			"encoding": "json", "data": string(data), "receipt": result.Receipt}
+		if err := check(request, message); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -8,7 +8,7 @@ use crate::{
 use mooring_core::{actor::Actor, batch::Change};
 use mooring_protocol::{
     boundary::{PendingAtomic, Transport},
-    session_control, AtomicChange, Counter, OwnerGrant, SessionParticipantInput,
+    control, session_control, AtomicChange, Counter, OwnerGrant, SessionParticipantInput,
     SessionParticipantInputMessage, SessionParticipantOpen,
 };
 use std::{
@@ -21,9 +21,16 @@ use std::{
 
 type OwnedActor = Actor<ConfirmedDocument, Arc<AtomicChange>>;
 pub type Recovery = (ConfirmedDocument, u64, Vec<Change<Arc<AtomicChange>>>);
+type GroupKey = (String, String);
+struct PublicGroup {
+    outer_request: String,
+    submission: Arc<mooring_protocol::SubmitChanges>,
+    _budget: crate::session_lane::RetainedControl,
+}
 struct Queued {
     connection: String,
     change: Change<Arc<AtomicChange>>,
+    group: Option<GroupKey>,
 }
 
 struct PendingBatch {
@@ -31,12 +38,22 @@ struct PendingBatch {
     request_id: String,
     changes: Vec<Arc<AtomicChange>>,
     membership: Vec<PendingAtomic>,
+    group: Option<GroupKey>,
 }
 
+struct PeerUpdate {
+    request_id: String,
+    from: Counter,
+    to: Counter,
+    data: String,
+}
 struct TerminalDelivery {
     request_id: String,
     receipt: Arc<mooring_protocol::CommitResult>,
     participants: std::collections::BTreeSet<String>,
+    peer_receipt: Arc<mooring_protocol::CommitResult>,
+    updates: Vec<PeerUpdate>,
+    peer_positions: BTreeMap<String, usize>,
     _budget: crate::session_lane::RetainedControl,
 }
 
@@ -113,6 +130,9 @@ pub struct RunningDriver {
     operation_changes: BTreeMap<String, String>,
     refused: Vec<Change<Arc<AtomicChange>>>,
     deliveries: VecDeque<TerminalDelivery>,
+    groups: BTreeMap<GroupKey, PublicGroup>,
+    feeding_group: Option<GroupKey>,
+    envelope_reserve: usize,
 }
 impl RunningDriver {
     /// One bounded live step. Only authenticated inherited-host controls can
@@ -312,6 +332,24 @@ impl RunningDriver {
         {
             return Err(invalid("submission binding"));
         }
+        let group_key = self
+            .owner
+            .native_humans()
+            .then(|| (input.participant_ref.clone(), submission.request_id.clone()));
+        if let Some(previous) = group_key.as_ref().and_then(|key| self.groups.get(key)) {
+            if previous.outer_request != input.request_id
+                || previous.submission.as_ref() != &submission
+            {
+                return Err(invalid("original public group changed"));
+            }
+            let ids: Vec<_> = submission
+                .changes
+                .iter()
+                .map(|c| c.change_id.clone())
+                .collect();
+            return self.output(&input.connection_ref,&input.request_id,serde_json::json!({"type":"changes_received","request_id":submission.request_id,"scope":self.owner.scope(),"session_id":self.owner.session_id(),"change_ids":ids,"state":"pending"}));
+        }
+        let original_submission = group_key.as_ref().map(|_| Arc::new(submission.clone()));
         let mut additions = Vec::new();
         let mut bytes = 0usize;
         let mut change_ids = Vec::new();
@@ -341,6 +379,9 @@ impl RunningDriver {
                 return Err(invalid("atomic fingerprint mismatch"));
             }
             if let Some(previous) = self.originals.get(&change.change_id) {
+                if group_key.is_some() {
+                    return Err(invalid("original public group adopts pending identity"));
+                }
                 if previous.as_ref() != &change {
                     return Err(invalid("pending atomic identity changed"));
                 }
@@ -381,6 +422,31 @@ impl RunningDriver {
             self.refused.extend(additions);
             return Err(invalid("bounded participant input capacity"));
         }
+        if let (Some(key), Some(original)) = (&group_key, original_submission) {
+            let operations = additions.iter().map(|c| c.operations.get()).sum::<usize>();
+            if operations > 256 || bytes > 262144 - self.envelope_reserve {
+                self.refused.extend(additions);
+                return Err(invalid("whole public group cannot fit batch"));
+            }
+            let charge = serde_json::to_vec(&(&input.request_id, original.as_ref(), &change_ids))
+                .map_err(|_| invalid("public group charge"))?
+                .len();
+            let budget = match self.driver.lane.output().reserve_control(charge) {
+                Ok(b) => b,
+                Err(e) => {
+                    self.refused.extend(additions);
+                    return Err(e);
+                }
+            };
+            self.groups.insert(
+                key.clone(),
+                PublicGroup {
+                    outer_request: input.request_id.clone(),
+                    submission: original,
+                    _budget: budget,
+                },
+            );
+        }
         self.input_bytes += bytes;
         *self
             .gate_bytes
@@ -396,6 +462,7 @@ impl RunningDriver {
             self.input.push_back(Queued {
                 connection: input.connection_ref.clone(),
                 change,
+                group: group_key.clone(),
             });
         }
         self.output(&input.connection_ref, &input.request_id, serde_json::json!({"type":"changes_received",
@@ -404,6 +471,15 @@ impl RunningDriver {
     }
     fn flush_input(&mut self) -> io::Result<()> {
         while let Some(queued) = self.input.pop_front() {
+            if self.owner.native_humans() {
+                if self.feeding_group.is_none() {
+                    self.feeding_group = queued.group.clone();
+                }
+                if self.feeding_group != queued.group {
+                    self.input.push_front(queued);
+                    break;
+                }
+            }
             let bytes = queued.change.bytes.get();
             match self.actor.enqueue(queued.change) {
                 Ok(()) => {
@@ -418,6 +494,7 @@ impl RunningDriver {
                     self.input.push_front(Queued {
                         connection: queued.connection,
                         change: refused.change,
+                        group: queued.group,
                     });
                     if capacity {
                         break;
@@ -429,6 +506,12 @@ impl RunningDriver {
         Ok(())
     }
     fn dispatch_due(&mut self) -> io::Result<()> {
+        if self.owner.native_humans()
+            && (self.feeding_group.is_none()
+                || self.input.iter().any(|q| q.group == self.feeding_group))
+        {
+            return Ok(());
+        }
         let basis = self.confirmed().checkpoint();
         let basis = mooring_protocol::ConfirmedCheckpointBasis {
             revision: basis.revision,
@@ -449,7 +532,28 @@ impl RunningDriver {
             .iter()
             .map(|change| change.value.clone())
             .collect();
-        let changes = order_changes(changes);
+        let group = self.feeding_group.clone();
+        let changes = if self.owner.native_humans() {
+            let expected = self
+                .groups
+                .get(
+                    group
+                        .as_ref()
+                        .ok_or_else(|| invalid("missing public group"))?,
+                )
+                .ok_or_else(|| invalid("lost public group"))?;
+            if changes.len() != expected.submission.changes.len()
+                || changes
+                    .iter()
+                    .zip(&expected.submission.changes)
+                    .any(|(a, b)| a.as_ref() != b)
+            {
+                return Err(invalid("split or reordered public group"));
+            }
+            changes
+        } else {
+            order_changes(changes)
+        };
         let request_id = format!("actor-submit:{sequence}");
         let membership = changes
             .iter()
@@ -473,7 +577,9 @@ impl RunningDriver {
             request_id,
             changes,
             membership,
+            group,
         });
+        self.feeding_group = None;
         self.send_control(checked.bytes())
     }
     fn committed(&mut self, raw: &[u8], host: &Transport<'_>) -> io::Result<()> {
@@ -496,6 +602,28 @@ impl RunningDriver {
         // reservation failure is nonterminal recovery, never a local rejection.
         let result: mooring_protocol::SessionCommitResult =
             serde_json::from_slice(raw).map_err(|_| invalid("verified receipt shape"))?;
+        let (delivery_request, delivery_receipt) = if self.owner.native_humans() {
+            let key = pending
+                .group
+                .as_ref()
+                .ok_or_else(|| invalid("missing original public group"))?;
+            let group = self
+                .groups
+                .get(key)
+                .ok_or_else(|| invalid("lost original public group"))?;
+            let public = result
+                .public_receipt
+                .as_deref()
+                .ok_or_else(|| invalid("missing host public receipt"))?;
+            let mut expected = result.receipt.clone();
+            expected.request_id = group.submission.request_id.clone();
+            if public != &expected {
+                return Err(invalid("host public receipt correlation"));
+            }
+            (group.outer_request.clone(), public.clone())
+        } else {
+            (pending.request_id.clone(), result.receipt.clone())
+        };
         let participants: std::collections::BTreeSet<_> = pending
             .changes
             .iter()
@@ -509,14 +637,42 @@ impl RunningDriver {
         if participants.is_empty() || participants.len() > session_control::MAX_PARTICIPANTS {
             return Err(invalid("receipt recipient capacity"));
         }
-        let charge = serde_json::to_vec(&(&pending.request_id, &result.receipt, &participants))
-            .map_err(|_| invalid("receipt accounting"))?
-            .len();
+        let updates = if self.owner.native_humans() {
+            self.verified_updates(pending, &result)?
+        } else {
+            Vec::new()
+        };
+        let peer_positions: BTreeMap<String, usize> = if updates.is_empty() {
+            BTreeMap::new()
+        } else {
+            self.participants
+                .live
+                .values()
+                .map(|p| (p.participant.clone(), 0))
+                .collect()
+        };
+        let update_charge: Vec<_> = updates
+            .iter()
+            .map(|u| (&u.request_id, u.from, u.to, &u.data))
+            .collect();
+        let charge = serde_json::to_vec(&(
+            &delivery_request,
+            &delivery_receipt,
+            &participants,
+            &result.receipt,
+            &update_charge,
+            &peer_positions,
+        ))
+        .map_err(|_| invalid("receipt accounting"))?
+        .len();
         let budget = self.driver.lane.output().reserve_control(charge)?;
         let delivery = TerminalDelivery {
-            request_id: pending.request_id.clone(),
-            receipt: Arc::new(result.receipt),
+            request_id: delivery_request,
+            receipt: Arc::new(delivery_receipt),
             participants,
+            peer_receipt: Arc::new(result.receipt),
+            updates,
+            peer_positions,
             _budget: budget,
         };
         let replacement = document.map(|doc| {
@@ -527,6 +683,9 @@ impl RunningDriver {
             .settle_host_response(pending.sequence, replacement)
             .map_err(|_| invalid("out-of-order settlement"))?;
         let pending = self.pending.pop_front().unwrap();
+        if let Some(group) = pending.group {
+            self.groups.remove(&group);
+        }
         for change in &pending.changes {
             self.originals.remove(&change.change_id);
             for op in &change.operations {
@@ -537,63 +696,184 @@ impl RunningDriver {
         self.flush_deliveries()
     }
     fn flush_deliveries(&mut self) -> io::Result<()> {
-        // One closed author must not block independent readers. For each
-        // stable participant, however, retained terminal results stay FIFO.
         let mut blocked = std::collections::BTreeSet::new();
         let mut index = 0;
         while index < self.deliveries.len() {
-            let participants: Vec<_> = self.deliveries[index]
+            let recipients: std::collections::BTreeSet<_> = self.deliveries[index]
                 .participants
                 .iter()
+                .chain(self.deliveries[index].peer_positions.keys())
                 .cloned()
                 .collect();
-            let request = self.deliveries[index].request_id.clone();
-            let receipt = self.deliveries[index].receipt.clone();
-            for participant in participants {
+            for participant in recipients {
                 if blocked.contains(&participant) {
                     continue;
                 }
+                let now = (self.driver.clock)()?;
                 let connections: Vec<_> = self
                     .participants
                     .live
                     .iter()
                     .filter(|(_, p)| p.participant == participant)
-                    .map(|(connection, _)| connection.clone())
+                    .map(|(c, _)| c.clone())
                     .collect();
-                let mut delivered = false;
-                for connection in connections {
-                    // A fresh ticket may authorize a NEW gate for this SAME
-                    // participant. No old lease object is recreated or revived.
-                    if self
-                        .participants
-                        .may_send(&connection, &self.owner, (self.driver.clock)()?)
-                        .is_err()
-                    {
-                        continue;
+                let connection = connections
+                    .into_iter()
+                    .find(|c| self.participants.may_send(c, &self.owner, now).is_ok());
+                let Some(connection) = connection else {
+                    blocked.insert(participant);
+                    continue;
+                };
+                if let Some(mut position) = self.deliveries[index]
+                    .peer_positions
+                    .get(&participant)
+                    .copied()
+                {
+                    while position < self.deliveries[index].updates.len() {
+                        self.participants.may_send(
+                            &connection,
+                            &self.owner,
+                            (self.driver.clock)()?,
+                        )?;
+                        let delivery = &self.deliveries[index];
+                        let update = &delivery.updates[position];
+                        let request = update.request_id.clone();
+                        let message = serde_json::json!({"type":"document_update","request_id":request,"scope":self.owner.scope(),"session_id":self.owner.session_id(),"generation":self.owner.initial_owner().fence.generation,"from_revision":update.from,"to_revision":update.to,"encoding":"json","data":update.data,"receipt":delivery.peer_receipt});
+                        self.output(&connection, &request, message)?;
+                        position += 1;
+                        self.deliveries[index]
+                            .peer_positions
+                            .insert(participant.clone(), position);
                     }
-                    // Current checks precede encoding AND run after writer
-                    // wait in output(). Only verified host receipts reach here.
+                    self.deliveries[index].peer_positions.remove(&participant);
+                }
+                if self.deliveries[index].participants.contains(&participant) {
+                    self.participants
+                        .may_send(&connection, &self.owner, (self.driver.clock)()?)?;
+                    let request = self.deliveries[index].request_id.clone();
+                    let receipt = self.deliveries[index].receipt.clone();
                     self.output(
                         &connection,
                         &request,
                         serde_json::to_value(receipt.as_ref())
                             .map_err(|_| invalid("receipt forwarding"))?,
                     )?;
-                    delivered = true;
-                }
-                if delivered {
                     self.deliveries[index].participants.remove(&participant);
-                } else {
-                    blocked.insert(participant);
                 }
             }
-            if self.deliveries[index].participants.is_empty() {
+            if self.deliveries[index].participants.is_empty()
+                && self.deliveries[index].peer_positions.is_empty()
+            {
                 self.deliveries.remove(index);
             } else {
                 index += 1;
             }
         }
         Ok(())
+    }
+
+    fn verified_updates(
+        &self,
+        pending: &PendingBatch,
+        result: &mooring_protocol::SessionCommitResult,
+    ) -> io::Result<Vec<PeerUpdate>> {
+        let deltas = result
+            .native_deltas
+            .as_ref()
+            .ok_or_else(|| invalid("missing committed native deltas"))?;
+        let receipt =
+            serde_json::to_value(&result.receipt).map_err(|_| invalid("receipt cut encoding"))?;
+        let previous = self.confirmed().checkpoint().revision.0;
+        let mut cuts = Vec::new();
+        for change in receipt["changes"]
+            .as_array()
+            .ok_or_else(|| invalid("receipt changes"))?
+        {
+            if change["status"] != "saved" {
+                continue;
+            }
+            let revision = change["last_revision"]
+                .as_str()
+                .and_then(|s| s.parse::<u64>().ok())
+                .ok_or_else(|| invalid("receipt cut revision"))?;
+            if revision <= previous {
+                continue;
+            }
+            let id = change["change_id"]
+                .as_str()
+                .ok_or_else(|| invalid("receipt cut identity"))?;
+            let original = pending
+                .changes
+                .iter()
+                .find(|c| c.change_id == id)
+                .ok_or_else(|| invalid("unmatched receipt atomic"))?;
+            cuts.push((revision, original));
+        }
+        cuts.sort_by_key(|(revision, _)| *revision);
+        if cuts.len() != deltas.len() {
+            return Err(invalid("incomplete committed delta membership"));
+        }
+        let mut updates = Vec::new();
+        let mut from = previous;
+        for ((revision, original), entry) in cuts.into_iter().zip(deltas) {
+            let expected = from
+                .checked_add(original.operations.len() as u64)
+                .ok_or_else(|| invalid("cut revision overflow"))?;
+            if revision != expected
+                || entry.revision.0 != revision
+                || entry.change_id != original.change_id
+                || entry.membership_hash != original.membership_hash
+            {
+                return Err(invalid("committed delta cut binding"));
+            }
+            let raw = mooring_protocol::boundary::decode_base64(&entry.native_delta.update, 262144)
+                .map_err(|_| invalid("native delta encoding"))?;
+            let actual = mooring_wordcraft::document_update::allocation_origins(&raw)
+                .map_err(|_| invalid("native allocation inventory"))?;
+            let declared: Vec<_> = entry
+                .native_delta
+                .allocation_origins
+                .iter()
+                .map(|n| n.0)
+                .collect();
+            if entry.native_delta.writer_origin.0 == 0
+                || entry.native_delta.writer_origin.0 >= (1 << 53)
+                || actual != declared
+                || actual
+                    .iter()
+                    .any(|n| *n != entry.native_delta.writer_origin.0)
+            {
+                return Err(invalid("native delta allocation binding"));
+            }
+            let data =
+                mooring_wordcraft::document_update::encode(&raw, &entry.native_delta.targets)
+                    .map_err(|_| invalid("native public update capacity"))?;
+            updates.push(PeerUpdate {
+                request_id: format!("actor-update:{revision}"),
+                from: Counter(from),
+                to: Counter(revision),
+                data,
+            });
+            from = revision;
+        }
+        if from != result.checkpoint.revision.0 {
+            return Err(invalid("native deltas omit committed state"));
+        }
+        if let Some(last) = deltas.last() {
+            let state = mooring_protocol::boundary::decode_base64(
+                &result.checkpoint.state,
+                control::MAX_CHECKPOINT_BYTES,
+            )
+            .map_err(|_| invalid("committed state encoding"))?;
+            if control::encode_checkpoint(&state)
+                .map_err(|_| invalid("committed raw state digest"))?
+                .digest
+                != last.checkpoint_state_digest
+            {
+                return Err(invalid("final native cut state binding"));
+            }
+        }
+        Ok(updates)
     }
     pub(crate) fn from_driver(
         driver: Driver,
@@ -643,6 +923,9 @@ impl RunningDriver {
             operation_changes: BTreeMap::new(),
             refused: Vec::new(),
             deliveries: VecDeque::new(),
+            groups: BTreeMap::new(),
+            feeding_group: None,
+            envelope_reserve: reserve,
         })
     }
     pub fn confirmed(&self) -> &ConfirmedDocument {

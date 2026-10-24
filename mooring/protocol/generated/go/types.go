@@ -1630,6 +1630,7 @@ type SessionCommitResult struct {
 	Checkpoint     Checkpoint                        `json:"checkpoint"`
 	Targets        []TargetVersion                   `json:"targets"`
 	NativeDeltas   *[]SessionCommittedNativeDelta    `json:"native_deltas,omitempty"`
+	PublicReceipt  *CommitResult                     `json:"public_receipt,omitempty"`
 }
 
 type SessionParticipantOpenType string
