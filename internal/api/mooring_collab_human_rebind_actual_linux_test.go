@@ -89,7 +89,7 @@ func TestCollaborationHumanActualRuntimeReplacementPreservesAdmission(t *testing
 	if _, err = registry.replaceRuntime(t.Context(), second, owner); err == nil {
 		t.Fatal("same owner generation reused")
 	}
-	// Voluntary release permits a fresh owner BEFORE the issued two-second
+	// Voluntary release permits a fresh owner BEFORE the original issued
 	// delivery lease expires. Owner succession must not acknowledge that lease.
 	if err = unit.owners.Release(t.Context(), owner); err != nil {
 		t.Fatal(err)
@@ -110,7 +110,7 @@ func TestCollaborationHumanActualRuntimeReplacementPreservesAdmission(t *testing
 		t.Fatal("replacement invented an acknowledgement or erased pending expiry")
 	}
 	check(old, false)
-	clock.now += 2*time.Second - time.Nanosecond
+	clock.now = time.Duration(pendingExpiry) - time.Nanosecond
 	if _, err = registry.replaceRuntime(t.Context(), second, newOwner); !errors.Is(err, mooring.ErrDeliveryClosed) {
 		t.Fatal("delivery barrier completed before the final original nanosecond", err)
 	}

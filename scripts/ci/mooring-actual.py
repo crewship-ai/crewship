@@ -51,43 +51,6 @@ def cases():
     return declared
 
 
-def prepare_diagnostic_overlay(directory, output, identity):
-    # One reviewed, temporary diagnostic input. It is not a configurable
-    # participant/runtime profile, and can never qualify pristine ALL22.
-    directory = directory.resolve()
-    manifest_raw = (directory / "manifest.json").read_bytes()
-    if hashlib.sha256(manifest_raw).hexdigest() != "1778d263a9e671882088e10c23298f855ea756f8a9cb4bb5a2712021591f3da9":
-        raise ValueError("unreviewed diagnostic overlay manifest")
-    manifest = json.loads(manifest_raw)
-    mapping_raw = (directory / "overlay-relative-map.json").read_bytes()
-    if hashlib.sha256(mapping_raw).hexdigest() != manifest["relative_map_sha256"]:
-        raise ValueError("diagnostic overlay map mismatch")
-    mapping = json.loads(mapping_raw)
-    expected = {"internal/api/mooring_collab_session_pump.go", "internal/mooring/runtime_session.go"}
-    if set(manifest["files"]) != expected or set(mapping) != {"Replace"} or set(mapping["Replace"]) != expected:
-        raise ValueError("diagnostic overlay source set mismatch")
-    replacements = {}
-    for original, entry in manifest["files"].items():
-        source = ROOT / original
-        replacement = (directory / entry["artifact_path"]).resolve()
-        if not replacement.is_relative_to(directory) or mapping["Replace"][original] != entry["artifact_path"]:
-            raise ValueError("diagnostic overlay path mismatch")
-        if hashlib.sha256(source.read_bytes()).hexdigest() != entry["original_sha256"]:
-            raise ValueError("diagnostic overlay original source mismatch")
-        if hashlib.sha256(replacement.read_bytes()).hexdigest() != entry["overlay_sha256"]:
-            raise ValueError("diagnostic overlay replacement mismatch")
-        replacements[str(source.resolve())] = str(replacement)
-    overlay = output / "go-diagnostic-overlay.json"
-    overlay.write_text(json.dumps({"Replace": replacements}, sort_keys=True) + "\n")
-    (output / "diagnostic-metadata.json").write_text(json.dumps({
-        "diagnostic_only": True, "source": identity,
-        "manifest_sha256": hashlib.sha256(manifest_raw).hexdigest(),
-        "overlay_sha256": hashlib.sha256(overlay.read_bytes()).hexdigest(),
-        "pristine_all22_qualified": False,
-    }, sort_keys=True, indent=2) + "\n")
-    return overlay
-
-
 def capture_go_test(command, env, events):
     # Go emits module-download and tool diagnostics on stderr, outside its
     # -json event stream. Preserve them separately; the JSON verifier remains
@@ -101,7 +64,6 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fixtures", type=Path, required=True)
     parser.add_argument("--results", type=Path, required=True)
-    parser.add_argument("--diagnostic-overlay", type=Path)
     args = parser.parse_args()
     declared = cases()
     fixture_path = args.fixtures.resolve()
@@ -138,7 +100,6 @@ def main():
     reads = pinned(fixture["reads"]["path"], fixture["reads"]["sha256"])
     output = args.results.resolve()
     output.mkdir(mode=0o700, parents=False, exist_ok=False)
-    overlay = prepare_diagnostic_overlay(args.diagnostic_overlay, output, identity) if args.diagnostic_overlay else None
     completed = []
     for name, path in declared.items():
         document = "d3" if name == READONLY else "d1"
@@ -169,8 +130,6 @@ def main():
         package = str(Path(path).parent)
         command = ["go", "test", "-json", "-race", "-tags", "mooring_rust_integration",
                    "./" + package, "-run", "^" + name + "$", "-count=1", "-timeout=10m"]
-        if overlay:
-            command[2:2] = ["-overlay", str(overlay)]
         print(f"actual integration: {package} {name}", flush=True)
         events = case_dir / "go-test.jsonl"
         returncode = capture_go_test(command, env, events)
@@ -178,16 +137,10 @@ def main():
             qualification = results.verify(log, MODULE + package, [name])
         if returncode != 0:
             raise ValueError(f"actual Go process failed: {name}: exit {returncode}")
-        if overlay:
-            qualification["diagnostic_only"] = True
         completed.append(qualification)
         (output / "completed.json").write_text(json.dumps(completed, indent=2) + "\n")
     if len(completed) != len(declared):
         raise ValueError("incomplete actual integration run")
-    if overlay:
-        print(json.dumps({"diagnostic_actual_tests_passed": len(completed), "skipped": 0,
-                          "source": source, "diagnostic_only": True}))
-        raise SystemExit("Diagnostic-only overlay cannot qualify pristine ALL22; clean followup required")
     print(json.dumps({"actual_tests_passed": len(completed), "skipped": 0, "source": source}))
 
 

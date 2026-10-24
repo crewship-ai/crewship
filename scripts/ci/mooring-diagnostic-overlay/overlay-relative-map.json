@@ -1,6 +1,0 @@
-{
-  "Replace": {
-    "internal/api/mooring_collab_session_pump.go": "files/internal/api/mooring_collab_session_pump.go.txt",
-    "internal/mooring/runtime_session.go": "files/internal/mooring/runtime_session.go.txt"
-  }
-}

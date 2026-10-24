@@ -28,8 +28,6 @@ class WorkflowContracts(unittest.TestCase):
         self.assertLess(lane.index('sha256sum --check --strict'), lane.index('tar -xzf'))
         self.assertIn('mooring-actual-fixtures.py --output', lane)
         self.assertIn('mooring-actual.py --fixtures', lane)
-        self.assertIn('--diagnostic-overlay scripts/ci/mooring-diagnostic-overlay', lane)
-        self.assertIn('(DIAGNOSTIC overlay)', lane)
         self.assertLess(lane.index('mooring-actual-fixtures.py --output'), lane.index('mooring-actual.py --fixtures'))
         self.assertIn('if-no-files-found: error', lane)
         self.assertIn('${{ runner.temp }}/mooring-actual-fixtures/', lane)
