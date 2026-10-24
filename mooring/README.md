@@ -86,3 +86,19 @@ counter is `precondition_failed`, attributed to the actual operation. This initi
 `agent_confirmed_current` capability rejects causal stale and provisional reads;
 the shared context fixtures qualify only this pure intersection, not host commits
 or the remaining broader collaboration modes.
+
+The unused Go `SessionCommitter` is a separate queued-submit store seam. It
+checks a retained atomic checkpoint basis and derives the current transport head
+inside the same FULL SQL writer. Original operation bases, reads, dependencies
+and fingerprints stay unchanged. Its processing callback must verify every
+complete host-sealed ingress operation and membership before outcome lookup;
+current per-operation write/task checks remain separate. External status/read
+authority and ordinary `Commit` expected-head semantics remain unchanged.
+
+A required pure output callback receives an uncommitted result/checkpoint and
+transaction to validate and encode the exact closed session receipt/checkpoint/
+inventory envelope before final authority/owner fences. It must not publish or
+install anything. Encoded bytes are bounded and returned only after COMMIT.
+This primitive authenticates no runtime or caller by itself: the real session
+factory, FIFO/barrier, ingress-proof registry and strict typed encoder are still
+required before enabling it. Its tests use mock seals/app/clock with real FULL SQL.

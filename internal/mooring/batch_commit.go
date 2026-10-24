@@ -141,6 +141,10 @@ func (s *BatchStore) deniedReason(err error) (*BatchRejection, error) {
 // results are returned unchanged, including after a lost response/reconnection.
 // Any SQL/engine/owner error returns no terminal result; callers query Status.
 func (s *BatchStore) Commit(ctx context.Context, request BatchRequest) (BatchResult, error) {
+	return s.commit(ctx, request, nil)
+}
+
+func (s *BatchStore) commit(ctx context.Context, request BatchRequest, session *sessionCommitMode) (BatchResult, error) {
 	if err := s.ready(); err != nil {
 		return BatchResult{}, err
 	}
@@ -148,11 +152,24 @@ func (s *BatchStore) Commit(ctx context.Context, request BatchRequest) (BatchRes
 	if err != nil {
 		return BatchResult{}, err
 	}
+	if session != nil {
+		session.members = make(map[string]sessionMembership)
+		for _, change := range changes {
+			for _, op := range change.Operations {
+				session.members[op.ID] = sessionMembership{change.ID, change.MembershipHash}
+			}
+		}
+	}
 	result := BatchResult{}
 	emitted := false
 	eventChanges := []BatchChangeResult{}
 	err = s.transaction(ctx, func(tx *sql.Tx) error {
 		key := request.Lease.Key
+		if session != nil {
+			if err := s.config.Owners.Check(ctx, tx, request.Lease); err != nil {
+				return err
+			}
+		}
 		// No operation/task existence lookup precedes current scoped authorization.
 		for _, c := range changes {
 			for i := range c.Operations {
@@ -162,7 +179,15 @@ func (s *BatchStore) Commit(ctx context.Context, request BatchRequest) (BatchRes
 				}
 			}
 		}
-		revision, checkpoint, e := batchScopeMatches(ctx, tx, key)
+		var revision string
+		var checkpoint []byte
+		var e error
+		if session == nil {
+			revision, checkpoint, e = batchScopeMatches(ctx, tx, key)
+		} else {
+			revision, checkpoint, e = sessionScopeCheckpoint(ctx, tx, key, session.basis)
+			request.ExpectedRevision = revision
+		}
 		if e != nil {
 			return e
 		}
@@ -431,6 +456,16 @@ func (s *BatchStore) Commit(ctx context.Context, request BatchRequest) (BatchRes
 			}
 			emitted = true
 		}
+		result.Revision = strconv.FormatUint(rev, 10)
+		result.Changes = make([]BatchChangeResult, len(changes))
+		for i := range changes {
+			result.Changes[i] = accepted[i]
+		}
+		if session != nil {
+			if e = session.prepareOutput(ctx, tx, request.Lease, result, checkpoint); e != nil {
+				return e
+			}
+		}
 		if emitted {
 			// Rejected operations also retain immutable dependency history. A prior
 			// candidate may consume the remaining budget after pre-admission checks;
@@ -460,10 +495,10 @@ func (s *BatchStore) Commit(ctx context.Context, request BatchRequest) (BatchRes
 				return e
 			}
 		}
-		result.Revision = strconv.FormatUint(rev, 10)
-		result.Changes = make([]BatchChangeResult, len(changes))
-		for i := range changes {
-			result.Changes[i] = accepted[i]
+		if session != nil && !emitted {
+			if e = s.config.Owners.Check(ctx, tx, request.Lease); e != nil {
+				return e
+			}
 		}
 		return nil
 	})
