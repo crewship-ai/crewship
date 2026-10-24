@@ -73,7 +73,7 @@ impl Maintenance {
     }
 }
 fn interval(duration: Duration) -> io::Result<Duration> {
-    if duration.is_zero() || duration > Duration::from_secs(2) {
+    if duration.is_zero() || duration > Duration::from_millis(mooring_protocol::session_control::DELIVERY_LEASE_MS) {
         return Err(invalid("delivery duration bound"));
     }
     Ok((duration / 8)
@@ -107,7 +107,7 @@ mod tests {
     #[test]
     fn bounds_and_overflow_never_change_gate_duration_or_authority() {
         assert!(Maintenance::new(at(0), Duration::ZERO).is_err());
-        assert!(Maintenance::new(at(0), Duration::from_millis(2001)).is_err());
+        assert!(Maintenance::new(at(0), Duration::from_millis(5001)).is_err());
         assert!(Maintenance::new(Tick(Duration::MAX), Duration::from_secs(2)).is_err());
         let mut m = Maintenance::new(at(0), Duration::from_secs(2)).unwrap();
         assert!(m.retried(at(0)).is_err());

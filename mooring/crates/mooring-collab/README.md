@@ -42,7 +42,7 @@ and verified receipt settlement are not connected by this transition. A bare
 restore or renewal reply cannot replace the actor's confirmed document.
 
 The separately invoked `RunningDriver::step` connects correlated host ticket
-replies to two-second read leases, exact participant input bindings, immutable
+replies to host-configured read leases (default five seconds, at most five seconds), exact participant input bindings, immutable
 `submit_changes`, the native core timer and FIFO host settlement. B may leave
 while A awaits its durable reply; an earlier sent dependency stays pending.
 Only a verified `SessionCommitResult` installs the host checkpoint. Uncertain

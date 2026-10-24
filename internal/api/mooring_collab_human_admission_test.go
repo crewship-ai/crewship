@@ -317,3 +317,42 @@ func TestCollaborationHumanStoreRequiresCompleteOperationLease(t *testing.T) {
 		t.Fatal("old ingress reached restored store")
 	}
 }
+
+func TestCollaborationHumanDeliveryDefaultFiveSeconds(t *testing.T) {
+	_, registry, owner, ctx, _ := collaborationAdmissionFixture(t)
+	ticket, _, err := registry.issue(ctx, owner, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined, err := registry.join(t.Context(), registry.runtime, owner, ticket, "default-five-second-join")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if joined.gate.DurationMilliseconds != 5000 {
+		t.Fatalf("default delivery lease: got %dms, want 5000ms", joined.gate.DurationMilliseconds)
+	}
+}
+
+func TestCollaborationHumanConfiguredLeaseUsesExactSQLHorizon(t *testing.T) {
+	rig, registry, owner, ctx, clock := collaborationAdmissionFixture(t)
+	registry.deliveryTTL = 3 * time.Second
+	ticket, _, err := registry.issue(ctx, owner, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined, err := registry.join(t.Context(), registry.runtime, owner, ticket, "configured-three-second-join")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var expires int64
+	if err = rig.db.QueryRow(`SELECT expires_ns FROM mooring_delivery_gates WHERE id=?`, joined.gate.GateID).Scan(&expires); err != nil {
+		t.Fatal(err)
+	}
+	if joined.gate.DurationMilliseconds != 3000 || expires != int64(clock.now+3*time.Second) {
+		t.Fatal("configured SQL horizon", joined.gate, expires)
+	}
+	clock.now += 3 * time.Second
+	if _, err = joined.delivery.Renew(t.Context(), owner, joined.gate.GateID, "expired-configured-gate"); err == nil {
+		t.Fatal("expired configured gate revived")
+	}
+}

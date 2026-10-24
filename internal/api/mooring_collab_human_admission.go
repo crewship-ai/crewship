@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/mooring"
 )
 
@@ -76,6 +77,7 @@ type collaborationHumanRegistry struct {
 	sessionID       string
 	limit           int
 	reservations    int
+	deliveryTTL     time.Duration
 	admissions      map[string]collaborationHumanAdmission
 	tickets         map[string]collaborationHumanJoinTicket
 }
@@ -453,7 +455,13 @@ func (s *collaborationHumanRegistry) join(ctx context.Context, runtime collabora
 		return empty, err
 	}
 	defer release()
-	const ttl = 2 * time.Second
+	ttl := s.deliveryTTL
+	if ttl == 0 {
+		ttl = config.DefaultMooringDeliveryLease
+	}
+	if ttl < time.Millisecond || ttl > config.DefaultMooringDeliveryLease {
+		return empty, errCollaborationAdmission
+	}
 	s.mu.Lock()
 	bindingID := s.bindingID
 	s.mu.Unlock()

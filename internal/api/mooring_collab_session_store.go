@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/mooring"
 )
@@ -244,8 +245,11 @@ func (c *collaborationSessionStore) check(ctx context.Context, tx *sql.Tx) error
 
 // The constructor derives session identity and versions only from the actual
 // opaque startup proof. It returns nothing until the original store is bound.
-func newCollaborationSessionHumanRegistry(ctx context.Context, c *collaborationSessionStore, activation *mooring.SessionActivation, owner mooring.OwnerLease, clock mooring.OwnerClock, limit int) (*collaborationHumanRegistry, error) {
+func newCollaborationSessionHumanRegistry(ctx context.Context, c *collaborationSessionStore, activation *mooring.SessionActivation, owner mooring.OwnerLease, clock mooring.OwnerClock, limit int, deliveryTTL ...time.Duration) (*collaborationHumanRegistry, error) {
 	if c == nil || activation == nil || clock == nil || limit < 1 || limit > 1000 || activation.Scope() != c.scope || !mooring.ValidWireIdentifier(activation.SessionID()) {
+		return nil, errCollaborationAdmission
+	}
+	if len(deliveryTTL) > 1 || (len(deliveryTTL) == 1 && (deliveryTTL[0] < time.Millisecond || deliveryTTL[0] > 5*time.Second)) {
 		return nil, errCollaborationAdmission
 	}
 	runtime, err := activation.SessionRuntime()
@@ -260,6 +264,9 @@ func newCollaborationSessionHumanRegistry(ctx context.Context, c *collaborationS
 		return nil, err
 	}
 	s := &collaborationHumanRegistry{sessionStore: c, lifecycle: c.lifecycle, bindingID: id, fence: c.fence, pages: c.pages, owners: c.owners, runtime: runtime, targetAdapter: c.adapter, readPolicy: mooring.CausalTargetReadPolicy, clock: clock, scope: c.scope, versions: activation.Versions(), sessionID: activation.SessionID(), ownerGeneration: owner.Generation, limit: limit, admissions: make(map[string]collaborationHumanAdmission), tickets: make(map[string]collaborationHumanJoinTicket)}
+	if len(deliveryTTL) == 1 {
+		s.deliveryTTL = deliveryTTL[0]
+	}
 	authority := func(ctx context.Context, tx *sql.Tx, access mooring.BatchAccess) error {
 		return s.authorizeBatchAtBinding(ctx, tx, access, runtime, id)
 	}
