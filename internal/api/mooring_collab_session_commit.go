@@ -64,35 +64,43 @@ func newCollaborationSessionCommitter(ctx context.Context, cell *collaborationSe
 }
 
 func (s *collaborationSessionCommitter) submit(ctx context.Context, request protocol.SessionSubmitBatch) (protocol.SessionCommitResult, error) {
+	result, _, err := s.submitWithCuts(ctx, request)
+	return result, err
+}
+
+// submitWithCuts releases only actual committed atomic cut DATA. It does not
+// qualify a client history witness, assign a source or publish to participants.
+func (s *collaborationSessionCommitter) submitWithCuts(ctx context.Context, request protocol.SessionSubmitBatch) (protocol.SessionCommitResult, []mooring.SessionSavedCut, error) {
 	var empty protocol.SessionCommitResult
 	if ctx == nil || s == nil || s.cell == nil || s.submissions == nil ||
 		request.Type != "session_submit_batch" || string(request.ControlProfile) != mooring.PrivateSessionProfile || !mooring.ValidWireIdentifier(string(request.RequestID)) ||
 		request.Scope != s.scope || request.SessionID != s.session || request.RuntimeRef != s.runtime || request.Versions != s.versions || request.Fence != s.fence {
-		return empty, errCollaborationSubmission
+		return empty, nil, errCollaborationSubmission
 	}
 	// Freeze owned structured input, including nested immutable operation bytes.
 	// This secondary budget cannot replace the pump's original raw-frame check.
 	raw, err := json.Marshal(request)
 	if err != nil || len(raw) > mooring.MaxPrivatePrepareRPCFrame {
-		return empty, errCollaborationSubmission
+		return empty, nil, errCollaborationSubmission
 	}
 	var frozen protocol.SessionSubmitBatch
 	if err = json.Unmarshal(raw, &frozen); err != nil {
-		return empty, errCollaborationSubmission
+		return empty, nil, errCollaborationSubmission
 	}
 	changesRaw, err := json.Marshal(frozen.Changes)
 	if err != nil {
-		return empty, err
+		return empty, nil, err
 	}
 	var changes []mooring.BatchChange
 	if err = json.Unmarshal(changesRaw, &changes); err != nil {
-		return empty, err
+		return empty, nil, err
 	}
 	changes, err = mooring.NormalizeSessionIngress(s.owner.Key, changes)
 	if err != nil {
-		return empty, err
+		return empty, nil, err
 	}
 	var result protocol.SessionCommitResult
+	var cuts []mooring.SessionSavedCut
 	err = s.submissions.run(ctx, s.binding, func(bound context.Context) error {
 		committer, err := mooring.NewSessionCommitter(s.cell.store, s.owner, s.submissions.bind(s.owner, s.binding), func(ctx context.Context, tx *sql.Tx, pending mooring.SessionPendingOutput) ([]byte, error) {
 			if pending.Lease != s.owner || pending.FullCheckpoint == nil || pending.Targets == nil {
@@ -135,10 +143,14 @@ func (s *collaborationSessionCommitter) submit(ctx context.Context, request prot
 		}
 		// Only the bytes released by successful COMMIT become a response. Errors or
 		// uncertainty return zero output; they are never terminal rejection receipts.
-		return json.Unmarshal(committed.EncodedOutput, &result)
+		if err := json.Unmarshal(committed.EncodedOutput, &result); err != nil {
+			return err
+		}
+		cuts = append([]mooring.SessionSavedCut(nil), committed.SavedCuts...)
+		return nil
 	})
 	if err != nil {
-		return empty, err
+		return empty, nil, err
 	}
-	return result, nil
+	return result, cuts, nil
 }

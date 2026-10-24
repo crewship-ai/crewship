@@ -5,6 +5,7 @@ package api
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -188,7 +189,17 @@ func TestCollaborationActualActorBPrecedesAAckAndCommitsOriginalSQL(t *testing.T
 					return protocol.SessionCommitResult{}, errors.New("B emitted only after A acknowledgement")
 				}
 				t.Logf("submit %s basis=%s elapsed=%s", submit.Changes[0].ChangeID, submit.ConfirmedBasis.Revision, time.Since(started))
-				result, e := committer.submit(bound, submit)
+				result, cuts, e := committer.submitWithCuts(bound, submit)
+				if e == nil {
+					state, decodeErr := base64.StdEncoding.Strict().DecodeString(result.Checkpoint.State)
+					hash := sha256.Sum256(state)
+					change := submit.Changes[0]
+					if decodeErr != nil || len(cuts) != 1 || cuts[0].ChangeID != string(change.ChangeID) || cuts[0].MembershipHash != string(change.MembershipHash) || cuts[0].Revision != string(result.Receipt.Revision) || cuts[0].StateDigest != "sha256:"+hex.EncodeToString(hash[:]) {
+						return protocol.SessionCommitResult{}, errors.New("committed native atomic cut did not reach API")
+					}
+				} else if len(cuts) != 0 {
+					return protocol.SessionCommitResult{}, errors.New("failed commit exposed cut")
+				}
 				t.Logf("commit %s error=%v revision=%s elapsed=%s", submit.Changes[0].ChangeID, e, result.Receipt.Revision, time.Since(started))
 				if e == nil {
 					results <- result

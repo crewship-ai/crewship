@@ -9,6 +9,7 @@ import (
 	"errors"
 	protocol "github.com/crewship-ai/crewship/mooring/protocol/generated/go"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -67,9 +68,21 @@ type SessionPendingOutput struct {
 	Targets        []BatchTargetVersion
 }
 type SessionOutputPreparer func(context.Context, *sql.Tx, SessionPendingOutput) ([]byte, error)
+
+// SessionSavedCut is committed DATA about one exact atomic boundary, not an
+// author or delivery capability. StateDigest hashes the decoded checkpoint
+// state, not its base64 encoding or full wire identity. Known Saved retries
+// retain their original boundary even when the batch ends at a later head.
+type SessionSavedCut struct {
+	ChangeID, MembershipHash, Revision, StateDigest string
+}
+
 type SessionBatchResult struct {
 	Result        BatchResult
 	EncodedOutput []byte
+	// SavedCuts is populated only by CommitFull after successful SQL COMMIT.
+	// Pending output callbacks never receive provisional cuts.
+	SavedCuts []SessionSavedCut
 }
 type SessionCommitter struct {
 	store     *BatchStore
@@ -98,6 +111,7 @@ type sessionCommitMode struct {
 	basis     SessionBasis
 	output    SessionOutputPreparer
 	encoded   []byte
+	savedCuts []SessionSavedCut
 }
 
 func (s *SessionCommitter) Commit(ctx context.Context, request SessionBatchRequest) (SessionBatchResult, error) {
@@ -151,7 +165,7 @@ func (s *SessionCommitter) commitMode(ctx context.Context, request SessionBatchR
 	if err != nil {
 		return SessionBatchResult{}, err
 	}
-	return SessionBatchResult{Result: result, EncodedOutput: mode.encoded}, nil
+	return SessionBatchResult{Result: result, EncodedOutput: mode.encoded, SavedCuts: append([]SessionSavedCut(nil), mode.savedCuts...)}, nil
 }
 func validSessionBasis(b SessionBasis) bool {
 	if _, err := batchCounter(b.Revision); err != nil || len(b.Digest) != len("sha256:")+64 || !strings.HasPrefix(b.Digest, "sha256:") {
@@ -278,6 +292,9 @@ func (m *sessionCommitMode) prepareOutput(ctx context.Context, tx *sql.Tx, store
 		copied.Assets = append([]protocol.Asset{}, cp.Assets...)
 		pending.FullCheckpoint = &copied
 		pending.Targets = append([]BatchTargetVersion{}, targets...)
+		if e = m.captureSavedCuts(ctx, tx, store, lease, result); e != nil {
+			return e
+		}
 	}
 	output, err := m.output(ctx, tx, pending)
 	if err != nil {
@@ -293,6 +310,65 @@ func (m *sessionCommitMode) prepareOutput(ctx context.Context, tx *sql.Tx, store
 		}
 	}
 	m.encoded = append([]byte(nil), output...)
+	return nil
+}
+
+func (m *sessionCommitMode) captureSavedCuts(ctx context.Context, tx *sql.Tx, store *BatchStore, lease OwnerLease, result BatchResult) error {
+	if len(result.Changes) > MaxAtomicOperations {
+		return ErrBatchCapacity
+	}
+	type numberedCut struct {
+		cut      SessionSavedCut
+		revision uint64
+	}
+	cuts := make([]numberedCut, 0, len(result.Changes))
+	head, err := batchCounter(result.Revision)
+	if err != nil {
+		return err
+	}
+	for _, change := range result.Changes {
+		if change.Status != "saved" {
+			continue
+		}
+		revision, e := batchCounter(change.LastRevision)
+		if e != nil || revision == 0 || revision > head || len(change.Operations) == 0 {
+			return ErrInvalid
+		}
+		var membership string
+		var last uint64
+		for _, op := range change.Operations {
+			member, ok := m.members[op.ID]
+			r, e := batchCounter(op.Revision)
+			if !ok || member.changeID != change.ID || member.membershipHash == "" || op.Status != "saved" || e != nil || r == 0 || r > revision {
+				return ErrInvalid
+			}
+			if membership != "" && membership != member.membershipHash {
+				return ErrInvalid
+			}
+			membership = member.membershipHash
+			if r > last {
+				last = r
+			}
+		}
+		if last != revision {
+			return ErrInvalid
+		}
+		// This bounded, identity-verified decode runs in the original FULL writer.
+		// Never substitute the final batch checkpoint for a historical atomic cut.
+		_, identity, e := store.loadRetainedFullCheckpoint(ctx, tx, lease.Key, change.LastRevision, false)
+		if e != nil {
+			return e
+		}
+		cuts = append(cuts, numberedCut{SessionSavedCut{change.ID, membership, change.LastRevision, canonicalDigest(identity.State)}, revision})
+	}
+	sort.Slice(cuts, func(i, j int) bool { return cuts[i].revision < cuts[j].revision })
+	m.savedCuts = make([]SessionSavedCut, len(cuts))
+	for i, cut := range cuts {
+		if i > 0 && cut.revision == cuts[i-1].revision {
+			return ErrInvalid
+		}
+		m.savedCuts[i] = cut.cut
+	}
 	return nil
 }
 

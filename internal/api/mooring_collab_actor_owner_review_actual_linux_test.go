@@ -81,8 +81,8 @@ func TestReviewActualActorLateOwnerCannotSaveOrRunLaterSubmit(t *testing.T) {
 				if e := f.cell.owners.Release(bound, f.owner); e != nil {
 					return protocol.SessionCommitResult{}, e
 				}
-				result, e := committer.submit(bound, submit)
-				if e != nil && len(result.Receipt.Changes) == 0 {
+				result, cuts, e := committer.submitWithCuts(bound, submit)
+				if e != nil && len(result.Receipt.Changes) == 0 && len(cuts) == 0 {
 					ownerDenied.Store(1)
 				}
 				return result, e
