@@ -82,7 +82,7 @@ func runMooringHTTPActualSDK(t *testing.T, peerDelete bool, grantChange ...strin
 			t.Fatal(e)
 		}
 	}
-	r := &Router{db: rig.db, pages: NewPageHandler(rig.db, nil, newTestLogger()), logger: newTestLogger(), mux: newRouteMux(), authMw: NewAuthMiddleware(v, sessionsDB, rig.db, newTestLogger()), mooringHTTPConfig: MooringHTTPConfig{Enabled: true, Binary: os.Getenv("MOORING_SESSION_BINARY"), BinarySHA256: os.Getenv("MOORING_SESSION_BINARY_SHA256"), DeliveryTTL: 5 * time.Second, SDKPrefix: "/mooring-sdk/generated/" + strings.Repeat("a", 64), EditorBundle: func(req *http.Request) (string, string) {
+	r := &Router{db: rig.db, pages: NewPageHandler(rig.db, nil, newTestLogger()), logger: newTestLogger(), mux: newRouteMux(), authMw: NewAuthMiddleware(v, sessionsDB, rig.db, newTestLogger()), mooringHTTPConfig: MooringHTTPConfig{Enabled: true, Binary: os.Getenv("MOORING_SESSION_BINARY"), BinarySHA256: os.Getenv("MOORING_SESSION_BINARY_SHA256"), DeliveryTTL: 5 * time.Second, SDKPrefix: mooringActualSDKPrefix(t), EditorBundle: func(req *http.Request) (string, string) {
 		if u := UserFromContext(req.Context()); u != nil && u.ID == rig.adminID {
 			return strings.Repeat("c", 64), "https://editor.invalid/exact-release/index.html"
 		}
@@ -136,7 +136,7 @@ func runMooringHTTPActualSDK(t *testing.T, peerDelete bool, grantChange ...strin
 		grant("write")
 	}
 	cp, e := os.ReadFile(os.Getenv("MOORING_SESSION_CHECKPOINT"))
-	if e != nil || fmt.Sprintf("%x", sha256.Sum256(cp)) != "208213ce8ceb06a735fb0b1bf5cd7915f070227aee11d5a0955df3d86ffd0170" {
+	if e != nil || fmt.Sprintf("%x", sha256.Sum256(cp)) != mooringActualFixtureSHA(t, "MOORING_SESSION_CHECKPOINT_SHA256") {
 		t.Fatal("checkpoint pin unavailable", e)
 	}
 	type opening struct {
@@ -312,16 +312,11 @@ func runMooringHTTPActualSDK(t *testing.T, peerDelete bool, grantChange ...strin
 		dir := t.TempDir()
 		sdkDirs[o.Ref] = dir
 		inputs := []struct{ env, name, hash string }{
-			{"MOORING_SDK_JS", "sdk.mjs", "4a55f64bc2f174b4dd2c06b503a910c74207041bfa41bf1ed3f91d245bfaa269"},
-			{"MOORING_SDK_WASM", "sdk.wasm", "ed2cbc58105a0d7f157b4ec9513d4005ffb30ec98c85c8a0cfb5b375de510315"},
+			{"MOORING_SDK_JS", "sdk.mjs", mooringActualFixtureSHA(t, "MOORING_SDK_JS_SHA256")},
+			{"MOORING_SDK_WASM", "sdk.wasm", mooringActualFixtureSHA(t, "MOORING_SDK_WASM_SHA256")},
 		}
 		for _, input := range inputs {
 			raw, err := os.ReadFile(os.Getenv(input.env))
-			// Explicit fresh release fixture; all other invocations retain the old
-			// c66 pin. No arbitrary caller hash or missing-pin fallback is accepted.
-			if (len(grantChange) != 0 || os.Getenv("MOORING_SDK_RELEASE_COMMIT") == "de5f2f2b9979e828fa59f325b511f27f6a4c0907") && input.env == "MOORING_SDK_WASM" {
-				input.hash = "a1e50c20362c6bfdd24ecf2c235dc4ff9e251e9b3a3ef45f880bbc596513e6fe"
-			}
 			if err != nil || fmt.Sprintf("%x", sha256.Sum256(raw)) != input.hash {
 				t.Fatal("SDK pin unavailable", input.env, err)
 			}

@@ -54,12 +54,13 @@ func TestRPCPrepareActualRustSQLCommitAndRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime, err := StartRuntime(t.Context(), RuntimeConfig{Enabled: true, Binary: binary, Versions: prepareVersions, ControlProfile: PrivatePrepareProfile})
+	versions := RuntimeVersions{Protocol: "0.4.0", Model: "0.2.0", Engine: "0.10.0"}
+	runtime, err := StartRuntime(t.Context(), RuntimeConfig{Enabled: true, Binary: binary, Versions: versions, ControlProfile: PrivatePrepareProfile})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = runtime.Close() }()
-	adapter, err := NewRPCPrepareAdapter(runtime, key, prepareVersions)
+	adapter, err := NewRPCPrepareAdapter(runtime, key, versions)
 	if err != nil {
 		t.Fatal(err)
 	}

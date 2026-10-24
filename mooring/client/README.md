@@ -49,3 +49,8 @@ project as the vendored wasm-bindgen crates). Binaryen wasm-opt 131 is Apache-2.
 its [release license](https://github.com/WebAssembly/binaryen/blob/1f903c14babf829745b421b92ff0f286e93e4209/LICENSE)
 is pinned to the version_131 source commit. Build-tool executables are not
 shipped as client assets.
+
+Required main CI runs `scripts/ci/mooring.sh`: all native workspace tests and
+the committed shared cases through the actual compiled WASM ABI. Compilation
+alone is not execution evidence. The CI Result gate rejects a missing, failed,
+cancelled or skipped Mooring job whenever code checks are planned.

@@ -60,7 +60,7 @@ func TestMooringHTTPActualTwoHumansJoinReadAndOriginalRevocation(t *testing.T) {
 			t.Fatal(e)
 		}
 	}
-	r := &Router{db: rig.db, pages: NewPageHandler(rig.db, nil, newTestLogger()), logger: newTestLogger(), mux: newRouteMux(), authMw: NewAuthMiddleware(v, sessionsDB, rig.db, newTestLogger()), mooringHTTPConfig: MooringHTTPConfig{Enabled: true, Binary: os.Getenv("MOORING_SESSION_BINARY"), BinarySHA256: os.Getenv("MOORING_SESSION_BINARY_SHA256"), DeliveryTTL: 5 * time.Second, SDKPrefix: "/mooring-sdk/generated/" + strings.Repeat("a", 64)}}
+	r := &Router{db: rig.db, pages: NewPageHandler(rig.db, nil, newTestLogger()), logger: newTestLogger(), mux: newRouteMux(), authMw: NewAuthMiddleware(v, sessionsDB, rig.db, newTestLogger()), mooringHTTPConfig: MooringHTTPConfig{Enabled: true, Binary: os.Getenv("MOORING_SESSION_BINARY"), BinarySHA256: os.Getenv("MOORING_SESSION_BINARY_SHA256"), DeliveryTTL: 5 * time.Second, SDKPrefix: mooringActualSDKPrefix(t)}}
 	r.registerMooringRoutes()
 	if r.mooringHTTP == nil {
 		t.Fatal("actual controller missing pinned runtime")

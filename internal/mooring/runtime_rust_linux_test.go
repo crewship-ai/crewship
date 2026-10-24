@@ -16,13 +16,14 @@ func TestRuntimeActualRustChild(t *testing.T) {
 	if binary == "" {
 		t.Fatal("mooring_rust_integration requires MOORING_TEST_RUST_BINARY pointing to the built mooring-collab")
 	}
-	r, err := StartRuntime(t.Context(), RuntimeConfig{Enabled: true, Binary: binary, Versions: runtimeTestVersions})
+	versions := RuntimeVersions{Protocol: "0.4.0", Model: "0.2.0", Engine: "0.10.0"}
+	r, err := StartRuntime(t.Context(), RuntimeConfig{Enabled: true, Binary: binary, Versions: versions})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = r.Close() }()
-	// This child slice has no content dispatcher. A post-bootstrap message
-	// must terminate it; it cannot manufacture an authoritative receipt.
+	// No content lane has been selected. Unsupported post-bootstrap traffic
+	// must terminate the child; it cannot manufacture an authoritative receipt.
 	if err = r.RPC.Write([]byte(`{"type":"unimplemented_content"}`)); err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +38,7 @@ func TestRuntimeActualRustChild(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	second, err := StartRuntime(ctx, RuntimeConfig{Enabled: true, Binary: binary, Versions: runtimeTestVersions})
+	second, err := StartRuntime(ctx, RuntimeConfig{Enabled: true, Binary: binary, Versions: versions})
 	if err != nil {
 		t.Fatal(err)
 	}
