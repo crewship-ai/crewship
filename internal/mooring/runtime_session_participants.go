@@ -61,6 +61,9 @@ func (s *SessionRuntime) participantBinding(a *SessionActivation, scope protocol
 }
 
 func (s *SessionRuntime) sendParticipant(ctx context.Context, activation *SessionActivation, raw []byte) error {
+	return s.sendParticipantTracked(ctx, activation, raw, nil)
+}
+func (s *SessionRuntime) sendParticipantTracked(ctx context.Context, activation *SessionActivation, raw []byte, tracked *sessionParticipantState) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -103,6 +106,17 @@ func (s *SessionRuntime) sendParticipant(ctx context.Context, activation *Sessio
 	if current, e := activation.SessionRuntime(); e != nil || current != s {
 		return ErrSessionRuntime
 	}
+	// This transition is under the same lock as DiscardUnsent, after acquiring
+	// the sole FD writer. Ticket handling may observe writing, never unsent.
+	if tracked != nil {
+		s.mu.Lock()
+		if !s.participantStateLocked(tracked) || tracked.activation != activation || tracked.writing || tracked.sent {
+			s.mu.Unlock()
+			return ErrSessionRuntime
+		}
+		tracked.writing = true
+		s.mu.Unlock()
+	}
 	stopped := make(chan struct{})
 	stop := context.AfterFunc(ctx, func() { s.fail(ctx.Err()); close(stopped) })
 	defer func() {
@@ -120,6 +134,15 @@ func (s *SessionRuntime) sendParticipant(ctx context.Context, activation *Sessio
 	}
 	if err == nil {
 		err = ctx.Err()
+	}
+	if err == nil && tracked != nil {
+		s.mu.Lock()
+		if !s.participantStateLocked(tracked) {
+			err = ErrSessionRuntime
+		} else {
+			tracked.sent = true
+		}
+		s.mu.Unlock()
 	}
 	if err != nil {
 		s.fail(err)

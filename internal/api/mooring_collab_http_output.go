@@ -20,8 +20,21 @@ func (c *collaborationHTTPConnection) committedOutput(q protocol.SessionParticip
 		return errCollaborationHTTP
 	}
 	c.mu.Lock()
+	gate := c.joined.gate
+	c.mu.Unlock()
+	return c.committedOutputRecipient(q, raw, kind, gate, false)
+}
+
+// originalGate validates the unchanged old envelope; checkedSendLocked below
+// independently uses the NEW current SQL gate. Denial never publishes bytes.
+func (c *collaborationHTTPConnection) committedOutputRecipient(q protocol.SessionParticipantOutput, raw []byte, kind string, originalGate mooring.DeliveryGrant, denied bool) error {
+	d := c.document
+	if d.originals == nil {
+		return errCollaborationHTTP
+	}
+	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !c.joinedDelivered || c.closed || q.ParticipantRef != protocol.Identifier(c.admission.participant) || q.GateID != protocol.Identifier(c.joined.gate.GateID) || q.PermissionVersion != protocol.Counter(c.joined.gate.PermissionVersion) {
+	if !c.joinedDelivered || (c.closed && !denied) || q.ParticipantRef != protocol.Identifier(c.admission.participant) || q.GateID != protocol.Identifier(originalGate.GateID) || q.PermissionVersion != protocol.Counter(originalGate.PermissionVersion) {
 		return errCollaborationHTTP
 	}
 	switch kind {
@@ -46,6 +59,9 @@ func (c *collaborationHTTPConnection) committedOutput(q protocol.SessionParticip
 			return errCollaborationHTTP
 		}
 		// Queue admission only; this neither publishes history nor marks Saved.
+		if denied {
+			return nil
+		}
 		return c.checkedSendLocked(raw)
 	case "commit_result":
 		var receipt protocol.CommitResult
@@ -59,13 +75,16 @@ func (c *collaborationHTTPConnection) committedOutput(q protocol.SessionParticip
 		if !valid {
 			return errCollaborationHTTP
 		}
+		if denied {
+			return nil
+		}
 		return c.checkedSendLocked(raw)
 	case "document_update":
 		var update protocol.DocumentUpdate
 		if json.Unmarshal(raw, &update) != nil || update.Scope != d.wireScope() || update.SessionID != protocol.Identifier(d.activation.SessionID()) || update.Generation != d.wireFence().Generation || update.Encoding != "json" || update.RequestID != protocol.Identifier("actor-update:"+string(update.ToRevision)) {
 			return errCollaborationHTTP
 		}
-		expectedOuter, err := collaborationPeerOutputID(string(update.ToRevision), c.ref, c.admission.participant, c.joined.gate.GateID)
+		expectedOuter, err := collaborationPeerOutputID(string(update.ToRevision), c.ref, c.admission.participant, originalGate.GateID)
 		if err != nil || q.RequestID != expectedOuter {
 			return errCollaborationHTTP
 		}
@@ -111,7 +130,13 @@ func (c *collaborationHTTPConnection) committedOutput(q protocol.SessionParticip
 			}
 		}
 		d.originals.mu.Unlock()
-		if !valid || latest == "" {
+		if !valid {
+			return errCollaborationHTTP
+		}
+		if denied {
+			return nil
+		}
+		if latest == "" {
 			return errCollaborationHTTP
 		}
 		// A current FULL snapshot can already include an older queued delta.

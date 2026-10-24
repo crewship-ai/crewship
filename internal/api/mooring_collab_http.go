@@ -96,6 +96,10 @@ type collaborationHTTPConnection struct {
 	joinRequest, openRequest protocol.Identifier
 	joinedDelivered          bool
 	deliveryMu               sync.Mutex
+	participantPending       *mooring.SessionParticipantPending
+	participantBinding       *mooring.SessionParticipantBinding
+	transition               *collaborationGateTransition
+	retirements              map[string]*collaborationRetiredGate
 }
 
 func newCollaborationHTTPManager(pages *PageHandler, c MooringHTTPConfig) (*collaborationHTTPManager, error) {

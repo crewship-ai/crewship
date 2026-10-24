@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -39,7 +40,7 @@ func TestMooringHTTPActualSDKWholeGroupSavedAndPeer(t *testing.T) {
 func TestMooringHTTPActualSDKUnobservedPeerDeletePreservesOriginal(t *testing.T) {
 	runMooringHTTPActualSDK(t, true)
 }
-func runMooringHTTPActualSDK(t *testing.T, peerDelete bool) {
+func runMooringHTTPActualSDK(t *testing.T, peerDelete bool, grantChange ...string) {
 	started := time.Now()
 	phase := func(name string) { t.Logf("phase %s elapsed=%s", name, time.Since(started)) }
 	copy := testutil.MigratedDB(t)
@@ -53,8 +54,16 @@ func runMooringHTTPActualSDK(t *testing.T, peerDelete bool) {
 	}
 	defer full.Close()
 	rig := pagesTransferSetupWithDB(t, full)
+	lateTicket := len(grantChange) != 0 && grantChange[0] == "late-ticket"
+	if lateTicket {
+		mustExec(t, rig.db, `INSERT INTO users(id,email,full_name) VALUES('late-ticket-unrelated','late-ticket-unrelated@example.invalid','Unrelated fixture')`)
+		mustExec(t, rig.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('late-ticket-unrelated-member',?,'late-ticket-unrelated','MEMBER')`, rig.wsID)
+	}
+
 	rig.seedPage(t, "http-native-page", "http-native-page", "Native", rig.adminID, "")
-	mustExec(t, rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('http-native-page','user',?,'write',?)`, rig.userID, rig.adminID)
+	if len(grantChange) == 0 {
+		mustExec(t, rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('http-native-page','user',?,'write',?)`, rig.userID, rig.adminID)
+	}
 	v, e := auth.NewJWTValidator("http-native-actual-fixture-signing-32characters")
 	if e != nil {
 		t.Fatal(e)
@@ -79,6 +88,9 @@ func runMooringHTTPActualSDK(t *testing.T, peerDelete bool) {
 		}
 		return "partial-metadata-must-not-appear", ""
 	}}}
+	if len(grantChange) != 0 {
+		r.registerPageRoutes()
+	}
 	r.registerMooringRoutes()
 	if r.mooringHTTP == nil {
 		t.Fatal("actual controller missing pinned runtime")
@@ -86,6 +98,43 @@ func runMooringHTTPActualSDK(t *testing.T, peerDelete bool) {
 	defer r.mooringHTTP.Close()
 	server := httptest.NewServer(r.mux)
 	defer server.Close()
+	setGrant := func(level string) error {
+		subject := rig.userID
+		if level == "unrelated-read" {
+			subject = "late-ticket-unrelated"
+			level = "read"
+		}
+		method, body, query := "PUT", "", ""
+		if level == "" {
+			method = "DELETE"
+			query = "&subject_type=user&subject=" + rig.userID + "&level=write"
+		} else {
+			raw, _ := json.Marshal(map[string]string{"subject_type": "user", "subject": subject, "level": level})
+			body = string(raw)
+		}
+		req, _ := http.NewRequest(method, server.URL+"/api/v1/pages/http-native-page/grants?workspace_id="+rig.wsID+query, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+tokens[rig.adminID])
+		resp, err := server.Client().Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		raw, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return fmt.Errorf("ordinary grant API %s %s: HTTP%d %s", method, level, resp.StatusCode, raw)
+		}
+		return nil
+	}
+	grant := func(level string) {
+		t.Helper()
+		if err := setGrant(level); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if len(grantChange) != 0 {
+		grant("write")
+	}
 	cp, e := os.ReadFile(os.Getenv("MOORING_SESSION_CHECKPOINT"))
 	if e != nil || fmt.Sprintf("%x", sha256.Sum256(cp)) != "208213ce8ceb06a735fb0b1bf5cd7915f070227aee11d5a0955df3d86ffd0170" {
 		t.Fatal("checkpoint pin unavailable", e)
@@ -105,9 +154,9 @@ func runMooringHTTPActualSDK(t *testing.T, peerDelete bool) {
 			Digest string `json:"bundle_digest"`
 		} `json:"editor"`
 	}
-	start := func(user string, initial bool) opening {
+	start := func(user string, initial bool, reader ...bool) opening {
 		t.Helper()
-		body := map[string]any{"write": true}
+		body := map[string]any{"write": len(reader) == 0}
 		if initial {
 			body["checkpoint_base64"] = base64.StdEncoding.EncodeToString(cp)
 		}
@@ -145,6 +194,32 @@ func runMooringHTTPActualSDK(t *testing.T, peerDelete bool) {
 	r.mooringHTTP.mu.Unlock()
 	if document == nil || document.activation.RequireHumanNativePrepare() != nil {
 		t.Fatal("actual human capability not activated")
+	}
+	var beforeTicket atomic.Pointer[func(protocol.TicketValidationRequest)]
+	lateMutation := make(chan error, 1)
+	if lateTicket {
+		// Install BEFORE any WS/Open: no TicketControl read can yet exist. Future
+		// token.Frame obtains this same runtime mutex after the publication barrier.
+		// Later arming uses atomic.Pointer; no handler pointer is changed live.
+		document.mu.Lock()
+		for _, c := range document.connections {
+			c.mu.Lock()
+			used := c.used || c.participantPending != nil
+			c.mu.Unlock()
+			if used {
+				document.mu.Unlock()
+				t.Fatal("late-ticket fixture installed after Open")
+			}
+		}
+		originalTicket := document.pump.handlers.TicketControl
+		document.pump.handlers.TicketControl = func(ctx context.Context, token mooring.SessionControl, q protocol.TicketValidationRequest) error {
+			if hook := beforeTicket.Load(); hook != nil {
+				(*hook)(q)
+			}
+			return originalTicket(ctx, token, q)
+		}
+		_ = document.cell.runtime.Err() // publication HB before every future Frame lock
+		document.mu.Unlock()
 	}
 	document.mu.Lock()
 	original := document.connections[first.Ref]
@@ -242,6 +317,11 @@ func runMooringHTTPActualSDK(t *testing.T, peerDelete bool) {
 		}
 		for _, input := range inputs {
 			raw, err := os.ReadFile(os.Getenv(input.env))
+			// Explicit fresh release fixture; all other invocations retain the old
+			// c66 pin. No arbitrary caller hash or missing-pin fallback is accepted.
+			if (len(grantChange) != 0 || os.Getenv("MOORING_SDK_RELEASE_COMMIT") == "de5f2f2b9979e828fa59f325b511f27f6a4c0907") && input.env == "MOORING_SDK_WASM" {
+				input.hash = "a1e50c20362c6bfdd24ecf2c235dc4ff9e251e9b3a3ef45f880bbc596513e6fe"
+			}
 			if err != nil || fmt.Sprintf("%x", sha256.Sum256(raw)) != input.hash {
 				t.Fatal("SDK pin unavailable", input.env, err)
 			}
@@ -281,7 +361,11 @@ process.stdout.write(JSON.stringify(changes));`
 		return result
 	}
 	own := generate(first, firstCP, 2, "own-http")
-	peer := generate(second, secondCP, 1, "peer-http")
+	peerCount := 1
+	if len(grantChange) != 0 {
+		peerCount = 2
+	}
+	peer := generate(second, secondCP, peerCount, "peer-http")
 	phase("SDK-originals-generated")
 	send := func(ws *websocket.Conn, o opening, id string, changes []protocol.AtomicChange) {
 		t.Helper()
@@ -292,6 +376,75 @@ process.stdout.write(JSON.stringify(changes));`
 		if err := websocket.Message.Send(ws, string(raw)); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if len(grantChange) != 0 {
+		runMooringPageGrantTransition(t, grantChange[0], mooringPageGrantProbe{
+			db: rig.db, owner: a, bob: b,
+			submitBob: func(index int) error {
+				raw, _ := json.Marshal(protocol.SubmitChanges{Type: "submit_changes", RequestID: protocol.Identifier(fmt.Sprintf("bob-grant-%d", index)), Scope: document.wireScope(), SessionID: protocol.Identifier(second.Session), Versions: second.Versions, Changes: peer[index : index+1]})
+				_ = b.SetWriteDeadline(time.Now().Add(8 * time.Second))
+				return websocket.Message.Send(b, string(raw))
+			},
+			changeGrant: func(mode string) {
+				if mode == "late-ticket" {
+					hook := func(q protocol.TicketValidationRequest) {
+						document.mu.Lock()
+						bob := document.connections[second.Ref]
+						document.mu.Unlock()
+						if bob == nil {
+							return
+						}
+						bob.mu.Lock()
+						match := bob.transition != nil && bob.ticket == q.Ticket
+						bob.mu.Unlock()
+						if !match || beforeTicket.Swap(nil) == nil {
+							return
+						}
+						t.Log("actual native TicketValidate after physical Bob Open; ordinary Page DELETE before final current-rights check")
+						lateMutation <- setGrant("")
+					}
+					beforeTicket.Store(&hook)
+					grant("unrelated-read")
+					// Force current-gate requalification even if a newer owner floor has
+					// already suppressed old renewals. This is the SAME original B packet.
+					send(b, second, "bob-grant-1", peer[1:2])
+					select {
+					case err := <-lateMutation:
+						if err != nil {
+							t.Fatal(err)
+						}
+					case <-time.After(8 * time.Second):
+						t.Fatal("actual late Ticket barrier absent")
+					}
+					return
+				}
+				if mode == "reader" {
+					grant("read")
+				}
+				grant("")
+			},
+			ownerContinue: func() { send(a, first, "owner-after-grant", own[:1]) },
+			oldTicket: func() error {
+				ws, err := dial(second, rig.userID)
+				if err != nil {
+					return err
+				}
+				defer ws.Close()
+				_ = ws.SetDeadline(time.Now().Add(8 * time.Second))
+				raw, _ := json.Marshal(protocol.SessionJoin{Type: "session_join", RequestID: "old-ticket-after-grant", Ticket: second.Ticket, Versions: second.Versions})
+				if err = websocket.Message.Send(ws, string(raw)); err != nil {
+					return err
+				}
+				var received []byte
+				return websocket.Message.Receive(ws, &received)
+			},
+			newReader: func() {
+				opening := start(rig.userID, false, true)
+				ws := join(opening, rig.userID)
+				_ = read(ws, opening)
+			},
+		})
+		return
 	}
 	framesByRef := map[string][]json.RawMessage{}
 	peerAlreadySaved := false

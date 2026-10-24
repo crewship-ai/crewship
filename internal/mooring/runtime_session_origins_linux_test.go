@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -62,6 +63,10 @@ func TestSessionOriginsHelper(t *testing.T) {
 		t.Fatal("open")
 	}
 	write(map[string]any{"type": "owner_acquire", "request_id": "acquire", "scope": open["scope"], "runtime_ref": open["runtime_ref"], "renewal_nonce": "nonce"})
+	var retirement *retirementTestPeer
+	if strings.HasPrefix(mode, "retirement-") {
+		retirement = &retirementTestPeer{t: t, write: write, mode: mode}
+	}
 	for {
 		raw, err = rpc.Read()
 		if err != nil {
@@ -92,7 +97,15 @@ func TestSessionOriginsHelper(t *testing.T) {
 				time.Sleep(20 * time.Second)
 				return
 			}
+		case "ticket_validated", "protocol_error":
+			if retirement != nil {
+				retirement.handle(v)
+			}
 		case "session_participant_open", "session_participant_input":
+			if retirement != nil {
+				retirement.handle(v)
+				continue
+			}
 			if mode != "participant-notifications" {
 				return
 			}
@@ -176,8 +189,19 @@ func sessionOriginsFixture(t *testing.T, mode string, optin bool) originFixture 
 		return nil
 	}
 	store := NewBatchStore(db.DB, BatchStoreConfig{Enabled: true, Owners: owners, CheckpointIdentity: &BatchCheckpointIdentityConfig{Enabled: true, Adapter: adapter, MaxMetadataBytes: 65536}, Authority: authority, Limits: DefaultBatchLimits(), Targets: &TargetStoreConfig{Enabled: true, Adapter: adapter, ReadPolicy: CausalTargetReadPolicy, HistoryBudget: DefaultBatchHistoryBudget(), Limits: DefaultBatchTargetLimits()}})
+	if strings.HasPrefix(mode, "retirement-decline") {
+		// MOCK native transport only. Actual application callbacks always DENY;
+		// these mandatory hooks confer no source/application write qualification.
+		store.config.Targets.SessionHumanPrepare = func(context.Context, *sql.Tx, SessionHumanPrepareAccess) (*protocol.SessionHumanPrepareContext, error) {
+			return nil, errOriginSourceDenied
+		}
+		store.config.Targets.SessionNativeCandidate = func(context.Context, *sql.Tx, SessionNativeCandidateAccess) error { return errOriginSourceDenied }
+	}
 	var open protocol.SessionOpen
 	_ = json.Unmarshal(sessionTestOpen(runtime), &open)
+	if strings.HasPrefix(mode, "retirement-decline") {
+		open.RequiredCapabilities = append(open.RequiredCapabilities, "human_native_prepare_v1")
+	}
 	if optin {
 		open.RequiredCapabilities = append(open.RequiredCapabilities, "origin_inventory_v1")
 	}

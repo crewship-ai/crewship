@@ -140,6 +140,26 @@ func TestCollaborationSessionPumpChild(t *testing.T) {
 		value["request_id"], value["scope"], value["session_id"], value["runtime_ref"], value["fence"] = id, scope, session, ref, grant["fence"]
 		return value
 	}
+	if mode == "output-fifo" {
+		output := func(id, kind string) map[string]any {
+			message := map[string]any{"type": "changes_received", "request_id": id, "scope": scope, "session_id": session, "change_ids": []string{"original-change"}, "state": "pending"}
+			if kind == "session_joined" {
+				message = map[string]any{"type": kind, "request_id": id, "scope": scope, "session_id": session, "participant_ref": "participant", "generation": "1", "permission_version": "1", "versions": open["versions"], "gate_id": "gate"}
+			}
+			return bind(map[string]any{"type": "session_participant_output", "control_profile": mooring.PrivateSessionProfile, "connection_ref": "connection", "participant_ref": "participant", "gate_id": "gate", "permission_version": "1", "message": message}, id)
+		}
+		if !write(output("old-output-1", "changes_received")) || !write(output("old-output-2", "changes_received")) || !write(output("correlated-management", "session_joined")) {
+			return
+		}
+		if !write(map[string]any{"type": "owner_renew", "request_id": "independent-renew", "scope": scope, "session_id": session, "fence": grant["fence"], "renewal_nonce": "management-nonce", "permission_version": "1"}) {
+			return
+		}
+		for {
+			if _, err = read(); err != nil {
+				return
+			}
+		}
+	}
 	if mode == "ticket" {
 		if !write(map[string]any{"type": "ticket_validate", "request_id": "ticket", "scope": scope, "session_id": session, "fence": grant["fence"], "ticket": "mock-opaque-ticket", "validation_nonce": "ticket-nonce"}) {
 			return
@@ -649,6 +669,80 @@ func TestCollaborationSessionPumpHasNoDefaultHandler(t *testing.T) {
 			}
 			if r.other.Load() != 0 {
 				t.Fatal("unhandled control ran B/status")
+			}
+		})
+	}
+}
+
+// Actual inherited child, MOCK output authority only: the DATA worker retains
+// original tokens while serial management can complete a new-gate handshake.
+func TestCollaborationSessionPumpOpaqueOutputFIFOAndManagement(t *testing.T) {
+	for _, uncertain := range []bool{false, true} {
+		t.Run(fmt.Sprint(uncertain), func(t *testing.T) {
+			entered := make(chan mooring.SessionControl, 1)
+			joined := make(chan struct{}, 1)
+			forwarded := make(chan string, 2)
+			release := make(chan struct{})
+			var count atomic.Int32
+			r := newConfiguredPumpTestRig(t, "output-fifo", "", "", func(h *collaborationSessionPumpHandlers) {
+				h.OutputControl = func(ctx context.Context, token mooring.SessionControl, q protocol.SessionParticipantOutput) error {
+					var message struct {
+						Type string `json:"type"`
+					}
+					if json.Unmarshal(q.Message, &message) != nil {
+						return errCollaborationSessionPump
+					}
+					if message.Type == "session_joined" {
+						joined <- struct{}{}
+						return nil
+					}
+					if count.Add(1) == 1 {
+						entered <- token
+						select {
+						case <-ctx.Done():
+							return ctx.Err()
+						case <-release:
+						}
+						if uncertain {
+							return errCollaborationSessionPump
+						}
+					}
+					forwarded <- string(q.RequestID)
+					return nil
+				}
+			})
+			if err := pumpWait(t, r.ctx, r.opened); err != nil {
+				t.Fatal(err)
+			}
+			original := pumpWait(t, r.ctx, entered)
+			pumpWait(t, r.ctx, joined)
+			if id := pumpWait(t, r.ctx, r.renewed); id != "independent-renew" {
+				t.Fatal(id)
+			}
+			raw, err := original.Frame()
+			if err != nil || !strings.Contains(string(raw), "old-output-1") {
+				t.Fatal("queued original token lost")
+			}
+			if count.Load() != 1 {
+				t.Fatal("later DATA overtook blocked original")
+			}
+			close(release)
+			if uncertain {
+				pumpWait(t, r.ctx, r.runtime.Done())
+				if count.Load() != 1 {
+					t.Fatal("uncertain old DATA allowed later DATA")
+				}
+				return
+			}
+			if first := pumpWait(t, r.ctx, forwarded); first != "old-output-1" {
+				t.Fatal(first)
+			}
+			if second := pumpWait(t, r.ctx, forwarded); second != "old-output-2" {
+				t.Fatal(second)
+			}
+			// Entering the second callback proves the first's actual completion ran.
+			if _, err = original.Frame(); err == nil {
+				t.Fatal("completed original token retained")
 			}
 		})
 	}

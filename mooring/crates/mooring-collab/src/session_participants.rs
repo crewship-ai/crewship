@@ -19,6 +19,7 @@ const BYTES: usize = mooring_protocol::session_control::MAX_GLOBAL_INPUT_BYTES;
 const LEASE: Duration = Duration::from_millis(mooring_protocol::session_control::DELIVERY_LEASE_MS);
 
 struct Pending {
+    sent_at: Tick,
     opening: SessionParticipantOpen,
     grant: PendingGrant,
     charge: usize,
@@ -118,6 +119,7 @@ impl Participants {
         self.pending.insert(
             id,
             Pending {
+                sent_at: now,
                 opening,
                 grant,
                 charge,
@@ -125,6 +127,53 @@ impl Participants {
         );
         Ok(raw)
     }
+    // Fixed negative admission only. It cannot settle operations, join a
+    // participant, advance permissions or mint a replacement gate/lease.
+    pub fn decline(
+        &mut self,
+        raw: &[u8],
+        host: &Transport<'_>,
+        owner: &OwnerController,
+        now: Tick,
+    ) -> io::Result<()> {
+        let Transport::AuthenticatedHost { issuer, .. } = host else {
+            return Err(invalid("ticket decline transport"));
+        };
+        if !mooring_protocol::wire::valid_identifier(issuer)
+            || !owner.native_humans()
+            || !owner.may_own(now)
+        {
+            return Err(invalid("ticket decline owner"));
+        }
+        let reply = validate_ticket_decline(raw)?;
+        let pending = self
+            .pending
+            .get(&reply.request_id)
+            .ok_or_else(|| invalid("unrelated ticket decline"))?;
+        let opening = &pending.opening;
+        let versions = match &opening.join {
+            SessionParticipantOpenJoin::SessionJoin(join) => &join.versions,
+            SessionParticipantOpenJoin::SessionJoinBounded(join) => &join.versions,
+        };
+        if now.0 < pending.sent_at.0
+            || reply.scope.as_ref() != Some(owner.scope())
+            || opening.scope != *owner.scope()
+            || opening.session_id != owner.session_id()
+            || opening.runtime_ref != owner.runtime_ref()
+            || opening.fence != owner.initial_owner().fence
+            || versions != owner.versions()
+        {
+            return Err(invalid("ticket decline binding"));
+        }
+        let remaining = self
+            .bytes
+            .checked_sub(pending.charge)
+            .ok_or_else(|| invalid("ticket decline accounting"))?;
+        self.pending.remove(&reply.request_id);
+        self.bytes = remaining;
+        Ok(())
+    }
+
     /// Consumes one correlated host reply. Replaying a ticket/gate cannot create
     /// a fresh lease controller or reset its original request-send deadline.
     pub fn accept(
@@ -390,4 +439,23 @@ fn update_charge(bytes: &mut usize, p: &mut Participant, charge: usize) -> io::R
     *bytes = base + charge;
     p.renewal_charge = charge;
     Ok(())
+}
+
+// This is deliberately not part of generic private control validation. Only
+// the selected inherited native Actor lane admits the fixed negative shape.
+pub(crate) fn validate_ticket_decline(raw: &[u8]) -> io::Result<mooring_protocol::ProtocolError> {
+    let normalized = mooring_protocol::wire::validate_bounded_envelope(raw)
+        .map_err(|_| invalid("ticket decline shape"))?;
+    let reply: mooring_protocol::ProtocolError =
+        serde_json::from_slice(normalized.bytes()).map_err(|_| invalid("ticket decline shape"))?;
+    if reply.scope.is_none()
+        || reply.reason.code != mooring_protocol::ErrorCode::PermissionRevoked
+        || reply.reason.retry != mooring_protocol::RejectionRetry::DoNotRetry
+        || reply.reason.message != "participant permission revoked"
+        || reply.reason.root_op_id.is_some()
+        || reply.reason.root_cause.is_some()
+    {
+        return Err(invalid("ticket decline purpose"));
+    }
+    Ok(reply)
 }
