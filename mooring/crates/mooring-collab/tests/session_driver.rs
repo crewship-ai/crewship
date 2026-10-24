@@ -1263,7 +1263,7 @@ fn actor_delivery_transplants_never_renew_current_gate_or_modify_document() {
             "generation" => reply["generation"] = json!("8"),
             "permission" => reply["permission_version"] = json!("4"),
             "nonce" => reply["renewal_nonce"] = json!("other"),
-            "duration" => reply["duration_ms"] = json!("2001"),
+            "duration" => reply["duration_ms"] = json!("5001"),
             _ => unreachable!(),
         }
         mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&reply).unwrap()).unwrap();
