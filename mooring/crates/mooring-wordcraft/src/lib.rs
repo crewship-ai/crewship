@@ -4,6 +4,7 @@
 pub mod adapter;
 mod candidate;
 mod checkpoint_description;
+mod checkpoint_origins;
 mod checkpoint_wire;
 pub mod command;
 mod core_fields;
@@ -13,6 +14,7 @@ mod human;
 #[cfg(test)]
 mod human_decode;
 mod native_qualification;
+pub mod origin_inventory;
 pub mod profile;
 pub mod read;
 

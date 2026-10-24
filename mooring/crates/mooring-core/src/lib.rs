@@ -5,6 +5,7 @@ pub mod adapter;
 pub mod batch;
 pub mod causal;
 pub mod checkpoint_description;
+pub mod checkpoint_origins;
 pub mod delivery;
 pub mod lease;
 pub mod prepare;
