@@ -51,6 +51,15 @@ def cases():
     return declared
 
 
+def capture_go_test(command, env, events):
+    # Go emits module-download and tool diagnostics on stderr, outside its
+    # -json event stream. Preserve them separately; the JSON verifier remains
+    # strict and the caller still checks the actual process exit status.
+    with events.open("w") as log, events.with_name("go-test.stderr.log").open("w") as diagnostics:
+        return subprocess.run(command, cwd=ROOT, env=env, stdout=log,
+                              stderr=diagnostics).returncode
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fixtures", type=Path, required=True)
@@ -123,12 +132,11 @@ def main():
                    "./" + package, "-run", "^" + name + "$", "-count=1", "-timeout=10m"]
         print(f"actual integration: {package} {name}", flush=True)
         events = case_dir / "go-test.jsonl"
-        with events.open("w") as log:
-            process = subprocess.run(command, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
+        returncode = capture_go_test(command, env, events)
         with events.open() as log:
             qualification = results.verify(log, MODULE + package, [name])
-        if process.returncode != 0:
-            raise ValueError(f"actual Go process failed: {name}: exit {process.returncode}")
+        if returncode != 0:
+            raise ValueError(f"actual Go process failed: {name}: exit {returncode}")
         completed.append(qualification)
         (output / "completed.json").write_text(json.dumps(completed, indent=2) + "\n")
     if len(completed) != len(declared):

@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -21,6 +22,34 @@ runner = load("actual_runner_tests", "mooring-actual.py")
 
 
 class ActualRunnerTests(unittest.TestCase):
+    def test_real_go_json_events_are_separate_from_stderr_diagnostics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "go.mod").write_text("module example.invalid/channels\n\ngo 1.27\n")
+            source = root / "actual_test.go"
+            source.write_text('package channels\nimport "testing"\nfunc TestActual(t *testing.T) {}\n')
+            # A wrapper supplies the same stderr channel Go uses for cold
+            # module downloads, then execs the real Go test process. Its test
+            # run/pass events are produced by Go, not fabricated fixtures.
+            diagnostic = "go: downloading example.invalid/fixture v1.0.0\n"
+            wrapper = "import os,sys; sys.stderr.write(" + repr(diagnostic) + "); sys.stderr.flush(); os.execvp('go', ['go', 'test', '-json', '-count=1', './...'])"
+            events = root / "go-test.jsonl"
+            with patch.object(runner, "ROOT", root):
+                code = runner.capture_go_test([sys.executable, "-c", wrapper], os.environ.copy(), events)
+                self.assertEqual(code, 0)
+                self.assertEqual(events.with_name("go-test.stderr.log").read_text(), diagnostic)
+                lines = events.read_text().splitlines()
+                self.assertNotIn(diagnostic.strip(), lines)
+                self.assertEqual(runner.results.verify(lines, "example.invalid/channels", ["TestActual"])["executed"], ["TestActual"])
+                with self.assertRaises(ValueError):
+                    runner.results.verify([diagnostic, *lines], "example.invalid/channels", ["TestActual"])
+                source.write_text(source.read_text().replace("{}", "{ undefinedFixture() }"))
+                code = runner.capture_go_test([sys.executable, "-c", wrapper], os.environ.copy(), events)
+                self.assertNotEqual(code, 0)
+                self.assertIn(diagnostic.strip(), events.with_name("go-test.stderr.log").read_text())
+                with self.assertRaises(ValueError):
+                    runner.results.verify(events.read_text().splitlines(), "example.invalid/channels", ["TestActual"])
+
     def test_relative_cargo_target_uses_build_root_not_callers_directory(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
