@@ -80,15 +80,16 @@ type SessionSavedCut struct {
 type SessionBatchResult struct {
 	Result        BatchResult
 	EncodedOutput []byte
-	// SavedCuts is populated only by CommitFull after successful SQL COMMIT.
-	// Pending output callbacks never receive provisional cuts.
-	SavedCuts []SessionSavedCut
+	// Released only after successful COMMIT; never passed to provisional output callbacks.
+	SavedCuts    []SessionSavedCut
+	NativeDeltas []SessionCommittedNativeDelta
 }
 type SessionCommitter struct {
-	store     *BatchStore
-	owner     OwnerLease
-	authority SessionBatchAuthority
-	output    SessionOutputPreparer
+	store         *BatchStore
+	owner         OwnerLease
+	authority     SessionBatchAuthority
+	output        SessionOutputPreparer
+	humanResolver SessionHumanPrepareResolver
 }
 
 func NewSessionCommitter(store *BatchStore, owner OwnerLease, authority SessionBatchAuthority, output SessionOutputPreparer) (*SessionCommitter, error) {
@@ -100,18 +101,22 @@ func NewSessionCommitter(store *BatchStore, owner OwnerLease, authority SessionB
 	// does not replace the transactional OwnerStore.Check below.
 	// Copy immutable configuration; never replace the public store's current-reader
 	// authority. Only the commit-only clone below can use processing authority.
-	return &SessionCommitter{store: store, owner: owner, authority: authority, output: output}, nil
+	return &SessionCommitter{store: store, owner: owner, authority: authority, output: output, humanResolver: store.config.Targets.SessionHumanPrepare}, nil
 }
 
 type sessionMembership struct{ changeID, membershipHash string }
 
 type sessionCommitMode struct {
-	fullBasis *FullCheckpointBasis
-	members   map[string]sessionMembership
-	basis     SessionBasis
-	output    SessionOutputPreparer
-	encoded   []byte
-	savedCuts []SessionSavedCut
+	originalStore                   *BatchStore
+	humanResolver                   SessionHumanPrepareResolver
+	fullBasis                       *FullCheckpointBasis
+	members                         map[string]sessionMembership
+	basis                           SessionBasis
+	output                          SessionOutputPreparer
+	encoded                         []byte
+	savedCuts                       []SessionSavedCut
+	prepared                        SessionPreparedCandidates
+	preparedRawBytes, preparedBytes int
 }
 
 func (s *SessionCommitter) Commit(ctx context.Context, request SessionBatchRequest) (SessionBatchResult, error) {
@@ -131,6 +136,8 @@ func (s *SessionCommitter) CommitFull(ctx context.Context, request SessionFullBa
 	return s.commitMode(ctx, SessionBatchRequest{Lease: request.Lease, Changes: request.Changes}, &sessionCommitMode{fullBasis: &basis, output: s.output})
 }
 func (s *SessionCommitter) commitMode(ctx context.Context, request SessionBatchRequest, mode *sessionCommitMode) (SessionBatchResult, error) {
+	mode.originalStore = s.store
+	mode.humanResolver = s.humanResolver
 	isolated := *s.store
 	isolated.config.Authority = func(ctx context.Context, tx *sql.Tx, access BatchAccess) error {
 		purpose := SessionProcessSealedOutcome
@@ -165,7 +172,7 @@ func (s *SessionCommitter) commitMode(ctx context.Context, request SessionBatchR
 	if err != nil {
 		return SessionBatchResult{}, err
 	}
-	return SessionBatchResult{Result: result, EncodedOutput: mode.encoded, SavedCuts: append([]SessionSavedCut(nil), mode.savedCuts...)}, nil
+	return SessionBatchResult{Result: result, EncodedOutput: mode.encoded, SavedCuts: append([]SessionSavedCut(nil), mode.savedCuts...), NativeDeltas: mode.nativeDeltaData()}, nil
 }
 func validSessionBasis(b SessionBasis) bool {
 	if _, err := batchCounter(b.Revision); err != nil || len(b.Digest) != len("sha256:")+64 || !strings.HasPrefix(b.Digest, "sha256:") {
@@ -304,7 +311,15 @@ func (m *sessionCommitMode) prepareOutput(ctx context.Context, tx *sql.Tx, store
 		return errors.New("Mooring session output capacity")
 	}
 	if m.fullBasis != nil {
-		output, err = validateFullSessionOutput(output, lease, result, *expected, targets)
+		output, err = m.injectNativeDeltaData(output)
+		if err != nil {
+			return err
+		}
+		if m.humanResolver == nil {
+			output, err = validateFullSessionOutput(output, lease, result, *expected, targets)
+		} else {
+			output, err = validateFullSessionOutputSelected(output, lease, result, *expected, targets, m.nativeDeltaData(), true)
+		}
 		if err != nil {
 			return err
 		}
@@ -375,6 +390,9 @@ func (m *sessionCommitMode) captureSavedCuts(ctx context.Context, tx *sql.Tx, st
 // This validation binds committed SQL data to the closed output grammar; the
 // concrete session manager additionally owns request/session/runtime correlation.
 func validateFullSessionOutput(raw []byte, lease OwnerLease, result BatchResult, cp protocol.Checkpoint, targets []BatchTargetVersion) ([]byte, error) {
+	return validateFullSessionOutputSelected(raw, lease, result, cp, targets, nil, false)
+}
+func validateFullSessionOutputSelected(raw []byte, lease OwnerLease, result BatchResult, cp protocol.Checkpoint, targets []BatchTargetVersion, deltas []SessionCommittedNativeDelta, native bool) ([]byte, error) {
 	canonical, err := canonicalPrivateControlJSON(raw)
 	if err != nil {
 		return nil, err
@@ -389,6 +407,18 @@ func validateFullSessionOutput(raw []byte, lease OwnerLease, result BatchResult,
 	}
 	var message protocol.SessionCommitResult
 	if json.Unmarshal(canonical, &message) != nil {
+		return nil, ErrPrivateControl
+	}
+	if native {
+		if message.NativeDeltas == nil {
+			return nil, ErrPrivateControl
+		}
+		actual, _ := json.Marshal(message.NativeDeltas)
+		expected, _ := json.Marshal(wireSessionNativeDeltas(deltas))
+		if !bytes.Equal(actual, expected) {
+			return nil, ErrPrivateControl
+		}
+	} else if message.NativeDeltas != nil {
 		return nil, ErrPrivateControl
 	}
 	if message.Scope != cp.Scope || message.Versions != cp.Versions || message.Fence.Generation != protocol.Counter(strconv.FormatInt(lease.Generation, 10)) || message.Fence.Token != lease.Token || !reflect.DeepEqual(message.Checkpoint, cp) || message.Receipt.RequestID != message.RequestID || message.Receipt.Issuer != "crewship" || message.Receipt.Scope != cp.Scope || message.Receipt.Generation != message.Fence.Generation || string(message.Receipt.Revision) != result.Revision {

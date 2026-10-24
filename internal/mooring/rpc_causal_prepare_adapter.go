@@ -32,11 +32,17 @@ func (a *CausalRPCPrepareAdapter) PrepareTargets(context.Context, []byte, BatchC
 	return BatchTargetCandidate{}, nil, ErrPrivateControl
 }
 func (a *CausalRPCPrepareAdapter) exchange(ctx context.Context, request any) ([]byte, error) {
+	return a.exchangeSelected(ctx, request, false)
+}
+func (a *CausalRPCPrepareAdapter) exchangeSelected(ctx context.Context, request any, native bool) ([]byte, error) {
+	if native && (a.roundTrip == nil || a.base.runtime.selectedControlProfile != PrivateSessionProfile) {
+		return nil, ErrPrivateControl
+	}
 	raw, err := json.Marshal(request)
 	if err != nil {
 		return nil, ErrPrivateControl
 	}
-	raw, err = a.base.validator.validateCausal(raw, privateCausalHost)
+	raw, err = a.base.validator.validateCausalSelected(raw, privateCausalHost, native)
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +55,7 @@ func (a *CausalRPCPrepareAdapter) exchange(ctx context.Context, request any) ([]
 	if err != nil {
 		return nil, err
 	}
-	response, err = a.base.validator.validateCausal(response, privateCausalRuntime)
+	response, err = a.base.validator.validateCausalSelected(response, privateCausalRuntime, native)
 	if err != nil {
 		return nil, a.base.invalid()
 	}
@@ -82,6 +88,9 @@ func (a *CausalRPCPrepareAdapter) ValidateTargets(ctx context.Context, checkpoin
 }
 
 func (a *CausalRPCPrepareAdapter) PrepareCausalTargets(ctx context.Context, checkpoint []byte, change BatchChange, labels BatchCausalPrepareContext) (BatchTargetCandidate, *PreparedFailure, error) {
+	return a.prepareCausalTargets(ctx, checkpoint, change, labels, nil, false)
+}
+func (a *CausalRPCPrepareAdapter) prepareCausalTargets(ctx context.Context, checkpoint []byte, change BatchChange, labels BatchCausalPrepareContext, human *protocol.SessionHumanPrepareContext, native bool) (BatchTargetCandidate, *PreparedFailure, error) {
 	var empty BatchTargetCandidate
 	// Independently bind the immutable change to this adapter's exact scope.
 	normalized, err := normalizeBatch(BatchRequest{Lease: OwnerLease{Key: a.base.scope}, ExpectedRevision: labels.DocumentRevision, Changes: []BatchChange{change}})
@@ -92,7 +101,7 @@ func (a *CausalRPCPrepareAdapter) PrepareCausalTargets(ctx context.Context, chec
 	for _, target := range labels.Targets {
 		initial = append(initial, BatchTargetIdentity{TargetID: target.TargetID, Deleted: target.Deleted})
 	}
-	if failure, bindingErr := causalTargetReadFailure(normalized[0], labels, initial); bindingErr != nil || failure != nil {
+	if failure, bindingErr := causalTargetReadFailure(normalized[0], labels, initial); bindingErr != nil || (failure != nil && human == nil) {
 		return empty, nil, ErrPrivateControl
 	}
 	c, err := encodePreparedCheckpoint(checkpoint)
@@ -108,7 +117,8 @@ func (a *CausalRPCPrepareAdapter) PrepareCausalTargets(ctx context.Context, chec
 		return empty, nil, ErrPrivateControl
 	}
 	request.Context.ReadPolicy = CausalTargetReadPolicy
-	raw, err := a.exchange(ctx, request)
+	request.HumanContext = human
+	raw, err := a.exchangeSelected(ctx, request, native)
 	if err != nil {
 		return empty, nil, err
 	}
@@ -123,6 +133,9 @@ func (a *CausalRPCPrepareAdapter) PrepareCausalTargets(ctx context.Context, chec
 		return empty, nil, a.base.invalid()
 	}
 	if kind.Kind == "failure" {
+		if response.NativeDelta != nil {
+			return empty, nil, a.base.invalid()
+		}
 		var failed protocol.PreparedDirectFailure
 		var reason BatchRejection
 		if json.Unmarshal(response.Outcome, &failed) != nil || convertPrepareValue(failed.Reason, &reason) != nil {
@@ -164,6 +177,14 @@ func (a *CausalRPCPrepareAdapter) PrepareCausalTargets(ctx context.Context, chec
 	// Reconstruct effects against the qualified original host inventory before
 	// returning any candidate. BatchStore must independently repeat at commit.
 	if !consistentPrepareEffects(BatchPrepareContext{Targets: labels.Targets}, result) {
+		return empty, nil, a.base.invalid()
+	}
+	if native {
+		result.NativeDelta, err = freezeSessionNativeDelta(response.NativeDelta, result.Effects)
+		if err != nil {
+			return empty, nil, a.base.invalid()
+		}
+	} else if response.NativeDelta != nil {
 		return empty, nil, a.base.invalid()
 	}
 	return result, nil, nil

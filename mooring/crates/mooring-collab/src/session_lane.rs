@@ -25,6 +25,7 @@ struct Queues {
     bytes: usize,
     count: usize,
     closed: bool,
+    human_native: bool,
     retained_bytes: usize,
     retained_count: usize,
 }
@@ -170,7 +171,8 @@ impl Output {
     /// Private control writes do not carry participant content. Participant
     /// outputs must use the separate final-gate API, even on this private FD.
     pub fn send(&self, bytes: &[u8]) -> io::Result<()> {
-        if validate_outgoing(bytes)? {
+        let native = self.shared.state.lock().unwrap().human_native;
+        if validate_outgoing(bytes, native)? {
             return Err(invalid("participant send requires final gate"));
         }
         self.write_checked(bytes, || Ok(()))
@@ -184,7 +186,8 @@ impl Output {
         bytes: &[u8],
         gate: impl FnOnce() -> io::Result<()>,
     ) -> io::Result<()> {
-        if validate_outgoing(bytes)? {
+        let native = self.shared.state.lock().unwrap().human_native;
+        if validate_outgoing(bytes, native)? {
             return Err(invalid("participant control bypass"));
         }
         self.write_checked(bytes, gate)
@@ -198,7 +201,8 @@ impl Output {
         bytes: &[u8],
         gate: impl FnOnce() -> io::Result<()>,
     ) -> io::Result<()> {
-        if !validate_outgoing(bytes)? {
+        let native = self.shared.state.lock().unwrap().human_native;
+        if !validate_outgoing(bytes, native)? {
             return Err(invalid("not a participant output"));
         }
         self.write_checked(bytes, gate)
@@ -265,6 +269,7 @@ impl Lane {
                 bytes: 0,
                 count: 0,
                 closed: false,
+                human_native: false,
                 retained_bytes: 0,
                 retained_count: 0,
             }),
@@ -277,7 +282,8 @@ impl Lane {
             .name("mooring-session-reader".into())
             .spawn(move || {
                 while let Ok(Some(frame)) = super::read_profile_frame(&mut stream, true) {
-                    let (route, canonical) = match validate_incoming(&frame) {
+                    let native = read_shared.state.lock().unwrap().human_native;
+                    let (route, canonical) = match validate_incoming(&frame, native) {
                         Ok(frame) => frame,
                         Err(_) => break,
                     };
@@ -318,6 +324,16 @@ impl Lane {
             return Err(invalid("actor wake already attached"));
         }
         *registered = Some(wake);
+        Ok(())
+    }
+    /// Only the concrete driver calls this after validating the actual first
+    /// SessionOpen and its implemented capability. A generic lane stays strict.
+    pub(crate) fn select_native_humans(&self) -> io::Result<()> {
+        let mut q = self.shared.state.lock().unwrap();
+        if q.closed || q.human_native {
+            return Err(invalid("native session capability selection"));
+        }
+        q.human_native = true;
         Ok(())
     }
     pub fn inbox(&self, route: Route) -> Inbox {
@@ -362,12 +378,20 @@ impl Drop for Lane {
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
 }
-fn validate_incoming(raw: &[u8]) -> io::Result<(Route, Vec<u8>)> {
+fn validate_incoming(raw: &[u8], native: bool) -> io::Result<(Route, Vec<u8>)> {
     // Separate exact causal profile remains unchanged when composed here.
-    if let Ok(value) = control::validate_causal(raw, Peer::InheritedHost) {
+    let validate = if native {
+        control::validate_session_native_prepare
+    } else {
+        control::validate_causal
+    };
+    if let Ok(value) = validate(raw, Peer::InheritedHost) {
         return Ok((Route::Prepare, value.bytes().to_vec()));
     }
     if let Ok(value) = session_control::validate(raw, Peer::InheritedHost) {
+        if value.value().get("native_deltas").is_some() && !native {
+            return Err(invalid("unselected native result data"));
+        }
         let route = if matches!(
             value.value()["type"].as_str(),
             Some("session_describe_checkpoint" | "session_inspect_origins")
@@ -390,8 +414,13 @@ fn validate_incoming(raw: &[u8]) -> io::Result<(Route, Vec<u8>)> {
     }
     Ok((Route::Actor, value.bytes().to_vec()))
 }
-fn validate_outgoing(raw: &[u8]) -> io::Result<bool> {
-    if control::validate_causal(raw, Peer::InheritedRuntime).is_ok() {
+fn validate_outgoing(raw: &[u8], native: bool) -> io::Result<bool> {
+    let validate = if native {
+        control::validate_session_native_prepare
+    } else {
+        control::validate_causal
+    };
+    if validate(raw, Peer::InheritedRuntime).is_ok() {
         return Ok(false);
     }
     if let Ok(value) = session_control::validate(raw, Peer::InheritedRuntime) {

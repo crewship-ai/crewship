@@ -42,6 +42,25 @@ func TestPrivateCausalControlSharedShapesDirectionsAndProfileIsolation(t *testin
 			if _, err := v.validate(tc.Message, tc.Sender == "runtime"); err == nil {
 				t.Fatal("causal shape entered strict profile")
 			}
+			if tc.ID == "atomic_prepared-causal" {
+				var value map[string]any
+				if json.Unmarshal(tc.Message, &value) != nil {
+					t.Fatal("candidate fixture")
+				}
+				value["native_delta"] = map[string]any{"writer_origin": "1", "allocation_origins": []any{}, "update": "", "targets": []any{"p"}}
+				if !v.schema.matches(v.schema.root, value, 0) {
+					t.Fatal("session-native DATA is not schema-valid")
+				}
+				packet, _ := json.Marshal(value)
+				if _, err := v.validateCausal(packet, peer); err == nil {
+					t.Fatal("standalone causal acquired optional session capability")
+				}
+				value["native_delta"] = nil
+				packet, _ = json.Marshal(value)
+				if _, err := v.validateCausal(packet, peer); err == nil {
+					t.Fatal("null optional field widened standalone profile")
+				}
+			}
 		})
 	}
 	strict := privateValidateFixture(t)

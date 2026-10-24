@@ -30,6 +30,7 @@ pub(crate) struct Participant {
     pub granted: Capabilities,
     pub bounded_transfer: bool,
     pub lease: ReadLease,
+    charge: usize,
     maintenance: crate::participant_maintenance::Maintenance,
     renewal_charge: usize,
 }
@@ -183,6 +184,7 @@ impl Participants {
                     SessionParticipantOpenJoin::SessionJoinBounded(_)
                 ),
                 lease,
+                charge: retained,
                 maintenance,
                 renewal_charge: 0,
             },
@@ -325,6 +327,45 @@ impl Participants {
         if p.permission < owner.known_permission() || !p.lease.may_deliver(now) {
             return Err(invalid("participant delivery expired"));
         }
+        Ok(())
+    }
+    pub fn leave(
+        &mut self,
+        input: &SessionParticipantInput,
+        owner: &OwnerController,
+        now: Tick,
+    ) -> io::Result<()> {
+        // Closing a bound connection grants no read/write authority and is
+        // valid even after its lease expired. Never recreate its old gate.
+        if input.scope != *owner.scope()
+            || input.session_id != owner.session_id()
+            || input.runtime_ref != owner.runtime_ref()
+            || input.fence != owner.initial_owner().fence
+            || !owner.may_own(now)
+        {
+            return Err(invalid("participant leave session binding"));
+        }
+        let p = self
+            .live
+            .get(&input.connection_ref)
+            .ok_or_else(|| invalid("participant is not admitted"))?;
+        if p.participant != input.participant_ref
+            || p.gate != input.gate_id
+            || p.permission != input.permission_version
+        {
+            return Err(invalid("participant leave gate binding"));
+        }
+        let charge = p
+            .charge
+            .checked_add(p.renewal_charge)
+            .ok_or_else(|| invalid("participant accounting"))?;
+        let remaining = self
+            .bytes
+            .checked_sub(charge)
+            .ok_or_else(|| invalid("participant accounting"))?;
+        let mut p = self.live.remove(&input.connection_ref).unwrap();
+        p.lease.revoke();
+        self.bytes = remaining;
         Ok(())
     }
     pub fn close(&mut self) {

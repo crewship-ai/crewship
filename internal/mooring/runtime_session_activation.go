@@ -162,6 +162,40 @@ func (a *SessionActivation) NewCausalAdapter() (*SessionCausalAdapter, error) {
 	return NewSessionCausalAdapter(s, a.owner.Key, s.versions)
 }
 
+// RequireHumanNativePrepare checks this process's actual correlated startup,
+// not a copied Ready/configuration claim. It is capability provenance only:
+// current owner, original source, observed basis and write checks still run in
+// the caller's complete writer/lifetime fence before every human preparation.
+func (a *SessionActivation) RequireHumanNativePrepare() error {
+	s, err := a.SessionRuntime()
+	if err != nil {
+		return err
+	}
+	return s.requireHumanNativePrepare()
+}
+
+func (s *SessionRuntime) requireHumanNativePrepare() error {
+	if s == nil || s.process == nil || s.process.RPC == nil || s.process.done == nil || s.process.selectedControlProfile != PrivateSessionProfile || s.process.selectedVersions != s.versions {
+		return ErrSessionRuntime
+	}
+	select {
+	case <-s.process.Done():
+		return ErrSessionRuntime
+	default:
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || s.observed.invalid || !s.observed.activated || s.observed.opened == nil || !sessionCapabilitiesEqual(s.observed.requiredCapabilities, s.observed.opened.Capabilities) {
+		return ErrSessionRuntime
+	}
+	for _, capability := range s.observed.requiredCapabilities {
+		if capability == "human_native_prepare_v1" {
+			return nil
+		}
+	}
+	return ErrSessionRuntime
+}
+
 // Check must run inside this exact store's writer transaction and the complete
 // host lifetime lease. It intentionally does not pin the initial document head:
 // real saved commits advance it. It does not replace canonical author checks.

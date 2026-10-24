@@ -11,7 +11,7 @@ use mooring_protocol::{boundary::Transport, control, Counter, OwnerGrant, Sessio
 use std::{
     io,
     os::unix::net::UnixStream,
-    sync::Arc,
+    sync::{Arc, OnceLock},
     thread,
     time::{Duration, Instant},
 };
@@ -36,7 +36,7 @@ impl Driver {
         transport: &Transport<'_>,
         clock: impl Fn() -> io::Result<Tick> + Send + Sync + 'static,
     ) -> io::Result<Self> {
-        Self::from_stream(stream, transport, clock, false)
+        Self::from_stream(stream, transport, clock, false, false)
     }
     /// Separately selected read-only inventory support. It grants no writer or
     /// participant capability; the concrete app still qualifies every input.
@@ -45,13 +45,23 @@ impl Driver {
         transport: &Transport<'_>,
         clock: impl Fn() -> io::Result<Tick> + Send + Sync + 'static,
     ) -> io::Result<Self> {
-        Self::from_stream(stream, transport, clock, true)
+        Self::from_stream(stream, transport, clock, true, false)
+    }
+    /// Concrete application handler support. Selection still requires the
+    /// explicit closed SessionOpen capability on the actual inherited channel.
+    pub fn from_negotiated_inherited_stream_with_native_humans(
+        stream: UnixStream,
+        transport: &Transport<'_>,
+        clock: impl Fn() -> io::Result<Tick> + Send + Sync + 'static,
+    ) -> io::Result<Self> {
+        Self::from_stream(stream, transport, clock, true, true)
     }
     fn from_stream(
         stream: UnixStream,
         transport: &Transport<'_>,
         clock: impl Fn() -> io::Result<Tick> + Send + Sync + 'static,
         origins: bool,
+        human_native: bool,
     ) -> io::Result<Self> {
         let Transport::AuthenticatedHost { .. } = transport else {
             return Err(invalid("startup requires authenticated host"));
@@ -63,14 +73,22 @@ impl Driver {
         let result = (|| {
             let raw = receive_until(&actor, || Ok(()))?;
             let first_send = clock()?;
-            let (startup, acquire) = Startup::from_open_with_origins(&raw, first_send, origins)?;
+            let (startup, acquire) =
+                Startup::from_open_with_capabilities(&raw, first_send, origins, human_native)?;
             let open: SessionOpen =
                 serde_json::from_slice(&raw).map_err(|_| invalid("invalid startup open"))?;
+            if open.required_capabilities.contains(
+                &mooring_protocol::SessionOpenRequiredCapabilitiesItem::HumanNativePrepareV1,
+            ) {
+                lane.select_native_humans()?;
+            }
             let prepare_inbox = lane.inbox(Route::Prepare);
             let prepare_output = output.clone();
+            let expected_fence = Arc::new(OnceLock::new());
+            let prepare_fence = expected_fence.clone();
             let worker = thread::Builder::new()
                 .name("mooring-session-prepare".into())
-                .spawn(move || prepare_loop(prepare_inbox, prepare_output, open))?;
+                .spawn(move || prepare_loop(prepare_inbox, prepare_output, open, prepare_fence))?;
             let ready = (|| {
                 output.send_control_checked(&acquire, || {
                     let now = clock()?;
@@ -88,6 +106,9 @@ impl Driver {
                 let mut owner = startup.accept_owner(&grant, transport, clock()?)?;
                 let restore = receive_until(&actor, || owner.check_owner(clock()?))?;
                 let mut ready = owner.restore(&restore, || clock())?;
+                expected_fence
+                    .set(ready.owner().fence.clone())
+                    .map_err(|_| invalid("startup owner already bound"))?;
                 ready.acknowledge(&output, || clock())?;
                 let maintenance = crate::owner_maintenance::Maintenance::new(
                     first_send,
@@ -253,7 +274,12 @@ impl Drop for CloseOutput {
         self.0.close();
     }
 }
-fn prepare_loop(inbox: Inbox, output: Output, open: SessionOpen) {
+fn prepare_loop(
+    inbox: Inbox,
+    output: Output,
+    open: SessionOpen,
+    fence: Arc<OnceLock<mooring_protocol::Fence>>,
+) {
     // Also poison on an unexpected worker unwind, not only ordinary errors.
     let _close_on_exit = CloseOutput(output.clone());
     let registration = wordcraft_registration();
@@ -278,7 +304,15 @@ fn prepare_loop(inbox: Inbox, output: Output, open: SessionOpen) {
             output.send(&response)?;
             continue;
         }
-        let normalized = control::validate_causal(&raw, control::Peer::InheritedHost)
+        let native = open
+            .required_capabilities
+            .contains(&mooring_protocol::SessionOpenRequiredCapabilitiesItem::HumanNativePrepareV1);
+        let validate = if native {
+            control::validate_session_native_prepare
+        } else {
+            control::validate_causal
+        };
+        let normalized = validate(&raw, control::Peer::InheritedHost)
             .map_err(|_| invalid("invalid scoped prepare"))?;
         // Application-only registration is insufficient for an owned session:
         // require the exact same workspace/artifact and semantic tuple too.
@@ -289,7 +323,11 @@ fn prepare_loop(inbox: Inbox, output: Output, open: SessionOpen) {
         {
             return Err(invalid("prepare escaped session binding"));
         }
-        let response = registration.respond_causal(&raw)?;
+        let response = if native {
+            registration.respond_session_native(&raw, &open, fence.get())?
+        } else {
+            registration.respond_causal(&raw)?
+        };
         output.send(&response)?;
     })();
     let _ = result;

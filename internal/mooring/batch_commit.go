@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+
+	protocol "github.com/crewship-ai/crewship/mooring/protocol/generated/go"
 )
 
 func (s *BatchStore) loadKnown(ctx context.Context, tx *sql.Tx, k SessionKey, changes []BatchChange) (map[int]BatchChangeResult, error) {
@@ -199,6 +201,9 @@ func (s *BatchStore) commit(ctx context.Context, request BatchRequest, session *
 		if e != nil {
 			return e
 		}
+		if session != nil && session.fullBasis != nil && session.humanResolver != nil {
+			session.beginPreparedCandidates(revision, checkpoint)
+		}
 		if e = s.requireTargetMode(ctx, tx, key.ArtifactID); e != nil {
 			return e
 		}
@@ -335,6 +340,20 @@ func (s *BatchStore) commit(ctx context.Context, request BatchRequest, session *
 						if e != nil {
 							return e
 						}
+						var humanContext *protocol.SessionHumanPrepareContext
+						sessionNative := session != nil && session.fullBasis != nil && session.humanResolver != nil
+						var sessionAdapter SessionNativeTargetBatchAdapter
+						if sessionNative {
+							var ok bool
+							sessionAdapter, ok = s.config.Targets.Adapter.(SessionNativeTargetBatchAdapter)
+							if !ok {
+								return ErrInvalid
+							}
+							humanContext, e = session.resolveHumanPrepare(ctx, tx, request.Lease, c, checkpoint, causalContext.DocumentRevision)
+							if e != nil {
+								return e
+							}
+						}
 						failure, e = causalTargetReadFailure(c, causalContext, inventory)
 						if e != nil {
 							return e
@@ -347,8 +366,15 @@ func (s *BatchStore) commit(ctx context.Context, request BatchRequest, session *
 						if e = json.Unmarshal(rawContext, &isolatedContext); e != nil {
 							return e
 						}
-						if failure == nil {
-							targetCandidate, failure, e = s.config.Targets.Adapter.(CausalTargetBatchAdapter).PrepareCausalTargets(ctx, append([]byte(nil), checkpoint...), isolated, isolatedContext)
+						// A human's original basis/raw history must be qualified by the
+						// concrete app before any explicit-read terminal decision. The
+						// runtime independently repeats those unchanged read checks.
+						if failure == nil || humanContext != nil {
+							if sessionNative {
+								targetCandidate, failure, e = sessionAdapter.PrepareSessionTargets(ctx, append([]byte(nil), checkpoint...), isolated, isolatedContext, humanContext)
+							} else {
+								targetCandidate, failure, e = s.config.Targets.Adapter.(CausalTargetBatchAdapter).PrepareCausalTargets(ctx, append([]byte(nil), checkpoint...), isolated, isolatedContext)
+							}
 						}
 					} else {
 						targetContext, e = s.targetContext(ctx, tx, key, c, rev)
@@ -458,6 +484,11 @@ func (s *BatchStore) commit(ctx context.Context, request BatchRequest, session *
 			}
 			if stored.Status == "saved" && s.targetsEnabled() {
 				if e = persistTargetRows(ctx, tx, key, targetRows); e != nil {
+					return e
+				}
+			}
+			if stored.Status == "saved" && session != nil {
+				if e = session.stagePreparedCandidate(c, stored.LastRevision, targetCandidate); e != nil {
 					return e
 				}
 			}

@@ -181,3 +181,27 @@ origins (including pending authors absent from the checkpoint), count those
 reservations within capacity, and bind the original author, full checkpoint
 identity and source order in its authorized writer. This helper alone issues
 no allocation, participant capability, human update admission or Saved.
+
+### D1 human producer integration
+
+The D1 integration composes the previously qualified original-delta producer,
+full native transition checks and retained-basis validator without changing the
+model format or the current descriptor, read-only classifier or agent adapter.
+The host supplies current authenticated connection context; numeric origins and
+local roles remain data, not authority. Persistent issuer/journal work is not a
+prerequisite for the ephemeral connection integration.
+
+The E3 undo entrypoints permit own insertion and formatting only. Ordinary text
+delete/backspace remains supported. Undo or redo of an action containing deletion
+returns `UnsupportedUndo` before mutation or history removal; it never skips that
+action to reach older history. The WASM facade uses these restricted entrypoints.
+The older experimental undo methods remain research APIs, not the E3 UI path.
+Native action eligibility uses existing Yrs stack-item metadata; no replacement
+CRDT or deletion-ownership model is installed.
+
+Native regression tests retain the two-client overlapping-delete case as an
+explicit refusal, and compare the complete peer-only native document after own
+insert/format undo, both delivery orders, redo and cold restore. These tests use
+synthetic delivery context. Real HTTP/WebSocket admission, host-backed Saved,
+WordApp browser wiring and the two-human-plus-agent acceptance remain separate
+integration gates. Local Save, a candidate or a local role never implies Saved.

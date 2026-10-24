@@ -342,6 +342,17 @@ fn admitted_actor_with_clock(
     UnixStream,
     std::sync::Arc<std::sync::atomic::AtomicU64>,
 ) {
+    admitted_actor_with_delivery_clock(write, owner_duration, 2000)
+}
+fn admitted_actor_with_delivery_clock(
+    write: bool,
+    owner_duration: u64,
+    delivery_duration: u64,
+) -> (
+    mooring_collab::session_actor::RunningDriver,
+    UnixStream,
+    std::sync::Arc<std::sync::atomic::AtomicU64>,
+) {
     let (driver, mut peer, now) = renewing_driver_with_duration(owner_duration);
     let scope = driver.confirmed().checkpoint().scope.clone();
     let versions = driver.confirmed().checkpoint().versions.clone();
@@ -356,7 +367,7 @@ fn admitted_actor_with_clock(
         assert_eq!(ticket["type"], "ticket_validate");
         let reply = json!({"type":"ticket_validated","request_id":ticket["request_id"],"scope":ticket["scope"],"session_id":ticket["session_id"],
             "generation":"7","participant_ref":"participant","permission_version":"3","granted":{"read":true,"write":write},
-            "versions":versions,"expires_in_ms":"2000","validation_nonce":ticket["validation_nonce"],"gate_id":"gate"});
+            "versions":versions,"expires_in_ms":delivery_duration.to_string(),"validation_nonce":ticket["validation_nonce"],"gate_id":"gate"});
         mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&reply).unwrap()).unwrap();
         let (_, joined) = receive_json(&mut peer);
         assert_eq!(joined["message"]["type"], "session_joined");
@@ -1382,4 +1393,120 @@ fn verified_saved_receipts_wait_for_a_new_authenticated_gate_and_keep_author_fif
     });
     assert_eq!(actor.confirmed().checkpoint(), &checkpoint);
     drop(peer);
+}
+
+#[test]
+fn p3_five_second_pending_grant_cannot_reopen_current_gate_at_its_first_send_expiry() {
+    use std::sync::atomic::Ordering;
+    let (mut actor, peer, now) = admitted_actor_with_delivery_clock(true, 60_000, 5000);
+    let checkpoint = actor.confirmed().checkpoint().clone();
+    let native = actor.confirmed().document().native().unwrap();
+    let ids = actor.confirmed().document().block_ids().unwrap();
+    let scope = checkpoint.scope.clone();
+    let a = agent_change(&scope, "A", None, " A");
+    let b = agent_change(&scope, "B", Some("A"), " B");
+    let peer = drive_peer_control(&mut actor, peer, move |mut peer| {
+        for (change, id) in [(a, "A"), (b, "B")] {
+            mooring_collab::write_frame(
+                &mut peer,
+                &serde_json::to_vec(&participant_input(&scope, &[change], id)).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(receive_json(&mut peer).1["message"]["state"], "pending");
+            assert_eq!(receive_json(&mut peer).1["type"], "session_submit_batch");
+        }
+        peer
+    });
+    now.store(250, Ordering::SeqCst);
+    let clock = now.clone();
+    let (mut peer, second) = drive_peer_control(&mut actor, peer, move |mut peer| {
+        let first = receive_json(&mut peer).0;
+        let mut grant = delivery_reply(&first);
+        grant["duration_ms"] = json!("5000");
+        clock.store(260, Ordering::SeqCst);
+        mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&grant).unwrap()).unwrap();
+        clock.store(500, Ordering::SeqCst);
+        // A cached retry can already be queued before the first reply is read.
+        let second = loop {
+            let request = receive_json(&mut peer).0;
+            if request != first {
+                break request;
+            }
+        };
+        (peer, second)
+    });
+    // First grant owns [250,5250), never [reply-time,reply-time+5000).
+    // The pending request's own [500,5500) cannot revive this expired gate.
+    now.store(5250, Ordering::SeqCst);
+    let mut late = delivery_reply(&second);
+    late["duration_ms"] = json!("5000");
+    mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&late).unwrap()).unwrap();
+    drive_actor_to_control_error(&mut actor);
+    let (confirmed, revision, originals) = actor.into_recovery();
+    assert_eq!(confirmed.checkpoint(), &checkpoint);
+    assert_eq!(confirmed.document().native().unwrap(), native);
+    assert_eq!(confirmed.document().block_ids().unwrap(), ids);
+    assert_eq!(revision, 10);
+    assert_eq!(originals.len(), 2);
+    assert_eq!(originals[0].value.operations[0].op_id, "A");
+    assert_eq!(originals[1].value.operations[0].op_id, "B");
+}
+
+#[test]
+fn session_leave_releases_expired_connection_without_reopening_its_old_gate() {
+    let (mut actor, peer, now) = admitted_actor_with_clock(false, 60_000);
+    now.store(2100, std::sync::atomic::Ordering::SeqCst);
+    let checkpoint = actor.confirmed().checkpoint().clone();
+    let scope = checkpoint.scope.clone();
+    let versions = checkpoint.versions.clone();
+    let peer = drive_peer_control(&mut actor, peer, move |mut peer| {
+        let mut leave = participant_input(&scope, &[], "leave");
+        leave["message"] = json!({"type":"session_leave","request_id":"leave","scope":scope,"session_id":"host-session"});
+        mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&leave).unwrap()).unwrap();
+        let opening = json!({"type":"session_participant_open","request_id":"new-private-open","control_profile":"mooring.session-causal.v1",
+            "scope":scope,"session_id":"host-session","runtime_ref":"fresh-authenticated-child","fence":{"generation":"7","token":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},
+            "connection_ref":"connection","join":{"type":"session_join","request_id":"new-public-join","ticket":"NEW_AUTHENTICATED_HOST_TICKET","versions":versions}});
+        mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&opening).unwrap()).unwrap();
+        let ticket = receive_json(&mut peer).1;
+        assert_eq!(ticket["type"], "ticket_validate");
+        let reply = json!({"type":"ticket_validated","request_id":ticket["request_id"],"scope":ticket["scope"],"session_id":ticket["session_id"],
+            "generation":"7","participant_ref":"participant","permission_version":"3","granted":{"read":true,"write":false},"versions":versions,
+            "expires_in_ms":"2000","validation_nonce":ticket["validation_nonce"],"gate_id":"new-gate"});
+        mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&reply).unwrap()).unwrap();
+        let joined = receive_json(&mut peer).1;
+        assert_eq!(joined["message"]["type"], "session_joined");
+        assert_eq!(joined["gate_id"], "new-gate");
+        peer
+    });
+    assert_eq!(actor.confirmed().checkpoint(), &checkpoint);
+    drop(peer);
+}
+
+#[test]
+fn transplanted_leave_cannot_remove_connection_or_forget_original_pending_change() {
+    let (mut actor, peer, _) = admitted_actor_with_clock(true, 60_000);
+    let checkpoint = actor.confirmed().checkpoint().clone();
+    let scope = checkpoint.scope.clone();
+    let a = agent_change(&scope, "A", None, " A");
+    let peer = drive_peer_control(&mut actor, peer, move |mut peer| {
+        mooring_collab::write_frame(
+            &mut peer,
+            &serde_json::to_vec(&participant_input(&scope, &[a], "A")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(receive_json(&mut peer).1["message"]["state"], "pending");
+        assert_eq!(receive_json(&mut peer).1["type"], "session_submit_batch");
+        peer
+    });
+    let mut leave = participant_input(&checkpoint.scope, &[], "leave");
+    leave["gate_id"] = json!("foreign-gate");
+    leave["message"] = json!({"type":"session_leave","request_id":"leave","scope":checkpoint.scope,"session_id":"host-session"});
+    let mut peer = peer;
+    mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&leave).unwrap()).unwrap();
+    drive_actor_to_control_error(&mut actor);
+    let (confirmed, revision, originals) = actor.into_recovery();
+    assert_eq!(confirmed.checkpoint(), &checkpoint);
+    assert_eq!(revision, 10);
+    assert_eq!(originals.len(), 1);
+    assert_eq!(originals[0].value.operations[0].op_id, "A");
 }

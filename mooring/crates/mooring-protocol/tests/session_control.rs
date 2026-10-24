@@ -11,11 +11,33 @@ fn fixture() -> Value {
     .unwrap()
 }
 #[test]
-fn preexisting_definitions_are_unchanged() {
+fn preexisting_definitions_only_add_session_native_optional_fields() {
     let schema: Value =
         serde_json::from_str(include_str!("../../../protocol/schema.json")).unwrap();
     for (name, expected) in fixture()["baseline_definition_hashes"].as_object().unwrap() {
-        let bytes = serde_json::to_vec(&schema["$defs"][name]).unwrap();
+        let mut definition = schema["$defs"][name].clone();
+        // These fields are accepted only by the explicitly opted-in session
+        // validator. Removing them must recover every byte of the old shape;
+        // required fields and all standalone semantics remain unchanged.
+        let optional = match name.as_str() {
+            "PrepareAtomicCausal" => Some("human_context"),
+            "AtomicPreparedCausal" => Some("native_delta"),
+            "SessionCommitResult" => Some("native_deltas"),
+            _ => None,
+        };
+        if let Some(field) = optional {
+            assert!(!definition["required"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|v| v == field));
+            assert!(definition["properties"]
+                .as_object_mut()
+                .unwrap()
+                .remove(field)
+                .is_some());
+        }
+        let bytes = serde_json::to_vec(&definition).unwrap();
         assert_eq!(
             canonical::normalize(&bytes).unwrap().digest(),
             expected.as_str().unwrap(),
@@ -115,5 +137,85 @@ fn only_explicit_full_checkpoint_messages_keep_large_session_budget() {
         let bytes = serde_json::to_vec(&message).unwrap();
         assert!(bytes.len() > session_control::MAX_BATCH_BYTES);
         assert!(session_control::validate(&bytes, peer).is_ok(), "{name}");
+    }
+}
+
+#[test]
+fn human_prepare_capability_never_substitutes_for_checkpoint_identity() {
+    let fixture = fixture();
+    for (kind, field, host) in [
+        ("session_open", "required_capabilities", true),
+        ("session_opened", "capabilities", false),
+    ] {
+        let template = fixture["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|case| case["valid"] == true && case["message"]["type"] == kind)
+            .unwrap()["message"]
+            .clone();
+        for (caps, valid) in [
+            (serde_json::json!(["checkpoint_identity_v1"]), true),
+            (
+                serde_json::json!(["checkpoint_identity_v1", "origin_inventory_v1"]),
+                true,
+            ),
+            (
+                serde_json::json!(["checkpoint_identity_v1", "human_native_prepare_v1"]),
+                true,
+            ),
+            (
+                serde_json::json!([
+                    "human_native_prepare_v1",
+                    "origin_inventory_v1",
+                    "checkpoint_identity_v1"
+                ]),
+                true,
+            ),
+            (serde_json::json!(["human_native_prepare_v1"]), false),
+            (
+                serde_json::json!(["origin_inventory_v1", "human_native_prepare_v1"]),
+                false,
+            ),
+            (
+                serde_json::json!([
+                    "checkpoint_identity_v1",
+                    "human_native_prepare_v1",
+                    "human_native_prepare_v1"
+                ]),
+                false,
+            ),
+            (
+                serde_json::json!(["checkpoint_identity_v1", "future_human"]),
+                false,
+            ),
+        ] {
+            let mut message = template.clone();
+            message[field] = caps.clone();
+            let raw = serde_json::to_vec(&message).unwrap();
+            assert_eq!(
+                session_control::validate(
+                    &raw,
+                    if host {
+                        Peer::InheritedHost
+                    } else {
+                        Peer::InheritedRuntime
+                    }
+                )
+                .is_ok(),
+                valid,
+                "{kind}: {caps}"
+            );
+            assert!(control::validate_causal(
+                &raw,
+                if host {
+                    Peer::InheritedHost
+                } else {
+                    Peer::InheritedRuntime
+                }
+            )
+            .is_err());
+            assert!(wire::validate_bounded_envelope(&raw).is_err());
+        }
     }
 }

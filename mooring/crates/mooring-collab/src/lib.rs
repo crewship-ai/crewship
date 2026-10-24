@@ -5,6 +5,8 @@ pub mod dispatch_causal;
 #[cfg(unix)]
 pub mod session_actor;
 #[cfg(unix)]
+mod session_human;
+#[cfg(unix)]
 pub mod session_lane;
 #[cfg(unix)]
 mod session_origins;
@@ -293,11 +295,12 @@ pub mod private_rpc {
             durabilities: &[Durability::Node],
             required: Durability::Node,
         };
-        let driver = crate::session_driver::Driver::from_negotiated_inherited_stream_with_origins(
-            stream,
-            &host,
-            mooring_core::lease::boottime,
-        )?;
+        let driver =
+            crate::session_driver::Driver::from_negotiated_inherited_stream_with_native_humans(
+                stream,
+                &host,
+                mooring_core::lease::boottime,
+            )?;
         let mut actor = driver.into_actor()?;
         loop {
             actor.step(&host, Duration::from_millis(20))?;

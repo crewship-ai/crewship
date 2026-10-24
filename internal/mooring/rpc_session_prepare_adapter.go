@@ -39,7 +39,17 @@ func (a *SessionCausalAdapter) PrepareTargets(context.Context, []byte, BatchChan
 	return BatchTargetCandidate{}, nil, ErrPrivateControl
 }
 func (a *SessionCausalAdapter) PrepareCausalTargets(ctx context.Context, checkpoint []byte, change BatchChange, labels BatchCausalPrepareContext) (BatchTargetCandidate, *PreparedFailure, error) {
+	if a != nil && a.session != nil && a.session.requireHumanNativePrepare() == nil {
+		return BatchTargetCandidate{}, nil, ErrPrivateControl
+	}
 	return a.causal.PrepareCausalTargets(ctx, checkpoint, change, labels)
+}
+
+func (a *SessionCausalAdapter) PrepareSessionTargets(ctx context.Context, checkpoint []byte, change BatchChange, labels BatchCausalPrepareContext, human *protocol.SessionHumanPrepareContext) (BatchTargetCandidate, *PreparedFailure, error) {
+	if a == nil || a.session == nil || a.causal == nil || a.session.requireHumanNativePrepare() != nil {
+		return BatchTargetCandidate{}, nil, ErrPrivateControl
+	}
+	return a.causal.prepareCausalTargets(ctx, checkpoint, change, labels, human, true)
 }
 
 // DescribeCheckpoint uses the same concrete sole-reader lane, even while Open
