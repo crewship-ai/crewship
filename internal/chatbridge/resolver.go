@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/documents"
@@ -521,6 +522,15 @@ func (r *IPCResolver) ResolveHumanChat(ctx context.Context, userID, chatID strin
 			return nil, err
 		}
 		resolveURL += "&receipt=" + base64.RawURLEncoding.EncodeToString(raw)
+	} else if original := auth.OriginalCredentialFromContext(ctx); original != nil {
+		if original.UserID != userID {
+			return nil, fmt.Errorf("original credential identity mismatch")
+		}
+		raw, err := json.Marshal(original)
+		if err != nil {
+			return nil, err
+		}
+		resolveURL += "&source_credential=" + base64.RawURLEncoding.EncodeToString(raw)
 	}
 	info, err := r.resolve(ctx, resolveURL)
 	if err != nil {

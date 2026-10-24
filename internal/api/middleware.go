@@ -108,6 +108,7 @@ type AuthUser struct {
 	SessionID           string
 	TokenID             string
 	CredentialExpiresAt time.Time
+	OriginalCredential  *auth.OriginalCredential `json:"-"`
 }
 
 // UserFromContext returns the authenticated user stored in the request context, or nil if not set.
@@ -405,11 +406,39 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 
 		tracked, release := m.streams.Track(r.Context(), epoch, user.ID, user.SessionID, user.TokenID, user.CredentialExpiresAt, m.persistedSessionValidator(user.ID, user.SessionID))
 		defer release()
+		if m.db != nil {
+			// Preserve the audience-aware retry outcome when this exact credential
+			// changed after its authoritative read. The additional original-source
+			// snapshot must never turn that race into a forced-login response.
+			if !auth.StreamCredentialCurrent(tracked) {
+				replyError(w, http.StatusServiceUnavailable, "credential state changed; retry the request")
+				return
+			}
+			original, err := captureOriginalHumanCredential(r.Context(), m.db, user, authKind, token)
+			if err != nil {
+				if !auth.StreamCredentialCurrent(tracked) {
+					replyError(w, http.StatusServiceUnavailable, "credential state changed; retry the request")
+					return
+				}
+				if originalCredentialAdmissionError(err) {
+					writeAuthError(w, http.StatusUnauthorized, reasonSessionInvalid)
+				} else {
+					replyInternalError(w, m.logger, "original credential snapshot unavailable", err)
+				}
+				return
+			}
+			user.OriginalCredential = original
+		}
+		// Revocation may also race the snapshot itself; never deliver its result
+		// through a lease that became invalid while the SQL read was in flight.
 		if !auth.StreamCredentialCurrent(tracked) {
 			replyError(w, http.StatusServiceUnavailable, "credential state changed; retry the request")
 			return
 		}
 		ctx := context.WithValue(tracked, ctxUser, user)
+		if user.OriginalCredential != nil {
+			ctx = auth.WithOriginalCredential(ctx, *user.OriginalCredential)
+		}
 		ctx = context.WithValue(ctx, ctxAuthKind, authKind)
 		r = r.WithContext(ctx)
 		if !m.restrictedRequest(w, r, user.ID) {

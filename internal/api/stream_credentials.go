@@ -56,10 +56,23 @@ func (m *AuthMiddleware) authenticateStream(ctx context.Context, c *auth.Claims)
 	if c.CredentialExpiresAt > 0 {
 		expiry = earlierExpiry(expiry, time.Unix(c.CredentialExpiresAt, 0))
 	}
+	if original := c.OriginalCredential; original != nil {
+		if m.db == nil || !original.Valid() || original.UserID != c.ID || (original.Kind == AuthKindSession && original.ID != c.Sid) || (original.Kind == AuthKindCLIToken && original.ID != c.CLITokenID) {
+			return nil, nil, errors.New("invalid original stream credential")
+		}
+		horizon, err := validateOriginalHumanCredential(ctx, m.db, *original, scopeSelf)
+		if err != nil {
+			return nil, nil, err
+		}
+		expiry = earlierExpiry(expiry, horizon)
+	}
 	tracked, release := m.streams.Track(ctx, epoch, c.ID, c.Sid, c.CLITokenID, expiry, m.persistedSessionValidator(c.ID, c.Sid))
 	if !auth.StreamCredentialCurrent(tracked) {
 		release()
 		return nil, nil, errors.New("stream credential changed")
+	}
+	if c.OriginalCredential != nil {
+		tracked = auth.WithOriginalCredential(tracked, *c.OriginalCredential)
 	}
 	return tracked, release, nil
 }
