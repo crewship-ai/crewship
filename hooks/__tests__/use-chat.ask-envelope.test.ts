@@ -66,9 +66,11 @@ describe("the submission envelope reaches the wire", () => {
 
     const env = envelope()
     act(() => {
-      result.current.sendMessage("Receipt from Acme for 12.50", {
+      // Wire/optimistic rendering assertions below do not acknowledge a send.
+      // Consume the cleanup rejection; separate receipt tests cover acceptance.
+      void Promise.resolve(result.current.sendMessage("Receipt from Acme for 12.50", {
         [ASK_SUBMISSION_METADATA_KEY]: env,
-      })
+      })).catch(() => {})
     })
 
     const payload = lastSentPayload()
@@ -102,7 +104,7 @@ describe("the submission envelope reaches the wire", () => {
 
     const env = envelope()
     act(() => {
-      result.current.sendMessage(env.rendered_text, { [ASK_SUBMISSION_METADATA_KEY]: env })
+      void Promise.resolve(result.current.sendMessage(env.rendered_text, { [ASK_SUBMISSION_METADATA_KEY]: env })).catch(() => {})
     })
 
     const turn = result.current.turns.at(-1)!

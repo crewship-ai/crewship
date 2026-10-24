@@ -9,6 +9,8 @@ import { checkChatMessageSize } from "@/components/features/chat/hooks/use-messa
 import { requireApiPathSegment } from "@/lib/api-path-segment"
 import { apiFetch, AUTH_EVENT } from "@/lib/api-fetch"
 import { projectInputVersionIds } from "@/components/features/chat/files/project-input-metadata"
+import { AskSubmissionError, askSubmissionError } from "@/lib/ask-submission-error"
+import { ASK_SUBMISSION_METADATA_KEY } from "@/components/features/chat/asks/ask-envelope"
 import { randomUUIDv4 } from "@/lib/random-id"
 
 /** Upper bound on out-of-order events held during reassembly. Past this, a gap
@@ -401,6 +403,29 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
   // Mirror of isStreaming for the (deps: []) event handlers — lets
   // handleDoneEvent tell "a local send is pending" apart from an
   // unsolicited done (another tab's run) without being re-created.
+  const pendingAsksRef = useRef(new Map<string, {
+    turnId: string
+    resolve: (sent: boolean) => void
+    reject: (error: AskSubmissionError) => void
+    timer: ReturnType<typeof setTimeout>
+  }>())
+  const settleAsk = useCallback((id: string, error?: AskSubmissionError) => {
+    const pending = pendingAsksRef.current.get(id)
+    if (!pending) return
+    pendingAsksRef.current.delete(id)
+    clearTimeout(pending.timer)
+    if (error) {
+      setTurns((turns) => turns.filter((turn) => turn.id !== pending.turnId))
+      setIsStreaming(false)
+      pending.reject(error)
+    } else pending.resolve(true)
+  }, [])
+  const rejectPendingAsks = useCallback((message: string) => {
+    for (const id of pendingAsksRef.current.keys()) settleAsk(id, new AskSubmissionError(message))
+  }, [settleAsk])
+  useEffect(() => () => {
+    rejectPendingAsks("The conversation changed before this form was confirmed. Your answers are still here.")
+  }, [authorityKey, rejectPendingAsks])
   const isStreamingRef = useRef(false)
   isStreamingRef.current = isStreaming
   const textBufferRef = useRef("")
@@ -1361,6 +1386,22 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
       const channelSessionId = msg.channel?.startsWith("session:") ? msg.channel.slice(8) : undefined
       const envSeq = typeof msg.seq === "number" ? (msg.seq as number) : 0
 
+      // Submission receipts are addressed to this session and do not wait for
+      // history replay or stream sequencing. Only the matching author/id can
+      // acknowledge the durable append; socket send alone is not acceptance.
+      if (msg.type === "chat_event" && channelSessionId === sessionId) {
+        const event = msg.payload && typeof msg.payload === "object" ? msg.payload as Record<string, unknown> : {}
+        const metadata = event.metadata && typeof event.metadata === "object" ? event.metadata as Record<string, unknown> : {}
+        if (event.type === "ask_submission_error" && typeof metadata.submission_id === "string") {
+          settleAsk(metadata.submission_id, askSubmissionError({ error: event.content, ask_errors: metadata.ask_errors }))
+          return
+        }
+        if (event.type === "user_message" && typeof metadata.ask_submission_id === "string" &&
+          typeof metadata.author_user_id === "string" && metadata.author_user_id === currentUserIdRef.current) {
+          settleAsk(metadata.ask_submission_id)
+        }
+      }
+
       // Handle assignment lifecycle events
       const assignmentTypes: AssignmentEventType[] = ["assignment_created", "assignment_running", "assignment_completed", "assignment_failed"]
       if (assignmentTypes.includes(msg.type as AssignmentEventType)) {
@@ -1444,6 +1485,9 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
       //    which is the point at which it stops the user and is surfaced.
       if (msg.type === "error") {
         if (!channelSessionId || channelSessionId !== sessionId) return
+        // An uncorrelated error cannot prove this submission was refused.
+        // Its correlated receipt, disconnect, or timeout will settle it.
+        if (pendingAsksRef.current.size) return
         if (!isStreamingRef.current) return
         const payload = msg.payload
         let reason = ""
@@ -1503,6 +1547,7 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
     [
       sessionId,
       isCurrentAuthority,
+      settleAsk,
       handleAssignmentEvent,
       flushPendingText,
       ingestChatEvent,
@@ -1552,6 +1597,12 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
     onConnect: handleConnect,
   })
   sendRef.current = send
+  useEffect(() => {
+    if (status !== "connected") rejectPendingAsks("The connection was lost before this form was confirmed. Check the conversation before sending again.")
+  }, [status, rejectPendingAsks])
+  useEffect(() => {
+    if (!authorityReadable || !canSend) rejectPendingAsks("This conversation is no longer available. Your form was not confirmed.")
+  }, [authorityReadable, canSend, rejectPendingAsks])
 
   // The socket is app-scoped (URL has no session id), so switching chats does
   // NOT reopen it and handleConnect won't refire. Subscribe + resume whenever
@@ -1612,6 +1663,9 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
       const profile = getExecutionProfile?.() ?? executionProfile
       if (!content.trim() || isStreaming || profile === "pending") return false
       if (profile === "restricted") {
+        if (metadata && ASK_SUBMISSION_METADATA_KEY in metadata) {
+          return Promise.reject(new AskSubmissionError("Ask forms are not supported in restricted chat. Your answers have not been sent."))
+        }
         const projectFileVersions = projectInputVersionIds(metadata)
         if (!workspaceId || projectFileVersions === null) {toast.error("Restricted chat supports text and explicitly selected project files only"); return false}
         const controller = new AbortController()
@@ -1661,6 +1715,17 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
         return true
       }
 
+      const ask = metadata?.[ASK_SUBMISSION_METADATA_KEY]
+      const submissionId = ask && typeof ask === "object" && "submission_id" in ask && typeof ask.submission_id === "string" ? ask.submission_id : undefined
+      if (pendingAsksRef.current.size) return false
+      const optimisticId = uuid()
+      let confirmation: Promise<boolean> | undefined
+      if (submissionId) {
+        confirmation = new Promise<boolean>((resolve, reject) => {
+          const timer = setTimeout(() => settleAsk(submissionId, new AskSubmissionError("Delivery could not be confirmed. Check the conversation before sending again.")), 30000)
+          pendingAsksRef.current.set(submissionId, { turnId: optimisticId, resolve, reject, timer })
+        })
+      }
       const sent = send({
         type: "send_message",
         // Name the channel this send is about. The server echoes it on any
@@ -1672,10 +1737,13 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
           ...(metadata ? { metadata } : {}),
         }),
       })
-      if (sent === false) return false
+      if (sent === false) {
+        if (submissionId) settleAsk(submissionId, new AskSubmissionError("Not connected — your answers are still here."))
+        return confirmation ?? false
+      }
 
       const userTurn: ChatTurn = {
-        id: uuid(),
+        id: optimisticId,
         role: "user",
         parts: [{ id: uuid(), type: "text", content: content.trim(), timestamp: new Date() }],
         isStreaming: false,
@@ -1692,9 +1760,9 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
       setStopPending(false)
     replyHasTextRef.current = false
 
-      return true
+      return confirmation ?? true
     },
-    [canSend, sessionId, send, isStreaming, executionProfile, getExecutionProfile, workspaceId, applyChatEvent, isCurrentAuthority],
+    [canSend, sessionId, send, isStreaming, executionProfile, getExecutionProfile, workspaceId, applyChatEvent, isCurrentAuthority, settleAsk],
   )
 
   const stopGeneration = useCallback(() => {

@@ -25,6 +25,7 @@ import (
 // agentConfigData holds the intermediate state during agent config resolution.
 type agentConfigData struct {
 	agentID       string
+	askForms      sql.NullString
 	agentSlug     string
 	agentName     string
 	agentStatus   string
@@ -402,6 +403,7 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 	resp := map[string]interface{}{
 		"agent_id":           agentID,
 		"agent_slug":         data.agentSlug,
+		"ask_forms":          data.askForms.String,
 		"agent_role":         roleStr,
 		"agent_status":       data.agentStatus,
 		"crew_id":            crewIDStr,
@@ -643,7 +645,7 @@ func (h *InternalHandler) loadAgentData(r *http.Request, agentID string) (*agent
 	d := &agentConfigData{agentID: agentID}
 	query := `
 		SELECT a.slug, a.name, a.status, a.role_title, a.agent_role, a.cli_adapter, a.system_prompt_legacy,
-			a.tool_profile, a.timeout_seconds, a.memory_enabled,
+			a.tool_profile, a.timeout_seconds, a.memory_enabled, a.ask_forms,
 			c2.id, c2.slug, c2.name, a.workspace_id, a.llm_model, a.llm_provider,
 			c2.network_mode, c2.allowed_domains, COALESCE(c2.allow_private_endpoints, 0),
 			c2.container_memory_mb, c2.container_cpus, c2.container_ttl_hours,
@@ -668,7 +670,7 @@ func (h *InternalHandler) loadAgentData(r *http.Request, agentID string) (*agent
 		args = append(args, crew)
 	}
 	err := h.db.QueryRowContext(r.Context(), query, args...).Scan(&d.agentSlug, &d.agentName, &d.agentStatus, &d.roleTitle, &d.agentRole, &d.cliAdapter, &d.systemPrompt,
-		&d.toolProfile, &d.timeoutSecs, &d.memoryEnabled,
+		&d.toolProfile, &d.timeoutSecs, &d.memoryEnabled, &d.askForms,
 		&d.crewID, &d.crewSlug, &d.crewName, &d.wsID, &d.llmModel, &d.llmProvider,
 		&d.crewNetworkMode, &d.crewAllowedDomains, &d.crewAllowPrivateEndpoints,
 		&d.crewMemoryMB, &d.crewCPUs, &d.crewTTLHours,

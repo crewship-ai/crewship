@@ -90,7 +90,9 @@ type ChatInfo struct {
 	HumanAuthority *chataudience.Receipt
 	AgentID        string
 	AgentSlug      string
-	AgentRole      string
+	// AskForms comes from the authorized agent configuration, never message metadata.
+	AskForms  string
+	AgentRole string
 	// AgentStatus is the agents.status column at resolve time. Used by
 	// the bridge to refuse to start an agent that's PENDING_REVIEW
 	// (guided-autonomy hire waiting on operator approval). Empty when
@@ -541,6 +543,10 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		return fmt.Errorf("resolve chat: queued human authority changed")
 	}
 	msgOpt.HumanAuthority = info.HumanAuthority
+	askEnvelope, err := validateAskSubmission(info, chatID, content, msgOpt.Metadata)
+	if err != nil {
+		return err
+	}
 	b.logger.Debug("chat resolved", "agent_id", info.AgentID, "crew_id", info.CrewID)
 	pageSlug, hasPage, pageErr := requestedPageSlug(msgOpt.Metadata)
 	if pageErr != nil {
@@ -610,20 +616,12 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// that is the ask-form submission envelope: which form was answered, at
 	// what version, with what values, and which upload answered which field.
 	//
-	// It is REBUILT rather than copied. msgOpt.Metadata is a raw map straight
-	// off an untrusted socket, and storing it verbatim would let any client
-	// write arbitrary structure into a durable conversation record. Reading it
-	// back through askforms.EnvelopeFromMetadata means exactly one shape can
-	// survive the hop — a valid envelope — and anything else (junk, a partial
-	// envelope, a metadata map with no envelope in it) leaves the message
-	// exactly as it would have been persisted before any of this existed.
-	//
-	// Nothing here touches Content. A form submission is an ordinary user
-	// message; strip the metadata and the conversation reads identically,
-	// which is what lets every CLI adapter stay unaware of forms.
+	// The envelope is rebuilt by the authoritative current-form check above.
+	// Malformed explicit submissions have already been refused; messages with
+	// no ask_submission key retain their ordinary-message behavior.
 	var userMsgMetadata any
-	if env, ok := askforms.EnvelopeFromMetadata(msgOpt.Metadata); ok {
-		userMsgMetadata = map[string]any{askforms.EnvelopeMetadataKey: env}
+	if askEnvelope != nil {
+		userMsgMetadata = map[string]any{askforms.EnvelopeMetadataKey: *askEnvelope}
 	}
 	if pageContext != nil {
 		if userMsgMetadata == nil {
@@ -692,6 +690,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 	broadcastUserMsg := func() {
 		metadata := map[string]any{"author_user_id": userID, "message_id": triggerMessageID}
+		if askEnvelope != nil {
+			metadata["ask_submission_id"] = askEnvelope.SubmissionID
+		}
 		if documentIteration != nil {
 			metadata["document_iteration_intent"] = *documentIteration
 		}
