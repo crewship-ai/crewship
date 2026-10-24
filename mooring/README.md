@@ -62,6 +62,10 @@ or Update. Raw Yjs auth, custom messages and awareness are rejected; presence
 must be bound to verified session identity separately. This is an input filter,
 not a durable commit endpoint. Rejection recovery constructs a fresh document
 from a caller-verified, host-authenticated and size-bounded authoritative
-snapshot and retains pending text as unsaved drafts.
+snapshot and retains pending text as unsaved drafts. Full snapshot recovery also
+checks that every encoded allocation/GC and deletion range is covered by the
+restored frontier; an apparently successful upstream apply cannot silently
+drop a missing same-origin prefix. Failure retains all original drafts. Scope,
+authority and bounded-input qualification remain the caller's responsibility.
 It does not infer Yjs dependencies, automatically replay intents, or implement
 the WordCraft adapter. UTF-16 offsets match browser Yjs indexing.
