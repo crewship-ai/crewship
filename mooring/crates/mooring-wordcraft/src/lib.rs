@@ -3,15 +3,16 @@
 //! An export is a candidate, never a durable Saved receipt.
 pub mod adapter;
 mod candidate;
+mod checkpoint_description;
 mod checkpoint_wire;
 pub mod command;
 mod core_fields;
 mod format;
-mod native_qualification;
 #[cfg(test)]
 mod human;
 #[cfg(test)]
 mod human_decode;
+mod native_qualification;
 pub mod profile;
 pub mod read;
 
