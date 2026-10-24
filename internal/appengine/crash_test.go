@@ -11,11 +11,13 @@ import (
 	"github.com/crewship-ai/crewship/internal/database"
 )
 
-func TestWorkbookHostCrashHelper(t *testing.T) {
+// workbookHostCrashHelper is the child branch of the actual crash test, not a
+// separate test that would be skipped during every ordinary suite run.
+func workbookHostCrashHelper(t *testing.T) {
+	t.Helper()
 	phase := os.Getenv("WORKBOOK_CRASH_PHASE")
-	if phase == "" {
-		// SKIP-WAIVER(#3967): parent test executes this subprocess entrypoint with a selected crash phase.
-		t.Skip("subprocess helper")
+	if phase != "before" && phase != "after" {
+		t.Fatalf("invalid workbook crash phase %q", phase)
 	}
 	db, err := database.Open("file:" + os.Getenv("WORKBOOK_CRASH_DB"))
 	if err != nil {
@@ -38,6 +40,10 @@ func TestWorkbookHostCrashHelper(t *testing.T) {
 	os.Exit(74) // committed, but no caller acknowledgement was delivered
 }
 func TestWorkbookActualHostProcessDeathBeforeAndAfterCommit(t *testing.T) {
+	if os.Getenv("WORKBOOK_CRASH_PHASE") != "" {
+		workbookHostCrashHelper(t)
+		t.Fatal("crash subprocess unexpectedly returned")
+	}
 	for _, phase := range []string{"before", "after"} {
 		t.Run(phase, func(t *testing.T) {
 			store, db, auth, key := fixture(t)
@@ -46,7 +52,7 @@ func TestWorkbookActualHostProcessDeathBeforeAndAfterCommit(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			child := exec.CommandContext(t.Context(), binary, "-test.run=^TestWorkbookHostCrashHelper$", "-test.timeout=30s")
+			child := exec.CommandContext(t.Context(), binary, "-test.run=^TestWorkbookActualHostProcessDeathBeforeAndAfterCommit$", "-test.timeout=30s")
 			child.Env = []string{"WORKBOOK_CRASH_PHASE=" + phase, "WORKBOOK_CRASH_DB=" + db.Path()}
 			output, err := child.CombinedOutput()
 			var exit *exec.ExitError
