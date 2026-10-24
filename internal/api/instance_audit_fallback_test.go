@@ -253,3 +253,42 @@ func TestAdminSessionRevokeSurvivesBrokenInstanceTail(t *testing.T) {
 		})
 	}
 }
+
+// A future internal operation must opt in to mutation and fallback explicitly.
+// In particular it must not fall through to unlock or mark the account revoked.
+func TestAdminSecurityRejectsUnknownOperation(t *testing.T) {
+	for _, broken := range []bool{false, true} {
+		t.Run(map[bool]string{false: "healthy", true: "broken"}[broken], func(t *testing.T) {
+			f := newPeopleFixture(t)
+			t.Setenv(backup.InstanceOwnerEmailEnv, "")
+			execOrFatal(t, f.db, `UPDATE users SET instance_role='ADMIN' WHERE id='u-admin'`)
+			if broken {
+				breakInstanceAuditTail(t, f.db)
+			}
+			snapshot := func() string {
+				t.Helper()
+				var state string
+				err := f.db.QueryRow(`SELECT json_array(failed_login_count,locked_until,access_revoked_at,
+					(SELECT COUNT(*) FROM user_sessions WHERE user_id=users.id AND revoked_at IS NULL),
+					(SELECT COUNT(*) FROM instance_audit_logs),
+					(SELECT COUNT(*) FROM audit_logs)) FROM users WHERE id='u-member'`).Scan(&state)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return state
+			}
+			before := snapshot()
+			h := NewAdminUsersHandler(f.db, newTestLogger(), f.store)
+			for _, operation := range []string{"", "future-access"} {
+				req := peopleReq("POST", "/api/v1/admin/users/u-member/sessions", "u-admin", "admin@a.test", "", "")
+				req = req.WithContext(context.WithValue(req.Context(), ctxInstanceAdmin, true))
+				req.SetPathValue("userId", "u-member")
+				rr := httptest.NewRecorder()
+				h.mutateSecurity(rr, req, operation)
+				if rr.Code != http.StatusBadRequest || snapshot() != before {
+					t.Fatalf("unknown operation %q: HTTP %d; before=%s after=%s", operation, rr.Code, before, snapshot())
+				}
+			}
+		})
+	}
+}
