@@ -7,6 +7,7 @@ pub mod control;
 pub mod grant;
 mod generated;
 pub mod session_control;
+pub mod session_receipt;
 mod shape;
 pub mod wire;
 pub use generated::*;

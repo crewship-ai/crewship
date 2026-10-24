@@ -86,6 +86,20 @@ pub fn validate_commit_result(
     transport: &Transport<'_>,
     expected: &CommitBinding<'_>,
 ) -> Result<HostReceipt, BoundaryError> {
+    if !matches!(transport, Transport::AuthenticatedHost { .. }) {
+        return Err(BoundaryError::Forbidden);
+    }
+    let normalized = wire::validate_bounded_envelope(raw).map_err(BoundaryError::Wire)?;
+    validate_checked_session_receipt(normalized, transport, expected)
+}
+
+// Only the closed session wrapper validator may supply a larger, already shape-
+// checked receipt. This is not an exported generic large-envelope entry point.
+pub(crate) fn validate_checked_session_receipt(
+    normalized: CanonicalValue,
+    transport: &Transport<'_>,
+    expected: &CommitBinding<'_>,
+) -> Result<HostReceipt, BoundaryError> {
     let Transport::AuthenticatedHost {
         issuer,
         durabilities,
@@ -94,7 +108,6 @@ pub fn validate_commit_result(
     else {
         return Err(BoundaryError::Forbidden);
     };
-    let normalized = wire::validate_bounded_envelope(raw).map_err(BoundaryError::Wire)?;
     let value = normalized.value();
     if value["type"] != "commit_result"
         || value["request_id"] != expected.request_id
