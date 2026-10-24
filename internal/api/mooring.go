@@ -135,7 +135,7 @@ func (m *mooringHTTP) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-	if e = gridcraftCredential(r, tx, true); e != nil {
+	if e = m.createAuthority(r, tx, ws, user.ID); e != nil {
 		mooringError(w, e)
 		return
 	}

@@ -276,6 +276,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **An identical Mooring create retry no longer returns a private document after its author loses access.** The existing transaction-local author check now runs before looking up the saved result as well as before committing a new document.
+
 - **Workbook creation now rechecks the original author’s current rights in its transaction.** Lost membership, restricted access or removed Page-create rights refuse both creation and identical retries; a rights change during insertion rolls back the staged Page.
 
 - Revoke every matching Page grant when a reference identifies both a current subject and a departed stored ID, without changing unrelated grants. ⚠️ References matching multiple live subjects now return 400 instead of selecting one arbitrarily. Creation and reissue also verify that other subjects' grants remain unchanged. Losing issuer authority during the audit commit returns 403 and rolls back the change; database failures remain server errors.
