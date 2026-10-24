@@ -226,6 +226,18 @@ Stop the server, export, put the file in place of `<data-dir>/audit-keyring.json
 (or point `CREWSHIP_AUDIT_KEYRING_PATH` at it), start the older build, and delete
 any other plaintext copy afterwards.
 
+## Background entries during chain repair
+
+A broken workspace chain or unavailable signing key can leave background journal entries in a bounded
+in-memory retry queue. It holds at most 10,000 entries and does **not** survive
+a restart; overflow drops the oldest entries with an ERROR. Resealing permits
+retry but does not recover entries already lost. Synchronous fallback writes
+return refusal errors to the caller and are not held. Permanently rejected retry
+entries are also dropped with an ERROR; no held-entry count is exposed. Persisted incident notices
+and delivery receipts have a separate lifecycle. See
+[the journal retention limits](/guides/crew-journal#entries-refused-by-a-broken-audit-chain)
+before planning a restart during repair.
+
 ## Common errors
 
 - **`bad --since: …`** / **`bad --until: …`** — the value is neither RFC3339 nor a duration. Accept formats: `2026-05-01T00:00:00Z`, `1h`, `24h`, `7d`.
