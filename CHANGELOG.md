@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Add a default-off authenticated Mooring HTTP/WebSocket controller with one-use human joins and current SQL-gated checkpoint delivery. Raw editing remains refused until the native human prepare capability is integrated; in-process backup restore requires disabling the controller and restarting.
+
 - Mooring SDK recovery refuses incomplete full snapshots even when Yrs reports no missing updates, preserving every original unsaved draft instead of accepting silently omitted history.
 
 - **Mooring agent reads:** an inactive session checkpoint reader retains the original agent mandate and confirmed attempt under the existing immutable authority; it grants no write or external delivery access.
