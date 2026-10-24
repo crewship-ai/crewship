@@ -13,6 +13,7 @@ mod human;
 #[cfg(test)]
 mod human_decode;
 mod native_qualification;
+pub mod origin_inventory;
 pub mod profile;
 pub mod read;
 
