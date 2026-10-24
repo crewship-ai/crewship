@@ -6,7 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"golang.org/x/sys/unix"
+	"net"
 	"strconv"
 	"strings"
 	"syscall"
@@ -14,6 +14,7 @@ import (
 	"time"
 
 	protocol "github.com/crewship-ai/crewship/mooring/protocol/generated/go"
+	"golang.org/x/sys/unix"
 )
 
 // Actual inherited child and real SQL startup/activation, synthetic native
@@ -197,8 +198,19 @@ func TestSessionParticipantTransportCanceledPhysicalWritePoisonsActualChild(t *t
 			break
 		}
 	}
-	if !failed || ctx.Err() == nil {
-		t.Fatal("actual stalled write was not canceled", err)
+	if !failed {
+		t.Fatal("actual stalled write did not fail")
+	}
+	if ctx.Err() == nil {
+		// The socket's write deadline and the context timer have the SAME
+		// deadline, but the network poller can wake before the context timer
+		// callback runs. A real timeout at/after that exact deadline proves
+		// the same cancellation horizon; a different/early error does not.
+		deadline, ok := ctx.Deadline()
+		var timeout net.Error
+		if !ok || !errors.As(err, &timeout) || !timeout.Timeout() || time.Now().Before(deadline) {
+			t.Fatal("actual stalled write failed before cancellation", err)
+		}
 	}
 	select {
 	case <-f.runtime.Done():

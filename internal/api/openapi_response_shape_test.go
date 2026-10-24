@@ -20,6 +20,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
 	"github.com/crewship-ai/crewship/internal/slides"
 	"github.com/crewship-ai/crewship/internal/webhook"
+	protocol "github.com/crewship-ai/crewship/mooring/protocol/generated/go"
 )
 
 // The spec's `required` list must be DERIVED from the response struct, not
@@ -49,6 +50,9 @@ var responseShapeContracts = []struct {
 	// A zero value of the struct the handler serializes.
 	value any
 }{
+	{name: "MooringSession", pointer: "/components/schemas/MooringSession", value: collaborationHTTPSessionResponse{}},
+	{name: "MooringSessionEditor", pointer: "/components/schemas/MooringSession/properties/editor", value: collaborationHTTPSessionEditor{}},
+	{name: "MooringSessionVersions", pointer: "/components/schemas/MooringSession/properties/versions", value: protocol.Versions{}},
 	{name: "CredentialFolder", pointer: "/components/schemas/CredentialFolder", value: credentialFolderResponse{}},
 	{name: "RestrictedRoutinePublicationValidation", pointer: "/components/schemas/RestrictedRoutinePublicationValidation", value: routinePublicationValidationResponse{}},
 	{name: "RestrictedRoutinePublication", pointer: "/components/schemas/RestrictedRoutinePublication", value: routinePublicationResponse{}},

@@ -9,6 +9,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Grade the actual Mooring session response and optional editor DTOs against their OpenAPI schema without increasing the ungraded-response budget.
+
+- Keep the participant stalled-write regression tied to its unchanged physical/context deadline even when the network poller wakes before the context timer callback.
+
 - Document the default-off Mooring session request/response and bodyless WebSocket upgrade, with exact conditional-route checks and CLI/configuration contracts.
 
 - WordCraft explains restricted undo/redo refusals without closing the editor or changing its save state; deletion undo and changes overlapping another author's deletion remain refused.

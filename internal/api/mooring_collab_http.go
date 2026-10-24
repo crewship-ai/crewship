@@ -258,6 +258,26 @@ func (m *collaborationHTTPManager) origin(key mooring.SessionKey) (string, error
 }
 func jsonNumber(n uint64) string { b, _ := json.Marshal(n); return string(b) }
 
+// The actual emitted wire DTO is paired with the generated schema so new
+// response fields cannot silently escape the response-shape inventory guard.
+type collaborationHTTPSessionResponse struct {
+	SessionID          string                          `json:"session_id"`
+	CheckpointRevision string                          `json:"checkpoint_revision"`
+	SDKPrefix          string                          `json:"sdk_prefix"`
+	ParticipantRef     string                          `json:"participant_ref"`
+	Ticket             string                          `json:"ticket"`
+	ConnectionRef      string                          `json:"connection_ref"`
+	Origin             string                          `json:"origin"`
+	Versions           protocol.Versions               `json:"versions"`
+	WebsocketPath      string                          `json:"websocket_path"`
+	Editor             *collaborationHTTPSessionEditor `json:"editor,omitempty"`
+}
+
+type collaborationHTTPSessionEditor struct {
+	URL          string `json:"url"`
+	BundleDigest string `json:"bundle_digest"`
+}
+
 func (m *collaborationHTTPManager) session(w http.ResponseWriter, r *http.Request) {
 	stamp, e := m.fence.capture(r.Context())
 	if e != nil {
@@ -353,11 +373,15 @@ func (m *collaborationHTTPManager) session(w http.ResponseWriter, r *http.Reques
 	d.connections[ref] = c
 	d.mu.Unlock()
 	w.Header().Set("Cache-Control", "no-store")
-	response := map[string]any{"session_id": d.activation.SessionID(), "checkpoint_revision": head, "sdk_prefix": m.config.SDKPrefix, "participant_ref": admission.participant, "ticket": ticket, "connection_ref": ref, "origin": origin, "versions": protocol.Versions{ProtocolVersion: "0.4.0", ModelVersion: "0.2.0", EngineVersion: "0.10.0"}, "websocket_path": "/api/v1/pages/@" + key.ArtifactID + "/mooring/ws?workspace_id=" + key.WorkspaceID}
+	response := collaborationHTTPSessionResponse{
+		SessionID: d.activation.SessionID(), CheckpointRevision: head, SDKPrefix: m.config.SDKPrefix,
+		ParticipantRef: admission.participant, Ticket: ticket, ConnectionRef: ref, Origin: origin,
+		Versions: d.wireVersions(), WebsocketPath: "/api/v1/pages/@" + key.ArtifactID + "/mooring/ws?workspace_id=" + key.WorkspaceID,
+	}
 	if m.config.EditorBundle != nil {
 		digest, indexURL := m.config.EditorBundle(r)
 		if digest != "" && indexURL != "" {
-			response["editor"] = map[string]string{"url": indexURL, "bundle_digest": digest}
+			response.Editor = &collaborationHTTPSessionEditor{URL: indexURL, BundleDigest: digest}
 		}
 	}
 	writeJSON(w, 200, response)
