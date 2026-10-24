@@ -368,8 +368,33 @@ impl Document {
     /// identities and current content permission before delivery. This proves
     /// app-state replay consistency, not receipt authority or durable lineage.
     pub fn update_since(&self, previous_checkpoint: &[u8]) -> Result<Vec<u8>, AdapterError> {
-        use mooring_text::yrs::updates::decoder::Decode;
-        let previous = Self::restore(previous_checkpoint)?;
+        let previous = self.previous_for_update(previous_checkpoint)?;
+        let previous_vector = previous.doc.transact().state_vector();
+        let delta = self
+            .doc
+            .transact()
+            .encode_state_as_update_v1(&previous_vector);
+        self.verify_update_from(previous, &delta)?;
+        Ok(delta)
+    }
+
+    /// Check original or delivery DATA against this exact candidate without
+    /// changing either document. This grants no authority or Saved receipt.
+    /// The caller must retain the original source/packet binding separately.
+    pub fn verify_update_since(
+        &self,
+        previous_checkpoint: &[u8],
+        update: &[u8],
+    ) -> Result<(), AdapterError> {
+        if update.len() > 262144 {
+            return Err(AdapterError::Limit);
+        }
+        let previous = self.previous_for_update(previous_checkpoint)?;
+        self.verify_update_from(previous, update)
+    }
+
+    fn previous_for_update(&self, checkpoint: &[u8]) -> Result<Self, AdapterError> {
+        let previous = Self::restore(checkpoint)?;
         if previous.model != self.model || previous.block_ids()? != self.block_ids()? {
             return Err(AdapterError::InvalidCheckpoint);
         }
@@ -381,19 +406,20 @@ impl Document {
         {
             return Err(AdapterError::InvalidCheckpoint);
         }
-        let delta = self
-            .doc
-            .transact()
-            .encode_state_as_update_v1(&previous_vector);
-        if delta.len() > 262144 {
+        Ok(previous)
+    }
+
+    fn verify_update_from(&self, previous: Self, update: &[u8]) -> Result<(), AdapterError> {
+        use mooring_text::yrs::updates::decoder::Decode;
+        if update.len() > 262144 {
             return Err(AdapterError::Limit);
         }
-        checkpoint_wire::preflight(&delta)?;
+        checkpoint_wire::preflight(update)?;
         previous
             .doc
             .transact_mut()
             .apply_update(
-                mooring_text::yrs::Update::decode_v1(&delta)
+                mooring_text::yrs::Update::decode_v1(update)
                     .map_err(|_| AdapterError::InvalidCheckpoint)?,
             )
             .map_err(|_| AdapterError::InvalidCheckpoint)?;
@@ -405,7 +431,7 @@ impl Document {
         if Self::restore(&previous.checkpoint()?)?.checkpoint()? != self.checkpoint()? {
             return Err(AdapterError::InvalidCheckpoint);
         }
-        Ok(delta)
+        Ok(())
     }
 
     /// Only host-authenticated, scope/revision-verified storage checkpoints may
