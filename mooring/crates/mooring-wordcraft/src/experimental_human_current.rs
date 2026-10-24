@@ -268,7 +268,8 @@ mod tests {
     use std::collections::BTreeMap;
     fn baseline() -> Vec<u8> {
         Document::import(
-            serde_json::from_str(include_str!("../tests/fixtures/d1-native.json")).unwrap(),
+            serde_json::from_str(include_str!("../tests/fixtures/d1-engine-canonical.json"))
+                .unwrap(),
             (0..8).map(|i| format!("p{i}")).collect(),
         )
         .unwrap()

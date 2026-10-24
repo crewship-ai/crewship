@@ -417,7 +417,8 @@ mod tests {
     use serde_json::json;
     fn native() -> Value {
         let mut value: Value =
-            serde_json::from_str(include_str!("../tests/fixtures/d1-native.json")).unwrap();
+            serde_json::from_str(include_str!("../tests/fixtures/d1-engine-canonical.json"))
+                .unwrap();
         value["body"] = json!([{ "kind":"para", "text":"Č😀e\u{301}", "runs":[{"len":9}] }]);
         value
     }

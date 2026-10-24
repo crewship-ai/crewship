@@ -182,7 +182,8 @@ mod tests {
     use serde_json::{json, Value};
     fn checkpoint() -> Vec<u8> {
         let native: Value =
-            serde_json::from_str(include_str!("../tests/fixtures/d1-native.json")).unwrap();
+            serde_json::from_str(include_str!("../tests/fixtures/d1-engine-canonical.json"))
+                .unwrap();
         let ids = (0..native["body"].as_array().unwrap().len())
             .map(|i| format!("stable-{i}"))
             .collect();

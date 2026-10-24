@@ -183,3 +183,30 @@ partial, wrong-typed or foreign roots are rejected, never reconstructed from the
 wrapper's native copy. No checkpoint/native rewrite or automatic migration is
 performed. Native/local SDK gates and the WASM model candidate gate reject
 readonly writes before parsing operation inputs or emitting a local proposal.
+
+### WordCraft native serialization qualification
+
+The application adapter alone links `wordcraft-doc` and `wordcraft-geom` from
+public WordCraft revision `668d7ce3a4b1dcf241a9c50a20754a85647a02c4`.
+The crates are vendored unchanged and the inventory records that immutable Git
+source, every source-file checksum and the selected MIT license text. They do
+not enter the generic core, protocol or minimal text client dependency graph.
+The WordCraft application crates require Rust 1.95 or later; the current
+qualification toolchain is 1.99.1.
+
+Writer qualification compares the entire original native value with serialization
+through that exact typed document model. The disposable typed value runs the
+same paragraph normalization and nonempty-document default as native JSON open;
+any resulting change refuses writer qualification. Unknown fields, inserted defaults,
+non-exact f32 conversions and integer type mismatches make the whole document
+read-only. The predicate never replaces the original native value or checkpoint.
+Actual WordCraft command validation remains separate: typed serde equality alone
+does not prove a UI command's effects or establish host writer authority.
+
+`d1-native.json` remains the original raw-source fixture. Its three known f32
+values are not rewritten on restore; it is now explicitly read-only.
+`d1-engine-canonical.json` is a separate fixture produced by opening that source
+with the qualified actual engine, and initializes writable connector tests.
+Existing projected checkpoints that no longer qualify retain their actual CRDT
+roots and stable IDs read-only, subject to full shape and native equality checks.
+There is no silent migration or numeric tolerance.
