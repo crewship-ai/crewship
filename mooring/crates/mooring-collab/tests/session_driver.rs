@@ -315,6 +315,401 @@ fn receive_json(peer: &mut UnixStream) -> (Vec<u8>, Value) {
     let value = serde_json::from_slice(&raw).unwrap();
     (raw, value)
 }
+
+fn admitted_actor() -> (mooring_collab::session_actor::RunningDriver, UnixStream) {
+    admitted_actor_with_write(true)
+}
+fn admitted_actor_with_write(
+    write: bool,
+) -> (mooring_collab::session_actor::RunningDriver, UnixStream) {
+    let (driver, mut peer, _now) = renewing_driver();
+    let scope = driver.confirmed().checkpoint().scope.clone();
+    let versions = driver.confirmed().checkpoint().versions.clone();
+    let mut actor = driver.into_actor().unwrap();
+    let host_worker = std::thread::spawn(move || {
+        let open = json!({"type":"session_participant_open","request_id":"private-open","control_profile":"mooring.session-causal.v1",
+            "scope":scope,"session_id":"host-session","runtime_ref":"fresh-authenticated-child",
+            "fence":{"generation":"7","token":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},
+            "connection_ref":"connection","join":{"type":"session_join","request_id":"public-join","ticket":"MOCK_HOST_ISSUED_TICKET","versions":versions}});
+        mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&open).unwrap()).unwrap();
+        let (_, ticket) = receive_json(&mut peer);
+        assert_eq!(ticket["type"], "ticket_validate");
+        let reply = json!({"type":"ticket_validated","request_id":ticket["request_id"],"scope":ticket["scope"],"session_id":ticket["session_id"],
+            "generation":"7","participant_ref":"participant","permission_version":"3","granted":{"read":true,"write":write},
+            "versions":versions,"expires_in_ms":"2000","validation_nonce":ticket["validation_nonce"],"gate_id":"gate"});
+        mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&reply).unwrap()).unwrap();
+        let (_, joined) = receive_json(&mut peer);
+        assert_eq!(joined["message"]["type"], "session_joined");
+        assert_eq!(joined["message"]["request_id"], "public-join");
+        assert_eq!(joined["participant_ref"], "participant");
+        peer
+    });
+    let limit = std::time::Instant::now() + Duration::from_secs(3);
+    while !host_worker.is_finished() {
+        actor.step(&host(), Duration::from_millis(20)).unwrap();
+        assert!(
+            std::time::Instant::now() < limit,
+            "mock ticket handshake stalled"
+        );
+    }
+    (actor, host_worker.join().unwrap())
+}
+fn agent_change(
+    scope: &mooring_protocol::Scope,
+    id: &str,
+    dependency: Option<&str>,
+    text: &str,
+) -> mooring_protocol::AtomicChange {
+    let change = json!({"change_id":format!("change-{id}"),"membership_hash":format!("sha256:{}","0".repeat(64)),
+        "operations":[{"op_id":id,"fingerprint":format!("sha256:{}","0".repeat(64)),"participant_ref":"participant","base_revision":"10",
+            "dependencies":dependency.into_iter().collect::<Vec<_>>(),"read_preconditions":[{"target_id":"stable-0","revision":"10"}],
+            "payload":{"kind":"text.insert","target_id":"stable-0","at":{"kind":"end"},"text":text}}]});
+    mooring_protocol::canonical::fingerprint_atomic(scope, &serde_json::to_vec(&change).unwrap())
+        .unwrap()
+        .with_fingerprints()
+}
+fn participant_input(
+    scope: &mooring_protocol::Scope,
+    changes: &[mooring_protocol::AtomicChange],
+    id: &str,
+) -> Value {
+    json!({"type":"session_participant_input","request_id":format!("private-{id}"),"control_profile":"mooring.session-causal.v1",
+        "scope":scope,"session_id":"host-session","runtime_ref":"fresh-authenticated-child",
+        "fence":{"generation":"7","token":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},
+        "connection_ref":"connection","participant_ref":"participant","gate_id":"gate","permission_version":"3",
+        "message":{"type":"submit_changes","request_id":id,"scope":scope,"session_id":"host-session",
+            "versions":mooring_wordcraft::profile::qualified_versions(),"changes":changes}})
+}
+fn mock_commit(
+    batch: &Value,
+    checkpoint: &mut mooring_protocol::Checkpoint,
+    targets: &mut Vec<TargetVersion>,
+) -> Value {
+    use mooring_core::{
+        adapter::{CausalPrepareAdapter, Prepared, PreparedCandidate},
+        causal::{CausalPrepareContext, EntryVersion, QualifiedRead},
+    };
+    let changes: Vec<mooring_protocol::AtomicChange> =
+        serde_json::from_value(batch["changes"].clone()).unwrap();
+    let mut outcomes = Vec::new();
+    for change in changes {
+        let before = mooring_protocol::checkpoint::verify(
+            checkpoint,
+            mooring_protocol::checkpoint::Limits {
+                decoded_bytes: control::MAX_CHECKPOINT_BYTES,
+                preimage_bytes: control::MAX_CONTROL_BYTES,
+            },
+        )
+        .unwrap();
+        let next = checkpoint.revision.0 + 1;
+        let mut qualified_reads = Vec::new();
+        for op in &change.operations {
+            for (index, read) in op.read_preconditions.iter().enumerate() {
+                let target = targets
+                    .iter()
+                    .find(|target| target.target_id == read.target_id)
+                    .unwrap();
+                qualified_reads.push(QualifiedRead {
+                    op_id: op.op_id.clone(),
+                    read_index: index as u32,
+                    target_id: read.target_id.clone(),
+                    observed_revision: read.revision,
+                    observed_structure_revision: read.structure_revision,
+                    entry: Some(EntryVersion {
+                        revision: target.revision,
+                        structure_revision: target.structure_revision,
+                        deleted: target.deleted,
+                    }),
+                    covered: true, // MOCK host history attestation; NOT SQL qualification.
+                });
+            }
+        }
+        let context = CausalPrepareContext {
+            document_revision: checkpoint.revision,
+            targets: targets.clone(),
+            operation_revisions: vec![mooring_protocol::PreparedOperationRevision {
+                op_id: change.operations[0].op_id.clone(),
+                revision: Counter(next),
+            }],
+            qualified_reads,
+        };
+        let Prepared::Candidate(candidate) = WordCraftAdapter
+            .prepare_atomic_causal(before.state(), &change, &context)
+            .unwrap()
+        else {
+            panic!("mock host app rejected");
+        };
+        let opaque = control::encode_checkpoint(candidate.checkpoint_bytes()).unwrap();
+        checkpoint.state = opaque.state;
+        checkpoint.revision = Counter(next);
+        for effect in candidate.effects().iter().flat_map(|op| &op.targets) {
+            let target = targets
+                .iter_mut()
+                .find(|target| target.target_id == effect.target_id)
+                .unwrap();
+            target.revision = Counter(next);
+            if effect.structure_changed {
+                target.structure_revision = Counter(next);
+            }
+            target.deleted = effect.deleted;
+        }
+        let mut value = serde_json::to_value(&*checkpoint).unwrap();
+        bind_checkpoint_identity(&mut value);
+        *checkpoint = serde_json::from_value(value).unwrap();
+        outcomes.push(json!({"change_id":change.change_id,"status":"saved","first_revision":next.to_string(),"last_revision":next.to_string(),
+            "operations":[{"op_id":change.operations[0].op_id,"status":"saved","revision":next.to_string(),"issuer":"crewship","durability":"node"}]}));
+    }
+    json!({"type":"session_commit_result","request_id":batch["request_id"],"control_profile":"mooring.session-causal.v1",
+        "scope":batch["scope"],"session_id":batch["session_id"],"runtime_ref":batch["runtime_ref"],"fence":batch["fence"],"versions":batch["versions"],
+        "receipt":{"type":"commit_result","request_id":batch["request_id"],"scope":batch["scope"],"generation":"7","revision":checkpoint.revision,
+            "issuer":"crewship","durability":"node","changes":outcomes},"checkpoint":checkpoint,"targets":targets})
+}
+
+#[test]
+fn admitted_actor_actual_timer_sends_b_before_a_ack_then_installs_only_correlated_host_checkpoints()
+{
+    let (mut actor, mut peer) = admitted_actor();
+    let before = actor.confirmed().document().native().unwrap();
+    let ids = actor.confirmed().document().block_ids().unwrap();
+    let mut checkpoint = actor.confirmed().checkpoint().clone();
+    let mut targets = actor.confirmed().targets().to_vec();
+    let a = agent_change(&checkpoint.scope, "A", None, " A");
+    let b = agent_change(&checkpoint.scope, "B", Some("A"), " B");
+    let (events, receive) = std::sync::mpsc::channel();
+    let (permit, permits) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let started = std::time::Instant::now();
+        mooring_collab::write_frame(
+            &mut peer,
+            &serde_json::to_vec(&participant_input(
+                &checkpoint.scope,
+                std::slice::from_ref(&a),
+                "submit-A",
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        let (_, pending_a) = receive_json(&mut peer);
+        assert_eq!(pending_a["message"]["state"], "pending");
+        let (_, first) = receive_json(&mut peer);
+        let first_delay = started.elapsed();
+        assert_eq!(first["type"], "session_submit_batch");
+        assert!(started.elapsed() >= Duration::from_millis(90));
+        let a_reply = mock_commit(&first, &mut checkpoint, &mut targets);
+        mooring_collab::write_frame(
+            &mut peer,
+            &serde_json::to_vec(&participant_input(&checkpoint.scope, &[a], "retry-A")).unwrap(),
+        )
+        .unwrap();
+        let (_, retry) = receive_json(&mut peer);
+        assert_eq!(retry["message"]["state"], "pending");
+        let b_started = std::time::Instant::now();
+        mooring_collab::write_frame(
+            &mut peer,
+            &serde_json::to_vec(&participant_input(&checkpoint.scope, &[b], "submit-B")).unwrap(),
+        )
+        .unwrap();
+        let (_, pending_b) = receive_json(&mut peer);
+        assert_eq!(pending_b["message"]["state"], "pending");
+        let (_, second) = receive_json(&mut peer);
+        assert_eq!(second["type"], "session_submit_batch");
+        assert_eq!(second["confirmed_basis"]["revision"], "10");
+        assert_eq!(
+            second["changes"][0]["operations"][0]["dependencies"],
+            json!(["A"])
+        );
+        eprintln!("real native timer: A={}ms B={}ms after respective input, both before host A ACK (host authority/history/receipts MOCK)", first_delay.as_millis(), b_started.elapsed().as_millis());
+        let b_reply = mock_commit(&second, &mut checkpoint, &mut targets);
+        events.send(0).unwrap();
+        permits.recv().unwrap();
+        mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&a_reply).unwrap()).unwrap();
+        let (_, saved_a) = receive_json(&mut peer);
+        assert_eq!(
+            saved_a["message"]["changes"][0]["operations"][0]["op_id"],
+            "A"
+        );
+        events.send(1).unwrap();
+        permits.recv().unwrap();
+        mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&b_reply).unwrap()).unwrap();
+        let (_, saved_b) = receive_json(&mut peer);
+        assert_eq!(
+            saved_b["message"]["changes"][0]["operations"][0]["op_id"],
+            "B"
+        );
+        events.send(2).unwrap();
+        peer
+    });
+    let deadline = std::time::Instant::now() + Duration::from_secs(4);
+    loop {
+        actor.step(&host(), Duration::from_millis(20)).unwrap();
+        if let Ok(stage) = receive.try_recv() {
+            let mut expected = before.clone();
+            let suffix = ["", " A", " A B"][stage];
+            expected["body"][0]["text"] = json!(format!(
+                "{}{}",
+                before["body"][0]["text"].as_str().unwrap(),
+                suffix
+            ));
+            expected["body"][0]["runs"][0]["len"] =
+                json!(before["body"][0]["runs"][0]["len"].as_u64().unwrap() + suffix.len() as u64);
+            assert_eq!(actor.confirmed().document().native().unwrap(), expected);
+            assert_eq!(actor.confirmed().document().block_ids().unwrap(), ids);
+            assert_eq!(
+                actor.confirmed().checkpoint().revision,
+                Counter(10 + stage as u64)
+            );
+            if stage == 2 {
+                break;
+            }
+            permit.send(()).unwrap();
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "actual actor/mock host stalled"
+        );
+    }
+    let _peer = worker.join().unwrap();
+    let (_, revision, remaining) = actor.into_recovery();
+    assert_eq!(revision, 12);
+    assert!(remaining.is_empty());
+}
+
+#[test]
+fn admitted_actor_uncertainty_bad_member_and_duplicate_receipt_keep_original_intents() {
+    for mode in ["uncertain", "foreign-member", "duplicate-A"] {
+        let (mut actor, mut peer) = admitted_actor();
+        let before = actor.confirmed().document().native().unwrap();
+        let ids = actor.confirmed().document().block_ids().unwrap();
+        let mut checkpoint = actor.confirmed().checkpoint().clone();
+        let mut targets = actor.confirmed().targets().to_vec();
+        let a = agent_change(&checkpoint.scope, "A", None, " A");
+        let b = agent_change(&checkpoint.scope, "B", Some("A"), " B");
+        let originals = [a.clone(), b.clone()];
+        let worker = std::thread::spawn(move || {
+            mooring_collab::write_frame(
+                &mut peer,
+                &serde_json::to_vec(&participant_input(&checkpoint.scope, &[a], "submit-A"))
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(receive_json(&mut peer).1["message"]["state"], "pending");
+            let first = receive_json(&mut peer).1;
+            let mut reply = mock_commit(&first, &mut checkpoint, &mut targets);
+            mooring_collab::write_frame(
+                &mut peer,
+                &serde_json::to_vec(&participant_input(&checkpoint.scope, &[b], "submit-B"))
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(receive_json(&mut peer).1["message"]["state"], "pending");
+            assert_eq!(
+                receive_json(&mut peer).1["changes"][0]["operations"][0]["op_id"],
+                "B"
+            );
+            if mode == "uncertain" {
+                return;
+            } // Simulated nonterminal SQL/transport failure: no guessed receipt.
+            if mode == "foreign-member" {
+                reply["receipt"]["changes"][0]["operations"][0]["op_id"] = json!("foreign");
+            }
+            mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&reply).unwrap()).unwrap();
+            if mode == "duplicate-A" {
+                assert_eq!(
+                    receive_json(&mut peer).1["message"]["changes"][0]["operations"][0]["op_id"],
+                    "A"
+                );
+                mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&reply).unwrap())
+                    .unwrap();
+            }
+            assert!(mooring_collab::read_frame(&mut peer).unwrap().is_none());
+        });
+        let deadline = std::time::Instant::now() + Duration::from_secs(4);
+        while actor.step(&host(), Duration::from_millis(20)).is_ok() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "uncertain actor did not close"
+            );
+        }
+        worker.join().unwrap();
+        let (document, revision, remaining) = actor.into_recovery();
+        let saved_a = mode == "duplicate-A";
+        assert_eq!(revision, if saved_a { 11 } else { 10 });
+        let mut expected = before;
+        if saved_a {
+            expected["body"][0]["text"] = json!(format!(
+                "{} A",
+                expected["body"][0]["text"].as_str().unwrap()
+            ));
+            expected["body"][0]["runs"][0]["len"] =
+                json!(expected["body"][0]["runs"][0]["len"].as_u64().unwrap() + 2);
+        }
+        assert_eq!(document.document().native().unwrap(), expected);
+        assert_eq!(document.document().block_ids().unwrap(), ids);
+        let expected_originals = if saved_a {
+            &originals[1..]
+        } else {
+            &originals[..]
+        };
+        assert_eq!(remaining.len(), expected_originals.len());
+        for (actual, expected) in remaining.iter().zip(expected_originals) {
+            assert_eq!(
+                actual.value.as_ref(),
+                expected,
+                "changed original after {mode}"
+            );
+        }
+    }
+}
+
+#[test]
+fn actor_input_transplants_read_only_write_and_ticket_replay_cannot_enter_the_scheduler() {
+    for field in [
+        "participant_ref",
+        "gate_id",
+        "permission_version",
+        "connection_ref",
+        "membership_hash",
+        "original_author",
+        "read-only-write",
+        "ticket-replay",
+    ] {
+        let (mut actor, mut peer) = admitted_actor_with_write(field != "read-only-write");
+        let before = actor.confirmed().document().checkpoint().unwrap();
+        let change = agent_change(&actor.confirmed().checkpoint().scope, "A", None, " A");
+        let mut input = participant_input(
+            &actor.confirmed().checkpoint().scope,
+            &[change],
+            "transplant",
+        );
+        match field {
+            "read-only-write" => {}
+            "ticket-replay" => {
+                input = json!({"type":"ticket_validated","request_id":"actor-ticket:1","scope":actor.confirmed().checkpoint().scope,
+                "session_id":"host-session","generation":"7","participant_ref":"participant","permission_version":"3",
+                "granted":{"read":true,"write":true},"versions":mooring_wordcraft::profile::qualified_versions(),
+                "expires_in_ms":"2000","validation_nonce":"actor-ticket:1","gate_id":"gate"})
+            }
+            "permission_version" => input[field] = json!("4"),
+            "membership_hash" => {
+                input["message"]["changes"][0][field] = json!(format!("sha256:{}", "f".repeat(64)))
+            }
+            "original_author" => {
+                input["message"]["changes"][0]["operations"][0]["participant_ref"] =
+                    json!("other-author")
+            }
+            _ => input[field] = json!("foreign"),
+        }
+        mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&input).unwrap()).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while actor.step(&host(), Duration::from_millis(20)).is_ok() {
+            assert!(std::time::Instant::now() < deadline);
+        }
+        let (document, revision, remaining) = actor.into_recovery();
+        assert_eq!(revision, 10);
+        assert_eq!(document.document().checkpoint().unwrap(), before);
+        assert!(remaining.is_empty(), "unadmitted {field} became pending");
+    }
+}
 #[test]
 fn consuming_actor_keeps_original_doc_fd_worker_and_pending_renewal() {
     use std::sync::atomic::Ordering;

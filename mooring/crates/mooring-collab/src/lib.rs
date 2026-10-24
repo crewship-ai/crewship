@@ -9,6 +9,8 @@ pub mod session_lane;
 #[cfg(unix)]
 mod session_origins;
 #[cfg(unix)]
+mod session_participants;
+#[cfg(unix)]
 pub mod session_startup;
 
 pub const MAX_FRAME: usize = 262_144;

@@ -40,3 +40,21 @@ first-send renewal deadlines. `RunningDriver` exposes only immutable confirmed
 state, owner maintenance and recovery; participant admission, timer dispatch
 and verified receipt settlement are not connected by this transition. A bare
 restore or renewal reply cannot replace the actor's confirmed document.
+
+The separately invoked `RunningDriver::step` connects correlated host ticket
+replies to two-second read leases, exact participant input bindings, immutable
+`submit_changes`, the native core timer and FIFO host settlement. B may leave
+while A awaits its durable reply; an earlier sent dependency stays pending.
+Only a verified `SessionCommitResult` installs the host checkpoint. Uncertain
+closure, foreign members and duplicate old receipts retain unresolved originals
+for recovery. Participant output runs its gate after encoding and writer wait;
+the Go conduit must independently enforce its final recipient gate.
+
+This initial actor path remains unselected by the production CLI. Tests use
+mock host authority/history/receipts and clocks with actual native timers and
+the actual WordCraft adapter/document. It does not qualify host-issued origins,
+SQL durability, task/proposal input, FIFO status controls, delivery renewals or
+large checkpoint/receipt chunk distribution. Unsupported controls close all
+lanes without manufacturing an outcome; these paths must be connected before
+service enablement. The current 20 ms inbox poll can add dispatch jitter beyond
+the core timer's 100 ms deadline; end-to-end latency is not yet qualified.
