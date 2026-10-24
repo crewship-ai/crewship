@@ -640,7 +640,7 @@ impl crate::dispatch::Registration<WordCraftAdapter> {
                 native_delta(
                     candidate,
                     bytes,
-                    human.as_ref().map(|h| h.original.proposal.origin),
+                    human.as_ref().map(|h| &h.original.proposal),
                 )
                 .map(Some)
             },
@@ -651,11 +651,11 @@ impl crate::dispatch::Registration<WordCraftAdapter> {
 fn native_delta(
     candidate: &Candidate,
     previous: &[u8],
-    human_origin: Option<u64>,
+    human_original: Option<&Proposal>,
 ) -> io::Result<SessionNativeDelta> {
     use mooring_core::adapter::PreparedCandidate;
-    let writer = match (human_origin, candidate.native_writer_origin()) {
-        (Some(origin), None) => origin,
+    let writer = match (human_original, candidate.native_writer_origin()) {
+        (Some(original), None) => original.origin,
         (None, Some(origin)) => origin,
         _ => return Err(invalid("candidate writer DATA binding")),
     };
@@ -664,9 +664,20 @@ fn native_delta(
     }
     let document = mooring_wordcraft::Document::restore(candidate.checkpoint_bytes())
         .map_err(|_| invalid("candidate delta restore"))?;
-    let raw = document
-        .update_since(previous)
-        .map_err(|_| invalid("candidate exact native delta"))?;
+    let raw = if let Some(original) = human_original {
+        // The source packet is an immutable host-bound witness, while a derived
+        // diff may redundantly include earlier peer DeleteSets. Ordered readers
+        // already hold that prior cut (or a verified full checkpoint). Prove the
+        // original packet reproduces this exact candidate before retaining it.
+        document
+            .verify_update_since(previous, &original.update)
+            .map_err(|_| invalid("candidate exact original human delta"))?;
+        original.update.clone()
+    } else {
+        document
+            .update_since(previous)
+            .map_err(|_| invalid("candidate exact native delta"))?
+    };
     let origins = mooring_wordcraft::document_update::allocation_origins(&raw)
         .map_err(|_| invalid("candidate native allocation inventory"))?;
     if origins.iter().any(|origin| *origin != writer) {
@@ -946,5 +957,63 @@ mod tests {
         assert_eq!(driver.confirmed().document().native().unwrap(), expected);
         assert_eq!(driver.confirmed().checkpoint().revision, Counter(0));
         drop(driver);
+    }
+
+    #[test]
+    fn human_native_reply_keeps_original_bytes_after_unobserved_peer_delete() {
+        // Concrete closed handler/app, synthetic host Saved/source authority.
+        let (open, fence, before, mut producer) = setup();
+        let a = producer.edit("A", insert()).unwrap();
+        let authored = producer.optimistic_checkpoint().unwrap();
+        let atomic = change(&a, &authored, &open.scope);
+        let mut peer = DraftReplica::restore(&before, 18, DraftAccess::Writer).unwrap();
+        let c = peer.edit("C", serde_json::from_value(json!({"kind":"text.delete","target_id":"p_one","start":{"kind":"start"},"end":{"kind":"end"}})).unwrap()).unwrap();
+        assert!(
+            mooring_wordcraft::document_update::allocation_origins(&c.update)
+                .unwrap()
+                .is_empty()
+        );
+        let current = mooring_wordcraft::experimental_human_current::prepare_current(
+            mooring_wordcraft::experimental_human_current::Authority::Writer(
+                mooring_wordcraft::experimental_human_current::HostWriter::current(&before, 18)
+                    .unwrap(),
+            ),
+            &c.authored_frontier,
+            &c.update,
+            &c.targets,
+        )
+        .unwrap()
+        .checkpoint()
+        .unwrap();
+        let initial = full(&before, &open, 0);
+        let mut request = request(&open, &fence, &initial, &current, &atomic, 1, 1);
+        request["human_context"]["saved_transcript"] = json!([{
+            "reference":"actual-Saved-C", "source_ref":"peer-source", "source_order":"1",
+            "writer_origin":"18", "update":protocol::boundary::encode_base64(&c.update,RAW).unwrap(),
+            "targets":c.targets, "revision":"1", "checkpoint_state_digest":hash(&current)
+        }]);
+        let response = respond(&request, &open, &fence).unwrap();
+        assert_eq!(response["outcome"]["kind"], "candidate");
+        let returned =
+            decode_base64(response["native_delta"]["update"].as_str().unwrap(), RAW).unwrap();
+        assert_eq!(
+            returned, a.update,
+            "human source DATA must preserve the exact sealed original"
+        );
+        let candidate = control::decode_checkpoint(
+            &serde_json::from_value(response["outcome"]["checkpoint"].clone()).unwrap(),
+        )
+        .unwrap();
+        let mut reader = DraftReplica::restore(&current, 47, DraftAccess::Reader).unwrap();
+        reader
+            .apply_verified_document_update(
+                &mooring_wordcraft::document_update::encode(&returned, &a.targets).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            reader.native().unwrap(),
+            Document::restore(&candidate).unwrap().native().unwrap()
+        );
+        assert!(response.get("receipt").is_none());
     }
 }

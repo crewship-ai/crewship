@@ -40,6 +40,8 @@ func TestMooringHTTPActualSDKUnobservedPeerDeletePreservesOriginal(t *testing.T)
 	runMooringHTTPActualSDK(t, true)
 }
 func runMooringHTTPActualSDK(t *testing.T, peerDelete bool) {
+	started := time.Now()
+	phase := func(name string) { t.Logf("phase %s elapsed=%s", name, time.Since(started)) }
 	copy := testutil.MigratedDB(t)
 	path := copy.Path()
 	if e := copy.Close(); e != nil {
@@ -128,6 +130,7 @@ func runMooringHTTPActualSDK(t *testing.T, peerDelete bool) {
 		return result
 	}
 	first, second := start(rig.adminID, true), start(rig.userID, false)
+	phase("bootstrap")
 	if first.Editor == nil || first.Editor.Digest != strings.Repeat("c", 64) || first.Editor.URL != "https://editor.invalid/exact-release/index.html" || second.Editor != nil {
 		t.Fatal("trusted editor metadata missing or partial callback reflected")
 	}
@@ -206,10 +209,14 @@ func runMooringHTTPActualSDK(t *testing.T, peerDelete bool) {
 		return ws
 	}
 	a, b := join(first, rig.adminID), join(second, rig.userID)
+	phase("joined")
 
 	read := func(ws *websocket.Conn, o opening) protocol.Checkpoint {
 		t.Helper()
 		raw, _ := json.Marshal(protocol.CheckpointRequest{Type: "checkpoint_request", RequestID: protocol.Identifier("read-" + o.Participant), Scope: document.wireScope(), Revision: protocol.Counter(o.Revision)})
+		if err := ws.SetWriteDeadline(time.Now().Add(8 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
 		if err := websocket.Message.Send(ws, string(raw)); err != nil {
 			t.Fatal(err)
 		}
@@ -275,9 +282,13 @@ process.stdout.write(JSON.stringify(changes));`
 	}
 	own := generate(first, firstCP, 2, "own-http")
 	peer := generate(second, secondCP, 1, "peer-http")
+	phase("SDK-originals-generated")
 	send := func(ws *websocket.Conn, o opening, id string, changes []protocol.AtomicChange) {
 		t.Helper()
 		raw, _ := json.Marshal(protocol.SubmitChanges{Type: "submit_changes", RequestID: protocol.Identifier(id), Scope: document.wireScope(), SessionID: protocol.Identifier(o.Session), Versions: o.Versions, Changes: changes})
+		if err := ws.SetWriteDeadline(time.Now().Add(8 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
 		if err := websocket.Message.Send(ws, string(raw)); err != nil {
 			t.Fatal(err)
 		}
@@ -328,6 +339,7 @@ process.stdout.write(JSON.stringify(changes));`
 		send(a, first, "original-own-request", own)
 		send(b, second, "original-peer-request", peer)
 	}
+	phase("original-groups-sent")
 	for _, recipient := range []struct {
 		ws    *websocket.Conn
 		id    string
@@ -339,6 +351,20 @@ process.stdout.write(JSON.stringify(changes));`
 			_ = recipient.ws.SetReadDeadline(time.Now().Add(15 * time.Second))
 			var raw []byte
 			if err := websocket.Message.Receive(recipient.ws, &raw); err != nil {
+				phase("receive-failed")
+				t.Logf("runtime error=%v", document.cell.runtime.Err())
+				_, now, clockErr := document.manager.clock.Now()
+				rows, queryErr := rig.db.QueryContext(t.Context(), `SELECT expires_ns,closed FROM mooring_delivery_gates WHERE page_id='http-native-page'`)
+				if queryErr == nil {
+					for rows.Next() {
+						var expires int64
+						var closed bool
+						if scanErr := rows.Scan(&expires, &closed); scanErr == nil {
+							t.Logf("gate remaining=%s closed=%v clockError=%v", time.Duration(expires-int64(now)), closed, clockErr)
+						}
+					}
+					_ = rows.Close()
+				}
 				document.originals.mu.Lock()
 				for id, slot := range document.originals.changes {
 					t.Logf("slot %s captured=%v captureError=%v group=%v saved=%v retired=%v", id, slot.captured, slot.captureErr, slot.group != nil, slot.saved != nil, slot.source.retired)
@@ -387,6 +413,7 @@ process.stdout.write(JSON.stringify(changes));`
 		}
 	}
 
+	phase("socket-receipts-captured")
 	currentOpening := first
 	currentOpening.Revision = "3"
 	actualCurrent := read(a, currentOpening)
