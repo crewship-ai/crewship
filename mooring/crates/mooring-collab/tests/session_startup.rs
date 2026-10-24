@@ -190,3 +190,29 @@ fn owner_expiry_between_restore_ack_and_open_ack_never_publishes_running() {
     assert!(mooring_collab::read_frame(&mut peer).unwrap().is_none());
     assert!(!ready.may_own(at(4)));
 }
+
+#[test]
+fn owner_epoch_advances_without_mutating_confirmed_document_or_granting_old_gate() {
+    let (startup, acquire) = Startup::from_open(&open(), at(0)).unwrap();
+    let owner = startup
+        .accept_owner(&grant(&acquire), &host(), at(1))
+        .unwrap();
+    let (raw, native, ids) = restore();
+    let ready = owner.restore(&raw, || Ok(at(2))).unwrap();
+    let renewal = ready.begin_owner_renewal(at(3)).unwrap();
+    assert_eq!(ready.retry_owner_renewal(at(4)).unwrap(), renewal);
+    let request: Value = serde_json::from_slice(&renewal).unwrap();
+    let response = json!({"type":"owner_grant","request_id":request["request_id"],"scope":request["scope"],"session_id":request["session_id"],"runtime_ref":"fresh-authenticated-child","fence":request["fence"],"lease_duration_ms":"60000","revision":"999","renewal_nonce":request["renewal_nonce"],"permission_version":"4"});
+    let advance = ready
+        .accept_owner_renewal(&serde_json::to_vec(&response).unwrap(), &host(), at(5))
+        .unwrap();
+    assert_eq!(advance.previous, Counter(3));
+    assert_eq!(advance.current, Counter(4));
+    assert!(!ready.matches_owner_permission(Counter(3), at(6)));
+    assert!(ready.matches_owner_permission(Counter(4), at(6))); // prerequisite only, not participant read/write authority.
+    assert_eq!(ready.confirmed().document().native().unwrap(), native);
+    assert_eq!(ready.confirmed().document().block_ids().unwrap(), ids);
+    assert_eq!(ready.basis().revision, Counter(10)); // informational grant revision999 never installs state or Saved.
+    ready.close_owner();
+    assert!(!ready.may_own(at(7)));
+}

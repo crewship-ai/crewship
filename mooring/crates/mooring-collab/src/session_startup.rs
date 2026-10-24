@@ -1,9 +1,11 @@
 //! Owned-document startup on the selected inherited session profile. This is not
 //! selected by the CLI. A driver must admit exactly ONE SessionOpen per fresh
 //! host runtime_ref; recreating Startup for that same admission is forbidden.
+pub use crate::session_owner_guard::PermissionAdvance;
 use crate::{
     dispatch::{invalid, inventory_set, wordcraft_versions},
     session_lane::Output,
+    session_owner_guard::OwnerGuard,
 };
 use mooring_core::{adapter::PrepareAdapter, batch::Tick};
 use mooring_protocol::{boundary::Transport, control, grant::PendingGrant, session_control, *};
@@ -44,11 +46,9 @@ pub struct ReadySession {
     open: SessionOpen,
     owner: OwnerGrant,
     host_issuer: String,
-    expires: Duration,
-    last_tick: Tick,
+    guard: OwnerGuard,
     confirmed: ConfirmedDocument,
     restore_request: String,
-    closed: bool,
     acknowledged: bool,
 }
 impl Startup {
@@ -195,19 +195,24 @@ impl OwnerAccepted {
         }
         let document = Document::restore(&bytes).map_err(|_| invalid("live document restore"))?;
         self.observe(clock()?)?;
+        let guard = OwnerGuard::new(
+            &self.open,
+            &self.grant,
+            &self.host_issuer,
+            self.expires,
+            self.last_tick,
+        );
         Ok(ReadySession {
             open: self.open,
             owner: self.grant,
             host_issuer: self.host_issuer,
-            expires: self.expires,
-            last_tick: self.last_tick,
+            guard,
             confirmed: ConfirmedDocument {
                 document,
                 checkpoint: request.checkpoint,
                 targets: request.targets,
             },
             restore_request: request.request_id,
-            closed: false,
             acknowledged: false,
         })
     }
@@ -223,19 +228,41 @@ impl ReadySession {
     pub fn confirmed(&self) -> &ConfirmedDocument {
         &self.confirmed
     }
+    /// Initial grant identity/fence only; current permission uses known_owner_permission.
     pub fn owner(&self) -> &OwnerGrant {
         &self.owner
     }
     pub fn host_issuer(&self) -> &str {
         &self.host_issuer
     }
-    pub fn may_own(&mut self, now: Tick) -> bool {
-        if self.closed || now < self.last_tick || now.0 >= self.expires {
-            self.closed = true;
-            return false;
-        }
-        self.last_tick = now;
-        true
+    /// Lease metadata is interior-mutable; the actual confirmed Doc remains immutable.
+    pub fn may_own(&self, now: Tick) -> bool {
+        self.guard.may_own(now)
+    }
+    pub fn close_owner(&self) {
+        self.guard.close();
+    }
+    pub fn known_owner_permission(&self) -> Counter {
+        self.guard.permission()
+    }
+    /// This is only an owner-version prerequisite, never a read/write grant.
+    pub fn matches_owner_permission(&self, version: Counter, now: Tick) -> bool {
+        self.guard.matches_permission(version, now)
+    }
+    pub fn begin_owner_renewal(&self, now: Tick) -> io::Result<Vec<u8>> {
+        self.guard.begin(now)
+    }
+    pub fn retry_owner_renewal(&self, now: Tick) -> io::Result<Vec<u8>> {
+        self.guard.retry(now)
+    }
+    /// An advance blocks old participant versions; it never opens/renews gates.
+    pub fn accept_owner_renewal(
+        &self,
+        raw: &[u8],
+        host: &Transport<'_>,
+        now: Tick,
+    ) -> io::Result<PermissionAdvance> {
+        self.guard.accept(raw, host, now)
     }
     /// Real writes on the shared FD, with owner checks after encoding and queue
     /// wait. Failure closes the whole session; no participant content is sent.
@@ -244,7 +271,7 @@ impl ReadySession {
         output: &Output,
         mut clock: impl FnMut() -> io::Result<Tick>,
     ) -> io::Result<()> {
-        if self.acknowledged || self.closed {
+        if self.acknowledged || self.guard.is_closed() {
             return Err(invalid("startup acknowledgement already consumed"));
         }
         let restored = SessionRestored {
@@ -279,7 +306,7 @@ impl ReadySession {
                 }
             });
             if result.is_err() {
-                self.closed = true;
+                self.guard.close();
                 output.close();
                 return result;
             }

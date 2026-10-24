@@ -290,3 +290,6 @@ pub mod private_rpc {
 
 #[cfg(unix)]
 pub mod session_driver;
+
+#[cfg(unix)]
+mod session_owner_guard;

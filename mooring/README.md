@@ -174,3 +174,15 @@ The production CLI continues selecting only its previous stateless causal
 profile. This composition includes the core-metadata readonly repair and native
 compatibility regressions; broader typed native-engine losslessness remains a
 separate activation requirement. No human draft APIs or Cargo changes are added.
+
+Owned sessions retain lease-only interior metadata independently of the
+immutable confirmed application document. The owner controller generates a
+monotonic nonce sequence in its fresh runtime's namespace, keeps at most one
+PendingGrant, preserves its original send time on retries, and permanently
+closes on expiry, clock regression or nonce exhaustion. Accepted owner epochs
+advance a monotonic knowledge floor; old participant versions fail its matching
+prerequisite immediately. Matching is not a participant read/write grant and
+never opens a closed delivery gate. Informational revisions in OwnerGrant do
+not install checkpoints or invent Saved outcomes. The initial grant getter is
+identity/fence metadata; current permission knowledge has its own accessor.
+The event-loop renewal and participant-gate wiring remain separate work.

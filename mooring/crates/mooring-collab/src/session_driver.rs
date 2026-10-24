@@ -104,11 +104,13 @@ impl Driver {
         let now = match (self.clock)() {
             Ok(now) => now,
             Err(error) => {
+                self.ready.close_owner();
                 self.lane.close();
                 return Err(error);
             }
         };
         if self.lane.is_closed() || !self.ready.may_own(now) {
+            self.ready.close_owner();
             self.lane.close();
             return Err(invalid("session owner expired"));
         }
