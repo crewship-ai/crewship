@@ -35,7 +35,7 @@ mod tests {
     use mooring_text::yrs::{Any, Map, ReadTxn, StateVector, Transact};
     use serde_json::{json, Value};
     fn source() -> Value {
-        serde_json::from_str(include_str!("../tests/fixtures/d1-native.json")).unwrap()
+        serde_json::from_str(include_str!("../tests/fixtures/d1-engine-canonical.json")).unwrap()
     }
     fn ids(v: &Value) -> Vec<String> {
         (0..v["body"].as_array().unwrap().len())

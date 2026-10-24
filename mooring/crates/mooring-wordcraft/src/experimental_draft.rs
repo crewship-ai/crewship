@@ -568,7 +568,8 @@ mod tests {
     use serde_json::{json, Value};
     fn baseline() -> Vec<u8> {
         let native =
-            serde_json::from_str(include_str!("../tests/fixtures/d1-native.json")).unwrap();
+            serde_json::from_str(include_str!("../tests/fixtures/d1-engine-canonical.json"))
+                .unwrap();
         Document::import(native, (0..8).map(|index| format!("p{index}")).collect())
             .unwrap()
             .checkpoint()
@@ -778,7 +779,8 @@ mod native_transition_tests {
     use serde_json::{json, Value};
     fn base() -> (Value, Vec<u8>) {
         let mut native: Value =
-            serde_json::from_str(include_str!("../tests/fixtures/d1-native.json")).unwrap();
+            serde_json::from_str(include_str!("../tests/fixtures/d1-engine-canonical.json"))
+                .unwrap();
         native["body"] = json!([{"kind":"para","text":"Č😀e\u{301}","runs":[{"len":9}]}]);
         let doc = Document::import(native.clone(), vec!["p_one".into()]).unwrap();
         (native, doc.checkpoint().unwrap())
@@ -861,7 +863,8 @@ mod native_selection_tests {
     use serde_json::{json, Value};
     fn fixture() -> (Value, Vec<u8>) {
         let mut native: Value =
-            serde_json::from_str(include_str!("../tests/fixtures/d1-native.json")).unwrap();
+            serde_json::from_str(include_str!("../tests/fixtures/d1-engine-canonical.json"))
+                .unwrap();
         native["body"] = json!([{"kind":"para","text":"aa","runs":[{"len":2}]}]);
         let bytes = Document::import(native.clone(), vec!["p_one".into()])
             .unwrap()

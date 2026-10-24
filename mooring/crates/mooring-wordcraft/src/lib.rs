@@ -16,6 +16,7 @@ mod human;
 mod human_current_wire;
 #[cfg(test)]
 mod human_decode;
+mod native_qualification;
 mod native_transition;
 pub mod profile;
 pub mod read;
@@ -583,6 +584,9 @@ fn classify(native: &Value) -> Result<bool, AdapterError> {
                 }
             }
         }
+    }
+    if !unsupported {
+        unsupported = !native_qualification::lossless(native);
     }
     Ok(unsupported)
 }

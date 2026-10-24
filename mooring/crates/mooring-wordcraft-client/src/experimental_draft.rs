@@ -263,7 +263,7 @@ mod tests {
     use serde_json::{json, Value};
     fn fixture() -> (Value, Vec<u8>) {
         let mut v: Value = serde_json::from_str(include_str!(
-            "../../mooring-wordcraft/tests/fixtures/d1-native.json"
+            "../../mooring-wordcraft/tests/fixtures/d1-engine-canonical.json"
         ))
         .unwrap();
         v["body"] = json!([{"kind":"para","text":"aa","runs":[{"len":2}]}]);
