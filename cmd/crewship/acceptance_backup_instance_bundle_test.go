@@ -30,6 +30,7 @@ import (
 // catalogued bundle. A workspace OWNER who is not an instance admin gets
 // nothing. Nothing is stubbed.
 func TestAcceptance_BackupCommandsReadAnInstanceBundle(t *testing.T) {
+	t.Setenv("CREWSHIP_DATA_DIR", t.TempDir())
 	t.Setenv(backup.InstanceOwnerEmailEnv, "")
 	t.Setenv("CREWSHIP_BACKUP_MIN_FREE_PERCENT", "0")
 	db := testutil.MigratedDB(t).DB
@@ -128,14 +129,21 @@ func TestAcceptance_BackupCommandsReadAnInstanceBundle(t *testing.T) {
 	}
 
 	var manifest struct {
-		Scope      string `json:"scope"`
-		Encryption struct {
+		IntegrityVerified *bool  `json:"integrity_verified"`
+		Scope             string `json:"scope"`
+		Encryption        struct {
 			Enabled bool `json:"enabled"`
 		} `json:"encryption"`
 	}
 	out := must("backup", "inspect", bundle, "--format", "json")
 	if err := json.Unmarshal([]byte(out), &manifest); err != nil || manifest.Scope != "instance" || !manifest.Encryption.Enabled {
 		t.Fatalf("inspect: %v\n%s", err, out)
+	}
+	if manifest.IntegrityVerified == nil || *manifest.IntegrityVerified {
+		t.Errorf("instance CLI must explicitly report integrity_verified:false: %s", out)
+	}
+	if table := must("backup", "inspect", bundle, "--format", "table"); !strings.Contains(table, "metadata only") || !strings.Contains(table, "backup verify") {
+		t.Errorf("instance CLI table must explain metadata-only semantics: %s", table)
 	}
 	if out := must("backup", "inspect", bundle, "--format", "table"); !strings.Contains(out, "instance") {
 		t.Fatalf("inspect -f table:\n%s", out)
@@ -167,6 +175,40 @@ func TestAcceptance_BackupCommandsReadAnInstanceBundle(t *testing.T) {
 	}
 	if audited != 1 {
 		t.Fatalf("instance audit entries for the download = %d, want 1", audited)
+	}
+
+	// Workspace success route uses the same built CLI, real router and owned fixture.
+	workspaceDir, err := backup.DefaultBackupsDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(workspaceDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	workspacePath := filepath.Join(workspaceDir, backup.BundleFileName(backup.ScopeWorkspace, "people", time.Now().UTC()))
+	workspaceFile, err := os.Create(workspacePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspaceManifest := &backup.Manifest{FormatVersion: backup.FormatVersion, Scope: backup.ScopeWorkspace, CompatibleTargets: []backup.Target{backup.TargetSameInstance}, CreatedBy: backup.Actor{UserID: "ib-boss"}, CreatedAt: time.Now().UTC(), Contents: backup.Contents{Workspace: &backup.WorkspaceSummary{ID: "ib-people", Slug: "people", Name: "People"}}}
+	writeErr := backup.WriteBundle(workspaceFile, workspaceManifest, strings.NewReader("owned-metadata-only-payload"), backup.WriteBundleOptions{NoEncrypt: true})
+	closeErr := workspaceFile.Close()
+	if writeErr != nil || closeErr != nil {
+		t.Fatalf("owned workspace fixture: %v / %v", writeErr, closeErr)
+	}
+	workspaceOutput := must("backup", "inspect", workspacePath, "--format", "json")
+	var workspaceMetadata struct {
+		Scope             string `json:"scope"`
+		IntegrityVerified *bool  `json:"integrity_verified"`
+	}
+	if err := json.Unmarshal([]byte(workspaceOutput), &workspaceMetadata); err != nil || workspaceMetadata.Scope != "workspace" {
+		t.Fatalf("workspace inspect route: %v\n%s", err, workspaceOutput)
+	}
+	if workspaceMetadata.IntegrityVerified == nil || *workspaceMetadata.IntegrityVerified {
+		t.Errorf("workspace CLI must explicitly report integrity_verified:false: %s", workspaceOutput)
+	}
+	if table := must("backup", "inspect", workspacePath, "--format", "table"); !strings.Contains(table, "metadata only") || !strings.Contains(table, "backup verify") {
+		t.Errorf("workspace CLI table must explain metadata-only semantics: %s", table)
 	}
 
 	// Not in the catalog: still a 404 on both routes.
