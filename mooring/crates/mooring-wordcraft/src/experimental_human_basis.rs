@@ -126,6 +126,12 @@ pub struct HostConfirmedBasis<'a> {
     own_prefix: &'a [HostSavedOwnPrefix<'a>],
 }
 impl<'a> HostConfirmedBasis<'a> {
+    pub(crate) fn original_proposal(&self) -> &Proposal {
+        self.original.proposal
+    }
+    pub(crate) fn current_checkpoint(&self) -> &[u8] {
+        self.current
+    }
     pub fn from_trusted_confirmed_store(
         basis: &'a [u8],
         current: &'a [u8],
@@ -283,6 +289,20 @@ fn reference(value: &[u8]) -> Result<(), Error> {
     Ok(())
 }
 pub fn prepare_confirmed_basis(authority: Authority<'_>) -> Result<Candidate, Error> {
+    prepare_with_authored_cut(authority, None)
+}
+/// The digest is immutable client intent, never authority. Replay must prove
+/// its exact author-view state before any merge into the global Saved view.
+pub fn prepare_confirmed_basis_with_authored_cut(
+    authority: Authority<'_>,
+    authored_checkpoint_state_digest: &str,
+) -> Result<Candidate, Error> {
+    prepare_with_authored_cut(authority, Some(authored_checkpoint_state_digest))
+}
+fn prepare_with_authored_cut(
+    authority: Authority<'_>,
+    expected_authored_cut: Option<&str>,
+) -> Result<Candidate, Error> {
     let Authority::Writer(host) = authority else {
         return Err(Error::Forbidden);
     };
@@ -311,12 +331,12 @@ pub fn prepare_confirmed_basis(authority: Authority<'_>) -> Result<Candidate, Er
     }
     // Phase 1: unchanged bytes/frontier/targets are qualified on their EXACT
     // original confirmed basis. No read/frontier rewriting or command replay.
-    let prepare_original = if host.own_prefix.is_empty() {
+    let prepare_original = if host.own_prefix.is_empty() && expected_authored_cut.is_none() {
         current::prepare_current
     } else {
         current::prepare_author_view
     };
-    prepare_original(
+    let authored_original = prepare_original(
         current::Authority::Writer(
             HostWriter::current(&authored_basis, host.origin)
                 .map_err(Error::Original)?
@@ -333,6 +353,14 @@ pub fn prepare_confirmed_basis(authority: Authority<'_>) -> Result<Candidate, Er
         }
         other => Error::Original(other),
     })?;
+    if let Some(expected) = expected_authored_cut {
+        let authored = authored_original
+            .checkpoint()
+            .map_err(|_| Error::UnqualifiedBasis)?;
+        if checkpoint_state_digest(&authored) != expected {
+            return Err(Error::UnqualifiedBasis);
+        }
+    }
     let basis = Document::restore(host.basis).map_err(|_| Error::UnqualifiedBasis)?;
     let now = Document::restore(host.current).map_err(|_| Error::UnqualifiedBasis)?;
     if basis.block_ids().map_err(|_| Error::UnqualifiedBasis)?
