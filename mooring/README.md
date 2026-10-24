@@ -128,3 +128,13 @@ public thirteen-case shared fixture consumer compares planner decisions only:
 `EligibleForHost` is not a durable receipt or authorization. The later Unicode
 scalar identifier policy remains enforced; no application/store authority moves
 into the planner.
+
+The inactive native-session composition includes the host-grant binding helper
+and stateful read-lease controller: `grant.rs`, `delivery.rs` and their original
+fixtures/tests retain the previously reviewed source. A request keeps its first
+send clock across retries; nonce ownership and the authenticated host identity
+remain bound, and late replies cannot reopen a revoked/expired gate. Actual
+integration still must provide trusted channel/admission provenance, keep one
+controller per fresh registered gate and check it immediately before every
+participant frame/chunk. No production caller or session profile selection is
+introduced by this composition.

@@ -2,6 +2,7 @@
 pub mod adapter;
 pub mod batch;
 pub mod causal;
+pub mod delivery;
 pub mod lease;
 pub mod prepare;
 pub mod resolve;

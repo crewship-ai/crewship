@@ -96,3 +96,24 @@ fn private_wrapping_never_widens_batch_or_participant_input() {
         wire::WireError::ResourceLimit
     );
 }
+
+#[test]
+fn only_explicit_full_checkpoint_messages_keep_large_session_budget() {
+    let f = fixture();
+    for (name, peer) in [
+        ("valid-SessionRestore", Peer::InheritedHost),
+        ("valid-SessionCommitResult", Peer::InheritedHost),
+    ] {
+        let mut message = f["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["id"] == name)
+            .unwrap()["message"]
+            .clone();
+        message["checkpoint"]["state"] = Value::String("x".repeat(300_000));
+        let bytes = serde_json::to_vec(&message).unwrap();
+        assert!(bytes.len() > session_control::MAX_BATCH_BYTES);
+        assert!(session_control::validate(&bytes, peer).is_ok(), "{name}");
+    }
+}

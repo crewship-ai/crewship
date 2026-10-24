@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 pub mod boundary;
 pub mod canonical;
 pub mod control;
+pub mod grant;
 mod generated;
 pub mod session_control;
 mod shape;
