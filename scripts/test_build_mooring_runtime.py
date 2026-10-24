@@ -50,9 +50,12 @@ class ToolArchiveTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.prepare(raw, Path(temp), **overrides)
 
-    def test_default_marker_keeps_ordinary_builds_disabled(self):
+    def test_explicit_dev_release_marker_requests_pinned_assets(self):
+        # This dev2 deployment branch explicitly builds the reviewed assets.
+        # The integration branch retains its default-off marker and assertion;
+        # application enablement still requires the separate runtime flag.
         marker = json.loads((build.ROOT/'mooring/runtime-release.json').read_text())
-        self.assertEqual(marker, {'schema_version':1,'enabled':False})
+        self.assertEqual(marker, {'schema_version':1,'enabled':True})
 
     def test_unselected_members_count_toward_expansion_limit(self):
         raw = io.BytesIO()
