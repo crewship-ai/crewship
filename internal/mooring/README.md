@@ -418,3 +418,23 @@ relaxing the existing preactivation denial. The actual inherited-peer tests use
 mock participant authority, real CLOCK_BOOTTIME and explicit host Release to
 prove owner 2 restores unchanged creator-1 data. They are not two-process cold
 recovery, human admission, participant delivery or production enablement proof.
+
+The inactive API session cell enables checkpoint metadata only through the same
+concrete session adapter used for target preparation. Its original immutable
+store authority admits two separate preactivation purposes: initialization and
+an authenticated startup checkpoint read. Each purpose retains the actual HTTP
+credential and ingress lifecycle, exact live process and captured owner through
+the complete bounded store operation. A copied store or escaped context cannot
+borrow that authority; binding permanently closes the startup entry.
+
+Startup reads use `ReadFullCheckpoint` under its initial/final canonical reader
+and owner checks. The manager restores the returned retained wrapper and target
+inventory instead of constructing checkpoint identity from caller strings.
+These reads grant no participant delivery rights, install no public route and
+do not establish Saved, native UI collaboration or deployment qualification.
+
+A private-owner override during restoration does not itself record
+`artifact.private_owner_accessed` or authorize external output. Before any
+content leaves the host, a future delivery handler must durably record the
+required owner-access audit and recheck the current recipient and delivery
+lease. This startup helper supplies neither audit nor delivery authority.

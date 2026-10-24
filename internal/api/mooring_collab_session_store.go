@@ -29,9 +29,11 @@ type collaborationSessionStore struct {
 	activation *mooring.SessionActivation
 	authority  mooring.BatchAuthority
 }
-type collaborationSessionInitializeKey struct{}
-type collaborationSessionInitialize struct {
+type collaborationSessionStartupKey struct{}
+type collaborationSessionStartup struct {
 	cell   *collaborationSessionStore
+	intent string
+	owner  mooring.OwnerLease
 	active atomic.Bool
 }
 
@@ -48,7 +50,7 @@ func newCollaborationSessionStore(enabled bool, pages *PageHandler, owners *moor
 		return nil, err
 	}
 	c := &collaborationSessionStore{pages: pages, owners: owners, fence: fence, lifecycle: lifecycle, scope: scope, runtime: runtime, adapter: adapter}
-	c.store = mooring.NewBatchStore(pages.db, mooring.BatchStoreConfig{Enabled: true, Owners: owners, Authority: c.authorize, Limits: mooring.DefaultBatchLimits(), Targets: &mooring.TargetStoreConfig{Enabled: true, ReadPolicy: mooring.CausalTargetReadPolicy, HistoryBudget: mooring.DefaultBatchHistoryBudget(), Adapter: adapter, Limits: mooring.DefaultBatchTargetLimits()}})
+	c.store = mooring.NewBatchStore(pages.db, mooring.BatchStoreConfig{Enabled: true, Owners: owners, Authority: c.authorize, Limits: mooring.DefaultBatchLimits(), CheckpointIdentity: &mooring.BatchCheckpointIdentityConfig{Enabled: true, Adapter: adapter, MaxMetadataBytes: mooring.MaxPrivatePrepareRPCFrame}, Targets: &mooring.TargetStoreConfig{Enabled: true, ReadPolicy: mooring.CausalTargetReadPolicy, HistoryBudget: mooring.DefaultBatchHistoryBudget(), Adapter: adapter, Limits: mooring.DefaultBatchTargetLimits()}})
 	return c, nil
 }
 
@@ -71,22 +73,43 @@ func (c *collaborationSessionStore) authorize(ctx context.Context, tx *sql.Tx, a
 		}
 		return authority(ctx, tx, access)
 	}
-	operation, ok := ctx.Value(collaborationSessionInitializeKey{}).(*collaborationSessionInitialize)
-	if !ok || operation == nil || operation.cell != c || !operation.active.Load() || access.Intent != "initialize" || access.Operation != nil || access.Participant != "" || access.TaskID != "" {
+	operation, ok := ctx.Value(collaborationSessionStartupKey{}).(*collaborationSessionStartup)
+	if !ok || operation == nil || operation.cell != c || !operation.active.Load() || operation.intent != access.Intent || (access.Intent != "initialize" && access.Intent != "read_checkpoint") || access.Operation != nil || access.Participant != "" || access.TaskID != "" {
 		return errCollaborationAdmission
 	}
-	intent := "initialize"
-	if access.IsCommitFence() {
+	if !c.startupRuntimeMatches(operation.owner) {
+		return errCollaborationAdmission
+	}
+	if err := c.owners.Check(ctx, tx, operation.owner); err != nil {
+		return err
+	}
+	intent := operation.intent
+	if intent == "initialize" && access.IsCommitFence() {
 		intent = "initialize_commit"
 	}
 	_, err := c.pages.authorizeCollaborationHumanPage(ctx, tx, c.scope, intent)
 	return err
 }
 
-// The original authenticated ingress and source are retained through the exact
-// Initialize operation. A copied context ceases to work when this call returns.
-func (c *collaborationSessionStore) initialize(r *http.Request, owner mooring.OwnerLease, checkpoint []byte) error {
-	if c == nil || r == nil || owner.Key != c.scope || !c.operations.TryRLock() {
+// Startup authority is tied to this actual process and its exact captured owner.
+// It grants no participant delivery rights and cannot survive process death.
+func (c *collaborationSessionStore) startupRuntimeMatches(owner mooring.OwnerLease) bool {
+	if c == nil || c.runtime == nil || c.runtime.Done() == nil || owner.Key != c.scope || owner.OwnerID != c.runtime.RuntimeRef() {
+		return false
+	}
+	select {
+	case <-c.runtime.Done():
+		return false
+	default:
+		return true
+	}
+}
+
+// The original authenticated ingress/source survives for exactly one startup
+// operation. Its private purpose prevents initialization and read contexts from
+// being exchanged, and escaped contexts are unusable after this call returns.
+func (c *collaborationSessionStore) runStartup(r *http.Request, owner mooring.OwnerLease, intent string, call func(context.Context) error) error {
+	if c == nil || r == nil || call == nil || (intent != "initialize" && intent != "read_checkpoint") || !c.startupRuntimeMatches(owner) || !c.operations.TryRLock() {
 		return errCollaborationAdmission
 	}
 	defer c.operations.RUnlock()
@@ -105,11 +128,33 @@ func (c *collaborationSessionStore) initialize(r *http.Request, owner mooring.Ow
 	if !ready {
 		return errCollaborationAdmission
 	}
-	operation := &collaborationSessionInitialize{cell: c}
+	operation := &collaborationSessionStartup{cell: c, intent: intent, owner: owner}
 	operation.active.Store(true)
 	defer operation.active.Store(false)
-	ctx := context.WithValue(r.Context(), collaborationSessionInitializeKey{}, operation)
-	return c.store.Initialize(ctx, owner, checkpoint)
+	ctx := context.WithValue(r.Context(), collaborationSessionStartupKey{}, operation)
+	return call(ctx)
+}
+
+func (c *collaborationSessionStore) initialize(r *http.Request, owner mooring.OwnerLease, checkpoint []byte) error {
+	return c.runStartup(r, owner, "initialize", func(ctx context.Context) error {
+		return c.store.Initialize(ctx, owner, checkpoint)
+	})
+}
+
+// Read the exact retained wrapper and target inventory under the immutable
+// original store authority. The generic store checks source and owner again
+// before its FULL writer finishes. No caller-built wrapper becomes proof.
+func (c *collaborationSessionStore) startupCheckpoint(r *http.Request, owner mooring.OwnerLease) (mooring.FullCheckpointSnapshot, error) {
+	var snapshot mooring.FullCheckpointSnapshot
+	err := c.runStartup(r, owner, "read_checkpoint", func(ctx context.Context) error {
+		var err error
+		snapshot, err = c.store.ReadFullCheckpoint(ctx, owner)
+		return err
+	})
+	if err != nil {
+		return mooring.FullCheckpointSnapshot{}, err
+	}
+	return snapshot, nil
 }
 
 // Binding never holds mu while waiting for SQL: authority is invoked by a

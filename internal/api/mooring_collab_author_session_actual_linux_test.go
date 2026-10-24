@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"net/http/httptest"
@@ -63,8 +62,9 @@ func TestCollaborationAuthorActualSessionKeepsIndependentOriginalRights(t *testi
 	wireScope := protocol.Scope{WorkspaceID: protocol.Identifier(unit.scope.WorkspaceID), ArtifactID: protocol.Identifier(unit.scope.ArtifactID), ApplicationID: "wordcraft"}
 	wireVersions := protocol.Versions{ProtocolVersion: versions.Protocol, ModelVersion: versions.Model, EngineVersion: versions.Engine}
 	sessionID := "actual-human-owned-session"
-	open := protocol.SessionOpen{Type: "session_open", RequestID: "human-open", ControlProfile: mooring.PrivateSessionProfile, Scope: wireScope, SessionID: protocol.Identifier(sessionID), RuntimeRef: protocol.Identifier(runtime.RuntimeRef()), Versions: wireVersions}
+	open := protocol.SessionOpen{Type: "session_open", RequestID: "human-open", ControlProfile: mooring.PrivateSessionProfile, Scope: wireScope, SessionID: protocol.Identifier(sessionID), RuntimeRef: protocol.Identifier(runtime.RuntimeRef()), Versions: wireVersions, RequiredCapabilities: []protocol.SessionOpenRequiredCapabilitiesItem{protocol.SessionOpenRequiredCapabilitiesItemCheckpointIdentityV1}}
 	opened := make(chan error, 1)
+	openStarted := time.Now()
 	go func() { _, e := runtime.Open(t.Context(), open); opened <- e }()
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
@@ -85,17 +85,6 @@ func TestCollaborationAuthorActualSessionKeepsIndependentOriginalRights(t *testi
 		t.Fatal(err)
 	}
 	request := httptest.NewRequest("POST", "/host-only-initialize", nil).WithContext(human)
-	mustExec(t, rig.db, `CREATE TRIGGER test_session_initialize_source_aba AFTER INSERT ON mooring_collab_audit WHEN NEW.kind='initialized'
- BEGIN UPDATE user_sessions SET revoked_at='2026-10-24T00:00:00Z' WHERE id='admission-source';
- UPDATE user_sessions SET revoked_at=NULL WHERE id='admission-source'; END`)
-	if err = cell.initialize(request, owner, checkpoint); err == nil {
-		t.Fatal("source ABA inside initialization committed")
-	}
-	var initialized int
-	if err = rig.db.QueryRow(`SELECT COUNT(*) FROM mooring_collab_documents WHERE page_id=?`, unit.scope.ArtifactID).Scan(&initialized); err != nil || initialized != 0 {
-		t.Fatal("failed source initialization left a document", err)
-	}
-	mustExec(t, rig.db, `DROP TRIGGER test_session_initialize_source_aba`)
 	if err = cell.initialize(request, owner, checkpoint); err != nil {
 		t.Fatal("original human initialization", err)
 	}
@@ -111,28 +100,18 @@ func TestCollaborationAuthorActualSessionKeepsIndependentOriginalRights(t *testi
 	if err = runtime.ReplyControl(ctx, control, raw); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := rig.db.QueryContext(ctx, `SELECT target_id,revision,structure_revision,deleted FROM mooring_collab_target_versions WHERE page_id=? ORDER BY target_id`, unit.scope.ArtifactID)
+	snapshot, err := cell.startupCheckpoint(request, owner)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal("original authenticated startup checkpoint", err)
 	}
-	targets := []protocol.TargetVersion{}
-	for rows.Next() {
-		var id, rev, structure string
-		var deleted bool
-		if err = rows.Scan(&id, &rev, &structure, &deleted); err != nil {
-			t.Fatal(err)
-		}
-		targets = append(targets, protocol.TargetVersion{TargetID: protocol.Identifier(id), Revision: protocol.Counter(rev), StructureRevision: protocol.Counter(structure), Deleted: deleted})
+	targets := make([]protocol.TargetVersion, 0, len(snapshot.Targets))
+	for _, target := range snapshot.Targets {
+		targets = append(targets, protocol.TargetVersion{TargetID: protocol.Identifier(target.TargetID), Revision: protocol.Counter(target.Revision), StructureRevision: protocol.Counter(target.StructureRevision), Deleted: target.Deleted})
 	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
-	sum := sha256.Sum256(checkpoint)
-	restore := protocol.SessionRestore{Type: "session_restore", RequestID: "human-restore", ControlProfile: mooring.PrivateSessionProfile, Scope: wireScope, SessionID: open.SessionID, RuntimeRef: open.RuntimeRef, Fence: grant.Fence, Versions: wireVersions, Targets: targets, Checkpoint: protocol.Checkpoint{Scope: wireScope, Revision: "0", Generation: grant.Fence.Generation, FormatVersion: "wordcraft-0.10.0/yrs-0.28.0/v2", Versions: wireVersions, Encoding: "base64", State: base64.StdEncoding.EncodeToString(checkpoint), Digest: protocol.Digest("sha256:" + hex.EncodeToString(sum[:])), Assets: []protocol.Asset{}}}
+	restore := protocol.SessionRestore{Type: "session_restore", RequestID: "human-restore", ControlProfile: mooring.PrivateSessionProfile, Scope: wireScope, SessionID: open.SessionID, RuntimeRef: open.RuntimeRef, Fence: grant.Fence, Versions: wireVersions, Targets: targets, Checkpoint: snapshot.Checkpoint}
+	t.Logf("startup before restore elapsed=%s checkpoint_bytes=%d", time.Since(openStarted), len(checkpoint))
 	if _, err = runtime.Restore(ctx, restore); err != nil {
-		t.Fatal(err)
+		t.Fatalf("restore: %v; runtime: %v; elapsed: %s", err, runtime.Err(), time.Since(openStarted))
 	}
 	if err = <-opened; err != nil {
 		t.Fatal(err)

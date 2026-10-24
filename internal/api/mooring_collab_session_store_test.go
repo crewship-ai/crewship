@@ -16,6 +16,9 @@ func TestCollaborationSessionInactiveFactoriesRejectUnverifiedState(t *testing.T
 	if err := cell.initialize(nil, mooring.OwnerLease{}, []byte("untrusted input")); err == nil {
 		t.Fatal("missing authenticated request initialized content")
 	}
+	if snapshot, err := cell.startupCheckpoint(nil, mooring.OwnerLease{}); err == nil || snapshot.Checkpoint.State != "" || snapshot.Targets != nil {
+		t.Fatal("unverified startup disclosed checkpoint metadata")
+	}
 	if _, err := newCollaborationSessionHumanRegistry(t.Context(), cell, &mooring.SessionActivation{}, mooring.OwnerLease{}, &collaborationAdmissionTestClock{}, 1); err == nil {
 		t.Fatal("empty copied activation minted a registry")
 	}
