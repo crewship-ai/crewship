@@ -261,3 +261,19 @@ They use injected clocks and trusted host fixtures. Retained SQL metadata,
 authorized writer-bound full-to-content conversion, actual Go startup, live FIFO,
 participant gates and provider/human admission must be composed separately before
 enablement. The earlier pinned Go/Rust opaque proofs remain historical evidence.
+
+### Actual owner-maintenance qualification
+
+The explicit `mooring_rust_integration` owner-maintenance test pins a separate
+native peer and fresh canonical D1 checkpoint by SHA256. It uses actual Linux
+CLOCK_BOOTTIME and FULL SQLite ownership, changes an initial eight-second lease
+to repeated two-second grants, checks four fresh renewal nonces and stable
+fences, and runs application preparation on the same FD between renewals.
+Withholding the next grant expires the child; a late reply and old activation
+remain unusable. Exact checkpoint bytes remain unchanged.
+
+The participant authority is an explicit allow-all test fixture. This proves
+owner maintenance and lane progress, with no participant admission, delivery,
+Saved result or production CLI selection. Run it with the same pinned artifact
+environment as the existing activation test and the exact test name
+`TestSessionOwnerMaintenanceActualRustAndBootOwner`.
