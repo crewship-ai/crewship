@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/literalfilter"
 	"io"
 	"net/http"
 	"regexp"
@@ -16,6 +17,7 @@ import (
 // Finding. Compiled once at package init so hot-path scans never pay the
 // regex compilation cost.
 type injectionRule struct {
+	filter   literalfilter.Filter
 	pattern  *regexp.Regexp
 	kind     Kind
 	severity Severity
@@ -27,28 +29,31 @@ var injectionRules []injectionRule
 func init() {
 	patterns := []struct {
 		expr     string
+		filter   literalfilter.Filter
 		kind     Kind
 		severity Severity
 		detail   string
 	}{
 		// Role override
-		{`(?i)ignore (previous|all|above) (instructions|prompts)`, KindRoleOverride, SeverityHigh, "instruction-override request"},
-		{`(?i)disregard .{0,40}? instructions`, KindRoleOverride, SeverityHigh, "disregard-instructions request"},
-		{`(?i)you are (now|actually) (a |an )?`, KindRoleOverride, SeverityMedium, "role-redefinition attempt"},
-		{`(?i)new (instructions|rules|persona)`, KindRoleOverride, SeverityMedium, "new-persona injection"},
+		{`(?i)ignore (previous|all|above) (instructions|prompts)`, literalfilter.FoldedAll("ignore"), KindRoleOverride, SeverityHigh, "instruction-override request"},
+		{`(?i)disregard .{0,40}? instructions`, literalfilter.FoldedAll("disregard", "instructions"), KindRoleOverride, SeverityHigh, "disregard-instructions request"},
+		{`(?i)you are (now|actually) (a |an )?`, literalfilter.FoldedAll("you", "are"), KindRoleOverride, SeverityMedium, "role-redefinition attempt"},
+		{`(?i)new (instructions|rules|persona)`, literalfilter.FoldedAll("new"), KindRoleOverride, SeverityMedium, "new-persona injection"},
 		// System prompt leak
-		{`(?i)(reveal|show|print|output) (your|the) (system prompt|instructions|rules)`, KindSystemPromptLeak, SeverityHigh, "request to reveal system prompt"},
-		{`(?i)what (is|are) your (system|initial) (prompt|instructions)`, KindSystemPromptLeak, SeverityMedium, "system-prompt probing question"},
+		{`(?i)(reveal|show|print|output) (your|the) (system prompt|instructions|rules)`, literalfilter.FoldedAny("reveal", "show", "print", "output"), KindSystemPromptLeak, SeverityHigh, "request to reveal system prompt"},
+		{`(?i)what (is|are) your (system|initial) (prompt|instructions)`, literalfilter.FoldedAll("what", "your"), KindSystemPromptLeak, SeverityMedium, "system-prompt probing question"},
 		// Jailbreak tropes
-		{`(?i)DAN (mode|prompt)`, KindJailbreak, SeverityHigh, "DAN jailbreak"},
-		{`(?i)developer mode`, KindJailbreak, SeverityMedium, "developer-mode jailbreak"},
-		{`(?i)jailbreak`, KindJailbreak, SeverityMedium, "explicit jailbreak mention"},
-		{`(?i)pretend you (have no|are without) restrictions`, KindJailbreak, SeverityHigh, "restriction-removal jailbreak"},
+		{`(?i)DAN (mode|prompt)`, literalfilter.FoldedAll("dan"), KindJailbreak, SeverityHigh, "DAN jailbreak"},
+		{`(?i)developer mode`, literalfilter.FoldedAll("developer", "mode"), KindJailbreak, SeverityMedium, "developer-mode jailbreak"},
+		{`(?i)jailbreak`, literalfilter.FoldedAll("jailbreak"), KindJailbreak, SeverityMedium, "explicit jailbreak mention"},
+		{`(?i)pretend you (have no|are without) restrictions`, literalfilter.FoldedAll("pretend", "you", "restrictions"), KindJailbreak, SeverityHigh, "restriction-removal jailbreak"},
 	}
+
 	injectionRules = make([]injectionRule, 0, len(patterns))
 	for _, p := range patterns {
 		injectionRules = append(injectionRules, injectionRule{
 			pattern:  regexp.MustCompile(p.expr),
+			filter:   p.filter,
 			kind:     p.kind,
 			severity: p.severity,
 			detail:   p.detail,
@@ -79,7 +84,11 @@ func ScanInput(text string) ScanResult {
 	if text == "" {
 		return res
 	}
+	view := literalfilter.NewView(text)
 	for _, r := range injectionRules {
+		if !view.MayMatch(r.filter) {
+			continue
+		}
 		if loc := r.pattern.FindStringIndex(text); loc != nil {
 			match := text[loc[0]:loc[1]]
 			res.Findings = append(res.Findings, Finding{
