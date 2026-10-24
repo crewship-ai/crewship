@@ -48,7 +48,7 @@ func TestCollaborationActualActorJoinRequiresOriginalCommittedSQLGate(t *testing
 		if err != nil {
 			t.Fatal("actual original SQL gate", err)
 		}
-		if joined.admission.participant != admission.participant || joined.gate.GateID == "" || joined.gate.DurationMilliseconds != 2000 {
+		if joined.admission.participant != admission.participant || joined.gate.GateID == "" || joined.gate.DurationMilliseconds != 5000 {
 			t.Fatal("gate changed original binding")
 		}
 		var live int

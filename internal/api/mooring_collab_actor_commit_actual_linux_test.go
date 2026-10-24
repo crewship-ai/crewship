@@ -12,6 +12,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -64,7 +65,7 @@ func withActualActorSQLParticipant(t *testing.T, call func(*actualActorSQLPartic
 		if err != nil {
 			t.Fatal("actual original SQL gate", err)
 		}
-		if joined.admission.participant != admission.participant || joined.gate.GateID == "" || joined.gate.DurationMilliseconds != 2000 {
+		if joined.admission.participant != admission.participant || joined.gate.GateID == "" || joined.gate.DurationMilliseconds != 5000 {
 			t.Fatal("gate changed original binding")
 		}
 		var live int
@@ -163,6 +164,7 @@ func TestCollaborationActualActorBPrecedesAAckAndCommitsOriginalSQL(t *testing.T
 		results := make(chan protocol.SessionCommitResult, 2)
 		probe := make(chan protocol.SessionSubmitBatch, 1)
 		outputs := make(chan protocol.SessionParticipantOutput, 16)
+		var renewals atomic.Int32
 		var once sync.Once
 		defer once.Do(func() { close(releaseA) })
 		pump, err := newCollaborationSessionPump(f.cell.runtime, collaborationSessionPumpHandlers{
@@ -192,6 +194,13 @@ func TestCollaborationActualActorBPrecedesAAckAndCommitsOriginalSQL(t *testing.T
 					results <- result
 				}
 				return result, e
+			},
+			Delivery: func(bound context.Context, request protocol.DeliveryRenew) (protocol.DeliveryGrant, error) {
+				result, err := f.joined.renewDelivery(bound, f.humans, f.owner, request)
+				if err == nil {
+					renewals.Add(1)
+				}
+				return result, err
 			},
 			Status: func(context.Context, protocol.SessionStatusRequest) (protocol.SessionStatusResult, error) {
 				return protocol.SessionStatusResult{}, errors.New("status not installed in test")
@@ -258,6 +267,24 @@ func TestCollaborationActualActorBPrecedesAAckAndCommitsOriginalSQL(t *testing.T
 			}
 		}
 		t.Logf("single-reader B enqueue witnessed before releasing A elapsed=%s", time.Since(started))
+
+		// Deliberately outlive the ORIGINAL configured grant. This is a
+		// lifecycle proof, not a performance measurement or a -race TTL knob.
+		// A stays outside SQL so real renewal transactions can make progress.
+		hold := time.NewTimer(time.Until(started.Add(time.Duration(f.joined.gate.DurationMilliseconds)*time.Millisecond + 250*time.Millisecond)))
+		select {
+		case <-hold.C:
+		case err := <-pumpDone:
+			hold.Stop()
+			t.Fatal("original gate expired without continuous renewal", err)
+		case <-ctx.Done():
+			hold.Stop()
+			t.Fatal("held A renewal deadline", ctx.Err())
+		}
+		if renewals.Load() < 2 {
+			t.Fatal("SQL delivery renewals not executed", renewals.Load())
+		}
+		t.Logf("original grant outlived with %d committed SQL renewals elapsed=%s", renewals.Load(), time.Since(started))
 
 		var rows int
 		if e := f.x.f.rig.db.QueryRow(`SELECT COUNT(*) FROM mooring_collab_operations WHERE page_id=?`, f.cell.scope.ArtifactID).Scan(&rows); e != nil || rows != 0 {

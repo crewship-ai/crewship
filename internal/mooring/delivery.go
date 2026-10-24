@@ -62,7 +62,7 @@ func (s *DeliveryStore) valid() error {
 	if !s.enabled {
 		return ErrDeliveryDisabled
 	}
-	if s.owners == nil || !s.owners.enabled || s.authorize == nil || s.ttl < time.Millisecond || s.ttl > 2*time.Second || s.ttl%time.Millisecond != 0 || s.ttl > s.owners.ttl || s.maxGates < 1 || s.maxGates > 5000 {
+	if s.owners == nil || !s.owners.enabled || s.authorize == nil || s.ttl < time.Millisecond || s.ttl > 5*time.Second || s.ttl%time.Millisecond != 0 || s.ttl > s.owners.ttl || s.maxGates < 1 || s.maxGates > 5000 {
 		return ErrInvalid
 	}
 	return nil
@@ -292,7 +292,7 @@ func (s *DeliveryStore) Barrier(ctx context.Context, key SessionKey, participant
 			if e = rows.Scan(&b, &expiry, &blocked); e != nil {
 				return e
 			}
-			if !blocked && b == boot && expiry > now && expiry-now > int64(2*time.Second) {
+			if !blocked && b == boot && expiry > now && expiry-now > int64(5*time.Second) {
 				return ErrInvalid
 			}
 			if !blocked && b == boot && expiry > now && expiry-now > max {
