@@ -123,3 +123,10 @@ work attempt and requested intent. Canonical permission changes are distinguishe
 from unavailable proof, which remains nonterminal. These independently reviewed
 primitives are assembled here for the bounded host submission registry; no
 network ingress, provider execution or session profile is enabled.
+
+`NormalizeSessionIngress` shares immutable change validation and owned canonical
+copies with the durable store. It binds the complete membership, operation
+fingerprints, original participant, task and read/dependency arrays. It is pure
+and does not seal authority or admit raw network input. The complete original
+transport wrapper still requires its own raw and canonical byte limits before
+parsing; a normalized change is not evidence that those checks ran.
