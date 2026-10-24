@@ -5,6 +5,30 @@ by Crewship, so it does not start a service or change the deployed application.
 The Go host remains the authority for permissions, fencing, durable writes and
 receipts. Draining a Rust batch never means the changes have been saved.
 
+Dormant human admissions and agent mandates capture original canonical author
+generations at fresh authenticated admission, in the same writer transaction as
+current source and Page checks. Human vectors bind the user and Page; agent
+vectors additionally bind the exact agent and crew-app ceiling. Existing proofs
+only read these generations. Missing legacy tracking, storage errors and schema
+drift remain nonterminal uncertainty; relevant changes cannot be undone by an ACL
+delete/reinsert. Current canonical policy, original source/member/run identity,
+scope and unextended horizons remain mandatory.
+
+The broad workspace epoch still invalidates delivery gates. An unaffected author
+can pass current policy under its unchanged original vector while a separate
+current epoch is returned for delivery. This never reopens an old closed gate,
+refreshes the original author, extends a mandate or qualifies raw mixed-author
+transport, native deltas, FIFO, Saved or end-to-end D3/E3 acceptance.
+
+Optional board/artifact schemas, even empty, are refused before fresh tracking
+and at every author revalidation/classification. An immutable positive bounded
+SQLite schema cookie also detects ordinary create/drop drift between checks;
+differences are uncertainty, not permission denial. This is not protection from
+privileged PRAGMA resets or general runtime DDL. Schema installation requires
+startup host-incarnation drain; optional installers must add exclusion and
+generation tracking before qualification. Per-workspace recipient generations
+remain conservative for one principal's grants on different Pages.
+
 `mooring_core::adapter::PrepareAdapter` is a pure application boundary: validate
 an opaque checkpoint and prepare one normalized immutable atomic change from a
 restored/forked authoritative state. Its candidate owns a full checkpoint and
@@ -149,3 +173,18 @@ No session FIFO, provider execution, participant delivery or editor UI is enable
 Agent submission admission also requires the mandate registry to share the exact
 original restore fence and SQL handle with the document registry. A short check
 under a different fence cannot substitute for the enclosing operation's lease.
+
+Author-relevant generation metadata is prepared separately from the broad
+workspace delivery epoch. Only a fresh authenticated same-writer host admission may install baseline
+tracking. Canonical recipient-grant, issuer, Page policy and app-ceiling mutations
+advance existing persistent generation-only tombstones; canonical
+Page/source/agent readers still decide rights. Workspace replacement preserves
+target tombstones and portable bundles cannot reset them. Mutation callbacks and
+revalidation never create or refresh absent tracking; missing original vectors deny. Normal checkpoint/head
+payload writes do not change author generations. Physical restore still requires
+host-incarnation invalidation and the existing delivery-retirement barriers.
+
+This metadata migration alone does not repair admission or mixed-author decisions:
+the dormant API still compares the broad workspace epoch until a separately
+reviewed capture/decision change consumes the original relevant generations.
+No D3/E3, content route, private execution or production enablement is qualified.
