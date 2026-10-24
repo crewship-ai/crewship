@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { MutationCache, QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { CreateSurface, CreateSurfaceBody, CreateSurfaceHeader } from "@/components/layout/create-surface"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { pagesKeys, usePage } from "@/hooks/use-pages"
 import { pageAccessKeys, toPageOwner, usePageGrants } from "@/hooks/use-page-grants"
@@ -54,14 +54,11 @@ function AccessBody({ workspaceId, slug, onClose, returnFocus, humanId }: Props 
   const canManage = available && !grants.loading && !grants.refusal && !grants.error
   const owner = available ? toPageOwner(detail.raw) : null
 
-  return <Dialog open onOpenChange={open => { if (!open) onClose() }}>
-    <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl" onCloseAutoFocus={event => {
-      if (returnFocus?.isConnected) { event.preventDefault(); returnFocus.focus() }
-    }}>
-      <DialogHeader>
-        <DialogTitle>Document access</DialogTitle>
-        <DialogDescription>Document rights and an agent’s task permission are separate. Sharing does not widen an existing task.</DialogDescription>
-      </DialogHeader>
+  return <CreateSurface open size="md" restoreOpenerFocus restoreFocusTo={returnFocus}
+    onOpenChange={open => { if (!open) onClose() }}>
+      <CreateSurfaceHeader title="Document access" onClose={onClose}
+        description="Document rights and an agent’s task permission are separate. Sharing does not widen an existing task." />
+      <CreateSurfaceBody>
       {!available ? <p role={humanId && detail.loading ? "status" : "alert"}>
         {humanId && detail.loading ? "Checking document access…" : "Document access is unavailable."}
       </p> : <div className="flex flex-col gap-4">
@@ -77,6 +74,6 @@ function AccessBody({ workspaceId, slug, onClose, returnFocus, humanId }: Props 
           <EffectiveAccessCard workspaceId={workspaceId} slug={slug} />
         </>}
       </div>}
-    </DialogContent>
-  </Dialog>
+      </CreateSurfaceBody>
+  </CreateSurface>
 }
