@@ -31,6 +31,7 @@ func (a *sessionHumanTestAdapter) PrepareSessionTargets(ctx context.Context, cp 
 // This proves the writer/lifetime seam, not human admission or a native profile.
 func TestSessionHumanResolverWriterLifetimeAndImmutableCapture(t *testing.T) {
 	s, lease, basis := fullBasisFixture(t)
+	s.config.Targets.SessionNativeCandidate = func(context.Context, *sql.Tx, SessionNativeCandidateAccess) error { return nil }
 	adapter := &sessionHumanTestAdapter{causalExecutionAdapter: s.config.Targets.Adapter.(*causalExecutionAdapter)}
 	s.config.Targets.Adapter = adapter
 	one := testBatchChange(t, lease.Key, "change-a", "", targetReadOp("a", "0"))
@@ -111,6 +112,7 @@ func TestSessionHumanResolverWriterLifetimeAndImmutableCapture(t *testing.T) {
 
 func TestSessionHumanResolverFailurePrecedesTerminalReadClassification(t *testing.T) {
 	s, lease, basis := fullBasisFixture(t)
+	s.config.Targets.SessionNativeCandidate = func(context.Context, *sql.Tx, SessionNativeCandidateAccess) error { return nil }
 	adapter := &sessionHumanTestAdapter{causalExecutionAdapter: s.config.Targets.Adapter.(*causalExecutionAdapter)}
 	s.config.Targets.Adapter = adapter
 	op := targetReadOp("a", "0")
@@ -130,6 +132,7 @@ func TestSessionHumanResolverFailurePrecedesTerminalReadClassification(t *testin
 
 func TestSessionHumanResolverHistoricalReadBudgetAndOrdinaryIsolation(t *testing.T) {
 	s, lease, basis := fullBasisFixture(t)
+	s.config.Targets.SessionNativeCandidate = func(context.Context, *sql.Tx, SessionNativeCandidateAccess) error { return nil }
 	adapter := &sessionHumanTestAdapter{causalExecutionAdapter: s.config.Targets.Adapter.(*causalExecutionAdapter)}
 	s.config.Targets.Adapter = adapter
 	one := testBatchChange(t, lease.Key, "change-a", "", targetReadOp("a", "0"))

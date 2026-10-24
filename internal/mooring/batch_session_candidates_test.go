@@ -13,6 +13,7 @@ func TestSessionPreparedCandidatesSameWriterNeverSavedBeforeCommit(t *testing.T)
 	for _, rollback := range []bool{false, true} {
 		t.Run(map[bool]string{false: "commit", true: "rollback"}[rollback], func(t *testing.T) {
 			s, lease, basis := fullBasisFixture(t)
+			s.config.Targets.SessionNativeCandidate = func(context.Context, *sql.Tx, SessionNativeCandidateAccess) error { return nil }
 			s.config.Targets.Adapter = &sessionHumanTestAdapter{causalExecutionAdapter: s.config.Targets.Adapter.(*causalExecutionAdapter)}
 			a := testBatchChange(t, lease.Key, "candidate-a", "", targetReadOp("a", "0"))
 			op := targetReadOp("b", "0")

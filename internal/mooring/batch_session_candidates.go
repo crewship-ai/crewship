@@ -95,6 +95,11 @@ func (m *sessionCommitMode) nativeDeltaData() []SessionCommittedNativeDelta {
 // Marshal application DATA into the candidate output before COMMIT. The output
 // callback never receives these provisional cuts and cannot supply substitutes.
 func (m *sessionCommitMode) injectNativeDeltaData(raw []byte) ([]byte, error) {
+	canonical, err := canonicalPrivateControlJSON(raw)
+	if err != nil {
+		return nil, err
+	}
+	raw = canonical
 	var value map[string]json.RawMessage
 	if json.Unmarshal(raw, &value) != nil {
 		return nil, ErrPrivateControl

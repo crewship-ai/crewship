@@ -85,15 +85,19 @@ type SessionBatchResult struct {
 	NativeDeltas []SessionCommittedNativeDelta
 }
 type SessionCommitter struct {
-	store         *BatchStore
-	owner         OwnerLease
-	authority     SessionBatchAuthority
-	output        SessionOutputPreparer
-	humanResolver SessionHumanPrepareResolver
+	store           *BatchStore
+	owner           OwnerLease
+	authority       SessionBatchAuthority
+	output          SessionOutputPreparer
+	humanResolver   SessionHumanPrepareResolver
+	nativeValidator SessionNativeCandidateValidator
 }
 
 func NewSessionCommitter(store *BatchStore, owner OwnerLease, authority SessionBatchAuthority, output SessionOutputPreparer) (*SessionCommitter, error) {
 	if store == nil || store.ready() != nil || !store.targetsEnabled() || store.config.Targets.ReadPolicy != CausalTargetReadPolicy || !batchID(owner.Key.WorkspaceID) || !batchID(owner.Key.ArtifactID) || !batchID(owner.Key.ApplicationID) || !ownerIDValid(owner.OwnerID) || owner.Generation <= 0 || len(owner.Token) != 64 || authority == nil || output == nil {
+		return nil, ErrInvalid
+	}
+	if store.config.Targets.SessionHumanPrepare != nil && !store.hasSessionNativeCallbacks() {
 		return nil, ErrInvalid
 	}
 	// Capture the exact host-owned lease, including generation and secret token.
@@ -101,7 +105,7 @@ func NewSessionCommitter(store *BatchStore, owner OwnerLease, authority SessionB
 	// does not replace the transactional OwnerStore.Check below.
 	// Copy immutable configuration; never replace the public store's current-reader
 	// authority. Only the commit-only clone below can use processing authority.
-	return &SessionCommitter{store: store, owner: owner, authority: authority, output: output, humanResolver: store.config.Targets.SessionHumanPrepare}, nil
+	return &SessionCommitter{store: store, owner: owner, authority: authority, output: output, humanResolver: store.config.Targets.SessionHumanPrepare, nativeValidator: store.config.Targets.SessionNativeCandidate}, nil
 }
 
 type sessionMembership struct{ changeID, membershipHash string }
@@ -109,6 +113,7 @@ type sessionMembership struct{ changeID, membershipHash string }
 type sessionCommitMode struct {
 	originalStore                   *BatchStore
 	humanResolver                   SessionHumanPrepareResolver
+	nativeValidator                 SessionNativeCandidateValidator
 	fullBasis                       *FullCheckpointBasis
 	members                         map[string]sessionMembership
 	basis                           SessionBasis
@@ -138,6 +143,7 @@ func (s *SessionCommitter) CommitFull(ctx context.Context, request SessionFullBa
 func (s *SessionCommitter) commitMode(ctx context.Context, request SessionBatchRequest, mode *sessionCommitMode) (SessionBatchResult, error) {
 	mode.originalStore = s.store
 	mode.humanResolver = s.humanResolver
+	mode.nativeValidator = s.nativeValidator
 	isolated := *s.store
 	isolated.config.Authority = func(ctx context.Context, tx *sql.Tx, access BatchAccess) error {
 		purpose := SessionProcessSealedOutcome
