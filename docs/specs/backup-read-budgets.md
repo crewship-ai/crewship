@@ -11,20 +11,20 @@ settings. Invalid settings fail the operation. Limits cannot be raised through a
 restore request or by a workspace owner. Values are decimal integer bytes/counts,
 except the Go duration string for timeout.
 
-| Variable suffix after `CREWSHIP_BACKUP_RESTORE_` | Default |
+| Operator environment variable | Default |
 | --- | ---: |
-| `COMPRESSED_BYTES` | 68719476736 (64 GiB per opened reader) |
-| `DECODED_BYTES` | 137438953472 (128 GiB aggregate decoded work) |
-| `ENTRIES` | 100000 logical entries across all passes |
-| `GENERATED_BYTES` | 68719476736 (64 GiB aggregate generated output) |
-| `BUFFERED_BYTES` | 67108864 (64 MiB aggregate source retained/parsed in memory) |
-| `HEADER_BYTES` | 8388608 (8 MiB aggregate logical names and link names) |
-| `SECTION_SINKS` | 256 (aggregate extraction section files) |
-| `DECODER_MEMORY_BYTES` | 67108864 (64 MiB per decoder) |
-| `DECODER_WINDOW_BYTES` | 67108864 (64 MiB maximum window) |
-| `DEPTH` | 4 simultaneously open decoders |
-| `TIMEOUT` | 2h |
-| `CONCURRENCY` | 1 (configurable 1–4 per process) |
+| `CREWSHIP_BACKUP_RESTORE_COMPRESSED_BYTES` | 68719476736 (64 GiB per opened reader) |
+| `CREWSHIP_BACKUP_RESTORE_DECODED_BYTES` | 137438953472 (128 GiB aggregate decoded work) |
+| `CREWSHIP_BACKUP_RESTORE_ENTRIES` | 100000 logical entries across all passes |
+| `CREWSHIP_BACKUP_RESTORE_GENERATED_BYTES` | 68719476736 (64 GiB aggregate generated output) |
+| `CREWSHIP_BACKUP_RESTORE_BUFFERED_BYTES` | 67108864 (64 MiB aggregate source retained/parsed in memory) |
+| `CREWSHIP_BACKUP_RESTORE_HEADER_BYTES` | 8388608 (8 MiB aggregate logical names and link names) |
+| `CREWSHIP_BACKUP_RESTORE_SECTION_SINKS` | 256 (aggregate extraction section files) |
+| `CREWSHIP_BACKUP_RESTORE_DECODER_MEMORY_BYTES` | 67108864 (64 MiB per decoder) |
+| `CREWSHIP_BACKUP_RESTORE_DECODER_WINDOW_BYTES` | 67108864 (64 MiB maximum window) |
+| `CREWSHIP_BACKUP_RESTORE_DEPTH` | 4 simultaneously open decoders |
+| `CREWSHIP_BACKUP_RESTORE_TIMEOUT` | 2h |
+| `CREWSHIP_BACKUP_RESTORE_CONCURRENCY` | 1 (configurable 1–4 per process) |
 
 By default only one top-level backup read operation runs in a process; an operation
 above the configured concurrency fails immediately. Nested helpers reuse admission. Low-level reader constructors alone do not take
