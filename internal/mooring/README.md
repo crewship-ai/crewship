@@ -276,3 +276,26 @@ writer against immutable dependency closure before the existing commit fences.
 The empty policy retains strict-current behavior. This store primitive does not
 select a private runtime profile or establish application/participant authority;
 those require separately qualified integration.
+
+The inactive human registry also has a trusted Rust-only replacement seam.
+Capture `storeBinding` once when constructing each store; its authority and
+adapter are immutable for that actual runtime binding. The bounded host
+operation wrapper acquires its runtime lease before the SQL writer and retains
+it through commit/response. Replacement refuses active operations, requires the
+actual old child's completed process exit and a fresh owner generation, and
+verifies the replacement's exact profile/versions. It invalidates every old
+ticket, closes all persisted scope gates without deleting issuance evidence,
+and admits no replacement until every old gate is blocked or its original
+BOOTTIME expiry has passed. Old store outcome/retry authority fails after the
+binding changes even when preparation would not contact Rust.
+
+Reconnect rechecks an existing original human admission and creates only a new
+bounded single-use ticket. Session/participant/source/member/epoch/deadline are
+never refreshed. A registry retains its original host restore incarnation;
+database restore or Go restart cannot revive those capabilities. The manager
+must use the one registry-selected session ID and separately validate the exact
+replacement `SessionOpened` before forwarding any content. This seam installs
+no session manager, Rust control messages, browser route or raw-human write
+profile. The tagged replacement test uses actual pinned native child processes
+and canonical FULL SQL with an explicit fixture clock/ingress; the separate
+actual HTTP test qualifies signed authentication and BOOTTIME storage behavior.

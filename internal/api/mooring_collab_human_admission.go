@@ -54,21 +54,28 @@ type collaborationHumanJoinTicket struct {
 }
 
 type collaborationHumanRegistry struct {
-	mu            sync.Mutex
-	fence         *collaborationIngressFence
-	pages         *PageHandler
-	owners        *mooring.OwnerStore
-	runtime       *mooring.Runtime
-	targetAdapter mooring.TargetBatchAdapter
-	readPolicy    string
-	clock         mooring.OwnerClock
-	scope         mooring.SessionKey
-	versions      mooring.RuntimeVersions
-	sessionID     string
-	limit         int
-	reservations  int
-	admissions    map[string]collaborationHumanAdmission
-	tickets       map[string]collaborationHumanJoinTicket
+	// Acquired BEFORE the SQL writer and held through complete bounded host
+	// operations. Replacement drains those operations before changing bindings.
+	runtimeMu       sync.RWMutex
+	mu              sync.Mutex
+	lifecycle       collaborationIngressStamp
+	bindingID       string
+	replacing       bool
+	ownerGeneration int64
+	fence           *collaborationIngressFence
+	pages           *PageHandler
+	owners          *mooring.OwnerStore
+	runtime         *mooring.Runtime
+	targetAdapter   mooring.TargetBatchAdapter
+	readPolicy      string
+	clock           mooring.OwnerClock
+	scope           mooring.SessionKey
+	versions        mooring.RuntimeVersions
+	sessionID       string
+	limit           int
+	reservations    int
+	admissions      map[string]collaborationHumanAdmission
+	tickets         map[string]collaborationHumanJoinTicket
 }
 
 func newCollaborationHumanRegistry(enabled bool, pages *PageHandler, owners *mooring.OwnerStore, runtime *mooring.Runtime, clock mooring.OwnerClock, fence *collaborationIngressFence, scope mooring.SessionKey, versions mooring.RuntimeVersions, limit int) (*collaborationHumanRegistry, error) {
@@ -107,7 +114,11 @@ func newCollaborationHumanRegistryPolicy(enabled bool, pages *PageHandler, owner
 	if err != nil {
 		return nil, err
 	}
-	return &collaborationHumanRegistry{targetAdapter: adapter, readPolicy: policy, fence: fence, pages: pages, owners: owners, runtime: runtime, clock: clock, scope: scope, versions: versions, sessionID: session, limit: limit, admissions: make(map[string]collaborationHumanAdmission), tickets: make(map[string]collaborationHumanJoinTicket)}, nil
+	lifecycle, err := collaborationHumanLifecycleStamp(fence)
+	if err != nil {
+		return nil, err
+	}
+	return &collaborationHumanRegistry{lifecycle: lifecycle, bindingID: session, targetAdapter: adapter, readPolicy: policy, fence: fence, pages: pages, owners: owners, runtime: runtime, clock: clock, scope: scope, versions: versions, sessionID: session, limit: limit, admissions: make(map[string]collaborationHumanAdmission), tickets: make(map[string]collaborationHumanJoinTicket)}, nil
 }
 
 func collaborationOpaqueID() (string, error) {
@@ -140,6 +151,11 @@ func (s *collaborationHumanRegistry) sweepLocked(boot string, now time.Duration)
 // the supplied runtime lease; neither it nor this method is a public endpoint.
 func (s *collaborationHumanRegistry) issue(ctx context.Context, owner mooring.OwnerLease, write bool) (string, collaborationHumanAdmission, error) {
 	var empty collaborationHumanAdmission
+	unlock, err := s.acquireRuntimeOperation()
+	if err != nil {
+		return "", empty, err
+	}
+	defer unlock()
 	ingress, err := s.fence.capture(ctx)
 	if err != nil {
 		return "", empty, err
@@ -160,6 +176,10 @@ func (s *collaborationHumanRegistry) issue(ctx context.Context, owner mooring.Ow
 	// takes that writer first, then resolves an admission from this registry.
 	s.mu.Lock()
 	s.sweepLocked(boot, now)
+	if s.ownerGeneration != 0 && s.ownerGeneration != owner.Generation {
+		s.mu.Unlock()
+		return "", empty, errCollaborationAdmission
+	}
 	if len(s.admissions)+s.reservations >= s.limit || len(s.tickets)+s.reservations >= s.limit*2 {
 		s.mu.Unlock()
 		return "", empty, errCollaborationAdmission
@@ -224,6 +244,7 @@ func (s *collaborationHumanRegistry) issue(ctx context.Context, owner mooring.Ow
 		return "", empty, errCollaborationAdmission
 	}
 	s.admissions[participant] = admission
+	s.ownerGeneration = owner.Generation
 	ticketTTL := 15 * time.Second
 	if remaining := admission.deadline - currentNow; remaining < ticketTTL {
 		ticketTTL = remaining
@@ -320,6 +341,11 @@ func (s *collaborationHumanRegistry) runHumanOperation(r *http.Request, particip
 	if fn == nil {
 		return errCollaborationAdmission
 	}
+	unlock, err := s.acquireRuntimeOperation()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	ctx, err := s.bindHumanRequest(r, participant)
 	if err != nil {
 		return err
@@ -345,7 +371,10 @@ func (s *collaborationHumanRegistry) runHumanOperation(r *http.Request, particip
 // Plug directly into BatchStore.Authority so status/unknown recovery keeps the
 // store's SQL writer linearization. No loose status cache or historical author
 // write check replaces the current reader admission.
-func (s *collaborationHumanRegistry) authorizeBatch(ctx context.Context, tx *sql.Tx, access mooring.BatchAccess) error {
+func (s *collaborationHumanRegistry) authorizeBatchAtBinding(ctx context.Context, tx *sql.Tx, access mooring.BatchAccess, runtime *mooring.Runtime, bindingID string) error {
+	if !s.matchesRuntimeBinding(runtime, bindingID) {
+		return errCollaborationAdmission
+	}
 	binding, ok := ctx.Value(collaborationHumanBindingKey{}).(collaborationHumanBinding)
 	if !ok || binding.registry != s || binding.operation == nil || !binding.operation.active.Load() || tx == nil || access.Scope != s.scope {
 		return errCollaborationAdmission
@@ -384,6 +413,11 @@ type collaborationHumanJoined struct {
 // suspend-aware deadline, measured from the FIRST request send, on every frame.
 func (s *collaborationHumanRegistry) join(ctx context.Context, runtime *mooring.Runtime, owner mooring.OwnerLease, ticket, nonce string) (collaborationHumanJoined, error) {
 	var empty collaborationHumanJoined
+	unlock, err := s.acquireRuntimeOperation()
+	if err != nil {
+		return empty, err
+	}
+	defer unlock()
 	admission, err := s.consume(runtime, owner, ticket, nonce)
 	if err != nil {
 		return empty, err
@@ -394,7 +428,13 @@ func (s *collaborationHumanRegistry) join(ctx context.Context, runtime *mooring.
 	}
 	defer release()
 	const ttl = 2 * time.Second
+	s.mu.Lock()
+	bindingID := s.bindingID
+	s.mu.Unlock()
 	authority := func(ctx context.Context, tx *sql.Tx, access mooring.DeliveryAccess) (string, error) {
+		if !s.matchesRuntimeBinding(runtime, bindingID) {
+			return "", errCollaborationAdmission
+		}
 		if access.Scope != s.scope || access.Participant != admission.participant || (access.Intent != "connect" && access.Intent != "renew") {
 			return "", errCollaborationAdmission
 		}
@@ -434,7 +474,7 @@ func (s *collaborationHumanRegistry) consume(runtime *mooring.Runtime, owner moo
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if runtime != s.runtime {
+	if s.replacing || runtime != s.runtime {
 		return empty, errCollaborationAdmission
 	}
 	issued, exists := s.tickets[ticket]

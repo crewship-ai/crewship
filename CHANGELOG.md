@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Mooring recovery groundwork:** inactive human admissions can retain their original identity and authority across a verified Rust-only replacement. Old store bindings and join tickets cannot follow the new process; issued delivery gates remain recorded until blocked or expired.
+
 - **Mooring admission groundwork:** an inactive human registry preserves original Page authority, burns bounded join tickets once and opens current SQL delivery gates. Its store wrapper holds the restore fence through the complete operation.
 
 - **Mooring authorization groundwork:** an inactive human Page authority adapter checks current canonical grants, folder scope and original credential inside the protected writer transaction.

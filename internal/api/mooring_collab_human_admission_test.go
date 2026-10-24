@@ -74,7 +74,11 @@ func collaborationAdmissionFixture(t *testing.T) (*pagesTransferRig, *collaborat
 	if _, err := newCollaborationHumanRegistryPolicy(true, pages, owners, runtime, clock, fence, scope, mooring.RuntimeVersions{}, 4, "unknown"); err == nil {
 		t.Fatal("unknown preparation policy accepted")
 	}
-	registry := &collaborationHumanRegistry{fence: fence, pages: pages, owners: owners, runtime: runtime, clock: clock, scope: scope, sessionID: "admission-document-session", limit: 4, admissions: make(map[string]collaborationHumanAdmission), tickets: make(map[string]collaborationHumanJoinTicket)}
+	lifecycle, err := collaborationHumanLifecycleStamp(fence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := &collaborationHumanRegistry{lifecycle: lifecycle, bindingID: "unit-runtime-binding", fence: fence, pages: pages, owners: owners, runtime: runtime, clock: clock, scope: scope, sessionID: "admission-document-session", limit: 4, admissions: make(map[string]collaborationHumanAdmission), tickets: make(map[string]collaborationHumanJoinTicket)}
 	return r, registry, owner, ctx, clock
 }
 
@@ -122,7 +126,7 @@ func TestCollaborationHumanTicketIsSingleUseAndPreservesOriginalPolicy(t *testin
 			if write {
 				intent = "write"
 			}
-			return s.authorizeBatch(bound, tx, mooring.BatchAccess{Intent: intent, Scope: s.scope, Participant: admission.participant})
+			return s.authorizeBatchAtBinding(bound, tx, mooring.BatchAccess{Intent: intent, Scope: s.scope, Participant: admission.participant}, s.runtime, s.bindingID)
 		})
 		if (err == nil) != want {
 			t.Fatalf("write=%v allowed=%v want=%v: %v", write, err == nil, want, err)
@@ -288,7 +292,7 @@ func TestCollaborationHumanStoreRequiresCompleteOperationLease(t *testing.T) {
 			return err
 		}
 		defer tx.Rollback()
-		return s.authorizeBatch(ctx, tx, mooring.BatchAccess{Intent: "outcome", Scope: s.scope, Participant: admission.participant})
+		return s.authorizeBatchAtBinding(ctx, tx, mooring.BatchAccess{Intent: "outcome", Scope: s.scope, Participant: admission.participant}, s.runtime, s.bindingID)
 	}
 	if err := check(bound); err == nil {
 		t.Fatal("loose caller binding bypassed complete-operation fence")

@@ -114,14 +114,18 @@ func TestCollaborationHumanActualHTTPRustStoreAndRevocation(t *testing.T) {
 		handler.ServeHTTP(response, req)
 		return response.Code, actionErr
 	}
+	storeBinding, err := registry.storeBinding()
+	if err != nil {
+		t.Fatal(err)
+	}
 	authority := func(ctx context.Context, tx *sql.Tx, access mooring.BatchAccess) error {
 		if access.Intent == "initialize" {
 			_, err := pages.authorizeCollaborationHumanPage(ctx, tx, access.Scope, "initialize")
 			return err
 		}
-		return registry.authorizeBatch(ctx, tx, access)
+		return storeBinding.authority(ctx, tx, access)
 	}
-	store := mooring.NewBatchStore(rig.db, mooring.BatchStoreConfig{Enabled: true, Owners: owners, Authority: authority, Limits: mooring.DefaultBatchLimits(), Targets: &mooring.TargetStoreConfig{Enabled: true, ReadPolicy: registry.readPolicy, HistoryBudget: mooring.DefaultBatchHistoryBudget(), Adapter: registry.targetAdapter, Limits: mooring.DefaultBatchTargetLimits()}})
+	store := mooring.NewBatchStore(rig.db, mooring.BatchStoreConfig{Enabled: true, Owners: owners, Authority: authority, Limits: mooring.DefaultBatchLimits(), Targets: &mooring.TargetStoreConfig{Enabled: true, ReadPolicy: registry.readPolicy, HistoryBudget: mooring.DefaultBatchHistoryBudget(), Adapter: storeBinding.adapter, Limits: mooring.DefaultBatchTargetLimits()}})
 	status, err := call(token, func(r *http.Request) error {
 		stamp, err := fence.capture(r.Context())
 		if err != nil {
