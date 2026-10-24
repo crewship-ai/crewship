@@ -163,10 +163,11 @@ for (const status of [403, 500]) it(`removes an already displayed folder roster 
   mount()
   await screen.findByText("folder-person")
   fireEvent.click(screen.getByRole("button", { name: "Open folder sharing…" }))
-  await waitFor(() => expect(screen.getAllByRole("dialog").length).toBeGreaterThan(1))
+  // Radix hides the parent dialog from accessibility queries while the nested modal is open.
+  await waitFor(() => expect(screen.getAllByRole("dialog", { hidden: true }).length).toBeGreaterThan(1))
   refused = true
   await screen.findByText("Folder ACL is unavailable.", {}, { timeout: 3000 })
   expect(screen.queryByText("folder-person")).not.toBeInTheDocument()
   expect(screen.queryByRole("button", { name: "Open folder sharing…" })).not.toBeInTheDocument()
-  expect(screen.getAllByRole("dialog")).toHaveLength(1)
+  await waitFor(() => expect(screen.getAllByRole("dialog", { hidden: true })).toHaveLength(1))
 })
