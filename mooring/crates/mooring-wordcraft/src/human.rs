@@ -195,7 +195,7 @@ mod tests {
     };
     fn baseline() -> (Vec<u8>, Vec<String>) {
         let native =
-            serde_json::from_str(include_str!("../tests/fixtures/d1-native.json")).unwrap();
+            serde_json::from_str(include_str!("../tests/fixtures/d1-engine-canonical.json")).unwrap();
         let document = Document::import(native, (0..8).map(|i| format!("p{i}")).collect()).unwrap();
         (
             document.checkpoint().unwrap(),

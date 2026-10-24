@@ -9,6 +9,8 @@ import subprocess
 import sys
 import tomllib
 
+WORDCRAFT_SOURCE = 'git+https://github.com/storytold/wordcraft?rev=668d7ce3a4b1dcf241a9c50a20754a85647a02c4#668d7ce3a4b1dcf241a9c50a20754a85647a02c4'
+
 COMMENT = 'This file only protects against accidental modifications. It is not a security mechanism and does not protect against malicious changes.'
 
 
@@ -27,7 +29,7 @@ def verify_checksums(directory, expected):
         raise ValueError('Unexpected checksum metadata')
     if '$comment' in checksums and checksums['$comment'] != COMMENT:
         raise ValueError('Unexpected checksum comment')
-    if checksums['package'] != expected or not re.fullmatch(r'[0-9a-f]{64}', expected):
+    if checksums['package'] != expected or (expected is not None and not re.fullmatch(r'[0-9a-f]{64}', expected)):
         raise ValueError('Registry checksum mismatch')
     files = checksums['files']
     if not isinstance(files, dict):
@@ -96,6 +98,18 @@ def verify_git_index(repository, expected):
             raise ValueError('Vendored Git bytes differ from recorded SHA256')
 
 
+def locked_checksum(package):
+    """Only the reviewed immutable application source may omit registry checksum."""
+    source = package['source']
+    if source == WORDCRAFT_SOURCE:
+        if package['name'] not in {'wordcraft-doc', 'wordcraft-geom'} or package['version'] != '0.10.0' or 'checksum' in package:
+            raise ValueError('Unqualified WordCraft Git package')
+        return None
+    if not source.startswith('registry+') or not re.fullmatch(r'[0-9a-f]{64}', package.get('checksum', '')):
+        raise ValueError('Unqualified package source or checksum')
+    return package['checksum']
+
+
 def main():
     root = Path(__file__).resolve().parents[1]
     lock = tomllib.loads((root / 'Cargo.lock').read_text())
@@ -105,7 +119,8 @@ def main():
         if 'source' not in package:
             continue
         directory = root / 'vendor' / f"{package['name']}-{package['version']}"
-        verify_checksums(directory, package['checksum'])
+        checksum = locked_checksum(package)
+        verify_checksums(directory, checksum)
         checksum_path = directory / '.cargo-checksum.json'
         checksums = json.loads(checksum_path.read_text(), object_pairs_hook=unique_object)
         expected_index[str(checksum_path.relative_to(root.parent))] = hashlib.sha256(checksum_path.read_bytes()).hexdigest()
@@ -121,14 +136,20 @@ def main():
         if package['name'] == 'yrs':
             texts.append(root / 'licenses' / 'yrs-0.28.0-MIT.txt')
             extra = 'https://github.com/y-crdt/y-crdt/blob/23b7f5693bbf9e7d26340c521ee8647f79bdfba2/LICENSE'
+        if package['source'] == WORDCRAFT_SOURCE:
+            texts.append(root / 'licenses' / 'wordcraft-0.10.0-MIT.txt')
+            extra = 'https://github.com/storytold/wordcraft/blob/668d7ce3a4b1dcf241a9c50a20754a85647a02c4/LICENSE-MIT'
         if not texts:
             raise ValueError('Missing license text')
         entries.append({
             'name': package['name'], 'version': package['version'],
-            'spdx': manifest['license'], 'registry_checksum': package['checksum'],
+            'spdx': manifest['license'], 'registry_checksum': checksum,
             'license_source': extra,
             'texts': [{'path': str(p.relative_to(root)), 'sha256': hashlib.sha256(p.read_bytes()).hexdigest()} for p in texts],
         })
+        if package['source'] == WORDCRAFT_SOURCE:
+            entries[-1]['source'] = package['source']
+            entries[-1]['selected_license'] = 'MIT'
     content = json.dumps(entries, indent=2, ensure_ascii=False) + '\n'
     target = root / 'licenses' / 'inventory.json'
     if '--check' in sys.argv:

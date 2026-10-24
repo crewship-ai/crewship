@@ -51,6 +51,23 @@
     ]
   },
   {
+    "name": "base64",
+    "version": "0.22.1",
+    "spdx": "MIT OR Apache-2.0",
+    "registry_checksum": "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6",
+    "license_source": null,
+    "texts": [
+      {
+        "path": "vendor/base64-0.22.1/LICENSE-APACHE",
+        "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+      },
+      {
+        "path": "vendor/base64-0.22.1/LICENSE-MIT",
+        "sha256": "0dd882e53de11566d50f8e8e2d5a651bcf3fabee4987d70f306233cf39094ba7"
+      }
+    ]
+  },
+  {
     "name": "bitflags",
     "version": "2.13.2",
     "spdx": "MIT OR Apache-2.0",
@@ -795,6 +812,23 @@
     ]
   },
   {
+    "name": "unicode-segmentation",
+    "version": "1.13.3",
+    "spdx": "MIT OR Apache-2.0",
+    "registry_checksum": "c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8",
+    "license_source": null,
+    "texts": [
+      {
+        "path": "vendor/unicode-segmentation-1.13.3/LICENSE-APACHE",
+        "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+      },
+      {
+        "path": "vendor/unicode-segmentation-1.13.3/LICENSE-MIT",
+        "sha256": "7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0"
+      }
+    ]
+  },
+  {
     "name": "version_check",
     "version": "0.9.5",
     "spdx": "MIT/Apache-2.0",
@@ -895,6 +929,36 @@
         "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
       }
     ]
+  },
+  {
+    "name": "wordcraft-doc",
+    "version": "0.10.0",
+    "spdx": "MIT OR Apache-2.0",
+    "registry_checksum": null,
+    "license_source": "https://github.com/storytold/wordcraft/blob/668d7ce3a4b1dcf241a9c50a20754a85647a02c4/LICENSE-MIT",
+    "texts": [
+      {
+        "path": "licenses/wordcraft-0.10.0-MIT.txt",
+        "sha256": "fc257de83c44ae49e4aad1cf777b886794be3ac9c8d00c010ef55935d5bbeba5"
+      }
+    ],
+    "source": "git+https://github.com/storytold/wordcraft?rev=668d7ce3a4b1dcf241a9c50a20754a85647a02c4#668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
+    "selected_license": "MIT"
+  },
+  {
+    "name": "wordcraft-geom",
+    "version": "0.10.0",
+    "spdx": "MIT OR Apache-2.0",
+    "registry_checksum": null,
+    "license_source": "https://github.com/storytold/wordcraft/blob/668d7ce3a4b1dcf241a9c50a20754a85647a02c4/LICENSE-MIT",
+    "texts": [
+      {
+        "path": "licenses/wordcraft-0.10.0-MIT.txt",
+        "sha256": "fc257de83c44ae49e4aad1cf777b886794be3ac9c8d00c010ef55935d5bbeba5"
+      }
+    ],
+    "source": "git+https://github.com/storytold/wordcraft?rev=668d7ce3a4b1dcf241a9c50a20754a85647a02c4#668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
+    "selected_license": "MIT"
   },
   {
     "name": "yrs",

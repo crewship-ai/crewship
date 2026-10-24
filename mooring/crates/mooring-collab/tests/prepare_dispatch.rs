@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 
 fn fixture() -> (Vec<u8>, Scope, AtomicChange, PrepareContext) {
     let native: Value = serde_json::from_str(include_str!(
-        "../../mooring-wordcraft/tests/fixtures/d1-native.json"
+        "../../mooring-wordcraft/tests/fixtures/d1-engine-canonical.json"
     ))
     .unwrap();
     let ids = (0..native["body"].as_array().unwrap().len())

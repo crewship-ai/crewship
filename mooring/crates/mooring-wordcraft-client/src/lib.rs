@@ -204,7 +204,7 @@ mod tests {
     use super::*;
     use serde_json::{json, Value};
     fn input() -> (String, String) {
-        let native = include_str!("../../mooring-wordcraft/tests/fixtures/d1-native.json");
+        let native = include_str!("../../mooring-wordcraft/tests/fixtures/d1-engine-canonical.json");
         let parsed: Value = serde_json::from_str(native).unwrap();
         let ids = (0..parsed["body"].as_array().unwrap().len())
             .map(|i| format!("stable-{i}"))
