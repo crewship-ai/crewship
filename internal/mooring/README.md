@@ -438,3 +438,19 @@ A private-owner override during restoration does not itself record
 content leaves the host, a future delivery handler must durably record the
 required owner-access audit and recheck the current recipient and delivery
 lease. This startup helper supplies neither audit nor delivery authority.
+
+`WithSessionOrigins` is an opt-in, read-only bridge for an already activated
+session whose actual Open/Opened exchange selected `origin_inventory_v1`.
+It uses the original store's `read_checkpoint` authority and the same FULL
+writer to bind the current owner, retained full checkpoint identity, concrete
+adapter and live process before and after native inspection and consumption.
+The callback-scoped `SessionOriginInventory.Visit` requires that exact context,
+transaction, store, owner and basis; copies and escaped contexts lose access
+before the final fences and COMMIT. The numeric visitor does not grant issuance
+authority or prove a complete burned-ID union across recovery.
+
+The explicit `mooring_rust_integration` test for this bridge pins the actual
+native peer and a fresh D1 checkpoint. It proves pre-OwnerGrant prepare progress,
+creator-1 provenance under owner 2, and activated writer-scoped inventory access
+with real BOOTTIME ownership. Participant authority remains mocked; the test
+reserves no origin and claims no participant delivery, Saved or enabled route.

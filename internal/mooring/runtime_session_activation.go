@@ -19,6 +19,7 @@ type sessionObserved struct {
 	grant                          *protocol.OwnerGrant
 	restored                       *protocol.SessionRestored
 	opened                         *protocol.SessionOpened
+	requiredCapabilities           []protocol.SessionOpenRequiredCapabilitiesItem
 	invalid, activated, activating bool
 }
 
@@ -27,6 +28,12 @@ func (s *SessionRuntime) observeSentLocked(kind string, raw []byte) {
 	switch kind {
 	case "session_open":
 		slot = &s.observed.openHash
+		var opening protocol.SessionOpen
+		if json.Unmarshal(raw, &opening) != nil {
+			s.observed.invalid = true
+			return
+		}
+		s.observed.requiredCapabilities = append([]protocol.SessionOpenRequiredCapabilitiesItem(nil), opening.RequiredCapabilities...)
 	case "session_restore":
 		slot = &s.observed.restoreHash
 	default:
@@ -42,7 +49,7 @@ func (s *SessionRuntime) observeResponseLocked(kind string, raw []byte) {
 	switch kind {
 	case "session_opened":
 		var v protocol.SessionOpened
-		if s.observed.opened != nil || json.Unmarshal(raw, &v) != nil {
+		if s.observed.opened != nil || json.Unmarshal(raw, &v) != nil || !sessionCapabilitiesEqual(s.observed.requiredCapabilities, v.Capabilities) {
 			s.observed.invalid = true
 			return
 		}
