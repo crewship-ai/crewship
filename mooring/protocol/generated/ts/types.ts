@@ -99,7 +99,7 @@ export interface ChangeResult {
 
 export type HelloType = "hello";
 
-export type HelloControlProfilesItem = "mooring.prepare.v1" | "mooring.prepare-causal.v1";
+export type HelloControlProfilesItem = "mooring.prepare.v1" | "mooring.prepare-causal.v1" | "mooring.session-causal.v1";
 
 export interface Hello {
   type: HelloType;
@@ -802,7 +802,7 @@ export type TaskChangeState = ChangeResult | TaskChangeStateVariant2;
 
 export type RuntimeReadyType = "runtime_ready";
 
-export type RuntimeReadySelectedControlProfile = "mooring.prepare.v1" | "mooring.prepare-causal.v1";
+export type RuntimeReadySelectedControlProfile = "mooring.prepare.v1" | "mooring.prepare-causal.v1" | "mooring.session-causal.v1";
 
 export interface RuntimeReady {
   type: RuntimeReadyType;
@@ -1027,4 +1027,268 @@ export interface AtomicPreparedCausal {
   control_profile: AtomicPreparedCausalControlProfile;
 }
 
-export type Message = Hello | Welcome | CommitBatch | CommitResult | StatusRequest | StatusResult | SessionTicketRequest | SessionTicket | OwnerAcquire | OwnerRenew | OwnerGrant | DeliveryRenew | DeliveryGrant | SessionClosed | DeliveryBlocked | RevocationConfirmed | ReadRequest | ReadResult | CheckpointRequest | CheckpointResult | Presence | TaskStatus | TaskResult | TaskCancel | Proposal | ProposalAccept | UndoRequest | ProtocolError | ManifestRequest | ManifestResult | LifecycleRequest | LifecycleResult | SessionJoin | SessionJoined | SessionLeave | SubmitChanges | ChangesReceived | TaskSubmit | ProposalRequest | CollaborationUpdate | DocumentUpdate | AssetRequest | AssetResult | TicketValidationRequest | TicketValidationResult | RevocationNotice | RuntimeReady | ValidateCheckpoint | CheckpointValidated | PrepareAtomic | AtomicPrepared | ValidateCheckpointCausal | CheckpointValidatedCausal | PrepareAtomicCausal | AtomicPreparedCausal;
+export interface ConfirmedCheckpointBasis {
+  revision: Counter;
+  digest: Digest;
+}
+
+export type SessionOpenType = "session_open";
+
+export type SessionOpenControlProfile = "mooring.session-causal.v1";
+
+export interface SessionOpen {
+  type: SessionOpenType;
+  request_id: Identifier;
+  control_profile: SessionOpenControlProfile;
+  scope: Scope;
+  session_id: Identifier;
+  runtime_ref: Identifier;
+  versions: Versions;
+}
+
+export type SessionRestoreType = "session_restore";
+
+export type SessionRestoreControlProfile = "mooring.session-causal.v1";
+
+export interface SessionRestore {
+  type: SessionRestoreType;
+  request_id: Identifier;
+  control_profile: SessionRestoreControlProfile;
+  scope: Scope;
+  session_id: Identifier;
+  runtime_ref: Identifier;
+  fence: Fence;
+  versions: Versions;
+  checkpoint: Checkpoint;
+  targets: Array<TargetVersion>;
+}
+
+export type SessionOpenedType = "session_opened";
+
+export type SessionOpenedControlProfile = "mooring.session-causal.v1";
+
+export interface SessionOpened {
+  type: SessionOpenedType;
+  request_id: Identifier;
+  control_profile: SessionOpenedControlProfile;
+  scope: Scope;
+  session_id: Identifier;
+  runtime_ref: Identifier;
+  fence: Fence;
+  versions: Versions;
+  confirmed_basis: ConfirmedCheckpointBasis;
+}
+
+export type SessionSubmitBatchType = "session_submit_batch";
+
+export type SessionSubmitBatchControlProfile = "mooring.session-causal.v1";
+
+export interface SessionSubmitBatch {
+  type: SessionSubmitBatchType;
+  request_id: Identifier;
+  control_profile: SessionSubmitBatchControlProfile;
+  scope: Scope;
+  session_id: Identifier;
+  runtime_ref: Identifier;
+  fence: Fence;
+  versions: Versions;
+  confirmed_basis: ConfirmedCheckpointBasis;
+  changes: Array<AtomicChange>;
+}
+
+export type SessionCommitResultType = "session_commit_result";
+
+export type SessionCommitResultControlProfile = "mooring.session-causal.v1";
+
+export interface SessionCommitResult {
+  type: SessionCommitResultType;
+  request_id: Identifier;
+  control_profile: SessionCommitResultControlProfile;
+  scope: Scope;
+  session_id: Identifier;
+  runtime_ref: Identifier;
+  fence: Fence;
+  versions: Versions;
+  receipt: CommitResult;
+  checkpoint: Checkpoint;
+  targets: Array<TargetVersion>;
+}
+
+export type SessionParticipantOpenType = "session_participant_open";
+
+export type SessionParticipantOpenControlProfile = "mooring.session-causal.v1";
+
+export type SessionParticipantOpenJoin = SessionJoin | SessionJoinBounded;
+
+export interface SessionParticipantOpen {
+  type: SessionParticipantOpenType;
+  request_id: Identifier;
+  control_profile: SessionParticipantOpenControlProfile;
+  scope: Scope;
+  session_id: Identifier;
+  runtime_ref: Identifier;
+  fence: Fence;
+  connection_ref: Identifier;
+  join: SessionParticipantOpenJoin;
+}
+
+export type SessionParticipantInputType = "session_participant_input";
+
+export type SessionParticipantInputControlProfile = "mooring.session-causal.v1";
+
+export type SessionParticipantInputMessage = SubmitChanges | TaskSubmit | ReadRequest | StatusRequest | SessionLeave | Presence;
+
+export interface SessionParticipantInput {
+  type: SessionParticipantInputType;
+  request_id: Identifier;
+  control_profile: SessionParticipantInputControlProfile;
+  scope: Scope;
+  session_id: Identifier;
+  runtime_ref: Identifier;
+  fence: Fence;
+  connection_ref: Identifier;
+  participant_ref: Identifier;
+  gate_id: Identifier;
+  permission_version: Counter;
+  message: SessionParticipantInputMessage;
+}
+
+export type BoundedTransferBeginType = "bounded_transfer_begin";
+
+export type BoundedTransferBeginKind = "checkpoint" | "document_update" | "host_receipt";
+
+export interface BoundedTransferBegin {
+  type: BoundedTransferBeginType;
+  request_id: Identifier;
+  scope: Scope;
+  session_id: Identifier;
+  participant_ref: Identifier;
+  gate_id: Identifier;
+  generation: Counter;
+  permission_version: Counter;
+  versions: Versions;
+  revision: Counter;
+  transfer_id: Identifier;
+  kind: BoundedTransferBeginKind;
+  total_bytes: PositiveCounter;
+  chunk_count: PositiveCounter;
+  digest: Digest;
+}
+
+export type BoundedTransferChunkType = "bounded_transfer_chunk";
+
+export interface BoundedTransferChunk {
+  type: BoundedTransferChunkType;
+  request_id: Identifier;
+  scope: Scope;
+  session_id: Identifier;
+  participant_ref: Identifier;
+  gate_id: Identifier;
+  generation: Counter;
+  permission_version: Counter;
+  versions: Versions;
+  revision: Counter;
+  transfer_id: Identifier;
+  index: Counter;
+  data: string;
+}
+
+export type SessionParticipantOutputType = "session_participant_output";
+
+export type SessionParticipantOutputControlProfile = "mooring.session-causal.v1";
+
+export type SessionParticipantOutputMessage = SessionJoined | ReadResult | StatusResult | ChangesReceived | CommitResult | TaskResult | SessionClosed | ProtocolError | Presence | DocumentUpdate | BoundedTransferBegin | BoundedTransferChunk | SessionJoinedBounded;
+
+export interface SessionParticipantOutput {
+  type: SessionParticipantOutputType;
+  request_id: Identifier;
+  control_profile: SessionParticipantOutputControlProfile;
+  scope: Scope;
+  session_id: Identifier;
+  runtime_ref: Identifier;
+  fence: Fence;
+  connection_ref: Identifier;
+  participant_ref: Identifier;
+  gate_id: Identifier;
+  permission_version: Counter;
+  message: SessionParticipantOutputMessage;
+}
+
+export type SessionJoinBoundedType = "session_join_bounded";
+
+export type SessionJoinBoundedTransferProfile = "bounded_transfer_v1";
+
+export interface SessionJoinBounded {
+  type: SessionJoinBoundedType;
+  request_id: Identifier;
+  ticket: string;
+  versions: Versions;
+  transfer_profile: SessionJoinBoundedTransferProfile;
+}
+
+export type SessionJoinedBoundedType = "session_joined_bounded";
+
+export type SessionJoinedBoundedSelectedTransferProfile = "bounded_transfer_v1";
+
+export interface SessionJoinedBounded {
+  type: SessionJoinedBoundedType;
+  request_id: Identifier;
+  joined: SessionJoined;
+  selected_transfer_profile: SessionJoinedBoundedSelectedTransferProfile;
+}
+
+export type SessionRestoredType = "session_restored";
+
+export type SessionRestoredControlProfile = "mooring.session-causal.v1";
+
+export interface SessionRestored {
+  type: SessionRestoredType;
+  request_id: Identifier;
+  control_profile: SessionRestoredControlProfile;
+  scope: Scope;
+  session_id: Identifier;
+  runtime_ref: Identifier;
+  fence: Fence;
+  versions: Versions;
+  confirmed_basis: ConfirmedCheckpointBasis;
+}
+
+export type SessionStatusRequestType = "session_status_request";
+
+export type SessionStatusRequestControlProfile = "mooring.session-causal.v1";
+
+export interface SessionStatusRequest {
+  type: SessionStatusRequestType;
+  request_id: Identifier;
+  control_profile: SessionStatusRequestControlProfile;
+  scope: Scope;
+  session_id: Identifier;
+  runtime_ref: Identifier;
+  fence: Fence;
+  connection_ref: Identifier;
+  participant_ref: Identifier;
+  gate_id: Identifier;
+  permission_version: Counter;
+  message: StatusRequest;
+}
+
+export type SessionStatusResultType = "session_status_result";
+
+export type SessionStatusResultControlProfile = "mooring.session-causal.v1";
+
+export interface SessionStatusResult {
+  type: SessionStatusResultType;
+  request_id: Identifier;
+  control_profile: SessionStatusResultControlProfile;
+  scope: Scope;
+  session_id: Identifier;
+  runtime_ref: Identifier;
+  fence: Fence;
+  connection_ref: Identifier;
+  participant_ref: Identifier;
+  gate_id: Identifier;
+  permission_version: Counter;
+  message: StatusResult;
+}
+
+export type Message = Hello | Welcome | CommitBatch | CommitResult | StatusRequest | StatusResult | SessionTicketRequest | SessionTicket | OwnerAcquire | OwnerRenew | OwnerGrant | DeliveryRenew | DeliveryGrant | SessionClosed | DeliveryBlocked | RevocationConfirmed | ReadRequest | ReadResult | CheckpointRequest | CheckpointResult | Presence | TaskStatus | TaskResult | TaskCancel | Proposal | ProposalAccept | UndoRequest | ProtocolError | ManifestRequest | ManifestResult | LifecycleRequest | LifecycleResult | SessionJoin | SessionJoined | SessionLeave | SubmitChanges | ChangesReceived | TaskSubmit | ProposalRequest | CollaborationUpdate | DocumentUpdate | AssetRequest | AssetResult | TicketValidationRequest | TicketValidationResult | RevocationNotice | RuntimeReady | ValidateCheckpoint | CheckpointValidated | PrepareAtomic | AtomicPrepared | ValidateCheckpointCausal | CheckpointValidatedCausal | PrepareAtomicCausal | AtomicPreparedCausal | SessionOpen | SessionRestore | SessionOpened | SessionSubmitBatch | SessionCommitResult | SessionParticipantOpen | SessionParticipantInput | BoundedTransferBegin | BoundedTransferChunk | SessionParticipantOutput | SessionJoinBounded | SessionJoinedBounded | SessionRestored | SessionStatusRequest | SessionStatusResult;

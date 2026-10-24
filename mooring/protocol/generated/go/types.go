@@ -175,6 +175,7 @@ type HelloControlProfilesItem string
 const (
 	HelloControlProfilesItemMooringPrepareV1       HelloControlProfilesItem = "mooring.prepare.v1"
 	HelloControlProfilesItemMooringPrepareCausalV1 HelloControlProfilesItem = "mooring.prepare-causal.v1"
+	HelloControlProfilesItemMooringSessionCausalV1 HelloControlProfilesItem = "mooring.session-causal.v1"
 )
 
 type Hello struct {
@@ -1173,6 +1174,7 @@ type RuntimeReadySelectedControlProfile string
 const (
 	RuntimeReadySelectedControlProfileMooringPrepareV1       RuntimeReadySelectedControlProfile = "mooring.prepare.v1"
 	RuntimeReadySelectedControlProfileMooringPrepareCausalV1 RuntimeReadySelectedControlProfile = "mooring.prepare-causal.v1"
+	RuntimeReadySelectedControlProfileMooringSessionCausalV1 RuntimeReadySelectedControlProfile = "mooring.session-causal.v1"
 )
 
 type RuntimeReady struct {
@@ -1480,6 +1482,388 @@ type AtomicPreparedCausal struct {
 	MembershipHash        Digest                             `json:"membership_hash"`
 	Outcome               AtomicPreparedCausalOutcome        `json:"outcome"`
 	ControlProfile        AtomicPreparedCausalControlProfile `json:"control_profile"`
+}
+
+type ConfirmedCheckpointBasis struct {
+	Revision Counter `json:"revision"`
+	Digest   Digest  `json:"digest"`
+}
+
+type SessionOpenType string
+
+const (
+	SessionOpenTypeSessionOpen SessionOpenType = "session_open"
+)
+
+type SessionOpenControlProfile string
+
+const (
+	SessionOpenControlProfileMooringSessionCausalV1 SessionOpenControlProfile = "mooring.session-causal.v1"
+)
+
+type SessionOpen struct {
+	Type           SessionOpenType           `json:"type"`
+	RequestID      Identifier                `json:"request_id"`
+	ControlProfile SessionOpenControlProfile `json:"control_profile"`
+	Scope          Scope                     `json:"scope"`
+	SessionID      Identifier                `json:"session_id"`
+	RuntimeRef     Identifier                `json:"runtime_ref"`
+	Versions       Versions                  `json:"versions"`
+}
+
+type SessionRestoreType string
+
+const (
+	SessionRestoreTypeSessionRestore SessionRestoreType = "session_restore"
+)
+
+type SessionRestoreControlProfile string
+
+const (
+	SessionRestoreControlProfileMooringSessionCausalV1 SessionRestoreControlProfile = "mooring.session-causal.v1"
+)
+
+type SessionRestore struct {
+	Type           SessionRestoreType           `json:"type"`
+	RequestID      Identifier                   `json:"request_id"`
+	ControlProfile SessionRestoreControlProfile `json:"control_profile"`
+	Scope          Scope                        `json:"scope"`
+	SessionID      Identifier                   `json:"session_id"`
+	RuntimeRef     Identifier                   `json:"runtime_ref"`
+	Fence          Fence                        `json:"fence"`
+	Versions       Versions                     `json:"versions"`
+	Checkpoint     Checkpoint                   `json:"checkpoint"`
+	Targets        []TargetVersion              `json:"targets"`
+}
+
+type SessionOpenedType string
+
+const (
+	SessionOpenedTypeSessionOpened SessionOpenedType = "session_opened"
+)
+
+type SessionOpenedControlProfile string
+
+const (
+	SessionOpenedControlProfileMooringSessionCausalV1 SessionOpenedControlProfile = "mooring.session-causal.v1"
+)
+
+type SessionOpened struct {
+	Type           SessionOpenedType           `json:"type"`
+	RequestID      Identifier                  `json:"request_id"`
+	ControlProfile SessionOpenedControlProfile `json:"control_profile"`
+	Scope          Scope                       `json:"scope"`
+	SessionID      Identifier                  `json:"session_id"`
+	RuntimeRef     Identifier                  `json:"runtime_ref"`
+	Fence          Fence                       `json:"fence"`
+	Versions       Versions                    `json:"versions"`
+	ConfirmedBasis ConfirmedCheckpointBasis    `json:"confirmed_basis"`
+}
+
+type SessionSubmitBatchType string
+
+const (
+	SessionSubmitBatchTypeSessionSubmitBatch SessionSubmitBatchType = "session_submit_batch"
+)
+
+type SessionSubmitBatchControlProfile string
+
+const (
+	SessionSubmitBatchControlProfileMooringSessionCausalV1 SessionSubmitBatchControlProfile = "mooring.session-causal.v1"
+)
+
+type SessionSubmitBatch struct {
+	Type           SessionSubmitBatchType           `json:"type"`
+	RequestID      Identifier                       `json:"request_id"`
+	ControlProfile SessionSubmitBatchControlProfile `json:"control_profile"`
+	Scope          Scope                            `json:"scope"`
+	SessionID      Identifier                       `json:"session_id"`
+	RuntimeRef     Identifier                       `json:"runtime_ref"`
+	Fence          Fence                            `json:"fence"`
+	Versions       Versions                         `json:"versions"`
+	ConfirmedBasis ConfirmedCheckpointBasis         `json:"confirmed_basis"`
+	Changes        []AtomicChange                   `json:"changes"`
+}
+
+type SessionCommitResultType string
+
+const (
+	SessionCommitResultTypeSessionCommitResult SessionCommitResultType = "session_commit_result"
+)
+
+type SessionCommitResultControlProfile string
+
+const (
+	SessionCommitResultControlProfileMooringSessionCausalV1 SessionCommitResultControlProfile = "mooring.session-causal.v1"
+)
+
+type SessionCommitResult struct {
+	Type           SessionCommitResultType           `json:"type"`
+	RequestID      Identifier                        `json:"request_id"`
+	ControlProfile SessionCommitResultControlProfile `json:"control_profile"`
+	Scope          Scope                             `json:"scope"`
+	SessionID      Identifier                        `json:"session_id"`
+	RuntimeRef     Identifier                        `json:"runtime_ref"`
+	Fence          Fence                             `json:"fence"`
+	Versions       Versions                          `json:"versions"`
+	Receipt        CommitResult                      `json:"receipt"`
+	Checkpoint     Checkpoint                        `json:"checkpoint"`
+	Targets        []TargetVersion                   `json:"targets"`
+}
+
+type SessionParticipantOpenType string
+
+const (
+	SessionParticipantOpenTypeSessionParticipantOpen SessionParticipantOpenType = "session_participant_open"
+)
+
+type SessionParticipantOpenControlProfile string
+
+const (
+	SessionParticipantOpenControlProfileMooringSessionCausalV1 SessionParticipantOpenControlProfile = "mooring.session-causal.v1"
+)
+
+type SessionParticipantOpenJoin = json.RawMessage
+
+type SessionParticipantOpen struct {
+	Type           SessionParticipantOpenType           `json:"type"`
+	RequestID      Identifier                           `json:"request_id"`
+	ControlProfile SessionParticipantOpenControlProfile `json:"control_profile"`
+	Scope          Scope                                `json:"scope"`
+	SessionID      Identifier                           `json:"session_id"`
+	RuntimeRef     Identifier                           `json:"runtime_ref"`
+	Fence          Fence                                `json:"fence"`
+	ConnectionRef  Identifier                           `json:"connection_ref"`
+	Join           SessionParticipantOpenJoin           `json:"join"`
+}
+
+type SessionParticipantInputType string
+
+const (
+	SessionParticipantInputTypeSessionParticipantInput SessionParticipantInputType = "session_participant_input"
+)
+
+type SessionParticipantInputControlProfile string
+
+const (
+	SessionParticipantInputControlProfileMooringSessionCausalV1 SessionParticipantInputControlProfile = "mooring.session-causal.v1"
+)
+
+type SessionParticipantInputMessage = json.RawMessage
+
+type SessionParticipantInput struct {
+	Type              SessionParticipantInputType           `json:"type"`
+	RequestID         Identifier                            `json:"request_id"`
+	ControlProfile    SessionParticipantInputControlProfile `json:"control_profile"`
+	Scope             Scope                                 `json:"scope"`
+	SessionID         Identifier                            `json:"session_id"`
+	RuntimeRef        Identifier                            `json:"runtime_ref"`
+	Fence             Fence                                 `json:"fence"`
+	ConnectionRef     Identifier                            `json:"connection_ref"`
+	ParticipantRef    Identifier                            `json:"participant_ref"`
+	GateID            Identifier                            `json:"gate_id"`
+	PermissionVersion Counter                               `json:"permission_version"`
+	Message           SessionParticipantInputMessage        `json:"message"`
+}
+
+type BoundedTransferBeginType string
+
+const (
+	BoundedTransferBeginTypeBoundedTransferBegin BoundedTransferBeginType = "bounded_transfer_begin"
+)
+
+type BoundedTransferBeginKind string
+
+const (
+	BoundedTransferBeginKindCheckpoint     BoundedTransferBeginKind = "checkpoint"
+	BoundedTransferBeginKindDocumentUpdate BoundedTransferBeginKind = "document_update"
+	BoundedTransferBeginKindHostReceipt    BoundedTransferBeginKind = "host_receipt"
+)
+
+type BoundedTransferBegin struct {
+	Type              BoundedTransferBeginType `json:"type"`
+	RequestID         Identifier               `json:"request_id"`
+	Scope             Scope                    `json:"scope"`
+	SessionID         Identifier               `json:"session_id"`
+	ParticipantRef    Identifier               `json:"participant_ref"`
+	GateID            Identifier               `json:"gate_id"`
+	Generation        Counter                  `json:"generation"`
+	PermissionVersion Counter                  `json:"permission_version"`
+	Versions          Versions                 `json:"versions"`
+	Revision          Counter                  `json:"revision"`
+	TransferID        Identifier               `json:"transfer_id"`
+	Kind              BoundedTransferBeginKind `json:"kind"`
+	TotalBytes        PositiveCounter          `json:"total_bytes"`
+	ChunkCount        PositiveCounter          `json:"chunk_count"`
+	Digest            Digest                   `json:"digest"`
+}
+
+type BoundedTransferChunkType string
+
+const (
+	BoundedTransferChunkTypeBoundedTransferChunk BoundedTransferChunkType = "bounded_transfer_chunk"
+)
+
+type BoundedTransferChunk struct {
+	Type              BoundedTransferChunkType `json:"type"`
+	RequestID         Identifier               `json:"request_id"`
+	Scope             Scope                    `json:"scope"`
+	SessionID         Identifier               `json:"session_id"`
+	ParticipantRef    Identifier               `json:"participant_ref"`
+	GateID            Identifier               `json:"gate_id"`
+	Generation        Counter                  `json:"generation"`
+	PermissionVersion Counter                  `json:"permission_version"`
+	Versions          Versions                 `json:"versions"`
+	Revision          Counter                  `json:"revision"`
+	TransferID        Identifier               `json:"transfer_id"`
+	Index             Counter                  `json:"index"`
+	Data              string                   `json:"data"`
+}
+
+type SessionParticipantOutputType string
+
+const (
+	SessionParticipantOutputTypeSessionParticipantOutput SessionParticipantOutputType = "session_participant_output"
+)
+
+type SessionParticipantOutputControlProfile string
+
+const (
+	SessionParticipantOutputControlProfileMooringSessionCausalV1 SessionParticipantOutputControlProfile = "mooring.session-causal.v1"
+)
+
+type SessionParticipantOutputMessage = json.RawMessage
+
+type SessionParticipantOutput struct {
+	Type              SessionParticipantOutputType           `json:"type"`
+	RequestID         Identifier                             `json:"request_id"`
+	ControlProfile    SessionParticipantOutputControlProfile `json:"control_profile"`
+	Scope             Scope                                  `json:"scope"`
+	SessionID         Identifier                             `json:"session_id"`
+	RuntimeRef        Identifier                             `json:"runtime_ref"`
+	Fence             Fence                                  `json:"fence"`
+	ConnectionRef     Identifier                             `json:"connection_ref"`
+	ParticipantRef    Identifier                             `json:"participant_ref"`
+	GateID            Identifier                             `json:"gate_id"`
+	PermissionVersion Counter                                `json:"permission_version"`
+	Message           SessionParticipantOutputMessage        `json:"message"`
+}
+
+type SessionJoinBoundedType string
+
+const (
+	SessionJoinBoundedTypeSessionJoinBounded SessionJoinBoundedType = "session_join_bounded"
+)
+
+type SessionJoinBoundedTransferProfile string
+
+const (
+	SessionJoinBoundedTransferProfileBoundedTransferV1 SessionJoinBoundedTransferProfile = "bounded_transfer_v1"
+)
+
+type SessionJoinBounded struct {
+	Type            SessionJoinBoundedType            `json:"type"`
+	RequestID       Identifier                        `json:"request_id"`
+	Ticket          string                            `json:"ticket"`
+	Versions        Versions                          `json:"versions"`
+	TransferProfile SessionJoinBoundedTransferProfile `json:"transfer_profile"`
+}
+
+type SessionJoinedBoundedType string
+
+const (
+	SessionJoinedBoundedTypeSessionJoinedBounded SessionJoinedBoundedType = "session_joined_bounded"
+)
+
+type SessionJoinedBoundedSelectedTransferProfile string
+
+const (
+	SessionJoinedBoundedSelectedTransferProfileBoundedTransferV1 SessionJoinedBoundedSelectedTransferProfile = "bounded_transfer_v1"
+)
+
+type SessionJoinedBounded struct {
+	Type                    SessionJoinedBoundedType                    `json:"type"`
+	RequestID               Identifier                                  `json:"request_id"`
+	Joined                  SessionJoined                               `json:"joined"`
+	SelectedTransferProfile SessionJoinedBoundedSelectedTransferProfile `json:"selected_transfer_profile"`
+}
+
+type SessionRestoredType string
+
+const (
+	SessionRestoredTypeSessionRestored SessionRestoredType = "session_restored"
+)
+
+type SessionRestoredControlProfile string
+
+const (
+	SessionRestoredControlProfileMooringSessionCausalV1 SessionRestoredControlProfile = "mooring.session-causal.v1"
+)
+
+type SessionRestored struct {
+	Type           SessionRestoredType           `json:"type"`
+	RequestID      Identifier                    `json:"request_id"`
+	ControlProfile SessionRestoredControlProfile `json:"control_profile"`
+	Scope          Scope                         `json:"scope"`
+	SessionID      Identifier                    `json:"session_id"`
+	RuntimeRef     Identifier                    `json:"runtime_ref"`
+	Fence          Fence                         `json:"fence"`
+	Versions       Versions                      `json:"versions"`
+	ConfirmedBasis ConfirmedCheckpointBasis      `json:"confirmed_basis"`
+}
+
+type SessionStatusRequestType string
+
+const (
+	SessionStatusRequestTypeSessionStatusRequest SessionStatusRequestType = "session_status_request"
+)
+
+type SessionStatusRequestControlProfile string
+
+const (
+	SessionStatusRequestControlProfileMooringSessionCausalV1 SessionStatusRequestControlProfile = "mooring.session-causal.v1"
+)
+
+type SessionStatusRequest struct {
+	Type              SessionStatusRequestType           `json:"type"`
+	RequestID         Identifier                         `json:"request_id"`
+	ControlProfile    SessionStatusRequestControlProfile `json:"control_profile"`
+	Scope             Scope                              `json:"scope"`
+	SessionID         Identifier                         `json:"session_id"`
+	RuntimeRef        Identifier                         `json:"runtime_ref"`
+	Fence             Fence                              `json:"fence"`
+	ConnectionRef     Identifier                         `json:"connection_ref"`
+	ParticipantRef    Identifier                         `json:"participant_ref"`
+	GateID            Identifier                         `json:"gate_id"`
+	PermissionVersion Counter                            `json:"permission_version"`
+	Message           StatusRequest                      `json:"message"`
+}
+
+type SessionStatusResultType string
+
+const (
+	SessionStatusResultTypeSessionStatusResult SessionStatusResultType = "session_status_result"
+)
+
+type SessionStatusResultControlProfile string
+
+const (
+	SessionStatusResultControlProfileMooringSessionCausalV1 SessionStatusResultControlProfile = "mooring.session-causal.v1"
+)
+
+type SessionStatusResult struct {
+	Type              SessionStatusResultType           `json:"type"`
+	RequestID         Identifier                        `json:"request_id"`
+	ControlProfile    SessionStatusResultControlProfile `json:"control_profile"`
+	Scope             Scope                             `json:"scope"`
+	SessionID         Identifier                        `json:"session_id"`
+	RuntimeRef        Identifier                        `json:"runtime_ref"`
+	Fence             Fence                             `json:"fence"`
+	ConnectionRef     Identifier                        `json:"connection_ref"`
+	ParticipantRef    Identifier                        `json:"participant_ref"`
+	GateID            Identifier                        `json:"gate_id"`
+	PermissionVersion Counter                           `json:"permission_version"`
+	Message           StatusResult                      `json:"message"`
 }
 
 type Message = json.RawMessage

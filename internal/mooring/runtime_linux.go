@@ -11,7 +11,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func startRuntime(_ context.Context, c RuntimeConfig, cmd *exec.Cmd) (*Runtime, error) {
+func startRuntime(ctx context.Context, c RuntimeConfig, cmd *exec.Cmd) (*Runtime, error) {
+	return startRuntimeSelected(ctx, c, cmd, false)
+}
+func startRuntimeSelected(_ context.Context, c RuntimeConfig, cmd *exec.Cmd, session bool) (*Runtime, error) {
 	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
 	if err != nil {
 		return nil, err
@@ -40,7 +43,12 @@ func startRuntime(_ context.Context, c RuntimeConfig, cmd *exec.Cmd) (*Runtime, 
 		r.mu.Unlock()
 		close(r.done)
 	}()
-	if err = runtimeHandshake(r.RPC, c.Versions, c.ControlProfile); err != nil {
+	if session {
+		err = runtimeSessionHandshake(r.RPC, c.Versions, c.ControlProfile)
+	} else {
+		err = runtimeHandshake(r.RPC, c.Versions, c.ControlProfile)
+	}
+	if err != nil {
 		_ = r.Close()
 		return nil, err
 	}
