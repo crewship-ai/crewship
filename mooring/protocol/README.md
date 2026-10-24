@@ -119,3 +119,27 @@ this first capability. Prepared checkpoints and effects are speculative; only
 the host can commit them or issue a durable receipt. Invalid checkpoints and
 uncertain engine errors close the private channel as a nonterminal failure;
 there is no fifth large ProtocolError envelope.
+
+The draft `mooring.session-causal.v1` shapes and `session_control::validate`
+reserve a separate inherited-channel session contract. They do not select the
+profile in a running child. Existing strict and causal preparation definitions
+remain identical. The fixed limits in `SessionOpen` describe the initial
+profile; generic protocol maxima are not an advertised session capability.
+Batch envelopes and complete ordinary private participant/status wrappers
+(including metadata) retain the 256 KiB raw/canonical bound. This conservative
+implementation includes wrapper overhead in the budget and rejects oversized
+ingress before sealing while retaining its draft. Escaped original raw bytes
+cannot disappear through normalization. Only full SessionRestore and
+SessionCommitResult may use the larger private session-frame bound. Larger checkpoint, document-update or host-receipt payloads
+require explicit `bounded_transfer_v1` selection and bounded chunks; wrapping
+an ordinary public message cannot enlarge its limit.
+
+The session fixtures execute closed shapes, private directions and profile
+separation. Their `semantic_cases` are pending driver requirements, not runtime
+proof: host-captured FIFO status barriers, exact owner/session/gate binding,
+retained basis validation, precommit output budgeting, authenticated receipts,
+chunk digest/reassembly and per-chunk send fences still require integration.
+No host `Saved`, admission, live distribution or recovery guarantee follows
+from a valid shape. The actual driver must compose the existing causal prepare
+validator explicitly and keep preparation progressing while durable replies
+are pending on its single inherited-channel reader.

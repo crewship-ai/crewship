@@ -218,3 +218,30 @@ writer against immutable dependency closure before the existing commit fences.
 The empty policy retains strict-current behavior. This store primitive does not
 select a private runtime profile or establish application/participant authority;
 those require separately qualified integration.
+
+`StartSessionRuntime` is an unused, default-off transport for the explicit
+`mooring.session-causal.v1` profile and WordCraft 0.4.0/0.2.0/0.10.0 tuple.
+It owns one inherited-FD reader. Correlated checkpoint preparation remains able
+to progress while an actor control awaits its host response; the old `Runtime`
+and `Exchange` are not exported from it and their factories reject this profile.
+`Open` uses the registry's one existing session ID; `Restore` preserves the
+host's exact checkpoint wrapper. Both return correlated transport responses,
+not proof of owner validity or installed document state.
+
+Outstanding requests, queued controls, borrowed controls and retained replies
+share 128 entries and 4 MiB of encoded control bytes. Ordinary whole wrappers
+(including metadata) retain the 256 KiB raw/canonical ceiling; only the explicit
+checkpoint/commit and causal preparation purposes use the 2 MiB private limit.
+These are retained-queue bounds, not a total process RSS bound or caller-memory
+bound. One writer enforces a five-second whole-method deadline. Cancellation
+before sending removes only that request; cancellation after sending poisons
+and kills the channel. `Done` closes after both actual child exit and reader
+exit. Original submitted intents remain the caller's recovery responsibility.
+
+This slice does not enable a CLI session actor, participant route or live
+submission. The lifecycle manager must bind actual owner lease, startup basis,
+renewal nonces and restored inventory before activation. The host dispatcher
+must process sealed submissions/status barriers in FIFO order, stop on an
+uncertain prefix, recheck original per-operation authority and final delivery
+gates, and reject encoded output over budget before SQL COMMIT. Readiness,
+correlation and private process identity do not supply those permissions.

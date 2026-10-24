@@ -9,7 +9,12 @@ import (
 // CausalRPCPrepareAdapter is an explicit causal-only capability. Its private
 // base can only be constructed from actual successful Runtime negotiation.
 // Configuration strings and deserialized RuntimeReady objects are not proof.
-type CausalRPCPrepareAdapter struct{ base *RPCPrepareAdapter }
+type CausalRPCPrepareAdapter struct {
+	base *RPCPrepareAdapter
+	// Only the concrete session factory installs this private correlated lane.
+	// Nil preserves the legacy exclusive Runtime.Exchange path unchanged.
+	roundTrip func(context.Context, []byte) ([]byte, error)
+}
 
 func NewCausalRPCPrepareAdapter(r *Runtime, scope SessionKey, versions RuntimeVersions) (*CausalRPCPrepareAdapter, error) {
 	if r == nil || r.RPC == nil || r.selectedControlProfile != PrivateCausalPrepareProfile || r.selectedVersions != versions || !batchID(scope.WorkspaceID) || !batchID(scope.ArtifactID) || !batchID(scope.ApplicationID) {
@@ -35,7 +40,12 @@ func (a *CausalRPCPrepareAdapter) exchange(ctx context.Context, request any) ([]
 	if err != nil {
 		return nil, err
 	}
-	response, err := a.base.runtime.Exchange(ctx, raw)
+	var response []byte
+	if a.roundTrip != nil {
+		response, err = a.roundTrip(ctx, raw)
+	} else {
+		response, err = a.base.runtime.Exchange(ctx, raw)
+	}
 	if err != nil {
 		return nil, err
 	}

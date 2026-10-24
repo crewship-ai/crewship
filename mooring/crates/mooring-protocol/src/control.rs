@@ -39,17 +39,18 @@ pub fn validate_bootstrap(raw: &[u8], peer: Peer) -> Result<CanonicalValue, Wire
 }
 
 pub fn is_control_type(value: &str) -> bool {
-    matches!(
-        value,
-        "validate_checkpoint"
-            | "checkpoint_validated"
-            | "prepare_atomic"
-            | "atomic_prepared"
-            | "validate_checkpoint_causal"
-            | "checkpoint_validated_causal"
-            | "prepare_atomic_causal"
-            | "atomic_prepared_causal"
-    )
+    crate::session_control::is_private_type(value)
+        || matches!(
+            value,
+            "validate_checkpoint"
+                | "checkpoint_validated"
+                | "prepare_atomic"
+                | "atomic_prepared"
+                | "validate_checkpoint_causal"
+                | "checkpoint_validated_causal"
+                | "prepare_atomic_causal"
+                | "atomic_prepared_causal"
+        )
 }
 
 /// Exactly four control envelopes, on an explicitly selected private channel.
