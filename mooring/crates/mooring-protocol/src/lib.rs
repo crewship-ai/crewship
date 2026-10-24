@@ -5,6 +5,7 @@ pub mod boundary;
 pub mod canonical;
 pub mod control;
 mod generated;
+pub mod session_control;
 mod shape;
 pub mod wire;
 pub use generated::*;

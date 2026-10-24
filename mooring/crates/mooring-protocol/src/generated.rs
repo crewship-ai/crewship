@@ -239,6 +239,8 @@ pub enum HelloControlProfilesItem {
     MooringPrepareV1,
     #[serde(rename = "mooring.prepare-causal.v1")]
     MooringPrepareCausalV1,
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1419,6 +1421,8 @@ pub enum RuntimeReadySelectedControlProfile {
     MooringPrepareV1,
     #[serde(rename = "mooring.prepare-causal.v1")]
     MooringPrepareCausalV1,
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1788,6 +1792,452 @@ pub struct AtomicPreparedCausal {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConfirmedCheckpointBasis {
+    pub revision: Counter,
+    pub digest: Digest,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionOpenType {
+    #[serde(rename = "session_open")]
+    SessionOpen,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionOpenControlProfile {
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionOpen {
+    pub r#type: SessionOpenType,
+    pub request_id: Identifier,
+    pub control_profile: SessionOpenControlProfile,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
+    pub versions: Versions,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionRestoreType {
+    #[serde(rename = "session_restore")]
+    SessionRestore,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionRestoreControlProfile {
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionRestore {
+    pub r#type: SessionRestoreType,
+    pub request_id: Identifier,
+    pub control_profile: SessionRestoreControlProfile,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
+    pub fence: Fence,
+    pub versions: Versions,
+    pub checkpoint: Checkpoint,
+    pub targets: Vec<TargetVersion>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionOpenedType {
+    #[serde(rename = "session_opened")]
+    SessionOpened,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionOpenedControlProfile {
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionOpened {
+    pub r#type: SessionOpenedType,
+    pub request_id: Identifier,
+    pub control_profile: SessionOpenedControlProfile,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
+    pub fence: Fence,
+    pub versions: Versions,
+    pub confirmed_basis: ConfirmedCheckpointBasis,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionSubmitBatchType {
+    #[serde(rename = "session_submit_batch")]
+    SessionSubmitBatch,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionSubmitBatchControlProfile {
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionSubmitBatch {
+    pub r#type: SessionSubmitBatchType,
+    pub request_id: Identifier,
+    pub control_profile: SessionSubmitBatchControlProfile,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
+    pub fence: Fence,
+    pub versions: Versions,
+    pub confirmed_basis: ConfirmedCheckpointBasis,
+    pub changes: Vec<AtomicChange>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionCommitResultType {
+    #[serde(rename = "session_commit_result")]
+    SessionCommitResult,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionCommitResultControlProfile {
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionCommitResult {
+    pub r#type: SessionCommitResultType,
+    pub request_id: Identifier,
+    pub control_profile: SessionCommitResultControlProfile,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
+    pub fence: Fence,
+    pub versions: Versions,
+    pub receipt: CommitResult,
+    pub checkpoint: Checkpoint,
+    pub targets: Vec<TargetVersion>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionParticipantOpenType {
+    #[serde(rename = "session_participant_open")]
+    SessionParticipantOpen,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionParticipantOpenControlProfile {
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SessionParticipantOpenJoin {
+    SessionJoin(SessionJoin),
+    SessionJoinBounded(SessionJoinBounded),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionParticipantOpen {
+    pub r#type: SessionParticipantOpenType,
+    pub request_id: Identifier,
+    pub control_profile: SessionParticipantOpenControlProfile,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
+    pub fence: Fence,
+    pub connection_ref: Identifier,
+    pub join: SessionParticipantOpenJoin,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionParticipantInputType {
+    #[serde(rename = "session_participant_input")]
+    SessionParticipantInput,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionParticipantInputControlProfile {
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SessionParticipantInputMessage {
+    SubmitChanges(SubmitChanges),
+    TaskSubmit(TaskSubmit),
+    ReadRequest(ReadRequest),
+    StatusRequest(StatusRequest),
+    SessionLeave(SessionLeave),
+    Presence(Presence),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionParticipantInput {
+    pub r#type: SessionParticipantInputType,
+    pub request_id: Identifier,
+    pub control_profile: SessionParticipantInputControlProfile,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
+    pub fence: Fence,
+    pub connection_ref: Identifier,
+    pub participant_ref: Identifier,
+    pub gate_id: Identifier,
+    pub permission_version: Counter,
+    pub message: SessionParticipantInputMessage,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum BoundedTransferBeginType {
+    #[serde(rename = "bounded_transfer_begin")]
+    BoundedTransferBegin,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum BoundedTransferBeginKind {
+    #[serde(rename = "checkpoint")]
+    Checkpoint,
+    #[serde(rename = "document_update")]
+    DocumentUpdate,
+    #[serde(rename = "host_receipt")]
+    HostReceipt,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BoundedTransferBegin {
+    pub r#type: BoundedTransferBeginType,
+    pub request_id: Identifier,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub participant_ref: Identifier,
+    pub gate_id: Identifier,
+    pub generation: Counter,
+    pub permission_version: Counter,
+    pub versions: Versions,
+    pub revision: Counter,
+    pub transfer_id: Identifier,
+    pub kind: BoundedTransferBeginKind,
+    pub total_bytes: PositiveCounter,
+    pub chunk_count: PositiveCounter,
+    pub digest: Digest,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum BoundedTransferChunkType {
+    #[serde(rename = "bounded_transfer_chunk")]
+    BoundedTransferChunk,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BoundedTransferChunk {
+    pub r#type: BoundedTransferChunkType,
+    pub request_id: Identifier,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub participant_ref: Identifier,
+    pub gate_id: Identifier,
+    pub generation: Counter,
+    pub permission_version: Counter,
+    pub versions: Versions,
+    pub revision: Counter,
+    pub transfer_id: Identifier,
+    pub index: Counter,
+    pub data: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionParticipantOutputType {
+    #[serde(rename = "session_participant_output")]
+    SessionParticipantOutput,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionParticipantOutputControlProfile {
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SessionParticipantOutputMessage {
+    SessionJoined(SessionJoined),
+    ReadResult(ReadResult),
+    StatusResult(StatusResult),
+    ChangesReceived(ChangesReceived),
+    CommitResult(CommitResult),
+    TaskResult(TaskResult),
+    SessionClosed(SessionClosed),
+    ProtocolError(ProtocolError),
+    Presence(Presence),
+    DocumentUpdate(DocumentUpdate),
+    BoundedTransferBegin(BoundedTransferBegin),
+    BoundedTransferChunk(BoundedTransferChunk),
+    SessionJoinedBounded(SessionJoinedBounded),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionParticipantOutput {
+    pub r#type: SessionParticipantOutputType,
+    pub request_id: Identifier,
+    pub control_profile: SessionParticipantOutputControlProfile,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
+    pub fence: Fence,
+    pub connection_ref: Identifier,
+    pub participant_ref: Identifier,
+    pub gate_id: Identifier,
+    pub permission_version: Counter,
+    pub message: SessionParticipantOutputMessage,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionJoinBoundedType {
+    #[serde(rename = "session_join_bounded")]
+    SessionJoinBounded,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionJoinBoundedTransferProfile {
+    #[serde(rename = "bounded_transfer_v1")]
+    BoundedTransferV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionJoinBounded {
+    pub r#type: SessionJoinBoundedType,
+    pub request_id: Identifier,
+    pub ticket: String,
+    pub versions: Versions,
+    pub transfer_profile: SessionJoinBoundedTransferProfile,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionJoinedBoundedType {
+    #[serde(rename = "session_joined_bounded")]
+    SessionJoinedBounded,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionJoinedBoundedSelectedTransferProfile {
+    #[serde(rename = "bounded_transfer_v1")]
+    BoundedTransferV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionJoinedBounded {
+    pub r#type: SessionJoinedBoundedType,
+    pub request_id: Identifier,
+    pub joined: SessionJoined,
+    pub selected_transfer_profile: SessionJoinedBoundedSelectedTransferProfile,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionRestoredType {
+    #[serde(rename = "session_restored")]
+    SessionRestored,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionRestoredControlProfile {
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionRestored {
+    pub r#type: SessionRestoredType,
+    pub request_id: Identifier,
+    pub control_profile: SessionRestoredControlProfile,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
+    pub fence: Fence,
+    pub versions: Versions,
+    pub confirmed_basis: ConfirmedCheckpointBasis,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionStatusRequestType {
+    #[serde(rename = "session_status_request")]
+    SessionStatusRequest,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionStatusRequestControlProfile {
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionStatusRequest {
+    pub r#type: SessionStatusRequestType,
+    pub request_id: Identifier,
+    pub control_profile: SessionStatusRequestControlProfile,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
+    pub fence: Fence,
+    pub connection_ref: Identifier,
+    pub participant_ref: Identifier,
+    pub gate_id: Identifier,
+    pub permission_version: Counter,
+    pub message: StatusRequest,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionStatusResultType {
+    #[serde(rename = "session_status_result")]
+    SessionStatusResult,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionStatusResultControlProfile {
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionStatusResult {
+    pub r#type: SessionStatusResultType,
+    pub request_id: Identifier,
+    pub control_profile: SessionStatusResultControlProfile,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
+    pub fence: Fence,
+    pub connection_ref: Identifier,
+    pub participant_ref: Identifier,
+    pub gate_id: Identifier,
+    pub permission_version: Counter,
+    pub message: StatusResult,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Message {
     Hello(Hello),
@@ -1845,4 +2295,19 @@ pub enum Message {
     CheckpointValidatedCausal(CheckpointValidatedCausal),
     PrepareAtomicCausal(PrepareAtomicCausal),
     AtomicPreparedCausal(AtomicPreparedCausal),
+    SessionOpen(SessionOpen),
+    SessionRestore(SessionRestore),
+    SessionOpened(SessionOpened),
+    SessionSubmitBatch(SessionSubmitBatch),
+    SessionCommitResult(SessionCommitResult),
+    SessionParticipantOpen(SessionParticipantOpen),
+    SessionParticipantInput(SessionParticipantInput),
+    BoundedTransferBegin(BoundedTransferBegin),
+    BoundedTransferChunk(BoundedTransferChunk),
+    SessionParticipantOutput(SessionParticipantOutput),
+    SessionJoinBounded(SessionJoinBounded),
+    SessionJoinedBounded(SessionJoinedBounded),
+    SessionRestored(SessionRestored),
+    SessionStatusRequest(SessionStatusRequest),
+    SessionStatusResult(SessionStatusResult),
 }

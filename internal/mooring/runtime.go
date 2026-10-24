@@ -157,6 +157,12 @@ func runtimeHandshake(rpc *RPC, versions RuntimeVersions, profile string) error 
 	if profile != "" && !privatePrepareProfile(profile) {
 		return ErrRuntimeHandshake
 	}
+	return runtimeHandshakeSelected(rpc, versions, profile, validateRuntimeReady)
+}
+
+// Private construction seam. The session constructor never publishes *Runtime
+// or permits legacy Exchange to read its stream.
+func runtimeHandshakeSelected(rpc *RPC, versions RuntimeVersions, profile string, validate func([]byte, RuntimeVersions, string) bool) error {
 	if err := rpc.conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		return err
 	}
@@ -177,13 +183,13 @@ func runtimeHandshake(rpc *RPC, versions RuntimeVersions, profile string) error 
 	if err != nil {
 		return err
 	}
-	if !validateRuntimeReady(frame, versions, profile) {
+	if !validate(frame, versions, profile) {
 		return ErrRuntimeHandshake
 	}
 	if err := rpc.conn.SetDeadline(time.Time{}); err != nil {
 		return err
 	}
-	if privatePrepareProfile(profile) {
+	if profile != "" {
 		rpc.maxFrame = MaxPrivatePrepareRPCFrame
 	}
 	return nil

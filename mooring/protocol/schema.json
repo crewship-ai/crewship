@@ -167,6 +167,51 @@
     },
     {
       "$ref": "#/$defs/AtomicPreparedCausal"
+    },
+    {
+      "$ref": "#/$defs/SessionOpen"
+    },
+    {
+      "$ref": "#/$defs/SessionRestore"
+    },
+    {
+      "$ref": "#/$defs/SessionOpened"
+    },
+    {
+      "$ref": "#/$defs/SessionSubmitBatch"
+    },
+    {
+      "$ref": "#/$defs/SessionCommitResult"
+    },
+    {
+      "$ref": "#/$defs/SessionParticipantOpen"
+    },
+    {
+      "$ref": "#/$defs/SessionParticipantInput"
+    },
+    {
+      "$ref": "#/$defs/BoundedTransferBegin"
+    },
+    {
+      "$ref": "#/$defs/BoundedTransferChunk"
+    },
+    {
+      "$ref": "#/$defs/SessionParticipantOutput"
+    },
+    {
+      "$ref": "#/$defs/SessionJoinBounded"
+    },
+    {
+      "$ref": "#/$defs/SessionJoinedBounded"
+    },
+    {
+      "$ref": "#/$defs/SessionRestored"
+    },
+    {
+      "$ref": "#/$defs/SessionStatusRequest"
+    },
+    {
+      "$ref": "#/$defs/SessionStatusResult"
     }
   ],
   "$defs": {
@@ -638,11 +683,12 @@
           "items": {
             "enum": [
               "mooring.prepare.v1",
-              "mooring.prepare-causal.v1"
+              "mooring.prepare-causal.v1",
+              "mooring.session-causal.v1"
             ]
           },
           "minItems": 1,
-          "maxItems": 2,
+          "maxItems": 3,
           "uniqueItems": true,
           "description": "Optional inherited-FD private bootstrap offer only. Absent preserves existing bootstrap. Participant transports must reject this field semantically."
         }
@@ -3220,7 +3266,8 @@
         "selected_control_profile": {
           "enum": [
             "mooring.prepare.v1",
-            "mooring.prepare-causal.v1"
+            "mooring.prepare-causal.v1",
+            "mooring.session-causal.v1"
           ],
           "description": "Optional exact offered inherited-FD private control profile selection. Absent retains old262144 bound; never infer support from versions alone."
         }
@@ -3923,6 +3970,865 @@
       "additionalProperties": false,
       "x-direction": "runtime_to_host",
       "description": "Separately negotiated causal inherited-host profile. Private inherited RPC candidate/failure only. No Saved/issuer/durability/authority. Exact request/checkpoint/change/membership/per-op effect binding is semantic validation."
+    },
+    "ConfirmedCheckpointBasis": {
+      "type": "object",
+      "properties": {
+        "revision": {
+          "$ref": "#/$defs/Counter"
+        },
+        "digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "revision",
+        "digest"
+      ],
+      "additionalProperties": false,
+      "description": "Retained canonical checkpoint at an atomic boundary. Host checks inside the same SQL writer; not a client-asserted current head."
+    },
+    "SessionOpen": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_open"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "control_profile": {
+          "const": "mooring.session-causal.v1"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runtime_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "control_profile",
+        "scope",
+        "session_id",
+        "runtime_ref",
+        "versions"
+      ],
+      "additionalProperties": false,
+      "x-direction": "host_to_runtime",
+      "description": "Small initialization request. Does not grant participant authority. Runtime requests real OwnerGrant before accepting restoration. Named profile pins exact limits: 100ms/256ops/262144 encoded batch; 4 outstanding/1048576 encoded flight; 262144 unsent; 100 participants; per-gate input262144/global4194304; delivery2000ms; private frame2097152; queued controls4194304/128; transfer2097152/chunks65536/max32/reassembly4194304. No implicit numeric defaults or generic maximum advertisement."
+    },
+    "SessionRestore": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_restore"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "control_profile": {
+          "const": "mooring.session-causal.v1"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runtime_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "fence": {
+          "$ref": "#/$defs/Fence"
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/Checkpoint"
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TargetVersion"
+          },
+          "minItems": 0,
+          "maxItems": 4096
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "control_profile",
+        "scope",
+        "session_id",
+        "runtime_ref",
+        "fence",
+        "versions",
+        "checkpoint",
+        "targets"
+      ],
+      "additionalProperties": false,
+      "x-direction": "host_to_runtime",
+      "description": "Only after correlated current OwnerGrant. Complete authenticated checkpoint and target inventory; no speculative candidate installation."
+    },
+    "SessionOpened": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_opened"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "control_profile": {
+          "const": "mooring.session-causal.v1"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runtime_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "fence": {
+          "$ref": "#/$defs/Fence"
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        },
+        "confirmed_basis": {
+          "$ref": "#/$defs/ConfirmedCheckpointBasis"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "control_profile",
+        "scope",
+        "session_id",
+        "runtime_ref",
+        "fence",
+        "versions",
+        "confirmed_basis"
+      ],
+      "additionalProperties": false,
+      "x-direction": "runtime_to_host",
+      "description": "Running confirmation only after full restoration. No authority or durability receipt."
+    },
+    "SessionSubmitBatch": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_submit_batch"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "control_profile": {
+          "const": "mooring.session-causal.v1"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runtime_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "fence": {
+          "$ref": "#/$defs/Fence"
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        },
+        "confirmed_basis": {
+          "$ref": "#/$defs/ConfirmedCheckpointBasis"
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AtomicChange"
+          },
+          "minItems": 1,
+          "maxItems": 256
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "control_profile",
+        "scope",
+        "session_id",
+        "runtime_ref",
+        "fence",
+        "versions",
+        "confirmed_basis",
+        "changes"
+      ],
+      "additionalProperties": false,
+      "x-direction": "runtime_to_host",
+      "description": "Explicit queued-submit. Host qualifies retained confirmed basis inside writer and derives CURRENT transport expected head there. Original immutable changes remain byte-semantic unchanged. Inner request raw/JCS <=262144 even on private2MiB channel."
+    },
+    "SessionCommitResult": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_commit_result"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "control_profile": {
+          "const": "mooring.session-causal.v1"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runtime_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "fence": {
+          "$ref": "#/$defs/Fence"
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        },
+        "receipt": {
+          "$ref": "#/$defs/CommitResult"
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/Checkpoint"
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TargetVersion"
+          },
+          "minItems": 0,
+          "maxItems": 4096
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "control_profile",
+        "scope",
+        "session_id",
+        "runtime_ref",
+        "fence",
+        "versions",
+        "receipt",
+        "checkpoint",
+        "targets"
+      ],
+      "additionalProperties": false,
+      "x-direction": "host_to_runtime",
+      "description": "Bound exact host durable result plus authoritative resulting checkpoint/inventory. Whole encoded output fits negotiated capacity BEFORE COMMIT, not after. No receipt truncation or rewrite."
+    },
+    "SessionParticipantOpen": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_participant_open"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "control_profile": {
+          "const": "mooring.session-causal.v1"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runtime_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "fence": {
+          "$ref": "#/$defs/Fence"
+        },
+        "connection_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "join": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/SessionJoin"
+            },
+            {
+              "$ref": "#/$defs/SessionJoinBounded"
+            }
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "control_profile",
+        "scope",
+        "session_id",
+        "runtime_ref",
+        "fence",
+        "connection_ref",
+        "join"
+      ],
+      "additionalProperties": false,
+      "x-direction": "host_to_runtime",
+      "description": "Go-authenticated conduit binds opaque connection. Rust separately validates one-use ticket over inherited host channel and starts first-send BOOTTIME gate."
+    },
+    "SessionParticipantInput": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_participant_input"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "control_profile": {
+          "const": "mooring.session-causal.v1"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runtime_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "fence": {
+          "$ref": "#/$defs/Fence"
+        },
+        "connection_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "participant_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "gate_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "permission_version": {
+          "$ref": "#/$defs/Counter"
+        },
+        "message": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/SubmitChanges"
+            },
+            {
+              "$ref": "#/$defs/TaskSubmit"
+            },
+            {
+              "$ref": "#/$defs/ReadRequest"
+            },
+            {
+              "$ref": "#/$defs/StatusRequest"
+            },
+            {
+              "$ref": "#/$defs/SessionLeave"
+            },
+            {
+              "$ref": "#/$defs/Presence"
+            }
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "control_profile",
+        "scope",
+        "session_id",
+        "runtime_ref",
+        "fence",
+        "connection_ref",
+        "participant_ref",
+        "gate_id",
+        "permission_version",
+        "message"
+      ],
+      "additionalProperties": false,
+      "x-direction": "host_to_runtime",
+      "description": "Inner public message remains <=262144 raw/JCS. Immutable mutations must first have exact host-sealed ingress proof; participant_ref alone is no author authority."
+    },
+    "BoundedTransferBegin": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "bounded_transfer_begin"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "participant_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "gate_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "generation": {
+          "$ref": "#/$defs/Counter"
+        },
+        "permission_version": {
+          "$ref": "#/$defs/Counter"
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        },
+        "revision": {
+          "$ref": "#/$defs/Counter"
+        },
+        "transfer_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "kind": {
+          "enum": [
+            "checkpoint",
+            "document_update",
+            "host_receipt"
+          ]
+        },
+        "total_bytes": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "chunk_count": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "scope",
+        "session_id",
+        "participant_ref",
+        "gate_id",
+        "generation",
+        "permission_version",
+        "versions",
+        "revision",
+        "transfer_id",
+        "kind",
+        "total_bytes",
+        "chunk_count",
+        "digest"
+      ],
+      "additionalProperties": false,
+      "x-direction": "runtime_to_participant",
+      "description": "Requires explicitly selected participant bounded_transfer_v1 feature. Only known inner grammar, total raw/JCS<=2097152, exactlyceil(total/65536) chunks<=32, one active/gate and aggregate reassembly<=4194304. Does not widen public raw/canonical per-frame262144."
+    },
+    "BoundedTransferChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "bounded_transfer_chunk"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "participant_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "gate_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "generation": {
+          "$ref": "#/$defs/Counter"
+        },
+        "permission_version": {
+          "$ref": "#/$defs/Counter"
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        },
+        "revision": {
+          "$ref": "#/$defs/Counter"
+        },
+        "transfer_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "index": {
+          "$ref": "#/$defs/Counter"
+        },
+        "data": {
+          "type": "string",
+          "maxLength": 87384,
+          "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+          "not": {
+            "pattern": "[^A-Za-z0-9+/=]"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "scope",
+        "session_id",
+        "participant_ref",
+        "gate_id",
+        "generation",
+        "permission_version",
+        "versions",
+        "revision",
+        "transfer_id",
+        "index",
+        "data"
+      ],
+      "additionalProperties": false,
+      "x-direction": "runtime_to_participant",
+      "description": "Strict canonical base64 incl padbits, decoded chunk<=65536. Exact increasingindex<chunk_count, all bindings match. Rust BOOTTIME and Go final gate before EACH chunk; closure discards partial. Whole digest and known inner shape/bindings verified before atomic installation."
+    },
+    "SessionParticipantOutput": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_participant_output"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "control_profile": {
+          "const": "mooring.session-causal.v1"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runtime_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "fence": {
+          "$ref": "#/$defs/Fence"
+        },
+        "connection_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "participant_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "gate_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "permission_version": {
+          "$ref": "#/$defs/Counter"
+        },
+        "message": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/SessionJoined"
+            },
+            {
+              "$ref": "#/$defs/ReadResult"
+            },
+            {
+              "$ref": "#/$defs/StatusResult"
+            },
+            {
+              "$ref": "#/$defs/ChangesReceived"
+            },
+            {
+              "$ref": "#/$defs/CommitResult"
+            },
+            {
+              "$ref": "#/$defs/TaskResult"
+            },
+            {
+              "$ref": "#/$defs/SessionClosed"
+            },
+            {
+              "$ref": "#/$defs/ProtocolError"
+            },
+            {
+              "$ref": "#/$defs/Presence"
+            },
+            {
+              "$ref": "#/$defs/DocumentUpdate"
+            },
+            {
+              "$ref": "#/$defs/BoundedTransferBegin"
+            },
+            {
+              "$ref": "#/$defs/BoundedTransferChunk"
+            },
+            {
+              "$ref": "#/$defs/SessionJoinedBounded"
+            }
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "control_profile",
+        "scope",
+        "session_id",
+        "runtime_ref",
+        "fence",
+        "connection_ref",
+        "participant_ref",
+        "gate_id",
+        "permission_version",
+        "message"
+      ],
+      "additionalProperties": false,
+      "x-direction": "runtime_to_host",
+      "description": "Go final bounded-send gate mandatory. Host-origin receipt must exactly match retained actual committed result/correlation; never infer Saved authority from issuer or child runtime. Inner ordinary public frames remain<=262144; large known payloads only chunked."
+    },
+    "SessionJoinBounded": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_join_bounded"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "ticket": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        },
+        "transfer_profile": {
+          "const": "bounded_transfer_v1"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "ticket",
+        "versions",
+        "transfer_profile"
+      ],
+      "additionalProperties": false,
+      "x-direction": "participant_to_runtime",
+      "description": "Separate explicit transfer-capable join. Old SessionJoin remains unchanged and cannot receive an overlimit checkpoint."
+    },
+    "SessionJoinedBounded": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_joined_bounded"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "joined": {
+          "$ref": "#/$defs/SessionJoined"
+        },
+        "selected_transfer_profile": {
+          "const": "bounded_transfer_v1"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "joined",
+        "selected_transfer_profile"
+      ],
+      "additionalProperties": false,
+      "x-direction": "runtime_to_participant",
+      "description": "Exact negotiated selection only when requested; unchanged SessionJoined bindings inside. No capability from unrequested feature."
+    },
+    "SessionRestored": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_restored"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "control_profile": {
+          "const": "mooring.session-causal.v1"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runtime_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "fence": {
+          "$ref": "#/$defs/Fence"
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        },
+        "confirmed_basis": {
+          "$ref": "#/$defs/ConfirmedCheckpointBasis"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "control_profile",
+        "scope",
+        "session_id",
+        "runtime_ref",
+        "fence",
+        "versions",
+        "confirmed_basis"
+      ],
+      "additionalProperties": false,
+      "x-direction": "runtime_to_host",
+      "description": "Echoes SessionRestore request_id after full restoration. SessionOpened separately echoes original SessionOpen request_id once owner+restore startup completed."
+    },
+    "SessionStatusRequest": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_status_request"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "control_profile": {
+          "const": "mooring.session-causal.v1"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runtime_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "fence": {
+          "$ref": "#/$defs/Fence"
+        },
+        "connection_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "participant_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "gate_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "permission_version": {
+          "$ref": "#/$defs/Counter"
+        },
+        "message": {
+          "$ref": "#/$defs/StatusRequest"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "control_profile",
+        "scope",
+        "session_id",
+        "runtime_ref",
+        "fence",
+        "connection_ref",
+        "participant_ref",
+        "gate_id",
+        "permission_version",
+        "message"
+      ],
+      "additionalProperties": false,
+      "x-direction": "runtime_to_host",
+      "description": "Host-captured FIFO barrier after every earlier accepted submit, never a child-selected sequence. Current external reader authorization before lookup; exact original fingerprint. Rust retains unsent/uncertain intent and never fabricates terminal unknown."
+    },
+    "SessionStatusResult": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_status_result"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "control_profile": {
+          "const": "mooring.session-causal.v1"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runtime_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "fence": {
+          "$ref": "#/$defs/Fence"
+        },
+        "connection_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "participant_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "gate_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "permission_version": {
+          "$ref": "#/$defs/Counter"
+        },
+        "message": {
+          "$ref": "#/$defs/StatusResult"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "control_profile",
+        "scope",
+        "session_id",
+        "runtime_ref",
+        "fence",
+        "connection_ref",
+        "participant_ref",
+        "gate_id",
+        "permission_version",
+        "message"
+      ],
+      "additionalProperties": false,
+      "x-direction": "host_to_runtime",
+      "description": "Host-captured FIFO barrier after every earlier accepted submit, never a child-selected sequence. Current external reader authorization before lookup; exact original fingerprint. Rust retains unsent/uncertain intent and never fabricates terminal unknown."
     }
   },
   "x-schema-version": "0.4.0"
