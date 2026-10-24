@@ -27,6 +27,12 @@ existing panic diagnostics. Unsupported protected-output combinations are
 refused before tracked state is read. These changes add no private environment,
 completion proof or native-execution qualification.
 
+Strict runs select a request-local discarded logger throughout preflight, stream,
+state, cleanup and detached supervision. Their generic journal boundary retains
+only a fixed summary and a small numeric/boolean outcome metadata whitelist;
+provider errors, argv, arbitrary reason strings and references are omitted.
+The shared logger and ordinary journal behavior are unchanged.
+
 `mooring_core::adapter::PrepareAdapter` is a pure application boundary: validate
 an opaque checkpoint and prepare one normalized immutable atomic change from a
 restored/forked authoritative state. Its candidate owns a full checkpoint and
