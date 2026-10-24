@@ -415,7 +415,7 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	// the API can report it to administrators and, in same-host mode, show
 	// it the public origin of signed-in browser requests.
 	editor := newEditorOrigin(cfg, logger)
-	if cfg.GridCraft.Enabled && cfg.GridCraft.EditorEnabled {
+	if (cfg.GridCraft.Enabled && cfg.GridCraft.EditorEnabled) || cfg.Mooring.Enabled {
 		s.editor = editor
 	}
 

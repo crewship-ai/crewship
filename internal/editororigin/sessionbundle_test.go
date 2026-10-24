@@ -76,3 +76,44 @@ func TestSessionBundleFollowsAllowlistOrder(t *testing.T) {
 		t.Fatalf("no bundles got %q %q", d, u)
 	}
 }
+
+// The application release pin must never fall back to another loaded editor.
+func TestPinnedBundleRequiresExactVerifiedBundleAndOrigin(t *testing.T) {
+	dir := t.TempDir()
+	index := `<!doctype html><script type="module">` + bootstrap + `</script>`
+	first := writeBundle(t, dir, map[string]string{"index.html": index, "app.js": "console.log(1)"})
+	second := writeBundle(t, dir, map[string]string{"index.html": index, "app.js": "console.log(2)"})
+	h, err := New(Options{SameHost: true, StudioOrigin: studio, BundleDir: dir, Bundles: []string{first, second}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d, u := h.PinnedBundle(sessionReq("studio.example.test"), second); d != second || u != "/_editor/b/"+second+"/index.html" {
+		t.Fatalf("exact pin got %q %q", d, u)
+	}
+	for _, missing := range []string{"", "../index.html", strings.Repeat("0", 64)} {
+		if h.HasBundle(missing) {
+			t.Fatalf("unverified pin loaded: %q", missing)
+		}
+		if d, u := h.PinnedBundle(sessionReq("studio.example.test"), missing); d != "" || u != "" {
+			t.Fatalf("unverified pin framed: %q %q", d, u)
+		}
+	}
+	if d, u := h.PinnedBundle(sessionReq("other.example.test"), second); d != "" || u != "" {
+		t.Fatalf("wrong origin framed: %q %q", d, u)
+	}
+	h.RecordCheck(studio, ProxyCheck{Status: ProxyCheckFailed, Isolation: true, Cause: CauseRedirect, Problems: []string{"redirected"}})
+	if !h.HasBundle(second) {
+		t.Fatal("proxy failure must not change immutable verified inventory")
+	}
+	if d, u := h.PinnedBundle(sessionReq("studio.example.test"), second); d != "" || u != "" {
+		t.Fatalf("failed isolation framed: %q %q", d, u)
+	}
+	for _, off := range []*Handler{nil, Deny()} {
+		if off.HasBundle(second) {
+			t.Fatal("disabled handler reports loaded pin")
+		}
+		if d, u := off.PinnedBundle(sessionReq("studio.example.test"), second); d != "" || u != "" {
+			t.Fatalf("disabled handler framed: %q %q", d, u)
+		}
+	}
+}

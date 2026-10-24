@@ -64,7 +64,7 @@ func validateGridCraftEditor(c *Config, allowedOrigins string) error {
 			allowed = append(allowed, item)
 		}
 	}
-	if g.EditorEnabled && g.EditorOrigin == "" {
+	if (g.EditorEnabled || c.Mooring.Enabled) && g.EditorOrigin == "" {
 		if g.EditorDevelopmentSameSite {
 			return errors.New("gridcraft editor: the sibling-subdomain exception applies only to a dedicated editor origin")
 		}

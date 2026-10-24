@@ -903,7 +903,27 @@ func (h *Handler) IndexURL(digest string) string {
 // request whose origin the same-host editor does not answer on, or an origin
 // the proxy self-check disabled.
 func (h *Handler) SessionBundle(r *http.Request) (digest, indexURL string) {
-	if h == nil || h.all || h.broken || len(h.order) == 0 {
+	if h == nil || len(h.order) == 0 {
+		return "", ""
+	}
+	return h.PinnedBundle(r, h.order[0])
+}
+
+// HasBundle reports whether the exact digest identifies a verified, loaded
+// bundle. It does not authorize a browser request or select an application.
+func (h *Handler) HasBundle(digest string) bool {
+	if h == nil || h.all || h.broken || !IsDigest(digest) {
+		return false
+	}
+	_, loaded := h.bundles[digest]
+	return loaded
+}
+
+// PinnedBundle resolves a release-selected verified bundle without substituting
+// the first allowlisted application's editor. Request-origin and proxy isolation
+// checks are identical to SessionBundle; an unavailable pin fails closed.
+func (h *Handler) PinnedBundle(r *http.Request, digest string) (string, string) {
+	if !h.HasBundle(digest) {
 		return "", ""
 	}
 	if h.sameHost {
@@ -912,8 +932,8 @@ func (h *Handler) SessionBundle(r *http.Request) (digest, indexURL string) {
 			return "", ""
 		}
 	}
-	digest = h.order[0]
-	if indexURL = h.IndexURL(digest); indexURL == "" {
+	indexURL := h.IndexURL(digest)
+	if indexURL == "" {
 		return "", ""
 	}
 	return digest, indexURL
