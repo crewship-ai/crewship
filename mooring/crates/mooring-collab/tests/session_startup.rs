@@ -30,6 +30,9 @@ fn restore() -> (Vec<u8>, Value, Vec<String>) {
         "../../mooring-wordcraft/tests/fixtures/d1-engine-canonical.json"
     ))
     .unwrap();
+    restore_native(native)
+}
+fn restore_native(native: Value) -> (Vec<u8>, Value, Vec<String>) {
     let ids: Vec<_> = (0..native["body"].as_array().unwrap().len())
         .map(|i| format!("stable-{i}"))
         .collect();
@@ -290,28 +293,97 @@ fn legacy_capability_and_content_only_identity_cannot_activate() {
 }
 
 #[test]
-fn review_4131_missing_or_unknown_capability_fails_before_owner_request(){
- for caps in [None,Some(json!([])),Some(json!(["future_identity"])),Some(json!(["checkpoint_identity_v1","checkpoint_identity_v1"]))]{
-  let mut message:Value=serde_json::from_slice(&open()).unwrap();
-  match caps{Some(value)=>message["required_capabilities"]=value,None=>{message.as_object_mut().unwrap().remove("required_capabilities");}}
-  assert!(Startup::from_open(&serde_json::to_vec(&message).unwrap(),at(0)).is_err());
- }
+fn review_4131_missing_or_unknown_capability_fails_before_owner_request() {
+    for caps in [
+        None,
+        Some(json!([])),
+        Some(json!(["future_identity"])),
+        Some(json!(["checkpoint_identity_v1", "checkpoint_identity_v1"])),
+    ] {
+        let mut message: Value = serde_json::from_slice(&open()).unwrap();
+        match caps {
+            Some(value) => message["required_capabilities"] = value,
+            None => {
+                message
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("required_capabilities");
+            }
+        }
+        assert!(Startup::from_open(&serde_json::to_vec(&message).unwrap(), at(0)).is_err());
+    }
 }
 #[test]
-fn review_4131_full_identity_cannot_be_transplanted_or_replaced_with_raw_content_hash(){
- for swap in ["scope","model","content-only","assets"]{
-  let (startup,acquire)=Startup::from_open(&open(),at(0)).unwrap();let owner=startup.accept_owner(&grant(&acquire),&host(),at(1)).unwrap();
-  let mut message:Value=serde_json::from_slice(&restore().0).unwrap();
-  match swap{
-   "scope"=>message["checkpoint"]["scope"]["artifact_id"]=json!("another-artifact"),
-   "model"=>message["checkpoint"]["versions"]["model_version"]=json!("0.1.0"),
-   "assets"=>message["checkpoint"]["assets"]=json!([{"asset_id":"unqualified-asset","digest":format!("sha256:{}","0".repeat(64)),"size_bytes":"1"}]),
-   "content-only"=>{},_=>unreachable!()
-  }
-  bind_checkpoint_identity(&mut message["checkpoint"]);
-  if swap=="content-only"{
-   let cp=serde_json::from_value(message["checkpoint"].clone()).unwrap();let identity=mooring_protocol::checkpoint::compute(&cp,mooring_protocol::checkpoint::Limits{decoded_bytes:control::MAX_CHECKPOINT_BYTES,preimage_bytes:control::MAX_CONTROL_BYTES}).unwrap();message["checkpoint"]["digest"]=json!(identity.content_digest());
-  }
-  assert!(owner.restore(&serde_json::to_vec(&message).unwrap(),||Ok(at(2))).is_err(),"{swap}");
- }
+fn review_4131_full_identity_cannot_be_transplanted_or_replaced_with_raw_content_hash() {
+    for swap in ["scope", "model", "content-only", "assets"] {
+        let (startup, acquire) = Startup::from_open(&open(), at(0)).unwrap();
+        let owner = startup
+            .accept_owner(&grant(&acquire), &host(), at(1))
+            .unwrap();
+        let mut message: Value = serde_json::from_slice(&restore().0).unwrap();
+        match swap {
+            "scope" => message["checkpoint"]["scope"]["artifact_id"] = json!("another-artifact"),
+            "model" => message["checkpoint"]["versions"]["model_version"] = json!("0.1.0"),
+            "assets" => {
+                message["checkpoint"]["assets"] = json!([{"asset_id":"unqualified-asset","digest":format!("sha256:{}","0".repeat(64)),"size_bytes":"1"}])
+            }
+            "content-only" => {}
+            _ => unreachable!(),
+        }
+        bind_checkpoint_identity(&mut message["checkpoint"]);
+        if swap == "content-only" {
+            let cp = serde_json::from_value(message["checkpoint"].clone()).unwrap();
+            let identity = mooring_protocol::checkpoint::compute(
+                &cp,
+                mooring_protocol::checkpoint::Limits {
+                    decoded_bytes: control::MAX_CHECKPOINT_BYTES,
+                    preimage_bytes: control::MAX_CONTROL_BYTES,
+                },
+            )
+            .unwrap();
+            message["checkpoint"]["digest"] = json!(identity.content_digest());
+        }
+        assert!(
+            owner
+                .restore(&serde_json::to_vec(&message).unwrap(), || Ok(at(2)))
+                .is_err(),
+            "{swap}"
+        );
+    }
+}
+
+#[test]
+fn actual_canonical_d3_restores_owned_readonly_document_without_public_frame_relaxation() {
+    let native: Value = serde_json::from_str(include_str!(
+        "../../mooring-wordcraft/tests/fixtures/d3-engine-canonical.json"
+    ))
+    .unwrap();
+    let (raw, native, ids) = restore_native(native);
+    assert!(raw.len() > 262144);
+    assert!(raw.len() <= 2097152);
+    let (startup, acquire) = Startup::from_open(&open(), at(0)).unwrap();
+    let owner = startup
+        .accept_owner(&grant(&acquire), &host(), at(1))
+        .unwrap();
+    let mut ready = owner.restore(&raw, || Ok(at(2))).unwrap();
+    assert!(ready.confirmed().document().is_read_only());
+    assert_eq!(ready.confirmed().document().native().unwrap(), native);
+    assert_eq!(ready.confirmed().document().block_ids().unwrap(), ids);
+    let cp: Value = serde_json::from_slice(&raw).unwrap();
+    let bytes = mooring_protocol::boundary::decode_base64(
+        cp["checkpoint"]["state"].as_str().unwrap(),
+        1572864,
+    )
+    .unwrap();
+    assert_eq!(ready.confirmed().document().checkpoint().unwrap(), bytes);
+    let (child, mut peer) = UnixStream::pair().unwrap();
+    peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+    let lane = Lane::from_negotiated_inherited_stream(child).unwrap();
+    ready.acknowledge(&lane.output(), || Ok(at(3))).unwrap();
+    for typ in ["session_restored", "session_opened"] {
+        let value: Value =
+            serde_json::from_slice(&mooring_collab::read_frame(&mut peer).unwrap().unwrap())
+                .unwrap();
+        assert_eq!(value["type"], typ);
+    }
 }
