@@ -5,6 +5,17 @@ by Crewship, so it does not start a service or change the deployed application.
 The Go host remains the authority for permissions, fencing, durable writes and
 receipts. Draining a Rust batch never means the changes have been saved.
 
+The unused host task-dispatch controller publishes an original pending human
+task in memory only after its work transaction commits. Publication and
+assignment lookup share a mutex; a committed row cannot race ahead of its host
+consent entry. Dispatch rechecks the exact current SQL attempt and original
+source, Page, membership, agent grant and app policy, then freezes the first
+run/attempt/generation. A fresh controller cannot recover consent from queued
+rows, serialized origins or agent tokens. Unknown checks remain nonterminal.
+No router, generic dispatcher kind or provider execution is enabled. Runtime
+privacy, participant binding, sealed completion and retirement barriers still
+require separate integration and review.
+
 `mooring_core::adapter::PrepareAdapter` is a pure application boundary: validate
 an opaque checkpoint and prepare one normalized immutable atomic change from a
 restored/forked authoritative state. Its candidate owns a full checkpoint and
