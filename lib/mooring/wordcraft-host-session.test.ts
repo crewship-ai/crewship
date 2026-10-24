@@ -45,7 +45,7 @@ function rig() {
   host.ready()
   return { host, socket, callbacks }
 }
-const submit = (id: string) => ` {"type":"submit_changes","request_id":"${id}","scope":${JSON.stringify(scope)},"session_id":"session","versions":${JSON.stringify(versions)},"changes":[]} \n`
+const submit = (id: string) => ` {"type":"submit_changes","request_id":"${id}","scope":${JSON.stringify(scope)},"session_id":"session","versions":${JSON.stringify(versions)},"changes":[{"change_id":"${id}","operations":[{"op_id":"${id}"}]}]} \n`
 const receipt = (id: string) => ({ type: "commit_result", request_id: id, scope, generation: "2", revision: "1", changes: [{ change_id: id, status: "saved" }] })
 beforeEach(() => { vi.stubGlobal("WebSocket", Socket); Pending.check.mockReset(); fetch.mockReset() })
 afterEach(() => vi.unstubAllGlobals())
@@ -102,4 +102,17 @@ describe("original parent-only WordCraft connection", () => {
     await expect(openWordCraftSession("workspace", "page", true, new AbortController().signal)).rejects.toThrow("editor_unavailable")
     expect(fetch).toHaveBeenCalledWith("/api/v1/pages/%40page/mooring/session?workspace_id=workspace", expect.objectContaining({ skipRefresh: true, body: '{"write":true}' }))
   })
+})
+
+it("does not let a known Saved operation under a new request clear a later draft", () => {
+  const { host, socket, callbacks } = rig()
+  host.draft(); host.submit(submit("A")); socket.receive(receipt("A"))
+  expect(callbacks.state).toHaveBeenLastCalledWith("saved")
+  host.draft()
+  const alias = JSON.parse(submit("A")); alias.request_id = "A2"
+  host.submit(JSON.stringify(alias))
+  socket.receive({ ...receipt("A2"), changes: [{ change_id: "A", status: "saved" }] })
+  expect(callbacks.state.mock.calls.at(-1)?.[0]).not.toBe("saved")
+  expect(socket.sent.some(raw => JSON.parse(raw).request_id === "A2")).toBe(false)
+  host.close()
 })

@@ -82,6 +82,9 @@ export function connectWordCraftHost(workspaceId: string, pageId: string, openin
   const pending = new Map<string, { receipt: WordCraftPendingReceipt; raw: string; epoch: number }>()
   const settled = new Map<string, string>()
   let settledBytes = 0
+  // Semantic identities live for this ORIGINAL source, including after Saved.
+  // A new transport request cannot assign an old operation a later draft epoch.
+  const operationIds = new Set<string>(), changeIds = new Set<string>()
   const state = (value: WordCraftHostState) => { if (!stopped) callbacks.state(value) }
   const stop = (reason: string) => {
     if (stopped) return
@@ -154,6 +157,25 @@ export function connectWordCraftHost(workspaceId: string, pageId: string, openin
         if (settled.has(request.request_id) || pending.size >= 256 || pendingBytes + encoder.encode(raw).length > WORDCRAFT_FRAME_BYTES) throw new Error("quota_exceeded")
         const receipt = new sdk.WordCraftPendingCommit(joined, checkpoint, raw)
         if (receipt.original_request_json() !== raw) { receipt.free(); throw new Error("original_changed") }
+        // The Rust constructor above checks schema/fingerprints/membership. This
+        // additional source-lifetime namespace prevents relabeling a known
+        // Saved atomic/op under a new public request ID to clear a newer Draft.
+        const nextChanges: string[] = [], nextOperations: string[] = []
+        try {
+          if (!Array.isArray(request.changes)) throw new Error("invalid_original")
+          for (const change of request.changes) {
+            if (!record(change) || !identifier(change.change_id) || !Array.isArray(change.operations)) throw new Error("invalid_original")
+            nextChanges.push(change.change_id)
+            for (const operation of change.operations) {
+              if (!record(operation) || !identifier(operation.op_id)) throw new Error("invalid_original")
+              nextOperations.push(operation.op_id)
+            }
+          }
+          if (!nextChanges.length || !nextOperations.length || nextChanges.some(id => changeIds.has(id)) || nextOperations.some(id => operationIds.has(id))
+            || changeIds.size + nextChanges.length > 256 || operationIds.size + nextOperations.length > 256) throw new Error("original_changed")
+        } catch (error) { receipt.free(); throw error }
+        for (const id of nextChanges) changeIds.add(id)
+        for (const id of nextOperations) operationIds.add(id)
         pending.set(request.request_id, { receipt, raw, epoch: draftEpoch }); pendingBytes += encoder.encode(raw).length
         state("pending"); send(raw)
       } catch { stop("unqualified_original") }

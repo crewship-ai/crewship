@@ -88,10 +88,14 @@ export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange }
         if (dead || abort.signal.aborted) return
         const src = editorFrameSrc(opening.editor.url, opening.editor.bundle_digest, window.location.origin)
         if (!src) throw new Error("invalid_editor_package")
+        // Fixed application mode waits for bootstrap; it never opens a blank
+        // native document and replaces it later with collaborative content.
+        const editorURL = new URL(src)
+        editorURL.searchParams.set("mooring", "1")
         const sdk = await loadWordCraftReceiptSDK(opening.sdk_prefix)
         if (dead || abort.signal.aborted) return
         bundle = opening.editor.bundle_digest
-        frame = createEditorFrame(document, src, () => { loads++; if (loads !== 1 || connected) close("editor_navigated") })
+        frame = createEditorFrame(document, editorURL.href, () => { loads++; if (loads !== 1 || connected) close("editor_navigated") })
         if (!frame) throw new Error("isolation_unavailable")
         frame.title = "WordCraft editor"
         host = connectWordCraftHost(workspaceId, pageId, opening, write, sdk, {
