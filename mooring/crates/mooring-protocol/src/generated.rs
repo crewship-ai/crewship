@@ -1811,6 +1811,12 @@ pub enum SessionOpenControlProfile {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionOpenRequiredCapabilitiesItem {
+    #[serde(rename = "checkpoint_identity_v1")]
+    CheckpointIdentityV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionOpen {
     pub r#type: SessionOpenType,
@@ -1820,6 +1826,7 @@ pub struct SessionOpen {
     pub session_id: Identifier,
     pub runtime_ref: Identifier,
     pub versions: Versions,
+    pub required_capabilities: Vec<SessionOpenRequiredCapabilitiesItem>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1862,6 +1869,12 @@ pub enum SessionOpenedControlProfile {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionOpenedCapabilitiesItem {
+    #[serde(rename = "checkpoint_identity_v1")]
+    CheckpointIdentityV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionOpened {
     pub r#type: SessionOpenedType,
@@ -1873,6 +1886,7 @@ pub struct SessionOpened {
     pub fence: Fence,
     pub versions: Versions,
     pub confirmed_basis: ConfirmedCheckpointBasis,
+    pub capabilities: Vec<SessionOpenedCapabilitiesItem>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -2238,6 +2252,65 @@ pub struct SessionStatusResult {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CheckpointDescription {
+    pub format_version: Identifier,
+    pub versions: Versions,
+    pub assets: Vec<Asset>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionDescribeCheckpointType {
+    #[serde(rename = "session_describe_checkpoint")]
+    SessionDescribeCheckpoint,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionDescribeCheckpointControlProfile {
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionDescribeCheckpoint {
+    pub r#type: SessionDescribeCheckpointType,
+    pub request_id: Identifier,
+    pub control_profile: SessionDescribeCheckpointControlProfile,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
+    pub versions: Versions,
+    pub checkpoint: OpaquePreparedCheckpoint,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionCheckpointDescribedType {
+    #[serde(rename = "session_checkpoint_described")]
+    SessionCheckpointDescribed,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionCheckpointDescribedControlProfile {
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionCheckpointDescribed {
+    pub r#type: SessionCheckpointDescribedType,
+    pub request_id: Identifier,
+    pub control_profile: SessionCheckpointDescribedControlProfile,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
+    pub versions: Versions,
+    pub input_digest: Digest,
+    pub description: CheckpointDescription,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Message {
     Hello(Hello),
@@ -2310,4 +2383,6 @@ pub enum Message {
     SessionRestored(SessionRestored),
     SessionStatusRequest(SessionStatusRequest),
     SessionStatusResult(SessionStatusResult),
+    SessionDescribeCheckpoint(SessionDescribeCheckpoint),
+    SessionCheckpointDescribed(SessionCheckpointDescribed),
 }

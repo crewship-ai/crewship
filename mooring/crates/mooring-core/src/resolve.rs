@@ -77,6 +77,7 @@ impl Default for Limits {
 }
 #[derive(Debug, PartialEq)]
 pub enum InvalidBatch {
+    InvalidRejection,
     Empty,
     TooLarge,
     InvalidLimits,
@@ -215,11 +216,21 @@ pub fn plan(
     if direct.keys().any(|id| !op_to_change.contains_key(id)) {
         return Err(InvalidBatch::InvalidId);
     }
+    if direct.iter().any(|(id, reason)| {
+        reason.root.op_id != *id
+            || reason.code != reason.root.code
+            || reason.code == Code::DependencyRejected
+    }) {
+        return Err(InvalidBatch::InvalidRejection);
+    }
+    let preflight = admission_failures(changes, prior, direct, &op_to_change);
+    let cycles = cyclic_changes(changes, prior, &preflight, &op_to_change);
     let mut context = Context {
         changes,
         prior,
-        direct,
+        direct: &preflight,
         op_to_change,
+        cycles,
         visiting: vec![false; changes.len()],
         outcomes: vec![None; changes.len()],
         order: Vec::new(),
@@ -242,7 +253,13 @@ pub fn plan(
                         op_id: op.op_id.clone(),
                         decision: match outcome {
                             AtomicDecision::Eligible => Decision::EligibleForHost,
-                            AtomicDecision::Rejected(reason) => Decision::Rejected(reason.clone()),
+                            AtomicDecision::Rejected(reason) => {
+                                Decision::Rejected(if op.op_id == reason.root.op_id {
+                                    reason.clone()
+                                } else {
+                                    Rejection::dependent(reason.root.clone())
+                                })
+                            }
                             AtomicDecision::Replay(outcomes) => {
                                 Decision::Replay(outcomes[index].clone())
                             }
@@ -262,6 +279,7 @@ struct Context<'a> {
     prior: &'a BTreeMap<String, PriorOperation>,
     direct: &'a BTreeMap<String, Rejection>,
     op_to_change: BTreeMap<String, usize>,
+    cycles: Vec<Option<String>>,
     visiting: Vec<bool>,
     outcomes: Vec<Option<AtomicDecision>>,
     order: Vec<String>,
@@ -336,6 +354,13 @@ impl Context<'_> {
                 "operation dependency cycle inside atomic change",
             ));
         }
+        if let Some(root) = &self.cycles[index] {
+            return AtomicDecision::Rejected(Rejection::direct(
+                root,
+                Code::DependencyCycle,
+                "indivisible atomic changes form a dependency cycle",
+            ));
+        }
         // Atomic membership is fingerprinted in application order. Reordering
         // operations here would change the authenticated command semantics.
         for (position, op) in change.operations.iter().enumerate() {
@@ -371,14 +396,6 @@ impl Context<'_> {
                     ));
                 };
                 if let Some(reason) = failure {
-                    if reason.root.code == Code::DependencyCycle
-                        && members.contains(&reason.root.op_id)
-                    {
-                        return AtomicDecision::Rejected(Rejection {
-                            code: Code::DependencyCycle,
-                            root: reason.root,
-                        });
-                    }
                     return AtomicDecision::Rejected(Rejection::dependent(reason.root));
                 }
             }
@@ -387,40 +404,214 @@ impl Context<'_> {
     }
 }
 fn internal_cycle(change: &AtomicChange) -> Option<String> {
-    fn visit<'a>(
-        id: &'a str,
-        operations: &BTreeMap<&'a str, &'a Operation>,
-        active: &mut BTreeSet<&'a str>,
-        done: &mut BTreeSet<&'a str>,
-    ) -> Option<String> {
-        if active.contains(id) {
-            return Some(id.into());
-        }
-        if done.contains(id) {
-            return None;
-        }
-        active.insert(id);
-        for dependency in &operations[id].dependencies {
-            if operations.contains_key(dependency.as_str()) {
-                if let Some(root) = visit(dependency, operations, active, done) {
-                    return Some(root);
-                }
-            }
-        }
-        active.remove(id);
-        done.insert(id);
-        None
-    }
     let operations: BTreeMap<_, _> = change
         .operations
         .iter()
-        .map(|op| (op.op_id.as_str(), op))
+        .map(|operation| (operation.op_id.as_str(), operation))
         .collect();
-    let (mut active, mut done) = (BTreeSet::new(), BTreeSet::new());
-    for op in &change.operations {
-        if let Some(root) = visit(&op.op_id, &operations, &mut active, &mut done) {
-            return Some(root);
+    // Choose the first SUBMITTED actual cyclic member, not a DFS backedge
+    // entry or an acyclic ancestor leading into another member's cycle.
+    for operation in &change.operations {
+        let mut pending: Vec<_> = operation
+            .dependencies
+            .iter()
+            .filter(|dependency| operations.contains_key(dependency.as_str()))
+            .map(String::as_str)
+            .collect();
+        let mut visited = BTreeSet::new();
+        while let Some(id) = pending.pop() {
+            if id == operation.op_id {
+                return Some(operation.op_id.clone());
+            }
+            if !visited.insert(id) {
+                continue;
+            }
+            pending.extend(
+                operations[id]
+                    .dependencies
+                    .iter()
+                    .filter(|dependency| operations.contains_key(dependency.as_str()))
+                    .map(String::as_str),
+            );
         }
     }
     None
+}
+
+/// Every vertex reachable back to itself is a complete SCC cycle member.
+/// Bounded by at most 256 operations/changes; repeated iterative reachability
+/// avoids recursive SCC bookkeeping and DFS "already black" misclassification.
+fn cyclic_changes(
+    changes: &[AtomicChange],
+    prior: &BTreeMap<String, PriorOperation>,
+    direct: &BTreeMap<String, Rejection>,
+    owners: &BTreeMap<String, usize>,
+) -> Vec<Option<String>> {
+    let mut edges = vec![Vec::new(); changes.len()];
+    for (index, change) in changes.iter().enumerate() {
+        // Replays/conflicts and direct invalid atomic changes do not execute.
+        // They terminate dependency propagation rather than creating new edges.
+        if change
+            .operations
+            .iter()
+            .any(|op| prior.contains_key(&op.op_id) || direct.contains_key(&op.op_id))
+        {
+            continue;
+        }
+        for operation in &change.operations {
+            for dependency in &operation.dependencies {
+                if let Some(&owner) = owners.get(dependency) {
+                    if owner != index {
+                        edges[index].push(owner);
+                    }
+                }
+            }
+        }
+        edges[index].sort_unstable();
+        edges[index].dedup();
+    }
+    let mut reachable = vec![vec![false; changes.len()]; changes.len()];
+    for start in 0..changes.len() {
+        let mut pending = edges[start].clone();
+        while let Some(node) = pending.pop() {
+            if reachable[start][node] {
+                continue;
+            }
+            reachable[start][node] = true;
+            pending.extend(&edges[node]);
+        }
+    }
+    changes
+        .iter()
+        .enumerate()
+        .map(|(index, change)| {
+            if !reachable[index][index] {
+                return None;
+            }
+            change
+                .operations
+                .iter()
+                .find(|operation| {
+                    operation.dependencies.iter().any(|dependency| {
+                        owners
+                            .get(dependency)
+                            .is_some_and(|&owner| owner != index && reachable[owner][index])
+                    })
+                })
+                .map(|operation| operation.op_id.clone())
+        })
+        .collect()
+}
+
+/// Gather definite nonexecuting outcomes before SCC. Propagation removes a
+/// failed vertex's outgoing edges, so an apparent cycle cannot hide an already
+/// definite admission/dependency rejection. No adapter is invoked here.
+fn admission_failures(
+    changes: &[AtomicChange],
+    prior: &BTreeMap<String, PriorOperation>,
+    direct: &BTreeMap<String, Rejection>,
+    owners: &BTreeMap<String, usize>,
+) -> BTreeMap<String, Rejection> {
+    let mut failures = BTreeMap::new();
+    for change in changes {
+        let members: Vec<_> = change
+            .operations
+            .iter()
+            .map(|op| op.op_id.clone())
+            .collect();
+        let conflict = change.operations.iter().find(|op| {
+            prior.get(&op.op_id).is_some_and(|old| {
+                old.fingerprint != op.fingerprint
+                    || old.change_id != change.change_id
+                    || old.member_ids != members
+                    || old.task_id != change.task_id
+            })
+        });
+        if let Some(op) = conflict {
+            failures.insert(
+                op.op_id.clone(),
+                Rejection::direct(
+                    &op.op_id,
+                    Code::OpIdConflict,
+                    "operation content, atomic membership or task changed",
+                ),
+            );
+            continue;
+        }
+        if prior.contains_key(&change.operations[0].op_id) {
+            if let Some(reason) =
+                change
+                    .operations
+                    .iter()
+                    .find_map(|op| match &prior[&op.op_id].outcome {
+                        HostOutcome::Rejected(reason) => Some(reason),
+                        _ => None,
+                    })
+            {
+                failures.insert(change.operations[0].op_id.clone(), reason.clone());
+            }
+            continue; // committed/rejected matching retries never revalidate
+        }
+        if let Some((op, reason)) = change
+            .operations
+            .iter()
+            .find_map(|op| direct.get(&op.op_id).map(|reason| (op, reason)))
+        {
+            failures.insert(op.op_id.clone(), reason.clone());
+            continue;
+        }
+        'operations: for op in &change.operations {
+            for dependency in &op.dependencies {
+                if owners.contains_key(dependency) {
+                    continue;
+                }
+                let reason = match prior.get(dependency) {
+                    Some(old) => match &old.outcome {
+                        HostOutcome::PreviouslyConfirmed => continue,
+                        HostOutcome::Rejected(reason) => Rejection::dependent(reason.root.clone()),
+                    },
+                    None => Rejection::direct(
+                        &op.op_id,
+                        Code::UnknownDependency,
+                        &format!("unknown dependency {dependency}"),
+                    ),
+                };
+                failures.insert(op.op_id.clone(), reason);
+                break 'operations;
+            }
+        }
+    }
+    // At most one new failed change per pass is needed for progress; the
+    // operation/dependency iteration order makes selection deterministic.
+    loop {
+        let mut added = false;
+        for change in changes {
+            if change
+                .operations
+                .iter()
+                .any(|op| failures.contains_key(&op.op_id) || prior.contains_key(&op.op_id))
+            {
+                continue;
+            }
+            'operations: for op in &change.operations {
+                for dependency in &op.dependencies {
+                    if let Some(&owner) = owners.get(dependency) {
+                        if let Some(root) = changes[owner].operations.iter().find_map(|member| {
+                            failures
+                                .get(&member.op_id)
+                                .map(|reason| reason.root.clone())
+                        }) {
+                            failures.insert(op.op_id.clone(), Rejection::dependent(root));
+                            added = true;
+                            break 'operations;
+                        }
+                    }
+                }
+            }
+        }
+        if !added {
+            break;
+        }
+    }
+    failures
 }

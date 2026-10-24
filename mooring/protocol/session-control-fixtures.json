@@ -115,7 +115,10 @@
           "protocol_version": "0.4.0",
           "model_version": "0.2.0",
           "engine_version": "0.10.0"
-        }
+        },
+        "required_capabilities": [
+          "checkpoint_identity_v1"
+        ]
       }
     },
     {
@@ -136,7 +139,10 @@
           "protocol_version": "0.4.0",
           "model_version": "0.2.0",
           "engine_version": "0.10.0"
-        }
+        },
+        "required_capabilities": [
+          "checkpoint_identity_v1"
+        ]
       }
     },
     {
@@ -157,7 +163,10 @@
           "protocol_version": "0.4.0",
           "model_version": "0.2.0",
           "engine_version": "0.10.0"
-        }
+        },
+        "required_capabilities": [
+          "checkpoint_identity_v1"
+        ]
       }
     },
     {
@@ -180,7 +189,10 @@
           "model_version": "0.2.0",
           "engine_version": "0.10.0"
         },
-        "unexpected": true
+        "unexpected": true,
+        "required_capabilities": [
+          "checkpoint_identity_v1"
+        ]
       }
     },
     {
@@ -393,7 +405,10 @@
         "confirmed_basis": {
           "revision": "0",
           "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
-        }
+        },
+        "capabilities": [
+          "checkpoint_identity_v1"
+        ]
       }
     },
     {
@@ -422,7 +437,10 @@
         "confirmed_basis": {
           "revision": "0",
           "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
-        }
+        },
+        "capabilities": [
+          "checkpoint_identity_v1"
+        ]
       }
     },
     {
@@ -451,7 +469,10 @@
         "confirmed_basis": {
           "revision": "0",
           "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
-        }
+        },
+        "capabilities": [
+          "checkpoint_identity_v1"
+        ]
       }
     },
     {
@@ -482,7 +503,10 @@
           "revision": "0",
           "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
         },
-        "unexpected": true
+        "unexpected": true,
+        "capabilities": [
+          "checkpoint_identity_v1"
+        ]
       }
     },
     {
@@ -1960,7 +1984,10 @@
           "protocol_version": "0.4.0",
           "model_version": "0.2.0",
           "engine_version": "0.10.0"
-        }
+        },
+        "required_capabilities": [
+          "checkpoint_identity_v1"
+        ]
       }
     },
     {
@@ -2036,7 +2063,10 @@
         "confirmed_basis": {
           "revision": "0",
           "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
-        }
+        },
+        "capabilities": [
+          "checkpoint_identity_v1"
+        ]
       }
     },
     {

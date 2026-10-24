@@ -212,6 +212,12 @@
     },
     {
       "$ref": "#/$defs/SessionStatusResult"
+    },
+    {
+      "$ref": "#/$defs/SessionDescribeCheckpoint"
+    },
+    {
+      "$ref": "#/$defs/SessionCheckpointDescribed"
     }
   ],
   "$defs": {
@@ -4011,6 +4017,14 @@
         },
         "versions": {
           "$ref": "#/$defs/Versions"
+        },
+        "required_capabilities": {
+          "type": "array",
+          "items": {
+            "const": "checkpoint_identity_v1"
+          },
+          "minItems": 1,
+          "maxItems": 1
         }
       },
       "required": [
@@ -4020,7 +4034,8 @@
         "scope",
         "session_id",
         "runtime_ref",
-        "versions"
+        "versions",
+        "required_capabilities"
       ],
       "additionalProperties": false,
       "x-direction": "host_to_runtime",
@@ -4110,6 +4125,14 @@
         },
         "confirmed_basis": {
           "$ref": "#/$defs/ConfirmedCheckpointBasis"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "const": "checkpoint_identity_v1"
+          },
+          "minItems": 1,
+          "maxItems": 1
         }
       },
       "required": [
@@ -4121,7 +4144,8 @@
         "runtime_ref",
         "fence",
         "versions",
-        "confirmed_basis"
+        "confirmed_basis",
+        "capabilities"
       ],
       "additionalProperties": false,
       "x-direction": "runtime_to_host",
@@ -4829,6 +4853,117 @@
       "additionalProperties": false,
       "x-direction": "host_to_runtime",
       "description": "Host-captured FIFO barrier after every earlier accepted submit, never a child-selected sequence. Current external reader authorization before lookup; exact original fingerprint. Rust retains unsent/uncertain intent and never fabricates terminal unknown."
+    },
+    "CheckpointDescription": {
+      "type": "object",
+      "properties": {
+        "format_version": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        },
+        "assets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Asset"
+          },
+          "minItems": 0,
+          "maxItems": 4096
+        }
+      },
+      "required": [
+        "format_version",
+        "versions",
+        "assets"
+      ],
+      "additionalProperties": false
+    },
+    "SessionDescribeCheckpoint": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_describe_checkpoint"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "control_profile": {
+          "const": "mooring.session-causal.v1"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runtime_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/OpaquePreparedCheckpoint"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "control_profile",
+        "scope",
+        "session_id",
+        "runtime_ref",
+        "versions",
+        "checkpoint"
+      ],
+      "additionalProperties": false,
+      "x-direction": "host_to_runtime"
+    },
+    "SessionCheckpointDescribed": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_checkpoint_described"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "control_profile": {
+          "const": "mooring.session-causal.v1"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runtime_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        },
+        "input_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "description": {
+          "$ref": "#/$defs/CheckpointDescription"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "control_profile",
+        "scope",
+        "session_id",
+        "runtime_ref",
+        "versions",
+        "input_digest",
+        "description"
+      ],
+      "additionalProperties": false,
+      "x-direction": "runtime_to_host"
     }
   },
   "x-schema-version": "0.4.0"

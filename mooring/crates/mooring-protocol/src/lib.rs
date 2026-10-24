@@ -3,9 +3,12 @@
 use serde::{Deserialize, Serialize};
 pub mod boundary;
 pub mod canonical;
+pub mod checkpoint;
 pub mod control;
 mod generated;
+pub mod grant;
 pub mod session_control;
+pub mod session_receipt;
 mod shape;
 pub mod wire;
 pub use generated::*;

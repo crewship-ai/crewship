@@ -5,8 +5,7 @@ use crate::{
     Document,
 };
 use mooring_text::yrs::{
-    types::Attrs, Any, Assoc, ClientID, GetString, Map, Out, ReadTxn, StickyIndex, Text, TextRef,
-    Transact, ID,
+    Any, Assoc, ClientID, GetString, Map, Out, ReadTxn, StickyIndex, Text, TextRef, Transact, ID,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -59,6 +58,8 @@ pub(crate) fn apply(document: &mut Document, command: &Command) -> Result<(), Ca
         return Err(CandidateError::InvalidRange);
     }
     drop(txn);
+    let stamp = crate::format::current_agent_stamp(&document.doc)
+        .map_err(|_| CandidateError::InvalidState)?;
     let mut txn = document.doc.transact_mut();
     match command {
         Command::Insert {
@@ -67,33 +68,52 @@ pub(crate) fn apply(document: &mut Document, command: &Command) -> Result<(), Ca
             ..
         } => {
             if let Some(properties) = properties {
-                let mut attrs = Attrs::new();
-                attrs.insert(crate::PROPS_PRESENT.into(), Any::Bool(true));
-                for (key, value) in properties {
-                    attrs.insert(
-                        format!("{}{key}", crate::CHARACTER_PREFIX).into(),
-                        Any::Bool(*value),
-                    );
-                }
-                text.insert_with_attributes(&mut txn, start, value, attrs);
+                text.insert_with_attributes(
+                    &mut txn,
+                    start,
+                    value,
+                    crate::format::insertion_attributes(properties, properties.is_empty(), stamp),
+                );
             } else {
+                // Preserve Yrs's exact resolved insertion formatting, then give
+                // this new text independent action keys for those native values.
                 text.insert(&mut txn, start, value);
+                let mut offset = 0;
+                let mut inherited = None;
+                for chunk in text.diff(&txn, mooring_text::yrs::types::text::YChange::identity) {
+                    let Out::Any(Any::String(value)) = chunk.insert else {
+                        return Err(CandidateError::InvalidState);
+                    };
+                    let end = offset + value.encode_utf16().count() as u32;
+                    if offset <= start && start < end {
+                        inherited = crate::format::properties(
+                            &chunk.attributes.unwrap_or_default(),
+                            crate::format::Model::V2,
+                        )
+                        .map_err(|_| CandidateError::InvalidState)?;
+                        break;
+                    }
+                    offset = end;
+                }
+                let properties =
+                    inherited
+                        .as_ref()
+                        .and_then(|value| value.as_object())
+                        .map(|properties| {
+                            properties
+                                .iter()
+                                .map(|(key, value)| (key.clone(), value.as_bool().unwrap()))
+                                .collect()
+                        });
+                let properties: command::CharacterProperties = properties.unwrap_or_default();
+                let explicit_empty = inherited.is_some() && properties.is_empty();
+                let attrs = crate::format::insertion_attributes(&properties, explicit_empty, stamp);
+                text.format(&mut txn, start, value.encode_utf16().count() as u32, attrs);
             }
         }
         Command::Delete { .. } => text.remove_range(&mut txn, start, end - start),
         Command::Format { properties, .. } => {
-            let mut attrs = Attrs::new();
-            // Clearing a property on text without overrides must not invent an
-            // explicit empty properties object that changes inheritance.
-            if properties.values().any(Option::is_some) {
-                attrs.insert(crate::PROPS_PRESENT.into(), Any::Bool(true));
-            }
-            for (key, value) in properties {
-                attrs.insert(
-                    format!("{}{key}", crate::CHARACTER_PREFIX).into(),
-                    value.map(Any::Bool).unwrap_or(Any::Null),
-                );
-            }
+            let attrs = crate::format::format_attributes(properties, stamp);
             text.format(&mut txn, start, end - start, attrs);
         }
     }
@@ -143,7 +163,8 @@ mod tests {
     use serde_json::{json, Value};
     fn document() -> Document {
         let mut native: Value =
-            serde_json::from_str(include_str!("../tests/fixtures/d1-native.json")).unwrap();
+            serde_json::from_str(include_str!("../tests/fixtures/d1-engine-canonical.json"))
+                .unwrap();
         native["body"] = json!([
             {"kind":"para","text":"Č😀e\u{301}","runs":[{"len":9}]},
             {"kind":"para","text":"other","runs":[{"len":5}]}

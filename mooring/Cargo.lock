@@ -34,6 +34,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "base64"
+version = "0.22.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
+
+[[package]]
 name = "bitflags"
 version = "2.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -223,6 +229,8 @@ dependencies = [
  "mooring-core",
  "mooring-protocol",
  "mooring-text",
+ "mooring-wordcraft",
+ "serde",
  "serde_json",
  "yrs",
 ]
@@ -260,6 +268,19 @@ dependencies = [
  "mooring-text",
  "serde",
  "serde_json",
+ "wordcraft-doc",
+]
+
+[[package]]
+name = "mooring-wordcraft-client"
+version = "0.1.0"
+dependencies = [
+ "mooring-core",
+ "mooring-protocol",
+ "mooring-wordcraft",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -468,6 +489,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
 
 [[package]]
+name = "unicode-segmentation"
+version = "1.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8"
+
+[[package]]
 name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -523,6 +550,27 @@ name = "windows-link"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
+
+[[package]]
+name = "wordcraft-doc"
+version = "0.10.0"
+source = "git+https://github.com/storytold/wordcraft?rev=668d7ce3a4b1dcf241a9c50a20754a85647a02c4#668d7ce3a4b1dcf241a9c50a20754a85647a02c4"
+dependencies = [
+ "base64",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "unicode-segmentation",
+ "wordcraft-geom",
+]
+
+[[package]]
+name = "wordcraft-geom"
+version = "0.10.0"
+source = "git+https://github.com/storytold/wordcraft?rev=668d7ce3a4b1dcf241a9c50a20754a85647a02c4#668d7ce3a4b1dcf241a9c50a20754a85647a02c4"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "yrs"

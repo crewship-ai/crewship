@@ -4,8 +4,11 @@ use crate::{
     command::{self, Command},
     AdapterError, Document,
 };
-use mooring_core::adapter::{PrepareAdapter, Prepared, PreparedCandidate, PreparedFailure};
-use mooring_core::prepare::{ConfirmedContext, ContextError};
+use mooring_core::adapter::{
+    CausalPrepareAdapter, PrepareAdapter, Prepared, PreparedCandidate, PreparedFailure,
+};
+use mooring_core::causal::{CausalContext, CausalPrepareContext, CausalWorkingTargets};
+use mooring_core::prepare::{ConfirmedContext, ContextError, WorkingTargets};
 use mooring_protocol::{
     AtomicChange, ErrorCode, PrepareContext, PreparedOperationEffects, TargetEffect, TargetIdentity,
 };
@@ -17,6 +20,8 @@ pub struct WordCraftAdapter;
 pub enum PrepareError {
     State(AdapterError),
     Context,
+    /// No complete self-contained asset description is qualified for these bytes.
+    UnqualifiedDescription,
 }
 pub struct Candidate {
     checkpoint: Vec<u8>,
@@ -67,97 +72,157 @@ impl PrepareAdapter for WordCraftAdapter {
     ) -> Result<Prepared<Candidate>, PrepareError> {
         // Restore once into owned state. No external state is touched, and any
         // failure below drops the entire prefix rather than returning it.
-        let mut document = Document::restore(checkpoint).map_err(PrepareError::State)?;
+        let document = Document::restore(checkpoint).map_err(PrepareError::State)?;
         let identities = inventory(&document)?;
         let confirmed = match ConfirmedContext::qualify(context, change, &identities) {
             Ok(value) => value,
             Err(error) => return context_failure(error),
         };
-        let mut working = confirmed.working();
-        let mut effects = Vec::new();
-        for operation in &change.operations {
-            if let Err(error) = working.check_current_reads(&operation.op_id) {
-                return context_failure(error);
-            }
-            let command = match command::decode(&operation.payload) {
-                Ok(command) => command,
-                Err(_) => {
-                    return Ok(reject(
-                        &operation.op_id,
-                        ErrorCode::InvalidRequest,
-                        "unsupported or invalid WordCraft command",
-                    ))
-                }
-            };
-            let target = match &command {
-                Command::Insert { target_id, .. }
-                | Command::Delete { target_id, .. }
-                | Command::Format { target_id, .. } => target_id,
-            };
-            // Every command depends on its existing paragraph, including start
-            // and end anchors. A global base or relative item is not an
-            // implicitly declared confirmed read observation.
-            if !operation
-                .read_preconditions
-                .iter()
-                .any(|read| read.target_id == *target)
-            {
+        prepare_commands(document, change, Working::Strict(confirmed.working()))
+    }
+}
+impl CausalPrepareAdapter for WordCraftAdapter {
+    fn prepare_atomic_causal(
+        &self,
+        checkpoint: &[u8],
+        change: &AtomicChange,
+        context: &CausalPrepareContext,
+    ) -> Result<Prepared<Candidate>, PrepareError> {
+        let document = Document::restore(checkpoint).map_err(PrepareError::State)?;
+        let identities = inventory(&document)?;
+        let qualified = match CausalContext::qualify(context, change, &identities) {
+            Ok(value) => value,
+            Err(error) => return context_failure(error),
+        };
+        prepare_commands(document, change, Working::Causal(qualified.working()))
+    }
+}
+// Different read policies share ONLY application mechanics. Each policy is
+// explicitly qualified above against the complete restored inventory; neither
+// rewrites immutable observations or forwards to the other policy.
+enum Working<'a> {
+    Strict(WorkingTargets<'a>),
+    Causal(CausalWorkingTargets<'a>),
+}
+impl Working<'_> {
+    fn check_current_reads(&mut self, op_id: &str) -> Result<(), ContextError> {
+        match self {
+            Self::Strict(value) => value.check_current_reads(op_id),
+            Self::Causal(value) => value.check_current_reads(op_id),
+        }
+    }
+    fn advance_effects(
+        &mut self,
+        op_id: &str,
+        effects: &[TargetEffect],
+    ) -> Result<(), ContextError> {
+        match self {
+            Self::Strict(value) => value.advance_effects(op_id, effects),
+            Self::Causal(value) => value.advance_effects(op_id, effects),
+        }
+    }
+    fn inventory(&self) -> Vec<TargetIdentity> {
+        match self {
+            Self::Strict(value) => value.inventory(),
+            Self::Causal(value) => value.inventory(),
+        }
+    }
+    fn complete(&self) -> bool {
+        match self {
+            Self::Strict(value) => value.complete(),
+            Self::Causal(value) => value.complete(),
+        }
+    }
+}
+fn prepare_commands(
+    mut document: Document,
+    change: &AtomicChange,
+    mut working: Working<'_>,
+) -> Result<Prepared<Candidate>, PrepareError> {
+    let mut effects = Vec::new();
+    for operation in &change.operations {
+        if let Err(error) = working.check_current_reads(&operation.op_id) {
+            return context_failure(error);
+        }
+        let command = match command::decode(&operation.payload) {
+            Ok(command) => command,
+            Err(_) => {
                 return Ok(reject(
                     &operation.op_id,
                     ErrorCode::InvalidRequest,
-                    "WordCraft paragraph read observation required",
-                ));
+                    "unsupported or invalid WordCraft command",
+                ))
             }
-            if let Err(error) = candidate::apply(&mut document, &command) {
-                let (code, message) = match error {
-                    CandidateError::InvalidState => {
-                        return Err(PrepareError::State(AdapterError::InvalidCheckpoint))
-                    }
-                    CandidateError::InvalidCommand | CandidateError::InvalidRange => (
-                        ErrorCode::InvalidRequest,
-                        "invalid WordCraft command or range",
-                    ),
-                    CandidateError::ReadOnly => (
-                        ErrorCode::Forbidden,
-                        "unqualified WordCraft document is read-only",
-                    ),
-                    CandidateError::MissingTarget => (
-                        ErrorCode::TargetDeleted,
-                        "WordCraft paragraph target unavailable",
-                    ),
-                    CandidateError::UnresolvedAnchor => (
-                        ErrorCode::PreconditionFailed,
-                        "WordCraft relative anchor unavailable or invalid",
-                    ),
-                };
-                return Ok(reject(&operation.op_id, code, message));
-            }
-            let targets = vec![TargetEffect {
-                target_id: target.clone(),
-                content_changed: true,
-                structure_changed: false,
-                created: false,
-                deleted: false,
-            }];
-            if let Err(error) = working.advance_effects(&operation.op_id, &targets) {
-                return context_failure(error);
-            }
-            effects.push(PreparedOperationEffects {
-                op_id: operation.op_id.clone(),
-                targets,
-            });
+        };
+        let target = match &command {
+            Command::Insert { target_id, .. }
+            | Command::Delete { target_id, .. }
+            | Command::Format { target_id, .. } => target_id,
+        };
+        // Every command depends on its existing paragraph, including start
+        // and end anchors. A global base or relative item is not an
+        // implicitly declared confirmed read observation.
+        if !operation
+            .read_preconditions
+            .iter()
+            .any(|read| read.target_id == *target)
+        {
+            return Ok(reject(
+                &operation.op_id,
+                ErrorCode::InvalidRequest,
+                "WordCraft paragraph read observation required",
+            ));
         }
-        let identities = inventory(&document)?;
-        if !working.complete() || working.inventory() != identities {
-            return Err(PrepareError::Context);
+        if let Err(error) = candidate::apply(&mut document, &command) {
+            let (code, message) = match error {
+                CandidateError::InvalidState => {
+                    return Err(PrepareError::State(AdapterError::InvalidCheckpoint))
+                }
+                CandidateError::InvalidCommand | CandidateError::InvalidRange => (
+                    ErrorCode::InvalidRequest,
+                    "invalid WordCraft command or range",
+                ),
+                CandidateError::ReadOnly => (
+                    ErrorCode::Forbidden,
+                    "unqualified WordCraft document is read-only",
+                ),
+                CandidateError::MissingTarget => (
+                    ErrorCode::TargetDeleted,
+                    "WordCraft paragraph target unavailable",
+                ),
+                CandidateError::UnresolvedAnchor => (
+                    ErrorCode::PreconditionFailed,
+                    "WordCraft relative anchor unavailable or invalid",
+                ),
+            };
+            return Ok(reject(&operation.op_id, code, message));
         }
-        Ok(Prepared::Candidate(Candidate {
-            checkpoint: document.checkpoint().map_err(PrepareError::State)?,
-            effects,
-            inventory: identities,
-        }))
+        let targets = vec![TargetEffect {
+            target_id: target.clone(),
+            content_changed: true,
+            structure_changed: false,
+            created: false,
+            deleted: false,
+        }];
+        if let Err(error) = working.advance_effects(&operation.op_id, &targets) {
+            return context_failure(error);
+        }
+        effects.push(PreparedOperationEffects {
+            op_id: operation.op_id.clone(),
+            targets,
+        });
     }
+    let identities = inventory(&document)?;
+    if !working.complete() || working.inventory() != identities {
+        return Err(PrepareError::Context);
+    }
+    Ok(Prepared::Candidate(Candidate {
+        checkpoint: document.checkpoint().map_err(PrepareError::State)?,
+        effects,
+        inventory: identities,
+    }))
 }
+
 fn reject(operation_id: &str, code: ErrorCode, message: &str) -> Prepared<Candidate> {
     Prepared::Rejected(PreparedFailure {
         operation_id: operation_id.into(),
@@ -182,7 +247,8 @@ mod tests {
     use serde_json::{json, Value};
     fn checkpoint() -> Vec<u8> {
         let native: Value =
-            serde_json::from_str(include_str!("../tests/fixtures/d1-native.json")).unwrap();
+            serde_json::from_str(include_str!("../tests/fixtures/d1-engine-canonical.json"))
+                .unwrap();
         let ids = (0..native["body"].as_array().unwrap().len())
             .map(|i| format!("stable-{i}"))
             .collect();
@@ -383,5 +449,202 @@ mod tests {
             WordCraftAdapter.prepare_atomic(&serde_json::to_vec(&tampered).unwrap(), &change, &ctx),
             Err(PrepareError::State(_))
         ));
+    }
+    fn causal_context(before: &[u8], change: &AtomicChange, revision: u64) -> CausalPrepareContext {
+        use mooring_core::causal::{EntryVersion, QualifiedRead};
+        let mut strict = context(before, change);
+        strict.document_revision = Counter(revision);
+        for target in &mut strict.targets {
+            target.revision = Counter(revision);
+        }
+        for (index, label) in strict.operation_revisions.iter_mut().enumerate() {
+            label.revision = Counter(revision + index as u64 + 1);
+        }
+        let qualified_reads = change
+            .operations
+            .iter()
+            .flat_map(|op| {
+                op.read_preconditions
+                    .iter()
+                    .enumerate()
+                    .map(|(index, read)| QualifiedRead {
+                        op_id: op.op_id.clone(),
+                        read_index: index as u32,
+                        target_id: read.target_id.clone(),
+                        observed_revision: read.revision,
+                        observed_structure_revision: read.structure_revision,
+                        entry: Some(EntryVersion {
+                            revision: Counter(revision),
+                            structure_revision: Counter(5),
+                            deleted: false,
+                        }),
+                        covered: true,
+                    })
+            })
+            .collect();
+        CausalPrepareContext {
+            document_revision: strict.document_revision,
+            targets: strict.targets,
+            operation_revisions: strict.operation_revisions,
+            qualified_reads,
+        }
+    }
+    #[test]
+    fn causal_external_host_coverage_preserves_original_observations_and_full_native() {
+        let before = checkpoint();
+        let mut op = insert("covered");
+        op.dependencies.push("committed-external-effect".into());
+        let change = change(vec![op]);
+        let immutable = change.clone();
+        let ctx = causal_context(&before, &change, 20);
+        let Prepared::Candidate(candidate) = WordCraftAdapter
+            .prepare_atomic_causal(&before, &change, &ctx)
+            .unwrap()
+        else {
+            panic!("qualified covered command rejected")
+        };
+        let mut expected = Document::restore(&before).unwrap().native().unwrap();
+        expected["body"][0]["text"] =
+            json!(expected["body"][0]["text"].as_str().unwrap().to_owned() + " + agent");
+        expected["body"][0]["runs"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"len":8,"props":{"italic":true,"bold":false}}));
+        assert_eq!(
+            Document::restore(candidate.checkpoint_bytes())
+                .unwrap()
+                .native()
+                .unwrap(),
+            expected
+        );
+        assert_eq!(change, immutable);
+        assert_eq!(candidate.effects()[0].op_id, "covered");
+        assert_eq!(
+            candidate.inventory(),
+            WordCraftAdapter.validate_checkpoint(&before).unwrap()
+        );
+        let mut strict = context(&before, &change);
+        strict.document_revision = ctx.document_revision;
+        strict.targets = ctx.targets.clone();
+        strict.operation_revisions = ctx.operation_revisions.clone();
+        let Prepared::Rejected(failure) = WordCraftAdapter
+            .prepare_atomic(&before, &change, &strict)
+            .unwrap()
+        else {
+            panic!("strict policy silently became causal")
+        };
+        assert_eq!(failure.code, ErrorCode::PreconditionFailed);
+    }
+    #[test]
+    fn causal_internal_effects_require_exact_immutable_dependency_closure() {
+        let before = checkpoint();
+        for covered in [false, true] {
+            let mut second = insert("second");
+            if covered {
+                second.dependencies.push("first".into());
+            }
+            let change = change(vec![insert("first"), second]);
+            let immutable = change.clone();
+            let ctx = causal_context(&before, &change, 10);
+            let result = WordCraftAdapter
+                .prepare_atomic_causal(&before, &change, &ctx)
+                .unwrap();
+            match result {
+                Prepared::Candidate(candidate) if covered => {
+                    let native = Document::restore(candidate.checkpoint_bytes())
+                        .unwrap()
+                        .native()
+                        .unwrap();
+                    let original = Document::restore(&before).unwrap().native().unwrap();
+                    assert_eq!(
+                        native["body"][0]["text"],
+                        json!(
+                            original["body"][0]["text"].as_str().unwrap().to_owned()
+                                + " + agent + agent"
+                        )
+                    );
+                    assert_eq!(
+                        candidate
+                            .effects()
+                            .iter()
+                            .map(|effect| effect.op_id.as_str())
+                            .collect::<Vec<_>>(),
+                        vec!["first", "second"]
+                    );
+                }
+                Prepared::Rejected(failure) if !covered => {
+                    assert_eq!(failure.operation_id, "second");
+                    assert_eq!(failure.code, ErrorCode::PreconditionFailed);
+                }
+                _ => panic!("causal prefix policy mismatch"),
+            }
+            assert_eq!(change, immutable);
+            assert_eq!(before, checkpoint_of_same(&before));
+        }
+    }
+    #[test]
+    fn causal_malformed_bindings_and_missing_inventory_are_nonterminal() {
+        let before = checkpoint();
+        let change = change(vec![insert("bound")]);
+        for mode in 0..5 {
+            let mut ctx = causal_context(&before, &change, 20);
+            match mode {
+                0 => ctx.qualified_reads.clear(),
+                1 => ctx.qualified_reads[0].observed_revision = Counter(11),
+                2 => ctx.qualified_reads[0].entry.as_mut().unwrap().revision = Counter(19),
+                3 => {
+                    ctx.targets.pop();
+                }
+                _ => ctx.qualified_reads[0].op_id = "foreign".into(),
+            }
+            assert!(matches!(
+                WordCraftAdapter.prepare_atomic_causal(&before, &change, &ctx),
+                Err(PrepareError::Context)
+            ));
+        }
+    }
+    #[test]
+    fn causal_uncovered_read_and_omitted_paragraph_read_fail_actual_member() {
+        let before = checkpoint();
+        let change = change(vec![insert("uncovered")]);
+        let mut ctx = causal_context(&before, &change, 20);
+        ctx.qualified_reads[0].covered = false;
+        let Prepared::Rejected(failure) = WordCraftAdapter
+            .prepare_atomic_causal(&before, &change, &ctx)
+            .unwrap()
+        else {
+            panic!("uncovered stale read accepted")
+        };
+        assert_eq!(failure.operation_id, "uncovered");
+        assert_eq!(failure.code, ErrorCode::PreconditionFailed);
+        let mut operation = insert("omitted");
+        operation.read_preconditions.clear();
+        let change = self::change(vec![operation]);
+        let ctx = causal_context(&before, &change, 10);
+        let Prepared::Rejected(failure) = WordCraftAdapter
+            .prepare_atomic_causal(&before, &change, &ctx)
+            .unwrap()
+        else {
+            panic!("missing application read accepted")
+        };
+        assert_eq!(failure.operation_id, "omitted");
+        assert_eq!(failure.code, ErrorCode::InvalidRequest);
+    }
+    #[test]
+    fn causal_unsupported_human_command_discards_successful_prefix() {
+        let before = checkpoint();
+        let mut second = operation("human", json!({"kind":"crdt.update","update":"AA=="}));
+        second.dependencies.push("first".into());
+        let change = change(vec![insert("first"), second]);
+        let ctx = causal_context(&before, &change, 10);
+        let Prepared::Rejected(failure) = WordCraftAdapter
+            .prepare_atomic_causal(&before, &change, &ctx)
+            .unwrap()
+        else {
+            panic!("human updates admitted by agent capability")
+        };
+        assert_eq!(failure.operation_id, "human");
+        assert_eq!(failure.code, ErrorCode::InvalidRequest);
+        assert_eq!(before, checkpoint_of_same(&before));
     }
 }

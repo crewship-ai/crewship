@@ -10,6 +10,7 @@ use crate::{
 };
 
 pub const PROFILE: &str = "mooring.session-causal.v1";
+pub const CHECKPOINT_IDENTITY_CAPABILITY: &str = "checkpoint_identity_v1";
 /// Fixed initial profile constants; the live driver must use these exact caps.
 pub const BATCH_DELAY_MS: u64 = 100;
 pub const MAX_BATCH_OPERATIONS: usize = 256;
@@ -41,6 +42,8 @@ pub fn is_private_type(value: &str) -> bool {
             | "session_participant_output"
             | "session_status_request"
             | "session_status_result"
+            | "session_describe_checkpoint"
+            | "session_checkpoint_described"
     )
 }
 
@@ -71,6 +74,7 @@ pub fn validate(raw: &[u8], peer: control::Peer) -> Result<CanonicalValue, WireE
                 | "session_participant_open"
                 | "session_participant_input"
                 | "session_status_result"
+                | "session_describe_checkpoint"
         ),
         control::Peer::InheritedRuntime => matches!(
             message_type,
@@ -79,6 +83,7 @@ pub fn validate(raw: &[u8], peer: control::Peer) -> Result<CanonicalValue, WireE
                 | "session_submit_batch"
                 | "session_participant_output"
                 | "session_status_request"
+                | "session_checkpoint_described"
         ),
         control::Peer::Participant => false,
     };
@@ -89,7 +94,13 @@ pub fn validate(raw: &[u8], peer: control::Peer) -> Result<CanonicalValue, WireE
     // larger private frame. Ordinary wrappers include their metadata in the
     // small raw/canonical budget, so normalization cannot hide escaped raw
     // inner bytes. Drivers reject over-budget ingress before sealing it.
-    if !matches!(message_type, "session_restore" | "session_commit_result") {
+    if !matches!(
+        message_type,
+        "session_restore"
+            | "session_commit_result"
+            | "session_describe_checkpoint"
+            | "session_checkpoint_described"
+    ) {
         wire::preflight_with_limit(raw, MAX_BATCH_BYTES)?;
         if value.bytes().len() > MAX_BATCH_BYTES {
             return Err(WireError::ResourceLimit);

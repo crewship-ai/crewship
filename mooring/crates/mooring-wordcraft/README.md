@@ -11,10 +11,11 @@ human update entrypoint.
 The model retains document metadata, explicit paragraph order and caller-issued
 stable IDs. Each paragraph has a nested Y.Text, so an empty paragraph's shared
 type identity survives storage recovery. The adapter converts UTF-8 byte run
-lengths to UTF-16 positions at checked Unicode scalar boundaries. Basic native
-character flags use separate Yrs attributes: independent bold and italic edits
-can merge without replacing each other's properties. A presence attribute keeps
-absent formatting distinct from explicit empty properties and explicit false.
+lengths to UTF-16 positions at checked Unicode scalar boundaries. Model 0.2 uses action-scoped
+Yrs property keys, so an equal-value peer format keeps its own identity during
+selective own undo. Independent bold/italic slots and explicit empty-properties
+intent retain the distinction between inheritance, explicit empty properties
+and explicit false.
 Paragraph style/list references, marks and full native metadata are retained.
 
 Initial support covers the qualified D1 paragraph model: basic inline flags,
@@ -35,8 +36,10 @@ checkpoint validates that native projection, stable IDs and CRDT state agree.
 
 Tests distinguish synthetic model/Unicode/concurrency cases from actual upstream
 engine/WASM qualification. A two-replica attribute merge is not an authenticated
-multiuser integration. Undo, rejected dependencies, native UI integration and
-host prepare/commit wiring remain separate work.
+multiuser integration. Full-native selective undo/redo has model regressions for peer same/different,
+inherit and explicit-empty properties. Authenticated human admission, rejected
+independent intent recovery, native UI integration and host wiring remain
+separate qualification.
 
 Offline qualification accepts explicit stable IDs rather than generating index
 IDs:
@@ -89,3 +92,79 @@ read-only documents. Text operations conservatively advance only the paragraph
 content revision (also for a semantic no-op), never paragraph existence, order or
 document metadata. Application checkpoints contain no authoritative host revision
 ledger. The default-off crate is still not wired into any production route.
+
+Native reads can project an already authenticated immutable checkpoint through
+`read::header` and `read::page`. The header retains every document field except
+body; pages retain complete native paragraphs plus their stable IDs. Both have
+explicit serialized-byte budgets (at most 262144 bytes); pages also cap paragraph
+count at 256. Unknown cursors and oversized individual paragraphs/headers are
+explicit errors, never truncation. The host reserves its envelope overhead and
+binds each after-ID cursor to the same scope, confirmed revision and checkpoint
+digest. These pure functions do not authenticate remote cursors or authorize a
+content path. Read-only native documents remain readable in full.
+
+Model 0.2 serializes `wordcraft-0.10.0/yrs-0.28.0/v2` checkpoints with a
+canonical base64 CRDT update. Decoded size and pad bits are checked before
+allocation; the native JSON is parsed from original bytes, preserving opaque
+integers beyond binary64 precision. Restore also rejects hidden roots and map
+keys not represented by the complete native model.
+
+Legacy `.../v1` checkpoints remain readable with their full native data, stable
+paragraph IDs and original CRDT identity. They are always read-only, and export
+retains the v1 marker. Importing a new v2 artifact is an explicit host operation;
+retiring old sessions/origins and binding a new epoch are not performed here.
+A restore never silently migrates an existing artifact into writable v2 state.
+
+Action keys contain a canonical bounded logical stamp and origin, never a Saved
+host revision. The current agent helper derives its stamp only from the
+host-authoritative confirmed CRDT state. It must not be used for human proposals:
+a qualified causal witness must avoid coupling an independent operation to
+unrelated optimistic changes. Human origin binding, stamp/read qualification and
+current authority still require their own closed protocol capability.
+
+The earlier v1 raw-delta structural validator now compiles only in tests. Its
+text-preservation checks are not full peer-format undo qualification; model-v2
+production code exposes no raw human update admission. No native WordApp command
+hook, browser human service or deployment is implied by these model regressions.
+
+### Causal agent preparation
+
+`CausalPrepareAdapter::prepare_atomic_causal` is a separate opt-in boundary. It
+qualifies every original observation and the complete restored inventory through
+`CausalContext`. The trusted host attests complete durable external history; the
+adapter additionally checks that earlier effects within the same atomic change
+are covered by its immutable dependency closure. It shares application mechanics
+with strict-current preparation, but never changes original observations or
+forwards between read policies. Unsupported human updates remain rejected.
+
+This pure method supplies candidates and effects only. It does not negotiate a
+private profile, authenticate host attestations, commit revisions, or emit Saved.
+
+Checkpoint restoration preflights the complete original Yrs v1 bytes before
+allocating any upstream Update: at most 4,096 encoded clients and 262,144 total
+structs/deletion ranges, checked u32 clocks, canonical u53 IDs/counters, bounded
+UTF-8 strings and exact frame consumption. Only this model's Map/Array/Text,
+string metadata/IDs and closed scalar formatting values are accepted. Nested Any
+containers, embeds, subdocuments and unknown content kinds fail nonterminally;
+this is not general-purpose Yrs feature support or a human admission API. Scope,
+authority, negotiated transport limits and checkpoint provenance remain the
+caller's responsibility. The scan borrows the input and allocates nothing.
+
+The optional native `DescribeCheckpoint` implementation restores the exact
+provided bytes before describing them. Its complete empty external manifest is
+qualified only for the closed self-contained model-v2 paragraph subset, including
+known D3 page breaks and paragraph section layout. The complete original native
+tree must roundtrip exactly through the pinned typed model before a disposable
+classifier copy omits only those two layout fields. Every original section must
+have no header/footer references, and all media/parts, external templates, linked
+styles, page pictures, opaque XML, retained links and inline objects remain
+unqualified. Unknown fields, numeric drift, review/protection modes and legacy
+encodings fail closed; compatibility versions never fill missing historical data.
+
+Read-only layout remains read-only after description, paging and restore. This
+metadata result grants no authority, installs no state and changes no original
+native data, stable IDs or checkpoint bytes. The host must authenticate/bound the
+request and retain the complete description with the exact checkpoint in the same
+authorized transaction. Embedded-object and table resource descriptions require
+separate qualification; embedded previews alone do not prove absence of external
+OLE/graphic relationships.
