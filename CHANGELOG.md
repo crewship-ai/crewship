@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Collaboration revocation metadata:** prepare persistent author-relevant generations from canonical policy mutations, separate from broad delivery invalidation. Portable restore preserves target tombstones. Admission integration remains unqualified and disabled.
+
 - **Mooring ingress groundwork:** an inactive bounded host registry retains original operation membership and authenticated author proofs after admission COMMIT. Session transport remains disabled pending independent review and mixed-author revocation qualification.
 
 - **Mooring session groundwork:** inactive queued commits retain their exact owner and original author proofs; uncertain authorization cannot become a durable refusal. No session transport or agent execution is enabled.

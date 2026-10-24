@@ -36,6 +36,7 @@ import "sort"
 // table. Drift detection catches the omission in tests so an oversight
 // surfaces before a bundle ships missing rows.
 var BackupTableIntent = map[string]ScopedTableIntent{
+	"mooring_authority_generations":  IntentExcludeRuntime, // target-local non-ABA tombstones never travel or reset in portable restore
 	"mooring_delivery_gates":         IntentExcludeRuntime,
 	"mooring_delivery_barriers":      IntentExcludeRuntime,
 	"mooring_collab_documents":       IntentInclude, // durable collaboration state; no runtime capabilities
