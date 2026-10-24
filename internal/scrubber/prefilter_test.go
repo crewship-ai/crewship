@@ -25,7 +25,7 @@ func TestPrefilterScrubberAllProfilesAndCustomRules(t *testing.T) {
 			t.Fatal(e)
 		}
 	}
-	for _, v := range []string{"", "benign metadata token secret bearer", "API_KEY=abc123xyz", "API_KEY=abc123xyz", "ſecret=abcdefgh", "Bearer abcdefghijklmnopqrstuvwxyz", "sk-ant-" + strings.Repeat("a", 50), `{"apiKey":"abcdefgh"}`, "sk-\u200b" + strings.Repeat("b", 30), "zzcustom zza zzb zzcapture zzgeneric", "owned-known-credential", base64.StdEncoding.EncodeToString([]byte("owned-known-credential")), "\xff\xfe\xe2\x82 owned\xffsecret"} {
+	for _, v := range []string{"", "benign metadata token secret bearer", "API_KEY=abc123xyz", "API_KEY=abc123xyz", "ſecret=abcdefgh", "Bearer abcdefghijklmnopqrstuvwxyz", "sk-ant-" + strings.Repeat("a", 50), `{"apiKey":"abcdefgh"}`, "sk-\u200b" + strings.Repeat("b", 30), "zzcustom zza zzb zzcapture zzgeneric", "owned-known-credential", base64.StdEncoding.EncodeToString([]byte("owned-known-credential")), "\xff\xfe\xe2\x82 owned\xffsecret"} { // gitleaks:allow -- owned synthetic regression fixture, not a credential
 		checkPrefilterScrubber(t, s, v)
 	}
 }
@@ -86,7 +86,8 @@ func FuzzPrefilterScrubberMatchesReference(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, text string) {
 		if len(text) > 8192 {
-			t.Skip()
+			// Bound each fuzz workload while still testing its byte prefix.
+			text = text[:8192]
 		}
 		s := New()
 		s.AddSecretValues("owned-known-credential")
@@ -128,8 +129,8 @@ func sizeName(n int) string {
 
 func TestPrefilterEveryBuiltinHasPositiveWitness(t *testing.T) {
 	witnesses := []string{
-		"-----BEGIN OPENSSH PRIVATE KEY-----\nowned-synthetic-not-a-key\n-----END OPENSSH PRIVATE KEY-----",
-		"-----BEGIN RSA PRIVATE KEY-----\nowned-synthetic-not-a-key\n-----END RSA PRIVATE KEY-----",
+		"-----BEGIN OPENSSH PRIVATE KEY-----\nowned-synthetic-not-a-key\n-----END OPENSSH PRIVATE KEY-----", // gitleaks:allow -- owned synthetic regression fixture, not a credential
+		"-----BEGIN RSA PRIVATE KEY-----\nowned-synthetic-not-a-key\n-----END RSA PRIVATE KEY-----",         // gitleaks:allow -- owned synthetic regression fixture, not a credential
 		"sk-ant-" + strings.Repeat("x", 30), "sk-or-" + strings.Repeat("x", 30), "sk-proj-" + strings.Repeat("x", 30),
 		"AIzaSy" + strings.Repeat("x", 33), "cur_" + strings.Repeat("x", 30), "factory_" + strings.Repeat("x", 30),
 		"xai-" + strings.Repeat("x", 30), "gsk_" + strings.Repeat("x", 30), "github_pat_" + strings.Repeat("x", 30),

@@ -24,7 +24,8 @@ func FuzzPrefilterLookoutMatchesReference(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, text string) {
 		if len(text) > 8192 {
-			t.Skip()
+			// Bound each fuzz workload while still testing its byte prefix.
+			text = text[:8192]
 		}
 		checkPrefilterLookout(t, text)
 	})

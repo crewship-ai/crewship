@@ -135,3 +135,8 @@ a5e52eb700be14e985b892b1a87ddb6215d5e613:mooring/vendor/syn-3.0.9/.cargo-checksu
 5eec46eb8db47efbc61dacc4e2d766ae077e17a2:mooring/vendor/rustversion-1.0.23/.cargo-checksum.json:generic-api-key:1
 5eec46eb8db47efbc61dacc4e2d766ae077e17a2:mooring/vendor/serde_json-1.0.154/.cargo-checksum.json:generic-api-key:1
 5eec46eb8db47efbc61dacc4e2d766ae077e17a2:mooring/vendor/syn-3.0.9/.cargo-checksum.json:generic-api-key:1
+
+# Exact historical fingerprints for owned synthetic scanner fixtures (#3995).
+# Current lines carry gitleaks:allow; no history is rewritten or path excluded.
+34e6a99b72d6b255f172124bb38897c559aeb6b3:internal/scrubber/prefilter_test.go:generic-api-key:28
+34e6a99b72d6b255f172124bb38897c559aeb6b3:internal/scrubber/prefilter_test.go:private-key:131
