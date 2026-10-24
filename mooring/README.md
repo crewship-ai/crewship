@@ -20,6 +20,13 @@ qualified isolated task environment or Page-scoped readout fencing, plus the
 actual dispatcher, participant and retirement barriers. No paid provider launch,
 content route or runtime profile is enabled by this option.
 
+Strict mode also suppresses child-controlled loop-guard and inspection
+diagnostics. It converts private panics to normal opaque errors without
+formatting, wrapping or rethrowing the panic value; ordinary runs retain their
+existing panic diagnostics. Unsupported protected-output combinations are
+refused before tracked state is read. These changes add no private environment,
+completion proof or native-execution qualification.
+
 `mooring_core::adapter::PrepareAdapter` is a pure application boundary: validate
 an opaque checkpoint and prepare one normalized immutable atomic change from a
 restored/forked authoritative state. Its candidate owns a full checkpoint and

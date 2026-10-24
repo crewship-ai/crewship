@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Private runtime diagnostics:** strict host-only suppression also masks loop-guard and inspection diagnostics and returns opaque errors for private panics. Ordinary diagnostics remain unchanged; private execution is still unqualified and disabled.
+
 - **Private runtime groundwork:** a host-only, unused output-suppression option prevents selected journal, observer and session-stream content copies. Native CLI histories, tools and shared-container readouts remain unqualified; this does not enable private execution.
 
 - **Mooring authorization decision groundwork:** an inactive captured-agent callback separates known canonical fence changes from SQL or policy uncertainty and preserves the original checked read/write scope.

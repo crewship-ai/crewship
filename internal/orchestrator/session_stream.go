@@ -99,6 +99,13 @@ var errRunPanicked = errors.New("agent run crashed")
 func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handler EventHandler) (err error) {
 	if req.strictContentPrivacy {
 		req = req.WithStrictContentPrivacy()
+		defer func() {
+			if recover() != nil {
+				// Also cover failures before runAgent's telemetry span exists.
+				// Never format, wrap or rethrow a private panic value.
+				err = ErrPrivateRunUnqualified
+			}
+		}()
 	}
 	pub := o.sessionPub()
 	// No publisher wired, no chat to publish on, or a caller that already owns
