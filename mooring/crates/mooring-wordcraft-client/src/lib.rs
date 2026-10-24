@@ -152,6 +152,7 @@ impl WordCraftModel {
                 &json!({"kind":"rejected","op_id":failure.operation_id,"code":failure.code,"message":failure.message}),
             )?),
             Err(PrepareError::Context) => Err("invalid_context".into()),
+            Err(PrepareError::UnqualifiedDescription) => Err("unqualified_checkpoint".into()),
             Err(PrepareError::State(error)) => Err(state_error(error)),
         }
     }
@@ -204,7 +205,8 @@ mod tests {
     use super::*;
     use serde_json::{json, Value};
     fn input() -> (String, String) {
-        let native = include_str!("../../mooring-wordcraft/tests/fixtures/d1-engine-canonical.json");
+        let native =
+            include_str!("../../mooring-wordcraft/tests/fixtures/d1-engine-canonical.json");
         let parsed: Value = serde_json::from_str(native).unwrap();
         let ids = (0..parsed["body"].as_array().unwrap().len())
             .map(|i| format!("stable-{i}"))

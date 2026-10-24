@@ -149,3 +149,17 @@ containers, embeds, subdocuments and unknown content kinds fail nonterminally;
 this is not general-purpose Yrs feature support or a human admission API. Scope,
 authority, negotiated transport limits and checkpoint provenance remain the
 caller's responsibility. The scan borrows the input and allocates nothing.
+
+The optional native `DescribeCheckpoint` implementation restores the exact
+provided bytes before describing them. Its first qualified manifest is empty
+ONLY for the closed self-contained model-v2 D1 paragraph subset: no external
+template, linked styles, page picture, opaque latent XML, retained hyperlink
+metadata, unresolved header/footer references or unsupported media/part graph.
+Unknown, read-only or legacy encodings return an opaque unqualified error;
+current compatibility versions never fill in unknown historical metadata.
+Embedded media is not broadly qualified: an OLE/graphic can retain external
+relationships even when its preview bytes are embedded. The result grants no
+authority, installs no state and changes no checkpoint bytes. The host must
+authenticate/bound the request and retain the complete description with the exact
+checkpoint in the same authorized transaction. D3 and broader embedded-object
+description qualification remain required follow-up work.
