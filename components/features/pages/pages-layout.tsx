@@ -83,6 +83,7 @@ import { usePageFolderMutations, usePageFolders } from "@/hooks/use-page-folders
 import { FolderDeleteDialog, FolderEditDialog, MoveToFolderDialog } from "@/components/features/pages/folder-dialogs"
 import { FolderSharingDialog } from "@/components/features/pages/folder-sharing-dialog"
 import { PageChatHandoff } from "@/components/features/pages/page-chat-handoff"
+import { NativeDocumentAccessDialog } from "./native-document-access-dialog"
 import { toast } from "sonner"
 
 export interface PagesLayoutProps {
@@ -113,6 +114,10 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   const nav = useEditorRoute(slug ?? null)
   const selectedSlug = nav.slug
   const [chatHandoffOpen, setChatHandoffOpen] = React.useState(false)
+  const [nativeAccessSlug, setNativeAccessSlug] = React.useState<string | null>(null)
+  const [nativeAccessOpener, setNativeAccessOpener] = React.useState<HTMLElement | null>(null)
+  const closeNativeAccess = React.useCallback(() => setNativeAccessSlug(null), [])
+  React.useEffect(closeNativeAccess, [workspaceId, closeNativeAccess])
 
   const [collapsed, setCollapsed] = React.useState(false)
   // On a phone the rail is 280px of a 390px screen — it does not sit BESIDE
@@ -390,10 +395,13 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 Ask about this Page
               </SubBarSecondary>
             )}
-            {selectedSlug && !editing && !nativeDocument && !nativeWorkbook && !nativeMooring && !nativeCollaboration && (
+            {selectedSlug && !editing && !nativeDocument && !nativeWorkbook && !nativeMooring && (
               <SubBarSecondary
                 icon={Share2}
-                onClick={() => nav.openEditor("access")}
+                onClick={event => {
+                  if (nativeCollaboration) { setNativeAccessOpener(event.currentTarget); setNativeAccessSlug(selectedSlug) }
+                  else nav.openEditor("access")
+                }}
                 disabled={detail.page == null}
                 title="Who reaches this Page, who may send it data, and its public links"
               >
@@ -475,6 +483,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               onToggleCollapse={() => setCollapsed(true)}
               onMovePage={(page) => setFolderDialog({ kind: "move", slug: page.slug })}
               onRemoveFromFolder={(page) => void removeFromFolder(page)}
+              onSharePage={(page, opener) => { setNativeAccessOpener(opener ?? null); setNativeAccessSlug(page.slug) }}
               onCreateFolder={canCreateFolder ? () => setFolderDialog({ kind: "create" }) : undefined}
               onEditFolder={(slug) => setFolderDialog({ kind: "edit", slug })}
               onShareFolder={(slug) => setFolderDialog({ kind: "share", slug })}
@@ -541,7 +550,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                     : <><PageSlides workspaceId={workspaceId} pageId={nativePageId} name={detail.page?.name} onDirtyChange={nav.setDirty} /><UnsentEditsLeaveDialog pending={nav.pending} onReturnFocus={focusNativeView} /></>
                 ) : nativeCollaboration ? (
                   detail.accessDenied || !nativePageId ? <p role="alert" className="p-6">Document access is unavailable.</p>
-                    : <><WordCraftEditorHost key={`${workspaceId}:${nativePageId}`} workspaceId={workspaceId} pageId={nativePageId} name={detail.page?.name} onDirtyChange={nav.setDirty} /><UnsentEditsLeaveDialog pending={nav.pending} onReturnFocus={focusNativeView} /></>
+                    : <><WordCraftEditorHost key={`${workspaceId}:${nativePageId}`} workspaceId={workspaceId} pageId={nativePageId} name={detail.page?.name} onDirtyChange={nav.setDirty} onUnavailable={closeNativeAccess} /><UnsentEditsLeaveDialog pending={nav.pending} onReturnFocus={focusNativeView} /></>
                 ) : nativeMooring ? (
                   detail.accessDenied || !nativePageId ? <p role="alert" className="p-6">Application unavailable</p>
                     : <><MooringEditorHost key={`${workspaceId}:${nativePageId}`} workspaceId={workspaceId} pageId={nativePageId} name={detail.page?.name} onDirtyChange={nav.setDirty} /><UnsentEditsLeaveDialog pending={nav.pending} onReturnFocus={focusNativeView} /></>
@@ -586,6 +595,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
         </div>
       </div>
 
+      {nativeAccessSlug && <NativeDocumentAccessDialog key={`${workspaceId}:${nativeAccessSlug}`} workspaceId={workspaceId} slug={nativeAccessSlug} onClose={closeNativeAccess} returnFocus={nativeAccessOpener} />}
       {creatingDocument && <NewDocumentDialog key={workspaceId} workspaceId={workspaceId} onClose={() => setCreatingDocument(false)} onCreated={openPage} />}
 
       {importing && (

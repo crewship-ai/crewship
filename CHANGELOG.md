@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- WordCraft documents expose existing authorized sharing from their header and list menu without replacing the running editor. Opening access rechecks the current viewer and keeps document sharing separate from agent task permissions.
+
 - Run the complete catalog of actual Mooring Rust/SQL integration tests in hosted CI using freshly built public-source fixtures; reject missing, skipped or failed execution evidence.
 
 - Grade the actual Mooring session response and optional editor DTOs against their OpenAPI schema without increasing the ungraded-response budget.

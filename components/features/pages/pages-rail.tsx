@@ -98,6 +98,7 @@ export interface PagesRailProps {
   /** The row menu's two verbs. Absent, the menu is not drawn. */
   onMovePage?: (page: PageView) => void
   onRemoveFromFolder?: (page: PageView) => void
+  onSharePage?: (page: PageView, opener?: HTMLElement | null) => void
   /** The folder verbs: the toolbar button and the header menu. */
   onCreateFolder?: () => void
   onEditFolder?: (slug: string) => void
@@ -229,6 +230,7 @@ export function PagesRail({
   onToggleCollapse,
   onMovePage,
   onRemoveFromFolder,
+  onSharePage,
   onCreateFolder,
   onEditFolder,
   onShareFolder,
@@ -350,7 +352,8 @@ export function PagesRail({
   const folderAuthority = React.useMemo(() => new Map((folders ?? []).map(folder => [folder.slug, folder])), [folders])
   const canMoveRow = (page: PageView) => Boolean(onMovePage && page.canMove === true)
   const canRemoveRow = (page: PageView) => Boolean(onRemoveFromFolder && page.folder && page.canRemoveFromFolder === true)
-  const rowMenus = (page: PageView) => canMoveRow(page) || canRemoveRow(page)
+  const canShareRow = (page: PageView) => Boolean(onSharePage && page.hasCollaboration)
+  const rowMenus = (page: PageView) => canMoveRow(page) || canRemoveRow(page) || canShareRow(page)
 
   // ── Select mode (#2533) ───────────────────────────────────────────────────
   // A row in Select mode toggles instead of opening — click, Enter and Space
@@ -816,6 +819,7 @@ export function PagesRail({
                             onOpenChange={(open) => setMenuFor(open ? page.slug : null)}
                             onMove={canMoveRow(page) ? () => onMovePage?.(page) : undefined}
                             onRemoveFromFolder={canRemoveRow(page) ? () => onRemoveFromFolder?.(page) : undefined}
+                            onShare={canShareRow(page) ? opener => onSharePage?.(page, opener) : undefined}
                           />
                         )}
                       </SidebarRow>

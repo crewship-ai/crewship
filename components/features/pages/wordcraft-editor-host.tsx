@@ -14,10 +14,12 @@ const labels: Record<WordCraftHostState, string> = {
 const exact = (message: Record<string, unknown>, keys: string[]) => Object.keys(message).length === keys.length && keys.every(key => key in message)
 
 /** Actual WordCraft protocol host; the legacy JSON pilot uses a separate host. */
-export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange }: { workspaceId: string; pageId: string; name?: string; onDirtyChange?: (dirty: boolean) => void }) {
+export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange, onUnavailable }: { workspaceId: string; pageId: string; name?: string; onDirtyChange?: (dirty: boolean) => void; onUnavailable?: () => void }) {
   const mount = React.useRef<HTMLDivElement>(null)
   const [state, setState] = React.useState<WordCraftHostState>("connecting")
   const [error, setError] = React.useState<string>()
+  const unavailable = React.useRef(onUnavailable)
+  React.useEffect(() => { unavailable.current = onUnavailable }, [onUnavailable])
   const dirty = ["draft", "pending", "unknown", "unsaved-draft"].includes(state)
   useLeaveGuard(dirty)
   React.useEffect(() => { onDirtyChange?.(dirty) }, [dirty, onDirtyChange])
@@ -34,6 +36,7 @@ export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange }
     const close = (reason: string) => {
       if (dead) return
       dead = true
+      unavailable.current?.()
       setState(previous => ["draft", "pending", "unknown", "unsaved-draft"].includes(previous) ? "unsaved-draft" : "stopped")
       host?.stop(reason)
       // Preserve the original producer's memory on a live failure, but end

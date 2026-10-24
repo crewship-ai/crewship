@@ -70,6 +70,12 @@ vi.mock("@/components/features/pages/page-application", () => ({
 }))
 
 vi.mock("@/components/features/pages/page-document",()=>({PageDocument:({pageId,workspaceId}:{pageId:string;workspaceId:string})=><div data-testid="native-document">Native document {workspaceId}:{pageId}</div>}))
+const nativeHost = vi.hoisted(() => ({ unavailable: undefined as undefined | (() => void) }))
+vi.mock("@/components/features/pages/wordcraft-editor-host", () => ({ WordCraftEditorHost: ({ onDirtyChange, onUnavailable }: { onDirtyChange: (dirty: boolean) => void; onUnavailable?: () => void }) => {
+  nativeHost.unavailable = onUnavailable
+  return <div data-testid="native-wordcraft"><button onClick={() => onDirtyChange(true)}>Make draft</button></div>
+} }))
+vi.mock("@/components/features/pages/native-document-access-dialog", () => ({ NativeDocumentAccessDialog: ({ slug, onClose }: { slug: string; onClose: () => void }) => <div role="dialog">Access {slug}<button onClick={onClose}>Close access</button></div> }))
 
 import { PagesLayout } from "@/components/features/pages/pages-layout"
 import { PAGE_STATE_ORDER } from "@/components/features/pages/page-state"
@@ -137,6 +143,19 @@ describe("PagesLayout", () => {
     window.history.replaceState(null, "", "/pages")
   })
   afterEach(() => vi.unstubAllGlobals())
+
+  it("opens native sharing without replacing a dirty WordCraft editor and closes it when the host stops", async () => {
+    renderLayout([{ ...FLEET, has_collaboration: true }], FLEET.slug!)
+    const editor = await screen.findByTestId("native-wordcraft")
+    fireEvent.click(screen.getByRole("button", { name: "Make draft" }))
+    fireEvent.click(screen.getByRole("button", { name: "Share" }))
+    expect(screen.getByRole("dialog")).toHaveTextContent(`Access ${FLEET.slug}`)
+    expect(screen.getByTestId("native-wordcraft")).toBe(editor)
+    expect(screen.queryByTestId("section-content")).not.toBeInTheDocument()
+    act(() => nativeHost.unavailable?.())
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    expect(screen.getByTestId("native-wordcraft")).toBe(editor)
+  })
 
   it("keeps readable Pages while hiding creation and import for VIEWER without page.create", async () => {
     access.role = "VIEWER"
