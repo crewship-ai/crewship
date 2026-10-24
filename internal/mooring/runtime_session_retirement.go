@@ -346,7 +346,7 @@ func (s *SessionRuntime) CompleteRetiredDeliveryControl(c SessionControl, r *Ses
 		return ErrSessionRuntime
 	}
 	delete(s.child, c.id)
-	delete(s.childIDs, entry.requestID)
+	s.removeChildIDLocked(entry)
 	s.count--
 	s.bytes -= len(entry.bytes)
 	s.drainParticipantRetirementsLocked()

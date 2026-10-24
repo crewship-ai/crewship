@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Mooring sessions retain a Pending notification and its matching terminal receipt separately while delivery is blocked, preserving each until its own completion.
+
 - WordCraft documents expose existing authorized sharing from their header and list menu without replacing the running editor. Opening access rechecks the current viewer and keeps document sharing separate from agent task permissions.
 
 - Run the complete catalog of actual Mooring Rust/SQL integration tests in hosted CI using freshly built public-source fixtures; reject missing, skipped or failed execution evidence.
