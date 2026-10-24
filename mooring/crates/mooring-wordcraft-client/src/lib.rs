@@ -43,6 +43,17 @@ fn bound(raw: &str) -> Result<usize, String> {
         mooring_protocol::Counter::try_from(raw.to_owned()).map_err(|_| "invalid_request")?;
     usize::try_from(counter.0).map_err(|_| "invalid_request".into())
 }
+fn checked_origin(raw: &str) -> Result<mooring_text::CheckedClientOrigin, String> {
+    if raw.len() > 16
+        || raw.is_empty()
+        || !raw.bytes().all(|b| b.is_ascii_digit())
+        || raw.starts_with('0')
+    {
+        return Err("invalid_origin".into());
+    }
+    let value = raw.parse::<u64>().map_err(|_| "invalid_origin")?;
+    mooring_text::CheckedClientOrigin::new(value).map_err(|_| "invalid_origin".into())
+}
 fn read_error(error: read::ReadError) -> String {
     match error {
         read::ReadError::InvalidLimit => "invalid_limit",
@@ -200,6 +211,84 @@ pub fn profile_json() -> String {
     let profile = mooring_wordcraft::profile::qualified_versions();
     json!({"application_id":mooring_wordcraft::profile::APPLICATION_ID,"selected":profile,"checkpoint_format":mooring_wordcraft::profile::CHECKPOINT_FORMAT,"upstream_source":mooring_wordcraft::profile::SOURCE_PIN,"upstream_git_describe":mooring_wordcraft::profile::SOURCE_DESCRIBE,"facade_package_version":env!("CARGO_PKG_VERSION"),"authoritative_install":false,"human_raw_updates":false,"qualification_artifacts":mooring_wordcraft::profile::qualification_artifacts()}).to_string()
 }
+// Keep the Rust construction API separate from the JS boundary: generated
+// `&str` conversion is not a JavaScript type check for hostile numeric values.
+impl WordCraftModel {
+    /// Explicit numeric data only. The host must separately issue and reserve
+    /// this origin for the original source and authenticated checkpoint basis.
+    pub fn import_with_origin(
+        native_json: &str,
+        ids_json: &str,
+        origin: &str,
+    ) -> Result<WordCraftModel, String> {
+        let origin = checked_origin(origin)?;
+        if native_json.len() > MAX_JSON {
+            return Err("quota_exceeded".into());
+        }
+        normalize_bounded(native_json.as_bytes()).map_err(|_| "invalid_request")?;
+        let native = serde_json::from_str(native_json).map_err(|_| "invalid_native")?;
+        let ids: Vec<String> = parse(ids_json)?;
+        Ok(Self {
+            document: Document::import_with_origin(native, ids, origin).map_err(state_error)?,
+        })
+    }
+    /// FRESH only: absence from the retained frontier is not proof that an
+    /// origin was never issued, rejected or burned. There is no continuation.
+    pub fn restore_with_fresh_origin(
+        checkpoint: &[u8],
+        origin: &str,
+    ) -> Result<WordCraftModel, String> {
+        let origin = checked_origin(origin)?;
+        if checkpoint.len() > MAX_CHECKPOINT {
+            return Err("quota_exceeded".into());
+        }
+        Ok(Self {
+            document: Document::restore_with_fresh_origin(checkpoint, origin)
+                .map_err(state_error)?,
+        })
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(typescript_type = "string")]
+    type OriginString;
+    #[wasm_bindgen(method, getter)]
+    fn length(this: &OriginString) -> u32;
+}
+#[cfg(target_arch = "wasm32")]
+fn origin_string(value: JsValue) -> Result<String, String> {
+    use wasm_bindgen::JsCast;
+    if !value.is_string() || value.unchecked_ref::<OriginString>().length() > 16 {
+        return Err("invalid_origin".into());
+    }
+    // Copy only after JS type and UTF-16 length are bounded.
+    value.as_string().ok_or_else(|| "invalid_origin".into())
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+impl WordCraftModel {
+    #[wasm_bindgen(js_name = import_with_origin)]
+    pub fn import_with_origin_js(
+        native_json: &str,
+        ids_json: &str,
+        origin: JsValue,
+    ) -> Result<WordCraftModel, String> {
+        let origin = origin_string(origin)?;
+        Self::import_with_origin(native_json, ids_json, &origin)
+    }
+    #[wasm_bindgen(js_name = restore_with_fresh_origin)]
+    pub fn restore_with_fresh_origin_js(
+        checkpoint: &[u8],
+        origin: JsValue,
+    ) -> Result<WordCraftModel, String> {
+        let origin = origin_string(origin)?;
+        Self::restore_with_fresh_origin(checkpoint, &origin)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -355,5 +444,92 @@ mod tests {
             serde_json::from_str(&model.page_json(None, "1", "262144").unwrap()).unwrap();
         assert_eq!(page["paragraphs"].as_array().unwrap().len(), 1);
         assert!(model.header_json("262144").is_ok());
+    }
+}
+
+#[cfg(test)]
+mod explicit_origin_tests {
+    use super::*;
+    fn input() -> (String, String) {
+        let native =
+            include_str!("../../mooring-wordcraft/tests/fixtures/d1-engine-canonical.json");
+        let value: serde_json::Value = serde_json::from_str(native).unwrap();
+        let ids = (0..value["body"].as_array().unwrap().len())
+            .map(|i| format!("explicit-{i}"))
+            .collect::<Vec<_>>();
+        (native.into(), serde_json::to_string(&ids).unwrap())
+    }
+    #[test]
+    fn explicit_origin_import_and_fresh_restore_preserve_complete_model() {
+        let (native, ids) = input();
+        for origin in ["1", "9007199254740991"] {
+            let model = WordCraftModel::import_with_origin(&native, &ids, origin).unwrap();
+            let cp = model.checkpoint().unwrap();
+            let inventory = mooring_wordcraft::origin_inventory::inspect(&cp).unwrap();
+            assert_eq!(inventory.allocated().len(), 1);
+            assert_eq!(inventory.allocated()[0].0, origin.parse::<u64>().unwrap());
+            assert!(WordCraftModel::restore_with_fresh_origin(&cp, origin).is_err());
+            let restored = WordCraftModel::restore_with_fresh_origin(&cp, "31").unwrap();
+            assert_eq!(restored.checkpoint().unwrap(), cp);
+            assert_eq!(
+                restored.native_json().unwrap(),
+                model.native_json().unwrap()
+            );
+            assert_eq!(
+                restored.stable_ids_json().unwrap(),
+                model.stable_ids_json().unwrap()
+            );
+        }
+    }
+    #[test]
+    fn malformed_origins_rejected_before_native_or_checkpoint_decode() {
+        for origin in [
+            "",
+            "0",
+            "00",
+            "01",
+            "+1",
+            "-1",
+            "1.0",
+            "1e1",
+            " 1",
+            "1 ",
+            "9007199254740992",
+            "18446744073709551616",
+        ] {
+            assert!(
+                matches!(WordCraftModel::import_with_origin("not JSON","not JSON",origin),Err(e) if e=="invalid_origin"),
+                "{origin}"
+            );
+            assert!(
+                matches!(WordCraftModel::restore_with_fresh_origin(b"not checkpoint",origin),Err(e) if e=="invalid_origin"),
+                "{origin}"
+            );
+        }
+    }
+    #[test]
+    fn explicit_origin_does_not_promote_read_only_native() {
+        let native = include_str!("../../mooring-wordcraft/tests/fixtures/d1-native.json");
+        let value: serde_json::Value = serde_json::from_str(native).unwrap();
+        let ids = serde_json::to_string(
+            &(0..value["body"].as_array().unwrap().len())
+                .map(|i| format!("raw-{i}"))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let model = WordCraftModel::import_with_origin(native, &ids, "17").unwrap();
+        assert!(model.is_read_only());
+        let cp = model.checkpoint().unwrap();
+        let restored = WordCraftModel::restore_with_fresh_origin(&cp, "31").unwrap();
+        assert!(restored.is_read_only());
+        assert_eq!(restored.checkpoint().unwrap(), cp);
+        assert_eq!(
+            restored.native_json().unwrap(),
+            model.native_json().unwrap()
+        );
+        assert_eq!(
+            restored.stable_ids_json().unwrap(),
+            model.stable_ids_json().unwrap()
+        );
     }
 }
