@@ -8,6 +8,13 @@ import (
 	"github.com/crewship-ai/crewship/internal/mooring"
 )
 
+// Only a process lifetime and exact concrete pointer identity are shared here.
+// Constructors still require the actual negotiated legacy runtime or the
+// separately verified session activation. This interface grants no authority.
+type collaborationHumanProcess interface {
+	Done() <-chan struct{}
+}
+
 // Host lifecycle identity, never a human authentication context. Capture ONCE
 // at registry construction; a restore must not refresh an existing registry.
 func collaborationHumanLifecycleStamp(f *collaborationIngressFence) (collaborationIngressStamp, error) {
@@ -27,6 +34,10 @@ func (s *collaborationHumanRegistry) acquireRuntimeOperation() (func(), error) {
 	}
 	s.mu.Lock()
 	active := !s.replacing && s.runtime != nil && s.bindingID != ""
+	if active && s.sessionStore != nil {
+		_, err := s.sessionStore.live()
+		active = err == nil
+	}
 	s.mu.Unlock()
 	if !active {
 		s.runtimeMu.RUnlock()
@@ -35,7 +46,7 @@ func (s *collaborationHumanRegistry) acquireRuntimeOperation() (func(), error) {
 	return s.runtimeMu.RUnlock, nil
 }
 
-func (s *collaborationHumanRegistry) matchesRuntimeBinding(runtime *mooring.Runtime, bindingID string) bool {
+func (s *collaborationHumanRegistry) matchesRuntimeBinding(runtime collaborationHumanProcess, bindingID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return !s.replacing && bindingID != "" && s.bindingID == bindingID && s.runtime == runtime
@@ -45,7 +56,7 @@ func (s *collaborationHumanRegistry) matchesRuntimeBinding(runtime *mooring.Runt
 // method value of a mutable registry would let old stores authenticate known
 // retries after rebind without ever calling their dead preparation adapter.
 type collaborationHumanStoreBinding struct {
-	runtime   *mooring.Runtime
+	runtime   collaborationHumanProcess
 	id        string
 	adapter   mooring.TargetBatchAdapter
 	authority mooring.BatchAuthority
@@ -105,6 +116,12 @@ func (s *collaborationHumanRegistry) replaceRuntime(ctx context.Context, replace
 	defer release()
 	s.mu.Lock()
 	old := s.runtime
+	// A prepare-only runtime may never replace a verified live session. Such
+	// recovery needs another actual activation and its original-store proof.
+	if _, legacy := old.(*mooring.Runtime); !legacy {
+		s.mu.Unlock()
+		return empty, errCollaborationAdmission
+	}
 	if old == nil || old == replacement || old.Done() == nil || owner.Generation <= s.ownerGeneration {
 		s.mu.Unlock()
 		return empty, errCollaborationAdmission

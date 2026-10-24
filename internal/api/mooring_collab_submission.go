@@ -279,6 +279,14 @@ func (s *collaborationSubmissionRegistry) bind(owner mooring.OwnerLease, binding
 		if err != nil || tx == nil || owner.Key != s.humans.scope || access.Lease != owner || access.Access.Scope != owner.Key || operation.binding.runtime != binding.runtime || operation.binding.id != binding.id {
 			return errCollaborationSubmission
 		}
+		if c := s.humans.sessionStore; c != nil {
+			if !access.Access.FromStore(c.store) {
+				return errCollaborationSubmission
+			}
+			if err = c.check(ctx, tx); err != nil {
+				return err
+			}
+		}
 		s.mu.Lock()
 		var entry collaborationSubmissionEntry
 		found := false

@@ -71,7 +71,7 @@ func (h *PageHandler) authorizeCollaborationPageSubject(ctx context.Context, tx 
 	if tx == nil || key.WorkspaceID == "" || key.ArtifactID == "" || key.ApplicationID != "wordcraft" || !source.Valid() {
 		return result, errCollaborationHumanAccess
 	}
-	write, initialize := false, false
+	write, initialize, finalInitialize := false, false, false
 	switch intent {
 	case "read", "read_checkpoint", "outcome":
 	case "write", "task":
@@ -79,6 +79,8 @@ func (h *PageHandler) authorizeCollaborationPageSubject(ctx context.Context, tx 
 	case "initialize":
 		write = true
 		initialize = true
+	case "initialize_commit":
+		write, initialize, finalInitialize = true, true, true
 	default:
 		return result, errCollaborationHumanAccess
 	}
@@ -140,7 +142,7 @@ func (h *PageHandler) authorizeCollaborationPageSubject(ctx context.Context, tx 
 		if rec.OwnerUserID != source.UserID || rec.OwnerCrewID != "" || rec.HasProject || rec.HasApplication {
 			return result, errCollaborationHumanAccess
 		}
-		privateSQL, _, err := privatePageOwnershipSQL(ctx, tx, "p")
+		privateSQL, _, err := privatePageOwnershipSQLForInitialization(ctx, tx, "p", finalInitialize)
 		if err != nil {
 			return result, err
 		}
@@ -150,6 +152,15 @@ func (h *PageHandler) authorizeCollaborationPageSubject(ctx context.Context, tx 
 		}
 		if attached {
 			return result, errCollaborationHumanAccess
+		}
+		if finalInitialize {
+			var installed bool
+			if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM mooring_collab_documents WHERE page_id=? AND workspace_id=? AND application_id=?)`, key.ArtifactID, key.WorkspaceID, key.ApplicationID).Scan(&installed); err != nil {
+				return result, err
+			}
+			if !installed {
+				return result, errCollaborationHumanAccess
+			}
 		}
 	} else {
 		var application string

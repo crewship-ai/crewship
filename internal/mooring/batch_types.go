@@ -74,12 +74,23 @@ type BatchResult struct {
 // Outcome access must authorize the caller's current scope before any ID lookup;
 // it need not authorize the historical author's now-revoked write capability.
 type BatchAccess struct {
-	Intent      string // initialize, outcome, read_checkpoint, write, task
+	store       *BatchStore // actual caller, never participant-controlled authority
+	final       bool        // initialized content exists; final custody/authority check
+	Intent      string      // initialize, outcome, read_checkpoint, write, task
 	Scope       SessionKey
 	Operation   *BatchOperation
 	TaskID      string
 	Participant string
 }
+
+// FromStore verifies the actual invoking store rather than a copied authority
+// callback/configuration. The store identity cannot be supplied through JSON.
+func (a BatchAccess) FromStore(store *BatchStore) bool { return store != nil && a.store == store }
+
+// IsCommitFence distinguishes the final check after initialization inserts.
+// Only the actual store sets this phase; it is never participant input.
+func (a BatchAccess) IsCommitFence() bool { return a.final }
+
 type BatchAuthority func(context.Context, *sql.Tx, BatchAccess) error
 
 // PreparedFailure identifies the real failed immutable member. This is an

@@ -112,6 +112,9 @@ func (s *SessionCommitter) Commit(ctx context.Context, request SessionBatchReque
 				return ErrInvalid
 			}
 		}
+		// This private copy changes only sealed-processing authority; its original
+		// initialized store remains the verified runtime/store binding.
+		access.store = s.store
 		return s.authority(ctx, tx, SessionBatchAccess{Purpose: purpose, Lease: request.Lease, Access: access, ChangeID: member.changeID, MembershipHash: member.membershipHash})
 	}
 	// The placeholder is used only for pure normalization. The actual transport

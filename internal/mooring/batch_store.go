@@ -21,7 +21,7 @@ func (s *BatchStore) authorize(ctx context.Context, tx *sql.Tx, k SessionKey, in
 		isolated := cloneBatchOperation(*op)
 		op = &isolated
 	}
-	return s.config.Authority(ctx, tx, BatchAccess{intent, k, op, task, participant})
+	return s.config.Authority(ctx, tx, BatchAccess{store: s, Intent: intent, Scope: k, Operation: op, TaskID: task, Participant: participant})
 }
 func (s *BatchStore) transaction(ctx context.Context, fn func(*sql.Tx) error) error {
 	if err := s.ready(); err != nil {
@@ -135,7 +135,7 @@ func (s *BatchStore) Initialize(ctx context.Context, lease OwnerLease, checkpoin
 		if err = s.audit(ctx, tx, lease.Key, "initialized", map[string]string{"revision": "0"}); err != nil {
 			return err
 		}
-		if err = s.authorize(ctx, tx, lease.Key, "initialize", nil, "", ""); err != nil {
+		if err = s.config.Authority(ctx, tx, BatchAccess{store: s, final: true, Intent: "initialize", Scope: lease.Key}); err != nil {
 			return err
 		}
 		return s.config.Owners.Check(ctx, tx, lease)

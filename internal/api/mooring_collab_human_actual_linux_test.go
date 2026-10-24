@@ -120,7 +120,11 @@ func TestCollaborationHumanActualHTTPRustStoreAndRevocation(t *testing.T) {
 	}
 	authority := func(ctx context.Context, tx *sql.Tx, access mooring.BatchAccess) error {
 		if access.Intent == "initialize" {
-			_, err := pages.authorizeCollaborationHumanPage(ctx, tx, access.Scope, "initialize")
+			intent := "initialize"
+			if access.IsCommitFence() {
+				intent = "initialize_commit"
+			}
+			_, err := pages.authorizeCollaborationHumanPage(ctx, tx, access.Scope, intent)
 			return err
 		}
 		return storeBinding.authority(ctx, tx, access)

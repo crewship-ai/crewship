@@ -27,6 +27,12 @@ func (h *PageHandler) pageAuthReader(ctx context.Context) pageAuthQueryer {
 // tables participate in custody; absent features never make ordinary Page
 // departure or listing fail. A present unsupported schema fails closed.
 func privatePageOwnershipSQL(ctx context.Context, q pageAuthQueryer, alias string) (string, string, error) {
+	return privatePageOwnershipSQLForInitialization(ctx, q, alias, false)
+}
+
+// Only the final host initialization fence may exclude its own new attachment.
+// Other native engines and schema validation remain part of custody checks.
+func privatePageOwnershipSQLForInitialization(ctx context.Context, q pageAuthQueryer, alias string, excludeCollaboration bool) (string, string, error) {
 	terms := []string{}
 	cases := []string{}
 	for _, extension := range []struct{ table, kind string }{
@@ -61,6 +67,9 @@ func privatePageOwnershipSQL(ctx context.Context, q pageAuthQueryer, alias strin
 			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pragma_table_info(?) WHERE name='workspace_id')`, extension.table).Scan(&scoped); err != nil || !scoped {
 				return "", "", fmt.Errorf("unsupported collaboration output scope schema")
 			}
+		}
+		if excludeCollaboration && extension.table == "mooring_collab_documents" {
+			continue
 		}
 		// Names come exclusively from the fixed list above and internal aliases.
 		term := "EXISTS(SELECT 1 FROM " + extension.table + " WHERE page_id=" + alias + ".id)"

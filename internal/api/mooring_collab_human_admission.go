@@ -65,7 +65,8 @@ type collaborationHumanRegistry struct {
 	fence           *collaborationIngressFence
 	pages           *PageHandler
 	owners          *mooring.OwnerStore
-	runtime         *mooring.Runtime
+	sessionStore    *collaborationSessionStore
+	runtime         collaborationHumanProcess
 	targetAdapter   mooring.TargetBatchAdapter
 	readPolicy      string
 	clock           mooring.OwnerClock
@@ -203,6 +204,11 @@ func (s *collaborationHumanRegistry) issue(ctx context.Context, owner mooring.Ow
 	if err = s.owners.Check(ctx, tx, owner); err != nil {
 		return "", empty, err
 	}
+	if s.sessionStore != nil {
+		if err = s.sessionStore.check(ctx, tx); err != nil {
+			return "", empty, err
+		}
+	}
 	intent := "read"
 	if write {
 		intent = "write"
@@ -268,6 +274,11 @@ func (s *collaborationHumanRegistry) capturedContext(ctx context.Context, admiss
 }
 
 func (s *collaborationHumanRegistry) checkCaptured(ctx context.Context, tx *sql.Tx, admission collaborationHumanAdmission, write bool, requiredRemaining time.Duration) (string, error) {
+	if s.sessionStore != nil {
+		if err := s.sessionStore.check(ctx, tx); err != nil {
+			return "", err
+		}
+	}
 	// This local check is not a lease over the caller's later commit/send.
 	// Entrypoints must hold an outer ingress lease around the complete operation.
 	release, err := s.fence.acquireOriginal(admission.ingress)
@@ -371,7 +382,10 @@ func (s *collaborationHumanRegistry) runHumanOperation(r *http.Request, particip
 // Plug directly into BatchStore.Authority so status/unknown recovery keeps the
 // store's SQL writer linearization. No loose status cache or historical author
 // write check replaces the current reader admission.
-func (s *collaborationHumanRegistry) authorizeBatchAtBinding(ctx context.Context, tx *sql.Tx, access mooring.BatchAccess, runtime *mooring.Runtime, bindingID string) error {
+func (s *collaborationHumanRegistry) authorizeBatchAtBinding(ctx context.Context, tx *sql.Tx, access mooring.BatchAccess, runtime collaborationHumanProcess, bindingID string) error {
+	if s.sessionStore != nil && !access.FromStore(s.sessionStore.store) {
+		return errCollaborationAdmission
+	}
 	if !s.matchesRuntimeBinding(runtime, bindingID) {
 		return errCollaborationAdmission
 	}
@@ -411,7 +425,7 @@ type collaborationHumanJoined struct {
 // join publishes no content. Only a successfully opened, current SQL gate may
 // become SessionJoined. The Rust dispatcher must still enforce its own
 // suspend-aware deadline, measured from the FIRST request send, on every frame.
-func (s *collaborationHumanRegistry) join(ctx context.Context, runtime *mooring.Runtime, owner mooring.OwnerLease, ticket, nonce string) (collaborationHumanJoined, error) {
+func (s *collaborationHumanRegistry) join(ctx context.Context, runtime collaborationHumanProcess, owner mooring.OwnerLease, ticket, nonce string) (collaborationHumanJoined, error) {
 	var empty collaborationHumanJoined
 	unlock, err := s.acquireRuntimeOperation()
 	if err != nil {
@@ -467,7 +481,7 @@ func (s *collaborationHumanRegistry) join(ctx context.Context, runtime *mooring.
 // join needs a fresh ticket; no retry can rebind this ticket to another nonce,
 // runtime, owner generation or gate. Its caller must be the inherited runtime
 // dispatcher and must open/recheck the SQL delivery gate before SessionJoined.
-func (s *collaborationHumanRegistry) consume(runtime *mooring.Runtime, owner mooring.OwnerLease, ticket, nonce string) (collaborationHumanAdmission, error) {
+func (s *collaborationHumanRegistry) consume(runtime collaborationHumanProcess, owner mooring.OwnerLease, ticket, nonce string) (collaborationHumanAdmission, error) {
 	var empty collaborationHumanAdmission
 	if runtime == nil || len(ticket) != 64 || !mooring.ValidWireIdentifier(nonce) {
 		return empty, errCollaborationAdmission

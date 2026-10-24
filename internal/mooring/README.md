@@ -347,3 +347,19 @@ on channel death or stale ownership; it does not pin the initial document head
 forever after real saved commits advance it. It carries no human, agent, reader,
 write or delivery permission. API constructors and every later operation still
 need independent current canonical authority, lifetime leases and final fences.
+
+The inactive API session binding consumes an actual `SessionActivation` and the
+original initialized store. A private set-once authority cell denies all reader
+operations before activation; initialization alone uses a bounded original-human
+operation. The final initialization fence distinguishes the newly installed
+collaboration attachment from competing native engines while rechecking current
+human authority, personal custody and owner lease. Other Page custody checks
+keep their original behavior. Store callbacks identify the actual invoking
+store; only the narrow internal sealed-processing copy retains its original
+store identity. A copied store/configuration cannot borrow this API authority.
+The session constructor derives identity and versions from activation, checks
+FULL SQL ownership, and never accepts a copied wire Ready message. Dead child,
+source ABA and wrong-store bindings fail closed. The existing prepare-only
+replacement seam cannot replace a live session. Actual session recovery, raw
+participant admission, FIFO settlement, full checkpoint identity translation,
+provider isolation, UI and deployment remain separate qualification requirements.
