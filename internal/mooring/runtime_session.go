@@ -62,6 +62,7 @@ type SessionRuntime struct {
 	next                       uint64
 	count, bytes               int
 	sessionID                  string
+	observed                   sessionObserved
 	openSent                   bool
 	closed                     bool
 	err                        error
@@ -253,6 +254,7 @@ func (s *SessionRuntime) request(ctx context.Context, raw []byte, maximum time.D
 		return nil, ErrSessionRuntime
 	}
 	p.sent = true
+	s.observeSentLocked(header.kind, normalized)
 	if header.kind == "session_open" {
 		s.openSent = true
 	}
@@ -305,6 +307,7 @@ func (s *SessionRuntime) readLoop() {
 				s.fail(ErrSessionRuntime)
 				return
 			}
+			s.observeResponseLocked(header.kind, normalized)
 			p.responseBytes = len(normalized)
 			s.bytes += len(normalized)
 			p.reply <- normalized
@@ -411,6 +414,9 @@ func (s *SessionRuntime) ReplyControl(ctx context.Context, c SessionControl, raw
 		s.fail(err)
 		return err
 	}
+	s.mu.Lock()
+	s.observeOwnerLocked(entry, normalized)
+	s.mu.Unlock()
 	return s.complete(c, true)
 }
 

@@ -333,3 +333,17 @@ must process sealed submissions/status barriers in FIFO order, stop on an
 uncertain prefix, recheck original per-operation authority and final delivery
 gates, and reject encoded output over budget before SQL COMMIT. Readiness,
 correlation and private process identity do not supply those permissions.
+
+`SessionActivation` is a separate opaque INITIAL startup proof. The channel
+records only small hashes/summaries of its actual sent Open/Restore and actual
+correlated owner grant/Restored/Opened messages; a caller-supplied copied Opened
+is never evidence. Activate requires that exact concrete session adapter/store,
+preselected session ID, runtime reference, nonce and owner fence, then checks
+current SQL checkpoint bytes/digest and the complete target inventory in the
+same FULL writer as OwnerStore.Check. It mints only after transaction success
+and refuses duplicate activation. Initial inventory has no fake empty atomic
+operation. The token remains tied to that exact store/process/owner and fails
+on channel death or stale ownership; it does not pin the initial document head
+forever after real saved commits advance it. It carries no human, agent, reader,
+write or delivery permission. API constructors and every later operation still
+need independent current canonical authority, lifetime leases and final fences.
