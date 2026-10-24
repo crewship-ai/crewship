@@ -88,6 +88,17 @@ func (o *Orchestrator) detachedHoldRunID(agentID string) (string, bool) {
 // mechanism exists to refuse. Every tenth tick re-attempts a bounded stop,
 // because a wedged exec that ignored one signal may honour the next.
 func (o *Orchestrator) watchDetachedHold(h *detachedHold, poll time.Duration) {
+	if h.req.strictContentPrivacy {
+		defer func() {
+			if recover() != nil {
+				// A failed observer proves nothing about runtime death. Keep
+				// the hold, admission and capacity; never publish the panic
+				// value or stack. Supervision recovery requires a separate
+				// trusted confirmation, not terminal bookkeeping here.
+				o.logger.Error("private detached supervision interrupted; runtime remains unconfirmed", "run_id", h.runID)
+			}
+		}()
+	}
 	t := time.NewTicker(poll)
 	defer t.Stop()
 	alertAfter := h.alertAfter
