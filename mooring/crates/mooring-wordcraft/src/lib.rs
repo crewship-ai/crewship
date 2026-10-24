@@ -15,6 +15,7 @@ mod human_decode;
 mod native_qualification;
 pub mod profile;
 pub mod read;
+mod readonly_resources;
 
 use std::collections::HashSet;
 
