@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 pub mod boundary;
 pub mod canonical;
+pub mod checkpoint;
 pub mod control;
 pub mod grant;
 mod generated;
