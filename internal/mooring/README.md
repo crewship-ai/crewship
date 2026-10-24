@@ -464,3 +464,17 @@ issuance, raw Saved history, native constructor or participant route. Logical
 operation metadata is bounded to 100,000 rows and 64 MiB per lineage; the 4,096
 origin-exclusion bound is conservative capacity refusal, not an unlimited
 lifetime entitlement or permission to recycle an origin.
+
+
+Original-author references are an inactive host-only precursor to an origin
+issuer. They retain an existing human admission or actual fixed-attempt agent
+proof, derive read/write scope from that original, and return only after the
+capture writer commits. Copies and serialized values cannot recreate them.
+Every use retains the original operation/runtime/owner binding and rechecks
+canonical rights without refreshing the original credential or horizon.
+
+These references provide neither inventory nor burned-history coverage, and
+the author-only check does not qualify a caller-owned transaction's database.
+A future issuer must use the exact opaque inventory writer, real covered burn
+history and reserved-origin constructors. No source, ordinal, grant, allocation,
+route, raw Saved history or execution is enabled by the references.
