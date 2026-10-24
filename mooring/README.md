@@ -117,3 +117,11 @@ Unverified client claims cannot supply history. Inputs are bounded to256 records
 and262144 total original bytes; unavailable history fails closed. Current native
 tests mock this outer host proof. This does not qualify durable human history,
 selective undo across arbitrary recovery, live authority or E3 completion.
+
+The experimental local client records `Proposal::authored_frontier` before each
+original edit, undo or redo. Retries return the same captured frontier together
+with the original update bytes; ordered recovery evidence retains both. Shared
+`Document::state_vector()` emits sorted-client bytes without serializing the
+entire checkpoint for each keystroke. WASM model/local-draft getters expose
+observed state and the proposal's immutable observation only; neither is a
+confirmed receipt or human causal authority. No wire profile is extended.

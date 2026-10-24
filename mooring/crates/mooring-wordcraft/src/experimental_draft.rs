@@ -26,6 +26,9 @@ pub struct Proposal {
     pub origin: u64,
     pub operation_id: String,
     pub update: Vec<u8>,
+    /// Exact observed frontier BEFORE this original edit/undo/redo.
+    /// Captured once and retained unchanged for retries and recovery evidence.
+    pub authored_frontier: Vec<u8>,
     pub targets: Vec<String>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -205,6 +208,9 @@ impl DraftReplica {
         if self.proposals.len() >= 256 {
             return Err(ClientError::Limit);
         }
+        // Capture ONCE before any own operation allocates IDs or changes the
+        // frontier. Retry/recovery retain this exact observation with bytes.
+        let authored_frontier = self.document.state_vector();
         // Experimental evidence only: it intentionally does not claim that
         // unrelated optimistic operations are required semantic dependencies.
         let local_stamp = self
@@ -256,6 +262,7 @@ impl DraftReplica {
             operation_id: operation_id.into(),
             origin: self.origin,
             update,
+            authored_frontier,
             targets: captured.targets.into_iter().collect(),
         };
         self.capture_order.push(operation_id.to_owned());
@@ -332,6 +339,10 @@ impl DraftReplica {
             .apply_update(Update::decode_v1(update).map_err(|_| ClientError::InvalidState)?)
             .map_err(|_| ClientError::InvalidState)?;
         Ok(())
+    }
+    /// Observed optimistic state only; never a confirmed receipt or authority.
+    pub fn state_vector(&self) -> Vec<u8> {
+        self.document.state_vector()
     }
     /// Origin uniqueness/retirement across sessions is the host's responsibility.
     /// This instance additionally refuses every origin it has ever used.
@@ -541,5 +552,42 @@ mod tests {
         let third = own.undo("m-third").unwrap();
         let draft = own.recover(&bytes, 18, DraftAccess::Writer).unwrap();
         assert_eq!(draft.proposals, vec![first, second, third]);
+    }
+    #[test]
+    fn original_frontier_is_captured_before_edit_and_retained_after_retry_recovery() {
+        let base = baseline();
+        let mut local = DraftReplica::restore(&base, 17, DraftAccess::Writer).unwrap();
+        let before = local.state_vector();
+        let first = local.edit("z-first", insert("X")).unwrap();
+        assert_eq!(first.authored_frontier, before);
+        assert_ne!(first.authored_frontier, local.state_vector());
+        let next = local.state_vector();
+        let second = local.edit("a-second", insert("Y")).unwrap();
+        assert_eq!(second.authored_frontier, next);
+        let retry = local.edit("z-first", insert("X")).unwrap();
+        assert_eq!(retry, first);
+        let undo_before = local.state_vector();
+        let undo = local.undo("undo").unwrap();
+        assert_eq!(undo.authored_frontier, undo_before);
+        let recovery = local.recover(&base, 18, DraftAccess::Writer).unwrap();
+        assert_eq!(recovery.proposals, vec![first, second, undo]);
+        let fresh = local.edit("fresh", insert("C")).unwrap();
+        assert_eq!(fresh.authored_frontier, before);
+    }
+    #[test]
+    fn recorded_actual_client_basis_prepares_without_regenerating_observations() {
+        use crate::experimental_human_current::{prepare_current, Authority, HostWriter};
+        let base = baseline();
+        let mut local = DraftReplica::restore(&base, 17, DraftAccess::Writer).unwrap();
+        let proposal = local.edit("actual", insert("Č😀")).unwrap();
+        let candidate = prepare_current(
+            Authority::Writer(HostWriter::current(&base, 17).unwrap()),
+            &proposal.authored_frontier,
+            &proposal.update,
+            &proposal.targets,
+        )
+        .unwrap();
+        assert_eq!(candidate.native().unwrap(), local.native().unwrap());
+        assert_eq!(proposal, local.edit("actual", insert("Č😀")).unwrap());
     }
 }
