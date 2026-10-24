@@ -21,11 +21,12 @@ fn run() -> std::io::Result<()> {
         durabilities: &[Durability::Node],
         required: Durability::Node,
     };
-    let mut driver = mooring_collab::session_driver::Driver::from_negotiated_inherited_stream(
-        stream,
-        &transport,
-        mooring_core::lease::boottime,
-    )?;
+    let mut driver =
+        mooring_collab::session_driver::Driver::from_negotiated_inherited_stream_with_origins(
+            stream,
+            &transport,
+            mooring_core::lease::boottime,
+        )?;
     driver.run_owner(&transport)
 }
 #[cfg(not(target_os = "linux"))]

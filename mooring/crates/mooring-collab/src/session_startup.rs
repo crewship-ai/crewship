@@ -68,15 +68,31 @@ impl Startup {
     /// Clock is trusted BOOTTIME. A request retry reuses the returned EXACT
     /// bytes and this pending object; no nonce nomination or first-send reset.
     pub fn from_open(raw: &[u8], first_send: Tick) -> io::Result<(Self, Vec<u8>)> {
+        Self::from_open_with_origins(raw, first_send, false)
+    }
+    /// Only the concrete driver with an actual inspector handler may select
+    /// this opt-in. Neither a copied capability nor the schema enables it.
+    pub(crate) fn from_open_with_origins(
+        raw: &[u8],
+        first_send: Tick,
+        origins: bool,
+    ) -> io::Result<(Self, Vec<u8>)> {
         let normalized = session_control::validate(raw, control::Peer::InheritedHost)
             .map_err(|_| invalid("invalid session open"))?;
         let open: SessionOpen = serde_json::from_value(normalized.value().clone())
             .map_err(|_| invalid("not session open"))?;
         // The schema declares optional future opt-ins, not implementation
         // support. This driver still has no origin-inventory lane handler.
-        if open.required_capabilities
-            != vec![SessionOpenRequiredCapabilitiesItem::CheckpointIdentityV1]
-        {
+        let identity_only = open.required_capabilities
+            == vec![SessionOpenRequiredCapabilitiesItem::CheckpointIdentityV1];
+        let both = open.required_capabilities.len() == 2
+            && open
+                .required_capabilities
+                .contains(&SessionOpenRequiredCapabilitiesItem::CheckpointIdentityV1)
+            && open
+                .required_capabilities
+                .contains(&SessionOpenRequiredCapabilitiesItem::OriginInventoryV1);
+        if !identity_only && !(origins && both) {
             return Err(invalid("unimplemented session capability"));
         }
         if open.scope.application_id != "wordcraft" || open.versions != wordcraft_versions() {
@@ -339,7 +355,19 @@ impl ReadySession {
             fence: self.owner.fence.clone(),
             versions: self.open.versions.clone(),
             confirmed_basis: self.basis(),
-            capabilities: vec![SessionOpenedCapabilitiesItem::CheckpointIdentityV1],
+            capabilities: self
+                .open
+                .required_capabilities
+                .iter()
+                .map(|capability| match capability {
+                    SessionOpenRequiredCapabilitiesItem::CheckpointIdentityV1 => {
+                        SessionOpenedCapabilitiesItem::CheckpointIdentityV1
+                    }
+                    SessionOpenRequiredCapabilitiesItem::OriginInventoryV1 => {
+                        SessionOpenedCapabilitiesItem::OriginInventoryV1
+                    }
+                })
+                .collect(),
         };
         for raw in [serde_json::to_vec(&restored), serde_json::to_vec(&opened)] {
             let raw = raw.map_err(|_| invalid("startup reply encoding"))?;

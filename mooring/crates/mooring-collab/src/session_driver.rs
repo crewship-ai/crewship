@@ -36,6 +36,23 @@ impl Driver {
         transport: &Transport<'_>,
         clock: impl Fn() -> io::Result<Tick> + Send + Sync + 'static,
     ) -> io::Result<Self> {
+        Self::from_stream(stream, transport, clock, false)
+    }
+    /// Separately selected read-only inventory support. It grants no writer or
+    /// participant capability; the concrete app still qualifies every input.
+    pub fn from_negotiated_inherited_stream_with_origins(
+        stream: UnixStream,
+        transport: &Transport<'_>,
+        clock: impl Fn() -> io::Result<Tick> + Send + Sync + 'static,
+    ) -> io::Result<Self> {
+        Self::from_stream(stream, transport, clock, true)
+    }
+    fn from_stream(
+        stream: UnixStream,
+        transport: &Transport<'_>,
+        clock: impl Fn() -> io::Result<Tick> + Send + Sync + 'static,
+        origins: bool,
+    ) -> io::Result<Self> {
         let Transport::AuthenticatedHost { .. } = transport else {
             return Err(invalid("startup requires authenticated host"));
         };
@@ -46,7 +63,7 @@ impl Driver {
         let result = (|| {
             let raw = receive_until(&actor, || Ok(()))?;
             let first_send = clock()?;
-            let (startup, acquire) = Startup::from_open(&raw, first_send)?;
+            let (startup, acquire) = Startup::from_open_with_origins(&raw, first_send, origins)?;
             let open: SessionOpen =
                 serde_json::from_slice(&raw).map_err(|_| invalid("invalid startup open"))?;
             let prepare_inbox = lane.inbox(Route::Prepare);
@@ -232,10 +249,18 @@ fn prepare_loop(inbox: Inbox, output: Output, open: SessionOpen) {
         if let Ok(normalized) =
             mooring_protocol::session_control::validate(&raw, control::Peer::InheritedHost)
         {
-            if normalized.value()["type"] != "session_describe_checkpoint" {
-                return Err(invalid("unexpected preparation control"));
-            }
-            output.send(&crate::session_description::respond(&raw, &open)?)?;
+            let response = match normalized.value()["type"].as_str() {
+                Some("session_describe_checkpoint") => {
+                    crate::session_description::respond(&raw, &open)?
+                }
+                Some("session_inspect_origins") => crate::session_origins::respond(
+                    &raw,
+                    &open,
+                    &mooring_wordcraft::adapter::WordCraftAdapter,
+                )?,
+                _ => return Err(invalid("unexpected preparation control")),
+            };
+            output.send(&response)?;
             continue;
         }
         let normalized = control::validate_causal(&raw, control::Peer::InheritedHost)

@@ -276,3 +276,26 @@ replies and preparation while a renewal reply is withheld. This is owner-only
 maintenance: production CLI selection, live participant admission and delivery
 remain disabled. Actual Go/SQL renewal qualification is a separate integration
 step.
+
+### Explicit read-only origin inspection
+
+The separate native `from_negotiated_inherited_stream_with_origins` constructor
+can acknowledge an explicitly requested `origin_inventory_v1` capability. The
+existing constructor remains identity-only and refuses that request before
+OwnerAcquire. Preparation handles inventory independently while startup awaits
+an owner and after the live document is restored. Required capabilities are
+echoed in their original order; identity-only sessions cannot request inventory.
+
+The handler verifies the full checkpoint identity and actual application
+description before inspecting every occupied origin. It returns sorted numeric
+metadata bound to exact scope/session/runtime/tuple/full basis and the host's
+current fence. Creator provenance remains separate. The echoed fence is host
+correlation metadata, not native proof of SQL ownership. Unknown, legacy and
+read-only inventory qualification fails nonterminally without content diagnostics.
+
+Actual socket tests preserve the owned document's complete native value, stable
+IDs and checkpoint bytes while inspecting before/after startup. They also cover
+identity/full-metadata transplants and the actual read-only D3 refusal. This does
+not reserve origins, construct writers, issue Saved, admit participants or enable
+the production session CLI. A concrete opaque Go result with original-source and
+owner checks in the same writer remains the required host integration.

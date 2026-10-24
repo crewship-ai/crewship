@@ -406,9 +406,22 @@ fn unexpected_actor_control_or_reversed_clock_closes_without_replacing_document(
             // A second startup restore is not a durable settlement authority.
             mooring_collab::write_frame(&mut peer, &restore().0).unwrap();
         }
-        assert!(driver
-            .maintain_owner(&host(), Duration::from_millis(20))
-            .is_err());
+        // One bounded maintenance tick may time out before the sole reader
+        // has normalized the complete hostile frame. Require eventual closure,
+        // not delivery by the OS within the first20ms scheduling quantum.
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            if driver
+                .maintain_owner(&host(), Duration::from_millis(20))
+                .is_err()
+            {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "hostile control did not close owner"
+            );
+        }
         assert!(driver.check_owner().is_err());
         assert_eq!(driver.confirmed().document().checkpoint().unwrap(), before);
     }
@@ -459,4 +472,75 @@ fn nonidentical_completed_nonce_reply_closes_instead_of_becoming_new_permission(
         .maintain_owner(&host(), Duration::from_millis(20))
         .is_err());
     assert_eq!(driver.known_owner_permission(), Counter(4));
+}
+
+#[test]
+fn optin_origin_inventory_progresses_before_owner_and_after_owned_startup() {
+    let (child, mut peer) = UnixStream::pair().unwrap();
+    peer.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+    let (restore_bytes, native, ids) = restore();
+    let mut restored: Value = serde_json::from_slice(&restore_bytes).unwrap();
+    restored["checkpoint"]["generation"] = json!("6");
+    bind_checkpoint_identity(&mut restored["checkpoint"]);
+    let full: mooring_protocol::Checkpoint =
+        serde_json::from_value(restored["checkpoint"].clone()).unwrap();
+    let verified = mooring_protocol::checkpoint::verify(
+        &full,
+        mooring_protocol::checkpoint::Limits {
+            decoded_bytes: control::MAX_CHECKPOINT_BYTES,
+            preimage_bytes: control::MAX_CONTROL_BYTES,
+        },
+    )
+    .unwrap();
+    let expected: Vec<_> = mooring_wordcraft::origin_inventory::inspect(verified.state())
+        .unwrap()
+        .allocated()
+        .iter()
+        .map(|(origin, clock)| json!({"origin":origin.to_string(),"clock":clock.to_string()}))
+        .collect();
+    let request = json!({"type":"session_inspect_origins","request_id":"origins-before-owner","control_profile":restored["control_profile"],"scope":restored["scope"],"session_id":restored["session_id"],"runtime_ref":restored["runtime_ref"],"fence":restored["fence"],"versions":restored["versions"],"checkpoint":restored["checkpoint"]});
+    let host_worker = std::thread::spawn(move || {
+        let mut opening: Value = serde_json::from_slice(&open()).unwrap();
+        opening["required_capabilities"] = json!(["origin_inventory_v1", "checkpoint_identity_v1"]);
+        mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&opening).unwrap()).unwrap();
+        let acquire = mooring_collab::read_frame(&mut peer).unwrap().unwrap();
+        // Preparation must progress before the actor has received its owner.
+        mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&request).unwrap()).unwrap();
+        let inspected: Value =
+            serde_json::from_slice(&mooring_collab::read_frame(&mut peer).unwrap().unwrap())
+                .unwrap();
+        assert_eq!(inspected["type"], "session_origins_inspected");
+        assert_eq!(inspected["allocated"], json!(expected));
+        assert_eq!(inspected["checkpoint_generation"], "6");
+        assert_eq!(inspected["fence"]["generation"], "7");
+        assert_eq!(inspected["checkpoint_basis"]["digest"], full.digest);
+        assert_eq!(inspected["content_digest"], verified.content_digest());
+        mooring_collab::write_frame(&mut peer, &grant(&acquire)).unwrap();
+        mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&restored).unwrap()).unwrap();
+        for purpose in ["session_restored", "session_opened"] {
+            let ack: Value =
+                serde_json::from_slice(&mooring_collab::read_frame(&mut peer).unwrap().unwrap())
+                    .unwrap();
+            assert_eq!(ack["type"], purpose);
+            if purpose == "session_opened" {
+                assert_eq!(ack["capabilities"], opening["required_capabilities"]);
+            }
+        }
+        (peer, request, inspected)
+    });
+    let driver =
+        Driver::from_negotiated_inherited_stream_with_origins(child, &host(), || Ok(at(1)))
+            .unwrap();
+    assert_eq!(driver.confirmed().document().native().unwrap(), native);
+    assert_eq!(driver.confirmed().document().block_ids().unwrap(), ids);
+    let before = driver.confirmed().document().checkpoint().unwrap();
+    let (mut peer, mut request, mut expected) = host_worker.join().unwrap();
+    request["request_id"] = json!("origins-after-startup");
+    expected["request_id"] = request["request_id"].clone();
+    mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&request).unwrap()).unwrap();
+    let actual: Value =
+        serde_json::from_slice(&mooring_collab::read_frame(&mut peer).unwrap().unwrap()).unwrap();
+    assert_eq!(actual, expected);
+    assert_eq!(driver.confirmed().document().checkpoint().unwrap(), before);
+    assert_eq!(driver.confirmed().document().native().unwrap(), native);
 }
