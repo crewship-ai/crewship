@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/mooring"
@@ -239,6 +240,12 @@ func TestCollaborationSubmissionAgentRequiresOriginalAuthenticatedMandate(t *tes
 
 func TestCollaborationSubmissionCommitFailurePublishesNoOriginalProof(t *testing.T) {
 	r, h, owner, ctx, _ := collaborationAdmissionFixture(t)
+	// Install the fault before capture; later schema drift is separately
+	// unqualified. A data switch preserves this actual deferred-COMMIT test.
+	mustExec(t, r.db, `CREATE TABLE submission_commit_failure(user_id TEXT REFERENCES users(id) DEFERRABLE INITIALLY DEFERRED)`)
+	mustExec(t, r.db, `CREATE TABLE submission_commit_switch(enabled INTEGER)`)
+	mustExec(t, r.db, `INSERT INTO submission_commit_switch VALUES(0)`)
+	mustExec(t, r.db, `CREATE TRIGGER submission_commit_fault AFTER UPDATE OF seq ON mooring_session_writer_fence WHEN (SELECT enabled FROM submission_commit_switch)=1 BEGIN INSERT INTO submission_commit_failure(user_id) VALUES('missing-submission-human'); END`)
 	_, admission, err := h.issue(ctx, owner, true)
 	if err != nil {
 		t.Fatal(err)
@@ -246,24 +253,21 @@ func TestCollaborationSubmissionCommitFailurePublishesNoOriginalProof(t *testing
 	registry, _ := newCollaborationSubmissionRegistry(h)
 	binding, _ := h.storeBinding()
 	c := submissionTestChange(t, h.scope, "commit_failed", "", admission.participant)
-	// Deferred FK permits the authority read and writer update, then fails the
-	// actual COMMIT. Publishing a seal before that boundary would retain proof.
-	mustExec(t, r.db, `CREATE TABLE submission_commit_failure(user_id TEXT REFERENCES users(id) DEFERRABLE INITIALLY DEFERRED)`)
-	mustExec(t, r.db, `CREATE TRIGGER submission_commit_fault AFTER UPDATE OF seq ON mooring_session_writer_fence BEGIN INSERT INTO submission_commit_failure(user_id) VALUES('missing-submission-human'); END`)
+	// Deferred FK permits authority reads, then rejects the actual COMMIT.
+	mustExec(t, r.db, `UPDATE submission_commit_switch SET enabled=1`)
 	request := httptest.NewRequest("POST", "/", nil).WithContext(ctx)
 	seal := func() error {
 		return h.runHumanOperation(request, admission.participant, func(ctx context.Context) error {
 			return registry.run(ctx, binding, func(ctx context.Context) error { return registry.sealHuman(ctx, []mooring.BatchChange{c}) })
 		})
 	}
-	if err = seal(); err == nil {
-		t.Fatal("failed COMMIT accepted")
+	if err = seal(); err == nil || !strings.Contains(err.Error(), "FOREIGN KEY") {
+		t.Fatal("expected actual deferred FK COMMIT failure", err)
 	}
 	if len(registry.entries) != 0 || registry.bytes != 0 {
 		t.Fatal("failed COMMIT published original author proof")
 	}
-	mustExec(t, r.db, `DROP TRIGGER submission_commit_fault`)
-	mustExec(t, r.db, `DROP TABLE submission_commit_failure`)
+	mustExec(t, r.db, `UPDATE submission_commit_switch SET enabled=0`)
 	if err = seal(); err != nil {
 		t.Fatal(err)
 	}

@@ -35,6 +35,7 @@ type collaborationHumanOperation struct{ active atomic.Bool }
 // preserve the ORIGINAL binding rather than recapturing it during reconnect.
 // No HTTP/WS route installs this inactive component.
 type collaborationHumanAdmission struct {
+	authorVector         collaborationAuthorVector
 	source               auth.OriginalCredential
 	ingress              collaborationIngressStamp
 	member               string
@@ -222,9 +223,13 @@ func (s *collaborationHumanRegistry) issue(ctx context.Context, owner mooring.Ow
 	if ttl < time.Millisecond {
 		return "", empty, errCollaborationAdmission
 	}
+	vector, err := captureCollaborationAuthorVector(ctx, tx, s.scope, source.UserID, "", "")
+	if err != nil {
+		return "", empty, err
+	}
 	// The same opaque identity is scoped by this registry; never a user-supplied
 	// name or a guessed stable user ID. A new admission gets a new participant.
-	admission := collaborationHumanAdmission{ingress: ingress, source: *source, member: proof.memberID, memberRevision: proof.memberRevision, permission: proof.permissionVersion, session: s.sessionID, participant: participant, write: write, boot: boot, deadline: now + ttl}
+	admission := collaborationHumanAdmission{authorVector: vector, ingress: ingress, source: *source, member: proof.memberID, memberRevision: proof.memberRevision, permission: proof.permissionVersion, session: s.sessionID, participant: participant, write: write, boot: boot, deadline: now + ttl}
 	if err = s.owners.Check(ctx, tx, owner); err != nil {
 		return "", empty, err
 	}
@@ -279,6 +284,13 @@ func (s *collaborationHumanRegistry) checkCaptured(ctx context.Context, tx *sql.
 	if err != nil || boot != admission.boot || now < 0 || now >= admission.deadline || (write && !admission.write) {
 		return "", errCollaborationAdmission
 	}
+	if !admission.authorVector.matches(s.scope, admission.source.UserID, "", "") {
+		return "", errCollaborationAuthorUnqualified
+	}
+	changed, err := collaborationAuthorVectorChanged(ctx, tx, admission.authorVector)
+	if err != nil || changed {
+		return "", errCollaborationAuthorUnqualified
+	}
 	intent := "read"
 	if write {
 		intent = "write"
@@ -287,7 +299,7 @@ func (s *collaborationHumanRegistry) checkCaptured(ctx context.Context, tx *sql.
 	if err != nil {
 		return "", err
 	}
-	if proof.permissionVersion != admission.permission || proof.memberID != admission.member || proof.memberRevision != admission.memberRevision {
+	if proof.memberID != admission.member || proof.memberRevision != admission.memberRevision {
 		return "", errCollaborationAdmission
 	}
 	boot, now, err = s.clock.Now()
