@@ -301,6 +301,9 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 	if dump == nil {
 		return nil
 	}
+	if err := rejectMooringCollaborationRemap(dump); err != nil {
+		return err
+	}
 	// table → edges. Build once so the two-pass walk stays fast.
 	fks := map[string][]foreignKeyEdge{}
 	for _, table := range BackupTables {

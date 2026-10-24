@@ -104,6 +104,13 @@ func (s *Server) Start(ctx context.Context) error {
 	if s.documentsStartupErr != nil {
 		return fmt.Errorf("Docs authority startup: %w", s.documentsStartupErr)
 	}
+	port := 0
+	if s.cfg != nil {
+		port = s.cfg.Server.Port
+	}
+	if err := startGridCraftTestBarrier(s.logger, port); err != nil {
+		return err
+	}
 	s.startedAt = time.Now()
 
 	// Recover orphaned RUNNING runs from previous crashes/restarts.
@@ -196,6 +203,9 @@ func (s *Server) Start(ctx context.Context) error {
 		// Recover assignments first, then resume committed outbox work using
 		// the same server lifetime as the dispatchers it calls.
 		s.apiRouter.StartIssueMutationOutbox(ctx)
+		// Workbook revisions whose live push was lost to a crash are pushed
+		// by this sweeper; a no-op when the workbook API is not installed.
+		s.apiRouter.StartGridCraftOutbox(ctx)
 		// Escalation expiry sweeper: the net for questions whose agent is no
 		// longer waiting. The long poll expires its own escalation at the
 		// deadline (internal/api/escalation_lifecycle.go), so this only ever

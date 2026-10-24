@@ -34,10 +34,8 @@ impl TextClient {
         index: u32,
         value: &str,
     ) -> Result<Vec<u8>, String> {
-        if op_id.is_empty()
-            || op_id.len() > 200
-            || block_id.is_empty()
-            || block_id.len() > 200
+        if !mooring_protocol::wire::valid_identifier(op_id)
+            || !mooring_protocol::wire::valid_identifier(block_id)
             || value.len() > 64 * 1024
             || self.unsaved.len() >= 256
         {
@@ -137,16 +135,19 @@ impl Default for TextClient {
 
 #[wasm_bindgen]
 pub fn negotiate_json(input: &str) -> Result<String, String> {
-    if input.len() > 16 * 1024 {
-        return Err("invalid_request".into());
-    }
-    let hello: Hello = serde_json::from_str(input).map_err(|_| "invalid_request")?;
+    let normalized = mooring_protocol::wire::normalize_bounded(input.as_bytes())
+        .map_err(|_| "invalid_request")?;
+    let hello: Hello =
+        serde_json::from_value(normalized.value().clone()).map_err(|_| "invalid_request")?;
     let versions = Versions {
         protocol_version: "0.4.0".into(),
         model_version: "1.0.0".into(),
         engine_version: env!("CARGO_PKG_VERSION").into(),
     };
     let supported = [versions];
+    if hello.control_profiles.is_some() {
+        return Err("invalid_request".into());
+    }
     let selected = negotiate(&hello, &supported)?;
     serde_json::to_string(selected).map_err(|error| error.to_string())
 }
@@ -159,6 +160,20 @@ pub fn conformance_case(input: &str) -> Result<String, String> {
     }
     let case: serde_json::Value = serde_json::from_str(input).map_err(|e| e.to_string())?;
     let value = match case["kind"].as_str().ok_or("fixture kind absent")? {
+        "identifier" => {
+            let count = case["repeat"].as_u64().ok_or("repeat absent")?;
+            let unit = case["unit"].as_str().ok_or("unit absent")?;
+            if count > 201 || unit.len() > 4 {
+                return Err("fixture_too_large".into());
+            }
+            let id = unit.repeat(count as usize);
+            let mut client = TextClient::new();
+            let ok = client.insert(&id, "p1", 0, "text").is_ok();
+            if !ok && !client.text("p1").is_empty() {
+                return Err("invalid identifier mutated text".into());
+            }
+            serde_json::json!({"ok":ok})
+        }
         "counter" => {
             match serde_json::from_str::<Counter>(case["input"].as_str().ok_or("input absent")?) {
                 Ok(counter) => serde_json::json!({"ok":true,"value":String::from(counter)}),

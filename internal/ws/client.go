@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -184,6 +185,11 @@ func (c *Client) writeFrame(msg []byte) bool {
 		allowed, err := gate.CanDeliver(ctx, c.userID, envelope.Channel)
 		cancel()
 		if err != nil || !allowed {
+			if page, ok := strings.CutPrefix(envelope.Channel, "page:"); ok && c.hub.isWorkbookPage(page) {
+				// Drop protected frames already queued before revocation. The separate
+				// channel-less session_closed control must still pass this shared socket.
+				return true
+			}
 			return false
 		}
 	}
@@ -571,6 +577,12 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 		}
 	}
 
+	// Copy provenance before detaching the run from the socket lifetime. The
+	// client JSON decoder never populates this server-owned option.
+	var originalCredential auth.OriginalCredential
+	if source := auth.OriginalCredentialFromContext(c.ctx); source != nil {
+		originalCredential = *source
+	}
 	go func() {
 		channel := "session:" + payload.ChatID
 
@@ -656,8 +668,9 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 			payload.Content,
 			streamFn,
 			ChatMessageOption{
-				MaxTurns: clampMaxTurns(payload.MaxTurns),
-				Metadata: payload.Metadata,
+				OriginalCredential: originalCredential,
+				MaxTurns:           clampMaxTurns(payload.MaxTurns),
+				Metadata:           payload.Metadata,
 			},
 		)
 		if err != nil {

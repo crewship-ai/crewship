@@ -73,6 +73,7 @@ type Router struct {
 
 	issueMutationHandler   *IssueHandler
 	issueMutationWorker    *issueMutationWorker
+	gridcraftOutbox        *gridcraftOutboxWorker
 	transcriptLock         func(context.Context) (func(), error)
 	transcriptSnapshotLock func(context.Context) (func(), error)
 	restrictedWorkflow     *restrictedworkflow.Service
@@ -198,11 +199,17 @@ type Router struct {
 	pageBuildImage                   string
 	pageRuntimeOrigin                string
 	pageRuntimeDevelopmentSameOrigin bool
-	pageStudioOrigin                 string
-	storagePath                      string // base path for crew file storage
-	catalogFetcher                   *devcontainer.CatalogFetcher
-	runtimeFetcher                   *devcontainer.RuntimeFetcher
-	dockerClient                     *dockerclient.Client
+	// workbookEditorDetail answers GET /api/v1/admin/instance/workbook-editor;
+	// nil while the embedded workbook editor is off.
+	workbookEditorDetail func() any
+	// workbookEditorBundle names the editor bundle new workbook editor
+	// sessions frame; nil while the embedded workbook editor is off.
+	workbookEditorBundle func(*http.Request) (digest, url string)
+	pageStudioOrigin     string
+	storagePath          string // base path for crew file storage
+	catalogFetcher       *devcontainer.CatalogFetcher
+	runtimeFetcher       *devcontainer.RuntimeFetcher
+	dockerClient         *dockerclient.Client
 	// instanceBackups is Admin › Backups across the instance, kept so tests
 	// can point its instance backup at a temp directory.
 	instanceBackups    *InstanceBackupsHandler
@@ -1055,6 +1062,7 @@ func (r *Router) Shutdown() {
 	})
 
 	r.issueMutationWorker.stop()
+	r.gridcraftOutbox.stop()
 	if r.provisioning != nil {
 		r.provisioning.Stop()
 	}

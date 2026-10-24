@@ -78,6 +78,34 @@ describe("coalescing and persistence", () => {
     expect(queue.coalesce(newest => { newest.body += "+2" })).toBe(false)
     expect(queue.head()?.body).toBe("a+1")
   })
+  it("removes a refused write, but never the one in flight", () => {
+    const { queue, remove } = setup()
+    queue.enqueue(row("a")); queue.enqueue(row("b")); queue.enqueue(row("c"))
+    void queue.deliver(() => new Promise(() => {}))
+    expect(queue.remove("a")).toBe(false)
+    expect(queue.remove("b")).toBe(true)
+    expect(queue.remove("missing")).toBe(false)
+    expect(queue.writes().map(write => write.id)).toEqual(["a", "c"])
+    expect(remove).toHaveBeenCalledWith(expect.objectContaining({ id: "b" }))
+  })
+  it("does not leave a failed journal removal unhandled", async () => {
+    const unhandled = vi.fn()
+    process.on("unhandledRejection", unhandled)
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      const { queue } = setup({ persist: { put: vi.fn(), remove: vi.fn(() => Promise.reject(new Error("journal gone"))) } })
+      queue.enqueue(row("a")); queue.enqueue(row("b"))
+      expect(queue.remove("b")).toBe(true)
+      expect(queue.writes().map(write => write.id)).toEqual(["a"])
+      vi.useRealTimers()
+      await new Promise(resolve => setTimeout(resolve, 10))
+      expect(unhandled).not.toHaveBeenCalled()
+      expect(warn).toHaveBeenCalled()
+    } finally {
+      process.off("unhandledRejection", unhandled)
+      warn.mockRestore()
+    }
+  })
 })
 
 describe("retry keeps the mutation identity", () => {

@@ -55,17 +55,18 @@ const (
 // so a stolen access token is killable in <= AccessTokenTTL once the
 // user signs out / changes password / an admin force-revokes.
 type Claims struct {
-	ID                  string `json:"id"`
-	Name                string `json:"name,omitempty"`
-	Email               string `json:"email,omitempty"`
-	Sid                 string `json:"sid,omitempty"`
-	CLITokenID          string `json:"cli_token_id,omitempty"`
-	CredentialExpiresAt int64  `json:"credential_expires_at,omitempty"`
-	Kind                string `json:"kind,omitempty"`
-	WSAuthorityVersion  int    `json:"ws_authority_version,omitempty"`
-	Exp                 int64  `json:"exp"`
-	Iat                 int64  `json:"iat"`
-	Jti                 string `json:"jti"`
+	ID                  string              `json:"id"`
+	Name                string              `json:"name,omitempty"`
+	Email               string              `json:"email,omitempty"`
+	Sid                 string              `json:"sid,omitempty"`
+	CLITokenID          string              `json:"cli_token_id,omitempty"`
+	CredentialExpiresAt int64               `json:"credential_expires_at,omitempty"`
+	OriginalCredential  *OriginalCredential `json:"original_credential,omitempty"`
+	Kind                string              `json:"kind,omitempty"`
+	WSAuthorityVersion  int                 `json:"ws_authority_version,omitempty"`
+	Exp                 int64               `json:"exp"`
+	Iat                 int64               `json:"iat"`
+	Jti                 string              `json:"jti"`
 }
 
 // JWTValidator issues and decodes Auth.js v5 JWE tokens. Holds three
@@ -166,12 +167,31 @@ func (v *JWTValidator) IssueCredentialWSTicket(userID, sessionID, tokenID, name,
 	if (sessionID == "") == (tokenID == "") {
 		return "", errors.New("exactly one stream credential required")
 	}
-	return v.issue(v.wsKey, KindWS, WSTicketTTL, userID, sessionID, name, email, streamTicketOrigin{tokenID, expiresAt})
+	return v.issue(v.wsKey, KindWS, WSTicketTTL, userID, sessionID, name, email, streamTicketOrigin{tokenID: tokenID, expiresAt: expiresAt})
+}
+
+// IssueOriginalCredentialWSTicket carries the original authentication snapshot
+// through socket admission. The upgrade cannot replace its fence or expiry with
+// today's state, even if the exact credential was revoked and restored meanwhile.
+func (v *JWTValidator) IssueOriginalCredentialWSTicket(userID, sessionID, tokenID, name, email string, original OriginalCredential) (string, error) {
+	if !original.Valid() || original.UserID != userID || (sessionID == "") == (tokenID == "") || (original.Kind == "session" && (original.ID != sessionID || tokenID != "")) || (original.Kind == "cli_token" && (original.ID != tokenID || sessionID != "")) {
+		return "", ErrInvalidToken
+	}
+	expiry, err := original.Expiry()
+	if err != nil {
+		return "", err
+	}
+	if !expiry.IsZero() && !time.Now().Before(expiry) {
+		return "", ErrTokenExpired
+	}
+	copy := original
+	return v.issue(v.wsKey, KindWS, WSTicketTTL, userID, sessionID, name, email, streamTicketOrigin{tokenID: tokenID, expiresAt: expiry, original: &copy})
 }
 
 type streamTicketOrigin struct {
 	tokenID   string
 	expiresAt time.Time
+	original  *OriginalCredential
 }
 
 // ValidateAccess decrypts an access token cookie and refuses anything
@@ -272,6 +292,7 @@ func (v *JWTValidator) issue(key []byte, kind string, ttl time.Duration, userID,
 	if kind == KindWS {
 		claims.WSAuthorityVersion = 1
 		if len(origin) > 0 {
+			claims.OriginalCredential = origin[0].original
 			claims.CLITokenID = origin[0].tokenID
 			if !origin[0].expiresAt.IsZero() {
 				claims.CredentialExpiresAt = origin[0].expiresAt.Unix()

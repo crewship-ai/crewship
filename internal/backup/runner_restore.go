@@ -76,6 +76,11 @@ type RestoreOptions struct {
 	// to FORK the workspace under a new slug; --replace exists to
 	// REASSERT the bundle's identity over whatever the target has.
 	Replace bool
+	// DiscardWorkbooks acknowledges that Replace destroys the target
+	// workspace's experimental workbooks. A bundle never carries them, so
+	// without it Replace refuses a target holding any workbook
+	// (ErrWorkbookTargetReplacement) and names the workbook Pages.
+	DiscardWorkbooks bool
 	// Logger, if set, receives human-readable progress/warning
 	// messages (e.g. "docker phase skipped …"). The CLI wires this
 	// into stderr; the REST handler can log to slog.
@@ -440,6 +445,19 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		return nil, err
 	}
 	defer func() { _ = extracted.Close() }()
+	// Refuse unqualified scope transformation or history collision before any
+	// destination admission, replacement, service import or database write.
+	if !opts.FilesOnly {
+		if opts.AsWorkspace != "" || opts.AsCrew != "" {
+			if err := rejectMooringCollaborationRemap(extracted.DBDump); err != nil {
+				return nil, err
+			}
+		}
+		if err := rejectMooringCollaborationCollision(ctx, db, extracted.DBDump); err != nil {
+			return nil, err
+		}
+	}
+
 	if err := runAdmissionBundlePreflight(ctx, db, extracted.DBDump, manifest.SchemaMigrationVersions, opts.ResumeWorkspaceID); err != nil {
 		return nil, err
 	}
@@ -480,7 +498,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	// Reject replacement before dry-run success or any service/file effects.
 	// ReplaceWorkspaceContents repeats this under its deleting transaction.
 	if opts.Replace && !opts.FilesOnly && extracted.DBDump != nil {
-		if err := rejectPrivateArtifactWorkspaceReplacement(ctx, db, firstWorkspaceID(extracted.DBDump), firstWorkspaceSlug(extracted.DBDump)); err != nil {
+		if err := rejectPrivateArtifactWorkspaceReplacement(ctx, db, firstWorkspaceID(extracted.DBDump), firstWorkspaceSlug(extracted.DBDump), opts.DiscardWorkbooks); err != nil {
 			return nil, err
 		}
 	}
@@ -1235,9 +1253,12 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 				return nil, fmt.Errorf("backup: --replace requires the bundle to carry a workspace row; this one does not")
 			}
 			preInsertSteps = append(preInsertSteps, func(ctx context.Context, tx *sql.Tx) error {
-				deleted, err := ReplaceWorkspaceContents(ctx, tx, bundleID, bundleSlug)
+				deleted, err := ReplaceWorkspaceContentsWithOptions(ctx, tx, bundleID, bundleSlug, ReplaceOptions{DiscardWorkbooks: opts.DiscardWorkbooks})
 				if err != nil {
 					return err
+				}
+				if opts.Logger != nil && deleted["gridcraft_heads"] > 0 {
+					opts.Logger(fmt.Sprintf("--replace --discard-workbooks: destroyed %d workbook(s) the bundle does not contain", deleted["gridcraft_heads"]))
 				}
 				if opts.Logger != nil && len(deleted) > 0 {
 					opts.Logger(fmt.Sprintf("--replace: wiped target workspace state before restore (%d tables touched)", len(deleted)))

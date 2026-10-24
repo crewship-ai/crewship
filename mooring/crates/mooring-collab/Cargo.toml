@@ -1,0 +1,21 @@
+[package]
+name = "mooring-collab"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+mooring-core = { path = "../mooring-core" }
+mooring-protocol = { path = "../mooring-protocol" }
+serde_json = "=1.0.154"
+serde = { version = "=1.0.229", features = ["derive"] }
+mooring-wordcraft = { path = "../mooring-wordcraft" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "=0.2.191"
+
+[dev-dependencies]
+mooring-text = { path = "../mooring-text" }
+yrs = "=0.28.0"

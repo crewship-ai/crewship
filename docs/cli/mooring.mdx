@@ -1,0 +1,56 @@
+---
+title: Mooring
+stability: experimental
+tag: Experimental
+---
+
+`crewship mooring` operates manifest-driven personal application documents.
+See the [pilot contract](/specs/mooring-pilot) for the supported JSON profile and
+native GridCraft adapter. These commands require the experimental server profile.
+
+## crewship mooring apps
+
+List the installed application manifests and their typed command schemas.
+
+## crewship mooring create
+
+Create a personal private application Page. Pass `--file packet.json` containing
+`{app_id,slug,name}`, or `--file -` to read the same JSON from stdin. Native
+GridCraft creation/import remains under `crewship workbook`.
+
+## crewship mooring read
+
+`crewship mooring read <slug|@ID>` reads the authorized manifest and confirmed
+state. The response includes revision, generation and available isolated editor.
+
+## crewship mooring command
+
+`crewship mooring command <slug|@ID> --file packet.json` executes a human command.
+Use `--file -` for stdin. The packet contains `mutation_id`, `base_rev`,
+`generation`, `command` and `arguments`. Preserve the packet unchanged after an
+uncertain response. A changed base is refused rather than overwriting content.
+
+## crewship mooring admit
+
+`crewship mooring admit <slug|@ID> --file packet.json` admits one declared command
+for a retained live human-chat run. Use `--file -` for stdin. The packet contains
+`mandate_id`, `run_id`, `base_rev`, `generation` and `command`. An agent cannot
+admit itself. Shared DIRECT documents are refused.
+
+## crewship mooring revoke
+
+`crewship mooring revoke <slug|@ID> <mandate>` revokes a retained mandate. New
+commands and exact receipt retries recheck revocation before returning content.
+
+## crewship mooring agent
+
+`crewship mooring agent --file packet.json` forwards a retained packet through
+the authenticated local sidecar. Use `--file -` for stdin. It requires the runtime
+`CREWSHIP_AGENT_TOKEN`; it cannot substitute a human CLI profile. The packet uses
+`action: read|command`, `artifact_id`, `mandate_id` and, for commands, `request`.
+Read returns the installed command manifest and current confirmed state.
+
+`CREWSHIP_SIDECAR_URL` optionally selects the protected loopback sidecar URL
+(default `http://127.0.0.1:9119`); remote hosts and redirects are refused. This is
+transport selection, not an authority override. The equivalent generic MCP tool
+is `mooring_command`; native `workbook_*` tools remain available.

@@ -29,6 +29,7 @@ import (
 type ChatMessageOption struct {
 	// Server-owned fields. The WS decoder constructs only MaxTurns and Metadata.
 	HumanAuthority           *chataudience.Receipt      `json:"-"`
+	OriginalCredential       auth.OriginalCredential    `json:"-"`
 	HumanResume              bool                       `json:"-"`
 	OriginalTriggerMessageID string                     `json:"-"`
 	DocumentCreationIntent   *documents.CreationIntent  `json:"-"`
@@ -144,7 +145,9 @@ type Hub struct {
 	// can never stall Run's select loop behind a slow DB), and if a
 	// sweep is still running when the next tick fires, that tick is
 	// skipped rather than stacking a second concurrent sweep.
-	connSweepInFlight atomic.Bool
+	connSweepInFlight     atomic.Bool
+	workbookSweepInFlight atomic.Bool
+	workbookPages         map[string]WorkbookSessionRechecker
 
 	// authReadTimeout bounds how long HandleUpgrade waits for the
 	// post-upgrade auth message before closing an unauthenticated
@@ -361,6 +364,8 @@ func (h *Hub) Run(ctx context.Context) {
 	// STARTS the sweep (maybeStartConnSweep runs it on its own goroutine)
 	// so DB latency in the checks can never stall register/unregister/
 	// broadcast processing in this loop.
+	workbookTicker := time.NewTicker(time.Second)
+	defer workbookTicker.Stop()
 	connSweepTicker := time.NewTicker(connSweepInterval)
 	defer connSweepTicker.Stop()
 
@@ -371,6 +376,8 @@ func (h *Hub) Run(ctx context.Context) {
 			return
 		case <-sweepTicker.C:
 			h.streams.sweep(time.Now())
+		case <-workbookTicker.C:
+			h.maybeStartWorkbookSweep(ctx)
 		case <-connSweepTicker.C:
 			h.maybeStartConnSweep(ctx)
 		case client := <-h.register:

@@ -142,5 +142,31 @@
     "export_formats": [],
     "execution_profile": "none",
     "authoring_skill": ""
+  },
+  {
+    "type_id": "gridcraft-workbook",
+    "schema_version": 1,
+    "viewer": "unavailable",
+    "editor": "unavailable",
+    "storage_adapter": "gridcraft-revisions-v1",
+    "projection_adapter": "none",
+    "anchor_kinds": [
+      "cell"
+    ],
+    "export_formats": [],
+    "execution_profile": "headless-worker/v1",
+    "authoring_skill": ""
+  },
+  {
+    "type_id": "mooring-app",
+    "schema_version": 1,
+    "viewer": "mooring",
+    "editor": "mooring",
+    "storage_adapter": "mooring",
+    "projection_adapter": "mooring",
+    "anchor_kinds": [],
+    "export_formats": [],
+    "execution_profile": "host-json",
+    "authoring_skill": ""
   }
 ]

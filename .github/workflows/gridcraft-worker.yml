@@ -1,0 +1,85 @@
+name: GridCraft worker qualification
+on:
+  pull_request:
+    paths:
+      - 'internal/appengine/**'
+      - 'internal/documents/**'
+      - 'cmd/crewship-gridcraft-worker/**'
+      - 'docker/gridcraft/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/gridcraft-worker.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  worker:
+    name: GridCraft worker
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: '1.27.3'
+      - name: Verify the pinned GridCraft engine
+        run: bash docker/gridcraft/prepare.sh
+      - name: Execute every real pinned engine contract without skips
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s docker/gridcraft -p 'test_verify_contract_tests.py'
+          CREWSHIP_TEST_GRIDCRAFT_BINARY="$GITHUB_WORKSPACE/docker/gridcraft/gridcraft-cli" \
+            go test -json -count=1 -timeout 15m -run '^(TestRealGridCraft|TestRecalcCheckCannot)' ./internal/appengine/ \
+            | tee "$RUNNER_TEMP/gridcraft-contract-tests.jsonl"
+          python3 docker/gridcraft/verify-contract-tests.py "$RUNNER_TEMP/gridcraft-contract-tests.jsonl"
+      - name: Verify the GridCraft worker image and lifecycle
+        id: image
+        env:
+          REVIEWED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$REVIEWED_SHA"
+          image="crewship-gridcraft-ci:$REVIEWED_SHA"
+          docker build --tag "$image" -f docker/gridcraft/Dockerfile .
+          GRIDCRAFT_IMAGE="$image" python3 docker/gridcraft/image-smoke.py
+          artifact="$RUNNER_TEMP/gridcraft-worker-image"
+          mkdir -p "$artifact"
+          image_id="$(docker image inspect --format '{{.Id}}' "$image")"
+          docker save --output "$artifact/image.tar" "$image_id"
+          # The image declares its worker protocol and engine pin offline; the
+          # smoke test above proved the running worker enforces the same pair.
+          docker run --rm --pull=never --network=none --read-only --cap-drop=ALL \
+            --security-opt=no-new-privileges --user="$(id -u):$(id -g)" "$image_id" --contract > "$RUNNER_TEMP/gridcraft-contract.json"
+          SOURCE_SHA="$REVIEWED_SHA" IMAGE_ID="$image_id" ARTIFACT_DIR="$artifact" CONTRACT="$RUNNER_TEMP/gridcraft-contract.json" python3 - <<'PY'
+          import hashlib, json, os, subprocess
+          from pathlib import Path
+          directory = Path(os.environ['ARTIFACT_DIR'])
+          digest = hashlib.sha256()
+          with (directory / 'image.tar').open('rb') as archive:
+              for chunk in iter(lambda: archive.read(1024 * 1024), b''):
+                  digest.update(chunk)
+          receipt = dict(source_sha=os.environ['SOURCE_SHA'],
+                         context_tree=subprocess.check_output(['git', 'rev-parse', 'HEAD^{tree}'], text=True).strip(),
+                         image_id=os.environ['IMAGE_ID'], archive_sha256=digest.hexdigest(),
+                         run_id=int(os.environ['GITHUB_RUN_ID']), run_attempt=int(os.environ['GITHUB_RUN_ATTEMPT']))
+          contract = json.loads(Path(os.environ['CONTRACT']).read_text())
+          assert set(contract) == {'protocol', 'protocol_min', 'protocol_max', 'engine_sha256'}
+          versions = (contract['protocol_min'], contract['protocol'], contract['protocol_max'])
+          assert all(type(v) is int and 1 <= v <= 9999 for v in versions) and versions == tuple(sorted(versions))
+          assert len(contract['engine_sha256']) == 64 and set(contract['engine_sha256']) <= set('0123456789abcdef')
+          receipt.update(contract)
+          (directory / 'receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          PY
+          echo "source_sha=$REVIEWED_SHA" >> "$GITHUB_OUTPUT"
+      - name: Retain the qualified GridCraft image without publication
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: gridcraft-worker-image-${{ steps.image.outputs.source_sha }}
+          path: |
+            ${{ runner.temp }}/gridcraft-worker-image/image.tar
+            ${{ runner.temp }}/gridcraft-worker-image/receipt.json
+          if-no-files-found: error
+          retention-days: 30

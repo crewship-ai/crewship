@@ -81,6 +81,10 @@ type RecoverOptions struct {
 	// Force allows a non-empty data directory: its database is replaced and
 	// files the bundle carries are overwritten.
 	Force bool
+	// DiscardWorkbooks acknowledges that a forced recovery destroys every
+	// workbook in the target database; no bundle contains one. Without it a
+	// forced recovery over workbooks refuses (ErrWorkbookTargetReplacement).
+	DiscardWorkbooks bool
 	// Drill restores for a test only: no key files are written and auth keys
 	// are not rotated (the directory is thrown away); the kit stays in memory
 	// for the drill's checks. The report is recorded as kind drill.
@@ -196,7 +200,7 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport
 
 	// 2. The target.
 	if opts.Force {
-		if err := rejectPrivateArtifactRecoveryTarget(ctx, dataDir); err != nil {
+		if err := rejectPrivateArtifactRecoveryTarget(ctx, dataDir, opts.DiscardWorkbooks); err != nil {
 			return rep, err
 		}
 		// A booted target holds its own audit keyring. Refuse one recovery
@@ -651,6 +655,7 @@ func kitEnv(kit *RecoveryKit) (map[string]string, error) {
 // must not survive a move: sign-in sessions, pairings, locks, the scheduler
 // lease, OAuth polling. Tables absent from this schema are skipped.
 var runtimeResets = []struct{ table, what string }{
+	{"mooring_session_owners", "Mooring session owner leases"},
 	{"document_creation_consents", "document creation consents"},
 	{"document_iteration_intents", "document iteration intents"},
 	{"artifact_run_principals", "artifact run principal admissions"},
@@ -733,6 +738,12 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 			if n > 0 {
 				rep.RuntimeReset = append(rep.RuntimeReset, fmt.Sprintf("%s (%d)", r.what, n))
 			}
+		}
+		// Close source delivery capabilities, but retain issued expiry bounds for
+		// read-revocation barriers if recovery shares the same OS boot. Never
+		// interpret discarded runtime metadata as an acknowledgement.
+		if _, err := db.ExecContext(ctx, `UPDATE mooring_delivery_gates SET closed=1,blocked=0`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "no such table") {
+			return fmt.Errorf("backup: close source Mooring delivery gates: %w", err)
 		}
 		// Physical instance bundles include document bytes and their source leases.
 		// Preserve content/history, fence every source engine before first boot.

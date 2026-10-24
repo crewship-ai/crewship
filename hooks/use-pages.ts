@@ -134,6 +134,9 @@ export interface WirePage {
   has_document?: boolean
   /** Proposed (FE-REQ-F5-6): the Page stores a native Slides deck. Absent today. */
   has_slides?: boolean
+  /** The Page stores a GridCraft workbook (read-only preview in the browser). */
+  has_workbook?: boolean
+  has_mooring?: boolean
   /** A published application exists. See `has_project` for source that is not published yet. */
   has_application?: boolean
   /**
@@ -483,6 +486,9 @@ export interface PageView {
   hasDocument?: boolean
   /** Confirmed native Slides descriptor; only read when the Slides editor mount flag is on. */
   hasSlides?: boolean
+  /** Confirmed GridCraft workbook storage; the Page renders the read-only workbook preview. */
+  hasWorkbook?: boolean
+  hasMooring?: boolean
   id: string
   slug: string
   name: string
@@ -632,6 +638,8 @@ export function toPageView(raw: WirePage): PageView {
     hasDocument: raw.has_document === true,
     privateAudience: typeof raw.private_audience === "boolean" ? raw.private_audience : undefined,
     hasSlides: raw.has_slides === true,
+    hasWorkbook: raw.has_workbook === true,
+    hasMooring: raw.has_mooring === true,
     slug,
     name: trimmed(raw.name) ?? slug,
     description: trimmed(raw.description),

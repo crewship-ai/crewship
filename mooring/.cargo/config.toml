@@ -3,3 +3,9 @@ replace-with = "vendored-sources"
 
 [source.vendored-sources]
 directory = "vendor"
+
+# Only the application adapter links the qualified WordCraft model.
+[source."git+https://github.com/storytold/wordcraft?rev=668d7ce3a4b1dcf241a9c50a20754a85647a02c4"]
+git = "https://github.com/storytold/wordcraft"
+rev = "668d7ce3a4b1dcf241a9c50a20754a85647a02c4"
+replace-with = "vendored-sources"

@@ -7,9 +7,9 @@ use crate::Counter;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Scope {
-    pub workspace_id: String,
-    pub artifact_id: String,
-    pub application_id: String,
+    pub workspace_id: Identifier,
+    pub artifact_id: Identifier,
+    pub application_id: Identifier,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -61,7 +61,7 @@ pub enum ErrorCode {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReadPrecondition {
-    pub target_id: String,
+    pub target_id: Identifier,
     pub revision: Counter,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub structure_revision: Option<Counter>,
@@ -70,11 +70,11 @@ pub struct ReadPrecondition {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Operation {
-    pub op_id: String,
+    pub op_id: Identifier,
     pub fingerprint: Digest,
-    pub participant_ref: String,
+    pub participant_ref: Identifier,
     pub base_revision: Counter,
-    pub dependencies: Vec<String>,
+    pub dependencies: Vec<Identifier>,
     pub read_preconditions: Vec<ReadPrecondition>,
     pub payload: serde_json::Map<String, serde_json::Value>,
 }
@@ -82,11 +82,11 @@ pub struct Operation {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AtomicChange {
-    pub change_id: String,
+    pub change_id: Identifier,
     pub operations: Vec<Operation>,
     pub membership_hash: Digest,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub task_id: Option<String>,
+    pub task_id: Option<Identifier>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -133,7 +133,7 @@ pub enum RejectionRootCauseCode {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RejectionRootCause {
-    pub op_id: String,
+    pub op_id: Identifier,
     pub code: RejectionRootCauseCode,
     pub message: String,
 }
@@ -155,7 +155,7 @@ pub enum RejectionRetry {
 pub struct Rejection {
     pub code: ErrorCode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub root_op_id: Option<String>,
+    pub root_op_id: Option<Identifier>,
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub root_cause: Option<RejectionRootCause>,
@@ -179,10 +179,10 @@ pub enum OperationResultVariant1Durability {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OperationResultVariant1 {
-    pub op_id: String,
+    pub op_id: Identifier,
     pub status: OperationResultVariant1Status,
     pub revision: Counter,
-    pub issuer: String,
+    pub issuer: Identifier,
     pub durability: OperationResultVariant1Durability,
 }
 
@@ -195,7 +195,7 @@ pub enum OperationResultVariant2Status {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OperationResultVariant2 {
-    pub op_id: String,
+    pub op_id: Identifier,
     pub status: OperationResultVariant2Status,
     pub reason: Rejection,
 }
@@ -218,7 +218,7 @@ pub enum ChangeResultStatus {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ChangeResult {
-    pub change_id: String,
+    pub change_id: Identifier,
     pub status: ChangeResultStatus,
     pub operations: Vec<OperationResult>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -234,11 +234,23 @@ pub enum HelloType {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum HelloControlProfilesItem {
+    #[serde(rename = "mooring.prepare.v1")]
+    MooringPrepareV1,
+    #[serde(rename = "mooring.prepare-causal.v1")]
+    MooringPrepareCausalV1,
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Hello {
     pub r#type: HelloType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub supported: Vec<Versions>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_profiles: Option<Vec<HelloControlProfilesItem>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -251,13 +263,13 @@ pub enum WelcomeType {
 #[serde(deny_unknown_fields)]
 pub struct Welcome {
     pub r#type: WelcomeType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub selected: Versions,
     pub scope: Scope,
-    pub participant_ref: String,
+    pub participant_ref: Identifier,
     pub permission_version: Counter,
     pub limits: WireLimits,
-    pub issuer: String,
+    pub issuer: Identifier,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -270,10 +282,10 @@ pub enum CommitBatchType {
 #[serde(deny_unknown_fields)]
 pub struct CommitBatch {
     pub r#type: CommitBatchType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub versions: Versions,
     pub scope: Scope,
-    pub session_id: String,
+    pub session_id: Identifier,
     pub fence: Fence,
     pub expected_revision: Counter,
     pub changes: Vec<AtomicChange>,
@@ -297,11 +309,11 @@ pub enum CommitResultDurability {
 #[serde(deny_unknown_fields)]
 pub struct CommitResult {
     pub r#type: CommitResultType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
     pub generation: Counter,
     pub revision: Counter,
-    pub issuer: String,
+    pub issuer: Identifier,
     pub durability: CommitResultDurability,
     pub changes: Vec<ChangeResult>,
 }
@@ -316,9 +328,9 @@ pub enum StatusRequestType {
 #[serde(deny_unknown_fields)]
 pub struct StatusRequest {
     pub r#type: StatusRequestType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub op_id: String,
+    pub op_id: Identifier,
     pub expected_fingerprint: Digest,
 }
 
@@ -337,7 +349,7 @@ pub enum StatusResultResultVariant2Status {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StatusResultResultVariant2 {
-    pub op_id: String,
+    pub op_id: Identifier,
     pub status: StatusResultResultVariant2Status,
 }
 
@@ -352,7 +364,7 @@ pub enum StatusResultResult {
 #[serde(deny_unknown_fields)]
 pub struct StatusResult {
     pub r#type: StatusResultType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
     pub result: StatusResultResult,
 }
@@ -360,7 +372,7 @@ pub struct StatusResult {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Asset {
-    pub asset_id: String,
+    pub asset_id: Identifier,
     pub digest: Digest,
     pub size_bytes: Counter,
 }
@@ -379,7 +391,7 @@ pub struct Checkpoint {
     pub scope: Scope,
     pub revision: Counter,
     pub generation: Counter,
-    pub format_version: String,
+    pub format_version: Identifier,
     pub versions: Versions,
     pub encoding: CheckpointEncoding,
     pub state: String,
@@ -420,7 +432,7 @@ pub enum SessionTicketRequestType {
 #[serde(deny_unknown_fields)]
 pub struct SessionTicketRequest {
     pub r#type: SessionTicketRequestType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
     pub requested: Capabilities,
 }
@@ -435,10 +447,10 @@ pub enum SessionTicketType {
 #[serde(deny_unknown_fields)]
 pub struct SessionTicket {
     pub r#type: SessionTicketType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
-    pub participant_ref: String,
+    pub session_id: Identifier,
+    pub participant_ref: Identifier,
     pub permission_version: Counter,
     pub granted: Capabilities,
     pub ticket: String,
@@ -456,10 +468,10 @@ pub enum OwnerAcquireType {
 #[serde(deny_unknown_fields)]
 pub struct OwnerAcquire {
     pub r#type: OwnerAcquireType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub runtime_ref: String,
-    pub renewal_nonce: String,
+    pub runtime_ref: Identifier,
+    pub renewal_nonce: Identifier,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -472,11 +484,11 @@ pub enum OwnerRenewType {
 #[serde(deny_unknown_fields)]
 pub struct OwnerRenew {
     pub r#type: OwnerRenewType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
+    pub session_id: Identifier,
     pub fence: Fence,
-    pub renewal_nonce: String,
+    pub renewal_nonce: Identifier,
     pub permission_version: Counter,
 }
 
@@ -490,14 +502,14 @@ pub enum OwnerGrantType {
 #[serde(deny_unknown_fields)]
 pub struct OwnerGrant {
     pub r#type: OwnerGrantType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
-    pub runtime_ref: String,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
     pub fence: Fence,
     pub lease_duration_ms: PositiveCounter,
     pub revision: Counter,
-    pub renewal_nonce: String,
+    pub renewal_nonce: Identifier,
     pub permission_version: Counter,
 }
 
@@ -511,14 +523,14 @@ pub enum DeliveryRenewType {
 #[serde(deny_unknown_fields)]
 pub struct DeliveryRenew {
     pub r#type: DeliveryRenewType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
-    pub participant_ref: String,
+    pub session_id: Identifier,
+    pub participant_ref: Identifier,
     pub fence: Fence,
     pub permission_version: Counter,
-    pub renewal_nonce: String,
-    pub gate_id: String,
+    pub renewal_nonce: Identifier,
+    pub gate_id: Identifier,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -531,15 +543,15 @@ pub enum DeliveryGrantType {
 #[serde(deny_unknown_fields)]
 pub struct DeliveryGrant {
     pub r#type: DeliveryGrantType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
-    pub participant_ref: String,
+    pub session_id: Identifier,
+    pub participant_ref: Identifier,
     pub generation: Counter,
     pub permission_version: Counter,
-    pub renewal_nonce: String,
+    pub renewal_nonce: Identifier,
     pub duration_ms: PositiveCounter,
-    pub gate_id: String,
+    pub gate_id: Identifier,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -552,15 +564,15 @@ pub enum SessionClosedType {
 #[serde(deny_unknown_fields)]
 pub struct SessionClosed {
     pub r#type: SessionClosedType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
-    pub participant_ref: String,
+    pub session_id: Identifier,
+    pub participant_ref: Identifier,
     pub generation: Counter,
     pub permission_version: Counter,
-    pub barrier_id: String,
+    pub barrier_id: Identifier,
     pub reason: Rejection,
-    pub gate_id: String,
+    pub gate_id: Identifier,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -573,13 +585,13 @@ pub enum DeliveryBlockedType {
 #[serde(deny_unknown_fields)]
 pub struct DeliveryBlocked {
     pub r#type: DeliveryBlockedType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
-    pub participant_ref: String,
+    pub session_id: Identifier,
+    pub participant_ref: Identifier,
     pub fence: Fence,
-    pub barrier_id: String,
-    pub covered_gate_ids: Vec<String>,
+    pub barrier_id: Identifier,
+    pub covered_gate_ids: Vec<Identifier>,
     pub permission_version: Counter,
 }
 
@@ -593,10 +605,10 @@ pub enum RevocationConfirmedType {
 #[serde(deny_unknown_fields)]
 pub struct RevocationConfirmed {
     pub r#type: RevocationConfirmedType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub participant_ref: String,
-    pub barrier_id: String,
+    pub participant_ref: Identifier,
+    pub barrier_id: Identifier,
     pub permission_version: Counter,
     pub read_blocked: bool,
     pub write_blocked: bool,
@@ -612,9 +624,9 @@ pub enum ReadRequestType {
 #[serde(deny_unknown_fields)]
 pub struct ReadRequest {
     pub r#type: ReadRequestType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
+    pub session_id: Identifier,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revision: Option<Counter>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -634,7 +646,7 @@ pub enum ReadResultType {
 #[serde(deny_unknown_fields)]
 pub struct ReadResult {
     pub r#type: ReadResultType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
     pub revision: Counter,
     pub items: Vec<ReadItem>,
@@ -652,7 +664,7 @@ pub enum CheckpointRequestType {
 #[serde(deny_unknown_fields)]
 pub struct CheckpointRequest {
     pub r#type: CheckpointRequestType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
     pub revision: Counter,
 }
@@ -667,7 +679,7 @@ pub enum CheckpointResultType {
 #[serde(deny_unknown_fields)]
 pub struct CheckpointResult {
     pub r#type: CheckpointResultType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub checkpoint: Checkpoint,
 }
 
@@ -681,10 +693,10 @@ pub enum PresenceType {
 #[serde(deny_unknown_fields)]
 pub struct Presence {
     pub r#type: PresenceType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
-    pub participant_ref: String,
+    pub session_id: Identifier,
+    pub participant_ref: Identifier,
     pub ttl_ms: PositiveCounter,
     pub view: serde_json::Map<String, serde_json::Value>,
 }
@@ -710,12 +722,12 @@ pub enum TaskSummaryStatus {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TaskSummary {
-    pub task_id: String,
+    pub task_id: Identifier,
     pub allow_partial: bool,
     pub status: TaskSummaryStatus,
     pub changes: Vec<TaskChangeState>,
-    pub participant_ref: String,
-    pub unresolved_change_ids: Vec<String>,
+    pub participant_ref: Identifier,
+    pub unresolved_change_ids: Vec<Identifier>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -728,9 +740,9 @@ pub enum TaskStatusType {
 #[serde(deny_unknown_fields)]
 pub struct TaskStatus {
     pub r#type: TaskStatusType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub task_id: String,
+    pub task_id: Identifier,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -743,7 +755,7 @@ pub enum TaskResultType {
 #[serde(deny_unknown_fields)]
 pub struct TaskResult {
     pub r#type: TaskResultType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
     pub task: TaskSummary,
 }
@@ -758,9 +770,9 @@ pub enum TaskCancelType {
 #[serde(deny_unknown_fields)]
 pub struct TaskCancel {
     pub r#type: TaskCancelType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub task_id: String,
+    pub task_id: Identifier,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -773,10 +785,10 @@ pub enum ProposalType {
 #[serde(deny_unknown_fields)]
 pub struct Proposal {
     pub r#type: ProposalType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub proposal_id: String,
-    pub participant_ref: String,
+    pub proposal_id: Identifier,
+    pub participant_ref: Identifier,
     pub base_revision: Counter,
     pub changes: Vec<AtomicChange>,
     pub diff: String,
@@ -792,11 +804,11 @@ pub enum ProposalAcceptType {
 #[serde(deny_unknown_fields)]
 pub struct ProposalAccept {
     pub r#type: ProposalAcceptType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub proposal_id: String,
+    pub proposal_id: Identifier,
     pub base_revision: Counter,
-    pub op_id: String,
+    pub op_id: Identifier,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -809,15 +821,15 @@ pub enum UndoRequestType {
 #[serde(deny_unknown_fields)]
 pub struct UndoRequest {
     pub r#type: UndoRequestType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub task_id: Option<String>,
-    pub participant_ref: String,
+    pub task_id: Option<Identifier>,
+    pub participant_ref: Identifier,
     pub base_revision: Counter,
-    pub op_id: String,
+    pub op_id: Identifier,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub target_change_id: Option<String>,
+    pub target_change_id: Option<Identifier>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -830,7 +842,7 @@ pub enum ProtocolErrorType {
 #[serde(deny_unknown_fields)]
 pub struct ProtocolError {
     pub r#type: ProtocolErrorType,
-    pub request_id: String,
+    pub request_id: Identifier,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope: Option<Scope>,
     pub reason: Rejection,
@@ -843,8 +855,8 @@ pub type Digest = String;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReadItem {
-    pub target_id: String,
-    pub model_type: String,
+    pub target_id: Identifier,
+    pub model_type: Identifier,
     pub revision: Counter,
     pub data: serde_json::Map<String, serde_json::Value>,
 }
@@ -867,10 +879,10 @@ pub struct WireLimits {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CommandDeclaration {
-    pub command_id: String,
+    pub command_id: Identifier,
     pub input_schema: serde_json::Map<String, serde_json::Value>,
     pub result_schema: serde_json::Map<String, serde_json::Value>,
-    pub effect_scope: String,
+    pub effect_scope: Identifier,
     pub mutation: bool,
     pub replayable: bool,
 }
@@ -888,7 +900,7 @@ pub enum FormatDeclarationValidator {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FormatDeclaration {
-    pub format_id: String,
+    pub format_id: Identifier,
     pub model_versions: Vec<String>,
     pub import_extensions: Vec<String>,
     pub export_extensions: Vec<String>,
@@ -967,14 +979,14 @@ pub enum ApplicationManifestMergeModelsItem {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ApplicationManifest {
-    pub application_id: String,
+    pub application_id: Identifier,
     pub package_version: String,
     pub package_digest: Digest,
     pub connection_path: ApplicationManifestConnectionPath,
     pub supported_versions: Vec<Versions>,
     pub formats: Vec<FormatDeclaration>,
     pub commands: Vec<CommandDeclaration>,
-    pub capabilities: Vec<String>,
+    pub capabilities: Vec<Identifier>,
     pub merge_models: Vec<ApplicationManifestMergeModelsItem>,
     pub presence_schema: serde_json::Map<String, serde_json::Value>,
     pub storage: StorageDeclaration,
@@ -991,8 +1003,8 @@ pub enum ManifestRequestType {
 #[serde(deny_unknown_fields)]
 pub struct ManifestRequest {
     pub r#type: ManifestRequestType,
-    pub request_id: String,
-    pub application_id: String,
+    pub request_id: Identifier,
+    pub application_id: Identifier,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1005,7 +1017,7 @@ pub enum ManifestResultType {
 #[serde(deny_unknown_fields)]
 pub struct ManifestResult {
     pub r#type: ManifestResultType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub manifest: ApplicationManifest,
 }
 
@@ -1031,9 +1043,9 @@ pub enum LifecycleRequestAction {
 #[serde(deny_unknown_fields)]
 pub struct LifecycleRequest {
     pub r#type: LifecycleRequestType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
+    pub session_id: Identifier,
     pub fence: Fence,
     pub action: LifecycleRequestAction,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1060,9 +1072,9 @@ pub enum LifecycleResultState {
 #[serde(deny_unknown_fields)]
 pub struct LifecycleResult {
     pub r#type: LifecycleResultType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
+    pub session_id: Identifier,
     pub generation: Counter,
     pub state: LifecycleResultState,
     pub revision: Counter,
@@ -1078,7 +1090,7 @@ pub enum SessionJoinType {
 #[serde(deny_unknown_fields)]
 pub struct SessionJoin {
     pub r#type: SessionJoinType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub ticket: String,
     pub versions: Versions,
 }
@@ -1093,14 +1105,14 @@ pub enum SessionJoinedType {
 #[serde(deny_unknown_fields)]
 pub struct SessionJoined {
     pub r#type: SessionJoinedType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
-    pub participant_ref: String,
+    pub session_id: Identifier,
+    pub participant_ref: Identifier,
     pub generation: Counter,
     pub permission_version: Counter,
     pub versions: Versions,
-    pub gate_id: String,
+    pub gate_id: Identifier,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1113,9 +1125,9 @@ pub enum SessionLeaveType {
 #[serde(deny_unknown_fields)]
 pub struct SessionLeave {
     pub r#type: SessionLeaveType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
+    pub session_id: Identifier,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1128,13 +1140,13 @@ pub enum SubmitChangesType {
 #[serde(deny_unknown_fields)]
 pub struct SubmitChanges {
     pub r#type: SubmitChangesType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
+    pub session_id: Identifier,
     pub versions: Versions,
     pub changes: Vec<AtomicChange>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub task_id: Option<String>,
+    pub task_id: Option<Identifier>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1155,10 +1167,10 @@ pub enum ChangesReceivedState {
 #[serde(deny_unknown_fields)]
 pub struct ChangesReceived {
     pub r#type: ChangesReceivedType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
-    pub change_ids: Vec<String>,
+    pub session_id: Identifier,
+    pub change_ids: Vec<Identifier>,
     pub state: ChangesReceivedState,
 }
 
@@ -1180,11 +1192,11 @@ pub enum TaskSubmitMode {
 #[serde(deny_unknown_fields)]
 pub struct TaskSubmit {
     pub r#type: TaskSubmitType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
+    pub session_id: Identifier,
     pub versions: Versions,
-    pub task_id: String,
+    pub task_id: Identifier,
     pub allow_partial: bool,
     pub mode: TaskSubmitMode,
     pub changes: Vec<AtomicChange>,
@@ -1200,9 +1212,9 @@ pub enum ProposalRequestType {
 #[serde(deny_unknown_fields)]
 pub struct ProposalRequest {
     pub r#type: ProposalRequestType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub proposal_id: String,
+    pub proposal_id: Identifier,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1229,12 +1241,12 @@ pub enum CollaborationUpdateState {
 #[serde(deny_unknown_fields)]
 pub struct CollaborationUpdate {
     pub r#type: CollaborationUpdateType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
+    pub session_id: Identifier,
     pub generation: Counter,
     pub base_revision: Counter,
-    pub change_ids: Vec<String>,
+    pub change_ids: Vec<Identifier>,
     pub encoding: CollaborationUpdateEncoding,
     pub data: String,
     pub state: CollaborationUpdateState,
@@ -1258,9 +1270,9 @@ pub enum DocumentUpdateEncoding {
 #[serde(deny_unknown_fields)]
 pub struct DocumentUpdate {
     pub r#type: DocumentUpdateType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
+    pub session_id: Identifier,
     pub generation: Counter,
     pub from_revision: Counter,
     pub to_revision: Counter,
@@ -1279,11 +1291,11 @@ pub enum AssetRequestType {
 #[serde(deny_unknown_fields)]
 pub struct AssetRequest {
     pub r#type: AssetRequestType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
+    pub session_id: Identifier,
     pub revision: Counter,
-    pub asset_id: String,
+    pub asset_id: Identifier,
     pub offset_bytes: Counter,
     pub max_bytes: PositiveCounter,
 }
@@ -1298,10 +1310,10 @@ pub enum AssetResultType {
 #[serde(deny_unknown_fields)]
 pub struct AssetResult {
     pub r#type: AssetResultType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
     pub revision: Counter,
-    pub asset_id: String,
+    pub asset_id: Identifier,
     pub offset_bytes: Counter,
     pub size_bytes: Counter,
     pub digest: Digest,
@@ -1318,12 +1330,12 @@ pub enum TicketValidationRequestType {
 #[serde(deny_unknown_fields)]
 pub struct TicketValidationRequest {
     pub r#type: TicketValidationRequestType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
+    pub session_id: Identifier,
     pub fence: Fence,
     pub ticket: String,
-    pub validation_nonce: String,
+    pub validation_nonce: Identifier,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1336,17 +1348,17 @@ pub enum TicketValidationResultType {
 #[serde(deny_unknown_fields)]
 pub struct TicketValidationResult {
     pub r#type: TicketValidationResultType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
+    pub session_id: Identifier,
     pub generation: Counter,
-    pub participant_ref: String,
+    pub participant_ref: Identifier,
     pub permission_version: Counter,
     pub granted: Capabilities,
     pub versions: Versions,
     pub expires_in_ms: PositiveCounter,
-    pub validation_nonce: String,
-    pub gate_id: String,
+    pub validation_nonce: Identifier,
+    pub gate_id: Identifier,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1359,14 +1371,14 @@ pub enum RevocationNoticeType {
 #[serde(deny_unknown_fields)]
 pub struct RevocationNotice {
     pub r#type: RevocationNoticeType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub scope: Scope,
-    pub session_id: String,
+    pub session_id: Identifier,
     pub generation: Counter,
-    pub participant_ref: String,
+    pub participant_ref: Identifier,
     pub permission_version: Counter,
-    pub barrier_id: String,
-    pub gate_ids: Vec<String>,
+    pub barrier_id: Identifier,
+    pub gate_ids: Vec<Identifier>,
     pub block_read: bool,
     pub block_write: bool,
 }
@@ -1386,7 +1398,7 @@ pub enum TaskChangeStateVariant2Status {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TaskChangeStateVariant2 {
-    pub change_id: String,
+    pub change_id: Identifier,
     pub status: TaskChangeStateVariant2Status,
 }
 
@@ -1404,11 +1416,964 @@ pub enum RuntimeReadyType {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum RuntimeReadySelectedControlProfile {
+    #[serde(rename = "mooring.prepare.v1")]
+    MooringPrepareV1,
+    #[serde(rename = "mooring.prepare-causal.v1")]
+    MooringPrepareCausalV1,
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimeReady {
     pub r#type: RuntimeReadyType,
-    pub request_id: String,
+    pub request_id: Identifier,
     pub selected: Versions,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_control_profile: Option<RuntimeReadySelectedControlProfile>,
+}
+
+pub type Identifier = String;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum OpaquePreparedCheckpointEncoding {
+    #[serde(rename = "base64")]
+    Base64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpaquePreparedCheckpoint {
+    pub encoding: OpaquePreparedCheckpointEncoding,
+    pub state: String,
+    pub digest: Digest,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetIdentity {
+    pub target_id: Identifier,
+    pub deleted: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetVersion {
+    pub target_id: Identifier,
+    pub revision: Counter,
+    pub structure_revision: Counter,
+    pub deleted: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreparedOperationRevision {
+    pub op_id: Identifier,
+    pub revision: PositiveCounter,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum PrepareContextReadPolicy {
+    #[serde(rename = "agent_confirmed_current")]
+    AgentConfirmedCurrent,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PrepareContext {
+    pub read_policy: PrepareContextReadPolicy,
+    pub document_revision: Counter,
+    pub targets: Vec<TargetVersion>,
+    pub operation_revisions: Vec<PreparedOperationRevision>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetEffect {
+    pub target_id: Identifier,
+    pub content_changed: bool,
+    pub structure_changed: bool,
+    pub created: bool,
+    pub deleted: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreparedOperationEffects {
+    pub op_id: Identifier,
+    pub targets: Vec<TargetEffect>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ValidateCheckpointType {
+    #[serde(rename = "validate_checkpoint")]
+    ValidateCheckpoint,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ValidateCheckpointControlProfile {
+    #[serde(rename = "mooring.prepare.v1")]
+    MooringPrepareV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ValidateCheckpoint {
+    pub r#type: ValidateCheckpointType,
+    pub request_id: Identifier,
+    pub scope: Scope,
+    pub selected: Versions,
+    pub checkpoint: OpaquePreparedCheckpoint,
+    pub control_profile: ValidateCheckpointControlProfile,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum CheckpointValidatedType {
+    #[serde(rename = "checkpoint_validated")]
+    CheckpointValidated,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum CheckpointValidatedControlProfile {
+    #[serde(rename = "mooring.prepare.v1")]
+    MooringPrepareV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CheckpointValidated {
+    pub r#type: CheckpointValidatedType,
+    pub request_id: Identifier,
+    pub scope: Scope,
+    pub selected: Versions,
+    pub input_checkpoint_digest: Digest,
+    pub inventory: Vec<TargetIdentity>,
+    pub control_profile: CheckpointValidatedControlProfile,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum PrepareAtomicType {
+    #[serde(rename = "prepare_atomic")]
+    PrepareAtomic,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum PrepareAtomicControlProfile {
+    #[serde(rename = "mooring.prepare.v1")]
+    MooringPrepareV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PrepareAtomic {
+    pub r#type: PrepareAtomicType,
+    pub request_id: Identifier,
+    pub scope: Scope,
+    pub selected: Versions,
+    pub checkpoint: OpaquePreparedCheckpoint,
+    pub context: PrepareContext,
+    pub change: AtomicChange,
+    pub control_profile: PrepareAtomicControlProfile,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum PreparedCandidateKind {
+    #[serde(rename = "candidate")]
+    Candidate,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreparedCandidate {
+    pub kind: PreparedCandidateKind,
+    pub checkpoint: OpaquePreparedCheckpoint,
+    pub effects: Vec<PreparedOperationEffects>,
+    pub inventory: Vec<TargetIdentity>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum PreparedDirectFailureKind {
+    #[serde(rename = "failure")]
+    Failure,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreparedDirectFailure {
+    pub kind: PreparedDirectFailureKind,
+    pub op_id: Identifier,
+    pub reason: Rejection,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum AtomicPreparedType {
+    #[serde(rename = "atomic_prepared")]
+    AtomicPrepared,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum AtomicPreparedOutcome {
+    PreparedCandidate(PreparedCandidate),
+    PreparedDirectFailure(PreparedDirectFailure),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum AtomicPreparedControlProfile {
+    #[serde(rename = "mooring.prepare.v1")]
+    MooringPrepareV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AtomicPrepared {
+    pub r#type: AtomicPreparedType,
+    pub request_id: Identifier,
+    pub scope: Scope,
+    pub selected: Versions,
+    pub input_checkpoint_digest: Digest,
+    pub change_id: Identifier,
+    pub membership_hash: Digest,
+    pub outcome: AtomicPreparedOutcome,
+    pub control_profile: AtomicPreparedControlProfile,
+}
+
+pub type CausalReadIndex = String;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CausalEntryVersion {
+    pub revision: Counter,
+    pub structure_revision: Counter,
+    pub deleted: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum QualifiedCausalReadEntry {
+    CausalEntryVersion(CausalEntryVersion),
+    Variant2(()),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QualifiedCausalRead {
+    pub op_id: Identifier,
+    pub read_index: CausalReadIndex,
+    pub target_id: Identifier,
+    pub observed_revision: Counter,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_structure_revision: Option<Counter>,
+    pub entry: QualifiedCausalReadEntry,
+    pub covered: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum CausalPrepareContextReadPolicy {
+    #[serde(rename = "agent_dependency_covered")]
+    AgentDependencyCovered,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CausalPrepareContext {
+    pub read_policy: CausalPrepareContextReadPolicy,
+    pub document_revision: Counter,
+    pub targets: Vec<TargetVersion>,
+    pub operation_revisions: Vec<PreparedOperationRevision>,
+    pub qualified_reads: Vec<QualifiedCausalRead>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ValidateCheckpointCausalType {
+    #[serde(rename = "validate_checkpoint_causal")]
+    ValidateCheckpointCausal,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ValidateCheckpointCausalControlProfile {
+    #[serde(rename = "mooring.prepare-causal.v1")]
+    MooringPrepareCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ValidateCheckpointCausal {
+    pub r#type: ValidateCheckpointCausalType,
+    pub request_id: Identifier,
+    pub scope: Scope,
+    pub selected: Versions,
+    pub checkpoint: OpaquePreparedCheckpoint,
+    pub control_profile: ValidateCheckpointCausalControlProfile,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum CheckpointValidatedCausalType {
+    #[serde(rename = "checkpoint_validated_causal")]
+    CheckpointValidatedCausal,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum CheckpointValidatedCausalControlProfile {
+    #[serde(rename = "mooring.prepare-causal.v1")]
+    MooringPrepareCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CheckpointValidatedCausal {
+    pub r#type: CheckpointValidatedCausalType,
+    pub request_id: Identifier,
+    pub scope: Scope,
+    pub selected: Versions,
+    pub input_checkpoint_digest: Digest,
+    pub inventory: Vec<TargetIdentity>,
+    pub control_profile: CheckpointValidatedCausalControlProfile,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum PrepareAtomicCausalType {
+    #[serde(rename = "prepare_atomic_causal")]
+    PrepareAtomicCausal,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum PrepareAtomicCausalControlProfile {
+    #[serde(rename = "mooring.prepare-causal.v1")]
+    MooringPrepareCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PrepareAtomicCausal {
+    pub r#type: PrepareAtomicCausalType,
+    pub request_id: Identifier,
+    pub scope: Scope,
+    pub selected: Versions,
+    pub checkpoint: OpaquePreparedCheckpoint,
+    pub context: CausalPrepareContext,
+    pub change: AtomicChange,
+    pub control_profile: PrepareAtomicCausalControlProfile,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum AtomicPreparedCausalType {
+    #[serde(rename = "atomic_prepared_causal")]
+    AtomicPreparedCausal,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum AtomicPreparedCausalOutcome {
+    PreparedCandidate(PreparedCandidate),
+    PreparedDirectFailure(PreparedDirectFailure),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum AtomicPreparedCausalControlProfile {
+    #[serde(rename = "mooring.prepare-causal.v1")]
+    MooringPrepareCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AtomicPreparedCausal {
+    pub r#type: AtomicPreparedCausalType,
+    pub request_id: Identifier,
+    pub scope: Scope,
+    pub selected: Versions,
+    pub input_checkpoint_digest: Digest,
+    pub change_id: Identifier,
+    pub membership_hash: Digest,
+    pub outcome: AtomicPreparedCausalOutcome,
+    pub control_profile: AtomicPreparedCausalControlProfile,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConfirmedCheckpointBasis {
+    pub revision: Counter,
+    pub digest: Digest,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionOpenType {
+    #[serde(rename = "session_open")]
+    SessionOpen,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionOpenControlProfile {
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionOpenRequiredCapabilitiesItem {
+    #[serde(rename = "checkpoint_identity_v1")]
+    CheckpointIdentityV1,
+    #[serde(rename = "origin_inventory_v1")]
+    OriginInventoryV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionOpen {
+    pub r#type: SessionOpenType,
+    pub request_id: Identifier,
+    pub control_profile: SessionOpenControlProfile,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
+    pub versions: Versions,
+    pub required_capabilities: Vec<SessionOpenRequiredCapabilitiesItem>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionRestoreType {
+    #[serde(rename = "session_restore")]
+    SessionRestore,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionRestoreControlProfile {
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionRestore {
+    pub r#type: SessionRestoreType,
+    pub request_id: Identifier,
+    pub control_profile: SessionRestoreControlProfile,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
+    pub fence: Fence,
+    pub versions: Versions,
+    pub checkpoint: Checkpoint,
+    pub targets: Vec<TargetVersion>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionOpenedType {
+    #[serde(rename = "session_opened")]
+    SessionOpened,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionOpenedControlProfile {
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionOpenedCapabilitiesItem {
+    #[serde(rename = "checkpoint_identity_v1")]
+    CheckpointIdentityV1,
+    #[serde(rename = "origin_inventory_v1")]
+    OriginInventoryV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionOpened {
+    pub r#type: SessionOpenedType,
+    pub request_id: Identifier,
+    pub control_profile: SessionOpenedControlProfile,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
+    pub fence: Fence,
+    pub versions: Versions,
+    pub confirmed_basis: ConfirmedCheckpointBasis,
+    pub capabilities: Vec<SessionOpenedCapabilitiesItem>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionSubmitBatchType {
+    #[serde(rename = "session_submit_batch")]
+    SessionSubmitBatch,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionSubmitBatchControlProfile {
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionSubmitBatch {
+    pub r#type: SessionSubmitBatchType,
+    pub request_id: Identifier,
+    pub control_profile: SessionSubmitBatchControlProfile,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
+    pub fence: Fence,
+    pub versions: Versions,
+    pub confirmed_basis: ConfirmedCheckpointBasis,
+    pub changes: Vec<AtomicChange>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionCommitResultType {
+    #[serde(rename = "session_commit_result")]
+    SessionCommitResult,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionCommitResultControlProfile {
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionCommitResult {
+    pub r#type: SessionCommitResultType,
+    pub request_id: Identifier,
+    pub control_profile: SessionCommitResultControlProfile,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
+    pub fence: Fence,
+    pub versions: Versions,
+    pub receipt: CommitResult,
+    pub checkpoint: Checkpoint,
+    pub targets: Vec<TargetVersion>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionParticipantOpenType {
+    #[serde(rename = "session_participant_open")]
+    SessionParticipantOpen,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionParticipantOpenControlProfile {
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SessionParticipantOpenJoin {
+    SessionJoin(SessionJoin),
+    SessionJoinBounded(SessionJoinBounded),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionParticipantOpen {
+    pub r#type: SessionParticipantOpenType,
+    pub request_id: Identifier,
+    pub control_profile: SessionParticipantOpenControlProfile,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
+    pub fence: Fence,
+    pub connection_ref: Identifier,
+    pub join: SessionParticipantOpenJoin,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionParticipantInputType {
+    #[serde(rename = "session_participant_input")]
+    SessionParticipantInput,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionParticipantInputControlProfile {
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SessionParticipantInputMessage {
+    SubmitChanges(SubmitChanges),
+    TaskSubmit(TaskSubmit),
+    ReadRequest(ReadRequest),
+    StatusRequest(StatusRequest),
+    SessionLeave(SessionLeave),
+    Presence(Presence),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionParticipantInput {
+    pub r#type: SessionParticipantInputType,
+    pub request_id: Identifier,
+    pub control_profile: SessionParticipantInputControlProfile,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
+    pub fence: Fence,
+    pub connection_ref: Identifier,
+    pub participant_ref: Identifier,
+    pub gate_id: Identifier,
+    pub permission_version: Counter,
+    pub message: SessionParticipantInputMessage,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum BoundedTransferBeginType {
+    #[serde(rename = "bounded_transfer_begin")]
+    BoundedTransferBegin,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum BoundedTransferBeginKind {
+    #[serde(rename = "checkpoint")]
+    Checkpoint,
+    #[serde(rename = "document_update")]
+    DocumentUpdate,
+    #[serde(rename = "host_receipt")]
+    HostReceipt,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BoundedTransferBegin {
+    pub r#type: BoundedTransferBeginType,
+    pub request_id: Identifier,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub participant_ref: Identifier,
+    pub gate_id: Identifier,
+    pub generation: Counter,
+    pub permission_version: Counter,
+    pub versions: Versions,
+    pub revision: Counter,
+    pub transfer_id: Identifier,
+    pub kind: BoundedTransferBeginKind,
+    pub total_bytes: PositiveCounter,
+    pub chunk_count: PositiveCounter,
+    pub digest: Digest,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum BoundedTransferChunkType {
+    #[serde(rename = "bounded_transfer_chunk")]
+    BoundedTransferChunk,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BoundedTransferChunk {
+    pub r#type: BoundedTransferChunkType,
+    pub request_id: Identifier,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub participant_ref: Identifier,
+    pub gate_id: Identifier,
+    pub generation: Counter,
+    pub permission_version: Counter,
+    pub versions: Versions,
+    pub revision: Counter,
+    pub transfer_id: Identifier,
+    pub index: Counter,
+    pub data: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionParticipantOutputType {
+    #[serde(rename = "session_participant_output")]
+    SessionParticipantOutput,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionParticipantOutputControlProfile {
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SessionParticipantOutputMessage {
+    SessionJoined(SessionJoined),
+    ReadResult(ReadResult),
+    StatusResult(StatusResult),
+    ChangesReceived(ChangesReceived),
+    CommitResult(CommitResult),
+    TaskResult(TaskResult),
+    SessionClosed(SessionClosed),
+    ProtocolError(ProtocolError),
+    Presence(Presence),
+    DocumentUpdate(DocumentUpdate),
+    BoundedTransferBegin(BoundedTransferBegin),
+    BoundedTransferChunk(BoundedTransferChunk),
+    SessionJoinedBounded(SessionJoinedBounded),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionParticipantOutput {
+    pub r#type: SessionParticipantOutputType,
+    pub request_id: Identifier,
+    pub control_profile: SessionParticipantOutputControlProfile,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
+    pub fence: Fence,
+    pub connection_ref: Identifier,
+    pub participant_ref: Identifier,
+    pub gate_id: Identifier,
+    pub permission_version: Counter,
+    pub message: SessionParticipantOutputMessage,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionJoinBoundedType {
+    #[serde(rename = "session_join_bounded")]
+    SessionJoinBounded,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionJoinBoundedTransferProfile {
+    #[serde(rename = "bounded_transfer_v1")]
+    BoundedTransferV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionJoinBounded {
+    pub r#type: SessionJoinBoundedType,
+    pub request_id: Identifier,
+    pub ticket: String,
+    pub versions: Versions,
+    pub transfer_profile: SessionJoinBoundedTransferProfile,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionJoinedBoundedType {
+    #[serde(rename = "session_joined_bounded")]
+    SessionJoinedBounded,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionJoinedBoundedSelectedTransferProfile {
+    #[serde(rename = "bounded_transfer_v1")]
+    BoundedTransferV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionJoinedBounded {
+    pub r#type: SessionJoinedBoundedType,
+    pub request_id: Identifier,
+    pub joined: SessionJoined,
+    pub selected_transfer_profile: SessionJoinedBoundedSelectedTransferProfile,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionRestoredType {
+    #[serde(rename = "session_restored")]
+    SessionRestored,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionRestoredControlProfile {
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionRestored {
+    pub r#type: SessionRestoredType,
+    pub request_id: Identifier,
+    pub control_profile: SessionRestoredControlProfile,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
+    pub fence: Fence,
+    pub versions: Versions,
+    pub confirmed_basis: ConfirmedCheckpointBasis,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionStatusRequestType {
+    #[serde(rename = "session_status_request")]
+    SessionStatusRequest,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionStatusRequestControlProfile {
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionStatusRequest {
+    pub r#type: SessionStatusRequestType,
+    pub request_id: Identifier,
+    pub control_profile: SessionStatusRequestControlProfile,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
+    pub fence: Fence,
+    pub connection_ref: Identifier,
+    pub participant_ref: Identifier,
+    pub gate_id: Identifier,
+    pub permission_version: Counter,
+    pub message: StatusRequest,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionStatusResultType {
+    #[serde(rename = "session_status_result")]
+    SessionStatusResult,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionStatusResultControlProfile {
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionStatusResult {
+    pub r#type: SessionStatusResultType,
+    pub request_id: Identifier,
+    pub control_profile: SessionStatusResultControlProfile,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
+    pub fence: Fence,
+    pub connection_ref: Identifier,
+    pub participant_ref: Identifier,
+    pub gate_id: Identifier,
+    pub permission_version: Counter,
+    pub message: StatusResult,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CheckpointDescription {
+    pub format_version: Identifier,
+    pub versions: Versions,
+    pub assets: Vec<Asset>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionDescribeCheckpointType {
+    #[serde(rename = "session_describe_checkpoint")]
+    SessionDescribeCheckpoint,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionDescribeCheckpointControlProfile {
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionDescribeCheckpoint {
+    pub r#type: SessionDescribeCheckpointType,
+    pub request_id: Identifier,
+    pub control_profile: SessionDescribeCheckpointControlProfile,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
+    pub versions: Versions,
+    pub checkpoint: OpaquePreparedCheckpoint,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionCheckpointDescribedType {
+    #[serde(rename = "session_checkpoint_described")]
+    SessionCheckpointDescribed,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionCheckpointDescribedControlProfile {
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionCheckpointDescribed {
+    pub r#type: SessionCheckpointDescribedType,
+    pub request_id: Identifier,
+    pub control_profile: SessionCheckpointDescribedControlProfile,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
+    pub versions: Versions,
+    pub input_digest: Digest,
+    pub description: CheckpointDescription,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AllocatedCrdtOrigin {
+    pub origin: Counter,
+    pub clock: PositiveCounter,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionInspectOriginsType {
+    #[serde(rename = "session_inspect_origins")]
+    SessionInspectOrigins,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionInspectOriginsControlProfile {
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionInspectOrigins {
+    pub r#type: SessionInspectOriginsType,
+    pub request_id: Identifier,
+    pub control_profile: SessionInspectOriginsControlProfile,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
+    pub fence: Fence,
+    pub versions: Versions,
+    pub checkpoint: Checkpoint,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionOriginsInspectedType {
+    #[serde(rename = "session_origins_inspected")]
+    SessionOriginsInspected,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionOriginsInspectedControlProfile {
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionOriginsInspected {
+    pub r#type: SessionOriginsInspectedType,
+    pub request_id: Identifier,
+    pub control_profile: SessionOriginsInspectedControlProfile,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
+    pub fence: Fence,
+    pub versions: Versions,
+    pub checkpoint_basis: ConfirmedCheckpointBasis,
+    pub checkpoint_generation: Counter,
+    pub content_digest: Digest,
+    pub allocated: Vec<AllocatedCrdtOrigin>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1461,4 +2426,31 @@ pub enum Message {
     TicketValidationResult(TicketValidationResult),
     RevocationNotice(RevocationNotice),
     RuntimeReady(RuntimeReady),
+    ValidateCheckpoint(ValidateCheckpoint),
+    CheckpointValidated(CheckpointValidated),
+    PrepareAtomic(PrepareAtomic),
+    AtomicPrepared(AtomicPrepared),
+    ValidateCheckpointCausal(ValidateCheckpointCausal),
+    CheckpointValidatedCausal(CheckpointValidatedCausal),
+    PrepareAtomicCausal(PrepareAtomicCausal),
+    AtomicPreparedCausal(AtomicPreparedCausal),
+    SessionOpen(SessionOpen),
+    SessionRestore(SessionRestore),
+    SessionOpened(SessionOpened),
+    SessionSubmitBatch(SessionSubmitBatch),
+    SessionCommitResult(SessionCommitResult),
+    SessionParticipantOpen(SessionParticipantOpen),
+    SessionParticipantInput(SessionParticipantInput),
+    BoundedTransferBegin(BoundedTransferBegin),
+    BoundedTransferChunk(BoundedTransferChunk),
+    SessionParticipantOutput(SessionParticipantOutput),
+    SessionJoinBounded(SessionJoinBounded),
+    SessionJoinedBounded(SessionJoinedBounded),
+    SessionRestored(SessionRestored),
+    SessionStatusRequest(SessionStatusRequest),
+    SessionStatusResult(SessionStatusResult),
+    SessionDescribeCheckpoint(SessionDescribeCheckpoint),
+    SessionCheckpointDescribed(SessionCheckpointDescribed),
+    SessionInspectOrigins(SessionInspectOrigins),
+    SessionOriginsInspected(SessionOriginsInspected),
 }

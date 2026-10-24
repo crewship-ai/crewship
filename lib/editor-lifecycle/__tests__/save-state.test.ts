@@ -96,6 +96,28 @@ describe("DX-02: never saved without a verified receipt", () => {
     const state = run(opened, { type: "journal", writes: 0 })
     expect(saveReducer(state, { type: "journal", writes: 0 })).toBe(state)
   })
+  it("the last open refusal decided clears the trouble, without a receipt", () => {
+    for (const refusal of [{ type: "conflict" }, { type: "rejected" }] as SaveEvent[]) {
+      const state = run(opened, { type: "edit", pending: 1 }, { type: "send" }, refusal, { type: "recount", pending: 0 }, { type: "refusals", open: 1 }, { type: "refusals", open: 0 })
+      expect(state.trouble).toBeUndefined()
+      expect(state.receipt).toBe(false)
+      expect(state.refused).toBe(0)
+    }
+  })
+  it("deciding one refusal keeps the trouble while another is open, work is unsent, or for other troubles", () => {
+    expect(run(opened, { type: "edit", pending: 1 }, { type: "rejected" }, { type: "recount", pending: 0 }, { type: "refusals", open: 2 }, { type: "refusals", open: 1 }).trouble).toBe("rejected")
+    expect(run(opened, { type: "edit", pending: 2 }, { type: "conflict" }, { type: "refusals", open: 0 }).trouble).toBe("conflict")
+    expect(run(opened, { type: "edit", pending: 1 }, { type: "offline" }, { type: "recount", pending: 0 }, { type: "refusals", open: 0 }).trouble).toBe("offline")
+  })
+  it("an open refusal is never saved, even after a receipt for later work, and guards leaving", () => {
+    const state = run(opened, { type: "edit", pending: 1 }, { type: "rejected" }, { type: "recount", pending: 0 }, { type: "refusals", open: 1 }, { type: "edit", pending: 1 }, { type: "send" }, { type: "ack", pending: 0 })
+    expect(state.refused).toBe(1)
+    expect(saveWordOf(state)).toBe("unsaved")
+    expect(losesWork(state)).toBe(true)
+    const decided = saveReducer(state, { type: "refusals", open: 0 })
+    expect(saveWordOf(decided)).toBe("saved")
+    expect(losesWork(decided)).toBe(false)
+  })
 })
 
 describe("labels", () => {

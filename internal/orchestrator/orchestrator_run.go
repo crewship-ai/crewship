@@ -1560,7 +1560,7 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 		runToken := agentRunAuthToken(runKey, req.WorkspaceID, req.AgentID, req.RunID, o.logger)
 		routeKey := internaltoken.DeriveLLMRouteKey(ipcToken, req.WorkspaceID, req.CrewID)
 		llmRouteToken := internaltoken.DeriveLLMRunRouteToken(routeKey, req.AgentID, req.RunID)
-		configFingerprint := sidecarConfigFingerprint(ipcToken, req.Credentials)
+		configFingerprint := gridcraftSidecarFingerprint(ipcToken, req.Credentials, o.gridCraftEnabled)
 		if credentialIsolationFailedOpen(configFingerprint, req.Credentials) {
 			o.warnCredentialIsolationFailOpenOnce(req.AgentID)
 		}
@@ -1643,14 +1643,15 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 		var ipcCfg *SidecarIPCConfig
 		if ipcBaseURL != "" {
 			ipcCfg = &SidecarIPCConfig{
-				BaseURL:     ipcBaseURL,
-				Token:       internalAPIToken,
-				AgentID:     req.AgentID,
-				AgentSlug:   req.AgentSlug,
-				CrewID:      req.CrewID,
-				WorkspaceID: req.WorkspaceID,
-				ChatID:      req.ChatID,
-				ContainerID: req.ContainerID,
+				GridCraftEnabled: o.gridCraftEnabled,
+				BaseURL:          ipcBaseURL,
+				Token:            internalAPIToken,
+				AgentID:          req.AgentID,
+				AgentSlug:        req.AgentSlug,
+				CrewID:           req.CrewID,
+				WorkspaceID:      req.WorkspaceID,
+				ChatID:           req.ChatID,
+				ContainerID:      req.ContainerID,
 				// #812: the boot agent's own per-agent token. req.CrewMembers
 				// excludes self, so the boot agent's identity would otherwise be
 				// missing from the sidecar's token→identity roster.

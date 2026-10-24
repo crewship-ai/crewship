@@ -209,6 +209,8 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y rpm rpm2cpio cpio
           bash scripts/check-release-artifacts.sh --strict --dist dist
+      - name: Reject binaries built with the test barrier tag
+        run: bash scripts/check-no-test-barrier.sh dist
       - name: Sign checksums.txt
         if: hashFiles('dist/checksums.txt') != ''
         run: |
