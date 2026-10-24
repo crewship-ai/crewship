@@ -204,13 +204,14 @@ type LoggingConfig struct {
 // AuthConfig holds authentication settings including JWT secrets, WebSocket
 // token expiry, internal token for IPC auth, and signup policy.
 type AuthConfig struct {
-	JWTSecret      string        `yaml:"jwt_secret"`
-	WSTokenExpiry  time.Duration `yaml:"ws_token_expiry"`
-	NextjsURL      string        `yaml:"nextjs_url"`
-	InternalToken  string        `yaml:"internal_token"`
-	AllowSignup    bool          `yaml:"allow_signup"`
-	GoogleClientID string        `yaml:"google_client_id"`
-	GoogleSecret   string        `yaml:"google_client_secret"`
+	PublicPagePasswords PublicPagePasswordsConfig `yaml:"public_page_passwords"`
+	JWTSecret           string                    `yaml:"jwt_secret"`
+	WSTokenExpiry       time.Duration             `yaml:"ws_token_expiry"`
+	NextjsURL           string                    `yaml:"nextjs_url"`
+	InternalToken       string                    `yaml:"internal_token"`
+	AllowSignup         bool                      `yaml:"allow_signup"`
+	GoogleClientID      string                    `yaml:"google_client_id"`
+	GoogleSecret        string                    `yaml:"google_client_secret"`
 
 	// BootstrapWindow controls the first-run /bootstrap window. Zero (the
 	// default) keeps bootstrap open until the first admin exists — the empty
@@ -428,6 +429,9 @@ var (
 // Validate checks that all configuration values are within acceptable ranges
 // and required fields are set. Returns an error describing the first invalid value.
 func (c *Config) Validate() error {
+	if _, err := c.Auth.PublicPagePasswords.Resolve(); err != nil {
+		return err
+	}
 	if err := c.Documents.validate(); err != nil {
 		return err
 	}
@@ -714,6 +718,22 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if val, ok := envBool("CREWSHIP_ALLOW_SIGNUP"); ok {
 		cfg.Auth.AllowSignup = val
+	}
+	for _, setting := range []struct {
+		name string
+		dst  *int
+	}{
+		{"CREWSHIP_PUBLIC_PAGE_PASSWORD_MAX_CONCURRENT", &cfg.Auth.PublicPagePasswords.MaxConcurrent},
+		{"CREWSHIP_PUBLIC_PAGE_PASSWORD_MAX_CONCURRENT_PER_TARGET", &cfg.Auth.PublicPagePasswords.MaxConcurrentPerTarget},
+	} {
+		if raw := os.Getenv(setting.name); raw != "" {
+			value, err := strconv.Atoi(raw)
+			if err != nil {
+				slog.Warn("ignoring invalid public page password limit", "name", setting.name)
+			} else {
+				*setting.dst = value
+			}
+		}
 	}
 	if v := os.Getenv("CREWSHIP_BOOTSTRAP_WINDOW"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil && d > 0 {
