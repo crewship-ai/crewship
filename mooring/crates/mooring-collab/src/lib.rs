@@ -199,6 +199,24 @@ pub mod private_rpc {
         .map_err(|_| invalid("invalid hello"))?;
         let hello: Hello = serde_json::from_value(normalized.value().clone())
             .map_err(|_| invalid("invalid hello"))?;
+        // A session offer is an explicit host opt-in, not an invitation to
+        // fall back to stateless preparation after an incompatible/ambiguous
+        // session declaration. Existing non-session offers retain negotiation.
+        if available
+            .iter()
+            .any(|profile| matches!(profile, ControlProfile::Session))
+            && hello.control_profiles.as_ref().is_some_and(|profiles| {
+                profiles
+                    .contains(&mooring_protocol::HelloControlProfilesItem::MooringSessionCausalV1)
+            })
+            && (hello
+                .control_profiles
+                .as_ref()
+                .is_none_or(|profiles| profiles.len() != 1)
+                || hello.supported.as_slice() != [supported_version.clone()])
+        {
+            return Err(invalid("ambiguous or incompatible session offer"));
+        }
         let supported = [supported_version.clone()];
         let selected = negotiate(&hello, &supported).map_err(invalid)?;
         let selected_control = available
@@ -226,6 +244,71 @@ pub mod private_rpc {
         stream.set_read_timeout(None)?;
         stream.set_write_timeout(None)?;
         Ok(selected_control)
+    }
+
+    /// Production private-FD composition. Only an exact explicit session offer
+    /// selects the owned actor; the Go session supervisor is default-off. This
+    /// function must receive the inherited host socket, never a public listener.
+    /// Profile selection proves no participant/source authority: host sealed
+    /// admission, SQL decisions and independent final delivery gates remain
+    /// mandatory. The legacy/strict/causal lanes retain their existing behavior.
+    pub fn serve_wordcraft(mut stream: UnixStream, timeout: Duration) -> io::Result<()> {
+        let registration = crate::dispatch::wordcraft_registration();
+        let selected = bootstrap_profiles(
+            &mut stream,
+            timeout,
+            &registration.selected,
+            &[
+                ControlProfile::Session,
+                ControlProfile::Causal,
+                ControlProfile::Strict,
+            ],
+        )?;
+        if matches!(selected, Some(ControlProfile::Session)) {
+            return serve_owned_session(stream);
+        }
+        let Some(selected) = selected else {
+            if read_frame(&mut stream)?.is_some() {
+                return Err(invalid("private profile not selected"));
+            }
+            return Ok(());
+        };
+        while let Some(frame) = read_profile_frame(&mut stream, true)? {
+            let response = match selected {
+                ControlProfile::Strict => registration.respond(&frame)?,
+                ControlProfile::Causal => registration.respond_causal(&frame)?,
+                ControlProfile::Session => return Err(invalid("session routing mismatch")),
+            };
+            write_profile_frame(&mut stream, &response, true)?;
+        }
+        Ok(())
+    }
+    #[cfg(target_os = "linux")]
+    fn serve_owned_session(stream: UnixStream) -> io::Result<()> {
+        use mooring_protocol::boundary::{Durability, Transport};
+        // Logical host mode is anchored to the inherited channel above; these
+        // labels do not turn arbitrary JSON or a browser into authenticated Go.
+        let host = Transport::AuthenticatedHost {
+            issuer: "crewship",
+            durabilities: &[Durability::Node],
+            required: Durability::Node,
+        };
+        let driver = crate::session_driver::Driver::from_negotiated_inherited_stream_with_origins(
+            stream,
+            &host,
+            mooring_core::lease::boottime,
+        )?;
+        let mut actor = driver.into_actor()?;
+        loop {
+            actor.step(&host, Duration::from_millis(20))?;
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    fn serve_owned_session(_stream: UnixStream) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "Linux session runtime required",
+        ))
     }
 
     pub fn serve(mut stream: UnixStream, bootstrap_timeout: Duration) -> io::Result<()> {

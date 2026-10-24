@@ -151,10 +151,10 @@ its scope, generation, revision, application tuple and checkpoint format.
 Restoration checks the trusted clock before and after work; each startup reply
 checks ownership again after encoding and writer wait. Tests use real Unix
 frames and the real application document with an injected deterministic clock.
-No CLI selects this profile, no participant join or mutation is admitted, and
-caller-trusted transport metadata still needs the actual inherited-FD factory.
+These startup tests alone admit no participant mutation; the production
+selection described below still requires the inherited-FD host factory.
 
-The unselected native `session_driver::Driver` composes the single-reader lane
+The native `session_driver::Driver` composes the single-reader lane
 with owned-document startup. A separate preparation worker binds every request
 to the exact opened workspace/artifact and application tuple, so a host prepare
 callback can progress while actor restoration is withheld. Preparation creates
@@ -162,8 +162,8 @@ independent owned candidates and never installs them into the retained live Doc.
 Startup polls the send-bound owner lease while waiting for restore, checks it
 around restoration and both acknowledgements, and closes/joins the worker on
 failure. Worker unwind also closes the channel. The driver retains the original
-checkpoint wrapper and actual document; no operation or participant control is
-processed yet, and no CLI selects this constructor. The injected clock and host
+checkpoint wrapper and actual document. The driver handles startup/ownership;
+its consuming actor handles participant controls. The injected clock and host
 transport assertion must come from verified native integration. Tests use real
 Unix socket pairs plus an injected clock; they do not qualify suspend behavior,
 production owner renewal, author admission, durable settlement or distribution.
@@ -174,8 +174,8 @@ retains FD3 close-on-exec, uses native CLOCK_BOOTTIME, restores an actual owned
 WordCraft Doc and serves scoped stateless prepare callbacks. It has no
 participant, submission or author-permission implementation. Its logical host
 mode is fixed to `crewship`/node solely for this isolated host-transport proof.
-The production CLI continues selecting only its previous stateless causal
-profile. This composition includes the core-metadata readonly repair and native
+Production session selection is described below; this example remains a test
+fixture. The composition includes the core-metadata readonly repair and native
 compatibility regressions; broader typed native-engine losslessness remains a
 separate activation requirement. No human draft APIs or Cargo changes are added.
 
@@ -264,7 +264,7 @@ enablement. The earlier pinned Go/Rust opaque proofs remain historical evidence.
 
 ### Native owner maintenance
 
-The unselected session driver renews its owner lease from the original request
+The session driver renews its owner lease from the original request
 send time, retries the same pending nonce, and checks the BOOTTIME owner guard
 after waiting for the shared writer. Preparation remains on its independent
 lane. A single cached canonical reply permits exact duplicates without extending
@@ -273,9 +273,9 @@ knowledge may advance, but participant gates and the confirmed document do not.
 
 Deterministic clock and real socket tests cover expiry, retry timing, duplicate
 replies and preparation while a renewal reply is withheld. This is owner-only
-maintenance: production CLI selection, live participant admission and delivery
-remain disabled. Actual Go/SQL renewal qualification is a separate integration
-step.
+maintenance evidence only. Canonical participant authority and final delivery
+still require the Go host; actual Go/SQL renewal qualification is a separate
+integration step.
 
 ### Explicit read-only origin inspection
 
@@ -296,14 +296,14 @@ read-only inventory qualification fails nonterminally without content diagnostic
 Actual socket tests preserve the owned document's complete native value, stable
 IDs and checkpoint bytes while inspecting before/after startup. They also cover
 identity/full-metadata transplants and the actual read-only D3 refusal. This does
-not reserve origins, construct writers, issue Saved, admit participants or enable
-the production session CLI. A concrete opaque Go result with original-source and
+not reserve origins, construct writers, issue Saved or prove participant rights.
+A concrete opaque Go result with original-source and
 owner checks in the same writer remains the required host integration.
 
 
 ### Live actor readiness notification
 
-The unselected consuming actor driver uses an opt-in payload-free thread wake
+The opt-in consuming actor driver uses an opt-in payload-free thread wake
 for both scheduler readiness and actual actor-lane arrivals/closure. It rebinds
 that wake before checking work and parking, so a wake between check and park
 remains pending. No synthetic protocol frame or extra polling thread is added;
@@ -321,3 +321,25 @@ Debug builds can exceed100ms during bounded validation. Idle actor waiting keeps
 the existing20ms owner-maintenance interval; readiness does not add1ms polling.
 These tests still use mock host authority/history/receipts and do not qualify
 production ingress, SQL, source-origin issuance or participant distribution.
+
+
+### Production private-FD profile selection
+
+The packaged `mooring-collab --rpc-fd 3` binary selects the owned session actor
+only when the inherited host explicitly offers the single closed
+`mooring.session-causal.v1` profile and exact qualified WordCraft tuple.
+Mixed session/stateless offers, ambiguous tuples and malformed/incompatible
+session declarations fail before readiness; there is no silent fallback.
+Existing offers without a session profile keep their prior no-profile,
+strict-prepare or causal-prepare behavior.
+
+The session branch uses the same inherited socket, single reader, independent
+prepare lane, actual CLOCK_BOOTTIME, owned application document, owner renewal
+and readiness-woken actor. It opens no listener and depends on no example/mock.
+Go `StartSessionRuntime` remains disabled unless its explicit Enabled config is
+set; this Rust entrypoint does not add a route, origin issuer or permission.
+Participant input still requires the host's original sealed submission,
+canonical current rights, durable SQL decisions and independent final send
+fences. Unsupported actor controls and uncertain results close the channel with
+owned pending intents retained. Large snapshot distribution, complete task/read
+handling and human-origin admission remain separate qualification work.
