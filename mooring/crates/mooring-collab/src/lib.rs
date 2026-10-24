@@ -5,6 +5,8 @@ pub mod dispatch_causal;
 #[cfg(unix)]
 pub mod session_lane;
 #[cfg(unix)]
+mod session_origins;
+#[cfg(unix)]
 pub mod session_startup;
 
 pub const MAX_FRAME: usize = 262_144;
@@ -291,6 +293,8 @@ pub mod private_rpc {
 #[cfg(unix)]
 pub mod session_driver;
 
+#[cfg(unix)]
+mod owner_maintenance;
 #[cfg(unix)]
 mod session_owner_guard;
 

@@ -263,7 +263,10 @@ fn validate_incoming(raw: &[u8]) -> io::Result<(Route, Vec<u8>)> {
         return Ok((Route::Prepare, value.bytes().to_vec()));
     }
     if let Ok(value) = session_control::validate(raw, Peer::InheritedHost) {
-        let route = if value.value()["type"] == "session_describe_checkpoint" {
+        let route = if matches!(
+            value.value()["type"].as_str(),
+            Some("session_describe_checkpoint" | "session_inspect_origins")
+        ) {
             Route::Prepare
         } else {
             Route::Actor

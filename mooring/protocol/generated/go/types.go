@@ -1505,6 +1505,7 @@ type SessionOpenRequiredCapabilitiesItem string
 
 const (
 	SessionOpenRequiredCapabilitiesItemCheckpointIdentityV1 SessionOpenRequiredCapabilitiesItem = "checkpoint_identity_v1"
+	SessionOpenRequiredCapabilitiesItemOriginInventoryV1    SessionOpenRequiredCapabilitiesItem = "origin_inventory_v1"
 )
 
 type SessionOpen struct {
@@ -1559,6 +1560,7 @@ type SessionOpenedCapabilitiesItem string
 
 const (
 	SessionOpenedCapabilitiesItemCheckpointIdentityV1 SessionOpenedCapabilitiesItem = "checkpoint_identity_v1"
+	SessionOpenedCapabilitiesItemOriginInventoryV1    SessionOpenedCapabilitiesItem = "origin_inventory_v1"
 )
 
 type SessionOpened struct {
@@ -1931,6 +1933,62 @@ type SessionCheckpointDescribed struct {
 	Versions       Versions                                 `json:"versions"`
 	InputDigest    Digest                                   `json:"input_digest"`
 	Description    CheckpointDescription                    `json:"description"`
+}
+
+type AllocatedCrdtOrigin struct {
+	Origin Counter         `json:"origin"`
+	Clock  PositiveCounter `json:"clock"`
+}
+
+type SessionInspectOriginsType string
+
+const (
+	SessionInspectOriginsTypeSessionInspectOrigins SessionInspectOriginsType = "session_inspect_origins"
+)
+
+type SessionInspectOriginsControlProfile string
+
+const (
+	SessionInspectOriginsControlProfileMooringSessionCausalV1 SessionInspectOriginsControlProfile = "mooring.session-causal.v1"
+)
+
+type SessionInspectOrigins struct {
+	Type           SessionInspectOriginsType           `json:"type"`
+	RequestID      Identifier                          `json:"request_id"`
+	ControlProfile SessionInspectOriginsControlProfile `json:"control_profile"`
+	Scope          Scope                               `json:"scope"`
+	SessionID      Identifier                          `json:"session_id"`
+	RuntimeRef     Identifier                          `json:"runtime_ref"`
+	Fence          Fence                               `json:"fence"`
+	Versions       Versions                            `json:"versions"`
+	Checkpoint     Checkpoint                          `json:"checkpoint"`
+}
+
+type SessionOriginsInspectedType string
+
+const (
+	SessionOriginsInspectedTypeSessionOriginsInspected SessionOriginsInspectedType = "session_origins_inspected"
+)
+
+type SessionOriginsInspectedControlProfile string
+
+const (
+	SessionOriginsInspectedControlProfileMooringSessionCausalV1 SessionOriginsInspectedControlProfile = "mooring.session-causal.v1"
+)
+
+type SessionOriginsInspected struct {
+	Type                 SessionOriginsInspectedType           `json:"type"`
+	RequestID            Identifier                            `json:"request_id"`
+	ControlProfile       SessionOriginsInspectedControlProfile `json:"control_profile"`
+	Scope                Scope                                 `json:"scope"`
+	SessionID            Identifier                            `json:"session_id"`
+	RuntimeRef           Identifier                            `json:"runtime_ref"`
+	Fence                Fence                                 `json:"fence"`
+	Versions             Versions                              `json:"versions"`
+	CheckpointBasis      ConfirmedCheckpointBasis              `json:"checkpoint_basis"`
+	CheckpointGeneration Counter                               `json:"checkpoint_generation"`
+	ContentDigest        Digest                                `json:"content_digest"`
+	Allocated            []AllocatedCrdtOrigin                 `json:"allocated"`
 }
 
 type Message = json.RawMessage
