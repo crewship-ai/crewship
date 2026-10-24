@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -41,5 +42,61 @@ func TestCollaborationCustodyAndGenericDeletionRefusal(t *testing.T) {
 	var conflict *ErrPagesNeedManualTransfer
 	if !errors.As(err, &conflict) {
 		t.Fatal("collaboration auto-transferred to a crew", err)
+	}
+}
+
+// Canonical SQL storage classification reaches authorized list/detail without
+// disclosing checkpoint bytes or relabeling the document as the pilot engine.
+func TestCollaborationPageMetadataUsesCanonicalStorage(t *testing.T) {
+	r := pagesTransferSetup(t)
+	r.seedPage(t, "metadata-collab", "metadata-collab", "Native", r.userID, "")
+	mustExec(t, r.db, `INSERT INTO mooring_collab_documents(page_id,workspace_id,application_id,revision,checkpoint_base64) VALUES('metadata-collab',?,'wordcraft','0','e30=')`, r.wsID)
+	h := NewPageHandler(r.db, nil, newTestLogger())
+	for _, index := range []bool{false, true} {
+		req := pagesRequest(t, "GET", "/api/v1/pages", r.wsID, r.userID, "MEMBER", "")
+		req.SetPathValue("slug", "metadata-collab")
+		response := httptest.NewRecorder()
+		if index {
+			h.List(response, req)
+		} else {
+			h.Get(response, req)
+		}
+		if response.Code != http.StatusOK {
+			t.Fatalf("index=%v: HTTP%d %s", index, response.Code, response.Body.String())
+		}
+		var body any
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		var find func(any) map[string]any
+		find = func(v any) map[string]any {
+			switch x := v.(type) {
+			case map[string]any:
+				if x["id"] == "metadata-collab" {
+					return x
+				}
+				for _, child := range x {
+					if found := find(child); found != nil {
+						return found
+					}
+				}
+			case []any:
+				for _, child := range x {
+					if found := find(child); found != nil {
+						return found
+					}
+				}
+			}
+			return nil
+		}
+		page := find(body)
+		if page == nil || page["has_collaboration"] != true || page["has_mooring"] == true || page["has_document"] == true {
+			t.Fatalf("index=%v wrong classification: %v", index, page)
+		}
+		for _, key := range []string{"checkpoint_base64", "checkpoint", "state", "ticket", "origin"} {
+			if _, ok := page[key]; ok {
+				t.Fatalf("content/authority leaked in metadata: %s", key)
+			}
+		}
 	}
 }

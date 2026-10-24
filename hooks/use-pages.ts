@@ -137,6 +137,8 @@ export interface WirePage {
   /** The Page stores a GridCraft workbook (read-only preview in the browser). */
   has_workbook?: boolean
   has_mooring?: boolean
+  /** Protocol-backed collaboration storage; never infer the legacy pilot. */
+  has_collaboration?: boolean
   /** A published application exists. See `has_project` for source that is not published yet. */
   has_application?: boolean
   /**
@@ -489,6 +491,7 @@ export interface PageView {
   /** Confirmed GridCraft workbook storage; the Page renders the read-only workbook preview. */
   hasWorkbook?: boolean
   hasMooring?: boolean
+  hasCollaboration?: boolean
   id: string
   slug: string
   name: string
@@ -640,6 +643,7 @@ export function toPageView(raw: WirePage): PageView {
     hasSlides: raw.has_slides === true,
     hasWorkbook: raw.has_workbook === true,
     hasMooring: raw.has_mooring === true,
+    hasCollaboration: raw.has_collaboration === true,
     slug,
     name: trimmed(raw.name) ?? slug,
     description: trimmed(raw.description),

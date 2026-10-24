@@ -256,6 +256,8 @@ type pageWire struct {
 	// HasWorkbook marks a Page holding a GridCraft workbook, viewed read-only.
 	HasWorkbook bool `json:"has_workbook,omitempty"`
 	HasMooring  bool `json:"has_mooring,omitempty"`
+	// HasCollaboration selects the protocol-backed document host, not the pilot.
+	HasCollaboration bool `json:"has_collaboration,omitempty"`
 	// HasProject and HasApplication answer DIFFERENT questions, and the editor
 	// needs both. HasApplication is "an application is published and running";
 	// HasProject is "this Page has application source at all", published or
@@ -323,10 +325,11 @@ type pageWire struct {
 // were conflated. They answer different questions.
 type pageListWire struct {
 	// Explicit audience classification; unfiled human ownership is not privacy.
-	PrivateAudience bool `json:"private_audience"`
-	HasDocument     bool `json:"has_document"`
-	HasWorkbook     bool `json:"has_workbook,omitempty"`
-	HasMooring      bool `json:"has_mooring,omitempty"`
+	PrivateAudience  bool `json:"private_audience"`
+	HasDocument      bool `json:"has_document"`
+	HasWorkbook      bool `json:"has_workbook,omitempty"`
+	HasMooring       bool `json:"has_mooring,omitempty"`
+	HasCollaboration bool `json:"has_collaboration,omitempty"`
 	// See pageWire.HasProject: source that exists versus source that is live.
 	HasProject         bool   `json:"has_project"`
 	HasApplication     bool   `json:"has_application"`
@@ -677,7 +680,7 @@ func (h *PageHandler) pageListRow(row *pageIndexRow, folders map[string]*pageFol
 	rec := &row.rec
 	out := pageListWire{
 		PrivateAudience: rec.PrivateAudience,
-		HasDocument:     rec.HasDocument, HasWorkbook: rec.HasWorkbook, HasMooring: rec.HasMooring, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
+		HasDocument:     rec.HasDocument, HasWorkbook: rec.HasWorkbook, HasMooring: rec.HasMooring, HasCollaboration: rec.HasCollaboration, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 		ID:                  rec.ID,
 		Slug:                rec.Slug,
 		Name:                rec.Name,
@@ -1855,7 +1858,7 @@ func (h *PageHandler) pageDocument(ctx context.Context, rec *pageRecord, panels 
 // cannot edit still sees exactly what they saw before.
 func (h *PageHandler) pageDocumentFor(ctx context.Context, rec *pageRecord, panels []*panelRecord, viewer *pageViewer, authored bool) pageWire {
 	out := pageWire{
-		HasDocument: rec.HasDocument, HasWorkbook: rec.HasWorkbook, HasMooring: rec.HasMooring, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
+		HasDocument: rec.HasDocument, HasWorkbook: rec.HasWorkbook, HasMooring: rec.HasMooring, HasCollaboration: rec.HasCollaboration, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 		ID:          rec.ID,
 		Slug:        rec.Slug,
 		Name:        rec.Name,
