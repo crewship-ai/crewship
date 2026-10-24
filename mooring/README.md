@@ -157,4 +157,17 @@ frontier. The caller must capture the real outer Session selection/effect,
 including the native cluster helper for caret deletion, and serialize the
 native command/post-gate/local capture sequence. Column/table/math and other
 unqualified modes still require explicit qualification. No live WordApp hook,
-public WASM facade method, host witness or human admission profile is installed.
+host witness or human admission profile is installed.
+
+
+The experimental WASM local draft exposes the selected connector through an
+opaque `WordCraftNativeSelection` object. It has no JSON constructor. Position
+arguments use canonical decimal strings and checked native UTF-8 boundaries;
+JavaScript integer wrapping cannot select a different location. Native JSON is
+bounded and preflighted, then the original bytes are parsed to preserve opaque
+integers. The local writer/read-only check runs before JSON or position decoding.
+Pure validation emits nothing; selected capture returns one unconfirmed original
+proposal with its immutable frontier. These methods do not capture a real UI
+selection automatically, authenticate a host origin, issue a receipt or enable
+any human profile. Synthetic opaque metadata preservation is a storage/digest
+property, not proof that the native WordCraft engine can edit that encoding.
