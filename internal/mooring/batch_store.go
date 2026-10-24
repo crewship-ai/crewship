@@ -125,7 +125,7 @@ func (s *BatchStore) Initialize(ctx context.Context, lease OwnerLease, checkpoin
 		if _, err := tx.ExecContext(ctx, `INSERT INTO mooring_collab_documents(page_id,workspace_id,application_id,revision,checkpoint_base64,target_tracking) VALUES(?,?,?,'0',?,?)`, lease.Key.ArtifactID, lease.Key.WorkspaceID, lease.Key.ApplicationID, encoded, s.targetsEnabled()); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO mooring_collab_checkpoints(page_id,workspace_id,revision,checkpoint_base64,decoded_bytes) VALUES(?,?,'0',?,?)`, lease.Key.ArtifactID, lease.Key.WorkspaceID, encoded, len(checkpoint))
+		_, err := tx.ExecContext(ctx, `INSERT INTO mooring_collab_checkpoints(page_id,workspace_id,revision,checkpoint_base64,decoded_bytes,checkpoint_generation) VALUES(?,?,'0',?,?,?)`, lease.Key.ArtifactID, lease.Key.WorkspaceID, encoded, len(checkpoint), strconv.FormatInt(lease.Generation, 10))
 		if err != nil {
 			return err
 		}
@@ -272,9 +272,10 @@ func (s *BatchStore) checkpointCapacity(ctx context.Context, tx *sql.Tx, page st
 	}
 	return nil
 }
-func (s *BatchStore) saveCheckpoint(ctx context.Context, tx *sql.Tx, k SessionKey, revision string, checkpoint []byte) error {
+func (s *BatchStore) saveCheckpoint(ctx context.Context, tx *sql.Tx, lease OwnerLease, revision string, checkpoint []byte) error {
+	k := lease.Key
 	encoded := base64.StdEncoding.EncodeToString(checkpoint)
-	if _, err := tx.ExecContext(ctx, `INSERT INTO mooring_collab_checkpoints(page_id,workspace_id,revision,checkpoint_base64,decoded_bytes) VALUES(?,?,?,?,?)`, k.ArtifactID, k.WorkspaceID, revision, encoded, len(checkpoint)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO mooring_collab_checkpoints(page_id,workspace_id,revision,checkpoint_base64,decoded_bytes,checkpoint_generation) VALUES(?,?,?,?,?,?)`, k.ArtifactID, k.WorkspaceID, revision, encoded, len(checkpoint), strconv.FormatInt(lease.Generation, 10)); err != nil {
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `UPDATE mooring_collab_documents SET revision=?,checkpoint_base64=? WHERE page_id=?`, revision, encoded, k.ArtifactID)

@@ -431,7 +431,7 @@ func (s *BatchStore) commit(ctx context.Context, request BatchRequest, session *
 						return e
 					}
 				}
-				if e = s.saveCheckpoint(ctx, tx, key, stored.LastRevision, candidate); e != nil {
+				if e = s.saveCheckpoint(ctx, tx, request.Lease, stored.LastRevision, candidate); e != nil {
 					return e
 				}
 				checkpoint = append([]byte(nil), candidate...)
