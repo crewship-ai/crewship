@@ -38,15 +38,51 @@ impl<D, T: Send + 'static> Actor<D, T> {
     /// encoder MUST check its final output is <= the charged bytes before I/O.
     /// Per-change charges must already include their exact normalized encoding.
     pub fn new(document: D, revision: u64, reserve: NonZeroUsize) -> Result<Self, StartError> {
+        Self::with_timer(
+            document,
+            revision,
+            reserve,
+            Duration::from_millis(100),
+            None,
+        )
+    }
+    /// A live driver can leave encoding/send headroom inside the unchanged
+    /// 100 ms maximum, and wake its own actor thread without polling faster.
+    /// Notification is only scheduler readiness; it is not ACK or authority.
+    pub fn new_waking(
+        document: D,
+        revision: u64,
+        reserve: NonZeroUsize,
+        flush_after: Duration,
+        wake: crate::schedule::native::ReadyWake,
+    ) -> Result<Self, StartError> {
+        if flush_after.is_zero() || flush_after > Duration::from_millis(100) {
+            return Err(StartError::Timer(
+                crate::schedule::native::StartError::Limits,
+            ));
+        }
+        Self::with_timer(document, revision, reserve, flush_after, Some(wake))
+    }
+    fn with_timer(
+        document: D,
+        revision: u64,
+        reserve: NonZeroUsize,
+        flush_after: Duration,
+        wake: Option<crate::schedule::native::ReadyWake>,
+    ) -> Result<Self, StartError> {
         let remaining = FRAME_BYTES
             .checked_sub(reserve.get())
             .and_then(NonZeroUsize::new)
             .ok_or(StartError::EnvelopeReserve)?;
-        let scheduler = Scheduler::new(BatchLimits {
-            max_wait: Duration::from_millis(100),
+        let limits = BatchLimits {
+            max_wait: flush_after,
             max_operations: NonZeroUsize::new(BATCH_OPERATIONS).unwrap(),
             max_bytes: remaining,
-        })
+        };
+        let scheduler = match wake {
+            Some(wake) => Scheduler::with_ready_wake(limits, wake),
+            None => Scheduler::new(limits),
+        }
         .map_err(StartError::Timer)?;
         Ok(Self {
             scheduler,

@@ -133,6 +133,26 @@ pub mod native {
             crate::lease::boottime()
         }
     }
+    /// Coalesced, payload-free thread notification. It conveys no transport,
+    /// clock or authority. Rebind before checking ready work and then parking;
+    /// a notification between that check and park remains as an unpark token.
+    #[derive(Clone)]
+    pub struct ReadyWake(Arc<Mutex<thread::Thread>>);
+    impl ReadyWake {
+        pub fn current() -> Self {
+            Self(Arc::new(Mutex::new(thread::current())))
+        }
+        pub fn bind_current(&self) {
+            *self.0.lock().unwrap_or_else(|p| p.into_inner()) = thread::current();
+        }
+        pub fn is_current(&self) -> bool {
+            self.0.lock().unwrap_or_else(|p| p.into_inner()).id() == thread::current().id()
+        }
+        pub fn notify(&self) {
+            let target = self.0.lock().unwrap_or_else(|p| p.into_inner()).clone();
+            target.unpark();
+        }
+    }
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum Failure {
         ClockUnavailable,
@@ -154,6 +174,7 @@ pub mod native {
     struct Shared<T> {
         state: Mutex<State<T>>,
         changed: Condvar,
+        wake: Option<ReadyWake>,
     }
     impl<T> Shared<T> {
         fn lock(&self) -> MutexGuard<'_, State<T>> {
@@ -163,6 +184,9 @@ pub mod native {
                     let mut guard = poisoned.into_inner();
                     guard.failure = Some(Failure::Poisoned);
                     self.changed.notify_all();
+                    if let Some(wake) = &self.wake {
+                        wake.notify();
+                    }
                     guard
                 }
             }
@@ -181,6 +205,16 @@ pub mod native {
             Self::with_clock(limits, Arc::new(BootClock))
         }
         pub fn with_clock(limits: Limits, clock: Arc<dyn Clock>) -> Result<Self, StartError> {
+            Self::with_clock_wake(limits, clock, None)
+        }
+        pub fn with_ready_wake(limits: Limits, wake: ReadyWake) -> Result<Self, StartError> {
+            Self::with_clock_wake(limits, Arc::new(BootClock), Some(wake))
+        }
+        fn with_clock_wake(
+            limits: Limits,
+            clock: Arc<dyn Clock>,
+            wake: Option<ReadyWake>,
+        ) -> Result<Self, StartError> {
             let queue = TimedQueue::new(limits).map_err(|_| StartError::Limits)?;
             clock.now().map_err(|_| StartError::Clock)?;
             let shared = Arc::new(Shared {
@@ -190,6 +224,7 @@ pub mod native {
                     failure: None,
                 }),
                 changed: Condvar::new(),
+                wake,
             });
             let worker_shared = shared.clone();
             let worker_clock = clock.clone();
@@ -217,6 +252,9 @@ pub mod native {
                             }
                             if now >= deadline {
                                 worker_shared.changed.notify_all();
+                                if let Some(wake) = &worker_shared.wake {
+                                    wake.notify();
+                                }
                             } else {
                                 state = match worker_shared
                                     .changed
@@ -242,6 +280,9 @@ pub mod native {
                         }
                     }
                     worker_shared.changed.notify_all();
+                    if let Some(wake) = &worker_shared.wake {
+                        wake.notify();
+                    }
                 })
                 .map_err(|_| StartError::Thread)?;
             Ok(Self {
@@ -267,12 +308,16 @@ pub mod native {
                 Err(_) => {
                     state.failure = Some(Failure::ClockUnavailable);
                     self.shared.changed.notify_all();
+                    if let Some(wake) = &self.shared.wake {
+                        wake.notify();
+                    }
                     return Err(NotEnqueued {
                         reason: EnqueueReason::ClockUnavailable,
                         change,
                     });
                 }
             };
+            let ready_before = state.queue.ready.len();
             let result = state.queue.enqueue(now, change);
             if result.as_ref().is_err_and(|error| {
                 matches!(
@@ -283,6 +328,11 @@ pub mod native {
                 state.failure = Some(Failure::ClockInvalid);
             }
             self.shared.changed.notify_all();
+            if state.failure.is_some() || state.queue.ready.len() > ready_before {
+                if let Some(wake) = &self.shared.wake {
+                    wake.notify();
+                }
+            }
             result
         }
         /// A local wait timeout is not a delivery lease and grants no authority.
@@ -321,6 +371,9 @@ pub mod native {
             let mut state = self.shared.lock();
             state.closed = true;
             self.shared.changed.notify_all();
+            if let Some(wake) = &self.shared.wake {
+                wake.notify();
+            }
         }
         pub fn close(&mut self) -> Vec<Change<T>> {
             self.shutdown();

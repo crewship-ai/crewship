@@ -30,12 +30,20 @@ struct Shared {
     state: Mutex<Queues>,
     ready: Condvar,
     stop: UnixStream,
+    actor_wake: Mutex<Option<mooring_core::schedule::native::ReadyWake>>,
 }
 impl Shared {
+    fn wake_actor(&self) {
+        let wake = self.actor_wake.lock().unwrap().clone();
+        if let Some(wake) = wake {
+            wake.notify();
+        }
+    }
     fn close(&self) {
         let mut q = self.state.lock().unwrap();
         q.closed = true;
         self.ready.notify_all();
+        self.wake_actor();
         drop(q);
         let _ = self.stop.shutdown(Shutdown::Both);
     }
@@ -72,6 +80,35 @@ impl Inbox {
                 return Ok(None);
             }
         }
+    }
+    /// A payload-free readiness token may interrupt this wait. Recheck timer
+    /// readiness on every None; no synthetic control enters the bounded queue.
+    pub(crate) fn receive_parked(
+        &self,
+        timeout: Duration,
+        wake: &mooring_core::schedule::native::ReadyWake,
+    ) -> io::Result<Option<Vec<u8>>> {
+        if !matches!(self.route, Route::Actor) || !wake.is_current() {
+            return Err(invalid("actor wake target"));
+        }
+        let take = || {
+            let mut q = self.shared.state.lock().unwrap();
+            if q.closed {
+                return Err(invalid("closed session channel"));
+            }
+            let frame = q.frames[self.route as usize].pop_front();
+            if let Some(ref frame) = frame {
+                q.bytes -= frame.len();
+                q.count -= 1;
+            }
+            Ok(frame)
+        };
+        if let Some(frame) = take()? {
+            return Ok(Some(frame));
+        }
+        // unpark tokens survive the gap between checking the queue and park.
+        thread::park_timeout(timeout);
+        take()
     }
 }
 #[derive(Clone)]
@@ -181,6 +218,7 @@ impl Lane {
             }),
             ready: Condvar::new(),
             stop,
+            actor_wake: Mutex::new(None),
         });
         let read_shared = shared.clone();
         let reader = thread::Builder::new()
@@ -202,6 +240,9 @@ impl Lane {
                     q.count += 1;
                     q.frames[route as usize].push_back(canonical);
                     read_shared.ready.notify_all();
+                    if matches!(route, Route::Actor) {
+                        read_shared.wake_actor();
+                    }
                 }
                 read_shared.close();
             })?;
@@ -214,6 +255,17 @@ impl Lane {
             reader: Some(reader),
             output,
         })
+    }
+    pub(crate) fn attach_actor_wake(
+        &self,
+        wake: mooring_core::schedule::native::ReadyWake,
+    ) -> io::Result<()> {
+        let mut registered = self.shared.actor_wake.lock().unwrap();
+        if registered.is_some() {
+            return Err(invalid("actor wake already attached"));
+        }
+        *registered = Some(wake);
+        Ok(())
     }
     pub fn inbox(&self, route: Route) -> Inbox {
         Inbox {
@@ -503,5 +555,49 @@ mod tests {
                 .unwrap(),
             control
         );
+    }
+    #[test]
+    fn payload_free_wake_rebinds_and_interrupts_actor_wait() {
+        let (lane, _host) = pair();
+        let wake = mooring_core::schedule::native::ReadyWake::current();
+        lane.attach_actor_wake(wake.clone()).unwrap();
+        assert!(lane.attach_actor_wake(wake.clone()).is_err());
+        let inbox = lane.inbox(Route::Actor);
+        let notify = wake.clone();
+        let (ready, started) = std::sync::mpsc::channel();
+        let worker = thread::spawn(move || {
+            wake.bind_current();
+            ready.send(()).unwrap();
+            let before = Instant::now();
+            assert!(inbox
+                .receive_parked(Duration::from_secs(3), &wake)
+                .unwrap()
+                .is_none());
+            assert!(before.elapsed() < Duration::from_secs(1));
+        });
+        started.recv().unwrap();
+        // Also covers an unpark BEFORE the receive's park call.
+        notify.notify();
+        worker.join().unwrap();
+        assert_eq!(lane.shared.state.lock().unwrap().count, 0);
+    }
+    #[test]
+    fn actor_frame_and_close_wake_without_fake_controls() {
+        let (lane, mut host) = pair();
+        let wake = mooring_core::schedule::native::ReadyWake::current();
+        lane.attach_actor_wake(wake.clone()).unwrap();
+        let inbox = lane.inbox(Route::Actor);
+        let frame = fixture("valid-SessionParticipantOpen");
+        super::super::write_frame(&mut host, &frame).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Some(received) = inbox.receive_parked(Duration::from_secs(2), &wake).unwrap() {
+                assert_eq!(received, frame);
+                break;
+            }
+            assert!(Instant::now() < deadline);
+        }
+        lane.close();
+        assert!(inbox.receive_parked(Duration::from_secs(2), &wake).is_err());
     }
 }

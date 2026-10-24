@@ -95,6 +95,7 @@ pub struct RunningDriver {
     driver: Driver,
     owner: OwnerController,
     actor: OwnedActor,
+    wake: mooring_core::schedule::native::ReadyWake,
     issuer: String,
     participants: crate::session_participants::Participants,
     input: VecDeque<Queued>,
@@ -117,6 +118,7 @@ impl RunningDriver {
         result
     }
     fn step_inner(&mut self, host: &Transport<'_>, wait: Duration) -> io::Result<()> {
+        self.wake.bind_current();
         if !matches!(host, Transport::AuthenticatedHost { issuer, .. } if *issuer == self.issuer) {
             return Err(invalid("actor needs original authenticated host"));
         }
@@ -125,7 +127,12 @@ impl RunningDriver {
         self.flush_input()?;
         self.dispatch_due()?;
         let wait = self.driver.maintenance.wait((self.driver.clock)()?, wait);
-        if let Some(raw) = self.driver.lane.inbox(Route::Actor).receive(wait)? {
+        if let Some(raw) = self
+            .driver
+            .lane
+            .inbox(Route::Actor)
+            .receive_parked(wait, &self.wake)?
+        {
             self.check_owner()?;
             let value: serde_json::Value =
                 serde_json::from_slice(&raw).map_err(|_| invalid("actor control"))?;
@@ -512,16 +519,23 @@ impl RunningDriver {
         let reserve = serde_json::to_vec(&empty)
             .map_err(|_| invalid("actor envelope encoding"))?
             .len();
-        let actor = Actor::new(
+        let wake = mooring_core::schedule::native::ReadyWake::current();
+        driver.lane.attach_actor_wake(wake.clone())?;
+        let actor = Actor::new_waking(
             document,
             revision,
             NonZeroUsize::new(reserve).ok_or_else(|| invalid("actor envelope limit"))?,
+            // Leave validation/encoding headroom within the unchanged100ms maximum.
+            // The bounded release matrix includes255ops (not immediate-full).
+            Duration::from_millis(40),
+            wake.clone(),
         )
         .map_err(|_| invalid("actor startup limit"))?;
         Ok(Self {
             driver,
             owner,
             actor,
+            wake,
             issuer,
             participants: crate::session_participants::Participants::new(),
             input: VecDeque::new(),

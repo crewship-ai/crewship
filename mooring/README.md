@@ -299,3 +299,25 @@ identity/full-metadata transplants and the actual read-only D3 refusal. This doe
 not reserve origins, construct writers, issue Saved, admit participants or enable
 the production session CLI. A concrete opaque Go result with original-source and
 owner checks in the same writer remains the required host integration.
+
+
+### Live actor readiness notification
+
+The unselected consuming actor driver uses an opt-in payload-free thread wake
+for both scheduler readiness and actual actor-lane arrivals/closure. It rebinds
+that wake before checking work and parking, so a wake between check and park
+remains pending. No synthetic protocol frame or extra polling thread is added;
+prepare routing, queue byte/count accounting and final owner/delivery checks
+remain separate. The existing default core scheduler/actor keeps its100ms
+setting. This live driver flushes at40ms to leave validation/encoding headroom
+within the unchanged100ms maximum; a full operation/byte batch remains immediate.
+
+The native measurement test covers1/32/255/256 operations and a240KB text
+change, three fresh sessions each, withholding all host ACKs. It records actual
+input-frame write to complete batch receive. Timing results depend on build
+profile and host load: optimized dev2 measurements are evidence for that bounded
+matrix, not a real-time guarantee under OS suspension or socket backpressure.
+Debug builds can exceed100ms during bounded validation. Idle actor waiting keeps
+the existing20ms owner-maintenance interval; readiness does not add1ms polling.
+These tests still use mock host authority/history/receipts and do not qualify
+production ingress, SQL, source-origin issuance or participant distribution.

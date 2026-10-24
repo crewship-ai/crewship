@@ -139,3 +139,31 @@ fn envelope_reserve_cannot_hide_an_oversize_atomic_change() {
     assert_eq!(refused.change.value, 1);
     assert!(matches!(refused.reason, EnqueueReason::Batch(_)));
 }
+
+#[test]
+fn waking_timer_interrupts_park_without_polling_and_rejects_weakened_maximum() {
+    use mooring_core::schedule::native::ReadyWake;
+    let wake = ReadyWake::current();
+    for duration in [Duration::ZERO, Duration::from_millis(101)] {
+        assert!(
+            Actor::<_, u32>::new_waking("confirmed", 0, n(100), duration, wake.clone()).is_err()
+        );
+    }
+    let mut actor =
+        Actor::new_waking("confirmed", 0, n(100), Duration::from_millis(40), wake).unwrap();
+    let started = Instant::now();
+    actor.enqueue(change(7, 1, 1)).unwrap();
+    let deadline = started + Duration::from_secs(2);
+    loop {
+        if let Some(dispatch) = actor.dispatch(Duration::ZERO).unwrap() {
+            assert_eq!(dispatch.batch.body[0].value, 7);
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::park_timeout(deadline.saturating_duration_since(Instant::now()));
+    }
+    assert!(started.elapsed() >= Duration::from_millis(20));
+    assert!(started.elapsed() < Duration::from_secs(1));
+    assert_eq!(actor.confirmed(), (&"confirmed", 0));
+    assert_eq!(actor.into_recovery().2[0].value, 7);
+}

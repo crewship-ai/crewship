@@ -494,7 +494,7 @@ fn admitted_actor_actual_timer_sends_b_before_a_ack_then_installs_only_correlate
         let (_, first) = receive_json(&mut peer);
         let first_delay = started.elapsed();
         assert_eq!(first["type"], "session_submit_batch");
-        assert!(started.elapsed() >= Duration::from_millis(90));
+        assert!(started.elapsed() >= Duration::from_millis(20));
         let a_reply = mock_commit(&first, &mut checkpoint, &mut targets);
         mooring_collab::write_frame(
             &mut peer,
@@ -1031,4 +1031,86 @@ fn optin_origin_inventory_progresses_before_owner_and_after_owned_startup() {
     assert_eq!(actual, expected);
     assert_eq!(driver.confirmed().document().checkpoint().unwrap(), before);
     assert_eq!(driver.confirmed().document().native().unwrap(), native);
+}
+
+#[test]
+fn actor_ready_wake_measures_input_to_send_across_bounded_loads_without_ack() {
+    for (operations, text_bytes) in [(1usize, 2usize), (32, 2), (255, 2), (256, 2), (1, 240_000)] {
+        for repeat in 0..3 {
+            let (mut actor, mut peer) = admitted_actor();
+            let checkpoint = actor.confirmed().checkpoint().clone();
+            let original = actor.confirmed().document().native().unwrap();
+            let changes = (0..operations)
+                .map(|n| {
+                    agent_change(
+                        &checkpoint.scope,
+                        &format!("matrix-{n}"),
+                        None,
+                        &"x".repeat(text_bytes),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let input = serde_json::to_vec(&participant_input(
+                &checkpoint.scope,
+                &changes,
+                "matrix-input",
+            ))
+            .unwrap();
+            let (sent, receive) = std::sync::mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                let started = std::time::Instant::now();
+                mooring_collab::write_frame(&mut peer, &input).unwrap();
+                let (_, pending) = receive_json(&mut peer);
+                assert_eq!(pending["message"]["state"], "pending");
+                let (bytes, batch) = receive_json(&mut peer);
+                assert_eq!(batch["type"], "session_submit_batch");
+                assert_eq!(batch["changes"].as_array().unwrap().len(), operations);
+                let delay = started.elapsed();
+                sent.send((delay, bytes.len())).unwrap();
+                peer
+            });
+            let deadline = std::time::Instant::now() + Duration::from_secs(4);
+            let (delay, bytes) = loop {
+                actor.step(&host(), Duration::from_millis(20)).unwrap();
+                if let Ok(result) = receive.try_recv() {
+                    break result;
+                }
+                assert!(std::time::Instant::now() < deadline);
+            };
+            eprintln!("actor wake matrix ops={operations} text={text_bytes} repeat={repeat} input_to_send_us={} batch_bytes={bytes} ACK=held", delay.as_micros());
+            assert_eq!(actor.confirmed().document().native().unwrap(), original);
+            assert_eq!(actor.confirmed().checkpoint(), &checkpoint);
+            let (_, _, retained) = actor.into_recovery();
+            assert_eq!(
+                retained
+                    .iter()
+                    .map(|change| change.value.operations.len())
+                    .sum::<usize>(),
+                operations
+            );
+            // Keep the actual peer open until all recovery assertions complete.
+            drop(worker.join().unwrap());
+        }
+    }
+}
+
+#[test]
+fn actor_ready_wake_idle_stays_at_bounded_owner_wait_frequency() {
+    let (mut actor, _peer) = admitted_actor();
+    let initial = actor.confirmed().checkpoint().clone();
+    let started = std::time::Instant::now();
+    let mut steps = 0;
+    while started.elapsed() < Duration::from_millis(500) {
+        actor.step(&host(), Duration::from_secs(1)).unwrap();
+        steps += 1;
+    }
+    assert!(
+        (1..=32).contains(&steps),
+        "unexpected idle step count {steps}"
+    );
+    assert_eq!(actor.confirmed().checkpoint(), &initial);
+    eprintln!(
+        "actor wake idle steps={steps} wall_us={} (existing20msownerwait,no1mspoll)",
+        started.elapsed().as_micros()
+    );
 }
