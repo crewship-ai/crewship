@@ -153,9 +153,11 @@ become the managed candidate; its independently observed version must match
 the native lock and exact selector. Older revisions without independent
 `managed_path` and `managed_version` evidence require a rebuild.
 
-Artifact validation currently buffers up to 512 MiB per reader; operators must
-budget memory for launcher validation in addition to the native CLI. The bound
-limits individual allocations, not aggregate concurrency or an OOM guarantee.
+Artifact validation keeps the 512 MiB per-artifact cap while streaming file
+hashes and reading ELF metadata in bounded blocks. Unix archive capture uses
+private temporary filesystem storage; Windows archives retain whole-file
+buffering. See Verification storage below. Per-artifact limits do not bound
+aggregate concurrency or guarantee against OOM; tmpfs storage also uses memory.
 Attestation uses a 20-second provider bound within 30-second admission.
 Immutable launcher generations are retained. Conservative collection is tracked
 in [issue #2906](https://github.com/crewship-ai/crewship/issues/2906); it must
