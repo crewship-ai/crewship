@@ -104,6 +104,9 @@ impl WordCraftAdapter {
             "authored_checkpoint_state_digest": authored_digest,
         });
         if operation.op_id != proposal.operation_id
+            || host
+                .original_base_revision()
+                .is_some_and(|revision| revision != operation.base_revision.0)
             || Some(&operation.payload) != expected.as_object()
         {
             return Err(PrepareError::Context);

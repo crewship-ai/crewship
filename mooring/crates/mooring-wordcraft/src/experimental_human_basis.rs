@@ -27,8 +27,14 @@ pub struct HostSealedOriginal<'a> {
     proposal: &'a Proposal,
     sealed_reference: &'a [u8],
     ordinal: u64,
+    base_revision: Option<u64>,
 }
 impl<'a> HostSealedOriginal<'a> {
+    /// ORIGINAL outer-operation label, already bound by the host fingerprint.
+    pub fn with_original_base_revision(mut self, revision: u64) -> Self {
+        self.base_revision = Some(revision);
+        self
+    }
     pub fn from_trusted_original_store(
         proposal: &'a Proposal,
         sealed_reference: &'a [u8],
@@ -42,6 +48,7 @@ impl<'a> HostSealedOriginal<'a> {
             proposal,
             sealed_reference,
             ordinal,
+            base_revision: None,
         })
     }
 }
@@ -53,8 +60,17 @@ pub struct HostSavedDelta<'a> {
     origin: u64,
     original: &'a [u8],
     targets: &'a [String],
+    revision: Option<u64>,
 }
 impl<'a> HostSavedDelta<'a> {
+    /// Actual post-COMMIT atomic cut revision, never Prepared/client metadata.
+    pub fn with_saved_revision(mut self, revision: u64) -> Result<Self, Error> {
+        if revision == 0 {
+            return Err(Error::InvalidHostContext);
+        }
+        self.revision = Some(revision);
+        Ok(self)
+    }
     pub fn from_trusted_committed_store(
         sealed_reference: &'a [u8],
         origin: u64,
@@ -70,6 +86,7 @@ impl<'a> HostSavedDelta<'a> {
             origin,
             original,
             targets,
+            revision: None,
         })
     }
 }
@@ -111,6 +128,37 @@ impl<'a> HostSavedOwnPrefix<'a> {
         })
     }
 }
+/// Borrowed host-only basis DATA. Full scope/tuple/asset identity and actual
+/// host provenance are verified by the private host wrapper, not these bytes.
+pub struct HostBasisViews<'a> {
+    original: &'a [u8],
+    original_revision: u64,
+    replay: Option<(&'a [u8], u64)>,
+}
+impl<'a> HostBasisViews<'a> {
+    pub fn from_trusted_live_store(original: &'a [u8], original_revision: u64) -> Self {
+        Self {
+            original,
+            original_revision,
+            replay: None,
+        }
+    }
+    /// At most ONE common replay basis; never a checkpoint per history entry.
+    pub fn with_replay_basis(mut self, checkpoint: &'a [u8], revision: u64) -> Result<Self, Error> {
+        if self.replay.is_some()
+            || revision > self.original_revision
+            || (revision == self.original_revision && checkpoint != self.original)
+        {
+            return Err(Error::UnqualifiedBasis);
+        }
+        self.replay = Some((checkpoint, revision));
+        Ok(self)
+    }
+    fn replay(&self) -> (&'a [u8], u64) {
+        self.replay
+            .unwrap_or((self.original, self.original_revision))
+    }
+}
 /// Exact SAME-scope/model/lineage checkpoints and original admission from a
 /// trusted host store. Original ordinal is the host-issued participant order;
 /// a Yrs clock cannot detect a later delete-only undo. The original constructor
@@ -124,8 +172,60 @@ pub struct HostConfirmedBasis<'a> {
     transcript: &'a [HostSavedDelta<'a>],
     own_history: &'a [HostCommittedOwnOperation<'a>],
     own_prefix: &'a [HostSavedOwnPrefix<'a>],
+    views: Option<HostBasisViews<'a>>,
 }
 impl<'a> HostConfirmedBasis<'a> {
+    /// Explicit revision-labelled opt-in; old constructors keep their policy.
+    pub fn from_trusted_live_store_with_basis_views(
+        views: HostBasisViews<'a>,
+        current: &'a [u8],
+        origin: u64,
+        original: HostSealedOriginal<'a>,
+        next_unsettled_ordinal: u64,
+        transcript: &'a [HostSavedDelta<'a>],
+        own_prefix: &'a [HostSavedOwnPrefix<'a>],
+    ) -> Result<Self, Error> {
+        if transcript.len() > 256 || own_prefix.len() > transcript.len() {
+            return Err(Error::UnqualifiedBasis);
+        }
+        if original.base_revision != Some(views.original_revision) {
+            return Err(Error::UnqualifiedBasis);
+        }
+        let (_, start_revision) = views.replay();
+        let mut prior = start_revision;
+        for entry in transcript {
+            let revision = entry.revision.ok_or(Error::UnqualifiedBasis)?;
+            if revision <= prior {
+                return Err(Error::UnqualifiedBasis);
+            }
+            prior = revision;
+        }
+        let mut prior_base = start_revision;
+        for prefix in own_prefix {
+            let base = prefix
+                .original
+                .base_revision
+                .ok_or(Error::UnqualifiedBasis)?;
+            if base < prior_base || base > views.original_revision {
+                return Err(Error::UnqualifiedBasis);
+            }
+            prior_base = base;
+        }
+        let mut host = Self::from_parts(
+            views.original,
+            current,
+            origin,
+            original,
+            next_unsettled_ordinal,
+            transcript,
+            own_prefix,
+        )?;
+        host.views = Some(views);
+        Ok(host)
+    }
+    pub(crate) fn original_base_revision(&self) -> Option<u64> {
+        self.original.base_revision
+    }
     pub(crate) fn original_proposal(&self) -> &Proposal {
         self.original.proposal
     }
@@ -241,6 +341,7 @@ impl<'a> HostConfirmedBasis<'a> {
             transcript,
             own_history: &[],
             own_prefix,
+            views: None,
         })
     }
     /// Already-Saved same-origin format history only. This is NOT optimistic
@@ -307,11 +408,31 @@ fn prepare_with_authored_cut(
         return Err(Error::Forbidden);
     };
     let original = host.original.proposal;
+    if host.views.is_some() {
+        prove_global(&host)?;
+    }
     // This is a disposable AUTHOR view, never an authoritative Saved cut.
     // Already-Saved own originals can belong to a different global interleave.
-    let mut authored_basis = host.basis.to_vec();
+    let replay_start = host
+        .views
+        .as_ref()
+        .map(|views| views.replay().0)
+        .unwrap_or(host.basis);
+    let mut authored_basis = replay_start.to_vec();
+    let mut applied_peers = BTreeSet::new();
     for prefix in host.own_prefix {
         let proposal = prefix.original.proposal;
+        if host.views.is_some() {
+            advance_author_peers(
+                &host,
+                &mut authored_basis,
+                prefix
+                    .original
+                    .base_revision
+                    .ok_or(Error::UnqualifiedBasis)?,
+                &mut applied_peers,
+            )?;
+        }
         let authored = current::prepare_author_view(
             current::Authority::Writer(
                 HostWriter::current(&authored_basis, host.origin)
@@ -328,6 +449,14 @@ fn prepare_with_authored_cut(
         if checkpoint_state_digest(&authored_basis) != prefix.authored_checkpoint_state_digest {
             return Err(Error::UnqualifiedBasis);
         }
+    }
+    if host.views.is_some() {
+        advance_author_peers(
+            &host,
+            &mut authored_basis,
+            host.original.base_revision.ok_or(Error::UnqualifiedBasis)?,
+            &mut applied_peers,
+        )?;
     }
     // Phase 1: unchanged bytes/frontier/targets are qualified on their EXACT
     // original confirmed basis. No read/frontier rewriting or command replay.
@@ -361,32 +490,8 @@ fn prepare_with_authored_cut(
             return Err(Error::UnqualifiedBasis);
         }
     }
-    let basis = Document::restore(host.basis).map_err(|_| Error::UnqualifiedBasis)?;
-    let now = Document::restore(host.current).map_err(|_| Error::UnqualifiedBasis)?;
-    if basis.block_ids().map_err(|_| Error::UnqualifiedBasis)?
-        != now.block_ids().map_err(|_| Error::UnqualifiedBasis)?
-    {
-        return Err(Error::UnqualifiedBasis);
-    }
-    // Prove application lineage by replaying exact host-Saved changes, including
-    // hidden CRDT history, into a disposable basis. SV containment alone is NOT
-    // a lineage proof. No transcript entry is inferred to be durable here.
-    let mut replay = host.basis.to_vec();
-    for entry in host.transcript {
-        replay =
-            current::merge_qualified_original(&replay, entry.original, entry.targets, entry.origin)
-                .map_err(|_| Error::UnqualifiedBasis)?
-                .checkpoint()
-                .map_err(|_| Error::UnqualifiedBasis)?;
-        if host.own_prefix.iter().any(|prefix| {
-            prefix.original.sealed_reference == entry.sealed_reference
-                && checkpoint_state_digest(&replay) != prefix.saved_checkpoint_state_digest
-        }) {
-            return Err(Error::UnqualifiedBasis);
-        }
-    }
-    if replay != host.current {
-        return Err(Error::UnqualifiedBasis);
+    if host.views.is_none() {
+        prove_global(&host)?;
     }
     // Phase 2: apply the SAME original bytes to the newer confirmed document.
     // The shared audit checks exact roots, declared targets, actual allocation
@@ -398,4 +503,77 @@ fn prepare_with_authored_cut(
         host.origin,
     )
     .map_err(Error::Original)
+}
+
+fn prove_global(host: &HostConfirmedBasis<'_>) -> Result<(), Error> {
+    let basis = Document::restore(host.basis).map_err(|_| Error::UnqualifiedBasis)?;
+    let now = Document::restore(host.current).map_err(|_| Error::UnqualifiedBasis)?;
+    if basis.block_ids().map_err(|_| Error::UnqualifiedBasis)?
+        != now.block_ids().map_err(|_| Error::UnqualifiedBasis)?
+    {
+        return Err(Error::UnqualifiedBasis);
+    }
+    // Prove application lineage by replaying exact host-Saved changes, including
+    // hidden CRDT history, into a disposable basis. SV containment alone is NOT
+    // a lineage proof. No transcript entry is inferred to be durable here.
+    let mut replay = host
+        .views
+        .as_ref()
+        .map(|views| views.replay().0)
+        .unwrap_or(host.basis)
+        .to_vec();
+    let mut saw_original = host
+        .views
+        .as_ref()
+        .is_none_or(|views| views.replay().1 == views.original_revision && replay == host.basis);
+    for entry in host.transcript {
+        replay =
+            current::merge_qualified_original(&replay, entry.original, entry.targets, entry.origin)
+                .map_err(|_| Error::UnqualifiedBasis)?
+                .checkpoint()
+                .map_err(|_| Error::UnqualifiedBasis)?;
+        if let Some(views) = &host.views {
+            if entry.revision == Some(views.original_revision) {
+                if replay != views.original {
+                    return Err(Error::UnqualifiedBasis);
+                }
+                saw_original = true;
+            }
+        }
+        if host.own_prefix.iter().any(|prefix| {
+            prefix.original.sealed_reference == entry.sealed_reference
+                && checkpoint_state_digest(&replay) != prefix.saved_checkpoint_state_digest
+        }) {
+            return Err(Error::UnqualifiedBasis);
+        }
+    }
+    if !saw_original || replay != host.current {
+        return Err(Error::UnqualifiedBasis);
+    }
+    Ok(())
+}
+fn advance_author_peers<'a>(
+    host: &HostConfirmedBasis<'a>,
+    checkpoint: &mut Vec<u8>,
+    observed_revision: u64,
+    applied: &mut BTreeSet<&'a [u8]>,
+) -> Result<(), Error> {
+    for entry in host.transcript {
+        let revision = entry.revision.ok_or(Error::UnqualifiedBasis)?;
+        if entry.origin != host.origin
+            && revision <= observed_revision
+            && applied.insert(entry.sealed_reference)
+        {
+            *checkpoint = current::merge_author_view_original(
+                checkpoint,
+                entry.original,
+                entry.targets,
+                entry.origin,
+            )
+            .map_err(|_| Error::UnqualifiedBasis)?
+            .checkpoint()
+            .map_err(|_| Error::UnqualifiedBasis)?;
+        }
+    }
+    Ok(())
 }

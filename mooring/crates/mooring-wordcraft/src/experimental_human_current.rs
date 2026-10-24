@@ -183,6 +183,23 @@ pub(crate) fn merge_qualified_original(
     targets: &[String],
     origin: u64,
 ) -> Result<Candidate, Error> {
+    merge_original_with_history(checkpoint, original, targets, origin, false)
+}
+pub(crate) fn merge_author_view_original(
+    checkpoint: &[u8],
+    original: &[u8],
+    targets: &[String],
+    origin: u64,
+) -> Result<Candidate, Error> {
+    merge_original_with_history(checkpoint, original, targets, origin, true)
+}
+fn merge_original_with_history(
+    checkpoint: &[u8],
+    original: &[u8],
+    targets: &[String],
+    origin: u64,
+    author_history: bool,
+) -> Result<Candidate, Error> {
     use mooring_text::yrs::updates::decoder::Decode;
     if original.len() > 262144 || origin >= 1 << 53 {
         return Err(Error::InvalidHostContext);
@@ -196,8 +213,13 @@ pub(crate) fn merge_qualified_original(
     {
         return Err(Error::InvalidHostContext);
     }
-    let document = Document::restore(checkpoint).map_err(|_| Error::InvalidCheckpoint)?;
-    apply_audited(document, update, targets, false)
+    let document = if author_history {
+        Document::restore_author_view(checkpoint)
+    } else {
+        Document::restore(checkpoint)
+    }
+    .map_err(|_| Error::InvalidCheckpoint)?;
+    apply_audited(document, update, targets, author_history)
 }
 
 fn declared_targets(ids: &[String], targets: &[String]) -> Result<BTreeSet<String>, Error> {
