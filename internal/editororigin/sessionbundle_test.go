@@ -3,8 +3,11 @@ package editororigin
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 // sessionReq is an HTTPS API request reaching Crewship on host.
@@ -115,5 +118,48 @@ func TestPinnedBundleRequiresExactVerifiedBundleAndOrigin(t *testing.T) {
 		if d, u := off.PinnedBundle(sessionReq("studio.example.test"), second); d != "" || u != "" {
 			t.Fatalf("disabled handler framed: %q %q", d, u)
 		}
+	}
+}
+
+func TestApplicationPackagesVerifyAndSnapshotExactReleaseBytes(t *testing.T) {
+	dir := t.TempDir()
+	index := `<!doctype html><script type="module">` + bootstrap + `</script>`
+	pin := writeBundle(t, dir, map[string]string{"index.html": index, "app.js": "console.log(42)"})
+	source := fstest.MapFS{}
+	for _, name := range []string{"manifest.json", "index.html", "app.js"} {
+		body, err := os.ReadFile(filepath.Join(dir, pin, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		source[pin+"/"+name] = &fstest.MapFile{Data: body}
+	}
+	h, err := New(Options{SameHost: true, StudioOrigin: studio, ApplicationPackages: source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d, u := h.PinnedBundle(sessionReq("studio.example.test"), pin); d != pin || u == "" {
+		t.Fatalf("release pin unavailable: %q %q", d, u)
+	}
+	// Application packages never become the workbook's first allowlisted app.
+	if d, u := h.SessionBundle(sessionReq("studio.example.test")); d != "" || u != "" {
+		t.Fatalf("release package changed legacy application selection: %q %q", d, u)
+	}
+	source[pin+"/app.js"].Data[0] = 'X'
+	r := httptest.NewRequest("GET", "https://studio.example.test/_editor/b/"+pin+"/app.js", nil)
+	r.Header.Set("Sec-Fetch-Site", "cross-site")
+	r.Header.Set("Sec-Fetch-Dest", "script")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 200 || w.Body.String() != "console.log(42)" {
+		t.Fatalf("handler retained mutable package source: %d %q", w.Code, w.Body.String())
+	}
+	bad, err := New(Options{SameHost: true, StudioOrigin: studio, ApplicationPackages: source})
+	if err == nil || bad.HasBundle(pin) {
+		t.Fatal("corrupt release package accepted")
+	}
+	delete(source, pin+"/manifest.json")
+	bad, err = New(Options{SameHost: true, StudioOrigin: studio, ApplicationPackages: source})
+	if err == nil || bad.HasBundle(pin) {
+		t.Fatal("unmanifested release package accepted")
 	}
 }

@@ -17,7 +17,7 @@ func assetFixture(t *testing.T) fstest.MapFS {
 	t.Helper()
 	binary := []byte("\x7fELFfixture-child")
 	hash := sha256.Sum256(binary)
-	m := Manifest{SchemaVersion: 1, SourceSHA: strings.Repeat("a", 40), Target: "x86_64-unknown-linux-gnu", Versions: Versions{"0.4.0", "1.0.0", "0.1.0"}, BinarySHA256: hex.EncodeToString(hash[:]), SDK: map[string]string{"index.js": strings.Repeat("b", 64)}, SDKPrefix: "/mooring-sdk/generated/" + strings.Repeat("c", 64), Tools: json.RawMessage(`{}`)}
+	m := Manifest{SchemaVersion: 1, SourceSHA: strings.Repeat("a", 40), Target: "x86_64-unknown-linux-gnu", Versions: Versions{"0.4.0", "1.0.0", "0.1.0"}, BinarySHA256: hex.EncodeToString(hash[:]), EditorBundleDigest: strings.Repeat("d", 64), SDK: map[string]string{"index.js": strings.Repeat("b", 64)}, SDKPrefix: "/mooring-sdk/generated/" + strings.Repeat("c", 64), Tools: json.RawMessage(`{}`)}
 	sdkRaw, _ := json.Marshal(m.SDK)
 	sdkHash := sha256.Sum256(sdkRaw)
 	m.SDKPrefix = "/mooring-sdk/generated/" + hex.EncodeToString(sdkHash[:])
@@ -68,7 +68,7 @@ func TestPrepareVerifiedPrivateExecutableAndOwnCleanup(t *testing.T) {
 	}
 }
 func TestCorruptAssetsFailBeforeCreatingFile(t *testing.T) {
-	for _, kind := range []string{"hash", "elf", "manifest", "target", "prefix", "sdk-path", "sdk-digest"} {
+	for _, kind := range []string{"hash", "elf", "manifest", "target", "prefix", "sdk-path", "sdk-digest", "editor-missing", "editor-path"} {
 		t.Run(kind, func(t *testing.T) {
 			data := assetFixture(t)
 			switch kind {
@@ -82,6 +82,12 @@ func TestCorruptAssetsFailBeforeCreatingFile(t *testing.T) {
 				var m Manifest
 				if err := json.Unmarshal(data["embedded/generated/manifest.json"].Data, &m); err != nil {
 					t.Fatal(err)
+				}
+				if kind == "editor-missing" {
+					m.EditorBundleDigest = ""
+				}
+				if kind == "editor-path" {
+					m.EditorBundleDigest = "../editor"
 				}
 				if kind == "target" {
 					m.Target = "other"
@@ -107,5 +113,23 @@ func TestCorruptAssetsFailBeforeCreatingFile(t *testing.T) {
 				t.Fatal("corrupt asset wrote a file", entries, err)
 			}
 		})
+	}
+}
+
+func TestEditorPackagesCannotReadAdjacentRuntimeOrToolFiles(t *testing.T) {
+	source := assetFixture(t)
+	source["embedded/generated/editor/pin/index.html"] = &fstest.MapFile{Data: []byte("editor")}
+	source["embedded/generated/licenses/manifest.json"] = &fstest.MapFile{Data: []byte("licenses")}
+	packages, err := editorPackages(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body, err := fs.ReadFile(packages, "pin/index.html"); err != nil || string(body) != "editor" {
+		t.Fatalf("editor subfilesystem unavailable: %q %v", body, err)
+	}
+	for _, name := range []string{"../mooring-collab", "mooring-collab", "../manifest.json", "licenses/manifest.json"} {
+		if _, err := fs.ReadFile(packages, name); err == nil {
+			t.Fatalf("adjacent runtime file exposed: %s", name)
+		}
 	}
 }

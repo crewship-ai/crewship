@@ -30,14 +30,15 @@ type Versions struct {
 	Engine   string `json:"engine_version"`
 }
 type Manifest struct {
-	SchemaVersion int               `json:"schema_version"`
-	SourceSHA     string            `json:"source_sha"`
-	Target        string            `json:"target"`
-	Versions      Versions          `json:"versions"`
-	BinarySHA256  string            `json:"binary_sha256"`
-	SDK           map[string]string `json:"sdk"`
-	SDKPrefix     string            `json:"sdk_prefix"`
-	Tools         json.RawMessage   `json:"tools"`
+	SchemaVersion      int               `json:"schema_version"`
+	SourceSHA          string            `json:"source_sha"`
+	Target             string            `json:"target"`
+	Versions           Versions          `json:"versions"`
+	BinarySHA256       string            `json:"binary_sha256"`
+	EditorBundleDigest string            `json:"editor_bundle_digest"`
+	SDK                map[string]string `json:"sdk"`
+	SDKPrefix          string            `json:"sdk_prefix"`
+	Tools              json.RawMessage   `json:"tools"`
 }
 
 func read(source fs.FS) (Manifest, []byte, error) {
@@ -51,7 +52,7 @@ func read(source fs.FS) (Manifest, []byte, error) {
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&manifest) != nil || manifest.SchemaVersion != 1 || !sourcePattern.MatchString(manifest.SourceSHA) || manifest.Target != "x86_64-unknown-linux-gnu" || !shaPattern.MatchString(manifest.BinarySHA256) || manifest.Versions.Protocol == "" || manifest.Versions.Model == "" || manifest.Versions.Engine == "" {
+	if decoder.Decode(&manifest) != nil || manifest.SchemaVersion != 1 || !sourcePattern.MatchString(manifest.SourceSHA) || manifest.Target != "x86_64-unknown-linux-gnu" || !shaPattern.MatchString(manifest.BinarySHA256) || !shaPattern.MatchString(manifest.EditorBundleDigest) || manifest.Versions.Protocol == "" || manifest.Versions.Model == "" || manifest.Versions.Engine == "" {
 		return Manifest{}, nil, ErrIntegrity
 	}
 	if len(manifest.SDK) == 0 || len(manifest.SDK) > 16 || !shaPattern.MatchString(filepath.Base(manifest.SDKPrefix)) || manifest.SDKPrefix != "/mooring-sdk/generated/"+filepath.Base(manifest.SDKPrefix) {
@@ -86,6 +87,18 @@ func read(source fs.FS) (Manifest, []byte, error) {
 // Inspect verifies embedded binary identity. It does not authorize an Artifact,
 // qualify an application adapter or enable a process/route.
 func Inspect() (Manifest, error) { manifest, _, err := read(embedded); return manifest, err }
+
+// EditorPackages exposes only immutable embedded editor packages, excluding
+// the executable, SDK/tool metadata and adjacent license storage. The editor
+// loader independently verifies every manifest and file before serving bytes.
+func EditorPackages() (fs.FS, error) { return editorPackages(embedded) }
+
+func editorPackages(source fs.FS) (fs.FS, error) {
+	if _, _, err := read(source); err != nil {
+		return nil, err
+	}
+	return fs.Sub(source, "embedded/generated/editor")
+}
 
 type Prepared struct {
 	Manifest  Manifest

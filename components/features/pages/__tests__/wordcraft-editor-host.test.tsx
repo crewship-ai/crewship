@@ -29,6 +29,8 @@ async function open() {
   const view = render(<WordCraftEditorHost workspaceId="workspace" pageId="page" name="Original title" />)
   await waitFor(() => expect(document.querySelector("iframe")).not.toBeNull())
   const frame = document.querySelector("iframe")!
+  expect(new URL(frame.src).searchParams.get("mooring")).toBe("1")
+  expect(new URL(frame.src).searchParams.get("webgl")).toBe("1")
   await act(async () => { frame.dispatchEvent(new Event("load")); window.dispatchEvent(new MessageEvent("message", { source: windowMock as unknown as Window, origin: "null", data: { type: "wordcraft:hello", protocol: 1, bundle: digest } })) })
   expect(windowMock.postMessage).toHaveBeenCalledOnce()
   const port = windowMock.postMessage.mock.calls[0][2][0] as MessagePort

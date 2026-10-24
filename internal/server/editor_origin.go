@@ -1,6 +1,7 @@
 package server
 
 import (
+	"io/fs"
 	"log/slog"
 	"net"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	goapi "github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/editororigin"
+	"github.com/crewship-ai/crewship/internal/mooringassets"
 )
 
 // newEditorOrigin returns the handler for embedded application editors, or nil
@@ -24,20 +26,29 @@ import (
 func newEditorOrigin(cfg *config.Config, logger *slog.Logger) *editororigin.Handler {
 	g := cfg.GridCraft
 	enabled := (g.Enabled && g.EditorEnabled) || cfg.Mooring.Enabled
+	var applicationPackages fs.FS
+	if cfg.Mooring.Enabled {
+		var err error
+		applicationPackages, err = mooringassets.EditorPackages()
+		if err != nil {
+			// configureMooringHTTP refuses startup without the matching assets.
+			logger.Error("Mooring editor release unavailable", "error", err)
+		}
+	}
 	if g.EditorOrigin == "" {
 		if !enabled {
 			return nil
 		}
 		h, err := editororigin.New(editororigin.Options{SameHost: true, StudioOrigin: cfg.Storage.PageStudioOrigin,
 			PageRuntimeOrigin: cfg.Storage.PageRuntimeOrigin, Scheme: goapi.RequestScheme, LoopbackServer: loopbackBind(cfg.Server.Host),
-			BundleDir: g.EditorBundleDir, Bundles: g.EditorBundles})
+			BundleDir: g.EditorBundleDir, Bundles: g.EditorBundles, ApplicationPackages: applicationPackages})
 		if err != nil {
 			// The handler still owns the prefix; refused bundles are not served.
 			logger.Error("gridcraft editor (same host) refused", "error", err)
 		}
 		return h
 	}
-	o := editororigin.Options{Origin: g.EditorOrigin, StudioOrigin: cfg.PageStudioOrigin()}
+	o := editororigin.Options{Origin: g.EditorOrigin, StudioOrigin: cfg.PageStudioOrigin(), ApplicationPackages: applicationPackages}
 	if enabled {
 		o.BundleDir, o.Bundles = g.EditorBundleDir, g.EditorBundles
 	}

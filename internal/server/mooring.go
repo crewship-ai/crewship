@@ -32,6 +32,11 @@ func (s *Server) configureMooringHTTP(opts []goapi.RouterOption) []goapi.RouterO
 		s.mooringStartupErr = errors.New("unsupported embedded Mooring versions")
 		return opts
 	}
+	if !s.editor.HasBundle(prepared.Manifest.EditorBundleDigest) {
+		_ = prepared.Close()
+		s.mooringStartupErr = errors.New("embedded Mooring editor bundle unavailable")
+		return opts
+	}
 	s.mooringAssets = prepared
 	return append(opts, goapi.WithMooringHTTP(goapi.MooringHTTPConfig{
 		Enabled:      true,

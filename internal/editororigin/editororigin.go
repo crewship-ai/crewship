@@ -132,6 +132,10 @@ type Options struct {
 	LoopbackServer bool
 	BundleDir      string
 	Bundles        []string
+	// ApplicationPackages contains digest-named directories from immutable
+	// release assets only. Never construct it from a request or mutable storage.
+	// Every package is verified and copied with the ordinary bundle limits.
+	ApplicationPackages fs.FS
 }
 
 type file struct {
@@ -427,6 +431,11 @@ func New(o Options) (*Handler, error) {
 	}
 	if err := h.loadCompiledPackages(); err != nil {
 		errs = append(errs, err)
+	}
+	if o.ApplicationPackages != nil {
+		if err := h.loadPackages(o.ApplicationPackages, "."); err != nil {
+			errs = append(errs, err)
+		}
 	}
 	return h, errors.Join(errs...)
 }

@@ -2,6 +2,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import tarfile
@@ -107,3 +108,34 @@ class ToolArchiveTests(unittest.TestCase):
                 (root/'untracked').write_text('unadmitted source')
                 with self.assertRaisesRegex(ValueError, 'clean and committed'):
                     build.verify_source(sha)
+
+
+class PinnedSourceIsolation(unittest.TestCase):
+    def test_inherited_git_metadata_cannot_redirect_source_fetch(self):
+        with tempfile.TemporaryDirectory(prefix='mooring-build-isolation-') as temporary:
+            root = Path(temporary)
+            env = build.git_environment()
+            def git(*args):
+                return subprocess.check_output(['git', *map(str, args)], env=env, text=True).strip()
+            for name in ('upstream', 'caller'):
+                source = root / name
+                git('init', '--quiet', source)
+                (source / 'input').write_text(name)
+                git('-C', source, 'add', 'input')
+                git('-c', 'user.name=fixture', '-c', 'user.email=fixture@example.test', '-C', source, 'commit', '--quiet', '-m', 'fixture')
+            caller = root / 'caller'
+            def snapshot():
+                return {str(p.relative_to(caller)): hashlib.sha256(p.read_bytes()).hexdigest() for p in caller.rglob('*') if p.is_file()}
+            before = snapshot()
+            pin = git('-C', root / 'upstream', 'rev-parse', 'HEAD')
+            destination = root / 'fetched'
+            hostile = {'GIT_DIR': str(caller / '.git'), 'GIT_WORK_TREE': str(caller),
+                       'GIT_INDEX_FILE': str(caller / '.git/index'), 'GIT_COMMON_DIR': str(caller / '.git'),
+                       'GIT_OBJECT_DIRECTORY': str(caller / '.git/objects'),
+                       'GIT_ALTERNATE_OBJECT_DIRECTORIES': str(caller / '.git/objects')}
+            with patch.dict(os.environ, hostile):
+                build.pinned_git((root / 'upstream').as_uri(), pin, destination)
+            self.assertEqual(before, snapshot())
+            self.assertTrue((destination / '.git/FETCH_HEAD').is_file())
+            self.assertEqual(pin, git('-C', destination, 'rev-parse', 'FETCH_HEAD'))
+            self.assertEqual('commit', git('-C', destination, 'cat-file', '-t', pin))

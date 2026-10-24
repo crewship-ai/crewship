@@ -95,6 +95,8 @@ export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange }
         // native document and replaces it later with collaborative content.
         const editorURL = new URL(src)
         editorURL.searchParams.set("mooring", "1")
+        // Explicit E3 browser profile; default software WebGPU remains unqualified.
+        editorURL.searchParams.set("webgl", "1")
         const sdk = await loadWordCraftReceiptSDK(opening.sdk_prefix)
         if (dead || abort.signal.aborted) return
         bundle = opening.editor.bundle_digest
