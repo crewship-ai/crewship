@@ -6,6 +6,7 @@ import { PageApplicationView } from "./page-application"
 import { PageDocument } from "./page-document"
 import { PageSlides } from "./page-slides"
 import { MooringEditorHost } from "./mooring-editor-host"
+import { WordCraftEditorHost } from "./wordcraft-editor-host"
 import { PageWorkbookSurface } from "./workbook-editor-host"
 import { slidesEditorMount } from "@/lib/feature-flags"
 import { DocumentCatalog } from "./document-catalog"
@@ -254,9 +255,10 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   // Flag off: has_slides is never read and the Page renders exactly as before.
   const nativeSlides = slidesEditorMount() && detail.page?.hasSlides === true && !nativeDocument
   // A GridCraft workbook is a read-only preview here: no panel editor, no panels fallback.
-  const nativeMooring = detail.page?.hasMooring === true && !nativeDocument && !nativeSlides
+  const nativeCollaboration = detail.page?.hasCollaboration === true && !nativeDocument && !nativeSlides
+  const nativeMooring = detail.page?.hasMooring === true && !nativeDocument && !nativeSlides && !nativeCollaboration
   const nativeWorkbook = detail.page?.hasWorkbook === true && !nativeDocument && !nativeSlides
-  const editing = nav.mode === "edit" && selectedSlug != null && detail.page != null && !detail.loading && !detail.error && !nativeDocument && !nativeSlides && !nativeWorkbook && !nativeMooring
+  const editing = nav.mode === "edit" && selectedSlug != null && detail.page != null && !detail.loading && !detail.error && !nativeDocument && !nativeSlides && !nativeWorkbook && !nativeMooring && !nativeCollaboration
 
   // Application | Panels. The switch lives in the page header beside Edit,
   // because that is where the page is named and where a person looks for
@@ -388,7 +390,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 Ask about this Page
               </SubBarSecondary>
             )}
-            {selectedSlug && !editing && !nativeDocument && !nativeWorkbook && !nativeMooring && (
+            {selectedSlug && !editing && !nativeDocument && !nativeWorkbook && !nativeMooring && !nativeCollaboration && (
               <SubBarSecondary
                 icon={Share2}
                 onClick={() => nav.openEditor("access")}
@@ -398,7 +400,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 Share
               </SubBarSecondary>
             )}
-            {selectedSlug && !editing && !nativeDocument && !nativeSlides && !nativeWorkbook && !nativeMooring && (
+            {selectedSlug && !editing && !nativeDocument && !nativeSlides && !nativeWorkbook && !nativeMooring && !nativeCollaboration && (
               <SubBarSecondary
                 icon={Pencil}
                 onClick={() => nav.openEditor()}
@@ -521,7 +523,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               <motion.div
                 key={nativeDocument ? `document-${workspaceId}:${detail.page!.id}` : nativeSlides ? `slides-${workspaceId}:${detail.page!.id}` : nativeWorkbook ? `workbook-${workspaceId}:${detail.page!.id}` : `page-${selectedSlug}`}
                 ref={nativeView}
-                tabIndex={nativeDocument || nativeSlides || nativeWorkbook || nativeMooring ? -1 : undefined}
+                tabIndex={nativeDocument || nativeSlides || nativeWorkbook || nativeMooring || nativeCollaboration ? -1 : undefined}
                 initial={{ opacity: 0, x: 12 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -12 }}
@@ -537,6 +539,9 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 ) : nativeSlides ? (
                   detail.accessDenied || !nativePageId ? <p role="alert" className="p-6">Slides access is unavailable.</p>
                     : <><PageSlides workspaceId={workspaceId} pageId={nativePageId} name={detail.page?.name} onDirtyChange={nav.setDirty} /><UnsentEditsLeaveDialog pending={nav.pending} onReturnFocus={focusNativeView} /></>
+                ) : nativeCollaboration ? (
+                  detail.accessDenied || !nativePageId ? <p role="alert" className="p-6">Document access is unavailable.</p>
+                    : <><WordCraftEditorHost key={`${workspaceId}:${nativePageId}`} workspaceId={workspaceId} pageId={nativePageId} name={detail.page?.name} onDirtyChange={nav.setDirty} /><UnsentEditsLeaveDialog pending={nav.pending} onReturnFocus={focusNativeView} /></>
                 ) : nativeMooring ? (
                   detail.accessDenied || !nativePageId ? <p role="alert" className="p-6">Application unavailable</p>
                     : <><MooringEditorHost key={`${workspaceId}:${nativePageId}`} workspaceId={workspaceId} pageId={nativePageId} name={detail.page?.name} onDirtyChange={nav.setDirty} /><UnsentEditsLeaveDialog pending={nav.pending} onReturnFocus={focusNativeView} /></>
