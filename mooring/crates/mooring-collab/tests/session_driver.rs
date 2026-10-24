@@ -225,3 +225,19 @@ fn bind_checkpoint_identity(value: &mut Value) {
     .unwrap();
     value["digest"] = json!(identity.full_digest());
 }
+
+#[test]
+fn review_4131_descriptor_binding_fails_closed_before_any_owner_grant(){
+ for swap in ["scope","session","runtime","tuple","digest"]{
+  let (child,mut peer)=UnixStream::pair().unwrap();peer.set_read_timeout(Some(Duration::from_secs(3))).unwrap();let (restore_raw,_,_)=restore();
+  let host_worker=std::thread::spawn(move||{
+   mooring_collab::write_frame(&mut peer,&open()).unwrap();let acquire=mooring_collab::read_frame(&mut peer).unwrap().unwrap();assert_eq!(serde_json::from_slice::<Value>(&acquire).unwrap()["type"],"owner_acquire");
+   let restore:Value=serde_json::from_slice(&restore_raw).unwrap();let cp=serde_json::from_value(restore["checkpoint"].clone()).unwrap();let identity=mooring_protocol::checkpoint::verify(&cp,mooring_protocol::checkpoint::Limits{decoded_bytes:control::MAX_CHECKPOINT_BYTES,preimage_bytes:control::MAX_CONTROL_BYTES}).unwrap();
+   let mut request=json!({"type":"session_describe_checkpoint","request_id":"review-descriptor","control_profile":"mooring.session-causal.v1","scope":restore["scope"],"session_id":restore["session_id"],"runtime_ref":restore["runtime_ref"],"versions":restore["versions"],"checkpoint":{"encoding":"base64","state":restore["checkpoint"]["state"],"digest":identity.content_digest()}});
+   match swap{"scope"=>request["scope"]["artifact_id"]=json!("other-artifact"),"session"=>request["session_id"]=json!("other-session"),"runtime"=>request["runtime_ref"]=json!("other-child"),"tuple"=>request["versions"]["model_version"]=json!("0.1.0"),"digest"=>request["checkpoint"]["digest"]=json!(format!("sha256:{}","0".repeat(64))),_=>unreachable!()}
+   mooring_collab::write_frame(&mut peer,&serde_json::to_vec(&request).unwrap()).unwrap();
+   assert!(matches!(mooring_collab::read_frame(&mut peer),Ok(None)|Err(_)),"wrong-bound description must not emit content or startup acknowledgements");
+  });
+  assert!(Driver::from_negotiated_inherited_stream(child,&host(),||Ok(at(1))).is_err(),"{swap}");host_worker.join().unwrap();
+ }
+}
