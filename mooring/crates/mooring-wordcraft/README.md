@@ -163,3 +163,16 @@ authority, installs no state and changes no checkpoint bytes. The host must
 authenticate/bound the request and retain the complete description with the exact
 checkpoint in the same authorized transaction. D3 and broader embedded-object
 description qualification remain required follow-up work.
+
+`origin_inventory::inspect` is a separate inactive read-only qualification for a
+host-authenticated exact model-v2 checkpoint. It returns a sorted complete
+allocated-client frontier and borrows the exact source bytes; it is neither
+serialized authority nor a new digest domain. Deleted content retains its
+origin. Candidates must be nonzero exact 53-bit integers before any upstream
+ClientID construction; an occupied origin or a full 4,096-client frontier is
+refused. Legacy, read-only and invalid checkpoints cannot qualify an origin.
+The host must additionally reserve document-wide uniqueness against ALL issued
+origins (including pending authors absent from the checkpoint), count those
+reservations within capacity, and bind the original author, full checkpoint
+identity and source order in its authorized writer. This helper alone issues
+no allocation, participant capability, human update admission or Saved.
