@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Mooring creation groundwork:** an inactive work transition can share its caller's authority transaction; rolling it back leaves the runtime unrequested. No agent execution is enabled.
+
 - **Private task runtime groundwork:** an uninstalled adapter preserves original human admission through actual ledger confirmation and host-only provider binding. Missing environment qualification blocks provider start; process exit does not imply a saved or completed Mooring task.
 
 - **Private runtime groundwork:** a host-only, unused output-suppression option prevents selected journal, observer and session-stream content copies. Native CLI histories, tools and shared-container readouts remain unqualified; this does not enable private execution.
