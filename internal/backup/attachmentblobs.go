@@ -255,7 +255,8 @@ func walkAttachmentBlobs(ctx context.Context, root string, payload *ExtractedPay
 		return nil
 	}
 	defer func() { _ = r.Close() }()
-	tr := tar.NewReader(r)
+	tr := newRestoreTarReader(ctx, r)
+	defer tr.Close()
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -277,7 +278,7 @@ func walkAttachmentBlobs(ctx context.Context, root string, payload *ExtractedPay
 			continue
 		}
 		delete(pending, pb.sha)
-		if err := restoreOneAttachmentBlob(root, pb.sha, pb.workspaces, tr, dryRun, st); err != nil {
+		if err := restoreOneAttachmentBlob(ctx, root, pb.sha, pb.workspaces, tr, dryRun, st); err != nil {
 			return err
 		}
 	}
@@ -286,7 +287,7 @@ func walkAttachmentBlobs(ctx context.Context, root string, payload *ExtractedPay
 // restoreOneAttachmentBlob lands one bundle entry at every destination that
 // needs it. The first destination written streams from the archive; any
 // further one is copied from that file (and verified again).
-func restoreOneAttachmentBlob(root, sha string, wss []string, body io.Reader, dryRun bool, st *AttachmentRestoreStats) error {
+func restoreOneAttachmentBlob(ctx context.Context, root, sha string, wss []string, body io.Reader, dryRun bool, st *AttachmentRestoreStats) error {
 	var written string
 	for i, ws := range wss {
 		var dst string
@@ -297,7 +298,7 @@ func restoreOneAttachmentBlob(root, sha string, wss []string, body io.Reader, dr
 				continue
 			}
 			dst = p
-			if same, exists, err := fileHasDigest(dst, sha); err != nil {
+			if same, exists, err := fileHasDigest(ctx, dst, sha); err != nil {
 				return fmt.Errorf("backup: check existing attachment blob %s: %w", sha, err)
 			} else if exists {
 				if same {
@@ -322,7 +323,7 @@ func restoreOneAttachmentBlob(root, sha string, wss []string, body io.Reader, dr
 			}
 			src, closeSrc = f, func() { _ = f.Close() }
 		}
-		err := writeBlobDurable(dst, src, sha)
+		err := writeBlobDurable(ctx, dst, src, sha)
 		if closeSrc != nil {
 			closeSrc()
 		}
@@ -346,7 +347,7 @@ func restoreOneAttachmentBlob(root, sha string, wss []string, body io.Reader, dr
 
 // fileHasDigest reports whether p exists and, if so, whether its content
 // hashes to sha.
-func fileHasDigest(p, sha string) (same, exists bool, err error) {
+func fileHasDigest(ctx context.Context, p, sha string) (same, exists bool, err error) {
 	f, err := os.Open(p)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -363,7 +364,7 @@ func fileHasDigest(p, sha string) (same, exists bool, err error) {
 		return false, true, nil
 	}
 	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
+	if _, err := io.Copy(h, &restoreReadGuard{ctx: ctx, r: f, b: readBudget(ctx), decoded: true}); err != nil {
 		return false, true, err
 	}
 	return hex.EncodeToString(h.Sum(nil)) == sha, true, nil

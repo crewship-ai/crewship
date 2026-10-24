@@ -2,6 +2,7 @@ package backup
 
 import (
 	"archive/tar"
+	"context"
 	"fmt"
 	"io"
 	"time"
@@ -124,35 +125,142 @@ func (w *TarZstWriter) Close() error {
 // stream on the fly and exposes a *tar.Reader to walk the entries.
 // Close releases resources held by the zstd decoder.
 type TarZstReader struct {
-	tr *tar.Reader
-	zr *zstd.Decoder
+	tr      *tar.Reader
+	zr      *zstd.Decoder
+	ctx     context.Context
+	budget  *restoreBudget
+	release func()
+	closed  bool
 }
 
 // NewTarZstReader returns a TarZstReader over src.
-func NewTarZstReader(src io.Reader) (*TarZstReader, error) {
-	zr, err := zstd.NewReader(src)
+func NewTarZstReader(src io.Reader, contexts ...context.Context) (*TarZstReader, error) {
+	ctx := context.Background()
+	if r, ok := src.(interface{ restoreContext() context.Context }); ok {
+		ctx = r.restoreContext()
+	}
+	if len(contexts) > 0 {
+		ctx = contexts[0]
+	}
+	ctx, release, err := ensureReadBudget(ctx)
 	if err != nil {
+		return nil, err
+	}
+	budget := readBudget(ctx)
+	decoderOwner := budget
+	for decoderOwner.parent != nil {
+		decoderOwner = decoderOwner.parent
+	}
+	decoderOwner.mu.Lock()
+	if decoderOwner.active >= decoderOwner.limits.Depth {
+		decoderOwner.failure = fmt.Errorf("%w: decoder nesting allowance %d", ErrRestoreLimit, decoderOwner.limits.Depth)
+		decoderOwner.mu.Unlock()
+		release()
+		return nil, decoderOwner.err()
+	}
+	decoderOwner.active++
+	decoderOwner.mu.Unlock()
+	closeBudget := func() { decoderOwner.mu.Lock(); decoderOwner.active--; decoderOwner.mu.Unlock(); release() }
+	guarded := &restoreReadGuard{ctx: ctx, r: src, b: budget, max: budget.limits.CompressedBytes}
+	zr, err := zstd.NewReader(guarded, zstd.WithDecoderConcurrency(1), zstd.WithDecoderMaxMemory(budget.limits.DecoderMemory), zstd.WithDecoderMaxWindow(budget.limits.DecoderWindow))
+	if err != nil {
+		closeBudget()
 		return nil, fmt.Errorf("backup: init zstd reader: %w", err)
 	}
-	return &TarZstReader{
-		tr: tar.NewReader(zr),
-		zr: zr,
-	}, nil
+	return &TarZstReader{tr: tar.NewReader(&restoreReadGuard{ctx: ctx, r: zr, b: budget, decoded: true}), zr: zr, ctx: ctx, budget: budget, release: closeBudget}, nil
 }
+func (r *TarZstReader) restoreContext() context.Context { return r.ctx }
 
 // Next advances to the next entry header in the archive. It returns
 // io.EOF when the archive is exhausted.
 func (r *TarZstReader) Next() (*tar.Header, error) {
-	return r.tr.Next()
+	if err := r.ctx.Err(); err != nil {
+		return nil, err
+	}
+	hdr, err := r.tr.Next()
+	markRestoreFailure(r.ctx, err)
+	if err == nil {
+		if r.budget != nil {
+			err = r.budget.charge("entries", 1)
+			if err == nil {
+				err = r.budget.charge("headers", int64(len(hdr.Name)+len(hdr.Linkname)))
+			}
+		}
+	}
+	return hdr, err
 }
 
 // Read reads the body of the current entry.
 func (r *TarZstReader) Read(p []byte) (int, error) {
-	return r.tr.Read(p)
+	n, err := r.tr.Read(p)
+	markRestoreFailure(r.ctx, err)
+	return n, err
 }
 
 // Close releases the zstd decoder. Safe to call multiple times.
 func (r *TarZstReader) Close() error {
-	r.zr.Close()
+	if !r.closed {
+		r.closed = true
+		r.zr.Close()
+		if r.release != nil {
+			r.release()
+		}
+	}
+	return nil
+}
+
+// newCreatedTarZstReader reads an archive produced by our own capture writer.
+// Creation has decoder bounds, but must not consume restore admission/work.
+func newCreatedTarZstReader(src io.Reader) (*TarZstReader, error) {
+	zr, err := zstd.NewReader(src, zstd.WithDecoderConcurrency(1), zstd.WithDecoderMaxMemory(64<<20), zstd.WithDecoderMaxWindow(64<<20))
+	if err != nil {
+		return nil, err
+	}
+	return &TarZstReader{tr: tar.NewReader(zr), zr: zr, ctx: context.Background()}, nil
+}
+
+// Replays consume the same allowance as compressed archive passes. The byte
+// guard sits before tar.Next, so its implicit discards cannot bypass it.
+type restoreTarReader struct {
+	tr      *tar.Reader
+	ctx     context.Context
+	budget  *restoreBudget
+	release func()
+	err     error
+}
+
+func newRestoreTarReader(ctx context.Context, src io.Reader) *restoreTarReader {
+	ctx, release, err := ensureReadBudget(ctx)
+	b := readBudget(ctx)
+	return &restoreTarReader{tr: tar.NewReader(&restoreReadGuard{ctx: ctx, r: src, b: b, decoded: true}), ctx: ctx, budget: b, release: release, err: err}
+}
+func (r *restoreTarReader) Next() (*tar.Header, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	if err := r.ctx.Err(); err != nil {
+		return nil, err
+	}
+	h, err := r.tr.Next()
+	if err == nil {
+		err = r.budget.charge("entries", 1)
+		if err == nil {
+			err = r.budget.charge("headers", int64(len(h.Name)+len(h.Linkname)))
+		}
+	}
+	return h, err
+}
+func (r *restoreTarReader) Read(p []byte) (int, error) {
+	if r.err != nil {
+		return 0, r.err
+	}
+	n, err := r.tr.Read(p)
+	markRestoreFailure(r.ctx, err)
+	return n, err
+}
+func (r *restoreTarReader) Close() error {
+	if r.release != nil {
+		r.release()
+	}
 	return nil
 }

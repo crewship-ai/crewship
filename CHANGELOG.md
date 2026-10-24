@@ -15,6 +15,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Guest access explanations match the supported resource policy.** Member settings name agents, routines and projects; CLI help explains the runtime prerequisites, and Edit explains the separate Publish share instead of claiming publication always needs a trusted reviewer.
 - **Skill repository imports use verified, pinned HTTPS connections.** Redirects and inherited Git/proxy/credential configuration are disabled. Administrators can allow exact private Git hosts with `skills.private_hosts`; loopback and metadata targets stay blocked. Imported `SKILL.md` files are read within the chosen import root, with bounded regular-file reads.
+- **Backup inspection reads metadata and reports that integrity has not been verified.** Restore, verification, recovery and conversion use operator-configured decoder, work, output, metadata, time and admission limits. Large operations can fail with an explicit resource allowance error; operators can tune the documented capacity settings.
 
 
 - Mooring SDK recovery refuses incomplete full snapshots even when Yrs reports no missing updates, preserving every original unsaved draft instead of accepting silently omitted history.

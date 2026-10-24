@@ -289,6 +289,12 @@ func (p *ExtractedPayload) OpenAttachmentBlobs(ctx context.Context) (io.ReadClos
 // MUST call Close() once finished with all sections (typically via
 // defer in RestoreBackup).
 func ExtractPayload(ctx context.Context, payload io.Reader, stagingParents ...string) (*ExtractedPayload, error) {
+	ctx, release, limitErr := BeginRestoreRead(ctx)
+	if limitErr != nil {
+		return nil, limitErr
+	}
+	defer release()
+
 	// Capture the storage backend NOW so a later SetDefaultStorage
 	// swap cannot send cleanup / reopen traffic to a different
 	// implementation than the one that created the temp files.
@@ -323,7 +329,7 @@ func ExtractPayload(ctx context.Context, payload io.Reader, stagingParents ...st
 		}
 	}()
 
-	tr, err := NewTarZstReader(payload)
+	tr, err := NewTarZstReader(payload, ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -335,6 +341,12 @@ func ExtractPayload(ctx context.Context, payload io.Reader, stagingParents ...st
 	// caller can stream it straight back into docker CopyTo without
 	// materialising the whole thing. sink type declared at file scope.
 	sinks := map[string]*sink{}
+	defer func() {
+		for _, s := range sinks {
+			_ = s.tw.Close()
+			_ = s.file.Close()
+		}
+	}()
 	var pageBytes int64
 	var serviceImageBytes int64
 	pageEntries := 0
@@ -342,12 +354,15 @@ func ExtractPayload(ctx context.Context, payload io.Reader, stagingParents ...st
 		if s, ok := sinks[key]; ok {
 			return s, nil
 		}
+		if err := readBudget(ctx).charge("sinks", 1); err != nil {
+			return nil, err
+		}
 		safe := strings.ReplaceAll(key, "/", "_")
 		f, err := st.CreateTemp(ctx, tempDir, safe+"-*.tar")
 		if err != nil {
 			return nil, fmt.Errorf("backup: create section temp %s: %w", key, err)
 		}
-		s := &sink{file: f, tw: tar.NewWriter(f)}
+		s := &sink{file: f, tw: tar.NewWriter(RestoreWriter(ctx, f))}
 		sinks[key] = s
 		return s, nil
 	}
@@ -421,7 +436,7 @@ func ExtractPayload(ctx context.Context, payload io.Reader, stagingParents ...st
 			// PR #493 follow-up: bound at maxBackupDBDumpBytes so an
 			// attacker-claimed hdr.Size of 10 GB can't OOM the restorer
 			// before UnmarshalDump even runs.
-			data, err := io.ReadAll(io.LimitReader(tr, maxBackupDBDumpBytes))
+			data, err := io.ReadAll(io.LimitReader(RestoreBufferedReader(ctx, tr), maxBackupDBDumpBytes))
 			if err != nil {
 				return nil, err
 			}
@@ -439,7 +454,7 @@ func ExtractPayload(ctx context.Context, payload io.Reader, stagingParents ...st
 			slug, file := parts[0], parts[1]
 			// PR #493 follow-up: devcontainer + mise blobs are < few KB;
 			// bound the read at 5 MB to deny tar-bomb allocations.
-			data, err := io.ReadAll(io.LimitReader(tr, maxBackupDevcontainerEntryBytes))
+			data, err := io.ReadAll(io.LimitReader(RestoreBufferedReader(ctx, tr), maxBackupDevcontainerEntryBytes))
 			if err != nil {
 				return nil, err
 			}
@@ -772,7 +787,7 @@ func crewRestoreSections(ctx context.Context, crewSlug string, payload *Extracte
 				if !ok || err != nil {
 					return r, ok, err
 				}
-				return memoryFilesTar(r), true, nil
+				return memoryFilesTar(r, ctx), true, nil
 			},
 			name: "crew-memory",
 			spec: ExtractSpec{Dest: ContainerCrewPath, User: memoryWriterUser, UnlinkFirst: true, PreserveModes: true, PreserveTimes: true},
@@ -788,7 +803,7 @@ func crewRestoreSections(ctx context.Context, crewSlug string, payload *Extracte
 				if !ok || err != nil {
 					return r, ok, err
 				}
-				return agentStateTar(r), true, nil
+				return agentStateTar(r, ctx), true, nil
 			},
 			name: "crew-agent-state",
 			spec: ExtractSpec{Dest: ContainerCrewPath, User: agentUser, PreserveModes: true, PreserveTimes: true},
@@ -893,7 +908,7 @@ func RestoreCrew(ctx context.Context, ops DockerOps, containerID string, crewSlu
 		// preflight's sweep needs to know where this section writes so
 		// it can tell an unwritable directory that matters from one that
 		// does not.
-		writesInto, writesPaths, derr := sectionWriteDirs(r)
+		writesInto, writesPaths, derr := sectionWriteDirs(r, ctx)
 		_ = r.Close()
 		if derr != nil {
 			preflightErrs = append(preflightErrs, fmt.Sprintf("%s: reading section layout: %v", s.name, derr))
@@ -940,7 +955,7 @@ func RestoreCrew(ctx context.Context, ops DockerOps, containerID string, crewSlu
 		if !ok {
 			continue
 		}
-		err = ops.CopyToPath(ctx, containerID, s.spec, r)
+		err = ops.CopyToPath(ctx, containerID, s.spec, &restoreReadGuard{ctx: ctx, r: r, b: readBudget(ctx), decoded: true, generated: true})
 		_ = r.Close()
 		if err != nil {
 			sectionErrs = append(sectionErrs, fmt.Sprintf("%s: %v", s.name, err))
@@ -1148,9 +1163,14 @@ func ownershipSweep(spec ExtractSpec) string {
 //
 // Used to keep the preflight's writability sweep exact: an unwritable
 // path only blocks a restore if the bundle actually writes there.
-func sectionWriteDirs(r io.Reader) (dirs, paths map[string]bool, err error) {
+func sectionWriteDirs(r io.Reader, contexts ...context.Context) (dirs, paths map[string]bool, err error) {
 	dirs, paths = map[string]bool{}, map[string]bool{}
-	tr := tar.NewReader(r)
+	ctx := context.Background()
+	if len(contexts) > 0 {
+		ctx = contexts[0]
+	}
+	tr := newRestoreTarReader(ctx, r)
+	defer tr.Close()
 	for {
 		hdr, nerr := tr.Next()
 		if nerr == io.EOF {

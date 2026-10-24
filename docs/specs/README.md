@@ -68,6 +68,8 @@ public contract here. Superseded a spec? Move it to
 
 ## Storage and lifecycle
 
+- [Backup read budgets](backup-read-budgets.md): metadata-only inspection, bounded restore work and operator settings.
+
 - [Installation paths](installation-paths.md): explicit path precedence, data-preserving startup checks, dev layout and seed target isolation.
 - [Offline reset](offline-reset.md): explicit targets, lifetime locks, retained identity and management state, label-scoped Docker cleanup and interrupted-reset recovery.
 - [Quota service backup](quota-service-backup.md): offline fixed-ext4 snapshots

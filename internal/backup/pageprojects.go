@@ -237,7 +237,8 @@ func preparePageProjectsRestore(ctx context.Context, payload *ExtractedPayload, 
 		defer stream.Close()
 		store := &pages.ProjectStore{Directory: target}
 		artifacts := &pagebuild.Store{Directory: filepath.Join(target, "artifacts")}
-		tr := tar.NewReader(stream)
+		tr := newRestoreTarReader(ctx, stream)
+		defer tr.Close()
 		seen := map[string]bool{}
 		used := int64(0)
 		count := 0
@@ -261,7 +262,7 @@ func preparePageProjectsRestore(ctx context.Context, payload *ExtractedPayload, 
 			}
 			seen[hdr.Name] = true
 			parts := strings.Split(hdr.Name, "/")
-			data, err := io.ReadAll(io.LimitReader(tr, hdr.Size+1))
+			data, err := io.ReadAll(io.LimitReader(RestoreBufferedReader(ctx, tr), hdr.Size+1))
 			if err != nil || int64(len(data)) != hdr.Size {
 				return errors.New("restore: truncated Page archive entry")
 			}
@@ -279,6 +280,13 @@ func preparePageProjectsRestore(ctx context.Context, payload *ExtractedPayload, 
 				if err != nil || actual != digest {
 					return errors.New("restore: Page source checksum mismatch")
 				}
+				serialized, err := source.MarshalYAMLSource()
+				if err != nil {
+					return err
+				}
+				if err := reserveRestoreGenerated(ctx, int64(len(serialized))); err != nil {
+					return err
+				}
 				if _, err := store.Put(ctx, targetWS, source); err != nil {
 					return err
 				}
@@ -291,9 +299,12 @@ func preparePageProjectsRestore(ctx context.Context, payload *ExtractedPayload, 
 				if err := json.Unmarshal(data, &artifact); err != nil {
 					return err
 				}
-				_, actual, err := artifact.Encode()
+				encoded, actual, err := artifact.Encode()
 				if err != nil || actual != digest {
 					return errors.New("restore: Page artifact checksum mismatch")
+				}
+				if err := reserveRestoreGenerated(ctx, int64(len(encoded))); err != nil {
+					return err
 				}
 				if _, err := artifacts.Put(ctx, targetWS, &artifact); err != nil {
 					return err
@@ -319,6 +330,10 @@ func preparePageProjectsRestore(ctx context.Context, payload *ExtractedPayload, 
 				if page == "" || len(refs.commits[page]) == 0 {
 					return errors.New("restore: Git object for an unknown Page")
 				}
+				// Reserve a conservative upper bound for deflate/header and Git metadata.
+				if err := reserveRestoreGenerated(ctx, 2*int64(len(data))+(64<<10)); err != nil {
+					return err
+				}
 				if err := store.ImportGitObject(ctx, targetWS, page, parts[3], parts[2], data); err != nil {
 					return err
 				}
@@ -337,6 +352,9 @@ func preparePageProjectsRestore(ctx context.Context, payload *ExtractedPayload, 
 			}
 		}
 		for page, ids := range boundaries {
+			if err := reserveRestoreGenerated(ctx, int64(len(strings.Join(ids, "\n")))+65536); err != nil {
+				return err
+			}
 			if err := store.SetCheckpointBoundaries(ctx, targetWS, page, ids); err != nil {
 				return err
 			}
@@ -367,6 +385,9 @@ func preparePageProjectsRestore(ctx context.Context, payload *ExtractedPayload, 
 				digest, err := source.Digest()
 				if err != nil || digest != spec.Digest {
 					return errors.New("restore: Git source integrity failure")
+				}
+				if err := reserveRestoreGenerated(ctx, 65536); err != nil {
+					return err
 				}
 				if err := store.PinCheckpoint(ctx, targetWS, page, commit); err != nil {
 					return err
