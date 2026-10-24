@@ -362,6 +362,51 @@ impl Document {
         Ok(bytes)
     }
 
+    /// Origin-preserving CRDT difference from an exact earlier checkpoint.
+    /// DATA only: callers must authenticate both complete host checkpoint
+    /// identities and current content permission before delivery. This proves
+    /// app-state replay consistency, not receipt authority or durable lineage.
+    pub fn update_since(&self, previous_checkpoint: &[u8]) -> Result<Vec<u8>, AdapterError> {
+        use mooring_text::yrs::updates::decoder::Decode;
+        let previous = Self::restore(previous_checkpoint)?;
+        if previous.model != self.model || previous.block_ids()? != self.block_ids()? {
+            return Err(AdapterError::InvalidCheckpoint);
+        }
+        let previous_vector = previous.doc.transact().state_vector();
+        let current_vector = self.doc.transact().state_vector();
+        if previous_vector
+            .iter()
+            .any(|(client, clock)| *clock > current_vector.get(client))
+        {
+            return Err(AdapterError::InvalidCheckpoint);
+        }
+        let delta = self
+            .doc
+            .transact()
+            .encode_state_as_update_v1(&previous_vector);
+        if delta.len() > 262144 {
+            return Err(AdapterError::Limit);
+        }
+        checkpoint_wire::preflight(&delta)?;
+        previous
+            .doc
+            .transact_mut()
+            .apply_update(
+                mooring_text::yrs::Update::decode_v1(&delta)
+                    .map_err(|_| AdapterError::InvalidCheckpoint)?,
+            )
+            .map_err(|_| AdapterError::InvalidCheckpoint)?;
+        if previous.doc.transact().has_missing_updates() {
+            return Err(AdapterError::InvalidCheckpoint);
+        }
+        // Exact checkpoint equality includes native metadata, stable IDs,
+        // retired attributes and all historical CRDT namespaces, not just SV.
+        if Self::restore(&previous.checkpoint()?)?.checkpoint()? != self.checkpoint()? {
+            return Err(AdapterError::InvalidCheckpoint);
+        }
+        Ok(delta)
+    }
+
     /// Only host-authenticated, scope/revision-verified storage checkpoints may
     /// reach this function. It is not an arbitrary remote Yrs update endpoint.
     /// Decode into a fresh document so errors cannot mutate a live replica.

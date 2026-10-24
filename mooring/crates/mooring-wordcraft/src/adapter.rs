@@ -58,6 +58,93 @@ fn inventory(document: &Document) -> Result<Vec<TargetIdentity>, PrepareError> {
     identities.sort_by(|a, b| a.target_id.cmp(&b.target_id));
     Ok(identities)
 }
+impl WordCraftAdapter {
+    /// Session-only human preparation. Authority is a borrowed host live-store
+    /// input, not a client wire claim. A whole immutable atomic is never split.
+    pub fn prepare_human_atomic(
+        &self,
+        checkpoint: &[u8],
+        change: &AtomicChange,
+        context: &CausalPrepareContext,
+        authority: crate::experimental_human_basis::Authority<'_>,
+    ) -> Result<Prepared<Candidate>, PrepareError> {
+        use crate::experimental_human_basis as human;
+        let human::Authority::Writer(host) = authority else {
+            return Err(PrepareError::Context);
+        };
+        if change.operations.len() != 1 || host.current_checkpoint() != checkpoint {
+            return Err(PrepareError::Context);
+        }
+        let operation = &change.operations[0];
+        let proposal = host.original_proposal();
+        let authored_digest = operation
+            .payload
+            .get("authored_checkpoint_state_digest")
+            .and_then(serde_json::Value::as_str)
+            .ok_or(PrepareError::Context)?;
+        let encode = |bytes: &[u8]| {
+            mooring_protocol::boundary::encode_base64(bytes, 262144)
+                .map_err(|_| PrepareError::Context)
+        };
+        let expected = serde_json::json!({
+            "kind": "humancrdt.update",
+            "operation_id": proposal.operation_id,
+            "origin": proposal.origin.to_string(),
+            "update": encode(&proposal.update)?,
+            "authored_frontier": encode(&proposal.authored_frontier)?,
+            "targets": proposal.targets,
+            "authored_checkpoint_state_digest": authored_digest,
+        });
+        if operation.op_id != proposal.operation_id
+            || Some(&operation.payload) != expected.as_object()
+        {
+            return Err(PrepareError::Context);
+        }
+        let document = Document::restore(checkpoint).map_err(PrepareError::State)?;
+        let identities = inventory(&document)?;
+        let qualified = match CausalContext::qualify(context, change, &identities) {
+            Ok(value) => value,
+            Err(error) => return context_failure(error),
+        };
+        let mut working = qualified.working();
+        if let Err(error) = working.check_current_reads(&operation.op_id) {
+            return context_failure(error);
+        }
+        let prepared = human::prepare_confirmed_basis_with_authored_cut(
+            human::Authority::Writer(host),
+            authored_digest,
+        )
+        .map_err(|_| PrepareError::Context)?;
+        let targets = prepared
+            .affected_targets()
+            .iter()
+            .map(|id| TargetEffect {
+                target_id: id.clone(),
+                content_changed: true,
+                structure_changed: false,
+                created: false,
+                deleted: false,
+            })
+            .collect::<Vec<_>>();
+        if let Err(error) = working.advance_effects(&operation.op_id, &targets) {
+            return context_failure(error);
+        }
+        let checkpoint = prepared.checkpoint().map_err(PrepareError::State)?;
+        let final_document = Document::restore(&checkpoint).map_err(PrepareError::State)?;
+        let identities = inventory(&final_document)?;
+        if !working.complete() || working.inventory() != identities {
+            return Err(PrepareError::Context);
+        }
+        Ok(Prepared::Candidate(Candidate {
+            checkpoint,
+            inventory: identities,
+            effects: vec![PreparedOperationEffects {
+                op_id: operation.op_id.clone(),
+                targets,
+            }],
+        }))
+    }
+}
 impl PrepareAdapter for WordCraftAdapter {
     type Candidate = Candidate;
     type Error = PrepareError;
@@ -646,5 +733,241 @@ mod tests {
         assert_eq!(failure.operation_id, "human");
         assert_eq!(failure.code, ErrorCode::InvalidRequest);
         assert_eq!(before, checkpoint_of_same(&before));
+    }
+    #[test]
+    fn original_human_atomic_binds_payload_cut_and_reads_without_splitting() {
+        use crate::experimental_draft::{DraftAccess, DraftReplica};
+        use crate::experimental_human_basis::{Authority, HostConfirmedBasis, HostSealedOriginal};
+        let before = checkpoint();
+        let mut local = DraftReplica::restore(&before, 17, DraftAccess::Writer).unwrap();
+        let proposal = local
+            .edit(
+                "human-op",
+                serde_json::from_value(serde_json::json!({
+                    "kind":"text.insert", "target_id":"stable-0", "at":{"kind":"end"},
+                    "text":" human😀", "properties":null
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        let authored = local.optimistic_checkpoint().unwrap();
+        let digest = mooring_protocol::control::encode_checkpoint(&authored)
+            .unwrap()
+            .digest;
+        let encode =
+            |bytes: &[u8]| mooring_protocol::boundary::encode_base64(bytes, 262144).unwrap();
+        let mut op = operation(
+            "human-op",
+            serde_json::json!({
+                "kind":"humancrdt.update", "operation_id":"human-op", "origin":"17",
+                "update":encode(&proposal.update), "authored_frontier":encode(&proposal.authored_frontier),
+                "targets":proposal.targets, "authored_checkpoint_state_digest":digest,
+            }),
+        );
+        op.read_preconditions.clear();
+        let original_change = change(vec![op]);
+        for mode in [
+            "valid",
+            "wrong-cut",
+            "extra-field",
+            "changed-update",
+            "wrong-op",
+            "multi-op",
+            "explicit-read",
+        ] {
+            let mut change = original_change.clone();
+            match mode {
+                "wrong-cut" => {
+                    change.operations[0].payload["authored_checkpoint_state_digest"] = serde_json::json!(
+                        mooring_protocol::control::encode_checkpoint(&before)
+                            .unwrap()
+                            .digest
+                    )
+                }
+                "extra-field" => {
+                    change.operations[0]
+                        .payload
+                        .insert("authority".into(), serde_json::json!(true));
+                }
+                "changed-update" => {
+                    change.operations[0].payload["update"] = serde_json::json!("AA==")
+                }
+                "wrong-op" => change.operations[0].op_id = "substituted".into(),
+                "multi-op" => change
+                    .operations
+                    .push(operation("second", serde_json::json!({}))),
+                "explicit-read" => change.operations[0]
+                    .read_preconditions
+                    .push(ReadPrecondition {
+                        target_id: "stable-0".into(),
+                        revision: Counter(0),
+                        structure_revision: Some(Counter(0)),
+                    }),
+                _ => {}
+            }
+            let mut ctx = causal_context(&before, &change, 20);
+            if mode == "explicit-read" {
+                ctx.qualified_reads[0].covered = false;
+            }
+            let host = HostConfirmedBasis::from_trusted_confirmed_store(
+                &before,
+                &before,
+                17,
+                HostSealedOriginal::from_trusted_original_store(&proposal, b"synthetic-slot", 1)
+                    .unwrap(),
+                1,
+                &[],
+            )
+            .unwrap();
+            let result = WordCraftAdapter.prepare_human_atomic(
+                &before,
+                &change,
+                &ctx,
+                Authority::Writer(host),
+            );
+            if mode == "valid" {
+                let Prepared::Candidate(candidate) = result.unwrap() else {
+                    panic!("valid original rejected")
+                };
+                let restored = Document::restore(candidate.checkpoint_bytes()).unwrap();
+                assert_eq!(restored.native().unwrap(), local.native().unwrap());
+                assert_eq!(candidate.effects()[0].op_id, "human-op");
+                assert_eq!(candidate.effects()[0].targets[0].target_id, "stable-0");
+            } else {
+                assert!(
+                    !matches!(result, Ok(Prepared::Candidate(_))),
+                    "accepted {mode}"
+                );
+            }
+            assert_eq!(local.optimistic_checkpoint().unwrap(), authored);
+        }
+        assert!(WordCraftAdapter
+            .prepare_human_atomic(
+                b"invalid",
+                &original_change,
+                &causal_context(&before, &original_change, 20),
+                Authority::Reader
+            )
+            .is_err());
+    }
+    #[test]
+    fn actual_agent_candidate_delta_preserves_ids_between_original_human_a_and_b() {
+        use crate::experimental_draft::{DraftAccess, DraftReplica};
+        use crate::experimental_human_basis::{
+            self as human, HostConfirmedBasis, HostSavedDelta, HostSavedOwnPrefix,
+            HostSealedOriginal,
+        };
+        use crate::experimental_human_current as current;
+        use mooring_text::yrs::{updates::decoder::Decode, Update};
+        let base = checkpoint();
+        let mut local = DraftReplica::restore(&base, 17, DraftAccess::Writer).unwrap();
+        let cmd = |text: &str| {
+            serde_json::from_value(json!({"kind":"text.insert","target_id":"stable-0","at":{"kind":"end"},"text":text,"properties":null})).unwrap()
+        };
+        let a = local.edit("A", cmd(" ownA")).unwrap();
+        let authored_a = local.optimistic_checkpoint().unwrap();
+        let b = local.edit("B", cmd(" ownB😀")).unwrap();
+        let authored_b = local.optimistic_checkpoint().unwrap();
+        let original_b = b.clone();
+        let saved_a = current::prepare_current(
+            current::Authority::Writer(current::HostWriter::current(&base, 17).unwrap()),
+            &a.authored_frontier,
+            &a.update,
+            &a.targets,
+        )
+        .unwrap()
+        .checkpoint()
+        .unwrap();
+        let mut format = operation(
+            "agent-format",
+            json!({"kind":"text.format","target_id":"stable-0","start":{"kind":"start"},"end":{"kind":"end"},"properties":{"bold":true}}),
+        );
+        format.dependencies.push("agent-insert".into());
+        let agent = change(vec![insert("agent-insert"), format]);
+        let Prepared::Candidate(agent_candidate) = WordCraftAdapter
+            .prepare_atomic_causal(&saved_a, &agent, &causal_context(&saved_a, &agent, 20))
+            .unwrap()
+        else {
+            panic!("actual agent candidate rejected")
+        };
+        let global = agent_candidate.checkpoint_bytes();
+        let verified_new = Document::restore(global).unwrap();
+        let delta = verified_new.update_since(&saved_a).unwrap();
+        let decoded = Update::decode_v1(&delta).unwrap();
+        let origins = decoded
+            .insertions(true)
+            .iter()
+            .map(|(client, _)| client.get())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            origins.len(),
+            1,
+            "actual agent delta must have one allocated origin"
+        );
+        assert_ne!(origins[0], 17);
+        let targets = vec!["stable-0".to_string()];
+        let transcript = [
+            HostSavedDelta::from_trusted_committed_store(
+                b"actual-saved-A",
+                17,
+                &a.update,
+                &a.targets,
+            )
+            .unwrap(),
+            HostSavedDelta::from_trusted_committed_store(
+                b"actual-saved-agent",
+                origins[0],
+                &delta,
+                &targets,
+            )
+            .unwrap(),
+        ];
+        let digest = |bytes: &[u8]| {
+            mooring_protocol::control::encode_checkpoint(bytes)
+                .unwrap()
+                .digest
+        };
+        let authored_a_digest = digest(&authored_a);
+        let saved_a_digest = digest(&saved_a);
+        let own = [HostSavedOwnPrefix::from_trusted_live_slot(
+            HostSealedOriginal::from_trusted_original_store(&a, b"actual-saved-A", 1).unwrap(),
+            &authored_a_digest,
+            &saved_a_digest,
+        )
+        .unwrap()];
+        let host = HostConfirmedBasis::from_trusted_live_store_with_own_prefix(
+            &base,
+            global,
+            17,
+            HostSealedOriginal::from_trusted_original_store(&b, b"original-B", 2).unwrap(),
+            2,
+            &transcript,
+            &own,
+        )
+        .unwrap();
+        let candidate = human::prepare_confirmed_basis_with_authored_cut(
+            human::Authority::Writer(host),
+            &digest(&authored_b),
+        )
+        .unwrap();
+        local
+            .apply_verified_host_delta(origins[0], &delta, &targets)
+            .unwrap();
+        assert_eq!(candidate.native().unwrap(), local.native().unwrap());
+        assert_eq!(
+            Document::restore(&candidate.checkpoint().unwrap())
+                .unwrap()
+                .block_ids()
+                .unwrap(),
+            verified_new.block_ids().unwrap()
+        );
+        assert_eq!(b, original_b);
+        assert!(
+            Document::restore(&base)
+                .unwrap()
+                .update_since(global)
+                .is_err(),
+            "cannot replay newer basis into older state"
+        );
     }
 }

@@ -90,6 +90,11 @@ fn original_b_survives_saved_own_a_and_peer_c_in_either_global_order() {
             Document::restore(&authored_a).unwrap().state_vector() == Document::restore(&server_authored).unwrap().state_vector(),
             authored_a.len(), server_authored.len());
             let b = alice.edit("B", insert(" B😀")).unwrap();
+            let authored_b_digest = mooring_protocol::control::encode_checkpoint(
+                &alice.optimistic_checkpoint().unwrap(),
+            )
+            .unwrap()
+            .digest;
             let c = bob.edit("C", insert(" C")).unwrap();
             let original_b = b.clone();
             let (global_cut_a, current) = if peer_first {
@@ -148,8 +153,11 @@ fn original_b_survives_saved_own_a_and_peer_c_in_either_global_order() {
                 &own,
             )
             .unwrap();
-            let candidate = basis::prepare_confirmed_basis(basis::Authority::Writer(context))
-                .expect(
+            let candidate = basis::prepare_confirmed_basis_with_authored_cut(
+                basis::Authority::Writer(context),
+                &authored_b_digest,
+            )
+            .expect(
                 "actual Saved own prefix must qualify original B without rewriting its frontier",
             );
             alice
@@ -173,6 +181,7 @@ fn original_b_survives_saved_own_a_and_peer_c_in_either_global_order() {
                 "order",
                 "skip-order",
                 "authored-digest",
+                "original-B-digest",
                 "saved-digest",
                 "swapped-digests",
                 "global-order",
@@ -280,7 +289,15 @@ fn original_b_survives_saved_own_a_and_peer_c_in_either_global_order() {
                     } else {
                         context
                     };
-                    basis::prepare_confirmed_basis(basis::Authority::Writer(context))
+                    let digest = if mode == "original-B-digest" {
+                        &authored_digest
+                    } else {
+                        &authored_b_digest
+                    };
+                    basis::prepare_confirmed_basis_with_authored_cut(
+                        basis::Authority::Writer(context),
+                        digest,
+                    )
                 });
                 assert!(
                     result.is_err(),
