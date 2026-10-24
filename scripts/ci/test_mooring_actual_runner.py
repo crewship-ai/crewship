@@ -2,6 +2,7 @@
 import importlib.util
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -22,6 +23,35 @@ runner = load("actual_runner_tests", "mooring-actual.py")
 
 
 class ActualRunnerTests(unittest.TestCase):
+    def test_reviewed_diagnostic_overlay_binds_original_and_replacement_bytes(self):
+        original_root = runner.ROOT
+        directory = Path(__file__).with_name("mooring-diagnostic-overlay")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copied = root / "overlay"
+            shutil.copytree(directory, copied)
+            output = root / "output"
+            output.mkdir()
+            overlay = runner.prepare_diagnostic_overlay(copied, output, {"commit": "test-only"})
+            mapping = json.loads(overlay.read_text())["Replace"]
+            self.assertEqual(set(mapping), {str(original_root / "internal/api/mooring_collab_session_pump.go"),
+                                            str(original_root / "internal/mooring/runtime_session.go")})
+            metadata = json.loads((output / "diagnostic-metadata.json").read_text())
+            self.assertTrue(metadata["diagnostic_only"])
+            self.assertFalse(metadata["pristine_all22_qualified"])
+            replacement = Path(next(iter(mapping.values())))
+            replacement.write_text(replacement.read_text() + "\n")
+            with self.assertRaisesRegex(ValueError, "replacement mismatch"):
+                runner.prepare_diagnostic_overlay(copied, output, {})
+            shutil.rmtree(copied)
+            shutil.copytree(directory, copied)
+            with patch.object(runner, "ROOT", root):
+                original = root / "internal/api/mooring_collab_session_pump.go"
+                original.parent.mkdir(parents=True)
+                original.write_text("different source\n")
+                with self.assertRaisesRegex(ValueError, "original source mismatch"):
+                    runner.prepare_diagnostic_overlay(copied, output, {})
+
     def test_real_go_json_events_are_separate_from_stderr_diagnostics(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

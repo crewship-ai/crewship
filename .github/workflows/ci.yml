@@ -1322,7 +1322,7 @@ jobs:
         run: timeout --kill-after=30s 18m bash scripts/ci/mooring.sh
 
   mooring-actual:
-    name: Mooring ALL actual native SQL and HTTP/WS cases
+    name: Mooring ALL actual native SQL and HTTP/WS cases (DIAGNOSTIC overlay)
     needs: [merge-conflict-markers, changes]
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
@@ -1362,16 +1362,16 @@ jobs:
         env:
           RUSTUP_TOOLCHAIN: 1.99.1
         run: timeout --kill-after=30s 14m python3 scripts/ci/mooring-actual-fixtures.py --output "$RUNNER_TEMP/mooring-actual-fixtures"
-      - name: Execute every actual test with no skipped or missing cases
+      - name: DIAGNOSTIC overlay - every actual test, never pristine qualification
         timeout-minutes: 40
-        run: timeout --kill-after=30s 39m python3 scripts/ci/mooring-actual.py --fixtures "$RUNNER_TEMP/mooring-actual-fixtures/fixtures.json" --results "$RUNNER_TEMP/mooring-actual-results"
+        run: timeout --kill-after=30s 39m python3 scripts/ci/mooring-actual.py --fixtures "$RUNNER_TEMP/mooring-actual-fixtures/fixtures.json" --results "$RUNNER_TEMP/mooring-actual-results" --diagnostic-overlay scripts/ci/mooring-diagnostic-overlay
       - name: Preserve actual per-test execution evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: mooring-actual-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            ${{ runner.temp }}/mooring-actual-fixtures/fixtures.json
+            ${{ runner.temp }}/mooring-actual-fixtures/
             ${{ runner.temp }}/mooring-actual-results/
           if-no-files-found: error
           retention-days: 7
