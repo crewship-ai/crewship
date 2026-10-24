@@ -289,6 +289,14 @@ impl RunningDriver {
         self.output(connection, &opening.request_id, message)
     }
     fn accept_input(&mut self, input: SessionParticipantInput) -> io::Result<()> {
+        if let SessionParticipantInputMessage::SessionLeave(leave) = &input.message {
+            if leave.scope != *self.owner.scope() || leave.session_id != self.owner.session_id() {
+                return Err(invalid("leave binding"));
+            }
+            return self
+                .participants
+                .leave(&input, &self.owner, (self.driver.clock)()?);
+        }
         let participant = self
             .participants
             .input(&input, &self.owner, (self.driver.clock)()?)?;

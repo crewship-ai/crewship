@@ -20,6 +20,24 @@ pub(crate) enum CandidateError {
 
 // Internal only until the host-context adapter can qualify every observation.
 pub(crate) fn apply(document: &mut Document, command: &Command) -> Result<(), CandidateError> {
+    apply_inner(document, command, None, None)
+}
+/// Local draft experiment only: this supplies original CRDT transaction origin,
+/// not participant authentication or a qualified human stamp witness.
+pub(crate) fn apply_draft(
+    document: &mut Document,
+    command: &Command,
+    origin: mooring_text::yrs::Origin,
+    local_stamp: (u64, u64),
+) -> Result<(), CandidateError> {
+    apply_inner(document, command, Some(origin), Some(local_stamp))
+}
+fn apply_inner(
+    document: &mut Document,
+    command: &Command,
+    origin: Option<mooring_text::yrs::Origin>,
+    local_stamp: Option<(u64, u64)>,
+) -> Result<(), CandidateError> {
     command::validate(command).map_err(|_| CandidateError::InvalidCommand)?;
     if document.is_read_only() {
         return Err(CandidateError::ReadOnly);
@@ -58,9 +76,15 @@ pub(crate) fn apply(document: &mut Document, command: &Command) -> Result<(), Ca
         return Err(CandidateError::InvalidRange);
     }
     drop(txn);
-    let stamp = crate::format::current_agent_stamp(&document.doc)
-        .map_err(|_| CandidateError::InvalidState)?;
-    let mut txn = document.doc.transact_mut();
+    let stamp = match local_stamp {
+        Some(stamp) => stamp,
+        None => crate::format::current_agent_stamp(&document.doc)
+            .map_err(|_| CandidateError::InvalidState)?,
+    };
+    let mut txn = match origin {
+        Some(origin) => document.doc.transact_mut_with(origin),
+        None => document.doc.transact_mut(),
+    };
     match command {
         Command::Insert {
             text: value,
