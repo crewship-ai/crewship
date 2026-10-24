@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Queued Mooring admission retains its original human authority.** Authenticated chat and WebSocket provenance preserves the original credential and revocation fence through run admission and retries; legacy receipts remain unfenced. This foundation does not enable document routes or editing.
+
 - Conversation transcript appends stay inside their configured storage root even when an existing transcript path is a symbolic link.
 
 - **Administrative security operations explicitly opt in to emergency audit fallback.** Only single/all-session revocation can use this fallback in the session handler; unlock remains chained-only, and unknown internal operations are rejected before any account or audit mutation. Web password changes and resets continue to fail closed on a broken audit chain.

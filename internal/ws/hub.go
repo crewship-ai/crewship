@@ -29,6 +29,7 @@ import (
 type ChatMessageOption struct {
 	// Server-owned fields. The WS decoder constructs only MaxTurns and Metadata.
 	HumanAuthority           *chataudience.Receipt      `json:"-"`
+	OriginalCredential       auth.OriginalCredential    `json:"-"`
 	HumanResume              bool                       `json:"-"`
 	OriginalTriggerMessageID string                     `json:"-"`
 	DocumentCreationIntent   *documents.CreationIntent  `json:"-"`
