@@ -59,6 +59,7 @@ type Config struct {
 	License   LicenseConfig            `yaml:"license"`
 	Composio  ComposioConfig           `yaml:"composio"`
 	Documents DocumentsConfig          `yaml:"documents"`
+	Diff      DiffConfig               `yaml:"diff"`
 	Slides    SlidesConfig             `yaml:"slides"`
 	Audit     AuditConfig              `yaml:"audit"`
 
@@ -440,6 +441,9 @@ func (c *Config) Validate() error {
 	if err := c.Documents.validate(); err != nil {
 		return err
 	}
+	if _, err := c.Diff.Resolve(); err != nil {
+		return err
+	}
 	if value := c.Storage.RunOutputPath; value != "" && (!filepath.IsAbs(value) || filepath.Clean(value) != value || strings.ContainsRune(value, 0)) {
 		return fmt.Errorf("storage.run_output_path must be a clean absolute host-private path")
 	}
@@ -557,6 +561,9 @@ func applyEnvOverrides(cfg *Config) {
 		}
 	}
 	for name, target := range map[string]*int{
+		"CREWSHIP_DIFF_MAX_INPUT_BYTES":                  &cfg.Diff.MaxInputBytes,
+		"CREWSHIP_DIFF_MAX_LINES":                        &cfg.Diff.MaxLines,
+		"CREWSHIP_DIFF_MAX_CONCURRENT":                   &cfg.Diff.MaxConcurrent,
 		"CREWSHIP_DOCUMENTS_MAX_DOCUMENTS_PER_WORKSPACE": &cfg.Documents.MaxDocumentsPerWorkspace,
 		"CREWSHIP_DOCUMENTS_MAX_OPERATIONS_PER_WINDOW":   &cfg.Documents.MaxOperationsPerWindow,
 		"CREWSHIP_DOCUMENTS_OPERATION_WINDOW_SECONDS":    &cfg.Documents.OperationWindowSeconds,

@@ -929,6 +929,13 @@ pipeline/version lookup failures or diff generation failure are `500`.
 Definitions are pretty-printed before diffing. `unified_diff` is empty when
 the hashes are identical.
 
+Nonidentical comparisons use the shared [diff computation limits](/configuration/environment#diff-preview-computation).
+Oversized raw/pretty input pairs, excessive matcher lines or bounded output
+return `413` with an explicit too-large error. Capacity exhaustion returns `429`
+with `Retry-After: 1` immediately. Existing authentication and version lookups run
+before admission; accepted comparisons keep their original hunks. The version
+hash shortcut does not occupy a computation slot.
+
 ### Governance
 
 `POST .../pipelines/{slug}/approve` and `POST .../pipelines/{slug}/reject`

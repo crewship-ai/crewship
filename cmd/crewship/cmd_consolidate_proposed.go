@@ -165,8 +165,10 @@ The server generates this preview from the same code path approve writes
 through, so what you see here is byte-for-byte what lands. Read-only,
 MEMBER and above.
 
-A proposal whose staged markdown has been deleted answers 410; one larger than
-8 MiB answers 413.`,
+A proposal whose staged markdown has been deleted answers 410. Preview byte,
+line and output limits answer 413 (exit 1); busy comparisons answer 429
+(exit 6). View inputs separately or retry later. No automatic retry.
+The existing absolute 8 MiB per-file ceiling remains in force.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {

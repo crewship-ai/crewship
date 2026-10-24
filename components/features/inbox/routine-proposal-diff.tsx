@@ -20,6 +20,7 @@ import Link from "next/link"
 import { cn } from "@/lib/utils"
 import { Appear, DetailCard } from "@/components/ui/detail"
 import { apiFetch } from "@/lib/api-fetch"
+import { diffErrorMessage } from "@/lib/diff-error"
 
 interface Props {
   workspaceId: string
@@ -52,7 +53,7 @@ export function RoutineProposalDiff({ workspaceId, slug, fromVersion, toVersion 
       .then(async (res) => {
         if (cancelled) return
         if (!res.ok) {
-          setError(`Could not load the diff (${res.status})`)
+          setError(diffErrorMessage(res.status, `Could not load the diff (${res.status})`))
           return
         }
         setDiff((await res.json()) as DiffResponse)
