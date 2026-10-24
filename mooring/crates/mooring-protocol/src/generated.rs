@@ -1757,7 +1757,7 @@ pub struct PrepareAtomicCausal {
     pub change: AtomicChange,
     pub control_profile: PrepareAtomicCausalControlProfile,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub human_context: Option<SessionHumanPrepareContext>,
+    pub human_context: Option<Box<SessionHumanPrepareContext>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1954,6 +1954,8 @@ pub struct SessionCommitResult {
     pub receipt: CommitResult,
     pub checkpoint: Checkpoint,
     pub targets: Vec<TargetVersion>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_deltas: Option<Vec<SessionCommittedNativeDelta>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -2433,6 +2435,49 @@ pub struct SessionHumanPrepareContext {
     pub own_history: Vec<SessionSavedNativeDelta>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replay_basis: Option<Checkpoint>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prepared_prefix: Option<SessionPreparedPrefix>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionPreparedNativeDelta {
+    pub reference: Identifier,
+    pub source_ref: Identifier,
+    pub source_order: PositiveCounter,
+    pub writer_origin: PositiveCounter,
+    pub update: String,
+    pub targets: Vec<Identifier>,
+    pub checkpoint_state_digest: Digest,
+    pub prospective_revision: PositiveCounter,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionPreparedHumanPrefix {
+    pub reference: Identifier,
+    pub source_ref: Identifier,
+    pub source_order: PositiveCounter,
+    pub change: AtomicChange,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionPreparedPrefix {
+    pub transaction_revision: Counter,
+    pub transaction_state_digest: Digest,
+    pub deltas: Vec<SessionPreparedNativeDelta>,
+    pub own_prefix: Vec<SessionPreparedHumanPrefix>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionCommittedNativeDelta {
+    pub change_id: Identifier,
+    pub membership_hash: Digest,
+    pub revision: PositiveCounter,
+    pub checkpoint_state_digest: Digest,
+    pub native_delta: SessionNativeDelta,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -1120,6 +1120,7 @@ export interface SessionCommitResult {
   receipt: CommitResult;
   checkpoint: Checkpoint;
   targets: Array<TargetVersion>;
+  native_deltas?: Array<SessionCommittedNativeDelta>;
 }
 
 export type SessionParticipantOpenType = "session_participant_open";
@@ -1416,6 +1417,40 @@ export interface SessionHumanPrepareContext {
   own_prefix: Array<SessionSavedHumanPrefix>;
   own_history: Array<SessionSavedNativeDelta>;
   replay_basis?: Checkpoint;
+  prepared_prefix?: SessionPreparedPrefix;
+}
+
+export interface SessionPreparedNativeDelta {
+  reference: Identifier;
+  source_ref: Identifier;
+  source_order: PositiveCounter;
+  writer_origin: PositiveCounter;
+  update: string;
+  targets: Array<Identifier>;
+  checkpoint_state_digest: Digest;
+  prospective_revision: PositiveCounter;
+}
+
+export interface SessionPreparedHumanPrefix {
+  reference: Identifier;
+  source_ref: Identifier;
+  source_order: PositiveCounter;
+  change: AtomicChange;
+}
+
+export interface SessionPreparedPrefix {
+  transaction_revision: Counter;
+  transaction_state_digest: Digest;
+  deltas: Array<SessionPreparedNativeDelta>;
+  own_prefix: Array<SessionPreparedHumanPrefix>;
+}
+
+export interface SessionCommittedNativeDelta {
+  change_id: Identifier;
+  membership_hash: Digest;
+  revision: PositiveCounter;
+  checkpoint_state_digest: Digest;
+  native_delta: SessionNativeDelta;
 }
 
 export type Message = Hello | Welcome | CommitBatch | CommitResult | StatusRequest | StatusResult | SessionTicketRequest | SessionTicket | OwnerAcquire | OwnerRenew | OwnerGrant | DeliveryRenew | DeliveryGrant | SessionClosed | DeliveryBlocked | RevocationConfirmed | ReadRequest | ReadResult | CheckpointRequest | CheckpointResult | Presence | TaskStatus | TaskResult | TaskCancel | Proposal | ProposalAccept | UndoRequest | ProtocolError | ManifestRequest | ManifestResult | LifecycleRequest | LifecycleResult | SessionJoin | SessionJoined | SessionLeave | SubmitChanges | ChangesReceived | TaskSubmit | ProposalRequest | CollaborationUpdate | DocumentUpdate | AssetRequest | AssetResult | TicketValidationRequest | TicketValidationResult | RevocationNotice | RuntimeReady | ValidateCheckpoint | CheckpointValidated | PrepareAtomic | AtomicPrepared | ValidateCheckpointCausal | CheckpointValidatedCausal | PrepareAtomicCausal | AtomicPreparedCausal | SessionOpen | SessionRestore | SessionOpened | SessionSubmitBatch | SessionCommitResult | SessionParticipantOpen | SessionParticipantInput | BoundedTransferBegin | BoundedTransferChunk | SessionParticipantOutput | SessionJoinBounded | SessionJoinedBounded | SessionRestored | SessionStatusRequest | SessionStatusResult | SessionDescribeCheckpoint | SessionCheckpointDescribed | SessionInspectOrigins | SessionOriginsInspected;

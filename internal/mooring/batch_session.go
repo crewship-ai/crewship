@@ -9,6 +9,7 @@ import (
 	"errors"
 	protocol "github.com/crewship-ai/crewship/mooring/protocol/generated/go"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -67,9 +68,21 @@ type SessionPendingOutput struct {
 	Targets        []BatchTargetVersion
 }
 type SessionOutputPreparer func(context.Context, *sql.Tx, SessionPendingOutput) ([]byte, error)
+
+// SessionSavedCut is committed DATA about one exact atomic boundary, not an
+// author or delivery capability. StateDigest hashes the decoded checkpoint
+// state, not its base64 encoding or full wire identity. Known Saved retries
+// retain their original boundary even when the batch ends at a later head.
+type SessionSavedCut struct {
+	ChangeID, MembershipHash, Revision, StateDigest string
+}
+
 type SessionBatchResult struct {
 	Result        BatchResult
 	EncodedOutput []byte
+	// Released only after successful COMMIT; never passed to provisional output callbacks.
+	SavedCuts    []SessionSavedCut
+	NativeDeltas []SessionCommittedNativeDelta
 }
 type SessionCommitter struct {
 	store         *BatchStore
@@ -94,13 +107,16 @@ func NewSessionCommitter(store *BatchStore, owner OwnerLease, authority SessionB
 type sessionMembership struct{ changeID, membershipHash string }
 
 type sessionCommitMode struct {
-	originalStore *BatchStore
-	humanResolver SessionHumanPrepareResolver
-	fullBasis     *FullCheckpointBasis
-	members       map[string]sessionMembership
-	basis         SessionBasis
-	output        SessionOutputPreparer
-	encoded       []byte
+	originalStore                   *BatchStore
+	humanResolver                   SessionHumanPrepareResolver
+	fullBasis                       *FullCheckpointBasis
+	members                         map[string]sessionMembership
+	basis                           SessionBasis
+	output                          SessionOutputPreparer
+	encoded                         []byte
+	savedCuts                       []SessionSavedCut
+	prepared                        SessionPreparedCandidates
+	preparedRawBytes, preparedBytes int
 }
 
 func (s *SessionCommitter) Commit(ctx context.Context, request SessionBatchRequest) (SessionBatchResult, error) {
@@ -156,7 +172,7 @@ func (s *SessionCommitter) commitMode(ctx context.Context, request SessionBatchR
 	if err != nil {
 		return SessionBatchResult{}, err
 	}
-	return SessionBatchResult{Result: result, EncodedOutput: mode.encoded}, nil
+	return SessionBatchResult{Result: result, EncodedOutput: mode.encoded, SavedCuts: append([]SessionSavedCut(nil), mode.savedCuts...), NativeDeltas: mode.nativeDeltaData()}, nil
 }
 func validSessionBasis(b SessionBasis) bool {
 	if _, err := batchCounter(b.Revision); err != nil || len(b.Digest) != len("sha256:")+64 || !strings.HasPrefix(b.Digest, "sha256:") {
@@ -283,6 +299,9 @@ func (m *sessionCommitMode) prepareOutput(ctx context.Context, tx *sql.Tx, store
 		copied.Assets = append([]protocol.Asset{}, cp.Assets...)
 		pending.FullCheckpoint = &copied
 		pending.Targets = append([]BatchTargetVersion{}, targets...)
+		if e = m.captureSavedCuts(ctx, tx, store, lease, result); e != nil {
+			return e
+		}
 	}
 	output, err := m.output(ctx, tx, pending)
 	if err != nil {
@@ -292,7 +311,15 @@ func (m *sessionCommitMode) prepareOutput(ctx context.Context, tx *sql.Tx, store
 		return errors.New("Mooring session output capacity")
 	}
 	if m.fullBasis != nil {
-		output, err = validateFullSessionOutput(output, lease, result, *expected, targets)
+		output, err = m.injectNativeDeltaData(output)
+		if err != nil {
+			return err
+		}
+		if m.humanResolver == nil {
+			output, err = validateFullSessionOutput(output, lease, result, *expected, targets)
+		} else {
+			output, err = validateFullSessionOutputSelected(output, lease, result, *expected, targets, m.nativeDeltaData(), true)
+		}
 		if err != nil {
 			return err
 		}
@@ -301,9 +328,71 @@ func (m *sessionCommitMode) prepareOutput(ctx context.Context, tx *sql.Tx, store
 	return nil
 }
 
+func (m *sessionCommitMode) captureSavedCuts(ctx context.Context, tx *sql.Tx, store *BatchStore, lease OwnerLease, result BatchResult) error {
+	if len(result.Changes) > MaxAtomicOperations {
+		return ErrBatchCapacity
+	}
+	type numberedCut struct {
+		cut      SessionSavedCut
+		revision uint64
+	}
+	cuts := make([]numberedCut, 0, len(result.Changes))
+	head, err := batchCounter(result.Revision)
+	if err != nil {
+		return err
+	}
+	for _, change := range result.Changes {
+		if change.Status != "saved" {
+			continue
+		}
+		revision, e := batchCounter(change.LastRevision)
+		if e != nil || revision == 0 || revision > head || len(change.Operations) == 0 {
+			return ErrInvalid
+		}
+		var membership string
+		var last uint64
+		for _, op := range change.Operations {
+			member, ok := m.members[op.ID]
+			r, e := batchCounter(op.Revision)
+			if !ok || member.changeID != change.ID || member.membershipHash == "" || op.Status != "saved" || e != nil || r == 0 || r > revision {
+				return ErrInvalid
+			}
+			if membership != "" && membership != member.membershipHash {
+				return ErrInvalid
+			}
+			membership = member.membershipHash
+			if r > last {
+				last = r
+			}
+		}
+		if last != revision {
+			return ErrInvalid
+		}
+		// This bounded, identity-verified decode runs in the original FULL writer.
+		// Never substitute the final batch checkpoint for a historical atomic cut.
+		_, identity, e := store.loadRetainedFullCheckpoint(ctx, tx, lease.Key, change.LastRevision, false)
+		if e != nil {
+			return e
+		}
+		cuts = append(cuts, numberedCut{SessionSavedCut{change.ID, membership, change.LastRevision, canonicalDigest(identity.State)}, revision})
+	}
+	sort.Slice(cuts, func(i, j int) bool { return cuts[i].revision < cuts[j].revision })
+	m.savedCuts = make([]SessionSavedCut, len(cuts))
+	for i, cut := range cuts {
+		if i > 0 && cut.revision == cuts[i-1].revision {
+			return ErrInvalid
+		}
+		m.savedCuts[i] = cut.cut
+	}
+	return nil
+}
+
 // This validation binds committed SQL data to the closed output grammar; the
 // concrete session manager additionally owns request/session/runtime correlation.
 func validateFullSessionOutput(raw []byte, lease OwnerLease, result BatchResult, cp protocol.Checkpoint, targets []BatchTargetVersion) ([]byte, error) {
+	return validateFullSessionOutputSelected(raw, lease, result, cp, targets, nil, false)
+}
+func validateFullSessionOutputSelected(raw []byte, lease OwnerLease, result BatchResult, cp protocol.Checkpoint, targets []BatchTargetVersion, deltas []SessionCommittedNativeDelta, native bool) ([]byte, error) {
 	canonical, err := canonicalPrivateControlJSON(raw)
 	if err != nil {
 		return nil, err
@@ -318,6 +407,18 @@ func validateFullSessionOutput(raw []byte, lease OwnerLease, result BatchResult,
 	}
 	var message protocol.SessionCommitResult
 	if json.Unmarshal(canonical, &message) != nil {
+		return nil, ErrPrivateControl
+	}
+	if native {
+		if message.NativeDeltas == nil {
+			return nil, ErrPrivateControl
+		}
+		actual, _ := json.Marshal(message.NativeDeltas)
+		expected, _ := json.Marshal(wireSessionNativeDeltas(deltas))
+		if !bytes.Equal(actual, expected) {
+			return nil, ErrPrivateControl
+		}
+	} else if message.NativeDeltas != nil {
 		return nil, ErrPrivateControl
 	}
 	if message.Scope != cp.Scope || message.Versions != cp.Versions || message.Fence.Generation != protocol.Counter(strconv.FormatInt(lease.Generation, 10)) || message.Fence.Token != lease.Token || !reflect.DeepEqual(message.Checkpoint, cp) || message.Receipt.RequestID != message.RequestID || message.Receipt.Issuer != "crewship" || message.Receipt.Scope != cp.Scope || message.Receipt.Generation != message.Fence.Generation || string(message.Receipt.Revision) != result.Revision {

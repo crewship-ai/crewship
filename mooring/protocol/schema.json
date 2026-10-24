@@ -4292,6 +4292,13 @@
           },
           "minItems": 0,
           "maxItems": 4096
+        },
+        "native_deltas": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "$ref": "#/$defs/SessionCommittedNativeDelta"
+          }
         }
       },
       "required": [
@@ -5306,6 +5313,9 @@
         "replay_basis": {
           "$ref": "#/$defs/Checkpoint",
           "description": "Optional single earlier retained FULL checkpoint from the original own-prefix base. Original_basis remains the exact immutable current operation base; never selected by state vector or digest. Both are authenticated by the host writer and replay-qualified by the app."
+        },
+        "prepared_prefix": {
+          "$ref": "#/$defs/SessionPreparedPrefix"
         }
       },
       "required": [
@@ -5325,6 +5335,142 @@
       ],
       "additionalProperties": false,
       "description": "Only actual inherited session host after human_native_prepare_v1 negotiation may construct this optional context. All source/order/basis/history bindings derive from original authenticated live submissions and actual Saved outcomes. Not client authority; no durable issuer/journal implied. Single-operation human atomic only; generic causal agent preparation rejects this field."
+    },
+    "SessionPreparedNativeDelta": {
+      "type": "object",
+      "properties": {
+        "reference": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "source_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "source_order": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "writer_origin": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "update": {
+          "type": "string",
+          "maxLength": 349528
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "minItems": 0,
+          "maxItems": 65536,
+          "uniqueItems": true
+        },
+        "checkpoint_state_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "prospective_revision": {
+          "$ref": "#/$defs/PositiveCounter"
+        }
+      },
+      "required": [
+        "reference",
+        "source_ref",
+        "source_order",
+        "writer_origin",
+        "update",
+        "targets",
+        "prospective_revision",
+        "checkpoint_state_digest"
+      ],
+      "additionalProperties": false,
+      "description": "Only a concrete earlier candidate from the SAME active SQL writer. The revision and state digest are prospective, not Saved. Actual original sealed source and candidate membership must match; never released as durable history before successful COMMIT."
+    },
+    "SessionPreparedHumanPrefix": {
+      "type": "object",
+      "properties": {
+        "reference": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "source_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "source_order": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "change": {
+          "$ref": "#/$defs/AtomicChange"
+        }
+      },
+      "required": [
+        "reference",
+        "source_ref",
+        "source_order",
+        "change"
+      ],
+      "additionalProperties": false,
+      "description": "Exact immutable original own operation linked to a concrete earlier candidate in this SAME SQL writer. Its authored state digest is intent until replay matches. This is not an actual Saved prefix."
+    },
+    "SessionPreparedPrefix": {
+      "type": "object",
+      "properties": {
+        "transaction_revision": {
+          "$ref": "#/$defs/Counter"
+        },
+        "transaction_state_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "deltas": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SessionPreparedNativeDelta"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "own_prefix": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SessionPreparedHumanPrefix"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        }
+      },
+      "required": [
+        "transaction_revision",
+        "transaction_state_digest",
+        "deltas",
+        "own_prefix"
+      ],
+      "additionalProperties": false,
+      "description": "Separate bounded transaction-local candidate evidence. Actual Saved transcript ends at this exact transaction-start state; the app replays and verifies that raw-state hash, then each prospective candidate cut. No third checkpoint copy or pre-COMMIT Saved claim."
+    },
+    "SessionCommittedNativeDelta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "change_id",
+        "membership_hash",
+        "revision",
+        "checkpoint_state_digest",
+        "native_delta"
+      ],
+      "properties": {
+        "change_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "membership_hash": {
+          "$ref": "#/$defs/Digest"
+        },
+        "revision": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "checkpoint_state_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "native_delta": {
+          "$ref": "#/$defs/SessionNativeDelta"
+        }
+      }
     }
   },
   "x-schema-version": "0.4.0"

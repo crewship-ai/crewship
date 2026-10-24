@@ -1629,6 +1629,7 @@ type SessionCommitResult struct {
 	Receipt        CommitResult                      `json:"receipt"`
 	Checkpoint     Checkpoint                        `json:"checkpoint"`
 	Targets        []TargetVersion                   `json:"targets"`
+	NativeDeltas   *[]SessionCommittedNativeDelta    `json:"native_deltas,omitempty"`
 }
 
 type SessionParticipantOpenType string
@@ -2035,6 +2036,40 @@ type SessionHumanPrepareContext struct {
 	OwnPrefix          []SessionSavedHumanPrefix `json:"own_prefix"`
 	OwnHistory         []SessionSavedNativeDelta `json:"own_history"`
 	ReplayBasis        *Checkpoint               `json:"replay_basis,omitempty"`
+	PreparedPrefix     *SessionPreparedPrefix    `json:"prepared_prefix,omitempty"`
+}
+
+type SessionPreparedNativeDelta struct {
+	Reference             Identifier      `json:"reference"`
+	SourceRef             Identifier      `json:"source_ref"`
+	SourceOrder           PositiveCounter `json:"source_order"`
+	WriterOrigin          PositiveCounter `json:"writer_origin"`
+	Update                string          `json:"update"`
+	Targets               []Identifier    `json:"targets"`
+	CheckpointStateDigest Digest          `json:"checkpoint_state_digest"`
+	ProspectiveRevision   PositiveCounter `json:"prospective_revision"`
+}
+
+type SessionPreparedHumanPrefix struct {
+	Reference   Identifier      `json:"reference"`
+	SourceRef   Identifier      `json:"source_ref"`
+	SourceOrder PositiveCounter `json:"source_order"`
+	Change      AtomicChange    `json:"change"`
+}
+
+type SessionPreparedPrefix struct {
+	TransactionRevision    Counter                      `json:"transaction_revision"`
+	TransactionStateDigest Digest                       `json:"transaction_state_digest"`
+	Deltas                 []SessionPreparedNativeDelta `json:"deltas"`
+	OwnPrefix              []SessionPreparedHumanPrefix `json:"own_prefix"`
+}
+
+type SessionCommittedNativeDelta struct {
+	ChangeID              Identifier         `json:"change_id"`
+	MembershipHash        Digest             `json:"membership_hash"`
+	Revision              PositiveCounter    `json:"revision"`
+	CheckpointStateDigest Digest             `json:"checkpoint_state_digest"`
+	NativeDelta           SessionNativeDelta `json:"native_delta"`
 }
 
 type Message = json.RawMessage

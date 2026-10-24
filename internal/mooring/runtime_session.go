@@ -567,6 +567,12 @@ func (s *SessionRuntime) validate(raw []byte, fromRuntime bool) ([]byte, session
 	if !allowed {
 		return nil, empty, ErrSessionRuntime
 	}
+	_, humanContext := value["human_context"]
+	_, nativeDelta := value["native_delta"]
+	_, nativeDeltas := value["native_deltas"]
+	if (humanContext || nativeDelta || nativeDeltas) && s.requireHumanNativePrepare() != nil {
+		return nil, empty, ErrSessionRuntime
+	}
 	if !large {
 		normalized, err = CanonicalE3WireJSON(raw)
 		if err != nil {

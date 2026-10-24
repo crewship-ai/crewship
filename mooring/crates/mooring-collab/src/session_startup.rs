@@ -77,22 +77,32 @@ impl Startup {
         first_send: Tick,
         origins: bool,
     ) -> io::Result<(Self, Vec<u8>)> {
+        Self::from_open_with_capabilities(raw, first_send, origins, false)
+    }
+    pub(crate) fn from_open_with_capabilities(
+        raw: &[u8],
+        first_send: Tick,
+        origins: bool,
+        human_native: bool,
+    ) -> io::Result<(Self, Vec<u8>)> {
         let normalized = session_control::validate(raw, control::Peer::InheritedHost)
             .map_err(|_| invalid("invalid session open"))?;
         let open: SessionOpen = serde_json::from_value(normalized.value().clone())
             .map_err(|_| invalid("not session open"))?;
         // The schema declares optional future opt-ins, not implementation
         // support. This driver still has no origin-inventory lane handler.
-        let identity_only = open.required_capabilities
-            == vec![SessionOpenRequiredCapabilitiesItem::CheckpointIdentityV1];
-        let both = open.required_capabilities.len() == 2
-            && open
+        if !open
+            .required_capabilities
+            .contains(&SessionOpenRequiredCapabilitiesItem::CheckpointIdentityV1)
+            || open
                 .required_capabilities
-                .contains(&SessionOpenRequiredCapabilitiesItem::CheckpointIdentityV1)
-            && open
-                .required_capabilities
-                .contains(&SessionOpenRequiredCapabilitiesItem::OriginInventoryV1);
-        if !identity_only && !(origins && both) {
+                .iter()
+                .any(|capability| match capability {
+                    SessionOpenRequiredCapabilitiesItem::CheckpointIdentityV1 => false,
+                    SessionOpenRequiredCapabilitiesItem::OriginInventoryV1 => !origins,
+                    SessionOpenRequiredCapabilitiesItem::HumanNativePrepareV1 => !human_native,
+                })
+        {
             return Err(invalid("unimplemented session capability"));
         }
         if open.scope.application_id != "wordcraft" || open.versions != wordcraft_versions() {

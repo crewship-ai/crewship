@@ -22,6 +22,7 @@ fn preexisting_definitions_only_add_session_native_optional_fields() {
         let optional = match name.as_str() {
             "PrepareAtomicCausal" => Some("human_context"),
             "AtomicPreparedCausal" => Some("native_delta"),
+            "SessionCommitResult" => Some("native_deltas"),
             _ => None,
         };
         if let Some(field) = optional {

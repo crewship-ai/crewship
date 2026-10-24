@@ -19,7 +19,12 @@ func (a *sessionHumanTestAdapter) PrepareSessionTargets(ctx context.Context, cp 
 		return BatchTargetCandidate{}, nil, ErrInvalid
 	}
 	a.sessionCalls++
-	return a.PrepareCausalTargets(ctx, cp, change, labels)
+	candidate, failure, err := a.PrepareCausalTargets(ctx, cp, change, labels)
+	if err == nil && failure == nil {
+		// MOCK application delta: this test exercises host lineage/lifetime only.
+		candidate.NativeDelta = &protocol.SessionNativeDelta{WriterOrigin: "31", AllocationOrigins: []protocol.PositiveCounter{}, Update: "AAA=", Targets: []protocol.Identifier{"p"}}
+	}
+	return candidate, failure, err
 }
 
 // Actual FULL SQLite; adapter, source resolver and sealed authority are MOCK.

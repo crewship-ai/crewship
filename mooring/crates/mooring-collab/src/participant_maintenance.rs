@@ -73,7 +73,9 @@ impl Maintenance {
     }
 }
 fn interval(duration: Duration) -> io::Result<Duration> {
-    if duration.is_zero() || duration > Duration::from_millis(mooring_protocol::session_control::DELIVERY_LEASE_MS) {
+    if duration.is_zero()
+        || duration > Duration::from_millis(mooring_protocol::session_control::DELIVERY_LEASE_MS)
+    {
         return Err(invalid("delivery duration bound"));
     }
     Ok((duration / 8)

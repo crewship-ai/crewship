@@ -201,6 +201,9 @@ func (s *BatchStore) commit(ctx context.Context, request BatchRequest, session *
 		if e != nil {
 			return e
 		}
+		if session != nil && session.fullBasis != nil && session.humanResolver != nil {
+			session.beginPreparedCandidates(revision, checkpoint)
+		}
 		if e = s.requireTargetMode(ctx, tx, key.ArtifactID); e != nil {
 			return e
 		}
@@ -363,7 +366,10 @@ func (s *BatchStore) commit(ctx context.Context, request BatchRequest, session *
 						if e = json.Unmarshal(rawContext, &isolatedContext); e != nil {
 							return e
 						}
-						if failure == nil {
+						// A human's original basis/raw history must be qualified by the
+						// concrete app before any explicit-read terminal decision. The
+						// runtime independently repeats those unchanged read checks.
+						if failure == nil || humanContext != nil {
 							if sessionNative {
 								targetCandidate, failure, e = sessionAdapter.PrepareSessionTargets(ctx, append([]byte(nil), checkpoint...), isolated, isolatedContext, humanContext)
 							} else {
@@ -478,6 +484,11 @@ func (s *BatchStore) commit(ctx context.Context, request BatchRequest, session *
 			}
 			if stored.Status == "saved" && s.targetsEnabled() {
 				if e = persistTargetRows(ctx, tx, key, targetRows); e != nil {
+					return e
+				}
+			}
+			if stored.Status == "saved" && session != nil {
+				if e = session.stagePreparedCandidate(c, stored.LastRevision, targetCandidate); e != nil {
 					return e
 				}
 			}

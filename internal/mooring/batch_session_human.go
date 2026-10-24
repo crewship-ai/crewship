@@ -38,6 +38,7 @@ type sessionHumanPrepareState struct {
 	checkpoint []byte
 	revision   string
 	loaded     map[string]struct{}
+	prepared   SessionPreparedCandidates
 }
 
 func (a SessionHumanPrepareAccess) FromStore(store *BatchStore) bool {
@@ -111,6 +112,12 @@ func (a SessionHumanPrepareAccess) LoadCheckpoint(ctx context.Context, revision 
 	}
 	n, err := batchCounter(revision)
 	head, headErr := batchCounter(s.revision)
+	if s.prepared.TransactionRevision != "" {
+		durable, e := batchCounter(s.prepared.TransactionRevision)
+		if e != nil || n > durable {
+			return empty, "", ErrInvalid
+		}
+	}
 	if err != nil || headErr != nil || n > head {
 		return empty, "", ErrInvalid
 	}
@@ -133,7 +140,7 @@ func (m *sessionCommitMode) resolveHumanPrepare(ctx context.Context, tx *sql.Tx,
 	if m == nil || m.fullBasis == nil || m.originalStore == nil || m.humanResolver == nil {
 		return nil, ErrInvalid
 	}
-	state := &sessionHumanPrepareState{active: true, store: m.originalStore, tx: tx, lease: lease, change: cloneBatchChange(change), checkpoint: append([]byte(nil), checkpoint...), revision: revision, loaded: make(map[string]struct{})}
+	state := &sessionHumanPrepareState{active: true, store: m.originalStore, tx: tx, lease: lease, change: cloneBatchChange(change), checkpoint: append([]byte(nil), checkpoint...), revision: revision, loaded: make(map[string]struct{}), prepared: m.prepared}
 	closeAccess := func() { state.mu.Lock(); state.active = false; state.mu.Unlock() }
 	defer closeAccess()
 	bound := context.WithValue(ctx, sessionHumanPrepareContextKey{}, state)
