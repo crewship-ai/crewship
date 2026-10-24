@@ -69,6 +69,19 @@ func (h *AdminUsersHandler) securityAuthority(r *http.Request, tx *sql.Tx, targe
 }
 
 func (h *AdminUsersHandler) mutateSecurity(w http.ResponseWriter, r *http.Request, operation string) {
+	var action string
+	var revokesSessions bool
+	switch operation {
+	case "one":
+		action, revokesSessions = "user.session_revoked", true
+	case "all":
+		action, revokesSessions = "user.sessions_revoked", true
+	case "unlock":
+		action = "user.unlocked"
+	default:
+		replyError(w, http.StatusBadRequest, "unsupported security operation")
+		return
+	}
 	_, _, target, ok := h.target(w, r)
 	if !ok {
 		return
@@ -93,7 +106,6 @@ func (h *AdminUsersHandler) mutateSecurity(w http.ResponseWriter, r *http.Reques
 		replyError(w, status, http.StatusText(status))
 		return
 	}
-	action := map[string]string{"one": "user.session_revoked", "all": "user.sessions_revoked", "unlock": "user.unlocked"}[operation]
 	metadata := map[string]any{}
 	var notifySessions, notifyAudit func()
 	var ids []string
@@ -138,7 +150,7 @@ func (h *AdminUsersHandler) mutateSecurity(w http.ResponseWriter, r *http.Reques
 			}
 		}
 	}
-	if err == nil && operation != "unlock" {
+	if err == nil && revokesSessions {
 		// Durable, session-independent marker in the same transaction: a
 		// Guest-published run accepted earlier stops at its next step even
 		// when the user had already logged out and no session row changed.
@@ -153,7 +165,7 @@ func (h *AdminUsersHandler) mutateSecurity(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var expected []adminSessionRevocation
-	if operation != "unlock" {
+	if revokesSessions {
 		selected := ids
 		if operation == "one" {
 			selected = []string{session}
@@ -168,7 +180,7 @@ func (h *AdminUsersHandler) mutateSecurity(w http.ResponseWriter, r *http.Reques
 		// Revocations proceed with a broken chain tail; unlock restores access
 		// and stays chained-only.
 		auditCtx := r.Context()
-		if operation != "unlock" {
+		if revokesSessions {
 			auditCtx = withSecurityAuditFallback(auditCtx)
 		}
 		err = auditInstance(auditCtx, r, tx, action, "USER", target, WorkspaceIDFromContext(r.Context()), metadata)

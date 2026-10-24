@@ -223,6 +223,7 @@ func TestAdminSessionRevokeSurvivesBrokenInstanceTail(t *testing.T) {
 			f := newPeopleFixture(t)
 			t.Setenv(backup.InstanceOwnerEmailEnv, "")
 			execOrFatal(t, f.db, `UPDATE users SET instance_role='ADMIN' WHERE id='u-admin'`)
+			execOrFatal(t, f.db, `UPDATE users SET failed_login_count=7,locked_until='2099-01-01T00:00:00Z' WHERE id='u-member'`)
 			breakInstanceAuditTail(t, f.db)
 			h := NewAdminUsersHandler(f.db, newTestLogger(), f.store)
 			req := peopleReq("POST", "/api/v1/admin/users/u-member/sessions", "u-admin", "admin@a.test", "", "")
@@ -242,6 +243,11 @@ func TestAdminSessionRevokeSurvivesBrokenInstanceTail(t *testing.T) {
 				if rr.Code != http.StatusInternalServerError || chained+fallback != 0 {
 					t.Fatalf("unlock bypassed broken chain: HTTP %d chained=%d fallback=%d", rr.Code, chained, fallback)
 				}
+				var failures int
+				var locked string
+				if err := f.db.QueryRow(`SELECT failed_login_count,COALESCE(locked_until,'') FROM users WHERE id='u-member'`).Scan(&failures, &locked); err != nil || failures != 7 || locked != "2099-01-01T00:00:00Z" {
+					t.Fatalf("refused unlock changed lockout: failures=%d locked=%q err=%v", failures, locked, err)
+				}
 				return
 			}
 			if rr.Code >= 300 {
@@ -249,6 +255,45 @@ func TestAdminSessionRevokeSurvivesBrokenInstanceTail(t *testing.T) {
 			}
 			if chained != 0 || fallback != 1 {
 				t.Fatalf("chained=%d fallback=%d, want one fallback row", chained, fallback)
+			}
+		})
+	}
+}
+
+// A future internal operation must opt in to mutation and fallback explicitly.
+// In particular it must not fall through to unlock or mark the account revoked.
+func TestAdminSecurityRejectsUnknownOperation(t *testing.T) {
+	for _, broken := range []bool{false, true} {
+		t.Run(map[bool]string{false: "healthy", true: "broken"}[broken], func(t *testing.T) {
+			f := newPeopleFixture(t)
+			t.Setenv(backup.InstanceOwnerEmailEnv, "")
+			execOrFatal(t, f.db, `UPDATE users SET instance_role='ADMIN' WHERE id='u-admin'`)
+			if broken {
+				breakInstanceAuditTail(t, f.db)
+			}
+			snapshot := func() string {
+				t.Helper()
+				var state string
+				err := f.db.QueryRow(`SELECT json_array(failed_login_count,locked_until,access_revoked_at,
+					(SELECT COUNT(*) FROM user_sessions WHERE user_id=users.id AND revoked_at IS NULL),
+					(SELECT COUNT(*) FROM instance_audit_logs),
+					(SELECT COUNT(*) FROM audit_logs)) FROM users WHERE id='u-member'`).Scan(&state)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return state
+			}
+			before := snapshot()
+			h := NewAdminUsersHandler(f.db, newTestLogger(), f.store)
+			for _, operation := range []string{"", "future-access"} {
+				req := peopleReq("POST", "/api/v1/admin/users/u-member/sessions", "u-admin", "admin@a.test", "", "")
+				req = req.WithContext(context.WithValue(req.Context(), ctxInstanceAdmin, true))
+				req.SetPathValue("userId", "u-member")
+				rr := httptest.NewRecorder()
+				h.mutateSecurity(rr, req, operation)
+				if rr.Code != http.StatusBadRequest || snapshot() != before {
+					t.Fatalf("unknown operation %q: HTTP %d; before=%s after=%s", operation, rr.Code, before, snapshot())
+				}
 			}
 		})
 	}
