@@ -161,6 +161,11 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	if err := o.configureHostOutput(&req); err != nil {
 		return err
 	}
+	if req.strictContentPrivacy && (req.HostOutputDir != "" || req.DurableOutputDir != "" || req.managedLaunch != nil) {
+		// These transports are already unsupported by the private command
+		// builder. Refuse before tracked state or admission resources are read.
+		return ErrPrivateRunUnqualified
+	}
 	ctx, finishTrackedRun, trackErr := o.trackAgentRun(ctx, &req)
 	if trackErr != nil {
 		return trackErr
@@ -191,6 +196,16 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	ctx, span := telemetry.StartAgentSpan(ctx, req.AgentID, req.AgentRole, req.CrewID, req.MissionID)
 	defer func() {
 		if r := recover(); r != nil {
+			if req.strictContentPrivacy {
+				// Never format, wrap, attach or rethrow the original value.
+				// Re-panicking can also expose the original recovered panic
+				// through Go's panic-chain printing. Remaining defers still
+				// release resources; callers receive an uncertain outcome.
+				err = ErrPrivateRunUnqualified
+				telemetry.RecordError(span, err)
+				span.End()
+				return
+			}
 			// telemetry.RecoverPanic stamps span + re-panics with a
 			// *PanicWithStack wrapper so the original crash stack is
 			// preserved across nested defers. Inner recover sites
@@ -1014,10 +1029,14 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 			if m, ok := event.Metadata.(map[string]interface{}); ok {
 				name, _ := m["tool_name"].(string)
 				if guard.observe(name, m["input"]) {
+					loggedTool := name
+					if req.strictContentPrivacy {
+						loggedTool = "[private tool]"
+					}
 					o.logger.Warn("loop guard tripped — aborting run",
 						"agent_id", req.AgentID,
 						"agent_slug", req.AgentSlug,
-						"tool", name,
+						"tool", loggedTool,
 						"threshold", loopGuardThreshold,
 					)
 					cancel()
@@ -1164,12 +1183,13 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		// as a clean or even a normal failed run, and return a typed error
 		// so callers can tell "the agent failed" apart from "we don't know
 		// what the agent did".
+		visibleInspectErr := privateRunError(req, inspErr)
 		o.logger.Error("exec inspect failed; run outcome unknown, failing closed",
-			"agent_id", req.AgentID, "exec_id", result.ExecID, "error", inspErr)
+			"agent_id", req.AgentID, "exec_id", result.ExecID, "error", visibleInspectErr)
 		o.failRun(ctx, req, runState.ID, "error")
 		o.emitExecEnd(ctx, req, result.ExecID, journalCmd, "warn",
-			fmt.Sprintf("%s: outcome UNKNOWN — exec inspect failed: %v", req.AgentSlug, inspErr),
-			execStart, map[string]any{"outcome": "unknown", "inspect_error": inspErr.Error()})
+			fmt.Sprintf("%s: outcome UNKNOWN — exec inspect failed: %v", req.AgentSlug, visibleInspectErr),
+			execStart, map[string]any{"outcome": "unknown", "inspect_error": visibleInspectErr.Error()})
 		o.markAgentOnline(ctx, req, map[string]any{"reason": "exec_inspect_failed"})
 		return fmt.Errorf("exec inspect failed, run outcome unknown: %w", inspErr)
 	}
