@@ -1,0 +1,92 @@
+{
+  "base": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
+  "native_patch_commit": "e2d9a769ad19f59ea4875b31bed2a8e1cc478c02",
+  "patch_sha256": "405ec80afcd8ceea160e9f085a2cb2eb2ba29d8c449942c7683c1eab3ea5f543",
+  "source_archive_sha256": "3d4a868545d592ae3c499e93852a889c0393288f1a868e4e8790574d1a5c1b5c",
+  "files": [
+    {
+      "path": "ROADMAP.md",
+      "bytes": 182404,
+      "sha256": "ddc2d206569a1b389378b3e98834c921d6e5b03066dfa3f46ad95d638690d608",
+      "before_sha256": "1d86cf7ba26aab60f3afdbd2139f20638e23dd23df2df57d53463075fb310276"
+    },
+    {
+      "path": "crates/engine/src/recovery.rs",
+      "bytes": 6779,
+      "sha256": "831d5f5978f0c933fb7d7d6dd15b8eab22dd7588b8824e81cf299e6c977fb2bc",
+      "before_sha256": "4130e76c3336827a5226afd7288da52c2ee3462b8086cb90c9b4b132deaa422b"
+    },
+    {
+      "path": "crates/engine/src/session.rs",
+      "bytes": 85409,
+      "sha256": "f6c4ded04ee585d664dfccef780d7b16287c0c63e86e209e7e65953a9c097606",
+      "before_sha256": "9f99f5dca42359f2fba9589ada8c787e56d1bb0ce8ffa53c58fc2ed8ea88a4b0"
+    },
+    {
+      "path": "crates/engine/src/tests_mooring_boundary.rs",
+      "bytes": 4159,
+      "sha256": "678d26011f22527ed8c190232ff26884b978b06b7c811fdb481bef848157bc77",
+      "before_sha256": null
+    },
+    {
+      "path": "crates/ui-egui/src/chrome.rs",
+      "bytes": 55979,
+      "sha256": "27438c878b2baa4e645f8b8370dc1ef677eb46de211570907e3c11e9b0d405c2",
+      "before_sha256": "2d56fd40c2bb183c1dd7db1165dc90c4b8d0018522ed0518f5ce065838a5f9df"
+    },
+    {
+      "path": "crates/ui-egui/src/keys.rs",
+      "bytes": 64334,
+      "sha256": "1d3380cefd30015bf1a8aa8ec4e8d28a574eaf870fa5df88df767178cd74b796",
+      "before_sha256": "751adec9114b760553f55c342255c6a0c13b6829123cee7f3577e2083e841960"
+    },
+    {
+      "path": "crates/ui-egui/src/lib.rs",
+      "bytes": 468971,
+      "sha256": "9545870509052fd517b8dd2bea3715faacf208d07f7a962450ffe7b96beae188",
+      "before_sha256": "bbd6a34f0ae5819b199974f55b3cf1d45d0b6dd15effa98b276b5d8bf52eed57"
+    },
+    {
+      "path": "crates/ui-egui/src/mooring_boundary.rs",
+      "bytes": 3451,
+      "sha256": "37712f6fda5e8c944dd872defe0c23698abd0067d97601fe85cb42113b3303ea",
+      "before_sha256": null
+    },
+    {
+      "path": "crates/ui-egui/src/tests_mooring_boundary.rs",
+      "bytes": 8392,
+      "sha256": "288ab8aef616317ceff2c388a6a171dd6eefd123378db5a5b85d1242e70030b0",
+      "before_sha256": null
+    },
+    {
+      "path": "crates/ui-egui/src/tests_mooring_recovery.rs",
+      "bytes": 3959,
+      "sha256": "11622b960b1dd4653ff214cd0b4129f7cccab2b7e690b4b0e09b49e7a9313355",
+      "before_sha256": null
+    },
+    {
+      "path": "crates/ui-egui/src/widgets.rs",
+      "bytes": 89678,
+      "sha256": "ada33c6b912e29ec211468aa87921762aed1f0bbb01adc0eaf5f1eea476b0f81",
+      "before_sha256": "96b1009d9573325b998228aac766478f6ccc0cfa8b0b8b7466a29170b5033e0b"
+    },
+    {
+      "path": "docs/architecture.md",
+      "bytes": 6546,
+      "sha256": "47b9f1cffb59123ec5097b16107b9652b4e664015b0928aae871e9c8e7e12d27",
+      "before_sha256": "ab25227eb885f313099545930e2f3c1c3898745e24a2714a0534d96a0db2b065"
+    },
+    {
+      "path": "docs/gaps.md",
+      "bytes": 60591,
+      "sha256": "c1858aa3944d219583cc39e8c3375a4247aca769eb9ed006dd890758ab8513de",
+      "before_sha256": "a29e818cd32e323affba835167f5b7f95700a0b11383a9e66e7b8112e107635a"
+    },
+    {
+      "path": "docs/ui-parity.md",
+      "bytes": 92324,
+      "sha256": "1c54193ba4e5008c5bfb2d3030249c6bced716256e26fddf2232b3e47522e489",
+      "before_sha256": "60b5fb5f8a23724cd3dd750212b76b123e28a068ba97196c491fe62edbbde9ab"
+    }
+  ]
+}
