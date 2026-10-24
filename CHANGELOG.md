@@ -276,6 +276,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **Workbook creation now rechecks the original author’s current rights in its transaction.** Lost membership, restricted access or removed Page-create rights refuse both creation and identical retries; a rights change during insertion rolls back the staged Page.
+
 - Revoke every matching Page grant when a reference identifies both a current subject and a departed stored ID, without changing unrelated grants. ⚠️ References matching multiple live subjects now return 400 instead of selecting one arbitrarily. Creation and reissue also verify that other subjects' grants remain unchanged. Losing issuer authority during the audit commit returns 403 and rolls back the change; database failures remain server errors.
 - **Old `/paymaster` links open Spend instead of Not found.** The page moved into the Journal's Spend tab; `/paymaster` now redirects there, and spend links built by the app point at it directly.
 - **Harbor 2: Spend respects the role.** The dashboard no longer asks for the cost ledger or draws the Spend tile below ADMIN, and Activity › Spend shows "Spend is unavailable: only workspace owners and admins can see costs." instead of failed-load cards if the server answers 403 (#3662 on the new layout).

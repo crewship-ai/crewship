@@ -217,6 +217,28 @@ func gridcraftCredential(r *http.Request, tx *sql.Tx, write bool) error {
 	}
 }
 
+// createAuthority rechecks the existing credential, live membership ceiling and
+// Page-create policy through the same transaction that stages the private Page.
+func (h *gridcraftHTTP) createAuthority(r *http.Request, tx *sql.Tx, ws, user string) error {
+	if e := gridcraftCredential(r, tx, true); e != nil {
+		return e
+	}
+	ctx := context.WithValue(r.Context(), pageAuthReaderKey{}, tx)
+	role, e := h.pages.liveContentHumanRole(ctx, ws, user)
+	if e != nil {
+		return appengine.ErrForbidden
+	}
+	var caps sql.NullString
+	var currentRole string
+	if e = tx.QueryRowContext(ctx, `SELECT capabilities,role FROM workspace_members WHERE workspace_id=? AND user_id=?`, ws, user).Scan(&caps, &currentRole); e != nil {
+		return appengine.ErrForbidden
+	}
+	if currentRole != role || (!canRole(role, "create") && !HasCapability(resolveCapabilitiesFromRow(caps, role), CapabilityPageCreate)) {
+		return appengine.ErrForbidden
+	}
+	return nil
+}
+
 func (h *gridcraftHTTP) humanKey(r *http.Request, write bool) (appengine.Key, error) {
 	k := appengine.Key{WorkspaceID: WorkspaceIDFromContext(r.Context())}
 	column, ref := "slug", r.PathValue("slug")
@@ -301,7 +323,7 @@ func (h *gridcraftHTTP) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-	if validateContentHumanCredential(r, tx, "pages:write") != nil {
+	if h.createAuthority(r, tx, wsID, user.ID) != nil {
 		replyError(w, 403, "Forbidden")
 		return
 	}
@@ -355,6 +377,10 @@ func (h *gridcraftHTTP) create(w http.ResponseWriter, r *http.Request) {
 	}
 	if err = insertPageVersion(r.Context(), tx, pageID, 1, string(specJSON), user.ID, stamp); err != nil {
 		gridcraftError(w, err)
+		return
+	}
+	if h.createAuthority(r, tx, wsID, user.ID) != nil {
+		replyError(w, 403, "Forbidden")
 		return
 	}
 	if err = tx.Commit(); err != nil {

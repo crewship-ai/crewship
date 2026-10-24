@@ -310,23 +310,7 @@ func (m *mooringHTTP) audit(r *http.Request, tx *sql.Tx, ws, page string, eventT
 }
 
 func (m *mooringHTTP) createAuthority(r *http.Request, tx *sql.Tx, ws, user string) error {
-	if e := gridcraftCredential(r, tx, true); e != nil {
-		return e
-	}
-	ctx := context.WithValue(r.Context(), pageAuthReaderKey{}, tx)
-	role, e := m.workbook.pages.liveContentHumanRole(ctx, ws, user)
-	if e != nil {
-		return appengine.ErrForbidden
-	}
-	var caps sql.NullString
-	var currentRole string
-	if e = tx.QueryRowContext(ctx, `SELECT capabilities,role FROM workspace_members WHERE workspace_id=? AND user_id=?`, ws, user).Scan(&caps, &currentRole); e != nil {
-		return appengine.ErrForbidden
-	}
-	if currentRole != role || (!canRole(role, "create") && !HasCapability(resolveCapabilitiesFromRow(caps, role), CapabilityPageCreate)) {
-		return appengine.ErrForbidden
-	}
-	return nil
+	return m.workbook.createAuthority(r, tx, ws, user)
 }
 
 type mooringCreatedResponse struct {
