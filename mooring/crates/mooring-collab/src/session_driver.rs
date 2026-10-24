@@ -7,7 +7,7 @@ use crate::{
     session_startup::{ReadySession, Startup},
 };
 use mooring_core::batch::Tick;
-use mooring_protocol::{boundary::Transport, control, SessionOpen};
+use mooring_protocol::{boundary::Transport, control, Counter, OwnerGrant, SessionOpen};
 use std::{
     io,
     os::unix::net::UnixStream,
@@ -25,6 +25,7 @@ pub struct Driver {
     prepare: Option<thread::JoinHandle<()>>,
     ready: ReadySession,
     clock: Clock,
+    maintenance: crate::owner_maintenance::Maintenance,
 }
 impl Driver {
     /// This constructor deliberately does not negotiate or assert transport
@@ -71,10 +72,15 @@ impl Driver {
                 let restore = receive_until(&actor, || owner.check_owner(clock()?))?;
                 let mut ready = owner.restore(&restore, || clock())?;
                 ready.acknowledge(&output, || clock())?;
-                Ok(ready)
+                let maintenance = crate::owner_maintenance::Maintenance::new(
+                    first_send,
+                    Duration::from_millis(ready.owner().lease_duration_ms.0),
+                    grant,
+                )?;
+                Ok((ready, maintenance))
             })();
             match ready {
-                Ok(ready) => Ok((ready, worker)),
+                Ok((ready, maintenance)) => Ok((ready, worker, maintenance)),
                 Err(error) => {
                     lane.close();
                     let _ = worker.join();
@@ -83,11 +89,12 @@ impl Driver {
             }
         })();
         match result {
-            Ok((ready, prepare)) => Ok(Self {
+            Ok((ready, prepare, maintenance)) => Ok(Self {
                 lane,
                 prepare: Some(prepare),
                 ready,
                 clock,
+                maintenance,
             }),
             Err(error) => {
                 lane.close();
@@ -115,6 +122,74 @@ impl Driver {
             return Err(invalid("session owner expired"));
         }
         Ok(())
+    }
+    /// Lease knowledge only, never participant read/write authority.
+    pub fn known_owner_permission(&self) -> Counter {
+        self.ready.known_owner_permission()
+    }
+
+    /// One bounded owner-control step. Preparation remains on its independent
+    /// lane. No participant input, receipts or document replacement is accepted.
+    pub fn maintain_owner(&mut self, host: &Transport<'_>, wait: Duration) -> io::Result<()> {
+        let result = self.maintain_owner_inner(host, wait);
+        if result.is_err() {
+            self.ready.close_owner();
+            self.lane.close();
+        }
+        result
+    }
+    fn maintain_owner_inner(&mut self, host: &Transport<'_>, wait: Duration) -> io::Result<()> {
+        if !matches!(host,Transport::AuthenticatedHost{issuer,..} if *issuer==self.ready.host_issuer())
+        {
+            return Err(invalid("owner maintenance requires original host"));
+        }
+        self.check_owner()?;
+        let now = (self.clock)()?;
+        let request = if self.maintenance.begin_due(now) {
+            let raw = self.ready.begin_owner_renewal(now)?;
+            self.maintenance.started(now)?;
+            Some(raw)
+        } else if self.maintenance.retry_due(now) {
+            let raw = self.ready.retry_owner_renewal(now)?;
+            self.maintenance.retried(now)?;
+            Some(raw)
+        } else {
+            None
+        };
+        if let Some(raw) = request {
+            self.lane.output().send_control_checked(&raw, || {
+                if self.ready.may_own((self.clock)()?) {
+                    Ok(())
+                } else {
+                    Err(invalid("owner expired before renewal send"))
+                }
+            })?;
+        }
+        self.check_owner()?;
+        let now = (self.clock)()?;
+        let wait = self.maintenance.wait(now, wait);
+        if let Some(raw) = self.lane.inbox(Route::Actor).receive(wait)? {
+            self.check_owner()?;
+            // Local FD retries can yield an exact duplicate of the last reply.
+            // Ignoring it changes no deadline, permission knowledge or Doc.
+            if raw == self.maintenance.completed {
+                return Ok(());
+            }
+            let grant: OwnerGrant = serde_json::from_slice(&raw)
+                .map_err(|_| invalid("unexpected owner actor control"))?;
+            self.ready
+                .accept_owner_renewal(&raw, host, (self.clock)()?)?;
+            self.maintenance
+                .completed(Duration::from_millis(grant.lease_duration_ms.0), raw)?;
+        }
+        self.check_owner()
+    }
+    /// Unselected lease-only integration loop; channel/clock failure closes all
+    /// lanes. A future actor loop must explicitly qualify additional controls.
+    pub fn run_owner(&mut self, host: &Transport<'_>) -> io::Result<()> {
+        loop {
+            self.maintain_owner(host, Duration::from_millis(20))?;
+        }
     }
 }
 impl Drop for Driver {

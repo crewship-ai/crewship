@@ -26,10 +26,7 @@ fn run() -> std::io::Result<()> {
         &transport,
         mooring_core::lease::boottime,
     )?;
-    loop {
-        driver.check_owner()?;
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    driver.run_owner(&transport)
 }
 #[cfg(not(target_os = "linux"))]
 fn run() -> std::io::Result<()> {

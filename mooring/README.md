@@ -261,3 +261,18 @@ They use injected clocks and trusted host fixtures. Retained SQL metadata,
 authorized writer-bound full-to-content conversion, actual Go startup, live FIFO,
 participant gates and provider/human admission must be composed separately before
 enablement. The earlier pinned Go/Rust opaque proofs remain historical evidence.
+
+### Native owner maintenance
+
+The unselected session driver renews its owner lease from the original request
+send time, retries the same pending nonce, and checks the BOOTTIME owner guard
+after waiting for the shared writer. Preparation remains on its independent
+lane. A single cached canonical reply permits exact duplicates without extending
+the deadline; changed, unrelated or late replies close the driver. Owner epoch
+knowledge may advance, but participant gates and the confirmed document do not.
+
+Deterministic clock and real socket tests cover expiry, retry timing, duplicate
+replies and preparation while a renewal reply is withheld. This is owner-only
+maintenance: production CLI selection, live participant admission and delivery
+remain disabled. Actual Go/SQL renewal qualification is a separate integration
+step.
