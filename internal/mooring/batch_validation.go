@@ -29,7 +29,7 @@ func (s *BatchStore) ready() error {
 		return ErrBatchDisabled
 	}
 	l := s.config.Limits
-	if s.db == nil || s.config.Owners == nil || s.config.Owners.db != s.db || s.config.Authority == nil || (s.config.Adapter == nil && !s.targetsEnabled()) || !s.targetConfigValid() || l.LedgerOperations < 1 || l.Changes < 1 || l.Tasks < 1 || l.AuditEvents < 1 || l.Checkpoints < 1 || l.CheckpointBytes < 1 || l.CheckpointBytes > 4<<20 || l.TotalCheckpointBytes < int64(l.CheckpointBytes) {
+	if s.db == nil || s.config.Owners == nil || s.config.Owners.db != s.db || s.config.Authority == nil || (s.config.Adapter == nil && !s.targetsEnabled()) || !s.targetConfigValid() || !s.checkpointIdentityConfigValid() || l.LedgerOperations < 1 || l.Changes < 1 || l.Tasks < 1 || l.AuditEvents < 1 || l.Checkpoints < 1 || l.CheckpointBytes < 1 || l.CheckpointBytes > 4<<20 || l.TotalCheckpointBytes < int64(l.CheckpointBytes) {
 		return ErrInvalid
 	}
 	return nil
