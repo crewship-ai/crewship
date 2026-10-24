@@ -32,3 +32,11 @@ Tests use real Unix socketpairs for fragmentation, EOF, exact readiness,
 unsupported versions, duplicate/unknown fields, post-bootstrap refusal and
 bootstrap timeout. These are transport/bootstrap checks; they do not establish
 browser collaboration or end-to-end authority enforcement.
+
+The unselected session library also exposes a consuming `Driver::into_actor`
+transition. It transfers the acknowledged owned document into the bounded core
+actor while retaining the original FD, prepare worker, owner nonce history and
+first-send renewal deadlines. `RunningDriver` exposes only immutable confirmed
+state, owner maintenance and recovery; participant admission, timer dispatch
+and verified receipt settlement are not connected by this transition. A bare
+restore or renewal reply cannot replace the actor's confirmed document.

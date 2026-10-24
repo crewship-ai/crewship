@@ -16,16 +16,16 @@ use std::{
     time::{Duration, Instant},
 };
 
-type Clock = Arc<dyn Fn() -> io::Result<Tick> + Send + Sync>;
+pub(crate) type Clock = Arc<dyn Fn() -> io::Result<Tick> + Send + Sync>;
 
 /// Keeps the actual live document apart from stateless preparation candidates.
 /// Drop closes the shared socket before joining the bounded prepare worker.
 pub struct Driver {
-    lane: Lane,
+    pub(crate) lane: Lane,
     prepare: Option<thread::JoinHandle<()>>,
-    ready: ReadySession,
-    clock: Clock,
-    maintenance: crate::owner_maintenance::Maintenance,
+    ready: Option<ReadySession>,
+    pub(crate) clock: Clock,
+    pub(crate) maintenance: crate::owner_maintenance::Maintenance,
 }
 impl Driver {
     /// This constructor deliberately does not negotiate or assert transport
@@ -109,7 +109,7 @@ impl Driver {
             Ok((ready, prepare, maintenance)) => Ok(Self {
                 lane,
                 prepare: Some(prepare),
-                ready,
+                ready: Some(ready),
                 clock,
                 maintenance,
             }),
@@ -119,8 +119,23 @@ impl Driver {
             }
         }
     }
+    fn ready(&self) -> &ReadySession {
+        // into_actor consumes Driver; no caller can observe the emptied slot.
+        self.ready.as_ref().expect("unconsumed startup document")
+    }
+    /// Consume the acknowledged startup exactly once. The original FD, prepare
+    /// worker, owner nonce history and one owned Doc stay together. This does
+    /// not admit participants or enable a production session profile.
+    pub fn into_actor(mut self) -> io::Result<crate::session_actor::RunningDriver> {
+        self.check_owner()?;
+        let now = (self.clock)()?;
+        let ready = self.ready.take().expect("unconsumed startup document");
+        let issuer = ready.host_issuer().to_owned();
+        let (owner, document) = ready.into_running(now)?;
+        crate::session_actor::RunningDriver::from_driver(self, owner, document, issuer)
+    }
     pub fn confirmed(&self) -> &crate::session_startup::ConfirmedDocument {
-        self.ready.confirmed()
+        self.ready().confirmed()
     }
     /// No participant control is processed yet. This remains the exact owned
     /// restored document until a separately qualified durable settlement path.
@@ -128,13 +143,13 @@ impl Driver {
         let now = match (self.clock)() {
             Ok(now) => now,
             Err(error) => {
-                self.ready.close_owner();
+                self.ready().close_owner();
                 self.lane.close();
                 return Err(error);
             }
         };
-        if self.lane.is_closed() || !self.ready.may_own(now) {
-            self.ready.close_owner();
+        if self.lane.is_closed() || !self.ready().may_own(now) {
+            self.ready().close_owner();
             self.lane.close();
             return Err(invalid("session owner expired"));
         }
@@ -142,7 +157,7 @@ impl Driver {
     }
     /// Lease knowledge only, never participant read/write authority.
     pub fn known_owner_permission(&self) -> Counter {
-        self.ready.known_owner_permission()
+        self.ready().known_owner_permission()
     }
 
     /// One bounded owner-control step. Preparation remains on its independent
@@ -150,24 +165,24 @@ impl Driver {
     pub fn maintain_owner(&mut self, host: &Transport<'_>, wait: Duration) -> io::Result<()> {
         let result = self.maintain_owner_inner(host, wait);
         if result.is_err() {
-            self.ready.close_owner();
+            self.ready().close_owner();
             self.lane.close();
         }
         result
     }
     fn maintain_owner_inner(&mut self, host: &Transport<'_>, wait: Duration) -> io::Result<()> {
-        if !matches!(host,Transport::AuthenticatedHost{issuer,..} if *issuer==self.ready.host_issuer())
+        if !matches!(host,Transport::AuthenticatedHost{issuer,..} if *issuer==self.ready().host_issuer())
         {
             return Err(invalid("owner maintenance requires original host"));
         }
         self.check_owner()?;
         let now = (self.clock)()?;
         let request = if self.maintenance.begin_due(now) {
-            let raw = self.ready.begin_owner_renewal(now)?;
+            let raw = self.ready().begin_owner_renewal(now)?;
             self.maintenance.started(now)?;
             Some(raw)
         } else if self.maintenance.retry_due(now) {
-            let raw = self.ready.retry_owner_renewal(now)?;
+            let raw = self.ready().retry_owner_renewal(now)?;
             self.maintenance.retried(now)?;
             Some(raw)
         } else {
@@ -175,7 +190,7 @@ impl Driver {
         };
         if let Some(raw) = request {
             self.lane.output().send_control_checked(&raw, || {
-                if self.ready.may_own((self.clock)()?) {
+                if self.ready().may_own((self.clock)()?) {
                     Ok(())
                 } else {
                     Err(invalid("owner expired before renewal send"))
@@ -194,7 +209,7 @@ impl Driver {
             }
             let grant: OwnerGrant = serde_json::from_slice(&raw)
                 .map_err(|_| invalid("unexpected owner actor control"))?;
-            self.ready
+            self.ready()
                 .accept_owner_renewal(&raw, host, (self.clock)()?)?;
             self.maintenance
                 .completed(Duration::from_millis(grant.lease_duration_ms.0), raw)?;

@@ -316,6 +316,99 @@ fn receive_json(peer: &mut UnixStream) -> (Vec<u8>, Value) {
     (raw, value)
 }
 #[test]
+fn consuming_actor_keeps_original_doc_fd_worker_and_pending_renewal() {
+    use std::sync::atomic::Ordering;
+    let (mut driver, mut peer, now) = renewing_driver();
+    let before = driver.confirmed().document().checkpoint().unwrap();
+    let native = driver.confirmed().document().native().unwrap();
+    let ids = driver.confirmed().document().block_ids().unwrap();
+    now.store(500, Ordering::SeqCst);
+    driver.maintain_owner(&host(), Duration::ZERO).unwrap();
+    let (original, _) = receive_json(&mut peer);
+    now.store(600, Ordering::SeqCst);
+    let mut running = driver.into_actor().unwrap();
+    assert_eq!(running.confirmed().document().native().unwrap(), native);
+    assert_eq!(running.confirmed().document().block_ids().unwrap(), ids);
+    now.store(750, Ordering::SeqCst);
+    running.maintain_owner(&host(), Duration::ZERO).unwrap();
+    let (retry, _) = receive_json(&mut peer);
+    assert_eq!(retry, original);
+
+    let cp = running.confirmed().checkpoint();
+    let identity = mooring_protocol::checkpoint::verify(
+        cp,
+        mooring_protocol::checkpoint::Limits {
+            decoded_bytes: control::MAX_CHECKPOINT_BYTES,
+            preimage_bytes: control::MAX_CONTROL_BYTES,
+        },
+    )
+    .unwrap();
+    let request = json!({"type":"validate_checkpoint_causal","request_id":"prepare-after-consuming-transition","scope":cp.scope,"selected":cp.versions,"checkpoint":{"encoding":"base64","state":cp.state,"digest":identity.content_digest()},"control_profile":"mooring.prepare-causal.v1"});
+    mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&request).unwrap()).unwrap();
+    let (_, prepared) = receive_json(&mut peer);
+    assert_eq!(prepared["type"], "checkpoint_validated_causal");
+    assert_eq!(prepared["request_id"], "prepare-after-consuming-transition");
+    mooring_collab::write_frame(&mut peer, &renewal_reply(&original, "4")).unwrap();
+    now.store(800, Ordering::SeqCst);
+    running
+        .maintain_owner(&host(), Duration::from_millis(20))
+        .unwrap();
+    assert_eq!(running.known_owner_permission(), Counter(4));
+    assert_eq!(running.confirmed().checkpoint().revision, Counter(10));
+    assert_eq!(running.confirmed().document().checkpoint().unwrap(), before);
+    now.store(1000, Ordering::SeqCst);
+    running.maintain_owner(&host(), Duration::ZERO).unwrap();
+    let (next, _) = receive_json(&mut peer);
+    assert_ne!(next, original);
+    now.store(1500, Ordering::SeqCst);
+    assert!(running.check_owner().is_err());
+    let _ = mooring_collab::write_frame(&mut peer, &renewal_reply(&next, "5"));
+    assert!(running.maintain_owner(&host(), Duration::ZERO).is_err());
+    let (document, revision, originals) = running.into_recovery();
+    assert_eq!(revision, 10);
+    assert_eq!(document.document().checkpoint().unwrap(), before);
+    assert_eq!(document.document().native().unwrap(), native);
+    assert_eq!(document.document().block_ids().unwrap(), ids);
+    assert!(originals.is_empty());
+}
+
+#[test]
+fn consuming_transition_cannot_restart_an_expired_or_reversed_owner() {
+    use std::sync::atomic::Ordering;
+    for reverse in [false, true] {
+        let (mut driver, mut peer, now) = renewing_driver();
+        if reverse {
+            now.store(100, Ordering::SeqCst);
+            driver.check_owner().unwrap();
+            now.store(99, Ordering::SeqCst);
+        } else {
+            now.store(1000, Ordering::SeqCst);
+        }
+        assert!(driver.into_actor().is_err());
+        assert!(mooring_collab::read_frame(&mut peer).unwrap().is_none());
+    }
+}
+
+#[test]
+fn running_actor_rejects_unqualified_document_replacement_and_recovers_original() {
+    let (driver, mut peer, _) = renewing_driver();
+    let before = driver.confirmed().document().checkpoint().unwrap();
+    let mut running = driver.into_actor().unwrap();
+    mooring_collab::write_frame(&mut peer, &restore().0).unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while running
+        .maintain_owner(&host(), Duration::from_millis(20))
+        .is_ok()
+    {
+        assert!(std::time::Instant::now() < deadline);
+    }
+    let (document, revision, originals) = running.into_recovery();
+    assert_eq!(revision, 10);
+    assert_eq!(document.document().checkpoint().unwrap(), before);
+    assert!(originals.is_empty());
+}
+
+#[test]
 fn driver_renews_exact_first_send_nonce_and_only_advances_owner_knowledge() {
     use std::sync::atomic::Ordering;
     let (mut driver, mut peer, now) = renewing_driver();

@@ -3,6 +3,8 @@ use std::io::{self, Read, Write};
 pub mod dispatch;
 pub mod dispatch_causal;
 #[cfg(unix)]
+pub mod session_actor;
+#[cfg(unix)]
 pub mod session_lane;
 #[cfg(unix)]
 mod session_origins;
