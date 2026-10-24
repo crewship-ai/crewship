@@ -223,6 +223,7 @@ func TestAdminSessionRevokeSurvivesBrokenInstanceTail(t *testing.T) {
 			f := newPeopleFixture(t)
 			t.Setenv(backup.InstanceOwnerEmailEnv, "")
 			execOrFatal(t, f.db, `UPDATE users SET instance_role='ADMIN' WHERE id='u-admin'`)
+			execOrFatal(t, f.db, `UPDATE users SET failed_login_count=7,locked_until='2099-01-01T00:00:00Z' WHERE id='u-member'`)
 			breakInstanceAuditTail(t, f.db)
 			h := NewAdminUsersHandler(f.db, newTestLogger(), f.store)
 			req := peopleReq("POST", "/api/v1/admin/users/u-member/sessions", "u-admin", "admin@a.test", "", "")
@@ -241,6 +242,11 @@ func TestAdminSessionRevokeSurvivesBrokenInstanceTail(t *testing.T) {
 				// Unlock restores access: it stays behind the chain.
 				if rr.Code != http.StatusInternalServerError || chained+fallback != 0 {
 					t.Fatalf("unlock bypassed broken chain: HTTP %d chained=%d fallback=%d", rr.Code, chained, fallback)
+				}
+				var failures int
+				var locked string
+				if err := f.db.QueryRow(`SELECT failed_login_count,COALESCE(locked_until,'') FROM users WHERE id='u-member'`).Scan(&failures, &locked); err != nil || failures != 7 || locked != "2099-01-01T00:00:00Z" {
+					t.Fatalf("refused unlock changed lockout: failures=%d locked=%q err=%v", failures, locked, err)
 				}
 				return
 			}
