@@ -1,8 +1,6 @@
 package orchestrator
 
 import (
-	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -18,7 +16,7 @@ func TestReviewPrivateDetachedProbePanicCannotEscapeAfterRunReturns(t *testing.T
 	h := &detachedHold{runID: req.RunID, containerID: req.ContainerID, agentSlug: req.AgentSlug, req: req, done: make(chan struct{}), alertAfter: time.Hour}
 	var caught any
 	func() { defer func() { caught = recover() }(); o.watchDetachedHold(h, time.Millisecond) }()
-	if strings.Contains(fmt.Sprint(caught), marker) {
+	if caught != nil {
 		t.Fatal("private detached provider panic escaped after RunAgent's privacy defer ended")
 	}
 }
