@@ -438,3 +438,12 @@ A private-owner override during restoration does not itself record
 content leaves the host, a future delivery handler must durably record the
 required owner-access audit and recheck the current recipient and delivery
 lease. This startup helper supplies neither audit nor delivery authority.
+
+`OriginInventoryData` normalizes bounded canonical scalar tuples and computes a
+candidate against supplied baseline and issued exclusions. These helpers are
+data only: even a normalized empty list proves nothing about a checkpoint.
+They cannot reserve an origin or construct a writer/source capability. Actual
+issuance still requires opaque runtime inventory evidence, original author and
+owner checks in the same writer, persistent burned exclusions and COMMIT before
+publication. The current 4,096-entry inspector bound is not an unbounded
+document-lifetime entitlement. No ingress or issuance route uses these helpers.
