@@ -94,6 +94,12 @@ func (r *collaborationRuntimeResolver) CreateRun(ctx context.Context, id, agent,
 func collaborationRuntimeFixture(t *testing.T) (*collaborationAgentTestFixture, *collaborationAgentTaskDispatcher, *WebhookHandler, *collaborationRuntimeRunner, *collaborationRuntimeContainer, dispatch.Assignment) {
 	t.Helper()
 	x := newCollaborationAgentTestFixture(t)
+	// This private creation boundary promises a durable request before provider
+	// start; keep the isolated fixture on one FULL synchronous connection.
+	x.f.rig.db.SetMaxOpenConns(1)
+	if _, err := x.f.rig.db.Exec("PRAGMA synchronous=FULL"); err != nil {
+		t.Fatal(err)
+	}
 	d, err := newCollaborationAgentTaskDispatcher(x.store)
 	if err != nil {
 		t.Fatal(err)
@@ -240,5 +246,44 @@ func TestCollaborationAgentRuntimeSourceRevocationABABeforeConfirmationNeverReca
 	var captured, current string
 	if err = x.f.rig.db.QueryRow(`SELECT p.user_authority_revision,CAST(u.authority_revision AS TEXT) FROM artifact_run_principals p JOIN users u ON u.id=p.human_user_id WHERE p.run_id=?`, a.RunID).Scan(&captured, &current); err != nil || captured != x.f.receipt.UserAuthorityRevision || captured == current {
 		t.Fatalf("original immutable user fence refreshed: %s/%s %v", captured, current, err)
+	}
+}
+
+func TestCollaborationAgentRuntimeCreationTransitionSourceABARollsBack(t *testing.T) {
+	x, d, h, runner, _, a := collaborationRuntimeFixture(t)
+	rt, err := newCollaborationAgentTaskRuntime(d, h, collaborationRuntimeEnvironment{}, func(context.Context, collaborationAgentConfirmed) error {
+		t.Fatal("rolled-back creation published a mandate")
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Actual canonical source mutations occur inside the requested transition.
+	// A precheck in a separate transaction cannot detect this ABA before commit.
+	mustExec(t, x.f.rig.db, `CREATE TRIGGER test_creation_source_aba AFTER UPDATE OF runtime_phase ON work_attempts
+		WHEN NEW.runtime_phase='requested' AND OLD.runtime_phase='starting'
+		BEGIN
+		 UPDATE user_sessions SET revoked_at='2026-10-24T00:00:00Z';
+		 UPDATE user_sessions SET revoked_at=NULL;
+		END`)
+	if _, err = d.Authorize(t.Context(), a); err != nil {
+		t.Fatal(err)
+	}
+	d.mu.Lock()
+	entry := *d.entries[a.Item.ID]
+	d.mu.Unlock()
+	if err = rt.requestOriginalCreation(t.Context(), a, entry); err == nil {
+		t.Fatal("source ABA committed creation")
+	}
+	var phase string
+	if err = x.f.rig.db.QueryRow(`SELECT runtime_phase FROM work_attempts WHERE run_id=?`, a.RunID).Scan(&phase); err != nil || phase != "starting" {
+		t.Fatalf("creation transition survived rollback: %q %v", phase, err)
+	}
+	var principals int
+	if err = x.f.rig.db.QueryRow(`SELECT COUNT(*) FROM artifact_run_principals WHERE run_id=?`, a.RunID).Scan(&principals); err != nil || principals != 0 {
+		t.Fatalf("principal survived rollback: %d %v", principals, err)
+	}
+	if runner.request != nil {
+		t.Fatal("failed atomic gate reached executor")
 	}
 }

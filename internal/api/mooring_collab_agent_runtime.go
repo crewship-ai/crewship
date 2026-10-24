@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"sync"
 	"time"
@@ -108,6 +109,7 @@ func (rt *collaborationAgentTaskRuntime) Run(ctx context.Context, a dispatch.Ass
 	runCtx = runauthority.WithTriggerMessage(runCtx, task.messageID)
 	runCtx = journal.WithRunID(runCtx, a.RunID)
 	launch := &webhookLaunch{cancel: cancel, workID: w.workID, runID: a.RunID, generation: a.Generation, store: work.NewStore(rt.h.db)}
+	launch.requestCreation = func(ctx context.Context) error { return rt.requestOriginalCreation(ctx, a, captured) }
 	if _, loaded := rt.launches.LoadOrStore(a.RunID, launch); loaded {
 		return errCollaborationAgentAccess
 	}
@@ -151,13 +153,9 @@ func (rt *collaborationAgentTaskRuntime) Run(ctx context.Context, a dispatch.Ass
 		return orchestrator.ErrPrivateRunUnqualified
 	}
 	req.ExecGate = func(gateCtx context.Context) error {
-		if e := rt.capturePrincipal(gateCtx, a, captured); e != nil {
-			return e
-		}
-		// This check and RequestCreation still use SEPARATE writers. No atomic
-		// source+creation claim: strict attach/every-use checks remain required.
 		return requestWebhookCreation(gateCtx, rt.h.orch, location, launch)
 	}
+
 	var once sync.Once
 	var confirmMu sync.Mutex
 	var confirmation error
@@ -222,12 +220,56 @@ func (rt *collaborationAgentTaskRuntime) capturePrincipal(ctx context.Context, a
 		return err
 	}
 	defer tx.Rollback()
+	if err = rt.capturePrincipalTx(ctx, tx, a, entry); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// The caller owns the same canonical writer and original ingress lease.
+func (rt *collaborationAgentTaskRuntime) capturePrincipalTx(ctx context.Context, tx *sql.Tx, a dispatch.Assignment, entry collaborationAgentDispatchEntry) error {
+	if tx == nil {
+		return errCollaborationAgentAccess
+	}
+	var err error
 	if err = rt.tasks.checkAssignment(ctx, tx, &entry, a); err != nil {
 		return err
 	}
 	w := entry.task.work
 	receipt := entry.task.originalHuman
 	if err = captureOriginalUserArtifactPrincipalContextQuery(ctx, tx, a.RunID, w.workspaceID, w.agentID, w.crewID, w.chatID, entry.task.messageID, &receipt); err != nil {
+		return err
+	}
+	return nil
+}
+
+// Called only by the private launch gate while its stop mutex and the whole
+// original creation-operation lease are held. No provider may start before the
+// source/principal/requested phase have committed together on the FULL handle.
+func (rt *collaborationAgentTaskRuntime) requestOriginalCreation(ctx context.Context, a dispatch.Assignment, entry collaborationAgentDispatchEntry) error {
+	release, err := rt.tasks.mandates.fence.acquireOriginal(entry.task.ingress)
+	if err != nil {
+		return err
+	}
+	defer release()
+	tx, err := rt.tasks.writer(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var synchronous int
+	if err = tx.QueryRowContext(ctx, "PRAGMA synchronous").Scan(&synchronous); err != nil || synchronous < 2 {
+		return errCollaborationAgentAccess
+	}
+	if err = rt.capturePrincipalTx(ctx, tx, a, entry); err != nil {
+		return err
+	}
+	if err = work.MarkRuntimeRequestedTx(ctx, tx, entry.task.work.workID, a.RunID, a.Generation); err != nil {
+		return err
+	}
+	// Recheck after the transition, including any canonical SQL trigger effects.
+	// A changed source rolls the transition back instead of publishing creation.
+	if err = rt.tasks.checkAssignment(ctx, tx, &entry, a); err != nil {
 		return err
 	}
 	return tx.Commit()
