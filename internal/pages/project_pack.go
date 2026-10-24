@@ -26,6 +26,8 @@ func writeProjectGitPack(ctx context.Context, repo string, objects projectGitObj
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
+	// Reuse compression state; Close still finishes a separate stream per object.
+	var writer *zlib.Writer
 	for _, id := range ids {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -50,7 +52,11 @@ func writeProjectGitPack(ctx context.Context, repo string, objects projectGitObj
 			}
 			pack.WriteByte(next)
 		}
-		writer := zlib.NewWriter(&pack)
+		if writer == nil {
+			writer = zlib.NewWriter(&pack)
+		} else {
+			writer.Reset(&pack)
+		}
 		if _, err := writer.Write(object.data); err != nil {
 			return err
 		}

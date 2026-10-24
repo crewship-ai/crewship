@@ -3,7 +3,6 @@ package docker
 import (
 	"context"
 	"errors"
-	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -100,12 +99,8 @@ func (p *Provider) attestManagedLaunch(ctx context.Context, id string, d managed
 	if err != nil {
 		return denied
 	}
-	raw, err := io.ReadAll(io.LimitReader(f, managedlaunch.MaxArtifactBytes+1))
-	f.Close()
-	if err != nil {
-		return denied
-	}
-	hostArtifact, err := managedlaunch.Capture("/opt/crewship/launcher", raw)
+	defer f.Close()
+	hostArtifact, err := managedlaunch.CaptureFile("/opt/crewship/launcher", f)
 	if err != nil {
 		return denied
 	}
@@ -125,7 +120,7 @@ func (p *Provider) attestManagedLaunch(ctx context.Context, id string, d managed
 		return denied
 	}
 	defer copied.Content.Close()
-	if managedlaunch.VerifyArchive(copied.Content, path.Base(managedlaunch.LauncherPath), raw) != nil {
+	if managedlaunch.VerifyArchiveFile(copied.Content, path.Base(managedlaunch.LauncherPath), f) != nil {
 		return denied
 	}
 	expected := p.ExpectedSidecarHash()
