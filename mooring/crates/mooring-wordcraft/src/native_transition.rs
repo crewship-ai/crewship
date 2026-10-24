@@ -120,6 +120,29 @@ impl Plan {
         before: &Value,
         after: &Value,
     ) -> Result<Self, TransitionError> {
+        Self::prepare_inner(document, before, after, None)
+    }
+    pub(crate) fn prepare_selected(
+        document: &Document,
+        before: &Value,
+        after: &Value,
+        target: &str,
+        start_byte: usize,
+        end_byte: usize,
+    ) -> Result<Self, TransitionError> {
+        Self::prepare_inner(
+            document,
+            before,
+            after,
+            Some((target, start_byte, end_byte)),
+        )
+    }
+    fn prepare_inner(
+        document: &Document,
+        before: &Value,
+        after: &Value,
+        selection: Option<(&str, usize, usize)>,
+    ) -> Result<Self, TransitionError> {
         if document.is_read_only() {
             return Err(TransitionError::Unsupported);
         }
@@ -170,31 +193,66 @@ impl Plan {
         let (index, (before_para, after_para)) = changed[0];
         let old = cells(before_para)?;
         let new = cells(after_para)?;
-        let prefix = old
-            .iter()
-            .zip(&new)
-            .take_while(|(a, b)| a.ch == b.ch)
-            .count();
-        // Repeated glyphs can admit several minimal splices at distinct item
-        // identities. Before/after alone is insufficient: require an explicit
-        // future native selection witness rather than guessing a CRDT position.
-        let full_suffix = old
-            .iter()
-            .rev()
-            .zip(new.iter().rev())
-            .take_while(|(a, b)| a.ch == b.ch)
-            .count();
-        if old.len() != new.len() && prefix + full_suffix > old.len().min(new.len()) {
-            return Err(TransitionError::Unsupported);
-        }
-        let suffix = old[prefix..]
-            .iter()
-            .rev()
-            .zip(new[prefix..].iter().rev())
-            .take_while(|(a, b)| a.ch == b.ch)
-            .count();
-        let old_end = old.len() - suffix;
-        let new_end = new.len() - suffix;
+        let selected = if let Some((target, start, end)) = selection {
+            if target != ids[index] || end < start {
+                return Err(TransitionError::Unsupported);
+            }
+            let text = before_para["text"]
+                .as_str()
+                .ok_or(TransitionError::Unsupported)?;
+            let prefix = text.get(..start).ok_or(TransitionError::Unsupported)?;
+            let suffix = text.get(end..).ok_or(TransitionError::Unsupported)?;
+            let after_text = after_para["text"]
+                .as_str()
+                .ok_or(TransitionError::Unsupported)?;
+            let middle_end = after_text
+                .len()
+                .checked_sub(suffix.len())
+                .filter(|end| *end >= start)
+                .ok_or(TransitionError::Unsupported)?;
+            if !after_text.starts_with(prefix)
+                || !after_text.ends_with(suffix)
+                || after_text.get(start..middle_end).is_none()
+            {
+                return Err(TransitionError::Unsupported);
+            }
+            Some((
+                prefix.chars().count(),
+                text.get(..end).unwrap().chars().count(),
+                after_text[..middle_end].chars().count(),
+                crate::byte_to_utf16(text, start).map_err(|_| TransitionError::Unsupported)?,
+                crate::byte_to_utf16(text, end).map_err(|_| TransitionError::Unsupported)?,
+            ))
+        } else {
+            None
+        };
+        let text_changed = before_para["text"] != after_para["text"];
+        let (prefix, old_end, new_end) =
+            if let Some((prefix, old_end, new_end, _, _)) = selected.filter(|_| text_changed) {
+                (prefix, old_end, new_end)
+            } else {
+                let prefix = old
+                    .iter()
+                    .zip(&new)
+                    .take_while(|(a, b)| a.ch == b.ch)
+                    .count();
+                let full_suffix = old
+                    .iter()
+                    .rev()
+                    .zip(new.iter().rev())
+                    .take_while(|(a, b)| a.ch == b.ch)
+                    .count();
+                if old.len() != new.len() && prefix + full_suffix > old.len().min(new.len()) {
+                    return Err(TransitionError::Unsupported);
+                }
+                let suffix = old[prefix..]
+                    .iter()
+                    .rev()
+                    .zip(new[prefix..].iter().rev())
+                    .take_while(|(a, b)| a.ch == b.ch)
+                    .count();
+                (prefix, old.len() - suffix, new.len() - suffix)
+            };
         let start = old[..prefix].iter().map(|c| c.ch.len_utf16() as u32).sum();
         let removed = old[prefix..old_end]
             .iter()
@@ -228,6 +286,13 @@ impl Plan {
                     (old_cell.props[f] != cell.props[f]).then_some(cell.props[f])
                 });
                 if patch.iter().any(Option::is_some) {
+                    if let Some((_, _, _, range_start, range_end)) = selected {
+                        // A known native splice cannot silently format retained
+                        // neighbors. Pure formatting is confined to selection.
+                        if text_changed || offset < range_start || offset + len > range_end {
+                            return Err(TransitionError::Unsupported);
+                        }
+                    }
                     assign(&mut writes, &patch)?;
                     if let Some(last) = spans
                         .last_mut()

@@ -144,3 +144,17 @@ normalization or rounding opaque integers. Local selective undo/redo uses the
 existing own-origin manager, not native whole-document history. No native UI
 entrypoint, host admission, service profile, durable receipt or Saved state is
 installed by these local mechanics.
+
+The experimental native connector can also capture a local `NativeSelection`
+from the actual outer command's stable paragraph and UTF-8 range before native
+mutation. This typed observation binds the current origin, sorted frontier and
+complete native basis; it grants no host authority. The selected transition
+checks exact text outside that known span and permits formatting only within
+the selected range. It preserves the real insertion/deletion location even
+when repeated glyphs make before/after text ambiguous. Exact retries retain the
+original observation; an equal visible model after undo cannot refresh its old
+frontier. The caller must capture the real outer Session selection/effect,
+including the native cluster helper for caret deletion, and serialize the
+native command/post-gate/local capture sequence. Column/table/math and other
+unqualified modes still require explicit qualification. No live WordApp hook,
+public WASM facade method, host witness or human admission profile is installed.

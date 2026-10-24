@@ -31,10 +31,21 @@ pub struct Proposal {
     pub authored_frontier: Vec<u8>,
     pub targets: Vec<String>,
 }
+/// Local outer-command observation only. Not an authentication or host read proof.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeSelection {
+    origin: u64,
+    frontier: Vec<u8>,
+    before: [u8; 32],
+    target: String,
+    start: usize,
+    end: usize,
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Action {
     Edit(Command),
     Native([u8; 32]),
+    NativeSelected([u8; 32], NativeSelection),
     Undo,
     Redo,
 }
@@ -191,6 +202,101 @@ impl DraftReplica {
             Some((before, after)),
         )
     }
+    /// Capture from the actual outer native Session before the command. Offsets
+    /// are UTF-8 byte boundaries in this exact local model, not wire positions.
+    pub fn observe_native_selection(
+        &self,
+        before: &serde_json::Value,
+        target: &str,
+        start: usize,
+        end: usize,
+    ) -> Result<NativeSelection, ClientError> {
+        self.require_native_access()?;
+        if self
+            .document
+            .native()
+            .map_err(|_| ClientError::InvalidState)?
+            != *before
+        {
+            return Err(ClientError::InvalidCommand);
+        }
+        let ids = self
+            .document
+            .block_ids()
+            .map_err(|_| ClientError::InvalidState)?;
+        let index = ids
+            .iter()
+            .position(|id| id == target)
+            .ok_or(ClientError::InvalidCommand)?;
+        let text = before["body"][index]["text"]
+            .as_str()
+            .ok_or(ClientError::InvalidCommand)?;
+        if end < start
+            || crate::byte_to_utf16(text, start).is_err()
+            || crate::byte_to_utf16(text, end).is_err()
+        {
+            return Err(ClientError::InvalidCommand);
+        }
+        Ok(NativeSelection {
+            origin: self.origin,
+            frontier: self.document.state_vector(),
+            before: crate::native_transition::identity(before, before)
+                .map_err(|_| ClientError::Limit)?,
+            target: target.into(),
+            start,
+            end,
+        })
+    }
+    fn selected_plan(
+        &self,
+        before: &serde_json::Value,
+        after: &serde_json::Value,
+        selection: &NativeSelection,
+    ) -> Result<crate::native_transition::Plan, ClientError> {
+        if selection.origin != self.origin
+            || selection.frontier != self.document.state_vector()
+            || selection.before
+                != crate::native_transition::identity(before, before)
+                    .map_err(|_| ClientError::Limit)?
+        {
+            return Err(ClientError::InvalidCommand);
+        }
+        crate::native_transition::Plan::prepare_selected(
+            &self.document,
+            before,
+            after,
+            &selection.target,
+            selection.start,
+            selection.end,
+        )
+        .map_err(|_| ClientError::InvalidCommand)
+    }
+    /// Pure native post-gate, with the actual pre-command selection binding.
+    pub fn validate_native_transition_selected(
+        &self,
+        before: &serde_json::Value,
+        after: &serde_json::Value,
+        selection: &NativeSelection,
+    ) -> Result<(), ClientError> {
+        self.require_native_access()?;
+        self.selected_plan(before, after, selection).map(|_| ())
+    }
+    pub fn native_transition_selected(
+        &mut self,
+        operation_id: &str,
+        before: &serde_json::Value,
+        after: &serde_json::Value,
+        selection: &NativeSelection,
+    ) -> Result<Proposal, ClientError> {
+        self.require_native_access()?;
+        let identity =
+            crate::native_transition::identity(before, after).map_err(|_| ClientError::Limit)?;
+        self.perform(
+            operation_id,
+            Action::NativeSelected(identity, selection.clone()),
+            Some((before, after)),
+        )
+    }
     /// Pure outer-native post-gate: emits nothing and changes no client state.
     pub fn validate_native_transition(
         &self,
@@ -252,7 +358,10 @@ impl DraftReplica {
         }
         // All native refusal/full-model preflight happens BEFORE capture/live
         // mutation. Exact retries above never rebuild a changed native basis.
-        let native_plan = if matches!(&action, Action::Native(_)) {
+        let native_plan = if let Action::NativeSelected(_, selection) = &action {
+            let (before, after) = native.ok_or(ClientError::InvalidCommand)?;
+            Some(self.selected_plan(before, after, selection)?)
+        } else if matches!(&action, Action::Native(_)) {
             let (before, after) = native.ok_or(ClientError::InvalidCommand)?;
             Some(
                 crate::native_transition::Plan::prepare(&self.document, before, after).map_err(
@@ -295,7 +404,7 @@ impl DraftReplica {
             )
             .map(|_| true)
             .map_err(|_| ClientError::InvalidCommand),
-            Action::Native(_) => native_plan
+            Action::Native(_) | Action::NativeSelected(_, _) => native_plan
                 .as_ref()
                 .unwrap()
                 .apply(
@@ -743,5 +852,174 @@ mod native_transition_tests {
         assert_eq!(client.state_vector(), frontier);
         assert!(client.proposals.is_empty());
         assert!(!client.blocked);
+    }
+}
+
+#[cfg(test)]
+mod native_selection_tests {
+    use super::*;
+    use serde_json::{json, Value};
+    fn fixture() -> (Value, Vec<u8>) {
+        let mut native: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/d1-native.json")).unwrap();
+        native["body"] = json!([{"kind":"para","text":"aa","runs":[{"len":2}]}]);
+        let bytes = Document::import(native.clone(), vec!["p_one".into()])
+            .unwrap()
+            .checkpoint()
+            .unwrap();
+        (native, bytes)
+    }
+    fn with_text(native: &Value, text: &str) -> Value {
+        let mut value = native.clone();
+        value["body"][0]["text"] = json!(text);
+        value["body"][0]["runs"] = json!([{"len":text.len()}]);
+        value
+    }
+    #[test]
+    fn native_selection_preserves_actual_repeated_glyph_item_positions_under_peer_delivery() {
+        let (before, checkpoint) = fixture();
+        let mut a = DraftReplica::restore(&checkpoint, 17, DraftAccess::Writer).unwrap();
+        let mut b = DraftReplica::restore(&checkpoint, 18, DraftAccess::Writer).unwrap();
+        let selection_a = a.observe_native_selection(&before, "p_one", 0, 0).unwrap();
+        let selection_b = b.observe_native_selection(&before, "p_one", 1, 1).unwrap();
+        let after_a = with_text(&before, "aaa");
+        let after_b = with_text(&before, "aXa");
+        a.validate_native_transition_selected(&before, &after_a, &selection_a)
+            .unwrap();
+        let pa = a
+            .native_transition_selected("a_native", &before, &after_a, &selection_a)
+            .unwrap();
+        let pb = b
+            .native_transition_selected("b_native", &before, &after_b, &selection_b)
+            .unwrap();
+        a.apply_verified_host_delta(18, &pb.update, &pb.targets)
+            .unwrap();
+        b.apply_verified_host_delta(17, &pa.update, &pa.targets)
+            .unwrap();
+        let expected = with_text(&before, "aaXa");
+        assert_eq!(a.native().unwrap(), expected);
+        assert_eq!(b.native().unwrap(), expected);
+        a.undo("undo_a").unwrap();
+        assert_eq!(a.native().unwrap(), after_b);
+        a.redo("redo_a").unwrap();
+        assert_eq!(a.native().unwrap(), expected);
+        assert_eq!(
+            a.native_transition_selected("a_native", &before, &after_a, &selection_a)
+                .unwrap(),
+            pa
+        );
+    }
+    #[test]
+    fn native_selection_is_bound_to_origin_frontier_and_immutable_retry_position() {
+        let (before, checkpoint) = fixture();
+        let mut client = DraftReplica::restore(&checkpoint, 17, DraftAccess::Writer).unwrap();
+        let at_start = client
+            .observe_native_selection(&before, "p_one", 0, 0)
+            .unwrap();
+        let at_end = client
+            .observe_native_selection(&before, "p_one", 2, 2)
+            .unwrap();
+        let after = with_text(&before, "aaa");
+        let original = client
+            .native_transition_selected("same_op", &before, &after, &at_start)
+            .unwrap();
+        assert_eq!(
+            client.native_transition_selected("same_op", &before, &after, &at_end),
+            Err(ClientError::OperationConflict)
+        );
+        assert_eq!(
+            client.native_transition_selected("stale", &before, &after, &at_start),
+            Err(ClientError::InvalidCommand)
+        );
+        client.undo("undo").unwrap();
+        assert_eq!(client.native().unwrap(), before);
+        // Visible equality after undo does not refresh an old authored frontier.
+        assert_eq!(
+            client.native_transition_selected("still_stale", &before, &after, &at_start),
+            Err(ClientError::InvalidCommand)
+        );
+        assert_eq!(
+            client
+                .native_transition_selected("same_op", &before, &after, &at_start)
+                .unwrap(),
+            original
+        );
+        let mut peer = DraftReplica::restore(&checkpoint, 18, DraftAccess::Writer).unwrap();
+        assert_eq!(
+            peer.native_transition_selected("wrong_origin", &before, &after, &at_start),
+            Err(ClientError::InvalidCommand)
+        );
+    }
+    #[test]
+    fn native_selection_rejects_off_span_effects_bad_utf8_and_reader_before_capture() {
+        let (before, checkpoint) = fixture();
+        let client = DraftReplica::restore(&checkpoint, 17, DraftAccess::Writer).unwrap();
+        let selection = client
+            .observe_native_selection(&before, "p_one", 0, 0)
+            .unwrap();
+        assert_eq!(
+            client.validate_native_transition_selected(
+                &before,
+                &with_text(&before, "aXa"),
+                &selection
+            ),
+            Err(ClientError::InvalidCommand)
+        );
+        let reader = DraftReplica::restore(&checkpoint, 18, DraftAccess::Reader).unwrap();
+        assert_eq!(
+            reader.observe_native_selection(&Value::Null, "bad", usize::MAX, 0),
+            Err(ClientError::Forbidden)
+        );
+        let mut unicode = before.clone();
+        unicode["body"][0]["text"] = json!("Č😀");
+        unicode["body"][0]["runs"] = json!([{"len":6}]);
+        let bytes = Document::import(unicode.clone(), vec!["p_one".into()])
+            .unwrap()
+            .checkpoint()
+            .unwrap();
+        let client = DraftReplica::restore(&bytes, 19, DraftAccess::Writer).unwrap();
+        for (start, end) in [(1, 1), (3, 3), (2, 7), (6, 2)] {
+            assert_eq!(
+                client.observe_native_selection(&unicode, "p_one", start, end),
+                Err(ClientError::InvalidCommand)
+            );
+        }
+        let selected = client
+            .observe_native_selection(&unicode, "p_one", 2, 6)
+            .unwrap();
+        let mut format = unicode.clone();
+        format["body"][0]["runs"] = json!([{"len":2,"props":{"bold":true}},{"len":4}]);
+        assert_eq!(
+            client.validate_native_transition_selected(&unicode, &format, &selected),
+            Err(ClientError::InvalidCommand)
+        );
+    }
+    #[test]
+    fn native_selection_deletes_actual_repeated_item_and_preserves_peer_origin_undo() {
+        let (before, checkpoint) = fixture();
+        let mut a = DraftReplica::restore(&checkpoint, 17, DraftAccess::Writer).unwrap();
+        let mut b = DraftReplica::restore(&checkpoint, 18, DraftAccess::Writer).unwrap();
+        let selection_a = a.observe_native_selection(&before, "p_one", 0, 1).unwrap();
+        let selection_b = b.observe_native_selection(&before, "p_one", 1, 1).unwrap();
+        let own_only = with_text(&before, "a");
+        let peer_only = with_text(&before, "aXa");
+        let pa = a
+            .native_transition_selected("delete_first_a", &before, &own_only, &selection_a)
+            .unwrap();
+        let pb = b
+            .native_transition_selected("insert_peer", &before, &peer_only, &selection_b)
+            .unwrap();
+        a.apply_verified_host_delta(18, &pb.update, &pb.targets)
+            .unwrap();
+        b.apply_verified_host_delta(17, &pa.update, &pa.targets)
+            .unwrap();
+        assert_eq!(a.native().unwrap(), with_text(&before, "Xa"));
+        assert_eq!(a.native().unwrap(), b.native().unwrap());
+        a.undo("undo_delete").unwrap();
+        assert_eq!(a.native().unwrap(), peer_only);
+        a.redo("redo_delete").unwrap();
+        assert_eq!(a.native().unwrap(), b.native().unwrap());
+        b.undo("undo_peer").unwrap();
+        assert_eq!(b.native().unwrap(), own_only);
     }
 }
