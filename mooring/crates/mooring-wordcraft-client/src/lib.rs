@@ -91,6 +91,10 @@ impl WordCraftModel {
     pub fn native_json(&self) -> Result<String, String> {
         encode(&self.document.native().map_err(state_error)?)
     }
+    /// Observed CRDT state only; never authority or a durable receipt.
+    pub fn state_vector(&self) -> Vec<u8> {
+        self.document.state_vector()
+    }
     pub fn stable_ids_json(&self) -> Result<String, String> {
         encode(&self.document.block_ids().map_err(state_error)?)
     }

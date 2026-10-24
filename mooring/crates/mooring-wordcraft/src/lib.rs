@@ -242,6 +242,25 @@ impl Document {
         Ok(native)
     }
 
+    /// Canonical sorted-client CRDT frontier. This is observed state only,
+    /// never a durable host receipt, permission or qualified human witness.
+    pub fn state_vector(&self) -> Vec<u8> {
+        use mooring_text::yrs::encoding::write::Write;
+        let vector = self.doc.transact().state_vector();
+        let mut entries = vector
+            .iter()
+            .map(|(client, clock)| (client.get(), *clock))
+            .collect::<Vec<_>>();
+        entries.sort_unstable();
+        let mut bytes = Vec::new();
+        bytes.write_var(entries.len() as u32);
+        for (client, clock) in entries {
+            bytes.write_var(client);
+            bytes.write_var(clock);
+        }
+        bytes
+    }
+
     pub fn block_ids(&self) -> Result<Vec<String>, AdapterError> {
         let txn = self.doc.transact();
         // An empty root array has no Yrs items to encode. Its implicit root

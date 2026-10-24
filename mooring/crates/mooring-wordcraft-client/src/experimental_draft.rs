@@ -66,6 +66,10 @@ impl WordCraftLocalDraft {
     pub fn native_json(&self) -> Result<String, String> {
         encode(&self.client.native().map_err(state_error)?)
     }
+    /// Actual optimistic observed state, not a confirmed host receipt.
+    pub fn state_vector(&self) -> Vec<u8> {
+        self.client.state_vector()
+    }
     pub fn stable_ids_json(&self) -> Result<String, String> {
         encode(&self.client.stable_ids().map_err(state_error)?)
     }
@@ -145,6 +149,10 @@ impl WordCraftLocalProposal {
     }
     pub fn origin(&self) -> String {
         self.proposal.origin.to_string()
+    }
+    /// Immutable observation from BEFORE this original edit/undo/redo.
+    pub fn authored_frontier(&self) -> Vec<u8> {
+        self.proposal.authored_frontier.clone()
     }
     pub fn update(&self) -> Vec<u8> {
         self.proposal.update.clone()

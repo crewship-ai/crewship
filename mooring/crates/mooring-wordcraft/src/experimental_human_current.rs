@@ -1,9 +1,7 @@
 //! Pure host-only v2 current-frontier experiment. No transport admission,
 //! credential verification, durable outcome, retirement or Saved semantics.
 use crate::{AdapterError, Document};
-use mooring_text::yrs::{
-    encoding::write::Write, ClientID, Map, Observable, Out, ReadTxn, StateVector, Transact,
-};
+use mooring_text::yrs::{ClientID, Map, Observable, Out, ReadTxn, StateVector, Transact};
 use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -94,19 +92,7 @@ impl Candidate {
 /// This byte helper grants no authority and does not qualify optimistic history.
 pub fn checkpoint_frontier(checkpoint: &[u8]) -> Result<Vec<u8>, Error> {
     let checked = Document::restore(checkpoint).map_err(|_| Error::InvalidCheckpoint)?;
-    let vector = checked.doc.transact().state_vector();
-    let mut entries = vector
-        .iter()
-        .map(|(client, clock)| (client.get(), *clock))
-        .collect::<Vec<_>>();
-    entries.sort_unstable();
-    let mut bytes = Vec::new();
-    bytes.write_var(entries.len() as u32);
-    for (client, clock) in entries {
-        bytes.write_var(client);
-        bytes.write_var(clock);
-    }
-    Ok(bytes)
+    Ok(checked.state_vector())
 }
 pub fn prepare_current(
     authority: Authority<'_>,
