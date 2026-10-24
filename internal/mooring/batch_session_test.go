@@ -57,7 +57,7 @@ func sessionTestCommitter(t *testing.T, s *BatchStore, lease OwnerLease, changes
 			return json.Marshal(p.Result)
 		}
 	}
-	committer, err := NewSessionCommitter(s, lease.Key, authority, output)
+	committer, err := NewSessionCommitter(s, lease, authority, output)
 	if err != nil {
 		t.Fatal(err)
 	}

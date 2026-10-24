@@ -58,18 +58,21 @@ type SessionBatchResult struct {
 }
 type SessionCommitter struct {
 	store     *BatchStore
-	scope     SessionKey
+	owner     OwnerLease
 	authority SessionBatchAuthority
 	output    SessionOutputPreparer
 }
 
-func NewSessionCommitter(store *BatchStore, scope SessionKey, authority SessionBatchAuthority, output SessionOutputPreparer) (*SessionCommitter, error) {
-	if store == nil || store.ready() != nil || !store.targetsEnabled() || store.config.Targets.ReadPolicy != CausalTargetReadPolicy || !batchID(scope.WorkspaceID) || !batchID(scope.ArtifactID) || !batchID(scope.ApplicationID) || authority == nil || output == nil {
+func NewSessionCommitter(store *BatchStore, owner OwnerLease, authority SessionBatchAuthority, output SessionOutputPreparer) (*SessionCommitter, error) {
+	if store == nil || store.ready() != nil || !store.targetsEnabled() || store.config.Targets.ReadPolicy != CausalTargetReadPolicy || !batchID(owner.Key.WorkspaceID) || !batchID(owner.Key.ArtifactID) || !batchID(owner.Key.ApplicationID) || !ownerIDValid(owner.OwnerID) || owner.Generation <= 0 || len(owner.Token) != 64 || authority == nil || output == nil {
 		return nil, ErrInvalid
 	}
+	// Capture the exact host-owned lease, including generation and secret token.
+	// A replacement runtime requires a new committer and captured authority; this
+	// does not replace the transactional OwnerStore.Check below.
 	// Copy immutable configuration; never replace the public store's current-reader
 	// authority. Only the commit-only clone below can use processing authority.
-	return &SessionCommitter{store: store, scope: scope, authority: authority, output: output}, nil
+	return &SessionCommitter{store: store, owner: owner, authority: authority, output: output}, nil
 }
 
 type sessionMembership struct{ changeID, membershipHash string }
@@ -82,7 +85,7 @@ type sessionCommitMode struct {
 }
 
 func (s *SessionCommitter) Commit(ctx context.Context, request SessionBatchRequest) (SessionBatchResult, error) {
-	if s == nil || s.store == nil || request.Lease.Key != s.scope || !validSessionBasis(request.Basis) {
+	if s == nil || s.store == nil || request.Lease != s.owner || !validSessionBasis(request.Basis) {
 		return SessionBatchResult{}, ErrInvalid
 	}
 	mode := &sessionCommitMode{basis: request.Basis, output: s.output}
