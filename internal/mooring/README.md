@@ -438,3 +438,17 @@ A private-owner override during restoration does not itself record
 content leaves the host, a future delivery handler must durably record the
 required owner-access audit and recheck the current recipient and delivery
 lease. This startup helper supplies neither audit nor delivery authority.
+
+After activation, a separate private agent-read operation retains the actual
+HTTP ingress and original confirmed-attempt mandate for the whole host read.
+It checks the original request through `Check` before invoking work, then uses
+`DecideCaptured` under every retained-reader writer without refreshing authority.
+It retains the same concrete store, mandate database, runtime, owner, scope and
+private callback lifetime. Human-context transplants, copied stores, escaped
+contexts and any write purpose are rejected. Agent-grant revocation and regrant
+cannot refresh the original proof or revoke an independent human's access.
+
+This operation supplies host checkpoint/inventory processing only. It grants no
+writer-source admission, participant output, private-owner audit or qualified
+agent execution environment. Tests use synthetic original HTTP contexts and
+confirmed work rows with an actual pinned native process, FULL SQL and BOOTTIME.

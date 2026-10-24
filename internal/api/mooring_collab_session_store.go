@@ -71,6 +71,9 @@ func (c *collaborationSessionStore) authorize(ctx context.Context, tx *sql.Tx, a
 		if err := activation.Check(ctx, tx, c.store); err != nil {
 			return err
 		}
+		if ctx.Value(collaborationAgentSessionReadKey{}) != nil {
+			return c.authorizeAgentRead(ctx, tx, access)
+		}
 		return authority(ctx, tx, access)
 	}
 	operation, ok := ctx.Value(collaborationSessionStartupKey{}).(*collaborationSessionStartup)
