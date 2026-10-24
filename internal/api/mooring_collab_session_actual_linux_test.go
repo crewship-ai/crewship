@@ -30,7 +30,7 @@ func TestCollaborationSessionActualInitializeSourceABARollsBack(t *testing.T) {
 	runCollaborationSessionActualStartup(t, true)
 }
 
-func runCollaborationSessionActualStartup(t *testing.T, initializeSourceABA bool) {
+func runCollaborationSessionActualStartup(t *testing.T, initializeSourceABA bool, nodeGenesis ...bool) {
 	pinned := func(pathEnv, hashEnv string, limit int64) []byte {
 		t.Helper()
 		path, hash := os.Getenv(pathEnv), os.Getenv(hashEnv)
@@ -93,11 +93,25 @@ func runCollaborationSessionActualStartup(t *testing.T, initializeSourceABA bool
 		t.Fatal(err)
 	}
 	request := httptest.NewRequest("POST", "/host-only-initialize", nil).WithContext(human)
+	initialize := func() error { return cell.initialize(request, owner, checkpoint) }
+	var node *mooring.OriginNodeData
+	if len(nodeGenesis) == 1 && nodeGenesis[0] {
+		root := t.TempDir()
+		if err = os.Chmod(root, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		node, err = mooring.NewOriginNodeData(cell.store, mooring.OriginNodeConfig{Enabled: true, Root: root, ForbiddenRoots: []string{t.TempDir()}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer node.Close()
+		initialize = func() error { return cell.initializeNode(request, owner, checkpoint, node) }
+	}
 	if initializeSourceABA {
 		mustExec(t, rig.db, `CREATE TRIGGER test_session_initialize_source_aba AFTER INSERT ON mooring_collab_audit WHEN NEW.kind='initialized'
 	 BEGIN UPDATE user_sessions SET revoked_at='2026-10-24T00:00:00Z' WHERE id='admission-source';
 	 UPDATE user_sessions SET revoked_at=NULL WHERE id='admission-source'; END`)
-		if err = cell.initialize(request, owner, checkpoint); err == nil {
+		if err = initialize(); err == nil {
 			t.Fatal("source ABA inside initialization committed")
 		}
 		var initialized int
@@ -106,8 +120,20 @@ func runCollaborationSessionActualStartup(t *testing.T, initializeSourceABA bool
 		}
 		return
 	}
-	if err = cell.initialize(request, owner, checkpoint); err != nil {
+	if err = initialize(); err != nil {
 		t.Fatal("original human initialization", err)
+	}
+	if node != nil {
+		if err = cell.runStartup(request, owner, "read_checkpoint", func(bound context.Context) error {
+			data, e := cell.store.ReadNodeOriginData(bound, owner, node)
+			if e == nil && (data.LineageID == "" || data.CreatorGeneration != strconv.FormatInt(owner.Generation, 10)) {
+				t.Fatal("incomplete genesis correlation")
+			}
+			return e
+		}); err != nil {
+			t.Fatal("actual original-human node read", err)
+		}
+		return
 	}
 	if _, _, err = cell.store.ReadCheckpoint(human, unit.scope); err == nil {
 		t.Fatal("unbound startup store granted a reader")

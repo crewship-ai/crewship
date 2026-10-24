@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Node origin genesis:** an inactive initializer binds fresh content to a retained local journal anchor. Ordinary local reopen returns correlation data; legacy adoption, source issuance and recovery after history loss remain unavailable.
+
 - **Mooring agent reads:** an inactive session checkpoint reader retains the original agent mandate and confirmed attempt under the existing immutable authority; it grants no write or external delivery access.
 
 - **Origin journal groundwork:** an unwired bounded local provider fsyncs immutable burn records before acknowledgement. It grants no source authority and does not qualify recovery after history loss.

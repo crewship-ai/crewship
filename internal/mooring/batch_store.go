@@ -94,6 +94,25 @@ func (s *BatchStore) auditCapacity(ctx context.Context, tx *sql.Tx, page string,
 // Initialize stores a qualified checkpoint at revision 0. It creates no live
 // process capability; restored state still requires a fresh owner and admission.
 func (s *BatchStore) Initialize(ctx context.Context, lease OwnerLease, checkpoint []byte) error {
+	return s.initialize(ctx, lease, checkpoint, nil)
+}
+
+// InitializeNode inserts a fresh node-lineage correlation during the original
+// authenticated initialization. It never upgrades an existing empty marker or
+// issues an origin/source cap. Original initial/final authority remains required.
+func (s *BatchStore) InitializeNode(ctx context.Context, lease OwnerLease, checkpoint []byte, node *OriginNodeData) error {
+	if s == nil || !s.checkpointIdentityEnabled() || !s.targetsEnabled() || lease.Key.ApplicationID != "wordcraft" {
+		return ErrOriginNodeData
+	}
+	release, err := node.acquire(ctx, s)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return s.initialize(ctx, lease, checkpoint, node)
+}
+
+func (s *BatchStore) initialize(ctx context.Context, lease OwnerLease, checkpoint []byte, node *OriginNodeData) (resultErr error) {
 	if err := s.ready(); err != nil {
 		return err
 	}
@@ -101,6 +120,15 @@ func (s *BatchStore) Initialize(ctx context.Context, lease OwnerLease, checkpoin
 		return ErrInvalid
 	}
 	checkpoint = append([]byte(nil), checkpoint...)
+	var genesis *originNodeGenesis
+	// Retain the scope journal lock through the actual transaction COMMIT.
+	defer func() {
+		if genesis != nil {
+			if closeErr := genesis.journal.Close(); closeErr != nil && resultErr == nil {
+				resultErr = ErrOriginNodeData
+			}
+		}
+	}()
 	return s.transaction(ctx, func(tx *sql.Tx) error {
 		if err := s.authorize(ctx, tx, lease.Key, "initialize", nil, "", ""); err != nil {
 			return err
@@ -128,8 +156,18 @@ func (s *BatchStore) Initialize(ctx context.Context, lease OwnerLease, checkpoin
 		if err = s.checkpointCapacity(ctx, tx, lease.Key.ArtifactID, len(checkpoint), metadata); err != nil {
 			return err
 		}
+		if node != nil {
+			genesis, err = node.prepareGenesis(ctx, tx, lease)
+			if err != nil {
+				return err
+			}
+		}
 		encoded := base64.StdEncoding.EncodeToString(checkpoint)
-		if _, err := tx.ExecContext(ctx, `INSERT INTO mooring_collab_documents(page_id,workspace_id,application_id,revision,checkpoint_base64,target_tracking) VALUES(?,?,?,'0',?,?)`, lease.Key.ArtifactID, lease.Key.WorkspaceID, lease.Key.ApplicationID, encoded, s.targetsEnabled()); err != nil {
+		if genesis != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO mooring_collab_documents(page_id,workspace_id,application_id,revision,checkpoint_base64,target_tracking,origin_lineage_id) VALUES(?,?,?,'0',?,?,?)`, lease.Key.ArtifactID, lease.Key.WorkspaceID, lease.Key.ApplicationID, encoded, s.targetsEnabled(), genesis.lineage); err != nil {
+				return err
+			}
+		} else if _, err := tx.ExecContext(ctx, `INSERT INTO mooring_collab_documents(page_id,workspace_id,application_id,revision,checkpoint_base64,target_tracking) VALUES(?,?,?,'0',?,?)`, lease.Key.ArtifactID, lease.Key.WorkspaceID, lease.Key.ApplicationID, encoded, s.targetsEnabled()); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO mooring_collab_checkpoints(page_id,workspace_id,revision,checkpoint_base64,decoded_bytes,checkpoint_generation,checkpoint_metadata_json) VALUES(?,?,'0',?,?,?,?)`, lease.Key.ArtifactID, lease.Key.WorkspaceID, encoded, len(checkpoint), strconv.FormatInt(lease.Generation, 10), checkpointMetadataSQL(metadata))
@@ -145,8 +183,21 @@ func (s *BatchStore) Initialize(ctx context.Context, lease OwnerLease, checkpoin
 		if err = s.checkpointStoredCapacity(ctx, tx, lease.Key.ArtifactID); err != nil {
 			return err
 		}
+		if genesis != nil {
+			if err = node.persistGenesis(ctx, tx, lease, genesis); err != nil {
+				return err
+			}
+		}
 		if err = s.config.Authority(ctx, tx, BatchAccess{store: s, final: true, Intent: "initialize", Scope: lease.Key}); err != nil {
 			return err
+		}
+		if genesis != nil {
+			if node.checkRoot() != nil {
+				return ErrOriginNodeData
+			}
+			if _, _, err := genesis.journal.IdentityData(ctx); err != nil {
+				return err
+			}
 		}
 		return s.config.Owners.Check(ctx, tx, lease)
 	})

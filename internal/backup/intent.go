@@ -36,6 +36,7 @@ import "sort"
 // table. Drift detection catches the omission in tests so an oversight
 // surfaces before a bundle ships missing rows.
 var BackupTableIntent = map[string]ScopedTableIntent{
+	"mooring_origin_node_anchors":    IntentExcludeRuntime, // immutable target-local scope/journal correlation never recreates source caps
 	"mooring_origin_documents":       IntentExcludeRuntime, // target-local lineage and budgets are preserved, never transplanted or regenerated
 	"mooring_origin_exclusions":      IntentExcludeRuntime, // issued-unused and historical origins remain permanently burned on this target
 	"mooring_ingress_sources":        IntentExcludeRuntime, // correlation metadata is not a restorable admission or source capability

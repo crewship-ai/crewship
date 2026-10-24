@@ -517,3 +517,40 @@ the author-only check does not qualify a caller-owned transaction's database.
 A future issuer must use the exact opaque inventory writer, real covered burn
 history and reserved-origin constructors. No source, ordinal, grant, allocation,
 route, raw Saved history or execution is enabled by the references.
+
+
+Node origin genesis is an inactive additive initialization variant. It preserves
+initial and final original-human authority in the same FULL writer, creates an
+exclusive fsynced local scope directory/journal, and commits the immutable
+content lineage with a retained target-local anchor. Failed final checks or
+COMMIT leave a refused orphan, never an automatically adopted namespace. An
+existing document with an empty legacy marker cannot be upgraded by this API.
+Owner correlation retains the original generation/runtime and token HASH only.
+A later owner may read correlation without relabeling checkpoint provenance.
+
+`OriginNodeConfig` is trusted application configuration, never request input.
+The planned configuration key is `CREWSHIP_MOORING_ORIGIN_ROOT`; no application
+bootstrap, route or deployment enables it here. The root must already exist,
+be private, and be outside the actual database directory and every supplied
+content/reset/log/mount root. Supplying a list does not qualify deployment path
+coverage. Provisioning and canonical reset/restore integration remain required.
+
+Portable replacement excludes and retains local anchors, and content deletion
+closes them. Before any explicit restore/reset, a future lifecycle manager must
+drain original ingress/runtime/source operations and fsync sticky local
+retirement BEFORE SQL mutation. `RetireBeforeRestore` supplies only the local
+DATA step; no restore hook is installed here. SQL rollback may restore an open
+DATA row, but cannot clear the independent sticky marker. There is no unretire.
+
+Ordinary same-node reopen verifies exact scope, lineage, initial checkpoint,
+journal identity and all SQL issued/source correlations. Journal-only burns
+remain excluded data; neither rows nor snapshots recreate authority. Whole
+SQL-plus-journal prefix rollback, disk/node loss, portable history union, cold
+source continuation and offhost recovery remain unqualified. Missing/corrupt
+state refuses; no repair, deletion or document identity reset is performed.
+
+This first leaf does not install an occupied-origin baseline. A later fresh
+WRITE-author issuer must consume the actual opaque activated runtime inventory
+in its qualified writer, reserve and fsync a fresh burn before SQL publication,
+and use separately reviewed reserved-origin constructors. Numeric data, a
+matching marker, an empty journal or a successful reopen is never that proof.
