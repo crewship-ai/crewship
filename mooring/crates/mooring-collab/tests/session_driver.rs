@@ -151,3 +151,43 @@ fn owner_expiry_while_waiting_restore_closes_and_joins_worker() {
     );
     host_worker.join().unwrap();
 }
+
+#[test]
+fn clock_error_permanently_closes_even_if_clock_later_recovers() {
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
+    let (child, mut peer) = UnixStream::pair().unwrap();
+    peer.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+    let (restore_bytes, _, _) = restore();
+    let host_worker = std::thread::spawn(move || {
+        mooring_collab::write_frame(&mut peer, &open()).unwrap();
+        let acquire = mooring_collab::read_frame(&mut peer).unwrap().unwrap();
+        mooring_collab::write_frame(&mut peer, &grant(&acquire)).unwrap();
+        mooring_collab::write_frame(&mut peer, &restore_bytes).unwrap();
+        for _ in 0..2 {
+            mooring_collab::read_frame(&mut peer).unwrap().unwrap();
+        }
+        peer
+    });
+    let failing = Arc::new(AtomicBool::new(false));
+    let clock = failing.clone();
+    let mut driver = Driver::from_negotiated_inherited_stream(child, &host(), move || {
+        if clock.load(Ordering::SeqCst) {
+            Err(std::io::Error::other("clock unavailable"))
+        } else {
+            Ok(at(1))
+        }
+    })
+    .unwrap();
+    let mut peer = host_worker.join().unwrap();
+    failing.store(true, Ordering::SeqCst);
+    assert!(driver.check_owner().is_err());
+    assert!(matches!(
+        mooring_collab::read_frame(&mut peer),
+        Ok(None) | Err(_)
+    ));
+    failing.store(false, Ordering::SeqCst);
+    assert!(driver.check_owner().is_err());
+}

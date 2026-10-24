@@ -101,7 +101,14 @@ impl Driver {
     /// No participant control is processed yet. This remains the exact owned
     /// restored document until a separately qualified durable settlement path.
     pub fn check_owner(&mut self) -> io::Result<()> {
-        if self.lane.is_closed() || !self.ready.may_own((self.clock)()?) {
+        let now = match (self.clock)() {
+            Ok(now) => now,
+            Err(error) => {
+                self.lane.close();
+                return Err(error);
+            }
+        };
+        if self.lane.is_closed() || !self.ready.may_own(now) {
             self.lane.close();
             return Err(invalid("session owner expired"));
         }
