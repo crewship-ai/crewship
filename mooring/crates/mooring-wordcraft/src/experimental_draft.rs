@@ -584,6 +584,14 @@ impl DraftReplica {
             .map_err(|_| ClientError::InvalidState)?;
         Ok(())
     }
+    /// Apply data from an already authenticated/correlated host frame. No
+    /// single peer origin is invented for a possibly multi-source update: the
+    /// original IDs remain inside the actual Yrs bytes. The legacy method's
+    /// origin argument is only a numeric range check, not an identity proof.
+    pub fn apply_verified_document_update(&mut self, data: &str) -> Result<(), ClientError> {
+        let parsed = crate::document_update::decode(data).map_err(|_| ClientError::InvalidState)?;
+        self.apply_verified_host_delta(self.origin, &parsed.update, &parsed.targets)
+    }
     /// Observed optimistic state only; never a confirmed receipt or authority.
     pub fn state_vector(&self) -> Vec<u8> {
         self.document.state_vector()

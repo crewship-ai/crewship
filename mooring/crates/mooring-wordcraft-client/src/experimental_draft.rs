@@ -146,6 +146,13 @@ impl WordCraftLocalDraft {
                 .map_err(error)?,
         })
     }
+    /// Data from a verified host DocumentUpdate frame; this method itself
+    /// authenticates no transport and changes no Saved/receipt state.
+    pub fn apply_verified_document_update(&mut self, data: &str) -> Result<(), String> {
+        self.client
+            .apply_verified_document_update(data)
+            .map_err(error)
+    }
     pub fn undo(&mut self, operation_id: &str) -> Result<WordCraftLocalProposal, String> {
         Ok(WordCraftLocalProposal {
             proposal: self.client.undo_e3(operation_id).map_err(error)?,
