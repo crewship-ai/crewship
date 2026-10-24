@@ -210,10 +210,13 @@ func (c *collaborationHTTPConnection) close() {
 	joined := c.joined
 	gate := joined.gate.GateID
 	c.mu.Unlock()
+	d := c.document
+	if d.originals != nil {
+		d.originals.retire(c)
+	}
 	if ws != nil {
 		_ = ws.Close()
 	}
-	d := c.document
 	d.mu.Lock()
 	if d.connections[c.ref] == c {
 		delete(d.connections, c.ref)
@@ -434,6 +437,7 @@ func (c *collaborationHTTPConnection) checkpoint(raw []byte) error {
 		return errCollaborationHTTP
 	}
 	var response []byte
+	var delivered protocol.Checkpoint
 	e := c.document.humans.runHumanOperation(c.request, c.admission.participant, func(ctx context.Context) error {
 		snapshot, e := c.document.cell.store.ReadFullCheckpoint(ctx, c.document.owner)
 		if e != nil {
@@ -445,12 +449,16 @@ func (c *collaborationHTTPConnection) checkpoint(raw []byte) error {
 			return errCollaborationHTTP
 		}
 		response, e = json.Marshal(protocol.CheckpointResult{Type: "checkpoint_result", RequestID: q.RequestID, Checkpoint: snapshot.Checkpoint})
+		delivered = snapshot.Checkpoint
 		return e
 	})
 	if e != nil {
 		return e
 	}
-	return c.checkedSend(response)
+	if e = c.checkedSend(response); e != nil {
+		return e
+	}
+	return c.recordObservedCheckpoint(delivered)
 }
 func (d *collaborationHTTPDocument) submit(ctx context.Context, q protocol.SessionSubmitBatch) (protocol.SessionCommitResult, error) {
 	return d.committer.submit(ctx, q)

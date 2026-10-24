@@ -75,6 +75,7 @@ type collaborationHTTPDocument struct {
 	submissions *collaborationSubmissionRegistry
 	committer   *collaborationSessionCommitter
 	pump        *collaborationSessionPump
+	originals   *collaborationLiveOriginals
 	mu          sync.Mutex
 	closed      bool
 	connections map[string]*collaborationHTTPConnection

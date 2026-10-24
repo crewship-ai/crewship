@@ -38,6 +38,7 @@ func (m *collaborationHTTPManager) document(r *http.Request, key mooring.Session
 	}
 	ctx, cancel := context.WithCancel(m.ctx)
 	d := &collaborationHTTPDocument{manager: m, key: key, ready: make(chan struct{}), ctx: ctx, cancel: cancel, connections: make(map[string]*collaborationHTTPConnection)}
+	d.originals = newCollaborationLiveOriginals(d)
 	m.docs[key] = d
 	m.mu.Unlock()
 	d.err = d.bootstrap(r, checkpoint)
@@ -146,7 +147,7 @@ func (d *collaborationHTTPDocument) bootstrap(r *http.Request, checkpoint []byte
 	if e != nil {
 		return e
 	}
-	d.committer, e = newCollaborationSessionCommitter(ctx, d.cell, d.submissions, d.owner)
+	d.committer, e = newCollaborationSessionCommitterWithOriginals(ctx, d.cell, d.submissions, d.owner, d.originals)
 	if e != nil {
 		return e
 	}

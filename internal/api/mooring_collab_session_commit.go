@@ -24,10 +24,18 @@ type collaborationSessionCommitter struct {
 	runtime     protocol.Identifier
 	versions    protocol.Versions
 	fence       protocol.Fence
+	originals   *collaborationLiveOriginals
 }
 
 func newCollaborationSessionCommitter(ctx context.Context, cell *collaborationSessionStore, submissions *collaborationSubmissionRegistry, owner mooring.OwnerLease) (*collaborationSessionCommitter, error) {
+	return newCollaborationSessionCommitterWithOriginals(ctx, cell, submissions, owner, nil)
+}
+
+func newCollaborationSessionCommitterWithOriginals(ctx context.Context, cell *collaborationSessionStore, submissions *collaborationSubmissionRegistry, owner mooring.OwnerLease, originals *collaborationLiveOriginals) (*collaborationSessionCommitter, error) {
 	if ctx == nil || cell == nil || submissions == nil || submissions.humans == nil || submissions.humans.sessionStore != cell || owner.Key != cell.scope || owner.Generation < 1 {
+		return nil, errCollaborationSubmission
+	}
+	if originals != nil && (originals.document == nil || originals.document.originals != originals || originals.document.cell != cell || originals.document.humans != submissions.humans || originals.document.submissions != submissions || originals.document.owner != owner) {
 		return nil, errCollaborationSubmission
 	}
 	runtime, err := cell.live()
@@ -56,7 +64,7 @@ func newCollaborationSessionCommitter(ctx context.Context, cell *collaborationSe
 		return nil, err
 	}
 	versions := activation.Versions()
-	return &collaborationSessionCommitter{cell: cell, submissions: submissions, binding: binding, owner: owner,
+	return &collaborationSessionCommitter{cell: cell, submissions: submissions, binding: binding, owner: owner, originals: originals,
 		scope:   protocol.Scope{WorkspaceID: protocol.Identifier(cell.scope.WorkspaceID), ArtifactID: protocol.Identifier(cell.scope.ArtifactID), ApplicationID: protocol.Identifier(cell.scope.ApplicationID)},
 		session: protocol.Identifier(activation.SessionID()), runtime: protocol.Identifier(runtime.RuntimeRef()),
 		versions: protocol.Versions{ProtocolVersion: versions.Protocol, ModelVersion: versions.Model, EngineVersion: versions.Engine},
@@ -102,7 +110,20 @@ func (s *collaborationSessionCommitter) submitWithCuts(ctx context.Context, requ
 	var result protocol.SessionCommitResult
 	var cuts []mooring.SessionSavedCut
 	err = s.submissions.run(ctx, s.binding, func(bound context.Context) error {
-		committer, err := mooring.NewSessionCommitter(s.cell.store, s.owner, s.submissions.bind(s.owner, s.binding), func(ctx context.Context, tx *sql.Tx, pending mooring.SessionPendingOutput) ([]byte, error) {
+		originalAuthority := s.submissions.bind(s.owner, s.binding)
+		authority := func(ctx context.Context, tx *sql.Tx, access mooring.SessionBatchAccess) error {
+			if err := originalAuthority(ctx, tx, access); err != nil {
+				return err
+			}
+			// Raw publication is checked before ANY outcome lookup/early reason,
+			// not merely before application preparation. Retired sources retain
+			// their already captured immutable processing proof.
+			if s.originals != nil && access.Purpose == mooring.SessionProcessSealedOutcome && access.Access.TaskID == "" {
+				return s.originals.authorizeOriginal(access)
+			}
+			return nil
+		}
+		committer, err := mooring.NewSessionCommitter(s.cell.store, s.owner, authority, func(ctx context.Context, tx *sql.Tx, pending mooring.SessionPendingOutput) ([]byte, error) {
 			if pending.Lease != s.owner || pending.FullCheckpoint == nil || pending.Targets == nil {
 				return nil, errCollaborationSubmission
 			}

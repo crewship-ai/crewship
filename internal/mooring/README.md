@@ -511,3 +511,14 @@ commands remain synthetic fixtures and output is a private collector. Normal Go
 with an optimized actor passes; race-instrumented SQL can exceed the initial2s
 delivery gate, so continuous participant renewal/status recovery is still an
 explicit missing qualification. No route, raw source issuer or deployment is added.
+
+The default-off HTTP controller's live original ledger retains at most 256
+proposals and 256 KiB of charged immutable data. An actual authenticated human
+seal writer must commit before a slot becomes usable. Original observed bases,
+connection origins, order and membership cannot refresh on retry. Every sealed
+human processing outcome checks that publication proof before any outcome lookup
+or dependency reason; missing or uncertain publication remains nonterminal.
+Already captured processing proofs survive source retirement, while new captures
+on that source are refused. These volatile records are neither restored SQL
+authority nor native application qualification. Raw editing remains refused
+until the negotiated native preparation and committed-history handoff are wired.
