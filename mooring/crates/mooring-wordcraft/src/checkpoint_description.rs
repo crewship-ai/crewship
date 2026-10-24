@@ -24,16 +24,49 @@ impl DescribeCheckpoint for WordCraftAdapter {
     }
 }
 fn closed_self_contained(document: &Document) -> bool {
-    if document.is_read_only() || document.model != crate::format::Model::V2 {
+    if document.model != crate::format::Model::V2 {
         return false;
     }
     let Ok(native) = document.native() else {
         return false;
     };
+    // Qualify the COMPLETE original tree before any disposable layout erasure.
+    // This rejects serde loss, numeric drift, unknown fields and review modes.
+    if !crate::native_qualification::lossless(&native) {
+        return false;
+    }
     let Ok(typed) = serde_json::from_value::<wordcraft_doc::Document>(native.clone()) else {
         return false;
     };
-    // This first descriptor proves ONLY the closed native paragraph subset.
+    if !typed.body.iter().all(|block| match &**block {
+        wordcraft_doc::Block::Para(paragraph) => {
+            paragraph.objects.is_empty()
+                && paragraph
+                    .section
+                    .as_ref()
+                    .is_none_or(|section| no_section_references(section))
+        }
+        _ => false,
+    }) {
+        return false;
+    }
+    // A disposable classifier input may omit ONLY the two qualified layout
+    // fields. Original native/checkpoint/IDs are never overwritten or migrated.
+    let mut layout_free = native.clone();
+    for paragraph in layout_free["body"].as_array_mut().unwrap() {
+        let object = paragraph.as_object_mut().unwrap();
+        object.remove("section");
+        if let Some(serde_json::Value::Object(props)) = object.get_mut("props") {
+            props.remove("pageBreakBefore");
+            if props.is_empty() {
+                object.remove("props");
+            }
+        }
+    }
+    if crate::classify(&layout_free) != Ok(false) {
+        return false;
+    }
+    // This descriptor proves only the known closed paragraph/section subset.
     // No absent/unknown graph is advertised as a complete empty manifest.
     typed.settings.attached_template.is_none()
         && !typed.settings.link_styles
@@ -46,10 +79,13 @@ fn closed_self_contained(document: &Document) -> bool {
         && typed.glossary.is_empty()
         && typed.sources.is_empty()
         && typed.custom_props.is_empty()
-        && [typed.last_section.headers, typed.last_section.footers]
-            .iter()
-            .all(|refs| refs.default.is_none() && refs.first.is_none() && refs.even.is_none())
+        && no_section_references(&typed.last_section)
         && no_unqualified_links(&native, 0, &mut 262144)
+}
+fn no_section_references(section: &wordcraft_doc::SectionProps) -> bool {
+    [&section.headers, &section.footers]
+        .iter()
+        .all(|refs| refs.default.is_none() && refs.first.is_none() && refs.even.is_none())
 }
 fn no_unqualified_links(value: &serde_json::Value, depth: usize, remaining: &mut usize) -> bool {
     if depth > 32 || *remaining == 0 {
@@ -253,6 +289,178 @@ mod trait_tests {
                 WordCraftAdapter.describe_checkpoint(&altered),
                 Err(PrepareError::State(_))
             ));
+        }
+    }
+}
+
+#[cfg(test)]
+mod readonly_layout_tests {
+    use super::*;
+    use serde_json::{json, Value};
+    #[test]
+    fn qualified_known_section_layout_describes_without_granting_writes() {
+        let mut native: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/d1-engine-canonical.json"))
+                .unwrap();
+        native["body"][0]["props"]["pageBreakBefore"] = json!(true);
+        native["body"][0]["section"] = native["lastSection"].clone();
+        let ids: Vec<_> = (0..native["body"].as_array().unwrap().len())
+            .map(|i| format!("layout_{i}"))
+            .collect();
+        let document = Document::import(native.clone(), ids.clone()).unwrap();
+        assert!(document.is_read_only());
+        let cp = document.checkpoint().unwrap();
+        let description = WordCraftAdapter.describe_checkpoint(&cp).unwrap();
+        assert!(description.assets.is_empty());
+        assert_eq!(
+            description.format_version,
+            crate::profile::CHECKPOINT_FORMAT
+        );
+        let restored = Document::restore(&cp).unwrap();
+        assert!(restored.is_read_only());
+        assert_eq!(restored.native().unwrap(), native);
+        assert_eq!(restored.block_ids().unwrap(), ids);
+        assert_eq!(restored.checkpoint().unwrap(), cp);
+    }
+}
+
+#[cfg(test)]
+mod d3_tests {
+    use super::*;
+    use serde_json::{json, Value};
+    fn fixture() -> Value {
+        serde_json::from_str(include_str!("../tests/fixtures/d3-engine-canonical.json")).unwrap()
+    }
+    fn imported(native: Value) -> Document {
+        let ids = (0..native["body"].as_array().unwrap().len())
+            .map(|i| format!("d3_section_{i}"))
+            .collect();
+        Document::import(native, ids).unwrap()
+    }
+    #[test]
+    fn actual_engine_canonical_d3_complete_graph_paging_and_original_bytes_remain_readonly() {
+        let native = fixture();
+        let mut document = imported(native.clone());
+        assert!(document.is_read_only());
+        assert_eq!(native["body"].as_array().unwrap().len(), 43);
+        let ids = document.block_ids().unwrap();
+        let cp = document.checkpoint().unwrap();
+        let description = WordCraftAdapter.describe_checkpoint(&cp).unwrap();
+        assert!(description.assets.is_empty());
+        assert_eq!(description.versions, crate::profile::qualified_versions());
+        let mut after = None;
+        let mut all = Vec::new();
+        let mut pages = 0;
+        let mut largest = 0;
+        loop {
+            let page = crate::read::page(&document, after.as_deref(), 5, 16384).unwrap();
+            let bytes = serde_json::to_vec(&page).unwrap().len();
+            assert!(bytes <= 16384);
+            largest = largest.max(bytes);
+            for paragraph in &page.paragraphs {
+                assert_eq!(paragraph.target_id, ids[all.len()]);
+                all.push(paragraph.native.clone());
+            }
+            pages += 1;
+            match page.next_after {
+                Some(cursor) => after = Some(cursor),
+                None => break,
+            }
+        }
+        assert_eq!(Value::Array(all), native["body"]);
+        assert!(pages > 1);
+        let header = crate::read::header(&document, 262144).unwrap();
+        let mut expected_header = native.clone();
+        expected_header.as_object_mut().unwrap().remove("body");
+        assert_eq!(header, expected_header);
+        let edit = crate::command::Command::Insert {
+            target_id: ids[0].clone(),
+            at: crate::command::Anchor::Start {},
+            text: "forbidden".into(),
+            properties: None,
+        };
+        assert_eq!(
+            crate::candidate::apply(&mut document, &edit),
+            Err(crate::candidate::CandidateError::ReadOnly)
+        );
+        let restored = Document::restore(&cp).unwrap();
+        assert!(restored.is_read_only());
+        assert_eq!(restored.native().unwrap(), native);
+        assert_eq!(restored.block_ids().unwrap(), ids);
+        assert_eq!(restored.checkpoint().unwrap(), cp);
+        assert_eq!(document.checkpoint().unwrap(), cp);
+        println!(
+            "d3_descriptor_metrics native={} checkpoint={} pages={} largest_page={} header={}",
+            serde_json::to_vec(&native).unwrap().len(),
+            cp.len(),
+            pages,
+            largest,
+            serde_json::to_vec(&header).unwrap().len()
+        );
+    }
+    #[test]
+    fn original_tree_unknown_section_references_and_modes_cannot_hide_in_layout_erasure() {
+        let source = fixture();
+        let section = source["body"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .position(|p| p.get("section").is_some())
+            .unwrap();
+        for case in [
+            "middle-header",
+            "middle-footer",
+            "unknown-section",
+            "page-picture",
+            "style-link",
+            "review-mode",
+            "numeric-drift",
+        ] {
+            let mut native = source.clone();
+            match case {
+                "middle-header" => {
+                    native["body"][section]["section"]["headers"]["default"] =
+                        json!("missing-header-part")
+                }
+                "middle-footer" => {
+                    native["body"][section]["section"]["footers"]["even"] =
+                        json!("missing-footer-part")
+                }
+                "unknown-section" => {
+                    native["body"][section]["section"]["unqualifiedResource"] =
+                        json!("https://example.invalid/resource")
+                }
+                "page-picture" => {
+                    let mut typed: wordcraft_doc::Document =
+                        serde_json::from_value(native).unwrap();
+                    typed.settings.page_picture = Some(wordcraft_doc::PagePicture {
+                        media: "unqualified-picture".into(),
+                        ..Default::default()
+                    });
+                    native = serde_json::to_value(typed).unwrap();
+                }
+                "style-link" => {
+                    native["styles"]["defaultChr"]["link"] =
+                        json!("https://example.invalid/default-link")
+                }
+                "review-mode" => native["settings"]["trackChanges"] = json!(true),
+                "numeric-drift" => {
+                    native["styles"]["defaultPara"]["lineSpacing"]["value"] = json!(1.15)
+                }
+                _ => unreachable!(),
+            }
+            let document = imported(native.clone());
+            let cp = document.checkpoint().unwrap();
+            assert!(
+                matches!(
+                    WordCraftAdapter.describe_checkpoint(&cp),
+                    Err(PrepareError::UnqualifiedDescription)
+                ),
+                "{case}"
+            );
+            let restored = Document::restore(&cp).unwrap();
+            assert_eq!(restored.native().unwrap(), native, "{case}");
+            assert_eq!(restored.checkpoint().unwrap(), cp, "{case}");
         }
     }
 }
