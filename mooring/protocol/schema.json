@@ -218,6 +218,12 @@
     },
     {
       "$ref": "#/$defs/SessionCheckpointDescribed"
+    },
+    {
+      "$ref": "#/$defs/SessionInspectOrigins"
+    },
+    {
+      "$ref": "#/$defs/SessionOriginsInspected"
     }
   ],
   "$defs": {
@@ -4021,10 +4027,26 @@
         "required_capabilities": {
           "type": "array",
           "items": {
-            "const": "checkpoint_identity_v1"
+            "enum": [
+              "checkpoint_identity_v1",
+              "origin_inventory_v1"
+            ]
           },
           "minItems": 1,
-          "maxItems": 1
+          "maxItems": 2,
+          "uniqueItems": true,
+          "allOf": [
+            {
+              "if": {
+                "maxItems": 1
+              },
+              "then": {
+                "items": {
+                  "const": "checkpoint_identity_v1"
+                }
+              }
+            }
+          ]
         }
       },
       "required": [
@@ -4129,10 +4151,26 @@
         "capabilities": {
           "type": "array",
           "items": {
-            "const": "checkpoint_identity_v1"
+            "enum": [
+              "checkpoint_identity_v1",
+              "origin_inventory_v1"
+            ]
           },
           "minItems": 1,
-          "maxItems": 1
+          "maxItems": 2,
+          "uniqueItems": true,
+          "allOf": [
+            {
+              "if": {
+                "maxItems": 1
+              },
+              "then": {
+                "items": {
+                  "const": "checkpoint_identity_v1"
+                }
+              }
+            }
+          ]
         }
       },
       "required": [
@@ -4964,6 +5002,131 @@
       ],
       "additionalProperties": false,
       "x-direction": "runtime_to_host"
+    },
+    "AllocatedCrdtOrigin": {
+      "type": "object",
+      "properties": {
+        "origin": {
+          "$ref": "#/$defs/Counter"
+        },
+        "clock": {
+          "$ref": "#/$defs/PositiveCounter"
+        }
+      },
+      "required": [
+        "origin",
+        "clock"
+      ],
+      "additionalProperties": false,
+      "description": "Semantic bounded-profile validation requires origin<=9007199254740991 and clock<=4294967295. Zero origin may be occupied baseline; never an issued writer."
+    },
+    "SessionInspectOrigins": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_inspect_origins"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "control_profile": {
+          "const": "mooring.session-causal.v1"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runtime_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "fence": {
+          "$ref": "#/$defs/Fence"
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/Checkpoint"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "control_profile",
+        "scope",
+        "session_id",
+        "runtime_ref",
+        "fence",
+        "versions",
+        "checkpoint"
+      ],
+      "additionalProperties": false,
+      "x-direction": "host_to_runtime",
+      "description": "Read-only application inventory; requires separately observed origin_inventory_v1 opt-in. Current fence and full creator provenance remain distinct. No issuance or access authority."
+    },
+    "SessionOriginsInspected": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_origins_inspected"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "control_profile": {
+          "const": "mooring.session-causal.v1"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runtime_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "fence": {
+          "$ref": "#/$defs/Fence"
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        },
+        "checkpoint_basis": {
+          "$ref": "#/$defs/ConfirmedCheckpointBasis"
+        },
+        "checkpoint_generation": {
+          "$ref": "#/$defs/Counter"
+        },
+        "content_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "allocated": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AllocatedCrdtOrigin"
+          },
+          "maxItems": 4096
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "control_profile",
+        "scope",
+        "session_id",
+        "runtime_ref",
+        "fence",
+        "versions",
+        "checkpoint_basis",
+        "checkpoint_generation",
+        "content_digest",
+        "allocated"
+      ],
+      "additionalProperties": false,
+      "x-direction": "runtime_to_host",
+      "description": "Complete strictly sorted unique allocated origin/positive clock inventory for exact full checkpoint. Numeric validation and actual concrete adapter/runtime/full-basis/fence provenance are mandatory. No reservation, authority or inferred empty baseline."
     }
   },
   "x-schema-version": "0.4.0"

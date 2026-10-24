@@ -11,6 +11,7 @@ use crate::{
 
 pub const PROFILE: &str = "mooring.session-causal.v1";
 pub const CHECKPOINT_IDENTITY_CAPABILITY: &str = "checkpoint_identity_v1";
+pub const ORIGIN_INVENTORY_CAPABILITY: &str = "origin_inventory_v1";
 /// Fixed initial profile constants; the live driver must use these exact caps.
 pub const BATCH_DELAY_MS: u64 = 100;
 pub const MAX_BATCH_OPERATIONS: usize = 256;
@@ -44,6 +45,8 @@ pub fn is_private_type(value: &str) -> bool {
             | "session_status_result"
             | "session_describe_checkpoint"
             | "session_checkpoint_described"
+            | "session_inspect_origins"
+            | "session_origins_inspected"
     )
 }
 
@@ -75,6 +78,7 @@ pub fn validate(raw: &[u8], peer: control::Peer) -> Result<CanonicalValue, WireE
                 | "session_participant_input"
                 | "session_status_result"
                 | "session_describe_checkpoint"
+                | "session_inspect_origins"
         ),
         control::Peer::InheritedRuntime => matches!(
             message_type,
@@ -84,6 +88,7 @@ pub fn validate(raw: &[u8], peer: control::Peer) -> Result<CanonicalValue, WireE
                 | "session_participant_output"
                 | "session_status_request"
                 | "session_checkpoint_described"
+                | "session_origins_inspected"
         ),
         control::Peer::Participant => false,
     };
@@ -100,6 +105,8 @@ pub fn validate(raw: &[u8], peer: control::Peer) -> Result<CanonicalValue, WireE
             | "session_commit_result"
             | "session_describe_checkpoint"
             | "session_checkpoint_described"
+            | "session_inspect_origins"
+            | "session_origins_inspected"
     ) {
         wire::preflight_with_limit(raw, MAX_BATCH_BYTES)?;
         if value.bytes().len() > MAX_BATCH_BYTES {
@@ -118,6 +125,34 @@ pub fn validate(raw: &[u8], peer: control::Peer) -> Result<CanonicalValue, WireE
         let inner =
             serde_json::to_vec(&value.value()["message"]).map_err(|_| WireError::InvalidJson)?;
         wire::validate_bounded_envelope(&inner)?;
+    }
+    if message_type == "session_origins_inspected" {
+        // Numeric/order constraints are not proof that an app inspected the
+        // checkpoint. Only the concrete correlated host adapter may retain that
+        // provenance. Zero can be occupied baseline, never a new writer grant.
+        let entries = value.value()["allocated"]
+            .as_array()
+            .ok_or(WireError::InvalidShape)?;
+        let mut previous = None;
+        for entry in entries {
+            let origin = entry["origin"]
+                .as_str()
+                .ok_or(WireError::InvalidShape)?
+                .parse::<u64>()
+                .map_err(|_| WireError::InvalidShape)?;
+            let clock = entry["clock"]
+                .as_str()
+                .ok_or(WireError::InvalidShape)?
+                .parse::<u32>()
+                .map_err(|_| WireError::InvalidShape)?;
+            if origin > (1_u64 << 53) - 1
+                || clock == 0
+                || previous.is_some_and(|prior| prior >= origin)
+            {
+                return Err(WireError::InvalidShape);
+            }
+            previous = Some(origin);
+        }
     }
     Ok(value)
 }

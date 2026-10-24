@@ -72,6 +72,13 @@ impl Startup {
             .map_err(|_| invalid("invalid session open"))?;
         let open: SessionOpen = serde_json::from_value(normalized.value().clone())
             .map_err(|_| invalid("not session open"))?;
+        // The schema declares optional future opt-ins, not implementation
+        // support. This driver still has no origin-inventory lane handler.
+        if open.required_capabilities
+            != vec![SessionOpenRequiredCapabilitiesItem::CheckpointIdentityV1]
+        {
+            return Err(invalid("unimplemented session capability"));
+        }
         if open.scope.application_id != "wordcraft" || open.versions != wordcraft_versions() {
             return Err(invalid("unqualified application tuple"));
         }

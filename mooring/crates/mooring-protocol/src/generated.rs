@@ -1814,6 +1814,8 @@ pub enum SessionOpenControlProfile {
 pub enum SessionOpenRequiredCapabilitiesItem {
     #[serde(rename = "checkpoint_identity_v1")]
     CheckpointIdentityV1,
+    #[serde(rename = "origin_inventory_v1")]
+    OriginInventoryV1,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1872,6 +1874,8 @@ pub enum SessionOpenedControlProfile {
 pub enum SessionOpenedCapabilitiesItem {
     #[serde(rename = "checkpoint_identity_v1")]
     CheckpointIdentityV1,
+    #[serde(rename = "origin_inventory_v1")]
+    OriginInventoryV1,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -2311,6 +2315,68 @@ pub struct SessionCheckpointDescribed {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AllocatedCrdtOrigin {
+    pub origin: Counter,
+    pub clock: PositiveCounter,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionInspectOriginsType {
+    #[serde(rename = "session_inspect_origins")]
+    SessionInspectOrigins,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionInspectOriginsControlProfile {
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionInspectOrigins {
+    pub r#type: SessionInspectOriginsType,
+    pub request_id: Identifier,
+    pub control_profile: SessionInspectOriginsControlProfile,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
+    pub fence: Fence,
+    pub versions: Versions,
+    pub checkpoint: Checkpoint,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionOriginsInspectedType {
+    #[serde(rename = "session_origins_inspected")]
+    SessionOriginsInspected,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SessionOriginsInspectedControlProfile {
+    #[serde(rename = "mooring.session-causal.v1")]
+    MooringSessionCausalV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionOriginsInspected {
+    pub r#type: SessionOriginsInspectedType,
+    pub request_id: Identifier,
+    pub control_profile: SessionOriginsInspectedControlProfile,
+    pub scope: Scope,
+    pub session_id: Identifier,
+    pub runtime_ref: Identifier,
+    pub fence: Fence,
+    pub versions: Versions,
+    pub checkpoint_basis: ConfirmedCheckpointBasis,
+    pub checkpoint_generation: Counter,
+    pub content_digest: Digest,
+    pub allocated: Vec<AllocatedCrdtOrigin>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Message {
     Hello(Hello),
@@ -2385,4 +2451,6 @@ pub enum Message {
     SessionStatusResult(SessionStatusResult),
     SessionDescribeCheckpoint(SessionDescribeCheckpoint),
     SessionCheckpointDescribed(SessionCheckpointDescribed),
+    SessionInspectOrigins(SessionInspectOrigins),
+    SessionOriginsInspected(SessionOriginsInspected),
 }

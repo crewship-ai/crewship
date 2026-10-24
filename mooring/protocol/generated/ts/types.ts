@@ -1036,7 +1036,7 @@ export type SessionOpenType = "session_open";
 
 export type SessionOpenControlProfile = "mooring.session-causal.v1";
 
-export type SessionOpenRequiredCapabilitiesItem = "checkpoint_identity_v1";
+export type SessionOpenRequiredCapabilitiesItem = "checkpoint_identity_v1" | "origin_inventory_v1";
 
 export interface SessionOpen {
   type: SessionOpenType;
@@ -1070,7 +1070,7 @@ export type SessionOpenedType = "session_opened";
 
 export type SessionOpenedControlProfile = "mooring.session-causal.v1";
 
-export type SessionOpenedCapabilitiesItem = "checkpoint_identity_v1";
+export type SessionOpenedCapabilitiesItem = "checkpoint_identity_v1" | "origin_inventory_v1";
 
 export interface SessionOpened {
   type: SessionOpenedType;
@@ -1334,4 +1334,44 @@ export interface SessionCheckpointDescribed {
   description: CheckpointDescription;
 }
 
-export type Message = Hello | Welcome | CommitBatch | CommitResult | StatusRequest | StatusResult | SessionTicketRequest | SessionTicket | OwnerAcquire | OwnerRenew | OwnerGrant | DeliveryRenew | DeliveryGrant | SessionClosed | DeliveryBlocked | RevocationConfirmed | ReadRequest | ReadResult | CheckpointRequest | CheckpointResult | Presence | TaskStatus | TaskResult | TaskCancel | Proposal | ProposalAccept | UndoRequest | ProtocolError | ManifestRequest | ManifestResult | LifecycleRequest | LifecycleResult | SessionJoin | SessionJoined | SessionLeave | SubmitChanges | ChangesReceived | TaskSubmit | ProposalRequest | CollaborationUpdate | DocumentUpdate | AssetRequest | AssetResult | TicketValidationRequest | TicketValidationResult | RevocationNotice | RuntimeReady | ValidateCheckpoint | CheckpointValidated | PrepareAtomic | AtomicPrepared | ValidateCheckpointCausal | CheckpointValidatedCausal | PrepareAtomicCausal | AtomicPreparedCausal | SessionOpen | SessionRestore | SessionOpened | SessionSubmitBatch | SessionCommitResult | SessionParticipantOpen | SessionParticipantInput | BoundedTransferBegin | BoundedTransferChunk | SessionParticipantOutput | SessionJoinBounded | SessionJoinedBounded | SessionRestored | SessionStatusRequest | SessionStatusResult | SessionDescribeCheckpoint | SessionCheckpointDescribed;
+export interface AllocatedCrdtOrigin {
+  origin: Counter;
+  clock: PositiveCounter;
+}
+
+export type SessionInspectOriginsType = "session_inspect_origins";
+
+export type SessionInspectOriginsControlProfile = "mooring.session-causal.v1";
+
+export interface SessionInspectOrigins {
+  type: SessionInspectOriginsType;
+  request_id: Identifier;
+  control_profile: SessionInspectOriginsControlProfile;
+  scope: Scope;
+  session_id: Identifier;
+  runtime_ref: Identifier;
+  fence: Fence;
+  versions: Versions;
+  checkpoint: Checkpoint;
+}
+
+export type SessionOriginsInspectedType = "session_origins_inspected";
+
+export type SessionOriginsInspectedControlProfile = "mooring.session-causal.v1";
+
+export interface SessionOriginsInspected {
+  type: SessionOriginsInspectedType;
+  request_id: Identifier;
+  control_profile: SessionOriginsInspectedControlProfile;
+  scope: Scope;
+  session_id: Identifier;
+  runtime_ref: Identifier;
+  fence: Fence;
+  versions: Versions;
+  checkpoint_basis: ConfirmedCheckpointBasis;
+  checkpoint_generation: Counter;
+  content_digest: Digest;
+  allocated: Array<AllocatedCrdtOrigin>;
+}
+
+export type Message = Hello | Welcome | CommitBatch | CommitResult | StatusRequest | StatusResult | SessionTicketRequest | SessionTicket | OwnerAcquire | OwnerRenew | OwnerGrant | DeliveryRenew | DeliveryGrant | SessionClosed | DeliveryBlocked | RevocationConfirmed | ReadRequest | ReadResult | CheckpointRequest | CheckpointResult | Presence | TaskStatus | TaskResult | TaskCancel | Proposal | ProposalAccept | UndoRequest | ProtocolError | ManifestRequest | ManifestResult | LifecycleRequest | LifecycleResult | SessionJoin | SessionJoined | SessionLeave | SubmitChanges | ChangesReceived | TaskSubmit | ProposalRequest | CollaborationUpdate | DocumentUpdate | AssetRequest | AssetResult | TicketValidationRequest | TicketValidationResult | RevocationNotice | RuntimeReady | ValidateCheckpoint | CheckpointValidated | PrepareAtomic | AtomicPrepared | ValidateCheckpointCausal | CheckpointValidatedCausal | PrepareAtomicCausal | AtomicPreparedCausal | SessionOpen | SessionRestore | SessionOpened | SessionSubmitBatch | SessionCommitResult | SessionParticipantOpen | SessionParticipantInput | BoundedTransferBegin | BoundedTransferChunk | SessionParticipantOutput | SessionJoinBounded | SessionJoinedBounded | SessionRestored | SessionStatusRequest | SessionStatusResult | SessionDescribeCheckpoint | SessionCheckpointDescribed | SessionInspectOrigins | SessionOriginsInspected;

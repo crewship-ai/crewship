@@ -129,8 +129,8 @@ Batch envelopes and complete ordinary private participant/status wrappers
 (including metadata) retain the 256 KiB raw/canonical bound. This conservative
 implementation includes wrapper overhead in the budget and rejects oversized
 ingress before sealing while retaining its draft. Escaped original raw bytes
-cannot disappear through normalization. Only full SessionRestore and
-SessionCommitResult may use the larger private session-frame bound. Larger checkpoint, document-update or host-receipt payloads
+cannot disappear through normalization. Only the named full restoration, committed-checkpoint, checkpoint-description
+and origin-inventory controls may use the larger private session-frame bound. Larger checkpoint, document-update or host-receipt payloads
 require explicit `bounded_transfer_v1` selection and bounded chunks; wrapping
 an ordinary public message cannot enlarge its limit.
 
@@ -151,3 +151,20 @@ mandatory. This raises owner knowledge only; participant delivery renewal still
 requires its exact registered permission version and no participant right or
 closed gate is reopened. The stateful owner controller must retain the accepted
 floor and a single pending request so delayed replies cannot lower knowledge.
+
+The optional `origin_inventory_v1` session capability declares two read-only
+private shapes: `session_inspect_origins` and `session_origins_inspected`.
+`checkpoint_identity_v1` remains mandatory; identity-only peers gain no origin
+capability. Both capabilities require an exact successful echo before use.
+The current driver explicitly refuses the new capability before OwnerAcquire
+until an actual application handler is composed; shapes alone cannot enable it.
+
+The inventory binds the complete checkpoint wrapper and a distinct current
+owner fence. Origin IDs are canonical decimal strings in0..2^53-1 and clocks
+in1..2^32-1, strictly sorted and unique, at most4096 for this bounded app
+qualification. Baseline zero is occupied, never an issued writer. These numeric
+and directional checks do not prove completeness or provenance. Only a concrete
+correlated adapter/runtime/full-basis/fence result under the original-source
+writer may provide inventory evidence; a public list or boolean cannot replace
+that binding. Issuance, persistent burned-ID union, source ordinals and writer
+construction remain separate work. No participant access or Saved is granted.

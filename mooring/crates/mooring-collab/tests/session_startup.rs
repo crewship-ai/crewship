@@ -387,3 +387,16 @@ fn actual_canonical_d3_restores_owned_readonly_document_without_public_frame_rel
         assert_eq!(value["type"], typ);
     }
 }
+
+#[test]
+fn declared_optional_origin_shapes_do_not_enable_identity_only_driver() {
+    let mut request: Value = serde_json::from_slice(&open()).unwrap();
+    request["required_capabilities"] = json!(["checkpoint_identity_v1", "origin_inventory_v1"]);
+    let raw = serde_json::to_vec(&request).unwrap();
+    assert!(
+        mooring_protocol::session_control::validate(&raw, control::Peer::InheritedHost).is_ok()
+    );
+    // This constructor cannot acknowledge an inventory handler it does not own,
+    // and returns before constructing/publishing any OwnerAcquire.
+    assert!(Startup::from_open(&raw, at(0)).is_err());
+}
