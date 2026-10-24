@@ -229,7 +229,9 @@ crewship skill import --repo https://github.com/your-org/skills \
 
 Bulk Git imports require HTTPS and a native Git version of at least 2.37 with
 working `http.curloptResolve` support. Each import checks the installed HTTPS
-transport against a temporary, owned TLS listener on `127.0.0.2`; if support
+transport against a temporary, owned TLS listener on `127.0.0.1`, with a
+separate wrong-address control reserved on `127.0.0.2` or an assigned local
+interface; if support
 cannot be demonstrated, the import is refused. DNS answers are validated and
 one approved address is pinned while certificate verification retains the
 original hostname. Redirects and inherited Git configuration, proxy settings,
