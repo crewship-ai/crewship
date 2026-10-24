@@ -101,24 +101,24 @@ func (s *BatchStore) Initialize(ctx context.Context, lease OwnerLease, checkpoin
 		return ErrInvalid
 	}
 	checkpoint = append([]byte(nil), checkpoint...)
-	var inventory []BatchTargetIdentity
-	if s.targetsEnabled() {
-		var err error
-		inventory, err = s.config.Targets.Adapter.ValidateTargets(ctx, append([]byte(nil), checkpoint...))
-		if err != nil {
-			return err
-		}
-		if !validTargetInventory(inventory, s.config.Targets.Limits.Targets) {
-			return ErrInvalid
-		}
-	} else if err := s.config.Adapter.ValidateCheckpoint(ctx, append([]byte(nil), checkpoint...)); err != nil {
-		return err
-	}
 	return s.transaction(ctx, func(tx *sql.Tx) error {
 		if err := s.authorize(ctx, tx, lease.Key, "initialize", nil, "", ""); err != nil {
 			return err
 		}
 		if err := s.config.Owners.Check(ctx, tx, lease); err != nil {
+			return err
+		}
+		var inventory []BatchTargetIdentity
+		if s.targetsEnabled() {
+			var err error
+			inventory, err = s.config.Targets.Adapter.ValidateTargets(ctx, append([]byte(nil), checkpoint...))
+			if err != nil {
+				return err
+			}
+			if !validTargetInventory(inventory, s.config.Targets.Limits.Targets) {
+				return ErrInvalid
+			}
+		} else if err := s.config.Adapter.ValidateCheckpoint(ctx, append([]byte(nil), checkpoint...)); err != nil {
 			return err
 		}
 		encoded := base64.StdEncoding.EncodeToString(checkpoint)
@@ -132,7 +132,13 @@ func (s *BatchStore) Initialize(ctx context.Context, lease OwnerLease, checkpoin
 		if err = s.initializeTargets(ctx, tx, lease.Key, inventory); err != nil {
 			return err
 		}
-		return s.audit(ctx, tx, lease.Key, "initialized", map[string]string{"revision": "0"})
+		if err = s.audit(ctx, tx, lease.Key, "initialized", map[string]string{"revision": "0"}); err != nil {
+			return err
+		}
+		if err = s.authorize(ctx, tx, lease.Key, "initialize", nil, "", ""); err != nil {
+			return err
+		}
+		return s.config.Owners.Check(ctx, tx, lease)
 	})
 }
 
