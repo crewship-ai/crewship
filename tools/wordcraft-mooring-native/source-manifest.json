@@ -1,14 +1,32 @@
 {
   "base": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-  "native_patch_commit": "e2d9a769ad19f59ea4875b31bed2a8e1cc478c02",
-  "patch_sha256": "405ec80afcd8ceea160e9f085a2cb2eb2ba29d8c449942c7683c1eab3ea5f543",
+  "native_patch_commit": "37268b7a66199254fc64ebd557411350532ad6d5",
+  "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
   "source_archive_sha256": "3d4a868545d592ae3c499e93852a889c0393288f1a868e4e8790574d1a5c1b5c",
   "files": [
     {
       "path": "ROADMAP.md",
-      "bytes": 182404,
-      "sha256": "ddc2d206569a1b389378b3e98834c921d6e5b03066dfa3f46ad95d638690d608",
+      "bytes": 182707,
+      "sha256": "d19a1649171c35e961dd2c08513259fdc0f62b0e041751198490fd2537d1b11b",
       "before_sha256": "1d86cf7ba26aab60f3afdbd2139f20638e23dd23df2df57d53463075fb310276"
+    },
+    {
+      "path": "apps/wordcraft-web/src/main.rs",
+      "bytes": 1193,
+      "sha256": "3659d0a45bb66c68b3696a08c8fdebd8f225a4afa33048691241b5bf7193d4d9",
+      "before_sha256": "dbb5f31e24357ba13a17f6084e7378d6477eb3750b23208f3a2fd1fc4e4a10e7"
+    },
+    {
+      "path": "apps/wordcraft-web/src/mooring.rs",
+      "bytes": 8552,
+      "sha256": "38dbaf902cc387b547ba8c415234ea051b7c933f51c18796b9328ef5710e9340",
+      "before_sha256": null
+    },
+    {
+      "path": "apps/wordcraft-web/src/web.rs",
+      "bytes": 32468,
+      "sha256": "7b227e6c4beee2ee5a7bf6ca69add54cc10a721fde5c8cdfa9aade03d11d4ef4",
+      "before_sha256": "2d931e9ad210a9ddd1742ce5028235490d657e5e186826d7cd7b65f1918495b7"
     },
     {
       "path": "crates/engine/src/recovery.rs",
@@ -48,14 +66,14 @@
     },
     {
       "path": "crates/ui-egui/src/mooring_boundary.rs",
-      "bytes": 3451,
-      "sha256": "37712f6fda5e8c944dd872defe0c23698abd0067d97601fe85cb42113b3303ea",
+      "bytes": 7864,
+      "sha256": "a182793151d04f708c88071a8e89ccee7563745af0ffe5af547800eb8bf498eb",
       "before_sha256": null
     },
     {
       "path": "crates/ui-egui/src/tests_mooring_boundary.rs",
-      "bytes": 8392,
-      "sha256": "288ab8aef616317ceff2c388a6a171dd6eefd123378db5a5b85d1242e70030b0",
+      "bytes": 10548,
+      "sha256": "a36f02c59396bef6d6bd224c7b5e0b9a3190cc39ae5ec39471cc2f9ad7a458c7",
       "before_sha256": null
     },
     {
@@ -66,21 +84,27 @@
     },
     {
       "path": "crates/ui-egui/src/widgets.rs",
-      "bytes": 89678,
-      "sha256": "ada33c6b912e29ec211468aa87921762aed1f0bbb01adc0eaf5f1eea476b0f81",
+      "bytes": 89946,
+      "sha256": "c3dc4b8d778956cfc2fa69cfe8c7c52e35e2d6f4763bc0b2affe4049058a6a67",
       "before_sha256": "96b1009d9573325b998228aac766478f6ccc0cfa8b0b8b7466a29170b5033e0b"
     },
     {
       "path": "docs/architecture.md",
-      "bytes": 6546,
-      "sha256": "47b9f1cffb59123ec5097b16107b9652b4e664015b0928aae871e9c8e7e12d27",
+      "bytes": 7490,
+      "sha256": "bc4b4e9a6722037881ec63b93efdce1495aa934d379e59b1cf6da06a96c473bc",
       "before_sha256": "ab25227eb885f313099545930e2f3c1c3898745e24a2714a0534d96a0db2b065"
     },
     {
       "path": "docs/gaps.md",
-      "bytes": 60591,
-      "sha256": "c1858aa3944d219583cc39e8c3375a4247aca769eb9ed006dd890758ab8513de",
+      "bytes": 61535,
+      "sha256": "6481daa90791df070d8d64a1ca80ffbdb7a9125bca008076dd6dba5dca7e98fa",
       "before_sha256": "a29e818cd32e323affba835167f5b7f95700a0b11383a9e66e7b8112e107635a"
+    },
+    {
+      "path": "docs/target-app-parity.md",
+      "bytes": 43738,
+      "sha256": "43f913857baafe606f053bd872d6aac170364d087239895dcd99abdb93b06a16",
+      "before_sha256": "17ab02d7c16f8c01cf10cb7d06a7673bd6deb35b6004585b655fa7b07fb35c6b"
     },
     {
       "path": "docs/ui-parity.md",
