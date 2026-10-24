@@ -24,12 +24,16 @@ type artifactPrincipalQueryer interface {
 }
 
 func captureArtifactChatPrincipalQuery(r *http.Request, db artifactPrincipalQueryer, run, ws, agent, crew, chat, message string, receipt *chataudience.Receipt) error {
+	return captureArtifactChatPrincipalContextQuery(r.Context(), db, run, ws, agent, crew, chat, message, receipt)
+}
+
+func captureArtifactChatPrincipalContextQuery(ctx context.Context, db artifactPrincipalQueryer, run, ws, agent, crew, chat, message string, receipt *chataudience.Receipt) error {
 	// Generic runs retain provenance without replacing their normal principal
 	// lifetime with the original JWT deadline. Mooring uses the strict wrapper.
-	if InternalTokenWorkspaceFromContext(r.Context()) != "" || InternalTokenCrewFromContext(r.Context()) != "" || receipt == nil || message == "" {
+	if InternalTokenWorkspaceFromContext(ctx) != "" || InternalTokenCrewFromContext(ctx) != "" || receipt == nil || message == "" {
 		return errors.New("host human admission required")
 	}
-	current, err := chataudience.CaptureTrustedQuery(r.Context(), db, chat, receipt.UserID, receipt)
+	current, err := chataudience.CaptureTrustedQuery(ctx, db, chat, receipt.UserID, receipt)
 	if err != nil {
 		return err
 	}
@@ -37,19 +41,19 @@ func captureArtifactChatPrincipalQuery(r *http.Request, db artifactPrincipalQuer
 		return errors.New("human admission changed")
 	}
 	var n int
-	if err = db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM conversation_messages WHERE id=? AND session_id=? AND agent_id=? AND author_user_id=? AND role='user'`, message, chat, agent, receipt.UserID).Scan(&n); err != nil {
+	if err = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM conversation_messages WHERE id=? AND session_id=? AND agent_id=? AND author_user_id=? AND role='user'`, message, chat, agent, receipt.UserID).Scan(&n); err != nil {
 		return err
 	}
 	if n != 1 {
 		return errors.New("human message missing")
 	}
-	_, err = db.ExecContext(r.Context(), `INSERT INTO artifact_run_principals(run_id,workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at,user_authority_revision,source_credential_kind,source_credential_id,source_credential_expires_at,source_credential_binding) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(run_id) DO NOTHING`, run, ws, agent, crew, receipt.UserID, chat, message, receipt.MemberID, receipt.MemberRevision, receipt.ChatGeneration, receipt.ChatRevision, tsformat.Format(time.Now().UTC().Add(time.Hour)), receipt.UserAuthorityRevision, receipt.SourceCredentialKind, receipt.SourceCredentialID, receipt.SourceCredentialExpiresAt, receipt.SourceCredentialBinding)
+	_, err = db.ExecContext(ctx, `INSERT INTO artifact_run_principals(run_id,workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at,user_authority_revision,source_credential_kind,source_credential_id,source_credential_expires_at,source_credential_binding) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(run_id) DO NOTHING`, run, ws, agent, crew, receipt.UserID, chat, message, receipt.MemberID, receipt.MemberRevision, receipt.ChatGeneration, receipt.ChatRevision, tsformat.Format(time.Now().UTC().Add(time.Hour)), receipt.UserAuthorityRevision, receipt.SourceCredentialKind, receipt.SourceCredentialID, receipt.SourceCredentialExpiresAt, receipt.SourceCredentialBinding)
 	if err != nil {
 		return err
 	}
 	// An exact retry keeps its original expiry. A run cannot silently reuse
 	// a different human, message or captured authority epoch.
-	err = db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM artifact_run_principals WHERE run_id=? AND workspace_id=? AND agent_id=? AND crew_id=? AND human_user_id=? AND chat_id=? AND message_id=? AND member_id=? AND member_revision=? AND chat_generation=? AND chat_revision=? AND user_authority_revision=? AND source_credential_kind=? AND source_credential_id=? AND source_credential_expires_at=? AND source_credential_binding=?`, run, ws, agent, crew, receipt.UserID, chat, message, receipt.MemberID, receipt.MemberRevision, receipt.ChatGeneration, receipt.ChatRevision, receipt.UserAuthorityRevision, receipt.SourceCredentialKind, receipt.SourceCredentialID, receipt.SourceCredentialExpiresAt, receipt.SourceCredentialBinding).Scan(&n)
+	err = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM artifact_run_principals WHERE run_id=? AND workspace_id=? AND agent_id=? AND crew_id=? AND human_user_id=? AND chat_id=? AND message_id=? AND member_id=? AND member_revision=? AND chat_generation=? AND chat_revision=? AND user_authority_revision=? AND source_credential_kind=? AND source_credential_id=? AND source_credential_expires_at=? AND source_credential_binding=?`, run, ws, agent, crew, receipt.UserID, chat, message, receipt.MemberID, receipt.MemberRevision, receipt.ChatGeneration, receipt.ChatRevision, receipt.UserAuthorityRevision, receipt.SourceCredentialKind, receipt.SourceCredentialID, receipt.SourceCredentialExpiresAt, receipt.SourceCredentialBinding).Scan(&n)
 	if err != nil {
 		return err
 	}
@@ -65,17 +69,24 @@ func captureArtifactChatPrincipalQuery(r *http.Request, db artifactPrincipalQuer
 // The caller still supplies its writer transaction and performs all current
 // run, attempt, credential, mandate and Page authorization checks separately.
 func captureOriginalUserArtifactPrincipalQuery(r *http.Request, db artifactPrincipalQueryer, run, ws, agent, crew, chat, message string, receipt *chataudience.Receipt) error {
-	current, err := chataudience.RevalidateOriginalUserQuery(r.Context(), db, receipt)
+	return captureOriginalUserArtifactPrincipalContextQuery(r.Context(), db, run, ws, agent, crew, chat, message, receipt)
+}
+
+// The context form is for a trusted host's ORIGINAL sealed receipt, never a
+// human assertion recovered from an agent bearer or serialized run metadata.
+// Callers still establish that provenance before this current SQL validation.
+func captureOriginalUserArtifactPrincipalContextQuery(ctx context.Context, db artifactPrincipalQueryer, run, ws, agent, crew, chat, message string, receipt *chataudience.Receipt) error {
+	current, err := chataudience.RevalidateOriginalUserQuery(ctx, db, receipt)
 	if err != nil {
 		return err
 	}
 	if current == nil || !receipt.OriginalCredential().Valid() {
 		return errors.New("original user authority required")
 	}
-	if _, err := validateOriginalHumanCredential(r.Context(), db, receipt.OriginalCredential(), scopeSelf); err != nil {
+	if _, err := validateOriginalHumanCredential(ctx, db, receipt.OriginalCredential(), scopeSelf); err != nil {
 		return err
 	}
-	return captureArtifactChatPrincipalQuery(r, db, run, ws, agent, crew, chat, message, receipt)
+	return captureArtifactChatPrincipalContextQuery(ctx, db, run, ws, agent, crew, chat, message, receipt)
 }
 
 type artifactRunAuthority struct{ WorkspaceID, AgentID, CrewID, RunID, HumanUserID, ChatID, MessageID, RequestID string }
