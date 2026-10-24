@@ -148,6 +148,12 @@ pub fn recover(
             reason: "trailing snapshot data".into(),
         });
     }
+    // A successful apply and has_missing_updates() do not prove that every
+    // encoded block materialized. In particular, an independent root update
+    // whose same-client prefix is absent can be silently omitted by Yrs.
+    // Recovery requires a FULL snapshot, including deleted/GC'ed history.
+    let mut encoded_ranges = update.insertions(true);
+    encoded_ranges.merge_with(update.delete_set().clone());
     let document = new_document();
     if let Err(error) = document.transact_mut().apply_update(update) {
         return Err(RecoveryError {
@@ -159,6 +165,16 @@ pub fn recover(
         return Err(RecoveryError {
             unsaved,
             reason: "snapshot has missing causal dependencies".into(),
+        });
+    }
+    let frontier = document.transact().state_vector();
+    if encoded_ranges
+        .iter()
+        .any(|(client, ranges)| ranges.iter().any(|range| range.end > frontier.get(client)))
+    {
+        return Err(RecoveryError {
+            unsaved,
+            reason: "snapshot contains unmaterialized history ranges".into(),
         });
     }
     Ok(Recovery { document, unsaved })
