@@ -127,7 +127,7 @@ func (h *WorkspaceHandler) writeEffectiveAccess(w http.ResponseWriter, r *http.R
 			}
 		} else if right.Kind == "routine" && right.Operation == "edit" {
 			decision.State = "conditional"
-			decision.Reason = "Edit allows changes to the collaborative draft with current View access and token scope. Publication still requires trusted review and testing; Edit does not grant execution."
+			decision.Reason = "Edit allows changes to the collaborative draft with current View access and token scope. Publishing also requires an explicit Publish share and publication admission; Edit does not grant execution."
 			if e := store.Check(r.Context(), user, workspace, access.Right{Kind: "routine", ID: right.ID, Operation: "view"}); e != nil {
 				if !errors.Is(e, access.ErrDenied) {
 					h.memberAccessError(w, e)

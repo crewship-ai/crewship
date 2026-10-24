@@ -18,8 +18,9 @@ import (
 var workspaceMemberAccessCmd = &cobra.Command{
 	Use: "access", Short: "Read or replace a member's resource access policy",
 	Long: `Manage a member's versioned resource policy (trusted workspace admin only).
-Restricted mode denies unintegrated application routes. It does not yet enable
-isolated model execution. An empty rights array in restricted mode denies all.
+Restricted mode denies unintegrated application routes. Execution also requires
+the matching grants, provider authority and an installed restricted runtime.
+An empty rights array in restricted mode denies all.
 Read the JSON document, edit its mode/rights, then replace it with the same
 membership_id and revision. A stale revision fails with 409; it is never retried.`,
 }

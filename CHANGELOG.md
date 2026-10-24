@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Guest access explanations match the supported resource policy.** Member settings name agents, routines and projects; CLI help explains the runtime prerequisites, and Edit explains the separate Publish share instead of claiming publication always needs a trusted reviewer.
+
 - Mooring SDK recovery refuses incomplete full snapshots even when Yrs reports no missing updates, preserving every original unsaved draft instead of accepting silently omitted history.
 
 - **Audit history damage is detected without operator requests.** Full instance and workspace verification now runs at startup and hourly outside writer transactions; post-upgrade defects and unchained fallback records alert instance admins. Delivery receipts commit with the inbox notice and survive inbox purge/retention, so handled security notices are not repeatedly restored or resent.

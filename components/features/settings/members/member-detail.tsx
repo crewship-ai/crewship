@@ -228,7 +228,7 @@ export function MemberDetail({
                 <span className="font-medium text-foreground">{member.access_mode === "restricted" ? "Restricted" : "Trusted"}</span>
                 {" — "}
                 {member.access_mode === "restricted"
-                  ? "only the crews, agents and projects granted below."
+                  ? "only the agents, routines and projects granted below."
                   : "everything the role and abilities allow."}
               </p>
             )}
