@@ -12,6 +12,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 mooring-core = { path = "../mooring-core" }
 mooring-protocol = { path = "../mooring-protocol" }
+mooring-text = { path = "../mooring-text" }
 mooring-wordcraft = { path = "../mooring-wordcraft" }
 serde = "=1.0.229"
 serde_json = "=1.0.154"

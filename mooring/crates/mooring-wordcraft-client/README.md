@@ -32,3 +32,21 @@ wraparound; stable after-IDs alone do not authenticate remote cursors. The host
 binds pages to one immutable confirmed checkpoint/revision and rechecks current
 permission before content delivery. Unsupported documents remain fully readable
 and conservatively read-only.
+
+`import_with_origin` and `restore_with_fresh_origin` are opt-in constructors
+accepting only canonical decimal strings in 1..2^53-1. They validate the number
+before native/checkpoint decoding and preserve existing read-only classification.
+Fresh restore refuses occupied origins, including deleted allocations. This is
+data validation, not a host issuance/authority or burn-journal proof. The caller
+must retain the actual document across operations; these APIs do not authorize
+repeated restore with an already issued origin. Existing constructors and
+`preview_agent` remain unchanged; the latter is not an explicit-origin factory.
+No continuation, network admission, human controller or Saved receipt is added.
+
+The browser regression in `tests/explicit-origin-browser.mjs` exports
+`qualifyExplicitOrigins(initializedSdk, canonicalD1Json, rawD1Json)`. A browser
+harness serves the generated web-target module/WASM and invokes this against
+the exact application fixtures. It checks full native/ID/checkpoint preservation
+and rejects JavaScript numbers, objects, booleans, null, bigint and oversized
+strings before converting the origin to a Rust string. Native tests alone do
+not qualify this JavaScript ABI behavior.
