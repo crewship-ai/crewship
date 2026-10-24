@@ -1371,7 +1371,7 @@ jobs:
         with:
           name: mooring-actual-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            ${{ runner.temp }}/mooring-actual-fixtures/fixtures.json
+            ${{ runner.temp }}/mooring-actual-fixtures/
             ${{ runner.temp }}/mooring-actual-results/
           if-no-files-found: error
           retention-days: 7

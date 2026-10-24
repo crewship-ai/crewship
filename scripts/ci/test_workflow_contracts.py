@@ -30,6 +30,8 @@ class WorkflowContracts(unittest.TestCase):
         self.assertIn('mooring-actual.py --fixtures', lane)
         self.assertLess(lane.index('mooring-actual-fixtures.py --output'), lane.index('mooring-actual.py --fixtures'))
         self.assertIn('if-no-files-found: error', lane)
+        self.assertIn('${{ runner.temp }}/mooring-actual-fixtures/', lane)
+        self.assertNotIn('${{ runner.temp }}/mooring-actual-fixtures/fixtures.json', lane)
         self.assertNotIn('continue-on-error', lane)
         self.assertNotIn('/home/ubuntu', lane)
         self.assertIn('mooring-actual', self.job(ci, 'result').split('runs-on:')[0])
