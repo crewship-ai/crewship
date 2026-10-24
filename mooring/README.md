@@ -120,3 +120,11 @@ reserve reduces each batch payload allowance; the actual wire encoder must
 verify its output against the charge before I/O. Native timer and acknowledgement
 waits remain separate. This composition still has no FD dispatcher, participant
 admission, owner/read gates or mixed-author host submission authority.
+
+The live-session composition carries the qualified atomic/dependency resolver,
+including complete SCC membership and first-submitted actual cycle roots,
+admission-failure precedence and original per-operation rejection roots. Its
+public thirteen-case shared fixture consumer compares planner decisions only:
+`EligibleForHost` is not a durable receipt or authorization. The later Unicode
+scalar identifier policy remains enforced; no application/store authority moves
+into the planner.
