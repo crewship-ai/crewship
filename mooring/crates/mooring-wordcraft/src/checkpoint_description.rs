@@ -13,7 +13,7 @@ impl DescribeCheckpoint for WordCraftAdapter {
         // Restore EXACT provided bytes, including hidden CRDT/model integrity.
         // A description neither changes these bytes nor grants read/write access.
         let document = Document::restore(checkpoint).map_err(PrepareError::State)?;
-        if !closed_self_contained(&document) {
+        if !closed_self_contained(&document) && !crate::readonly_resources::qualified(&document) {
             return Err(PrepareError::UnqualifiedDescription);
         }
         Ok(CheckpointDescription {
@@ -82,7 +82,7 @@ fn closed_self_contained(document: &Document) -> bool {
         && no_section_references(&typed.last_section)
         && no_unqualified_links(&native, 0, &mut 262144)
 }
-fn no_section_references(section: &wordcraft_doc::SectionProps) -> bool {
+pub(crate) fn no_section_references(section: &wordcraft_doc::SectionProps) -> bool {
     [&section.headers, &section.footers]
         .iter()
         .all(|refs| refs.default.is_none() && refs.first.is_none() && refs.even.is_none())
@@ -462,5 +462,40 @@ mod d3_tests {
             assert_eq!(restored.native().unwrap(), native, "{case}");
             assert_eq!(restored.checkpoint().unwrap(), cp, "{case}");
         }
+    }
+}
+
+#[cfg(test)]
+mod d2_tests {
+    use super::*;
+    #[test]
+    fn known_actual_d2_resources_are_complete_readonly_without_rewriting() {
+        let native: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/d2-engine-canonical.json"))
+                .unwrap();
+        let ids: Vec<String> = (0..native["body"].as_array().unwrap().len())
+            .map(|i| format!("d2_{i}"))
+            .collect();
+        let mut document = Document::import(native.clone(), ids.clone()).unwrap();
+        assert!(document.is_read_only());
+        let checkpoint = document.checkpoint().unwrap();
+        let description = WordCraftAdapter.describe_checkpoint(&checkpoint).unwrap();
+        assert!(description.assets.is_empty());
+        let command = crate::command::Command::Insert {
+            target_id: ids[0].clone(),
+            at: crate::command::Anchor::Start {},
+            text: "must remain unsaved".into(),
+            properties: None,
+        };
+        assert_eq!(
+            crate::candidate::apply(&mut document, &command),
+            Err(crate::candidate::CandidateError::ReadOnly)
+        );
+        assert_eq!(document.checkpoint().unwrap(), checkpoint);
+        let restored = Document::restore(&checkpoint).unwrap();
+        assert!(restored.is_read_only());
+        assert_eq!(restored.native().unwrap(), native);
+        assert_eq!(restored.block_ids().unwrap(), ids);
+        assert_eq!(restored.checkpoint().unwrap(), checkpoint);
     }
 }
