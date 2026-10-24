@@ -265,3 +265,6 @@ pub mod private_rpc {
         Ok(())
     }
 }
+
+#[cfg(unix)]
+pub mod session_driver;

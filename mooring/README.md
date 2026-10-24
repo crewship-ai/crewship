@@ -149,3 +149,17 @@ checks ownership again after encoding and writer wait. Tests use real Unix
 frames and the real application document with an injected deterministic clock.
 No CLI selects this profile, no participant join or mutation is admitted, and
 caller-trusted transport metadata still needs the actual inherited-FD factory.
+
+The unselected native `session_driver::Driver` composes the single-reader lane
+with owned-document startup. A separate preparation worker binds every request
+to the exact opened workspace/artifact and application tuple, so a host prepare
+callback can progress while actor restoration is withheld. Preparation creates
+independent owned candidates and never installs them into the retained live Doc.
+Startup polls the send-bound owner lease while waiting for restore, checks it
+around restoration and both acknowledgements, and closes/joins the worker on
+failure. Worker unwind also closes the channel. The driver retains the original
+checkpoint wrapper and actual document; no operation or participant control is
+processed yet, and no CLI selects this constructor. The injected clock and host
+transport assertion must come from verified native integration. Tests use real
+Unix socket pairs plus an injected clock; they do not qualify suspend behavior,
+production owner renewal, author admission, durable settlement or distribution.

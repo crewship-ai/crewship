@@ -122,6 +122,10 @@ impl Startup {
     }
 }
 impl OwnerAccepted {
+    /// A driver must poll the bound owner while waiting for restoration.
+    pub fn check_owner(&mut self, now: Tick) -> io::Result<()> {
+        self.observe(now)
+    }
     /// The clock is sampled BEFORE and AFTER restore/serialization work. The
     /// caller must supply BOOTTIME; tests can inject deterministic clocks.
     pub fn restore(

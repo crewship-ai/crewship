@@ -224,6 +224,9 @@ impl Lane {
     pub fn output(&self) -> Output {
         self.output.clone()
     }
+    pub fn is_closed(&self) -> bool {
+        self.shared.state.lock().unwrap().closed
+    }
     pub fn close(&self) {
         self.shared.close();
     }
