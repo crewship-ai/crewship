@@ -58,7 +58,13 @@ export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange }
       if (message.type === "wordcraft:ready" && exact(message, ["protocol", "type"])) { host?.ready(); return }
       if (message.type === "wordcraft:submit" && exact(message, ["protocol", "type", "raw"]) && typeof message.raw === "string") { host?.submit(message.raw); return }
       if (message.type === "wordcraft:status" && exact(message, ["protocol", "type", "state", "reason"]) && typeof message.reason === "string" && message.reason.length <= 64) {
-        if (message.state === "draft") { host?.draft(); return }
+        if (message.state === "draft") { setError(undefined); host?.draft(); return }
+        // A closed local refusal is explanatory only: it cannot clear dirty
+        // work, advance Saved, close the producer or authorize a mutation.
+        if (message.state === "history-refused" && message.reason === "unsupported_delete_undo") {
+          setError("Undo or redo is unavailable for deletions or changes that overlap another person's deletion. Your document has not been changed.")
+          return
+        }
         // Child diagnostics cannot clear dirty work or declare Saved.
         if (message.state === "pending") return
         if (["unknown", "unsaved-draft", "stopped"].includes(String(message.state))) { close("editor_stopped"); return }

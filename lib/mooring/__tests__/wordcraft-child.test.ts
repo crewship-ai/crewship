@@ -3,7 +3,7 @@ import { startWordCraftChild, type WordCraftChildSDK, type WordCraftNativeWeb } 
 
 // Transport/controller fixtures only. Rust validates actual native/protocol data
 // in separate native+Chromium proofs; these fakes grant no authority.
-function setup() {
+function setup(historyError?: string) {
   const parent = { postMessage: vi.fn() }
   let connect: ((event: MessageEvent) => void) | undefined
   const window = { parent, addEventListener: (_: "message", callback: (e: MessageEvent) => void) => { connect = callback }, removeEventListener: vi.fn() }
@@ -26,8 +26,8 @@ function setup() {
     observe_native_selection = vi.fn(() => ({}))
     validate_native_transition_selected = vi.fn()
     native_transition_selected(id: string, _before: string, after: string) { localNative = after; count++; return proposal(id) }
-    undo = vi.fn((id: string) => { count++; return proposal(id) })
-    redo = vi.fn((id: string) => { count++; return proposal(id) })
+    undo = vi.fn((id: string) => { if (historyError) throw historyError; count++; return proposal(id) })
+    redo = vi.fn((id: string) => { if (historyError) throw historyError; count++; return proposal(id) })
     apply_verified_document_update = update
     apply_verified_own_document_update = ownUpdate
   }
@@ -129,6 +129,29 @@ describe("isolated WordApp child original transport", () => {
     expect(s.port.close).toHaveBeenCalledTimes(1)
     expect(s.requests).toEqual([original])
     expect(s.sent.map(raw => JSON.parse(raw)).at(-1)).toMatchObject({ type: "wordcraft:status", state: "unsaved-draft" })
+    expect(s.sent.map(raw => JSON.parse(raw).state)).not.toContain("saved")
+  })
+  it.each(["edit.undo", "edit.redo"])("reports a local history refusal for %s without replacing the draft or submitting", command => {
+    const s = setup("unsupported_delete_undo"); s.receive(s.bootstrap); s.emit("native A")
+    const original = s.requests[0]
+    const before = s.sent.length
+    let refusal: unknown
+    try { s.callbacks().history("native A", command) } catch (cause) { refusal = cause }
+    // Preserve the exact SDK exception: the native bridge classifies this as
+    // a refusal before mutation, not an uncertain capture requiring shutdown.
+    expect(refusal).toBe("unsupported_delete_undo")
+    expect(s.sent.slice(before).map(raw => JSON.parse(raw))).toEqual([
+      { protocol: 1, type: "wordcraft:status", state: "history-refused", reason: "unsupported_delete_undo" },
+    ])
+    expect(s.callbacks().can_edit()).toBe(true)
+    expect(s.handle.stop).not.toHaveBeenCalled()
+    expect(s.port.close).not.toHaveBeenCalled()
+    expect(s.requests).toEqual([original])
+    expect(s.native.start_collaborative).toHaveBeenCalledTimes(1)
+    // A later valid edit still uses the original producer and local state.
+    s.emit("native A+B")
+    expect(s.requests).toHaveLength(2)
+    expect(s.cuts).toEqual([[1], [2]])
     expect(s.sent.map(raw => JSON.parse(raw).state)).not.toContain("saved")
   })
   it("invalid bootstrap cannot initialize a native editor", () => {

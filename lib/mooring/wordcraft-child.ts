@@ -159,7 +159,16 @@ export function startWordCraftChild(
       begin()
       // SDK refusal happens BEFORE history mutation/pop. Ordinary deletion is
       // allowed; only unsupported delete/overlap UNDO/REDO is refused.
-      const proposal = command === "edit.undo" ? draft.undo(operationId) : draft.redo(operationId)
+      let proposal: Proposal
+      try { proposal = command === "edit.undo" ? draft.undo(operationId) : draft.redo(operationId) }
+      catch (cause) {
+        if (cause === "unsupported_delete_undo") {
+          // Local explanation only. Preserve the exact refusal so the native
+          // bridge leaves history and the document intact without stopping.
+          try { status("history-refused", cause) } catch { /* retain SDK refusal */ }
+        }
+        throw cause
+      }
       try { emit(proposal); return draft.native_json() }
       catch { stop("capture-failed"); throw "capture_failed" }
     },

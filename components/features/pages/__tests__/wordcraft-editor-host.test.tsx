@@ -85,3 +85,31 @@ it("rejects oversized child strings before making a second UTF-8 allocation", as
     expect(frame.hidden).toBe(true)
   } finally { encoder.mockRestore() }
 })
+
+// These private-port tests qualify local explanatory UX only; the state callback
+// is a fixture and does not prove a real Rust or SQL receipt.
+it.each(["saved", "pending"])("shows a history refusal while keeping %s and the same editor", async state => {
+  const { frame, send } = await open()
+  const callbacks = mocks.connect.mock.calls[0][5]
+  await act(async () => { callbacks.state(state) })
+  const priorStatus = screen.getByRole("status").textContent
+  await send({ type: "wordcraft:status", state: "history-refused", reason: "unsupported_delete_undo" })
+  expect(screen.getByRole("alert")).toHaveTextContent("Undo or redo is unavailable for deletions or changes that overlap another person's deletion. Your document has not been changed.")
+  expect(screen.getByRole("status").textContent).toBe(priorStatus)
+  expect(frame.hidden).toBe(false)
+  expect(frame.isConnected).toBe(true)
+  expect(mocks.stop).not.toHaveBeenCalled()
+  expect(mocks.submit).not.toHaveBeenCalled()
+  expect(mocks.draft).not.toHaveBeenCalled()
+  expect(mocks.ready).not.toHaveBeenCalled()
+  await send({ type: "wordcraft:status", state: "draft", reason: "local-original" })
+  expect(screen.queryByRole("alert")).toBeNull()
+  expect(mocks.draft).toHaveBeenCalledOnce()
+})
+it("rejects an unrecognized history refusal without displaying its untrusted reason", async () => {
+  const { frame, send } = await open()
+  await send({ type: "wordcraft:status", state: "history-refused", reason: "untrusted-child-text" })
+  expect(mocks.stop).toHaveBeenCalledWith("invalid_editor_sequence")
+  expect(frame.hidden).toBe(true)
+  expect(screen.queryByText("untrusted-child-text")).toBeNull()
+})
