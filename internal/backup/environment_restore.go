@@ -360,7 +360,10 @@ func AssembleImageArchive(ctx context.Context, env *Environment, w io.Writer, op
 				_ = rc.Close()
 				return err
 			}
-			_, err = io.CopyN(tw, rc, n)
+			// Stored layers are replayed work, including decrypted external files.
+			// Charge the same operation budget as archive decoding.
+			input := &restoreReadGuard{ctx: ctx, r: rc, b: readBudget(ctx), decoded: true}
+			_, err = io.CopyN(tw, input, n)
 			_ = rc.Close()
 			if err != nil {
 				return fmt.Errorf("backup: environment blob %s: %w", e.Digest, err)

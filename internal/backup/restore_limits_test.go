@@ -423,3 +423,24 @@ func TestRestoreBudgetLandingCannotHideImageLimit(t *testing.T) {
 		t.Fatalf("failure published landed report: %v", err)
 	}
 }
+
+// External stores return ordinary files, and encrypted stores return a
+// decrypting reader. Neither may bypass the shared replay-work allowance.
+func TestRestoreBudgetExternalImageReplay(t *testing.T) {
+	ops := newFakeEnvOps()
+	ops.snap = crewSnapshot()
+	ops.snap.Mounts = nil
+	store := &EnvironmentStore{Dir: t.TempDir()}
+	env, _ := captureWithFake(t, ops, store, nil, "")
+	open, _ := BlobSources(store)
+	limits := DefaultRestoreLimits()
+	limits.DecodedBytes = 1
+	ctx := budgetContext(limits)
+	err := AssembleImageArchive(ctx, env, io.Discard, EnvironmentBlobOpener(env, store.ServerKeys(), open))
+	if !errors.Is(err, ErrRestoreLimit) {
+		t.Fatalf("external image replay escaped shared decoded-work allowance: %v", err)
+	}
+	if !errors.Is(restoreOperationError(ctx), ErrRestoreLimit) {
+		t.Fatal("external image replay did not latch operation failure")
+	}
+}
