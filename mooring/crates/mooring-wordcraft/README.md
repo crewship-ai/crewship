@@ -151,15 +151,20 @@ authority, negotiated transport limits and checkpoint provenance remain the
 caller's responsibility. The scan borrows the input and allocates nothing.
 
 The optional native `DescribeCheckpoint` implementation restores the exact
-provided bytes before describing them. Its first qualified manifest is empty
-ONLY for the closed self-contained model-v2 D1 paragraph subset: no external
-template, linked styles, page picture, opaque latent XML, retained hyperlink
-metadata, unresolved header/footer references or unsupported media/part graph.
-Unknown, read-only or legacy encodings return an opaque unqualified error;
-current compatibility versions never fill in unknown historical metadata.
-Embedded media is not broadly qualified: an OLE/graphic can retain external
-relationships even when its preview bytes are embedded. The result grants no
-authority, installs no state and changes no checkpoint bytes. The host must
-authenticate/bound the request and retain the complete description with the exact
-checkpoint in the same authorized transaction. D3 and broader embedded-object
-description qualification remain required follow-up work.
+provided bytes before describing them. Its complete empty external manifest is
+qualified only for the closed self-contained model-v2 paragraph subset, including
+known D3 page breaks and paragraph section layout. The complete original native
+tree must roundtrip exactly through the pinned typed model before a disposable
+classifier copy omits only those two layout fields. Every original section must
+have no header/footer references, and all media/parts, external templates, linked
+styles, page pictures, opaque XML, retained links and inline objects remain
+unqualified. Unknown fields, numeric drift, review/protection modes and legacy
+encodings fail closed; compatibility versions never fill missing historical data.
+
+Read-only layout remains read-only after description, paging and restore. This
+metadata result grants no authority, installs no state and changes no original
+native data, stable IDs or checkpoint bytes. The host must authenticate/bound the
+request and retain the complete description with the exact checkpoint in the same
+authorized transaction. Embedded-object and table resource descriptions require
+separate qualification; embedded previews alone do not prove absence of external
+OLE/graphic relationships.
