@@ -333,10 +333,7 @@ func foldHomoglyphs(body string) string {
 const base64ScanMaxBlocks = 256
 
 func scanBase64Obfuscation(body string) *ScanHit {
-	matches := base64Block.FindAllString(body, -1)
-	if len(matches) > base64ScanMaxBlocks {
-		matches = matches[:base64ScanMaxBlocks]
-	}
+	matches := base64Block.FindAllString(body, base64ScanMaxBlocks)
 	for _, match := range matches {
 		// Strict StdEncoding; ignore decode errors (most random
 		// long base64-shaped strings won't decode cleanly).
