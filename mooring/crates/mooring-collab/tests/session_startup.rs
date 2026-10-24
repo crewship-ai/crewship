@@ -288,3 +288,30 @@ fn legacy_capability_and_content_only_identity_cannot_activate() {
         );
     }
 }
+
+#[test]
+fn review_4131_missing_or_unknown_capability_fails_before_owner_request(){
+ for caps in [None,Some(json!([])),Some(json!(["future_identity"])),Some(json!(["checkpoint_identity_v1","checkpoint_identity_v1"]))]{
+  let mut message:Value=serde_json::from_slice(&open()).unwrap();
+  match caps{Some(value)=>message["required_capabilities"]=value,None=>{message.as_object_mut().unwrap().remove("required_capabilities");}}
+  assert!(Startup::from_open(&serde_json::to_vec(&message).unwrap(),at(0)).is_err());
+ }
+}
+#[test]
+fn review_4131_full_identity_cannot_be_transplanted_or_replaced_with_raw_content_hash(){
+ for swap in ["scope","model","content-only","assets"]{
+  let (startup,acquire)=Startup::from_open(&open(),at(0)).unwrap();let owner=startup.accept_owner(&grant(&acquire),&host(),at(1)).unwrap();
+  let mut message:Value=serde_json::from_slice(&restore().0).unwrap();
+  match swap{
+   "scope"=>message["checkpoint"]["scope"]["artifact_id"]=json!("another-artifact"),
+   "model"=>message["checkpoint"]["versions"]["model_version"]=json!("0.1.0"),
+   "assets"=>message["checkpoint"]["assets"]=json!([{"asset_id":"unqualified-asset","digest":format!("sha256:{}","0".repeat(64)),"size_bytes":"1"}]),
+   "content-only"=>{},_=>unreachable!()
+  }
+  bind_checkpoint_identity(&mut message["checkpoint"]);
+  if swap=="content-only"{
+   let cp=serde_json::from_value(message["checkpoint"].clone()).unwrap();let identity=mooring_protocol::checkpoint::compute(&cp,mooring_protocol::checkpoint::Limits{decoded_bytes:control::MAX_CHECKPOINT_BYTES,preimage_bytes:control::MAX_CONTROL_BYTES}).unwrap();message["checkpoint"]["digest"]=json!(identity.content_digest());
+  }
+  assert!(owner.restore(&serde_json::to_vec(&message).unwrap(),||Ok(at(2))).is_err(),"{swap}");
+ }
+}
