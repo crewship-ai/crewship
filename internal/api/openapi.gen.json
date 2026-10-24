@@ -11756,6 +11756,111 @@
         ],
         "type": "object"
       },
+      "MooringSession": {
+        "additionalProperties": false,
+        "properties": {
+          "checkpoint_revision": {
+            "pattern": "^(0|[1-9][0-9]*)$",
+            "type": "string"
+          },
+          "connection_ref": {
+            "type": "string"
+          },
+          "editor": {
+            "additionalProperties": false,
+            "properties": {
+              "bundle_digest": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "url",
+              "bundle_digest"
+            ],
+            "type": "object"
+          },
+          "origin": {
+            "description": "Host-reserved positive origin, at most 2^53-1; decimal string.",
+            "pattern": "^[1-9][0-9]*$",
+            "type": "string"
+          },
+          "participant_ref": {
+            "type": "string"
+          },
+          "sdk_prefix": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "ticket": {
+            "type": "string"
+          },
+          "versions": {
+            "additionalProperties": false,
+            "properties": {
+              "engine_version": {
+                "enum": [
+                  "0.10.0"
+                ],
+                "type": "string"
+              },
+              "model_version": {
+                "enum": [
+                  "0.2.0"
+                ],
+                "type": "string"
+              },
+              "protocol_version": {
+                "enum": [
+                  "0.4.0"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "protocol_version",
+              "model_version",
+              "engine_version"
+            ],
+            "type": "object"
+          },
+          "websocket_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "checkpoint_revision",
+          "sdk_prefix",
+          "participant_ref",
+          "ticket",
+          "connection_ref",
+          "origin",
+          "versions",
+          "websocket_path"
+        ],
+        "type": "object"
+      },
+      "MooringSessionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "checkpoint_base64": {
+            "description": "Optional canonical base64 initialization checkpoint; decoded size at most 1536 KiB. The whole request is limited to 2 MiB.",
+            "nullable": true,
+            "type": "string"
+          },
+          "write": {
+            "default": false,
+            "nullable": true,
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
       "MooringState": {
         "additionalProperties": false,
         "properties": {
@@ -130781,21 +130886,40 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/MooringSessionRequest"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/MooringSession"
                 }
               }
             },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
           },
           "401": {
             "content": {
@@ -130832,6 +130956,42 @@
               }
             },
             "description": "Forbidden"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           },
           "503": {
             "content": {
@@ -130891,18 +131051,41 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Original connection_ref returned by the authenticated session request; a connection can be used only once.",
+            "in": "query",
+            "name": "connection_ref",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "pattern": "^[^\\u0000]+$",
+              "type": "string"
+            }
           }
         ],
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
+          "101": {
+            "description": "Switching Protocols",
+            "headers": {
+              "Connection": {
                 "schema": {
-                  "type": "object"
+                  "enum": [
+                    "Upgrade"
+                  ],
+                  "type": "string"
+                }
+              },
+              "Upgrade": {
+                "schema": {
+                  "enum": [
+                    "websocket"
+                  ],
+                  "type": "string"
                 }
               }
-            },
-            "description": "OK"
+            }
           },
           "400": {
             "content": {
@@ -130957,6 +131140,42 @@
               }
             },
             "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [

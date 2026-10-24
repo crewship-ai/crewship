@@ -54,3 +54,29 @@ Read returns the installed command manifest and current confirmed state.
 (default `http://127.0.0.1:9119`); remote hosts and redirects are refused. This is
 transport selection, not an authority override. The equivalent generic MCP tool
 is `mooring_command`; native `workbook_*` tools remain available.
+
+## crewship mooring session
+
+`crewship mooring session <slug|@ID> --file packet.json` requests a human
+collaboration session in the separately enabled Rust session profile. Use
+`--file -` for stdin. The original JSON object accepts `write` (default `false`)
+and an optional `checkpoint_base64` initialization checkpoint. The CLI forwards
+that object without reconstructing it. It does not accept caller-selected roles
+or authority. The response contains the one-use ticket, `connection_ref`,
+participant/origin identifiers and `websocket_path`; admission is not a save.
+See the [session transport contract](/specs/mooring-session-transport) for limits
+and the current qualification boundary.
+
+## crewship mooring connect
+
+`crewship mooring connect <slug|@ID> --connection CONNECTION_REF --file frames.ndjson`
+opens the authenticated WebSocket using the original session `connection_ref`.
+Use `--file -` for stdin. Supply one original JSON frame per line, starting with
+the original `session_join`; the command cannot mint a ticket, participant or
+change packet. Each frame is limited to 256 KiB. Keep original packets for retries.
+
+The current CLI profile supplies credentials and workspace context. The default,
+JSON and NDJSON formats print server frames as JSON lines; YAML prints separate
+YAML documents. Quiet output is rejected before input or network activity. A
+pending frame is not confirmation of storage; only the host's committed response
+can confirm a saved change.

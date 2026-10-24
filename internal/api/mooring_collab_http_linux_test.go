@@ -50,6 +50,19 @@ func TestMooringHTTPAuthenticatesAndChecksPageBeforeBody(t *testing.T) {
 		t.Fatal("controller not registered")
 	}
 	defer r.mooringHTTP.Close()
+	registered := registeredPublicRoutes(r)
+	spec := loadGeneratedSpec(t)
+	if len(registered) != 2 {
+		t.Fatalf("enabled transport registered %d paths, want exactly two", len(registered))
+	}
+	for path, method := range map[string]string{
+		"/api/v1/pages/{slug}/mooring/session": "POST",
+		"/api/v1/pages/{slug}/mooring/ws":      "GET",
+	} {
+		if len(registered[path]) != 1 || !registered[path][method] || !spec[path][method] {
+			t.Fatalf("enabled transport %s: registered=%v spec=%v", path, registered[path], spec[path])
+		}
+	}
 	for _, tc := range []struct {
 		name, token string
 		want        int

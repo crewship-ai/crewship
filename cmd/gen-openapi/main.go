@@ -451,6 +451,14 @@ func buildDocument(routes []route) map[string]any {
 		// handler reached for. Success responses retain the generic schema
 		// until endpoint-specific schemas are added.
 		for status, response := range responses {
+			// Informational responses (including WebSocket's 101 upgrade) have
+			// headers but no HTTP message body. Do not invent a JSON error body.
+			if status[0] == '1' {
+				if headers := routeSchemaCatalog()[rt.method+" "+rt.path].SuccessHeaders; headers != nil {
+					response.(map[string]any)["headers"] = headers
+				}
+				continue
+			}
 			if status[0] != '2' && status != "304" {
 				response.(map[string]any)["content"] = errorContentForRoute(rt, info)
 			}

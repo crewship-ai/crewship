@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Document the default-off Mooring session request/response and bodyless WebSocket upgrade, with exact conditional-route checks and CLI/configuration contracts.
+
 - WordCraft explains restricted undo/redo refusals without closing the editor or changing its save state; deletion undo and changes overlapping another author's deletion remain refused.
 
 - Mooring CLI streams honor JSON/NDJSON and YAML output; unsupported quiet output is rejected before opening input or connecting. Original submitted packets remain unchanged. Literal HTTP registrations expose the existing authenticated session and WebSocket paths to route inventories.
