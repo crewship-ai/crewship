@@ -36,6 +36,10 @@ import "sort"
 // table. Drift detection catches the omission in tests so an oversight
 // surfaces before a bundle ships missing rows.
 var BackupTableIntent = map[string]ScopedTableIntent{
+	"mooring_origin_documents":       IntentExcludeRuntime, // target-local lineage and budgets are preserved, never transplanted or regenerated
+	"mooring_origin_exclusions":      IntentExcludeRuntime, // issued-unused and historical origins remain permanently burned on this target
+	"mooring_ingress_sources":        IntentExcludeRuntime, // correlation metadata is not a restorable admission or source capability
+	"mooring_ingress_operations":     IntentExcludeRuntime, // original source ordinals/hashes cannot be replaced by portable metadata
 	"mooring_authority_generations":  IntentExcludeRuntime, // target-local non-ABA tombstones never travel or reset in portable restore
 	"mooring_delivery_gates":         IntentExcludeRuntime,
 	"mooring_delivery_barriers":      IntentExcludeRuntime,

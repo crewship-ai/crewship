@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Origin metadata groundwork:** retain target-local origin exclusions and immutable source ordinals across portable replacement. A portable lineage marker supplies correlation only; issuance, recovery coverage and content ingress remain disabled.
+
 - **Mooring origin groundwork:** bounded data helpers preserve occupied and issued origin exclusions when computing a candidate. They provide no inventory provenance, reservation, source capability or enabled ingress path.
 
 - **Independent collaboration authors:** dormant admission callbacks distinguish original author generations from broad delivery invalidation, so another user's grant revocation does not reject an unaffected original author. Current source and Page policy remain required; missing tracking or schema drift stays nonterminal, and no content path is enabled.
