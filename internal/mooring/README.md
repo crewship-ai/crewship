@@ -381,3 +381,21 @@ from relabelling retained metadata; it is not authenticity against arbitrary tru
 SQL deletion/replacement or tampered portable input. Portable restore retains exact
 known metadata and legacy NULL. Writer-bound full-to-content basis translation and
 actual descriptor transport are separate prerequisites before full session activation.
+
+
+`SessionCommitter.CommitFull` is the separate dormant full-identity entry. It
+accepts `FullCheckpointBasis`, then checks original sealed processing authority
+and the exact captured owner before resolving retained metadata/content inside
+the same FULL writer. Both the original atomic-boundary checkpoint and current
+head must have qualified retained metadata and creator provenance. Legacy NULL
+is unknown; neither a content digest nor a fresh owner generation substitutes
+for the original full identity. Identity-enabled stores refuse the older raw
+`SessionCommitter.Commit` entry. Immutable operation reads are never rewritten.
+
+The uncommitted output callback receives isolated copies of the actual full
+checkpoint, target versions and receipt. Its closed `SessionCommitResult` must
+match those SQL values and fit both the 2 MiB raw and canonical budgets before
+COMMIT. Final author/owner fences still run after output preparation. Runtime,
+session and request correlation remain the concrete verified manager's duty;
+this primitive does not authenticate caller-provided strings or qualify a live
+runtime factory. The existing strict/stateless paths retain their behavior.

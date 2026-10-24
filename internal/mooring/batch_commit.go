@@ -185,6 +185,14 @@ func (s *BatchStore) commit(ctx context.Context, request BatchRequest, session *
 		if session == nil {
 			revision, checkpoint, e = batchScopeMatches(ctx, tx, key)
 		} else {
+			if session.fullBasis != nil {
+				session.basis, e = s.resolveFullCheckpointBasis(ctx, tx, key, *session.fullBasis)
+				if e != nil {
+					return e
+				}
+			} else if s.checkpointIdentityEnabled() {
+				return ErrCheckpointIdentity
+			}
 			revision, checkpoint, e = sessionScopeCheckpoint(ctx, tx, key, session.basis)
 			request.ExpectedRevision = revision
 		}
@@ -467,7 +475,7 @@ func (s *BatchStore) commit(ctx context.Context, request BatchRequest, session *
 			result.Changes[i] = accepted[i]
 		}
 		if session != nil {
-			if e = session.prepareOutput(ctx, tx, request.Lease, result, checkpoint); e != nil {
+			if e = session.prepareOutput(ctx, tx, s, request.Lease, result, checkpoint); e != nil {
 				return e
 			}
 		}

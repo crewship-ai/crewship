@@ -1,11 +1,15 @@
 package mooring
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	protocol "github.com/crewship-ai/crewship/mooring/protocol/generated/go"
+	"reflect"
+	"strconv"
 	"strings"
 )
 
@@ -16,6 +20,14 @@ const sessionOutputBytes = 2 * 1024 * 1024
 // SessionBasis names a retained canonical checkpoint at an atomic boundary.
 // It is transport context, never a rewrite of an operation's immutable reads.
 type SessionBasis struct{ Revision, Digest string }
+
+// SessionFullBatchRequest retains the original wire identity until the authorized
+// writer resolves it. It cannot be substituted with an opaque content digest.
+type SessionFullBatchRequest struct {
+	Lease   OwnerLease
+	Basis   FullCheckpointBasis
+	Changes []BatchChange
+}
 type SessionBatchRequest struct {
 	Lease   OwnerLease
 	Basis   SessionBasis
@@ -50,6 +62,9 @@ type SessionPendingOutput struct {
 	Lease      OwnerLease
 	Result     BatchResult
 	Checkpoint []byte
+	// FullCheckpoint and Targets are populated only by CommitFull from retained SQL.
+	FullCheckpoint *protocol.Checkpoint
+	Targets        []BatchTargetVersion
 }
 type SessionOutputPreparer func(context.Context, *sql.Tx, SessionPendingOutput) ([]byte, error)
 type SessionBatchResult struct {
@@ -78,17 +93,30 @@ func NewSessionCommitter(store *BatchStore, owner OwnerLease, authority SessionB
 type sessionMembership struct{ changeID, membershipHash string }
 
 type sessionCommitMode struct {
-	members map[string]sessionMembership
-	basis   SessionBasis
-	output  SessionOutputPreparer
-	encoded []byte
+	fullBasis *FullCheckpointBasis
+	members   map[string]sessionMembership
+	basis     SessionBasis
+	output    SessionOutputPreparer
+	encoded   []byte
 }
 
 func (s *SessionCommitter) Commit(ctx context.Context, request SessionBatchRequest) (SessionBatchResult, error) {
-	if s == nil || s.store == nil || request.Lease != s.owner || !validSessionBasis(request.Basis) {
+	if s == nil || s.store == nil || s.store.checkpointIdentityEnabled() || request.Lease != s.owner || !validSessionBasis(request.Basis) {
 		return SessionBatchResult{}, ErrInvalid
 	}
-	mode := &sessionCommitMode{basis: request.Basis, output: s.output}
+	return s.commitMode(ctx, request, &sessionCommitMode{basis: request.Basis, output: s.output})
+}
+
+// CommitFull qualifies the original wire identity under the same writer after
+// exact sealed-authority checks. It never rewrites immutable operation reads.
+func (s *SessionCommitter) CommitFull(ctx context.Context, request SessionFullBatchRequest) (SessionBatchResult, error) {
+	if s == nil || s.store == nil || !s.store.checkpointIdentityEnabled() || request.Lease != s.owner || !validFullCheckpointBasis(request.Basis) {
+		return SessionBatchResult{}, ErrInvalid
+	}
+	basis := request.Basis
+	return s.commitMode(ctx, SessionBatchRequest{Lease: request.Lease, Changes: request.Changes}, &sessionCommitMode{fullBasis: &basis, output: s.output})
+}
+func (s *SessionCommitter) commitMode(ctx context.Context, request SessionBatchRequest, mode *sessionCommitMode) (SessionBatchResult, error) {
 	isolated := *s.store
 	isolated.config.Authority = func(ctx context.Context, tx *sql.Tx, access BatchAccess) error {
 		purpose := SessionProcessSealedOutcome
@@ -215,7 +243,7 @@ func sessionScopeCheckpoint(ctx context.Context, tx *sql.Tx, key SessionKey, bas
 	current, err := sessionCheckpoint(ctx, tx, key, head, true)
 	return head, current, err
 }
-func (m *sessionCommitMode) prepareOutput(ctx context.Context, tx *sql.Tx, lease OwnerLease, result BatchResult, checkpoint []byte) error {
+func (m *sessionCommitMode) prepareOutput(ctx context.Context, tx *sql.Tx, store *BatchStore, lease OwnerLease, result BatchResult, checkpoint []byte) error {
 	// Deep-copy before trusted callback so it cannot change persisted receipts or
 	// the AfterCommit event through aliases.
 	raw, err := json.Marshal(result)
@@ -226,13 +254,92 @@ func (m *sessionCommitMode) prepareOutput(ctx context.Context, tx *sql.Tx, lease
 	if err = json.Unmarshal(raw, &isolated); err != nil {
 		return err
 	}
-	output, err := m.output(ctx, tx, SessionPendingOutput{lease, isolated, append([]byte(nil), checkpoint...)})
+	pending := SessionPendingOutput{Lease: lease, Result: isolated, Checkpoint: append([]byte(nil), checkpoint...)}
+	var expected *protocol.Checkpoint
+	var targets []BatchTargetVersion
+	if m.fullBasis != nil {
+		cp, identity, e := store.loadRetainedFullCheckpoint(ctx, tx, lease.Key, result.Revision, true)
+		if e != nil {
+			return e
+		}
+		if !bytes.Equal(identity.State, checkpoint) {
+			return ErrCheckpointIdentity
+		}
+		head, e := batchCounter(result.Revision)
+		if e != nil {
+			return e
+		}
+		targets, e = initialSessionTargets(ctx, tx, store, lease.Key, head)
+		if e != nil {
+			return e
+		}
+		expected = &cp
+		copied := cp
+		copied.Assets = append([]protocol.Asset{}, cp.Assets...)
+		pending.FullCheckpoint = &copied
+		pending.Targets = append([]BatchTargetVersion{}, targets...)
+	}
+	output, err := m.output(ctx, tx, pending)
 	if err != nil {
 		return err
 	}
 	if len(output) == 0 || len(output) > sessionOutputBytes {
 		return errors.New("Mooring session output capacity")
 	}
+	if m.fullBasis != nil {
+		output, err = validateFullSessionOutput(output, lease, result, *expected, targets)
+		if err != nil {
+			return err
+		}
+	}
 	m.encoded = append([]byte(nil), output...)
 	return nil
+}
+
+// This validation binds committed SQL data to the closed output grammar; the
+// concrete session manager additionally owns request/session/runtime correlation.
+func validateFullSessionOutput(raw []byte, lease OwnerLease, result BatchResult, cp protocol.Checkpoint, targets []BatchTargetVersion) ([]byte, error) {
+	canonical, err := canonicalPrivateControlJSON(raw)
+	if err != nil {
+		return nil, err
+	}
+	validator, err := newPrivateControlValidator()
+	if err != nil {
+		return nil, err
+	}
+	var value map[string]any
+	if json.Unmarshal(canonical, &value) != nil || value["type"] != "session_commit_result" || !validator.schema.matches(validator.schema.root, value, 0) {
+		return nil, ErrPrivateControl
+	}
+	var message protocol.SessionCommitResult
+	if json.Unmarshal(canonical, &message) != nil {
+		return nil, ErrPrivateControl
+	}
+	if message.Scope != cp.Scope || message.Versions != cp.Versions || message.Fence.Generation != protocol.Counter(strconv.FormatInt(lease.Generation, 10)) || message.Fence.Token != lease.Token || !reflect.DeepEqual(message.Checkpoint, cp) || message.Receipt.RequestID != message.RequestID || message.Receipt.Issuer != "crewship" || message.Receipt.Scope != cp.Scope || message.Receipt.Generation != message.Fence.Generation || string(message.Receipt.Revision) != result.Revision {
+		return nil, ErrCheckpointIdentity
+	}
+	changesRaw, err := json.Marshal(message.Receipt.Changes)
+	if err != nil {
+		return nil, err
+	}
+	var changes []BatchChangeResult
+	if json.Unmarshal(changesRaw, &changes) != nil || !reflect.DeepEqual(changes, result.Changes) {
+		return nil, ErrCheckpointIdentity
+	}
+	targetRaw, err := json.Marshal(message.Targets)
+	if err != nil {
+		return nil, err
+	}
+	var actual []BatchTargetVersion
+	if json.Unmarshal(targetRaw, &actual) != nil || !reflect.DeepEqual(actual, targets) {
+		return nil, ErrCheckpointIdentity
+	}
+	for _, change := range result.Changes {
+		for _, op := range change.Operations {
+			if op.Status == "saved" && (string(message.Receipt.Issuer) != op.Issuer || (message.Receipt.Durability == "replicated" && op.Durability != "replicated")) {
+				return nil, ErrCheckpointIdentity
+			}
+		}
+	}
+	return canonical, nil
 }
