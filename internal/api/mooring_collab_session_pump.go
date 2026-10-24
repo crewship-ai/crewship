@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"sync/atomic"
 
 	"github.com/crewship-ai/crewship/internal/mooring"
@@ -18,6 +19,7 @@ var errCollaborationSessionPump = errors.New("Mooring session processing stopped
 // Output must check current recipient delivery authority before forwarding any
 // bytes or reporting completion; the pump itself grants no content access.
 // Every callback must respect cancellation and retain no borrowed request data.
+// Returned values must be owned and immutable after the callback returns.
 // No routes or application handlers install these callbacks today.
 type collaborationSessionPumpHandlers struct {
 	Submit   func(context.Context, protocol.SessionSubmitBatch) (protocol.SessionCommitResult, error)
@@ -133,13 +135,25 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 	}
 }
 
-func pumpCall[Q, R any](ctx context.Context, raw []byte, call func(context.Context, Q) (R, error)) (R, error) {
+// Keep the original scalar binding outside the callback. ReplyControl owns
+// transport correlation, but does not compare every reply field to its request.
+// These comparisons do not establish receipt semantics or participant rights.
+func pumpRequest[Q any](ctx context.Context, raw []byte) (Q, error) {
 	var request Q
-	var empty R
-	if call == nil || ctx.Err() != nil || json.Unmarshal(raw, &request) != nil {
-		return empty, errCollaborationSessionPump
+	if ctx.Err() != nil || json.Unmarshal(raw, &request) != nil {
+		return request, errCollaborationSessionPump
 	}
-	return call(ctx, request)
+	return request, nil
+}
+
+// Counter comparisons must remain exact above 2^53 and reject overflow or a
+// noncanonical spelling. Owner knowledge may advance; delivery rights may not.
+func pumpCounterAtLeast(got, original protocol.Counter) bool {
+	a, errA := strconv.ParseUint(string(got), 10, 64)
+	b, errB := strconv.ParseUint(string(original), 10, 64)
+	return errA == nil && errB == nil &&
+		strconv.FormatUint(a, 10) == string(got) &&
+		strconv.FormatUint(b, 10) == string(original) && a >= b
 }
 
 func (p *collaborationSessionPump) reply(ctx context.Context, token mooring.SessionControl, response any, err error) error {
@@ -160,8 +174,22 @@ func (p *collaborationSessionPump) mutation(ctx context.Context, token mooring.S
 	}
 	switch kind {
 	case "session_submit_batch":
-		result, err := pumpCall(ctx, raw, p.handlers.Submit)
+		request, err := pumpRequest[protocol.SessionSubmitBatch](ctx, raw)
+		if err != nil || p.handlers.Submit == nil {
+			return errCollaborationSessionPump
+		}
+		result, err := p.handlers.Submit(ctx, request)
 		if err == nil {
+			if result.RequestID != request.RequestID ||
+				string(result.ControlProfile) != string(request.ControlProfile) ||
+				result.Scope != request.Scope || result.SessionID != request.SessionID ||
+				result.RuntimeRef != request.RuntimeRef || result.Fence != request.Fence ||
+				result.Versions != request.Versions ||
+				result.Receipt.RequestID != request.RequestID ||
+				result.Receipt.Scope != request.Scope ||
+				result.Receipt.Generation != request.Fence.Generation {
+				return errCollaborationSessionPump
+			}
 			for _, change := range result.Receipt.Changes {
 				for _, operation := range change.Operations {
 					var outcome struct {
@@ -181,7 +209,30 @@ func (p *collaborationSessionPump) mutation(ctx context.Context, token mooring.S
 		}
 		return p.reply(ctx, token, result, err)
 	case "session_status_request":
-		result, err := pumpCall(ctx, raw, p.handlers.Status)
+		request, err := pumpRequest[protocol.SessionStatusRequest](ctx, raw)
+		if err != nil || p.handlers.Status == nil || request.Message.Scope != request.Scope {
+			return errCollaborationSessionPump
+		}
+		result, err := p.handlers.Status(ctx, request)
+		if err == nil {
+			var operation struct {
+				OpID protocol.Identifier `json:"op_id"`
+			}
+			if result.RequestID != request.RequestID ||
+				string(result.ControlProfile) != string(request.ControlProfile) ||
+				result.Scope != request.Scope || result.SessionID != request.SessionID ||
+				result.RuntimeRef != request.RuntimeRef || result.Fence != request.Fence ||
+				result.ConnectionRef != request.ConnectionRef ||
+				result.ParticipantRef != request.ParticipantRef ||
+				result.GateID != request.GateID ||
+				result.PermissionVersion != request.PermissionVersion ||
+				result.Message.RequestID != request.Message.RequestID ||
+				result.Message.Scope != request.Message.Scope ||
+				json.Unmarshal(result.Message.Result, &operation) != nil ||
+				operation.OpID != request.Message.OpID {
+				return errCollaborationSessionPump
+			}
+		}
 		return p.reply(ctx, token, result, err)
 	default:
 		return errCollaborationSessionPump
@@ -191,16 +242,58 @@ func (p *collaborationSessionPump) mutation(ctx context.Context, token mooring.S
 func (p *collaborationSessionPump) control(ctx context.Context, token mooring.SessionControl, kind string, raw []byte) error {
 	switch kind {
 	case "owner_acquire":
-		result, err := pumpCall(ctx, raw, p.handlers.Acquire)
+		request, err := pumpRequest[protocol.OwnerAcquire](ctx, raw)
+		if err != nil || p.handlers.Acquire == nil {
+			return errCollaborationSessionPump
+		}
+		result, err := p.handlers.Acquire(ctx, request)
+		if err == nil && (result.RequestID != request.RequestID ||
+			result.Scope != request.Scope || result.RuntimeRef != request.RuntimeRef ||
+			result.RenewalNonce != request.RenewalNonce) {
+			return errCollaborationSessionPump
+		}
 		return p.reply(ctx, token, result, err)
 	case "owner_renew":
-		result, err := pumpCall(ctx, raw, p.handlers.Renew)
+		request, err := pumpRequest[protocol.OwnerRenew](ctx, raw)
+		if err != nil || p.handlers.Renew == nil {
+			return errCollaborationSessionPump
+		}
+		result, err := p.handlers.Renew(ctx, request)
+		if err == nil && (result.RequestID != request.RequestID ||
+			result.Scope != request.Scope || result.SessionID != request.SessionID ||
+			result.RuntimeRef != protocol.Identifier(p.runtime.RuntimeRef()) ||
+			result.Fence != request.Fence || result.RenewalNonce != request.RenewalNonce ||
+			!pumpCounterAtLeast(result.PermissionVersion, request.PermissionVersion)) {
+			return errCollaborationSessionPump
+		}
 		return p.reply(ctx, token, result, err)
 	case "ticket_validate":
-		result, err := pumpCall(ctx, raw, p.handlers.Ticket)
+		request, err := pumpRequest[protocol.TicketValidationRequest](ctx, raw)
+		if err != nil || p.handlers.Ticket == nil {
+			return errCollaborationSessionPump
+		}
+		result, err := p.handlers.Ticket(ctx, request)
+		if err == nil && (result.RequestID != request.RequestID ||
+			result.Scope != request.Scope || result.SessionID != request.SessionID ||
+			result.Generation != request.Fence.Generation ||
+			result.ValidationNonce != request.ValidationNonce) {
+			return errCollaborationSessionPump
+		}
 		return p.reply(ctx, token, result, err)
 	case "delivery_renew":
-		result, err := pumpCall(ctx, raw, p.handlers.Delivery)
+		request, err := pumpRequest[protocol.DeliveryRenew](ctx, raw)
+		if err != nil || p.handlers.Delivery == nil {
+			return errCollaborationSessionPump
+		}
+		result, err := p.handlers.Delivery(ctx, request)
+		if err == nil && (result.RequestID != request.RequestID ||
+			result.Scope != request.Scope || result.SessionID != request.SessionID ||
+			result.ParticipantRef != request.ParticipantRef ||
+			result.Generation != request.Fence.Generation ||
+			result.PermissionVersion != request.PermissionVersion ||
+			result.RenewalNonce != request.RenewalNonce || result.GateID != request.GateID) {
+			return errCollaborationSessionPump
+		}
 		return p.reply(ctx, token, result, err)
 	case "session_participant_output":
 		var output protocol.SessionParticipantOutput

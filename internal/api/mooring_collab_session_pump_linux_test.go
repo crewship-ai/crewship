@@ -4,6 +4,7 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -133,6 +134,11 @@ func TestCollaborationSessionPumpChild(t *testing.T) {
 		value["request_id"], value["scope"], value["session_id"], value["runtime_ref"], value["fence"] = id, scope, session, ref, grant["fence"]
 		return value
 	}
+	if mode == "ticket" {
+		if !write(map[string]any{"type": "ticket_validate", "request_id": "ticket", "scope": scope, "session_id": session, "fence": grant["fence"], "ticket": "mock-opaque-ticket", "validation_nonce": "ticket-nonce"}) {
+			return
+		}
+	}
 	a := bind(pumpFixture(t, "SessionSubmitBatch"), "A")
 	if !write(a) {
 		return
@@ -156,11 +162,21 @@ func TestCollaborationSessionPumpChild(t *testing.T) {
 	if !write(bind(pumpFixture(t, "SessionSubmitBatch"), "B")) {
 		return
 	}
-	if !write(bind(pumpFixture(t, "SessionStatusRequest"), "status")) {
+	status := bind(pumpFixture(t, "SessionStatusRequest"), "status")
+	if mode != "nested-scope" {
+		status["message"].(map[string]any)["scope"] = scope
+	}
+	if !write(status) {
 		return
 	}
+	if mode == "status" || mode == "nested-scope" {
+		if !write(bind(pumpFixture(t, "SessionSubmitBatch"), "C")) {
+			return
+		}
+	}
+	knownPermission := grant["permission_version"]
 	renew := func(id string) map[string]any {
-		return map[string]any{"type": "owner_renew", "request_id": id, "scope": scope, "session_id": session, "fence": grant["fence"], "renewal_nonce": id, "permission_version": "1"}
+		return map[string]any{"type": "owner_renew", "request_id": id, "scope": scope, "session_id": session, "fence": grant["fence"], "renewal_nonce": id, "permission_version": knownPermission}
 	}
 	if !write(renew("renew")) {
 		return
@@ -169,12 +185,22 @@ func TestCollaborationSessionPumpChild(t *testing.T) {
 		return
 	}
 	var mutations []string
+	advanced := false
 	for {
 		v, e := read()
 		if e != nil {
 			return
 		}
 		id, _ := v["request_id"].(string)
+		if v["type"] == "owner_grant" {
+			knownPermission = v["permission_version"]
+			if mode == "advance" && knownPermission == "2" && !advanced {
+				advanced = true
+				if !write(renew("permission-advanced")) {
+					return
+				}
+			}
+		}
 		if id == "renew" {
 			if mode == "death" {
 				return
@@ -188,8 +214,12 @@ func TestCollaborationSessionPumpChild(t *testing.T) {
 		}
 		if v["type"] == "session_commit_result" || v["type"] == "session_status_result" {
 			mutations = append(mutations, id)
-			if len(mutations) == 3 {
-				if strings.Join(mutations, ",") != "A,B,status" {
+			expected := "A,B,status"
+			if mode == "status" || mode == "nested-scope" {
+				expected += ",C"
+			}
+			if len(mutations) == strings.Count(expected, ",")+1 {
+				if strings.Join(mutations, ",") != expected {
 					t.Fatal("mock observed reordered replies")
 				}
 				if !write(renew("replies-ordered")) {
@@ -240,17 +270,56 @@ func newPumpTestRig(t *testing.T, mode, outcome string) *pumpTestRig {
 	}
 	h := collaborationSessionPumpHandlers{
 		Acquire: func(_ context.Context, q protocol.OwnerAcquire) (protocol.OwnerGrant, error) {
-			return owner(q.RequestID, q.RenewalNonce, q.Scope, protocol.Identifier(runtime.RuntimeRef())), nil
+			result := owner(q.RequestID, q.RenewalNonce, q.Scope, q.RuntimeRef)
+			if outcome == "acquire-nonce" {
+				result.RenewalNonce = "foreign-nonce"
+			}
+			return result, nil
 		},
 		Renew: func(_ context.Context, q protocol.OwnerRenew) (protocol.OwnerGrant, error) {
 			if outcome == "control-panic" {
 				panic("private mock management panic")
 			}
 			r.renewed <- string(q.RequestID)
-			return owner(q.RequestID, q.RenewalNonce, q.Scope, protocol.Identifier(runtime.RuntimeRef())), nil
+			result := owner(q.RequestID, q.RenewalNonce, q.Scope, protocol.Identifier(runtime.RuntimeRef()))
+			switch outcome {
+			case "advance":
+				result.PermissionVersion = "2"
+			case "renew-fence":
+				result.Fence.Token = strings.Repeat("z", 32)
+			case "renew-nonce":
+				result.RenewalNonce = "foreign-nonce"
+			case "renew-permission":
+				result.PermissionVersion = "0"
+			}
+			return result, nil
 		},
 		Delivery: func(_ context.Context, q protocol.DeliveryRenew) (protocol.DeliveryGrant, error) {
-			return protocol.DeliveryGrant{Type: "delivery_grant", RequestID: q.RequestID, Scope: q.Scope, SessionID: q.SessionID, ParticipantRef: q.ParticipantRef, Generation: q.Fence.Generation, PermissionVersion: q.PermissionVersion, RenewalNonce: q.RenewalNonce, DurationMs: "1000", GateID: q.GateID}, nil
+			result := protocol.DeliveryGrant{Type: "delivery_grant", RequestID: q.RequestID, Scope: q.Scope, SessionID: q.SessionID, ParticipantRef: q.ParticipantRef, Generation: q.Fence.Generation, PermissionVersion: q.PermissionVersion, RenewalNonce: q.RenewalNonce, DurationMs: "1000", GateID: q.GateID}
+			switch outcome {
+			case "delivery-nonce":
+				result.RenewalNonce = "foreign-nonce"
+			case "delivery-generation":
+				result.Generation = "2"
+			case "delivery-participant":
+				result.ParticipantRef = "foreign-participant"
+			case "delivery-gate":
+				result.GateID = "foreign-gate"
+			case "delivery-permission":
+				result.PermissionVersion = "2"
+			}
+			return result, nil
+		},
+		Ticket: func(_ context.Context, q protocol.TicketValidationRequest) (protocol.TicketValidationResult, error) {
+			read := true
+			result := protocol.TicketValidationResult{Type: "ticket_validated", RequestID: q.RequestID, Scope: q.Scope, SessionID: q.SessionID, Generation: q.Fence.Generation, ParticipantRef: "mock-participant", PermissionVersion: "1", Granted: protocol.Capabilities{Read: &read}, Versions: protocol.Versions{ProtocolVersion: "0.4.0", ModelVersion: "0.2.0", EngineVersion: "0.10.0"}, ExpiresInMs: "1000", ValidationNonce: q.ValidationNonce, GateID: "mock-gate"}
+			if outcome == "ticket-nonce" {
+				result.ValidationNonce = "foreign-nonce"
+			}
+			if outcome == "ticket-generation" {
+				result.Generation = "2"
+			}
+			return result, nil
 		},
 		Submit: func(ctx context.Context, q protocol.SessionSubmitBatch) (protocol.SessionCommitResult, error) {
 			r.mu.Lock()
@@ -276,15 +345,50 @@ func newPumpTestRig(t *testing.T, mode, outcome string) *pumpTestRig {
 			v["request_id"], v["scope"], v["session_id"], v["runtime_ref"], v["fence"] = q.RequestID, q.Scope, q.SessionID, q.RuntimeRef, q.Fence
 			// Deliberately MOCK application receipt: no Saved claim is established.
 			result := pumpConvert[protocol.SessionCommitResult](t, v)
+			result.Receipt.RequestID, result.Receipt.Scope, result.Receipt.Generation, result.Receipt.Revision = q.RequestID, q.Scope, q.Fence.Generation, q.ConfirmedBasis.Revision
+			result.Receipt.Changes = nil
+			for _, change := range q.Changes {
+				entry := protocol.ChangeResult{ChangeID: change.ChangeID, Status: "rejected", Operations: []protocol.OperationResult{}}
+				for _, operation := range change.Operations {
+					raw, _ := json.Marshal(map[string]any{"op_id": operation.OpID, "status": "rejected", "reason": map[string]any{"code": "forbidden", "message": "Mock application rejection", "retry": "new_operation_after_refresh"}})
+					entry.Operations = append(entry.Operations, raw)
+				}
+				result.Receipt.Changes = append(result.Receipt.Changes, entry)
+			}
+			result.Checkpoint.Scope, result.Checkpoint.Versions, result.Checkpoint.Generation, result.Checkpoint.Revision = q.Scope, q.Versions, q.Fence.Generation, q.ConfirmedBasis.Revision
+			result.Checkpoint.FormatVersion = "mock-not-wordcraft"
+			result.Checkpoint.State = "mock checkpoint, not native content"
+			result.Checkpoint.Digest = protocol.Digest(fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(result.Checkpoint.State))))
 			if outcome == "binding" {
 				result.RequestID = "foreign-request"
+			}
+			if outcome == "foreign-fence" {
+				result.Fence.Token = strings.Repeat("z", 32)
+			}
+			switch outcome {
+			case "submit-generation":
+				result.Fence.Generation = "2"
+			case "submit-session":
+				result.SessionID = "foreign-session"
+			case "submit-runtime":
+				result.RuntimeRef = "foreign-runtime"
+			case "submit-scope":
+				result.Scope.ArtifactID = "foreign-artifact"
+			case "submit-versions":
+				result.Versions.ModelVersion = "9.0.0"
+			case "receipt-request":
+				result.Receipt.RequestID = "foreign-request"
+			case "receipt-scope":
+				result.Receipt.Scope.ArtifactID = "foreign-artifact"
+			case "receipt-generation":
+				result.Receipt.Generation = "2"
 			}
 			if q.RequestID == "A" && (outcome == "unknown" || outcome == "root-unknown") {
 				reason := map[string]any{"code": "unknown_outcome", "message": "uncertain", "retry": "same_operation"}
 				if outcome == "root-unknown" {
 					reason = map[string]any{"code": "atomic_aborted", "root_cause": map[string]any{"code": "unknown_outcome"}}
 				}
-				raw, _ := json.Marshal(map[string]any{"op_id": "o1", "status": "rejected", "reason": reason})
+				raw, _ := json.Marshal(map[string]any{"op_id": q.Changes[0].Operations[0].OpID, "status": "rejected", "reason": reason})
 				result.Receipt.Changes[0].Operations[0] = raw
 			}
 			return result, nil
@@ -297,7 +401,27 @@ func newPumpTestRig(t *testing.T, mode, outcome string) *pumpTestRig {
 			v := pumpFixture(t, "SessionStatusResult")
 			v["request_id"], v["scope"], v["session_id"], v["runtime_ref"], v["fence"] = q.RequestID, q.Scope, q.SessionID, q.RuntimeRef, q.Fence
 			result := pumpConvert[protocol.SessionStatusResult](t, v)
-			result.Message.Result = json.RawMessage(`{"op_id":"o1","status":"unknown"}`)
+			result.ConnectionRef, result.ParticipantRef, result.GateID, result.PermissionVersion = q.ConnectionRef, q.ParticipantRef, q.GateID, q.PermissionVersion
+			result.Message.RequestID, result.Message.Scope = q.Message.RequestID, q.Message.Scope
+			result.Message.Result, _ = json.Marshal(map[string]any{"op_id": q.Message.OpID, "status": "unknown"})
+			switch outcome {
+			case "status-fence":
+				result.Fence.Token = strings.Repeat("z", 32)
+			case "status-connection":
+				result.ConnectionRef = "foreign-connection"
+			case "status-participant":
+				result.ParticipantRef = "foreign-participant"
+			case "status-gate":
+				result.GateID = "foreign-gate"
+			case "status-permission":
+				result.PermissionVersion = "2"
+			case "status-request":
+				result.Message.RequestID = "foreign-message-request"
+			case "status-scope":
+				result.Message.Scope.ArtifactID = "foreign-artifact"
+			case "status-op":
+				result.Message.Result = json.RawMessage(`{"op_id":"foreign-op","status":"unknown"}`)
+			}
 			return result, nil
 		},
 	}
@@ -364,7 +488,7 @@ func TestCollaborationSessionPumpFIFOAndIndependentOwnerRenewal(t *testing.T) {
 }
 
 func TestCollaborationSessionPumpUncertaintyNeverRunsNextMutation(t *testing.T) {
-	for _, outcome := range []string{"error", "unknown", "root-unknown", "binding", "panic"} {
+	for _, outcome := range []string{"error", "unknown", "root-unknown", "binding", "panic", "foreign-fence", "submit-generation", "submit-session", "submit-runtime", "submit-scope", "submit-versions", "receipt-request", "receipt-scope", "receipt-generation"} {
 		t.Run(outcome, func(t *testing.T) {
 			r := newPumpTestRig(t, "normal", outcome)
 			pumpWait(t, r.ctx, r.entered)
@@ -381,6 +505,85 @@ func TestCollaborationSessionPumpUncertaintyNeverRunsNextMutation(t *testing.T) 
 				t.Fatal("nonopaque pump error", err)
 			}
 		})
+	}
+}
+
+func TestCollaborationSessionPumpStatusTransplantsStopLaterSubmit(t *testing.T) {
+	for _, outcome := range []string{"status-fence", "status-connection", "status-participant", "status-gate", "status-permission", "status-request", "status-scope", "status-op"} {
+		t.Run(outcome, func(t *testing.T) {
+			r := newPumpTestRig(t, "status", outcome)
+			pumpWait(t, r.ctx, r.entered)
+			for pumpWait(t, r.ctx, r.renewed) != "renew-roundtrip" {
+			}
+			close(r.release)
+			pumpWait(t, r.ctx, r.runtime.Done())
+			if r.other.Load() != 2 {
+				t.Fatal("status transplant ran C or lost prior FIFO prefix", r.other.Load())
+			}
+			r.mu.Lock()
+			order := strings.Join(r.order, ",")
+			r.mu.Unlock()
+			if order != "A,B,status" {
+				t.Fatal(order)
+			}
+		})
+	}
+	t.Run("incoming-nested-scope", func(t *testing.T) {
+		r := newPumpTestRig(t, "nested-scope", "")
+		pumpWait(t, r.ctx, r.entered)
+		for pumpWait(t, r.ctx, r.renewed) != "renew-roundtrip" {
+		}
+		close(r.release)
+		pumpWait(t, r.ctx, r.runtime.Done())
+		if r.other.Load() != 1 {
+			t.Fatal("foreign nested scope invoked status/C", r.other.Load())
+		}
+	})
+}
+
+func TestCollaborationSessionPumpManagementTransplantsStopProcess(t *testing.T) {
+	for _, outcome := range []string{"acquire-nonce", "renew-fence", "renew-nonce", "renew-permission", "delivery-nonce", "delivery-generation", "delivery-participant", "delivery-gate", "delivery-permission", "ticket-nonce", "ticket-generation"} {
+		t.Run(outcome, func(t *testing.T) {
+			mode := "normal"
+			if strings.HasPrefix(outcome, "ticket-") {
+				mode = "ticket"
+			}
+			r := newPumpTestRig(t, mode, outcome)
+			pumpWait(t, r.ctx, r.runtime.Done())
+			if r.other.Load() != 0 {
+				t.Fatal("transplanted management reply ran B/status", r.other.Load())
+			}
+		})
+	}
+}
+
+func TestCollaborationSessionPumpOwnerPermissionMayAdvance(t *testing.T) {
+	r := newPumpTestRig(t, "advance", "advance")
+	pumpWait(t, r.ctx, r.entered)
+	seen := map[string]bool{}
+	for !seen["permission-advanced"] || !seen["delivery-roundtrip"] {
+		seen[pumpWait(t, r.ctx, r.renewed)] = true
+	}
+	if r.other.Load() != 0 {
+		t.Fatal("renewal bypassed submit FIFO")
+	}
+	close(r.release)
+	for pumpWait(t, r.ctx, r.renewed) != "replies-ordered" {
+	}
+}
+
+func TestCollaborationSessionPumpCounterAdvanceIsExact(t *testing.T) {
+	for _, entry := range []struct {
+		got, original string
+		allow         bool
+	}{
+		{"2", "1", true}, {"1", "2", false}, {"9007199254740993", "9007199254740992", true},
+		{"9007199254740992", "9007199254740993", false}, {"18446744073709551615", "18446744073709551615", true},
+		{"18446744073709551616", "1", false}, {"2", "18446744073709551616", false}, {"02", "1", false}, {"2", "01", false},
+	} {
+		if pumpCounterAtLeast(protocol.Counter(entry.got), protocol.Counter(entry.original)) != entry.allow {
+			t.Fatal(entry)
+		}
 	}
 }
 
