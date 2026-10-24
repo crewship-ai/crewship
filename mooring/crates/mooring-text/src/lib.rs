@@ -163,3 +163,6 @@ pub fn recover(
     }
     Ok(Recovery { document, unsaved })
 }
+
+#[cfg(test)]
+mod visibility_probe;
