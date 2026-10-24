@@ -8,12 +8,17 @@ mod checkpoint_origins;
 mod checkpoint_wire;
 pub mod command;
 mod core_fields;
+pub mod experimental_draft;
+pub mod experimental_human_basis;
+pub mod experimental_human_current;
 mod format;
 #[cfg(test)]
 mod human;
+mod human_current_wire;
 #[cfg(test)]
 mod human_decode;
 mod native_qualification;
+mod native_transition;
 pub mod origin_inventory;
 pub mod profile;
 pub mod read;
@@ -240,6 +245,25 @@ impl Document {
         }
         object.insert("body".into(), json!(body));
         Ok(native)
+    }
+
+    /// Canonical sorted-client CRDT frontier. This is observed state only,
+    /// never a durable host receipt, permission or qualified human witness.
+    pub fn state_vector(&self) -> Vec<u8> {
+        use mooring_text::yrs::encoding::write::Write;
+        let vector = self.doc.transact().state_vector();
+        let mut entries = vector
+            .iter()
+            .map(|(client, clock)| (client.get(), *clock))
+            .collect::<Vec<_>>();
+        entries.sort_unstable();
+        let mut bytes = Vec::new();
+        bytes.write_var(entries.len() as u32);
+        for (client, clock) in entries {
+            bytes.write_var(client);
+            bytes.write_var(clock);
+        }
+        bytes
     }
 
     pub fn block_ids(&self) -> Result<Vec<String>, AdapterError> {
