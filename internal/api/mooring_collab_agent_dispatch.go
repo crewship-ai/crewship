@@ -148,7 +148,27 @@ func (d *collaborationAgentTaskDispatcher) Authorize(ctx context.Context, a disp
 	return dispatch.Allow(), nil
 }
 
+// checkPending retains the original BOOTTIME horizon. SQL attempt leases and
+// later attachment cannot restore expired or uncertain original human consent.
+func (d *collaborationAgentTaskDispatcher) checkPending(entry *collaborationAgentDispatchEntry) error {
+	if d == nil || d.mandates == nil || entry == nil || entry.pending == nil || entry.pending.store != d.mandates {
+		return errCollaborationAgentAccess
+	}
+	s := d.mandates
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	boot, tick, err := s.now()
+	pending, exists := s.pending[entry.pending.id]
+	if err != nil || !exists || pending.boot != boot || tick >= pending.expiresTick || pending.task.work != entry.task.work {
+		return errCollaborationAgentAccess
+	}
+	return nil
+}
+
 func (d *collaborationAgentTaskDispatcher) checkAssignment(ctx context.Context, tx *sql.Tx, entry *collaborationAgentDispatchEntry, a dispatch.Assignment) error {
+	if err := d.checkPending(entry); err != nil {
+		return err
+	}
 	if a.Item == nil || !mooring.ValidWireIdentifier(a.RunID) || a.Generation < 1 || a.Attempt < 1 || entry.runID != "" && (entry.runID != a.RunID || entry.attempt != a.Attempt || entry.generation != a.Generation) {
 		return errCollaborationAgentAccess
 	}
@@ -193,5 +213,6 @@ func (d *collaborationAgentTaskDispatcher) checkAssignment(ctx context.Context, 
 	if err != nil || !live {
 		return errCollaborationAgentAccess
 	}
-	return nil
+	// Authority may expire while the same-writer SQL checks are running.
+	return d.checkPending(entry)
 }
