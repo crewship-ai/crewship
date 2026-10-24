@@ -1,6 +1,9 @@
-//! Default-off pure WordCraft WASM model facade. No network, authoritative
-//! install, durable receipt or human CRDT update admission is implemented here.
+//! Default-off WordCraft WASM model and existing receipt-boundary facade.
+//! Transport provenance belongs to the caller; no network, authoritative
+//! install, receipt minting or human CRDT update admission is implemented here.
 mod experimental_draft;
+mod receipt;
+pub use receipt::WordCraftPendingCommit;
 
 use mooring_core::adapter::{PrepareAdapter, Prepared, PreparedCandidate};
 use mooring_protocol::{
