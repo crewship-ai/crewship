@@ -75,14 +75,14 @@ func TestSessionActivationActualRustOwnedDocumentAndBootOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := NewBatchStore(db.DB, BatchStoreConfig{Enabled: true, Owners: owners, Authority: func(context.Context, *sql.Tx, BatchAccess) error { return nil }, Limits: DefaultBatchLimits(), Targets: &TargetStoreConfig{Enabled: true, Adapter: adapter, ReadPolicy: CausalTargetReadPolicy, HistoryBudget: DefaultBatchHistoryBudget(), Limits: DefaultBatchTargetLimits()}})
+	store := NewBatchStore(db.DB, BatchStoreConfig{Enabled: true, Owners: owners, CheckpointIdentity: &BatchCheckpointIdentityConfig{Enabled: true, Adapter: adapter, MaxMetadataBytes: 65536}, Authority: func(context.Context, *sql.Tx, BatchAccess) error { return nil }, Limits: DefaultBatchLimits(), Targets: &TargetStoreConfig{Enabled: true, Adapter: adapter, ReadPolicy: CausalTargetReadPolicy, HistoryBudget: DefaultBatchHistoryBudget(), Limits: DefaultBatchTargetLimits()}})
 	scope := adapter.causal.base.wireScope()
 	versions := adapter.causal.base.wireVersions()
 	sessionID, err := prepareRequestID()
 	if err != nil {
 		t.Fatal(err)
 	}
-	open := protocol.SessionOpen{Type: "session_open", RequestID: "actual-open", ControlProfile: PrivateSessionProfile, Scope: scope, SessionID: sessionID, RuntimeRef: protocol.Identifier(runtime.RuntimeRef()), Versions: versions}
+	open := protocol.SessionOpen{Type: "session_open", RequiredCapabilities: []protocol.SessionOpenRequiredCapabilitiesItem{"checkpoint_identity_v1"}, RequestID: "actual-open", ControlProfile: PrivateSessionProfile, Scope: scope, SessionID: sessionID, RuntimeRef: protocol.Identifier(runtime.RuntimeRef()), Versions: versions}
 	opened := make(chan error, 1)
 	go func() { _, e := runtime.Open(t.Context(), open); opened <- e }()
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
@@ -99,7 +99,8 @@ func TestSessionActivationActualRustOwnedDocumentAndBootOwner(t *testing.T) {
 	if json.Unmarshal(raw, &acquire) != nil || acquire.Type != "owner_acquire" || acquire.Scope != scope || acquire.RuntimeRef != open.RuntimeRef {
 		t.Fatal("actual owner acquisition binding")
 	}
-	initialOwners := NewOwnerStore(db.DB, true, clock, 2*time.Second)
+	phaseStarted := time.Now()
+	initialOwners := NewOwnerStore(db.DB, true, clock, time.Minute)
 	initial, err := initialOwners.Acquire(ctx, key, "prior-runtime")
 	if err != nil {
 		t.Fatal(err)
@@ -108,9 +109,13 @@ func TestSessionActivationActualRustOwnedDocumentAndBootOwner(t *testing.T) {
 	if err = store.Initialize(ctx, initial, checkpoint); err != nil {
 		t.Fatal("actual initialization while Open pending", err)
 	}
-	// A real BOOTTIME expiry allows owner 2 to take over; the retained
-	// checkpoint remains creator generation 1 and its bytes are unchanged.
-	time.Sleep(2100 * time.Millisecond)
+	t.Log("actual initialized", time.Since(phaseStarted))
+	// Voluntary host release uses the real BOOTTIME owner writer and retains
+	// creator provenance. Waiting for an old lease inside Open would consume
+	// its fixed five-second startup budget rather than qualify checkpoint I/O.
+	if err = initialOwners.Release(ctx, initial); err != nil {
+		t.Fatal("actual owner release", err)
+	}
 	lease, err := owners.Acquire(ctx, key, runtime.RuntimeRef())
 	if err != nil || lease.Generation != initial.Generation+1 {
 		t.Fatal("actual owner takeover", lease.Generation, err)
@@ -120,6 +125,7 @@ func TestSessionActivationActualRustOwnedDocumentAndBootOwner(t *testing.T) {
 	if err = runtime.ReplyControl(ctx, control, grantRaw); err != nil {
 		t.Fatal(err)
 	}
+	t.Log("actual owner granted", time.Since(phaseStarted))
 	var targets []BatchTargetVersion
 	if err = store.transaction(ctx, func(tx *sql.Tx) error {
 		if e := owners.Check(ctx, tx, lease); e != nil {
@@ -139,8 +145,9 @@ func TestSessionActivationActualRustOwnedDocumentAndBootOwner(t *testing.T) {
 		}
 		return owners.Check(ctx, tx, lease)
 	}); err != nil {
-		t.Fatal("actual prepare while restoration withheld", err)
+		t.Fatal("actual prepare while restoration withheld", err, "process cause", runtime.Err())
 	}
+	t.Log("actual target validation complete", time.Since(phaseStarted))
 	opaque, err := encodePreparedCheckpoint(checkpoint)
 	if err != nil {
 		t.Fatal(err)
@@ -150,6 +157,13 @@ func TestSessionActivationActualRustOwnedDocumentAndBootOwner(t *testing.T) {
 		wireTargets = append(wireTargets, protocol.TargetVersion{TargetID: protocol.Identifier(v.TargetID), Revision: protocol.Counter(v.Revision), StructureRevision: protocol.Counter(v.StructureRevision), Deleted: v.Deleted})
 	}
 	restore := protocol.SessionRestore{Type: "session_restore", RequestID: "actual-restore", ControlProfile: PrivateSessionProfile, Scope: scope, SessionID: sessionID, RuntimeRef: open.RuntimeRef, Fence: grant.Fence, Versions: versions, Targets: wireTargets, Checkpoint: protocol.Checkpoint{Scope: scope, Revision: "0", Generation: protocol.Counter(strconv.FormatInt(initial.Generation, 10)), FormatVersion: "wordcraft-0.10.0/yrs-0.28.0/v2", Versions: versions, Encoding: "base64", State: opaque.State, Digest: opaque.Digest, Assets: []protocol.Asset{}}}
+	snapshot, err := store.ReadFullCheckpoint(ctx, lease)
+	if err != nil {
+		t.Fatal("authorized full checkpoint startup read", err)
+	}
+	restore.Checkpoint = snapshot.Checkpoint
+	t.Log("actual retained full checkpoint read", time.Since(phaseStarted))
+
 	if _, err = runtime.Restore(ctx, restore); err != nil {
 		t.Fatal("actual owned document restore", err)
 	}
@@ -162,6 +176,10 @@ func TestSessionActivationActualRustOwnedDocumentAndBootOwner(t *testing.T) {
 	}
 	if activation.SessionID() != string(sessionID) || activation.RuntimeRef() != runtime.RuntimeRef() || activation.InitialBasis().Digest != string(opaque.Digest) {
 		t.Fatal("actual activation identity changed")
+	}
+	fullBasis, e := activation.InitialFullBasis()
+	if e != nil || fullBasis.Revision != string(snapshot.Checkpoint.Revision) || fullBasis.Digest != string(snapshot.Checkpoint.Digest) || fullBasis.Digest == activation.InitialBasis().Digest {
+		t.Fatal("full/content activation identities were conflated", e)
 	}
 	if err = store.transaction(ctx, func(tx *sql.Tx) error { return activation.Check(ctx, tx, store) }); err != nil {
 		t.Fatal(err)
@@ -183,7 +201,7 @@ func TestSessionActivationActualRustOwnedDocumentAndBootOwner(t *testing.T) {
 	}); err != nil || !bytes.Equal(retained, checkpoint) {
 		t.Fatal("host checkpoint changed after actual child death", err)
 	}
-	report := map[string]any{"rust_source": source, "binary_sha256": binarySHA, "checkpoint_sha256": checkpointSHA, "owner_clock": "Linux CLOCK_BOOTTIME", "checkpoint_generation": initial.Generation, "active_owner_generation": lease.Generation, "checkpoint_digest_profile": "opaque-content-sha256", "ownership_sql": "FULL", "startup_acknowledged": true, "prepare_while_restore_withheld": true, "target_count": len(targets), "checkpoint_bytes": len(checkpoint), "participant_authority": "MOCK_ALLOW_ALL", "saved_receipts": 0, "production_cli_enabled": false}
+	report := map[string]any{"rust_source": source, "binary_sha256": binarySHA, "checkpoint_sha256": checkpointSHA, "owner_clock": "Linux CLOCK_BOOTTIME", "takeover": "explicit host Release followed by fresh Acquire", "checkpoint_generation": initial.Generation, "active_owner_generation": lease.Generation, "checkpoint_digest_profile": "full-tuple-jcs-v0.4", "content_digest": canonicalDigest(checkpoint), "ownership_sql": "FULL", "startup_acknowledged": true, "prepare_while_restore_withheld": true, "target_count": len(targets), "checkpoint_bytes": len(checkpoint), "participant_authority": "MOCK_ALLOW_ALL", "saved_receipts": 0, "production_cli_enabled": false}
 	encoded, _ := json.MarshalIndent(report, "", "  ")
 	if err = os.WriteFile(filepath.Join(output, "activation-evidence.json"), append(encoded, '\n'), 0600); err != nil {
 		t.Fatal(err)

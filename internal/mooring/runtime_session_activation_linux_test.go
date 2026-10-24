@@ -29,7 +29,7 @@ func sessionActivationProvenance(t *testing.T, forged bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := NewBatchStore(db.DB, BatchStoreConfig{Enabled: true, Owners: owners, Authority: func(context.Context, *sql.Tx, BatchAccess) error { return nil }, Limits: DefaultBatchLimits(), Targets: &TargetStoreConfig{Enabled: true, Adapter: adapter, ReadPolicy: CausalTargetReadPolicy, HistoryBudget: DefaultBatchHistoryBudget(), Limits: DefaultBatchTargetLimits()}})
+	store := NewBatchStore(db.DB, BatchStoreConfig{Enabled: true, Owners: owners, CheckpointIdentity: &BatchCheckpointIdentityConfig{Enabled: true, Adapter: adapter, MaxMetadataBytes: 65536}, Authority: func(context.Context, *sql.Tx, BatchAccess) error { return nil }, Limits: DefaultBatchLimits(), Targets: &TargetStoreConfig{Enabled: true, Adapter: adapter, ReadPolicy: CausalTargetReadPolicy, HistoryBudget: DefaultBatchHistoryBudget(), Limits: DefaultBatchTargetLimits()}})
 	if _, err = s.Activate(t.Context(), store, OwnerLease{}, protocol.SessionRestore{}); err == nil {
 		t.Fatal("unopened transport activated")
 	}
@@ -77,11 +77,22 @@ func sessionActivationProvenance(t *testing.T, forged bool) {
 		t.Fatal(err)
 	}
 	restore := protocol.SessionRestore{Type: "session_restore", RequestID: "restore", ControlProfile: PrivateSessionProfile, Scope: open.Scope, SessionID: open.SessionID, RuntimeRef: open.RuntimeRef, Fence: grant.Fence, Versions: open.Versions, Targets: []protocol.TargetVersion{}, Checkpoint: protocol.Checkpoint{Scope: open.Scope, Revision: "0", Generation: protocol.Counter(strconv.FormatInt(initial.Generation, 10)), FormatVersion: "wordcraft-0.10.0/yrs-0.28.0/v2", Versions: open.Versions, Encoding: "base64", State: opaque.State, Digest: opaque.Digest, Assets: []protocol.Asset{}}}
+	snapshot, err := store.ReadFullCheckpoint(ctx, lease)
+	if err != nil {
+		t.Fatal("authorized full checkpoint startup read", err)
+	}
+	restore.Checkpoint = snapshot.Checkpoint
+
 	if _, err = s.Activate(ctx, store, lease, restore); err == nil {
 		t.Fatal("unobserved restore activated")
 	}
 	if forged {
 		restore.Checkpoint.Generation = grant.Fence.Generation
+		identity, e := ComputeCheckpointIdentity(restore.Checkpoint, CheckpointIdentityLimits{DecodedBytes: maxPreparedCheckpoint, PreimageBytes: sessionOutputBytes})
+		if e != nil {
+			t.Fatal(e)
+		}
+		restore.Checkpoint.Digest = protocol.Digest(identity.FullDigest)
 	}
 	if _, err = s.Restore(ctx, restore); err != nil {
 		t.Fatal(err)

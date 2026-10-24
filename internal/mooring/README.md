@@ -361,16 +361,17 @@ The session constructor derives identity and versions from activation, checks
 FULL SQL ownership, and never accepts a copied wire Ready message. Dead child,
 source ABA and wrong-store bindings fail closed. The existing prepare-only
 replacement seam cannot replace a live session. Actual session recovery, raw
-participant admission, FIFO settlement, full checkpoint identity translation,
-provider isolation, UI and deployment remain separate qualification requirements.
+participant admission, FIFO settlement, provider isolation, UI and deployment
+remain separate qualification requirements.
 
 The dormant checkpoint identity configuration retains an application-qualified
 format, semantic tuple and complete asset manifest beside each new checkpoint.
 There is no default empty manifest or backfill: legacy NULL remains unknown.
 Canonical metadata sorts unique asset IDs by UTF-16 and preserves decimal u64
 sizes. The generic host never parses application state to guess its references.
-A future live constructor must require the concrete negotiated descriptor adapter;
-the generic callback interface itself grants no process or participant authority.
+The session activation path requires the same concrete negotiated adapter for
+checkpoint description and target preparation. The generic callback interface
+itself grants no process or participant authority.
 
 Both initialization and Saved account metadata bytes alongside decoded checkpoint
 bytes in retained history capacity. Complete SQL usage is checked again after
@@ -379,8 +380,9 @@ publish no partial checkpoint or event. Exact retries retain the original metada
 and do not call the descriptor again. An UPDATE guard prevents normal writers
 from relabelling retained metadata; it is not authenticity against arbitrary trusted
 SQL deletion/replacement or tampered portable input. Portable restore retains exact
-known metadata and legacy NULL. Writer-bound full-to-content basis translation and
-actual descriptor transport are separate prerequisites before full session activation.
+known metadata and legacy NULL. The concrete session descriptor uses the sole
+correlated reader and an independent preparation lane, including while Open
+awaits ownership; mismatched input/scope/session/tuple poisons the process.
 
 
 `SessionCommitter.CommitFull` is the separate dormant full-identity entry. It
@@ -399,3 +401,20 @@ COMMIT. Final author/owner fences still run after output preparation. Runtime,
 session and request correlation remain the concrete verified manager's duty;
 this primitive does not authenticate caller-provided strings or qualify a live
 runtime factory. The existing strict/stateless paths retain their behavior.
+
+
+The unexposed session profile requires `checkpoint_identity_v1` in Open and its
+exact Opened echo. Activation checks the actual transcript and full checkpoint
+identity against retained metadata under the writer; `InitialFullBasis` is
+separate from `InitialBasis`'s internal content digest. Legacy opaque startup
+proofs do not establish this capability. Strict/stateless profiles are unchanged.
+
+`ReadFullCheckpoint(ctx, exactOwnerLease)` returns a retained full wrapper and
+complete target versions under the same FULL writer. It invokes the immutable
+current-reader callback before loading data and again after decoding, with owner
+checks before and after; no caller can supply an authorization override. An API
+startup reader needs its own bounded original-source operation rather than
+relaxing the existing preactivation denial. The actual inherited-peer tests use
+mock participant authority, real CLOCK_BOOTTIME and explicit host Release to
+prove owner 2 restores unchanged creator-1 data. They are not two-process cold
+recovery, human admission, participant delivery or production enablement proof.

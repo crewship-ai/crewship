@@ -66,7 +66,7 @@ func TestSessionTransportHelper(t *testing.T) {
 		owner["scope"] = map[string]any{"workspace_id": "wrong", "artifact_id": "artifact", "application_id": "wordcraft"}
 	}
 	if mode == "unsolicited" {
-		write(map[string]any{"type": "session_opened", "request_id": "not-pending", "control_profile": PrivateSessionProfile, "scope": open["scope"], "session_id": open["session_id"], "runtime_ref": open["runtime_ref"], "versions": sessionTestVersions, "fence": map[string]any{"generation": "1", "token": "01234567890123456789012345678901"}, "confirmed_basis": map[string]any{"revision": "0", "digest": "sha256:" + string(makeDigestZeros())}})
+		write(map[string]any{"type": "session_opened", "capabilities": []string{"checkpoint_identity_v1"}, "request_id": "not-pending", "control_profile": PrivateSessionProfile, "scope": open["scope"], "session_id": open["session_id"], "runtime_ref": open["runtime_ref"], "versions": sessionTestVersions, "fence": map[string]any{"generation": "1", "token": "01234567890123456789012345678901"}, "confirmed_basis": map[string]any{"revision": "0", "digest": "sha256:" + string(makeDigestZeros())}})
 	} else {
 		write(owner)
 	}
@@ -90,7 +90,7 @@ func TestSessionTransportHelper(t *testing.T) {
 			if mode == "activation" {
 				continue
 			}
-			write(map[string]any{"type": "session_opened", "request_id": open["request_id"], "control_profile": PrivateSessionProfile, "scope": open["scope"], "session_id": open["session_id"], "runtime_ref": open["runtime_ref"], "versions": sessionTestVersions, "fence": v["fence"], "confirmed_basis": map[string]any{"revision": "0", "digest": "sha256:" + string(makeDigestZeros())}})
+			write(map[string]any{"type": "session_opened", "capabilities": []string{"checkpoint_identity_v1"}, "request_id": open["request_id"], "control_profile": PrivateSessionProfile, "scope": open["scope"], "session_id": open["session_id"], "runtime_ref": open["runtime_ref"], "versions": sessionTestVersions, "fence": v["fence"], "confirmed_basis": map[string]any{"revision": "0", "digest": "sha256:" + string(makeDigestZeros())}})
 
 		case "session_restore":
 			if mode != "activation" {
@@ -100,8 +100,15 @@ func TestSessionTransportHelper(t *testing.T) {
 			result := map[string]any{"type": "session_restored", "request_id": v["request_id"], "control_profile": PrivateSessionProfile, "scope": v["scope"], "session_id": v["session_id"], "runtime_ref": v["runtime_ref"], "versions": v["versions"], "fence": v["fence"], "confirmed_basis": map[string]any{"revision": cp["revision"], "digest": cp["digest"]}}
 			write(result)
 			result["type"] = "session_opened"
+			result["capabilities"] = []string{"checkpoint_identity_v1"}
 			result["request_id"] = open["request_id"]
 			write(result)
+		case "session_describe_checkpoint":
+			described := map[string]any{"type": "session_checkpoint_described", "request_id": v["request_id"], "control_profile": PrivateSessionProfile, "scope": v["scope"], "session_id": v["session_id"], "runtime_ref": v["runtime_ref"], "versions": v["versions"], "input_digest": v["checkpoint"].(map[string]any)["digest"], "description": map[string]any{"format_version": "wordcraft-0.10.0/yrs-0.28.0/v2", "versions": sessionTestVersions, "assets": []any{}}}
+			if mode == "descriptor-wrong-digest" {
+				described["input_digest"] = "sha256:" + string(makeDigestZeros())
+			}
+			write(described)
 		case "validate_checkpoint_causal":
 			write(map[string]any{"type": "checkpoint_validated_causal", "request_id": v["request_id"], "scope": v["scope"], "selected": sessionTestVersions, "input_checkpoint_digest": v["checkpoint"].(map[string]any)["digest"], "inventory": []any{}, "control_profile": PrivateCausalPrepareProfile})
 		}
@@ -129,7 +136,7 @@ func sessionPeerKey(t *testing.T, mode string, key SessionKey) *SessionRuntime {
 	return s
 }
 func sessionTestOpen(s *SessionRuntime) []byte {
-	b, _ := json.Marshal(map[string]any{"type": "session_open", "request_id": "open", "control_profile": PrivateSessionProfile, "scope": map[string]any{"workspace_id": s.scope.WorkspaceID, "artifact_id": s.scope.ArtifactID, "application_id": s.scope.ApplicationID}, "session_id": "host-session", "runtime_ref": s.RuntimeRef(), "versions": sessionTestVersions})
+	b, _ := json.Marshal(map[string]any{"type": "session_open", "required_capabilities": []string{"checkpoint_identity_v1"}, "request_id": "open", "control_profile": PrivateSessionProfile, "scope": map[string]any{"workspace_id": s.scope.WorkspaceID, "artifact_id": s.scope.ArtifactID, "application_id": s.scope.ApplicationID}, "session_id": "host-session", "runtime_ref": s.RuntimeRef(), "versions": sessionTestVersions})
 	return b
 }
 func TestSessionRuntimeInheritedPrepareProgressWhileOpenAwaitsOwner(t *testing.T) {
@@ -264,5 +271,42 @@ func TestSessionRuntimeFactoryRejectsLegacyOrForgedProcess(t *testing.T) {
 	}
 	if _, err := NewCausalRPCPrepareAdapter(s.process, s.scope, sessionTestVersions); err == nil {
 		t.Fatal("legacy reader exposed on session process")
+	}
+}
+
+func TestSessionRuntimeMandatoryIdentityCapabilityBeforeAnyOwnerRequest(t *testing.T) {
+	s := sessionPeer(t, "normal")
+	var open map[string]any
+	if json.Unmarshal(sessionTestOpen(s), &open) != nil {
+		t.Fatal("fixture")
+	}
+	delete(open, "required_capabilities")
+	raw, _ := json.Marshal(open)
+	if _, err := s.request(t.Context(), raw, time.Second); err == nil {
+		t.Fatal("missing capability admitted")
+	}
+	if s.sessionID != "" || s.openSent {
+		t.Fatal("invalid Open reached transport")
+	}
+}
+func TestSessionRuntimeWrongDescriptorDigestPoisonsBeforeInitialization(t *testing.T) {
+	s := sessionPeer(t, "descriptor-wrong-digest")
+	go func() { _, _ = s.request(t.Context(), sessionTestOpen(s), 3*time.Second) }()
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	if _, err := s.NextControl(ctx); err != nil {
+		t.Fatal(err)
+	}
+	adapter, err := NewSessionCausalAdapter(s, s.scope, s.versions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = adapter.DescribeCheckpoint(ctx, []byte("actual retained input")); err == nil {
+		t.Fatal("foreign descriptor returned")
+	}
+	select {
+	case <-s.Done():
+	case <-ctx.Done():
+		t.Fatal("uncertain descriptor process stayed alive")
 	}
 }

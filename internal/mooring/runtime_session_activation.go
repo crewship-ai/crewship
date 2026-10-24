@@ -84,6 +84,7 @@ type SessionActivation struct {
 	owner     OwnerLease
 	sessionID string
 	basis     SessionBasis
+	fullBasis FullCheckpointBasis
 	targets   []BatchTargetVersion
 }
 
@@ -116,6 +117,15 @@ func (a *SessionActivation) InitialBasis() SessionBasis {
 		return SessionBasis{}
 	}
 	return a.basis
+}
+
+// InitialFullBasis is retained full wire identity, distinct from InitialBasis's
+// internal opaque-content digest. Neither is continuing reader authority.
+func (a *SessionActivation) InitialFullBasis() (FullCheckpointBasis, error) {
+	if a == nil || !validFullCheckpointBasis(a.fullBasis) {
+		return FullCheckpointBasis{}, ErrSessionRuntime
+	}
+	return a.fullBasis, nil
 }
 func (a *SessionActivation) InitialTargets() []BatchTargetVersion {
 	if a == nil {
@@ -159,7 +169,7 @@ func (a *SessionActivation) Check(ctx context.Context, tx *sql.Tx, store *BatchS
 		return ErrSessionRuntime
 	}
 	adapter, ok := store.config.Targets.Adapter.(*SessionCausalAdapter)
-	if !ok || adapter == nil || adapter.session != a.runtime {
+	if !ok || adapter == nil || adapter.session != a.runtime || !store.checkpointIdentityEnabled() || store.config.CheckpointIdentity.Adapter != adapter {
 		return ErrSessionRuntime
 	}
 	return store.config.Owners.Check(ctx, tx, a.owner)
@@ -173,7 +183,7 @@ func (s *SessionRuntime) Activate(ctx context.Context, store *BatchStore, owner 
 		return nil, ErrSessionRuntime
 	}
 	adapter, ok := store.config.Targets.Adapter.(*SessionCausalAdapter)
-	if !ok || adapter == nil || adapter.session != s {
+	if !ok || adapter == nil || adapter.session != s || !store.checkpointIdentityEnabled() || store.config.CheckpointIdentity.Adapter != adapter {
 		return nil, ErrSessionRuntime
 	}
 	raw, err := json.Marshal(restore)
@@ -212,27 +222,11 @@ func (s *SessionRuntime) Activate(ctx context.Context, store *BatchStore, owner 
 	if cp.Scope != scope || cp.Versions != versions || cp.Revision != o.grant.Revision {
 		return nil, ErrSessionRuntime
 	}
-	if cp.FormatVersion != "wordcraft-0.10.0/yrs-0.28.0/v2" {
-		return nil, ErrSessionRuntime
-	}
-	var restoredBytes []byte
-	switch cp.Encoding {
-	case protocol.CheckpointEncodingBase64:
-		restoredBytes, err = decodePreparedCheckpoint(protocol.OpaquePreparedCheckpoint{Encoding: protocol.OpaquePreparedCheckpointEncodingBase64, State: cp.State, Digest: cp.Digest})
-	case protocol.CheckpointEncodingJson:
-		if len(cp.State) > maxPreparedCheckpoint {
-			return nil, ErrSessionRuntime
-		}
-		restoredBytes = []byte(cp.State)
-		if canonicalDigest(restoredBytes) != string(cp.Digest) {
-			return nil, ErrSessionRuntime
-		}
-	default:
-		return nil, ErrSessionRuntime
-	}
+	identity, err := VerifyCheckpointIdentity(cp, CheckpointIdentityLimits{DecodedBytes: maxPreparedCheckpoint, PreimageBytes: sessionOutputBytes})
 	if err != nil {
 		return nil, err
 	}
+	restoredBytes := identity.State
 	basis := protocol.ConfirmedCheckpointBasis{Revision: cp.Revision, Digest: cp.Digest}
 	for _, v := range []struct {
 		scope        protocol.Scope
@@ -255,16 +249,11 @@ func (s *SessionRuntime) Activate(ctx context.Context, store *BatchStore, owner 
 		if err := store.config.Owners.Check(ctx, tx, owner); err != nil {
 			return err
 		}
-		head, checkpoint, err := sessionScopeCheckpoint(ctx, tx, owner.Key, SessionBasis{Revision: string(cp.Revision), Digest: string(cp.Digest)})
-		if err != nil || head != string(cp.Revision) || canonicalDigest(checkpoint) != string(cp.Digest) || !bytes.Equal(checkpoint, restoredBytes) {
+		retained, retainedIdentity, err := store.loadRetainedFullCheckpoint(ctx, tx, owner.Key, string(cp.Revision), true)
+		if err != nil || retained.Digest != cp.Digest || retainedIdentity.ContentDigest != identity.ContentDigest || !bytes.Equal(retainedIdentity.State, restoredBytes) {
 			return ErrSessionRuntime
 		}
-		// The creator generation is retained checkpoint provenance, not the current
-		// owner's fence. Unknown legacy provenance must not be guessed or relabeled.
-		var generation sql.NullString
-		if err = tx.QueryRowContext(ctx, `SELECT checkpoint_generation FROM mooring_collab_checkpoints WHERE page_id=? AND workspace_id=? AND revision=?`, owner.Key.ArtifactID, owner.Key.WorkspaceID, head).Scan(&generation); err != nil || !generation.Valid || generation.String != string(cp.Generation) {
-			return ErrSessionRuntime
-		}
+		head := string(retained.Revision)
 		var tracking int
 		if err = tx.QueryRowContext(ctx, `SELECT target_tracking FROM mooring_collab_documents WHERE page_id=?`, owner.Key.ArtifactID).Scan(&tracking); err != nil || tracking != 1 {
 			return ErrSessionRuntime
@@ -304,7 +293,7 @@ func (s *SessionRuntime) Activate(ctx context.Context, store *BatchStore, owner 
 		if err = store.config.Owners.Check(ctx, tx, owner); err != nil {
 			return err
 		}
-		result = &SessionActivation{runtime: s, store: store, owner: owner, sessionID: sessionID, basis: SessionBasis{Revision: head, Digest: string(cp.Digest)}, targets: append([]BatchTargetVersion(nil), targets...)}
+		result = &SessionActivation{runtime: s, store: store, owner: owner, sessionID: sessionID, basis: SessionBasis{Revision: head, Digest: identity.ContentDigest}, fullBasis: FullCheckpointBasis{Revision: head, Digest: string(cp.Digest)}, targets: append([]BatchTargetVersion(nil), targets...)}
 		return nil
 	})
 	if err != nil {

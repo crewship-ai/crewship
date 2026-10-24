@@ -2,6 +2,8 @@ package mooring
 
 import (
 	"context"
+	"encoding/json"
+	protocol "github.com/crewship-ai/crewship/mooring/protocol/generated/go"
 	"time"
 )
 
@@ -38,4 +40,47 @@ func (a *SessionCausalAdapter) PrepareTargets(context.Context, []byte, BatchChan
 }
 func (a *SessionCausalAdapter) PrepareCausalTargets(ctx context.Context, checkpoint []byte, change BatchChange, labels BatchCausalPrepareContext) (BatchTargetCandidate, *PreparedFailure, error) {
 	return a.causal.PrepareCausalTargets(ctx, checkpoint, change, labels)
+}
+
+// DescribeCheckpoint uses the same concrete sole-reader lane, even while Open
+// awaits ownership. It does not install a candidate or grant scope authority.
+func (a *SessionCausalAdapter) DescribeCheckpoint(ctx context.Context, checkpoint []byte) (BatchCheckpointDescription, error) {
+	var empty BatchCheckpointDescription
+	if a == nil || a.session == nil || a.causal == nil {
+		return empty, ErrPrivateControl
+	}
+	opaque, err := encodePreparedCheckpoint(checkpoint)
+	if err != nil {
+		return empty, err
+	}
+	id, err := prepareRequestID()
+	if err != nil {
+		return empty, err
+	}
+	a.session.mu.Lock()
+	sessionID := a.session.sessionID
+	a.session.mu.Unlock()
+	if !batchID(sessionID) {
+		return empty, ErrPrivateControl
+	}
+	request := protocol.SessionDescribeCheckpoint{Type: "session_describe_checkpoint", RequestID: id, ControlProfile: PrivateSessionProfile, Scope: a.causal.base.wireScope(), SessionID: protocol.Identifier(sessionID), RuntimeRef: protocol.Identifier(a.session.runtimeRef), Versions: a.causal.base.wireVersions(), Checkpoint: opaque}
+	raw, err := json.Marshal(request)
+	if err != nil {
+		return empty, ErrPrivateControl
+	}
+	raw, err = a.session.request(ctx, raw, 5*time.Second)
+	if err != nil {
+		return empty, err
+	}
+	var response protocol.SessionCheckpointDescribed
+	if json.Unmarshal(raw, &response) != nil || response.Type != "session_checkpoint_described" || response.RequestID != id || response.Scope != request.Scope || response.SessionID != request.SessionID || response.RuntimeRef != request.RuntimeRef || response.Versions != request.Versions || response.InputDigest != opaque.Digest || response.Description.Versions != request.Versions {
+		a.session.fail(ErrPrivateControl)
+		return empty, ErrPrivateControl
+	}
+	description := BatchCheckpointDescription{FormatVersion: response.Description.FormatVersion, Versions: response.Description.Versions, Assets: response.Description.Assets}
+	if _, err = canonicalCheckpointDescription(description, sessionOutputBytes); err != nil {
+		a.session.fail(err)
+		return empty, err
+	}
+	return description, nil
 }

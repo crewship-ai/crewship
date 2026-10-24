@@ -189,6 +189,8 @@ func sessionExpected(kind string) string {
 		return "session_opened"
 	case "session_restore":
 		return "session_restored"
+	case "session_describe_checkpoint":
+		return "session_checkpoint_described"
 	}
 	return ""
 }
@@ -339,7 +341,7 @@ func (s *SessionRuntime) readLoop() {
 	}
 }
 func sessionReplyType(kind string) bool {
-	return kind == "checkpoint_validated_causal" || kind == "atomic_prepared_causal" || kind == "session_opened" || kind == "session_restored"
+	return kind == "session_checkpoint_described" || kind == "checkpoint_validated_causal" || kind == "atomic_prepared_causal" || kind == "session_opened" || kind == "session_restored"
 }
 func (s *SessionRuntime) NextControl(ctx context.Context) (SessionControl, error) {
 	for {
@@ -542,7 +544,7 @@ func (s *SessionRuntime) validate(raw []byte, fromRuntime bool) ([]byte, session
 	large := false
 	if fromRuntime {
 		switch kind {
-		case "checkpoint_validated_causal", "atomic_prepared_causal":
+		case "checkpoint_validated_causal", "atomic_prepared_causal", "session_checkpoint_described":
 			allowed = true
 			large = true
 		case "session_opened", "session_restored", "session_submit_batch", "session_participant_output", "session_status_request", "owner_acquire", "owner_renew", "ticket_validate", "delivery_renew", "revocation_ack":
@@ -553,7 +555,7 @@ func (s *SessionRuntime) validate(raw []byte, fromRuntime bool) ([]byte, session
 		case "validate_checkpoint_causal", "prepare_atomic_causal":
 			allowed = true
 			large = true
-		case "session_restore", "session_commit_result":
+		case "session_restore", "session_commit_result", "session_describe_checkpoint":
 			allowed = true
 			large = true
 		case "session_open", "session_participant_open", "session_participant_input", "session_status_result", "owner_grant", "ticket_validated", "delivery_grant", "revocation_notice":
