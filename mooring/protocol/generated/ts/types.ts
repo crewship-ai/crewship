@@ -6,9 +6,9 @@
 export type Counter = string;
 
 export interface Scope {
-  workspace_id: string;
-  artifact_id: string;
-  application_id: string;
+  workspace_id: Identifier;
+  artifact_id: Identifier;
+  application_id: Identifier;
 }
 
 export interface Versions {
@@ -20,26 +20,26 @@ export interface Versions {
 export type ErrorCode = "precondition_failed" | "op_id_conflict" | "dependency_rejected" | "target_deleted" | "quota_exceeded" | "permission_revoked" | "forbidden" | "stale_owner" | "lease_expired" | "version_mismatch" | "invalid_request" | "atomic_change_too_large" | "capacity_exhausted" | "unknown_dependency" | "dependency_cycle" | "unknown_outcome" | "task_cancelled";
 
 export interface ReadPrecondition {
-  target_id: string;
+  target_id: Identifier;
   revision: Counter;
   structure_revision?: Counter;
 }
 
 export interface Operation {
-  op_id: string;
+  op_id: Identifier;
   fingerprint: Digest;
-  participant_ref: string;
+  participant_ref: Identifier;
   base_revision: Counter;
-  dependencies: Array<string>;
+  dependencies: Array<Identifier>;
   read_preconditions: Array<ReadPrecondition>;
   payload: Record<string, unknown>;
 }
 
 export interface AtomicChange {
-  change_id: string;
+  change_id: Identifier;
   operations: Array<Operation>;
   membership_hash: Digest;
-  task_id?: string;
+  task_id?: Identifier;
 }
 
 export interface Fence {
@@ -50,7 +50,7 @@ export interface Fence {
 export type RejectionRootCauseCode = "precondition_failed" | "op_id_conflict" | "target_deleted" | "quota_exceeded" | "permission_revoked" | "forbidden" | "stale_owner" | "lease_expired" | "version_mismatch" | "invalid_request" | "atomic_change_too_large" | "capacity_exhausted" | "unknown_dependency" | "dependency_cycle" | "task_cancelled";
 
 export interface RejectionRootCause {
-  op_id: string;
+  op_id: Identifier;
   code: RejectionRootCauseCode;
   message: string;
 }
@@ -59,7 +59,7 @@ export type RejectionRetry = "do_not_retry" | "query_status" | "reconnect_then_q
 
 export interface Rejection {
   code: ErrorCode;
-  root_op_id?: string;
+  root_op_id?: Identifier;
   message: string;
   root_cause?: RejectionRootCause;
   retry: RejectionRetry;
@@ -70,17 +70,17 @@ export type OperationResultVariant1Status = "saved";
 export type OperationResultVariant1Durability = "node" | "replicated";
 
 export interface OperationResultVariant1 {
-  op_id: string;
+  op_id: Identifier;
   status: OperationResultVariant1Status;
   revision: Counter;
-  issuer: string;
+  issuer: Identifier;
   durability: OperationResultVariant1Durability;
 }
 
 export type OperationResultVariant2Status = "rejected";
 
 export interface OperationResultVariant2 {
-  op_id: string;
+  op_id: Identifier;
   status: OperationResultVariant2Status;
   reason: Rejection;
 }
@@ -90,7 +90,7 @@ export type OperationResult = OperationResultVariant1 | OperationResultVariant2;
 export type ChangeResultStatus = "saved" | "rejected";
 
 export interface ChangeResult {
-  change_id: string;
+  change_id: Identifier;
   status: ChangeResultStatus;
   operations: Array<OperationResult>;
   first_revision?: Counter;
@@ -99,33 +99,36 @@ export interface ChangeResult {
 
 export type HelloType = "hello";
 
+export type HelloControlProfilesItem = "mooring.prepare.v1" | "mooring.prepare-causal.v1" | "mooring.session-causal.v1";
+
 export interface Hello {
   type: HelloType;
-  request_id: string;
+  request_id: Identifier;
   supported: Array<Versions>;
+  control_profiles?: Array<HelloControlProfilesItem>;
 }
 
 export type WelcomeType = "welcome";
 
 export interface Welcome {
   type: WelcomeType;
-  request_id: string;
+  request_id: Identifier;
   selected: Versions;
   scope: Scope;
-  participant_ref: string;
+  participant_ref: Identifier;
   permission_version: Counter;
   limits: WireLimits;
-  issuer: string;
+  issuer: Identifier;
 }
 
 export type CommitBatchType = "commit_batch";
 
 export interface CommitBatch {
   type: CommitBatchType;
-  request_id: string;
+  request_id: Identifier;
   versions: Versions;
   scope: Scope;
-  session_id: string;
+  session_id: Identifier;
   fence: Fence;
   expected_revision: Counter;
   changes: Array<AtomicChange>;
@@ -137,11 +140,11 @@ export type CommitResultDurability = "node" | "replicated";
 
 export interface CommitResult {
   type: CommitResultType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
   generation: Counter;
   revision: Counter;
-  issuer: string;
+  issuer: Identifier;
   durability: CommitResultDurability;
   changes: Array<ChangeResult>;
 }
@@ -150,9 +153,9 @@ export type StatusRequestType = "operation_status";
 
 export interface StatusRequest {
   type: StatusRequestType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  op_id: string;
+  op_id: Identifier;
   expected_fingerprint: Digest;
 }
 
@@ -161,7 +164,7 @@ export type StatusResultType = "operation_status_result";
 export type StatusResultResultVariant2Status = "unknown";
 
 export interface StatusResultResultVariant2 {
-  op_id: string;
+  op_id: Identifier;
   status: StatusResultResultVariant2Status;
 }
 
@@ -169,13 +172,13 @@ export type StatusResultResult = OperationResult | StatusResultResultVariant2;
 
 export interface StatusResult {
   type: StatusResultType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
   result: StatusResultResult;
 }
 
 export interface Asset {
-  asset_id: string;
+  asset_id: Identifier;
   digest: Digest;
   size_bytes: Counter;
 }
@@ -186,7 +189,7 @@ export interface Checkpoint {
   scope: Scope;
   revision: Counter;
   generation: Counter;
-  format_version: string;
+  format_version: Identifier;
   versions: Versions;
   encoding: CheckpointEncoding;
   state: string;
@@ -210,7 +213,7 @@ export type SessionTicketRequestType = "session_ticket_request";
 
 export interface SessionTicketRequest {
   type: SessionTicketRequestType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
   requested: Capabilities;
 }
@@ -219,10 +222,10 @@ export type SessionTicketType = "session_ticket";
 
 export interface SessionTicket {
   type: SessionTicketType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
-  participant_ref: string;
+  session_id: Identifier;
+  participant_ref: Identifier;
   permission_version: Counter;
   granted: Capabilities;
   ticket: string;
@@ -234,21 +237,21 @@ export type OwnerAcquireType = "owner_acquire";
 
 export interface OwnerAcquire {
   type: OwnerAcquireType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  runtime_ref: string;
-  renewal_nonce: string;
+  runtime_ref: Identifier;
+  renewal_nonce: Identifier;
 }
 
 export type OwnerRenewType = "owner_renew";
 
 export interface OwnerRenew {
   type: OwnerRenewType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
+  session_id: Identifier;
   fence: Fence;
-  renewal_nonce: string;
+  renewal_nonce: Identifier;
   permission_version: Counter;
 }
 
@@ -256,14 +259,14 @@ export type OwnerGrantType = "owner_grant";
 
 export interface OwnerGrant {
   type: OwnerGrantType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
-  runtime_ref: string;
+  session_id: Identifier;
+  runtime_ref: Identifier;
   fence: Fence;
   lease_duration_ms: PositiveCounter;
   revision: Counter;
-  renewal_nonce: string;
+  renewal_nonce: Identifier;
   permission_version: Counter;
 }
 
@@ -271,57 +274,57 @@ export type DeliveryRenewType = "delivery_renew";
 
 export interface DeliveryRenew {
   type: DeliveryRenewType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
-  participant_ref: string;
+  session_id: Identifier;
+  participant_ref: Identifier;
   fence: Fence;
   permission_version: Counter;
-  renewal_nonce: string;
-  gate_id: string;
+  renewal_nonce: Identifier;
+  gate_id: Identifier;
 }
 
 export type DeliveryGrantType = "delivery_grant";
 
 export interface DeliveryGrant {
   type: DeliveryGrantType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
-  participant_ref: string;
+  session_id: Identifier;
+  participant_ref: Identifier;
   generation: Counter;
   permission_version: Counter;
-  renewal_nonce: string;
+  renewal_nonce: Identifier;
   duration_ms: PositiveCounter;
-  gate_id: string;
+  gate_id: Identifier;
 }
 
 export type SessionClosedType = "session_closed";
 
 export interface SessionClosed {
   type: SessionClosedType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
-  participant_ref: string;
+  session_id: Identifier;
+  participant_ref: Identifier;
   generation: Counter;
   permission_version: Counter;
-  barrier_id: string;
+  barrier_id: Identifier;
   reason: Rejection;
-  gate_id: string;
+  gate_id: Identifier;
 }
 
 export type DeliveryBlockedType = "delivery_blocked";
 
 export interface DeliveryBlocked {
   type: DeliveryBlockedType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
-  participant_ref: string;
+  session_id: Identifier;
+  participant_ref: Identifier;
   fence: Fence;
-  barrier_id: string;
-  covered_gate_ids: Array<string>;
+  barrier_id: Identifier;
+  covered_gate_ids: Array<Identifier>;
   permission_version: Counter;
 }
 
@@ -329,10 +332,10 @@ export type RevocationConfirmedType = "revocation_confirmed";
 
 export interface RevocationConfirmed {
   type: RevocationConfirmedType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  participant_ref: string;
-  barrier_id: string;
+  participant_ref: Identifier;
+  barrier_id: Identifier;
   permission_version: Counter;
   read_blocked: boolean;
   write_blocked: boolean;
@@ -342,9 +345,9 @@ export type ReadRequestType = "read_request";
 
 export interface ReadRequest {
   type: ReadRequestType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
+  session_id: Identifier;
   revision?: Counter;
   cursor?: string;
   query?: Record<string, unknown>;
@@ -355,7 +358,7 @@ export type ReadResultType = "read_result";
 
 export interface ReadResult {
   type: ReadResultType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
   revision: Counter;
   items: Array<ReadItem>;
@@ -366,7 +369,7 @@ export type CheckpointRequestType = "checkpoint_request";
 
 export interface CheckpointRequest {
   type: CheckpointRequestType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
   revision: Counter;
 }
@@ -375,7 +378,7 @@ export type CheckpointResultType = "checkpoint_result";
 
 export interface CheckpointResult {
   type: CheckpointResultType;
-  request_id: string;
+  request_id: Identifier;
   checkpoint: Checkpoint;
 }
 
@@ -383,10 +386,10 @@ export type PresenceType = "presence";
 
 export interface Presence {
   type: PresenceType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
-  participant_ref: string;
+  session_id: Identifier;
+  participant_ref: Identifier;
   ttl_ms: PositiveCounter;
   view: Record<string, unknown>;
 }
@@ -394,28 +397,28 @@ export interface Presence {
 export type TaskSummaryStatus = "pending" | "running" | "saved" | "rejected" | "partial" | "cancelled" | "unknown";
 
 export interface TaskSummary {
-  task_id: string;
+  task_id: Identifier;
   allow_partial: boolean;
   status: TaskSummaryStatus;
   changes: Array<TaskChangeState>;
-  participant_ref: string;
-  unresolved_change_ids: Array<string>;
+  participant_ref: Identifier;
+  unresolved_change_ids: Array<Identifier>;
 }
 
 export type TaskStatusType = "task_status";
 
 export interface TaskStatus {
   type: TaskStatusType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  task_id: string;
+  task_id: Identifier;
 }
 
 export type TaskResultType = "task_result";
 
 export interface TaskResult {
   type: TaskResultType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
   task: TaskSummary;
 }
@@ -424,19 +427,19 @@ export type TaskCancelType = "task_cancel";
 
 export interface TaskCancel {
   type: TaskCancelType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  task_id: string;
+  task_id: Identifier;
 }
 
 export type ProposalType = "proposal";
 
 export interface Proposal {
   type: ProposalType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  proposal_id: string;
-  participant_ref: string;
+  proposal_id: Identifier;
+  participant_ref: Identifier;
   base_revision: Counter;
   changes: Array<AtomicChange>;
   diff: string;
@@ -446,31 +449,31 @@ export type ProposalAcceptType = "proposal_accept";
 
 export interface ProposalAccept {
   type: ProposalAcceptType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  proposal_id: string;
+  proposal_id: Identifier;
   base_revision: Counter;
-  op_id: string;
+  op_id: Identifier;
 }
 
 export type UndoRequestType = "undo_request";
 
 export interface UndoRequest {
   type: UndoRequestType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  task_id?: string;
-  participant_ref: string;
+  task_id?: Identifier;
+  participant_ref: Identifier;
   base_revision: Counter;
-  op_id: string;
-  target_change_id?: string;
+  op_id: Identifier;
+  target_change_id?: Identifier;
 }
 
 export type ProtocolErrorType = "protocol_error";
 
 export interface ProtocolError {
   type: ProtocolErrorType;
-  request_id: string;
+  request_id: Identifier;
   scope?: Scope;
   reason: Rejection;
 }
@@ -480,8 +483,8 @@ export type PositiveCounter = Counter;
 export type Digest = string;
 
 export interface ReadItem {
-  target_id: string;
-  model_type: string;
+  target_id: Identifier;
+  model_type: Identifier;
   revision: Counter;
   data: Record<string, unknown>;
 }
@@ -500,10 +503,10 @@ export interface WireLimits {
 }
 
 export interface CommandDeclaration {
-  command_id: string;
+  command_id: Identifier;
   input_schema: Record<string, unknown>;
   result_schema: Record<string, unknown>;
-  effect_scope: string;
+  effect_scope: Identifier;
   mutation: boolean;
   replayable: boolean;
 }
@@ -511,7 +514,7 @@ export interface CommandDeclaration {
 export type FormatDeclarationValidator = "adapter" | "host" | "none";
 
 export interface FormatDeclaration {
-  format_id: string;
+  format_id: Identifier;
   model_versions: Array<string>;
   import_extensions: Array<string>;
   export_extensions: Array<string>;
@@ -540,14 +543,14 @@ export type ApplicationManifestConnectionPath = "A" | "B" | "C";
 export type ApplicationManifestMergeModelsItem = "properties" | "commands" | "yjs_text" | "application_server" | "exclusive";
 
 export interface ApplicationManifest {
-  application_id: string;
+  application_id: Identifier;
   package_version: string;
   package_digest: Digest;
   connection_path: ApplicationManifestConnectionPath;
   supported_versions: Array<Versions>;
   formats: Array<FormatDeclaration>;
   commands: Array<CommandDeclaration>;
-  capabilities: Array<string>;
+  capabilities: Array<Identifier>;
   merge_models: Array<ApplicationManifestMergeModelsItem>;
   presence_schema: Record<string, unknown>;
   storage: StorageDeclaration;
@@ -558,15 +561,15 @@ export type ManifestRequestType = "manifest_request";
 
 export interface ManifestRequest {
   type: ManifestRequestType;
-  request_id: string;
-  application_id: string;
+  request_id: Identifier;
+  application_id: Identifier;
 }
 
 export type ManifestResultType = "manifest_result";
 
 export interface ManifestResult {
   type: ManifestResultType;
-  request_id: string;
+  request_id: Identifier;
   manifest: ApplicationManifest;
 }
 
@@ -576,9 +579,9 @@ export type LifecycleRequestAction = "open" | "suspend" | "resume" | "close";
 
 export interface LifecycleRequest {
   type: LifecycleRequestType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
+  session_id: Identifier;
   fence: Fence;
   action: LifecycleRequestAction;
   checkpoint?: Checkpoint;
@@ -590,9 +593,9 @@ export type LifecycleResultState = "ready" | "suspended" | "closed";
 
 export interface LifecycleResult {
   type: LifecycleResultType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
+  session_id: Identifier;
   generation: Counter;
   state: LifecycleResultState;
   revision: Counter;
@@ -602,7 +605,7 @@ export type SessionJoinType = "session_join";
 
 export interface SessionJoin {
   type: SessionJoinType;
-  request_id: string;
+  request_id: Identifier;
   ticket: string;
   versions: Versions;
 }
@@ -611,35 +614,35 @@ export type SessionJoinedType = "session_joined";
 
 export interface SessionJoined {
   type: SessionJoinedType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
-  participant_ref: string;
+  session_id: Identifier;
+  participant_ref: Identifier;
   generation: Counter;
   permission_version: Counter;
   versions: Versions;
-  gate_id: string;
+  gate_id: Identifier;
 }
 
 export type SessionLeaveType = "session_leave";
 
 export interface SessionLeave {
   type: SessionLeaveType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
+  session_id: Identifier;
 }
 
 export type SubmitChangesType = "submit_changes";
 
 export interface SubmitChanges {
   type: SubmitChangesType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
+  session_id: Identifier;
   versions: Versions;
   changes: Array<AtomicChange>;
-  task_id?: string;
+  task_id?: Identifier;
 }
 
 export type ChangesReceivedType = "changes_received";
@@ -648,10 +651,10 @@ export type ChangesReceivedState = "pending" | "synchronized";
 
 export interface ChangesReceived {
   type: ChangesReceivedType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
-  change_ids: Array<string>;
+  session_id: Identifier;
+  change_ids: Array<Identifier>;
   state: ChangesReceivedState;
 }
 
@@ -661,11 +664,11 @@ export type TaskSubmitMode = "suggest" | "direct";
 
 export interface TaskSubmit {
   type: TaskSubmitType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
+  session_id: Identifier;
   versions: Versions;
-  task_id: string;
+  task_id: Identifier;
   allow_partial: boolean;
   mode: TaskSubmitMode;
   changes: Array<AtomicChange>;
@@ -675,9 +678,9 @@ export type ProposalRequestType = "proposal_request";
 
 export interface ProposalRequest {
   type: ProposalRequestType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  proposal_id: string;
+  proposal_id: Identifier;
 }
 
 export type CollaborationUpdateType = "collaboration_update";
@@ -688,12 +691,12 @@ export type CollaborationUpdateState = "synchronized";
 
 export interface CollaborationUpdate {
   type: CollaborationUpdateType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
+  session_id: Identifier;
   generation: Counter;
   base_revision: Counter;
-  change_ids: Array<string>;
+  change_ids: Array<Identifier>;
   encoding: CollaborationUpdateEncoding;
   data: string;
   state: CollaborationUpdateState;
@@ -705,9 +708,9 @@ export type DocumentUpdateEncoding = "json" | "base64";
 
 export interface DocumentUpdate {
   type: DocumentUpdateType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
+  session_id: Identifier;
   generation: Counter;
   from_revision: Counter;
   to_revision: Counter;
@@ -720,11 +723,11 @@ export type AssetRequestType = "asset_request";
 
 export interface AssetRequest {
   type: AssetRequestType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
+  session_id: Identifier;
   revision: Counter;
-  asset_id: string;
+  asset_id: Identifier;
   offset_bytes: Counter;
   max_bytes: PositiveCounter;
 }
@@ -733,10 +736,10 @@ export type AssetResultType = "asset_result";
 
 export interface AssetResult {
   type: AssetResultType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
   revision: Counter;
-  asset_id: string;
+  asset_id: Identifier;
   offset_bytes: Counter;
   size_bytes: Counter;
   digest: Digest;
@@ -747,43 +750,43 @@ export type TicketValidationRequestType = "ticket_validate";
 
 export interface TicketValidationRequest {
   type: TicketValidationRequestType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
+  session_id: Identifier;
   fence: Fence;
   ticket: string;
-  validation_nonce: string;
+  validation_nonce: Identifier;
 }
 
 export type TicketValidationResultType = "ticket_validated";
 
 export interface TicketValidationResult {
   type: TicketValidationResultType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
+  session_id: Identifier;
   generation: Counter;
-  participant_ref: string;
+  participant_ref: Identifier;
   permission_version: Counter;
   granted: Capabilities;
   versions: Versions;
   expires_in_ms: PositiveCounter;
-  validation_nonce: string;
-  gate_id: string;
+  validation_nonce: Identifier;
+  gate_id: Identifier;
 }
 
 export type RevocationNoticeType = "revocation_notice";
 
 export interface RevocationNotice {
   type: RevocationNoticeType;
-  request_id: string;
+  request_id: Identifier;
   scope: Scope;
-  session_id: string;
+  session_id: Identifier;
   generation: Counter;
-  participant_ref: string;
+  participant_ref: Identifier;
   permission_version: Counter;
-  barrier_id: string;
-  gate_ids: Array<string>;
+  barrier_id: Identifier;
+  gate_ids: Array<Identifier>;
   block_read: boolean;
   block_write: boolean;
 }
@@ -791,7 +794,7 @@ export interface RevocationNotice {
 export type TaskChangeStateVariant2Status = "pending" | "running" | "cancelled" | "unknown";
 
 export interface TaskChangeStateVariant2 {
-  change_id: string;
+  change_id: Identifier;
   status: TaskChangeStateVariant2Status;
 }
 
@@ -799,10 +802,656 @@ export type TaskChangeState = ChangeResult | TaskChangeStateVariant2;
 
 export type RuntimeReadyType = "runtime_ready";
 
+export type RuntimeReadySelectedControlProfile = "mooring.prepare.v1" | "mooring.prepare-causal.v1" | "mooring.session-causal.v1";
+
 export interface RuntimeReady {
   type: RuntimeReadyType;
-  request_id: string;
+  request_id: Identifier;
   selected: Versions;
+  selected_control_profile?: RuntimeReadySelectedControlProfile;
 }
 
-export type Message = Hello | Welcome | CommitBatch | CommitResult | StatusRequest | StatusResult | SessionTicketRequest | SessionTicket | OwnerAcquire | OwnerRenew | OwnerGrant | DeliveryRenew | DeliveryGrant | SessionClosed | DeliveryBlocked | RevocationConfirmed | ReadRequest | ReadResult | CheckpointRequest | CheckpointResult | Presence | TaskStatus | TaskResult | TaskCancel | Proposal | ProposalAccept | UndoRequest | ProtocolError | ManifestRequest | ManifestResult | LifecycleRequest | LifecycleResult | SessionJoin | SessionJoined | SessionLeave | SubmitChanges | ChangesReceived | TaskSubmit | ProposalRequest | CollaborationUpdate | DocumentUpdate | AssetRequest | AssetResult | TicketValidationRequest | TicketValidationResult | RevocationNotice | RuntimeReady;
+export type Identifier = string;
+
+export type OpaquePreparedCheckpointEncoding = "base64";
+
+export interface OpaquePreparedCheckpoint {
+  encoding: OpaquePreparedCheckpointEncoding;
+  state: string;
+  digest: Digest;
+}
+
+export interface TargetIdentity {
+  target_id: Identifier;
+  deleted: boolean;
+}
+
+export interface TargetVersion {
+  target_id: Identifier;
+  revision: Counter;
+  structure_revision: Counter;
+  deleted: boolean;
+}
+
+export interface PreparedOperationRevision {
+  op_id: Identifier;
+  revision: PositiveCounter;
+}
+
+export type PrepareContextReadPolicy = "agent_confirmed_current";
+
+export interface PrepareContext {
+  read_policy: PrepareContextReadPolicy;
+  document_revision: Counter;
+  targets: Array<TargetVersion>;
+  operation_revisions: Array<PreparedOperationRevision>;
+}
+
+export interface TargetEffect {
+  target_id: Identifier;
+  content_changed: boolean;
+  structure_changed: boolean;
+  created: boolean;
+  deleted: boolean;
+}
+
+export interface PreparedOperationEffects {
+  op_id: Identifier;
+  targets: Array<TargetEffect>;
+}
+
+export type ValidateCheckpointType = "validate_checkpoint";
+
+export type ValidateCheckpointControlProfile = "mooring.prepare.v1";
+
+export interface ValidateCheckpoint {
+  type: ValidateCheckpointType;
+  request_id: Identifier;
+  scope: Scope;
+  selected: Versions;
+  checkpoint: OpaquePreparedCheckpoint;
+  control_profile: ValidateCheckpointControlProfile;
+}
+
+export type CheckpointValidatedType = "checkpoint_validated";
+
+export type CheckpointValidatedControlProfile = "mooring.prepare.v1";
+
+export interface CheckpointValidated {
+  type: CheckpointValidatedType;
+  request_id: Identifier;
+  scope: Scope;
+  selected: Versions;
+  input_checkpoint_digest: Digest;
+  inventory: Array<TargetIdentity>;
+  control_profile: CheckpointValidatedControlProfile;
+}
+
+export type PrepareAtomicType = "prepare_atomic";
+
+export type PrepareAtomicControlProfile = "mooring.prepare.v1";
+
+export interface PrepareAtomic {
+  type: PrepareAtomicType;
+  request_id: Identifier;
+  scope: Scope;
+  selected: Versions;
+  checkpoint: OpaquePreparedCheckpoint;
+  context: PrepareContext;
+  change: AtomicChange;
+  control_profile: PrepareAtomicControlProfile;
+}
+
+export type PreparedCandidateKind = "candidate";
+
+export interface PreparedCandidate {
+  kind: PreparedCandidateKind;
+  checkpoint: OpaquePreparedCheckpoint;
+  effects: Array<PreparedOperationEffects>;
+  inventory: Array<TargetIdentity>;
+}
+
+export type PreparedDirectFailureKind = "failure";
+
+export interface PreparedDirectFailure {
+  kind: PreparedDirectFailureKind;
+  op_id: Identifier;
+  reason: Rejection;
+}
+
+export type AtomicPreparedType = "atomic_prepared";
+
+export type AtomicPreparedOutcome = PreparedCandidate | PreparedDirectFailure;
+
+export type AtomicPreparedControlProfile = "mooring.prepare.v1";
+
+export interface AtomicPrepared {
+  type: AtomicPreparedType;
+  request_id: Identifier;
+  scope: Scope;
+  selected: Versions;
+  input_checkpoint_digest: Digest;
+  change_id: Identifier;
+  membership_hash: Digest;
+  outcome: AtomicPreparedOutcome;
+  control_profile: AtomicPreparedControlProfile;
+}
+
+export type CausalReadIndex = string;
+
+export interface CausalEntryVersion {
+  revision: Counter;
+  structure_revision: Counter;
+  deleted: boolean;
+}
+
+export type QualifiedCausalReadEntry = CausalEntryVersion | null;
+
+export interface QualifiedCausalRead {
+  op_id: Identifier;
+  read_index: CausalReadIndex;
+  target_id: Identifier;
+  observed_revision: Counter;
+  observed_structure_revision?: Counter;
+  entry: QualifiedCausalReadEntry;
+  covered: boolean;
+}
+
+export type CausalPrepareContextReadPolicy = "agent_dependency_covered";
+
+export interface CausalPrepareContext {
+  read_policy: CausalPrepareContextReadPolicy;
+  document_revision: Counter;
+  targets: Array<TargetVersion>;
+  operation_revisions: Array<PreparedOperationRevision>;
+  qualified_reads: Array<QualifiedCausalRead>;
+}
+
+export type ValidateCheckpointCausalType = "validate_checkpoint_causal";
+
+export type ValidateCheckpointCausalControlProfile = "mooring.prepare-causal.v1";
+
+export interface ValidateCheckpointCausal {
+  type: ValidateCheckpointCausalType;
+  request_id: Identifier;
+  scope: Scope;
+  selected: Versions;
+  checkpoint: OpaquePreparedCheckpoint;
+  control_profile: ValidateCheckpointCausalControlProfile;
+}
+
+export type CheckpointValidatedCausalType = "checkpoint_validated_causal";
+
+export type CheckpointValidatedCausalControlProfile = "mooring.prepare-causal.v1";
+
+export interface CheckpointValidatedCausal {
+  type: CheckpointValidatedCausalType;
+  request_id: Identifier;
+  scope: Scope;
+  selected: Versions;
+  input_checkpoint_digest: Digest;
+  inventory: Array<TargetIdentity>;
+  control_profile: CheckpointValidatedCausalControlProfile;
+}
+
+export type PrepareAtomicCausalType = "prepare_atomic_causal";
+
+export type PrepareAtomicCausalControlProfile = "mooring.prepare-causal.v1";
+
+export interface PrepareAtomicCausal {
+  type: PrepareAtomicCausalType;
+  request_id: Identifier;
+  scope: Scope;
+  selected: Versions;
+  checkpoint: OpaquePreparedCheckpoint;
+  context: CausalPrepareContext;
+  change: AtomicChange;
+  control_profile: PrepareAtomicCausalControlProfile;
+  human_context?: SessionHumanPrepareContext;
+}
+
+export type AtomicPreparedCausalType = "atomic_prepared_causal";
+
+export type AtomicPreparedCausalOutcome = PreparedCandidate | PreparedDirectFailure;
+
+export type AtomicPreparedCausalControlProfile = "mooring.prepare-causal.v1";
+
+export interface AtomicPreparedCausal {
+  type: AtomicPreparedCausalType;
+  request_id: Identifier;
+  scope: Scope;
+  selected: Versions;
+  input_checkpoint_digest: Digest;
+  change_id: Identifier;
+  membership_hash: Digest;
+  outcome: AtomicPreparedCausalOutcome;
+  control_profile: AtomicPreparedCausalControlProfile;
+  native_delta?: SessionNativeDelta;
+}
+
+export interface ConfirmedCheckpointBasis {
+  revision: Counter;
+  digest: Digest;
+}
+
+export type SessionOpenType = "session_open";
+
+export type SessionOpenControlProfile = "mooring.session-causal.v1";
+
+export type SessionOpenRequiredCapabilitiesItem = "checkpoint_identity_v1" | "origin_inventory_v1" | "human_native_prepare_v1";
+
+export interface SessionOpen {
+  type: SessionOpenType;
+  request_id: Identifier;
+  control_profile: SessionOpenControlProfile;
+  scope: Scope;
+  session_id: Identifier;
+  runtime_ref: Identifier;
+  versions: Versions;
+  required_capabilities: Array<SessionOpenRequiredCapabilitiesItem>;
+}
+
+export type SessionRestoreType = "session_restore";
+
+export type SessionRestoreControlProfile = "mooring.session-causal.v1";
+
+export interface SessionRestore {
+  type: SessionRestoreType;
+  request_id: Identifier;
+  control_profile: SessionRestoreControlProfile;
+  scope: Scope;
+  session_id: Identifier;
+  runtime_ref: Identifier;
+  fence: Fence;
+  versions: Versions;
+  checkpoint: Checkpoint;
+  targets: Array<TargetVersion>;
+}
+
+export type SessionOpenedType = "session_opened";
+
+export type SessionOpenedControlProfile = "mooring.session-causal.v1";
+
+export type SessionOpenedCapabilitiesItem = "checkpoint_identity_v1" | "origin_inventory_v1" | "human_native_prepare_v1";
+
+export interface SessionOpened {
+  type: SessionOpenedType;
+  request_id: Identifier;
+  control_profile: SessionOpenedControlProfile;
+  scope: Scope;
+  session_id: Identifier;
+  runtime_ref: Identifier;
+  fence: Fence;
+  versions: Versions;
+  confirmed_basis: ConfirmedCheckpointBasis;
+  capabilities: Array<SessionOpenedCapabilitiesItem>;
+}
+
+export type SessionSubmitBatchType = "session_submit_batch";
+
+export type SessionSubmitBatchControlProfile = "mooring.session-causal.v1";
+
+export interface SessionSubmitBatch {
+  type: SessionSubmitBatchType;
+  request_id: Identifier;
+  control_profile: SessionSubmitBatchControlProfile;
+  scope: Scope;
+  session_id: Identifier;
+  runtime_ref: Identifier;
+  fence: Fence;
+  versions: Versions;
+  confirmed_basis: ConfirmedCheckpointBasis;
+  changes: Array<AtomicChange>;
+}
+
+export type SessionCommitResultType = "session_commit_result";
+
+export type SessionCommitResultControlProfile = "mooring.session-causal.v1";
+
+export interface SessionCommitResult {
+  type: SessionCommitResultType;
+  request_id: Identifier;
+  control_profile: SessionCommitResultControlProfile;
+  scope: Scope;
+  session_id: Identifier;
+  runtime_ref: Identifier;
+  fence: Fence;
+  versions: Versions;
+  receipt: CommitResult;
+  checkpoint: Checkpoint;
+  targets: Array<TargetVersion>;
+  native_deltas?: Array<SessionCommittedNativeDelta>;
+  public_receipt?: CommitResult;
+}
+
+export type SessionParticipantOpenType = "session_participant_open";
+
+export type SessionParticipantOpenControlProfile = "mooring.session-causal.v1";
+
+export type SessionParticipantOpenJoin = SessionJoin | SessionJoinBounded;
+
+export interface SessionParticipantOpen {
+  type: SessionParticipantOpenType;
+  request_id: Identifier;
+  control_profile: SessionParticipantOpenControlProfile;
+  scope: Scope;
+  session_id: Identifier;
+  runtime_ref: Identifier;
+  fence: Fence;
+  connection_ref: Identifier;
+  join: SessionParticipantOpenJoin;
+}
+
+export type SessionParticipantInputType = "session_participant_input";
+
+export type SessionParticipantInputControlProfile = "mooring.session-causal.v1";
+
+export type SessionParticipantInputMessage = SubmitChanges | TaskSubmit | ReadRequest | StatusRequest | SessionLeave | Presence;
+
+export interface SessionParticipantInput {
+  type: SessionParticipantInputType;
+  request_id: Identifier;
+  control_profile: SessionParticipantInputControlProfile;
+  scope: Scope;
+  session_id: Identifier;
+  runtime_ref: Identifier;
+  fence: Fence;
+  connection_ref: Identifier;
+  participant_ref: Identifier;
+  gate_id: Identifier;
+  permission_version: Counter;
+  message: SessionParticipantInputMessage;
+}
+
+export type BoundedTransferBeginType = "bounded_transfer_begin";
+
+export type BoundedTransferBeginKind = "checkpoint" | "document_update" | "host_receipt";
+
+export interface BoundedTransferBegin {
+  type: BoundedTransferBeginType;
+  request_id: Identifier;
+  scope: Scope;
+  session_id: Identifier;
+  participant_ref: Identifier;
+  gate_id: Identifier;
+  generation: Counter;
+  permission_version: Counter;
+  versions: Versions;
+  revision: Counter;
+  transfer_id: Identifier;
+  kind: BoundedTransferBeginKind;
+  total_bytes: PositiveCounter;
+  chunk_count: PositiveCounter;
+  digest: Digest;
+}
+
+export type BoundedTransferChunkType = "bounded_transfer_chunk";
+
+export interface BoundedTransferChunk {
+  type: BoundedTransferChunkType;
+  request_id: Identifier;
+  scope: Scope;
+  session_id: Identifier;
+  participant_ref: Identifier;
+  gate_id: Identifier;
+  generation: Counter;
+  permission_version: Counter;
+  versions: Versions;
+  revision: Counter;
+  transfer_id: Identifier;
+  index: Counter;
+  data: string;
+}
+
+export type SessionParticipantOutputType = "session_participant_output";
+
+export type SessionParticipantOutputControlProfile = "mooring.session-causal.v1";
+
+export type SessionParticipantOutputMessage = SessionJoined | ReadResult | StatusResult | ChangesReceived | CommitResult | TaskResult | SessionClosed | ProtocolError | Presence | DocumentUpdate | BoundedTransferBegin | BoundedTransferChunk | SessionJoinedBounded;
+
+export interface SessionParticipantOutput {
+  type: SessionParticipantOutputType;
+  request_id: Identifier;
+  control_profile: SessionParticipantOutputControlProfile;
+  scope: Scope;
+  session_id: Identifier;
+  runtime_ref: Identifier;
+  fence: Fence;
+  connection_ref: Identifier;
+  participant_ref: Identifier;
+  gate_id: Identifier;
+  permission_version: Counter;
+  message: SessionParticipantOutputMessage;
+}
+
+export type SessionJoinBoundedType = "session_join_bounded";
+
+export type SessionJoinBoundedTransferProfile = "bounded_transfer_v1";
+
+export interface SessionJoinBounded {
+  type: SessionJoinBoundedType;
+  request_id: Identifier;
+  ticket: string;
+  versions: Versions;
+  transfer_profile: SessionJoinBoundedTransferProfile;
+}
+
+export type SessionJoinedBoundedType = "session_joined_bounded";
+
+export type SessionJoinedBoundedSelectedTransferProfile = "bounded_transfer_v1";
+
+export interface SessionJoinedBounded {
+  type: SessionJoinedBoundedType;
+  request_id: Identifier;
+  joined: SessionJoined;
+  selected_transfer_profile: SessionJoinedBoundedSelectedTransferProfile;
+}
+
+export type SessionRestoredType = "session_restored";
+
+export type SessionRestoredControlProfile = "mooring.session-causal.v1";
+
+export interface SessionRestored {
+  type: SessionRestoredType;
+  request_id: Identifier;
+  control_profile: SessionRestoredControlProfile;
+  scope: Scope;
+  session_id: Identifier;
+  runtime_ref: Identifier;
+  fence: Fence;
+  versions: Versions;
+  confirmed_basis: ConfirmedCheckpointBasis;
+}
+
+export type SessionStatusRequestType = "session_status_request";
+
+export type SessionStatusRequestControlProfile = "mooring.session-causal.v1";
+
+export interface SessionStatusRequest {
+  type: SessionStatusRequestType;
+  request_id: Identifier;
+  control_profile: SessionStatusRequestControlProfile;
+  scope: Scope;
+  session_id: Identifier;
+  runtime_ref: Identifier;
+  fence: Fence;
+  connection_ref: Identifier;
+  participant_ref: Identifier;
+  gate_id: Identifier;
+  permission_version: Counter;
+  message: StatusRequest;
+}
+
+export type SessionStatusResultType = "session_status_result";
+
+export type SessionStatusResultControlProfile = "mooring.session-causal.v1";
+
+export interface SessionStatusResult {
+  type: SessionStatusResultType;
+  request_id: Identifier;
+  control_profile: SessionStatusResultControlProfile;
+  scope: Scope;
+  session_id: Identifier;
+  runtime_ref: Identifier;
+  fence: Fence;
+  connection_ref: Identifier;
+  participant_ref: Identifier;
+  gate_id: Identifier;
+  permission_version: Counter;
+  message: StatusResult;
+}
+
+export interface CheckpointDescription {
+  format_version: Identifier;
+  versions: Versions;
+  assets: Array<Asset>;
+}
+
+export type SessionDescribeCheckpointType = "session_describe_checkpoint";
+
+export type SessionDescribeCheckpointControlProfile = "mooring.session-causal.v1";
+
+export interface SessionDescribeCheckpoint {
+  type: SessionDescribeCheckpointType;
+  request_id: Identifier;
+  control_profile: SessionDescribeCheckpointControlProfile;
+  scope: Scope;
+  session_id: Identifier;
+  runtime_ref: Identifier;
+  versions: Versions;
+  checkpoint: OpaquePreparedCheckpoint;
+}
+
+export type SessionCheckpointDescribedType = "session_checkpoint_described";
+
+export type SessionCheckpointDescribedControlProfile = "mooring.session-causal.v1";
+
+export interface SessionCheckpointDescribed {
+  type: SessionCheckpointDescribedType;
+  request_id: Identifier;
+  control_profile: SessionCheckpointDescribedControlProfile;
+  scope: Scope;
+  session_id: Identifier;
+  runtime_ref: Identifier;
+  versions: Versions;
+  input_digest: Digest;
+  description: CheckpointDescription;
+}
+
+export interface AllocatedCrdtOrigin {
+  origin: Counter;
+  clock: PositiveCounter;
+}
+
+export type SessionInspectOriginsType = "session_inspect_origins";
+
+export type SessionInspectOriginsControlProfile = "mooring.session-causal.v1";
+
+export interface SessionInspectOrigins {
+  type: SessionInspectOriginsType;
+  request_id: Identifier;
+  control_profile: SessionInspectOriginsControlProfile;
+  scope: Scope;
+  session_id: Identifier;
+  runtime_ref: Identifier;
+  fence: Fence;
+  versions: Versions;
+  checkpoint: Checkpoint;
+}
+
+export type SessionOriginsInspectedType = "session_origins_inspected";
+
+export type SessionOriginsInspectedControlProfile = "mooring.session-causal.v1";
+
+export interface SessionOriginsInspected {
+  type: SessionOriginsInspectedType;
+  request_id: Identifier;
+  control_profile: SessionOriginsInspectedControlProfile;
+  scope: Scope;
+  session_id: Identifier;
+  runtime_ref: Identifier;
+  fence: Fence;
+  versions: Versions;
+  checkpoint_basis: ConfirmedCheckpointBasis;
+  checkpoint_generation: Counter;
+  content_digest: Digest;
+  allocated: Array<AllocatedCrdtOrigin>;
+}
+
+export interface SessionNativeDelta {
+  writer_origin: PositiveCounter;
+  allocation_origins: Array<PositiveCounter>;
+  update: string;
+  targets: Array<Identifier>;
+}
+
+export interface SessionSavedNativeDelta {
+  reference: Identifier;
+  source_ref: Identifier;
+  source_order: PositiveCounter;
+  writer_origin: PositiveCounter;
+  update: string;
+  targets: Array<Identifier>;
+  revision: PositiveCounter;
+  checkpoint_state_digest: Digest;
+}
+
+export interface SessionSavedHumanPrefix {
+  reference: Identifier;
+  source_ref: Identifier;
+  source_order: PositiveCounter;
+  change: AtomicChange;
+}
+
+export interface SessionHumanPrepareContext {
+  session_id: Identifier;
+  runtime_ref: Identifier;
+  fence: Fence;
+  op_id: Identifier;
+  source_ref: Identifier;
+  original_reference: Identifier;
+  origin: PositiveCounter;
+  source_order: PositiveCounter;
+  next_unsettled_order: PositiveCounter;
+  original_basis: Checkpoint;
+  saved_transcript: Array<SessionSavedNativeDelta>;
+  own_prefix: Array<SessionSavedHumanPrefix>;
+  own_history: Array<SessionSavedNativeDelta>;
+  replay_basis?: Checkpoint;
+  prepared_prefix?: SessionPreparedPrefix;
+}
+
+export interface SessionPreparedNativeDelta {
+  reference: Identifier;
+  source_ref: Identifier;
+  source_order: PositiveCounter;
+  writer_origin: PositiveCounter;
+  update: string;
+  targets: Array<Identifier>;
+  checkpoint_state_digest: Digest;
+  prospective_revision: PositiveCounter;
+}
+
+export interface SessionPreparedHumanPrefix {
+  reference: Identifier;
+  source_ref: Identifier;
+  source_order: PositiveCounter;
+  change: AtomicChange;
+}
+
+export interface SessionPreparedPrefix {
+  transaction_revision: Counter;
+  transaction_state_digest: Digest;
+  deltas: Array<SessionPreparedNativeDelta>;
+  own_prefix: Array<SessionPreparedHumanPrefix>;
+}
+
+export interface SessionCommittedNativeDelta {
+  change_id: Identifier;
+  membership_hash: Digest;
+  revision: PositiveCounter;
+  checkpoint_state_digest: Digest;
+  native_delta: SessionNativeDelta;
+}
+
+export type Message = Hello | Welcome | CommitBatch | CommitResult | StatusRequest | StatusResult | SessionTicketRequest | SessionTicket | OwnerAcquire | OwnerRenew | OwnerGrant | DeliveryRenew | DeliveryGrant | SessionClosed | DeliveryBlocked | RevocationConfirmed | ReadRequest | ReadResult | CheckpointRequest | CheckpointResult | Presence | TaskStatus | TaskResult | TaskCancel | Proposal | ProposalAccept | UndoRequest | ProtocolError | ManifestRequest | ManifestResult | LifecycleRequest | LifecycleResult | SessionJoin | SessionJoined | SessionLeave | SubmitChanges | ChangesReceived | TaskSubmit | ProposalRequest | CollaborationUpdate | DocumentUpdate | AssetRequest | AssetResult | TicketValidationRequest | TicketValidationResult | RevocationNotice | RuntimeReady | ValidateCheckpoint | CheckpointValidated | PrepareAtomic | AtomicPrepared | ValidateCheckpointCausal | CheckpointValidatedCausal | PrepareAtomicCausal | AtomicPreparedCausal | SessionOpen | SessionRestore | SessionOpened | SessionSubmitBatch | SessionCommitResult | SessionParticipantOpen | SessionParticipantInput | BoundedTransferBegin | BoundedTransferChunk | SessionParticipantOutput | SessionJoinBounded | SessionJoinedBounded | SessionRestored | SessionStatusRequest | SessionStatusResult | SessionDescribeCheckpoint | SessionCheckpointDescribed | SessionInspectOrigins | SessionOriginsInspected;

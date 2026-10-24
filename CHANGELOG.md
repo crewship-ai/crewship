@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Mooring Rust and protocol sources receive native and WASM CI coverage.** This consolidation keeps the reviewed runtime, SDK, generated wire types and locked third-party sources together; the required CI lane executes the current shared vectors through the actual WASM ABI. Document routes remain disabled by default.
+
 - Conversation transcript appends stay inside their configured storage root even when an existing transcript path is a symbolic link.
 
 - **Administrative security operations explicitly opt in to emergency audit fallback.** Only single/all-session revocation can use this fallback in the session handler; unlock remains chained-only, and unknown internal operations are rejected before any account or audit mutation. Web password changes and resets continue to fail closed on a broken audit chain.

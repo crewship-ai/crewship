@@ -1,6 +1,26 @@
 use mooring_client::{conformance_case, negotiate_json, TextClient};
 
 #[test]
+fn identifier_scalars_match_wire_without_constraining_text() {
+    let mut client = TextClient::new();
+    let id = "😀".repeat(200);
+    client.insert(&id, &id, 0, "a\0b").unwrap();
+    assert_eq!(client.text(&id), "a\0b");
+    let drafts = client.unsaved_json();
+    for invalid in ["😀".repeat(201), "a\0b".into(), String::new()] {
+        assert_eq!(
+            client.insert(&invalid, &id, 0, "bad"),
+            Err("invalid_request".into())
+        );
+        assert_eq!(
+            client.insert("other", &invalid, 0, "bad"),
+            Err("invalid_request".into())
+        );
+    }
+    assert_eq!(client.unsaved_json(), drafts);
+}
+
+#[test]
 fn p30_shared_native_wasm_vectors() {
     let cases: Vec<serde_json::Value> =
         serde_json::from_str(include_str!("../../../fixtures/native-wasm.json")).unwrap();
@@ -55,4 +75,14 @@ fn p21_draft_byte_quota_rejects_before_changing_text() {
         }
     }
     assert!(rejected, "full-text drafts must have a bounded byte budget");
+}
+
+#[test]
+fn participant_sdk_cannot_offer_inherited_control_profile() {
+    assert_eq!(
+        negotiate_json(
+            r#"{"type":"hello","request_id":"r","supported":[{"protocol_version":"0.4.0","model_version":"1.0.0","engine_version":"0.28.0"}],"control_profiles":["mooring.prepare.v1"]}"#
+        ),
+        Err("invalid_request".into())
+    );
 }

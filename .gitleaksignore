@@ -140,3 +140,10 @@ a5e52eb700be14e985b892b1a87ddb6215d5e613:mooring/vendor/syn-3.0.9/.cargo-checksu
 # Current lines carry gitleaks:allow; no history is rewritten or path excluded.
 34e6a99b72d6b255f172124bb38897c559aeb6b3:internal/scrubber/prefilter_test.go:generic-api-key:28
 34e6a99b72d6b255f172124bb38897c559aeb6b3:internal/scrubber/prefilter_test.go:private-key:131
+# Pinned RustCrypto source checksum maps, verified by license-inventory.py.
+mooring/vendor/digest-0.10.7/.cargo-checksum.json:generic-api-key:1
+mooring/vendor/sha2-0.10.9/.cargo-checksum.json:generic-api-key:1
+
+# Exact introducing-commit fingerprints for the same source hashes.
+e40906f36fd59049a89c0bf5190c3f50b896c6ff:mooring/vendor/digest-0.10.7/.cargo-checksum.json:generic-api-key:1
+e40906f36fd59049a89c0bf5190c3f50b896c6ff:mooring/vendor/sha2-0.10.9/.cargo-checksum.json:generic-api-key:1

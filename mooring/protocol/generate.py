@@ -17,11 +17,11 @@ derive = '#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]'
 
 
 def title(name):
-    return ''.join(p[:1].upper() + p[1:] for p in re.split(r'[_-]', name))
+    return ''.join(p[:1].upper() + p[1:] for p in re.split(r'[_\-.]', name))
 
 
 def go_title(name):
-    return ''.join(p.upper() if p.lower() in ('id', 'ttl', 'url') else title(p) for p in re.split(r'[_-]', name))
+    return ''.join(p.upper() if p.lower() in ('id', 'ttl', 'url') else title(p) for p in re.split(r'[_\-.]', name))
 
 
 def named(name, node):
@@ -91,6 +91,12 @@ def typed(name, node, allow_named=True):
         ref = ref.removeprefix('#/$defs/')
         if ref not in schema['$defs']:
             raise ValueError('Unresolved reference')
+        # The optional session witness owns bounded checkpoint/history DATA.
+        # Keep it off the stack so adding that opt-in witness does not enlarge
+        # every ordinary Message enum value. Serde's wire shape is unchanged.
+        if (name, ref) in {('PrepareAtomicCausalHumanContext', 'SessionHumanPrepareContext'),
+                           ('SessionCommitResultPublicReceipt', 'CommitResult')}:
+            return f'Box<{ref}>', ref, ref
         return ref, ref, ref
     if allow_named and ('oneOf' in node or 'enum' in node or 'const' in node or 'properties' in node):
         return named(name, node)
@@ -101,6 +107,8 @@ def typed(name, node, allow_named=True):
         return 'serde_json::Map<String, serde_json::Value>', 'map[string]json.RawMessage', 'Record<string, unknown>'
     if node.get('type') == 'boolean':
         return 'bool', 'bool', 'boolean'
+    if node.get('type') == 'null':
+        return '()', 'json.RawMessage', 'null'
     if node.get('type') == 'string':
         return 'String', 'string', 'string'
     raise ValueError(f'Unsupported shape: {node}')

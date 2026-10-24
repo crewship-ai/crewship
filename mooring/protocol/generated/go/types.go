@@ -10,9 +10,9 @@ import "encoding/json"
 type Counter string
 
 type Scope struct {
-	WorkspaceID   string `json:"workspace_id"`
-	ArtifactID    string `json:"artifact_id"`
-	ApplicationID string `json:"application_id"`
+	WorkspaceID   Identifier `json:"workspace_id"`
+	ArtifactID    Identifier `json:"artifact_id"`
+	ApplicationID Identifier `json:"application_id"`
 }
 
 type Versions struct {
@@ -44,26 +44,26 @@ const (
 )
 
 type ReadPrecondition struct {
-	TargetID          string   `json:"target_id"`
-	Revision          Counter  `json:"revision"`
-	StructureRevision *Counter `json:"structure_revision,omitempty"`
+	TargetID          Identifier `json:"target_id"`
+	Revision          Counter    `json:"revision"`
+	StructureRevision *Counter   `json:"structure_revision,omitempty"`
 }
 
 type Operation struct {
-	OpID              string                     `json:"op_id"`
+	OpID              Identifier                 `json:"op_id"`
 	Fingerprint       Digest                     `json:"fingerprint"`
-	ParticipantRef    string                     `json:"participant_ref"`
+	ParticipantRef    Identifier                 `json:"participant_ref"`
 	BaseRevision      Counter                    `json:"base_revision"`
-	Dependencies      []string                   `json:"dependencies"`
+	Dependencies      []Identifier               `json:"dependencies"`
 	ReadPreconditions []ReadPrecondition         `json:"read_preconditions"`
 	Payload           map[string]json.RawMessage `json:"payload"`
 }
 
 type AtomicChange struct {
-	ChangeID       string      `json:"change_id"`
+	ChangeID       Identifier  `json:"change_id"`
 	Operations     []Operation `json:"operations"`
 	MembershipHash Digest      `json:"membership_hash"`
-	TaskID         *string     `json:"task_id,omitempty"`
+	TaskID         *Identifier `json:"task_id,omitempty"`
 }
 
 type Fence struct {
@@ -92,7 +92,7 @@ const (
 )
 
 type RejectionRootCause struct {
-	OpID    string                 `json:"op_id"`
+	OpID    Identifier             `json:"op_id"`
 	Code    RejectionRootCauseCode `json:"code"`
 	Message string                 `json:"message"`
 }
@@ -108,7 +108,7 @@ const (
 
 type Rejection struct {
 	Code      ErrorCode           `json:"code"`
-	RootOpID  *string             `json:"root_op_id,omitempty"`
+	RootOpID  *Identifier         `json:"root_op_id,omitempty"`
 	Message   string              `json:"message"`
 	RootCause *RejectionRootCause `json:"root_cause,omitempty"`
 	Retry     RejectionRetry      `json:"retry"`
@@ -128,10 +128,10 @@ const (
 )
 
 type OperationResultVariant1 struct {
-	OpID       string                            `json:"op_id"`
+	OpID       Identifier                        `json:"op_id"`
 	Status     OperationResultVariant1Status     `json:"status"`
 	Revision   Counter                           `json:"revision"`
-	Issuer     string                            `json:"issuer"`
+	Issuer     Identifier                        `json:"issuer"`
 	Durability OperationResultVariant1Durability `json:"durability"`
 }
 
@@ -142,7 +142,7 @@ const (
 )
 
 type OperationResultVariant2 struct {
-	OpID   string                        `json:"op_id"`
+	OpID   Identifier                    `json:"op_id"`
 	Status OperationResultVariant2Status `json:"status"`
 	Reason Rejection                     `json:"reason"`
 }
@@ -157,7 +157,7 @@ const (
 )
 
 type ChangeResult struct {
-	ChangeID      string             `json:"change_id"`
+	ChangeID      Identifier         `json:"change_id"`
 	Status        ChangeResultStatus `json:"status"`
 	Operations    []OperationResult  `json:"operations"`
 	FirstRevision *Counter           `json:"first_revision,omitempty"`
@@ -170,10 +170,19 @@ const (
 	HelloTypeHello HelloType = "hello"
 )
 
+type HelloControlProfilesItem string
+
+const (
+	HelloControlProfilesItemMooringPrepareV1       HelloControlProfilesItem = "mooring.prepare.v1"
+	HelloControlProfilesItemMooringPrepareCausalV1 HelloControlProfilesItem = "mooring.prepare-causal.v1"
+	HelloControlProfilesItemMooringSessionCausalV1 HelloControlProfilesItem = "mooring.session-causal.v1"
+)
+
 type Hello struct {
-	Type      HelloType  `json:"type"`
-	RequestID string     `json:"request_id"`
-	Supported []Versions `json:"supported"`
+	Type            HelloType                   `json:"type"`
+	RequestID       Identifier                  `json:"request_id"`
+	Supported       []Versions                  `json:"supported"`
+	ControlProfiles *[]HelloControlProfilesItem `json:"control_profiles,omitempty"`
 }
 
 type WelcomeType string
@@ -184,13 +193,13 @@ const (
 
 type Welcome struct {
 	Type              WelcomeType `json:"type"`
-	RequestID         string      `json:"request_id"`
+	RequestID         Identifier  `json:"request_id"`
 	Selected          Versions    `json:"selected"`
 	Scope             Scope       `json:"scope"`
-	ParticipantRef    string      `json:"participant_ref"`
+	ParticipantRef    Identifier  `json:"participant_ref"`
 	PermissionVersion Counter     `json:"permission_version"`
 	Limits            WireLimits  `json:"limits"`
-	Issuer            string      `json:"issuer"`
+	Issuer            Identifier  `json:"issuer"`
 }
 
 type CommitBatchType string
@@ -201,10 +210,10 @@ const (
 
 type CommitBatch struct {
 	Type             CommitBatchType `json:"type"`
-	RequestID        string          `json:"request_id"`
+	RequestID        Identifier      `json:"request_id"`
 	Versions         Versions        `json:"versions"`
 	Scope            Scope           `json:"scope"`
-	SessionID        string          `json:"session_id"`
+	SessionID        Identifier      `json:"session_id"`
 	Fence            Fence           `json:"fence"`
 	ExpectedRevision Counter         `json:"expected_revision"`
 	Changes          []AtomicChange  `json:"changes"`
@@ -225,11 +234,11 @@ const (
 
 type CommitResult struct {
 	Type       CommitResultType       `json:"type"`
-	RequestID  string                 `json:"request_id"`
+	RequestID  Identifier             `json:"request_id"`
 	Scope      Scope                  `json:"scope"`
 	Generation Counter                `json:"generation"`
 	Revision   Counter                `json:"revision"`
-	Issuer     string                 `json:"issuer"`
+	Issuer     Identifier             `json:"issuer"`
 	Durability CommitResultDurability `json:"durability"`
 	Changes    []ChangeResult         `json:"changes"`
 }
@@ -242,9 +251,9 @@ const (
 
 type StatusRequest struct {
 	Type                StatusRequestType `json:"type"`
-	RequestID           string            `json:"request_id"`
+	RequestID           Identifier        `json:"request_id"`
 	Scope               Scope             `json:"scope"`
-	OpID                string            `json:"op_id"`
+	OpID                Identifier        `json:"op_id"`
 	ExpectedFingerprint Digest            `json:"expected_fingerprint"`
 }
 
@@ -261,7 +270,7 @@ const (
 )
 
 type StatusResultResultVariant2 struct {
-	OpID   string                           `json:"op_id"`
+	OpID   Identifier                       `json:"op_id"`
 	Status StatusResultResultVariant2Status `json:"status"`
 }
 
@@ -269,15 +278,15 @@ type StatusResultResult = json.RawMessage
 
 type StatusResult struct {
 	Type      StatusResultType   `json:"type"`
-	RequestID string             `json:"request_id"`
+	RequestID Identifier         `json:"request_id"`
 	Scope     Scope              `json:"scope"`
 	Result    StatusResultResult `json:"result"`
 }
 
 type Asset struct {
-	AssetID   string  `json:"asset_id"`
-	Digest    Digest  `json:"digest"`
-	SizeBytes Counter `json:"size_bytes"`
+	AssetID   Identifier `json:"asset_id"`
+	Digest    Digest     `json:"digest"`
+	SizeBytes Counter    `json:"size_bytes"`
 }
 
 type CheckpointEncoding string
@@ -291,7 +300,7 @@ type Checkpoint struct {
 	Scope         Scope              `json:"scope"`
 	Revision      Counter            `json:"revision"`
 	Generation    Counter            `json:"generation"`
-	FormatVersion string             `json:"format_version"`
+	FormatVersion Identifier         `json:"format_version"`
 	Versions      Versions           `json:"versions"`
 	Encoding      CheckpointEncoding `json:"encoding"`
 	State         string             `json:"state"`
@@ -319,7 +328,7 @@ const (
 
 type SessionTicketRequest struct {
 	Type      SessionTicketRequestType `json:"type"`
-	RequestID string                   `json:"request_id"`
+	RequestID Identifier               `json:"request_id"`
 	Scope     Scope                    `json:"scope"`
 	Requested Capabilities             `json:"requested"`
 }
@@ -332,10 +341,10 @@ const (
 
 type SessionTicket struct {
 	Type              SessionTicketType `json:"type"`
-	RequestID         string            `json:"request_id"`
+	RequestID         Identifier        `json:"request_id"`
 	Scope             Scope             `json:"scope"`
-	SessionID         string            `json:"session_id"`
-	ParticipantRef    string            `json:"participant_ref"`
+	SessionID         Identifier        `json:"session_id"`
+	ParticipantRef    Identifier        `json:"participant_ref"`
 	PermissionVersion Counter           `json:"permission_version"`
 	Granted           Capabilities      `json:"granted"`
 	Ticket            string            `json:"ticket"`
@@ -351,10 +360,10 @@ const (
 
 type OwnerAcquire struct {
 	Type         OwnerAcquireType `json:"type"`
-	RequestID    string           `json:"request_id"`
+	RequestID    Identifier       `json:"request_id"`
 	Scope        Scope            `json:"scope"`
-	RuntimeRef   string           `json:"runtime_ref"`
-	RenewalNonce string           `json:"renewal_nonce"`
+	RuntimeRef   Identifier       `json:"runtime_ref"`
+	RenewalNonce Identifier       `json:"renewal_nonce"`
 }
 
 type OwnerRenewType string
@@ -365,11 +374,11 @@ const (
 
 type OwnerRenew struct {
 	Type              OwnerRenewType `json:"type"`
-	RequestID         string         `json:"request_id"`
+	RequestID         Identifier     `json:"request_id"`
 	Scope             Scope          `json:"scope"`
-	SessionID         string         `json:"session_id"`
+	SessionID         Identifier     `json:"session_id"`
 	Fence             Fence          `json:"fence"`
-	RenewalNonce      string         `json:"renewal_nonce"`
+	RenewalNonce      Identifier     `json:"renewal_nonce"`
 	PermissionVersion Counter        `json:"permission_version"`
 }
 
@@ -381,14 +390,14 @@ const (
 
 type OwnerGrant struct {
 	Type              OwnerGrantType  `json:"type"`
-	RequestID         string          `json:"request_id"`
+	RequestID         Identifier      `json:"request_id"`
 	Scope             Scope           `json:"scope"`
-	SessionID         string          `json:"session_id"`
-	RuntimeRef        string          `json:"runtime_ref"`
+	SessionID         Identifier      `json:"session_id"`
+	RuntimeRef        Identifier      `json:"runtime_ref"`
 	Fence             Fence           `json:"fence"`
 	LeaseDurationMs   PositiveCounter `json:"lease_duration_ms"`
 	Revision          Counter         `json:"revision"`
-	RenewalNonce      string          `json:"renewal_nonce"`
+	RenewalNonce      Identifier      `json:"renewal_nonce"`
 	PermissionVersion Counter         `json:"permission_version"`
 }
 
@@ -400,14 +409,14 @@ const (
 
 type DeliveryRenew struct {
 	Type              DeliveryRenewType `json:"type"`
-	RequestID         string            `json:"request_id"`
+	RequestID         Identifier        `json:"request_id"`
 	Scope             Scope             `json:"scope"`
-	SessionID         string            `json:"session_id"`
-	ParticipantRef    string            `json:"participant_ref"`
+	SessionID         Identifier        `json:"session_id"`
+	ParticipantRef    Identifier        `json:"participant_ref"`
 	Fence             Fence             `json:"fence"`
 	PermissionVersion Counter           `json:"permission_version"`
-	RenewalNonce      string            `json:"renewal_nonce"`
-	GateID            string            `json:"gate_id"`
+	RenewalNonce      Identifier        `json:"renewal_nonce"`
+	GateID            Identifier        `json:"gate_id"`
 }
 
 type DeliveryGrantType string
@@ -418,15 +427,15 @@ const (
 
 type DeliveryGrant struct {
 	Type              DeliveryGrantType `json:"type"`
-	RequestID         string            `json:"request_id"`
+	RequestID         Identifier        `json:"request_id"`
 	Scope             Scope             `json:"scope"`
-	SessionID         string            `json:"session_id"`
-	ParticipantRef    string            `json:"participant_ref"`
+	SessionID         Identifier        `json:"session_id"`
+	ParticipantRef    Identifier        `json:"participant_ref"`
 	Generation        Counter           `json:"generation"`
 	PermissionVersion Counter           `json:"permission_version"`
-	RenewalNonce      string            `json:"renewal_nonce"`
+	RenewalNonce      Identifier        `json:"renewal_nonce"`
 	DurationMs        PositiveCounter   `json:"duration_ms"`
-	GateID            string            `json:"gate_id"`
+	GateID            Identifier        `json:"gate_id"`
 }
 
 type SessionClosedType string
@@ -437,15 +446,15 @@ const (
 
 type SessionClosed struct {
 	Type              SessionClosedType `json:"type"`
-	RequestID         string            `json:"request_id"`
+	RequestID         Identifier        `json:"request_id"`
 	Scope             Scope             `json:"scope"`
-	SessionID         string            `json:"session_id"`
-	ParticipantRef    string            `json:"participant_ref"`
+	SessionID         Identifier        `json:"session_id"`
+	ParticipantRef    Identifier        `json:"participant_ref"`
 	Generation        Counter           `json:"generation"`
 	PermissionVersion Counter           `json:"permission_version"`
-	BarrierID         string            `json:"barrier_id"`
+	BarrierID         Identifier        `json:"barrier_id"`
 	Reason            Rejection         `json:"reason"`
-	GateID            string            `json:"gate_id"`
+	GateID            Identifier        `json:"gate_id"`
 }
 
 type DeliveryBlockedType string
@@ -456,13 +465,13 @@ const (
 
 type DeliveryBlocked struct {
 	Type              DeliveryBlockedType `json:"type"`
-	RequestID         string              `json:"request_id"`
+	RequestID         Identifier          `json:"request_id"`
 	Scope             Scope               `json:"scope"`
-	SessionID         string              `json:"session_id"`
-	ParticipantRef    string              `json:"participant_ref"`
+	SessionID         Identifier          `json:"session_id"`
+	ParticipantRef    Identifier          `json:"participant_ref"`
 	Fence             Fence               `json:"fence"`
-	BarrierID         string              `json:"barrier_id"`
-	CoveredGateIds    []string            `json:"covered_gate_ids"`
+	BarrierID         Identifier          `json:"barrier_id"`
+	CoveredGateIds    []Identifier        `json:"covered_gate_ids"`
 	PermissionVersion Counter             `json:"permission_version"`
 }
 
@@ -474,10 +483,10 @@ const (
 
 type RevocationConfirmed struct {
 	Type              RevocationConfirmedType `json:"type"`
-	RequestID         string                  `json:"request_id"`
+	RequestID         Identifier              `json:"request_id"`
 	Scope             Scope                   `json:"scope"`
-	ParticipantRef    string                  `json:"participant_ref"`
-	BarrierID         string                  `json:"barrier_id"`
+	ParticipantRef    Identifier              `json:"participant_ref"`
+	BarrierID         Identifier              `json:"barrier_id"`
 	PermissionVersion Counter                 `json:"permission_version"`
 	ReadBlocked       bool                    `json:"read_blocked"`
 	WriteBlocked      bool                    `json:"write_blocked"`
@@ -491,9 +500,9 @@ const (
 
 type ReadRequest struct {
 	Type      ReadRequestType             `json:"type"`
-	RequestID string                      `json:"request_id"`
+	RequestID Identifier                  `json:"request_id"`
 	Scope     Scope                       `json:"scope"`
-	SessionID string                      `json:"session_id"`
+	SessionID Identifier                  `json:"session_id"`
 	Revision  *Counter                    `json:"revision,omitempty"`
 	Cursor    *string                     `json:"cursor,omitempty"`
 	Query     *map[string]json.RawMessage `json:"query,omitempty"`
@@ -508,7 +517,7 @@ const (
 
 type ReadResult struct {
 	Type       ReadResultType `json:"type"`
-	RequestID  string         `json:"request_id"`
+	RequestID  Identifier     `json:"request_id"`
 	Scope      Scope          `json:"scope"`
 	Revision   Counter        `json:"revision"`
 	Items      []ReadItem     `json:"items"`
@@ -523,7 +532,7 @@ const (
 
 type CheckpointRequest struct {
 	Type      CheckpointRequestType `json:"type"`
-	RequestID string                `json:"request_id"`
+	RequestID Identifier            `json:"request_id"`
 	Scope     Scope                 `json:"scope"`
 	Revision  Counter               `json:"revision"`
 }
@@ -536,7 +545,7 @@ const (
 
 type CheckpointResult struct {
 	Type       CheckpointResultType `json:"type"`
-	RequestID  string               `json:"request_id"`
+	RequestID  Identifier           `json:"request_id"`
 	Checkpoint Checkpoint           `json:"checkpoint"`
 }
 
@@ -548,10 +557,10 @@ const (
 
 type Presence struct {
 	Type           PresenceType               `json:"type"`
-	RequestID      string                     `json:"request_id"`
+	RequestID      Identifier                 `json:"request_id"`
 	Scope          Scope                      `json:"scope"`
-	SessionID      string                     `json:"session_id"`
-	ParticipantRef string                     `json:"participant_ref"`
+	SessionID      Identifier                 `json:"session_id"`
+	ParticipantRef Identifier                 `json:"participant_ref"`
 	TTLMs          PositiveCounter            `json:"ttl_ms"`
 	View           map[string]json.RawMessage `json:"view"`
 }
@@ -569,12 +578,12 @@ const (
 )
 
 type TaskSummary struct {
-	TaskID              string            `json:"task_id"`
+	TaskID              Identifier        `json:"task_id"`
 	AllowPartial        bool              `json:"allow_partial"`
 	Status              TaskSummaryStatus `json:"status"`
 	Changes             []TaskChangeState `json:"changes"`
-	ParticipantRef      string            `json:"participant_ref"`
-	UnresolvedChangeIds []string          `json:"unresolved_change_ids"`
+	ParticipantRef      Identifier        `json:"participant_ref"`
+	UnresolvedChangeIds []Identifier      `json:"unresolved_change_ids"`
 }
 
 type TaskStatusType string
@@ -585,9 +594,9 @@ const (
 
 type TaskStatus struct {
 	Type      TaskStatusType `json:"type"`
-	RequestID string         `json:"request_id"`
+	RequestID Identifier     `json:"request_id"`
 	Scope     Scope          `json:"scope"`
-	TaskID    string         `json:"task_id"`
+	TaskID    Identifier     `json:"task_id"`
 }
 
 type TaskResultType string
@@ -598,7 +607,7 @@ const (
 
 type TaskResult struct {
 	Type      TaskResultType `json:"type"`
-	RequestID string         `json:"request_id"`
+	RequestID Identifier     `json:"request_id"`
 	Scope     Scope          `json:"scope"`
 	Task      TaskSummary    `json:"task"`
 }
@@ -611,9 +620,9 @@ const (
 
 type TaskCancel struct {
 	Type      TaskCancelType `json:"type"`
-	RequestID string         `json:"request_id"`
+	RequestID Identifier     `json:"request_id"`
 	Scope     Scope          `json:"scope"`
-	TaskID    string         `json:"task_id"`
+	TaskID    Identifier     `json:"task_id"`
 }
 
 type ProposalType string
@@ -624,10 +633,10 @@ const (
 
 type Proposal struct {
 	Type           ProposalType   `json:"type"`
-	RequestID      string         `json:"request_id"`
+	RequestID      Identifier     `json:"request_id"`
 	Scope          Scope          `json:"scope"`
-	ProposalID     string         `json:"proposal_id"`
-	ParticipantRef string         `json:"participant_ref"`
+	ProposalID     Identifier     `json:"proposal_id"`
+	ParticipantRef Identifier     `json:"participant_ref"`
 	BaseRevision   Counter        `json:"base_revision"`
 	Changes        []AtomicChange `json:"changes"`
 	Diff           string         `json:"diff"`
@@ -641,11 +650,11 @@ const (
 
 type ProposalAccept struct {
 	Type         ProposalAcceptType `json:"type"`
-	RequestID    string             `json:"request_id"`
+	RequestID    Identifier         `json:"request_id"`
 	Scope        Scope              `json:"scope"`
-	ProposalID   string             `json:"proposal_id"`
+	ProposalID   Identifier         `json:"proposal_id"`
 	BaseRevision Counter            `json:"base_revision"`
-	OpID         string             `json:"op_id"`
+	OpID         Identifier         `json:"op_id"`
 }
 
 type UndoRequestType string
@@ -656,13 +665,13 @@ const (
 
 type UndoRequest struct {
 	Type           UndoRequestType `json:"type"`
-	RequestID      string          `json:"request_id"`
+	RequestID      Identifier      `json:"request_id"`
 	Scope          Scope           `json:"scope"`
-	TaskID         *string         `json:"task_id,omitempty"`
-	ParticipantRef string          `json:"participant_ref"`
+	TaskID         *Identifier     `json:"task_id,omitempty"`
+	ParticipantRef Identifier      `json:"participant_ref"`
 	BaseRevision   Counter         `json:"base_revision"`
-	OpID           string          `json:"op_id"`
-	TargetChangeID *string         `json:"target_change_id,omitempty"`
+	OpID           Identifier      `json:"op_id"`
+	TargetChangeID *Identifier     `json:"target_change_id,omitempty"`
 }
 
 type ProtocolErrorType string
@@ -673,7 +682,7 @@ const (
 
 type ProtocolError struct {
 	Type      ProtocolErrorType `json:"type"`
-	RequestID string            `json:"request_id"`
+	RequestID Identifier        `json:"request_id"`
 	Scope     *Scope            `json:"scope,omitempty"`
 	Reason    Rejection         `json:"reason"`
 }
@@ -683,8 +692,8 @@ type PositiveCounter Counter
 type Digest string
 
 type ReadItem struct {
-	TargetID  string                     `json:"target_id"`
-	ModelType string                     `json:"model_type"`
+	TargetID  Identifier                 `json:"target_id"`
+	ModelType Identifier                 `json:"model_type"`
 	Revision  Counter                    `json:"revision"`
 	Data      map[string]json.RawMessage `json:"data"`
 }
@@ -703,10 +712,10 @@ type WireLimits struct {
 }
 
 type CommandDeclaration struct {
-	CommandID    string                     `json:"command_id"`
+	CommandID    Identifier                 `json:"command_id"`
 	InputSchema  map[string]json.RawMessage `json:"input_schema"`
 	ResultSchema map[string]json.RawMessage `json:"result_schema"`
-	EffectScope  string                     `json:"effect_scope"`
+	EffectScope  Identifier                 `json:"effect_scope"`
 	Mutation     bool                       `json:"mutation"`
 	Replayable   bool                       `json:"replayable"`
 }
@@ -720,7 +729,7 @@ const (
 )
 
 type FormatDeclaration struct {
-	FormatID         string                     `json:"format_id"`
+	FormatID         Identifier                 `json:"format_id"`
 	ModelVersions    []string                   `json:"model_versions"`
 	ImportExtensions []string                   `json:"import_extensions"`
 	ExportExtensions []string                   `json:"export_extensions"`
@@ -781,14 +790,14 @@ const (
 )
 
 type ApplicationManifest struct {
-	ApplicationID        string                               `json:"application_id"`
+	ApplicationID        Identifier                           `json:"application_id"`
 	PackageVersion       string                               `json:"package_version"`
 	PackageDigest        Digest                               `json:"package_digest"`
 	ConnectionPath       ApplicationManifestConnectionPath    `json:"connection_path"`
 	SupportedVersions    []Versions                           `json:"supported_versions"`
 	Formats              []FormatDeclaration                  `json:"formats"`
 	Commands             []CommandDeclaration                 `json:"commands"`
-	Capabilities         []string                             `json:"capabilities"`
+	Capabilities         []Identifier                         `json:"capabilities"`
 	MergeModels          []ApplicationManifestMergeModelsItem `json:"merge_models"`
 	PresenceSchema       map[string]json.RawMessage           `json:"presence_schema"`
 	Storage              StorageDeclaration                   `json:"storage"`
@@ -803,8 +812,8 @@ const (
 
 type ManifestRequest struct {
 	Type          ManifestRequestType `json:"type"`
-	RequestID     string              `json:"request_id"`
-	ApplicationID string              `json:"application_id"`
+	RequestID     Identifier          `json:"request_id"`
+	ApplicationID Identifier          `json:"application_id"`
 }
 
 type ManifestResultType string
@@ -815,7 +824,7 @@ const (
 
 type ManifestResult struct {
 	Type      ManifestResultType  `json:"type"`
-	RequestID string              `json:"request_id"`
+	RequestID Identifier          `json:"request_id"`
 	Manifest  ApplicationManifest `json:"manifest"`
 }
 
@@ -836,9 +845,9 @@ const (
 
 type LifecycleRequest struct {
 	Type       LifecycleRequestType   `json:"type"`
-	RequestID  string                 `json:"request_id"`
+	RequestID  Identifier             `json:"request_id"`
 	Scope      Scope                  `json:"scope"`
-	SessionID  string                 `json:"session_id"`
+	SessionID  Identifier             `json:"session_id"`
 	Fence      Fence                  `json:"fence"`
 	Action     LifecycleRequestAction `json:"action"`
 	Checkpoint *Checkpoint            `json:"checkpoint,omitempty"`
@@ -860,9 +869,9 @@ const (
 
 type LifecycleResult struct {
 	Type       LifecycleResultType  `json:"type"`
-	RequestID  string               `json:"request_id"`
+	RequestID  Identifier           `json:"request_id"`
 	Scope      Scope                `json:"scope"`
-	SessionID  string               `json:"session_id"`
+	SessionID  Identifier           `json:"session_id"`
 	Generation Counter              `json:"generation"`
 	State      LifecycleResultState `json:"state"`
 	Revision   Counter              `json:"revision"`
@@ -876,7 +885,7 @@ const (
 
 type SessionJoin struct {
 	Type      SessionJoinType `json:"type"`
-	RequestID string          `json:"request_id"`
+	RequestID Identifier      `json:"request_id"`
 	Ticket    string          `json:"ticket"`
 	Versions  Versions        `json:"versions"`
 }
@@ -889,14 +898,14 @@ const (
 
 type SessionJoined struct {
 	Type              SessionJoinedType `json:"type"`
-	RequestID         string            `json:"request_id"`
+	RequestID         Identifier        `json:"request_id"`
 	Scope             Scope             `json:"scope"`
-	SessionID         string            `json:"session_id"`
-	ParticipantRef    string            `json:"participant_ref"`
+	SessionID         Identifier        `json:"session_id"`
+	ParticipantRef    Identifier        `json:"participant_ref"`
 	Generation        Counter           `json:"generation"`
 	PermissionVersion Counter           `json:"permission_version"`
 	Versions          Versions          `json:"versions"`
-	GateID            string            `json:"gate_id"`
+	GateID            Identifier        `json:"gate_id"`
 }
 
 type SessionLeaveType string
@@ -907,9 +916,9 @@ const (
 
 type SessionLeave struct {
 	Type      SessionLeaveType `json:"type"`
-	RequestID string           `json:"request_id"`
+	RequestID Identifier       `json:"request_id"`
 	Scope     Scope            `json:"scope"`
-	SessionID string           `json:"session_id"`
+	SessionID Identifier       `json:"session_id"`
 }
 
 type SubmitChangesType string
@@ -920,12 +929,12 @@ const (
 
 type SubmitChanges struct {
 	Type      SubmitChangesType `json:"type"`
-	RequestID string            `json:"request_id"`
+	RequestID Identifier        `json:"request_id"`
 	Scope     Scope             `json:"scope"`
-	SessionID string            `json:"session_id"`
+	SessionID Identifier        `json:"session_id"`
 	Versions  Versions          `json:"versions"`
 	Changes   []AtomicChange    `json:"changes"`
-	TaskID    *string           `json:"task_id,omitempty"`
+	TaskID    *Identifier       `json:"task_id,omitempty"`
 }
 
 type ChangesReceivedType string
@@ -943,10 +952,10 @@ const (
 
 type ChangesReceived struct {
 	Type      ChangesReceivedType  `json:"type"`
-	RequestID string               `json:"request_id"`
+	RequestID Identifier           `json:"request_id"`
 	Scope     Scope                `json:"scope"`
-	SessionID string               `json:"session_id"`
-	ChangeIds []string             `json:"change_ids"`
+	SessionID Identifier           `json:"session_id"`
+	ChangeIds []Identifier         `json:"change_ids"`
 	State     ChangesReceivedState `json:"state"`
 }
 
@@ -965,11 +974,11 @@ const (
 
 type TaskSubmit struct {
 	Type         TaskSubmitType `json:"type"`
-	RequestID    string         `json:"request_id"`
+	RequestID    Identifier     `json:"request_id"`
 	Scope        Scope          `json:"scope"`
-	SessionID    string         `json:"session_id"`
+	SessionID    Identifier     `json:"session_id"`
 	Versions     Versions       `json:"versions"`
-	TaskID       string         `json:"task_id"`
+	TaskID       Identifier     `json:"task_id"`
 	AllowPartial bool           `json:"allow_partial"`
 	Mode         TaskSubmitMode `json:"mode"`
 	Changes      []AtomicChange `json:"changes"`
@@ -983,9 +992,9 @@ const (
 
 type ProposalRequest struct {
 	Type       ProposalRequestType `json:"type"`
-	RequestID  string              `json:"request_id"`
+	RequestID  Identifier          `json:"request_id"`
 	Scope      Scope               `json:"scope"`
-	ProposalID string              `json:"proposal_id"`
+	ProposalID Identifier          `json:"proposal_id"`
 }
 
 type CollaborationUpdateType string
@@ -1009,12 +1018,12 @@ const (
 
 type CollaborationUpdate struct {
 	Type         CollaborationUpdateType     `json:"type"`
-	RequestID    string                      `json:"request_id"`
+	RequestID    Identifier                  `json:"request_id"`
 	Scope        Scope                       `json:"scope"`
-	SessionID    string                      `json:"session_id"`
+	SessionID    Identifier                  `json:"session_id"`
 	Generation   Counter                     `json:"generation"`
 	BaseRevision Counter                     `json:"base_revision"`
-	ChangeIds    []string                    `json:"change_ids"`
+	ChangeIds    []Identifier                `json:"change_ids"`
 	Encoding     CollaborationUpdateEncoding `json:"encoding"`
 	Data         string                      `json:"data"`
 	State        CollaborationUpdateState    `json:"state"`
@@ -1035,9 +1044,9 @@ const (
 
 type DocumentUpdate struct {
 	Type         DocumentUpdateType     `json:"type"`
-	RequestID    string                 `json:"request_id"`
+	RequestID    Identifier             `json:"request_id"`
 	Scope        Scope                  `json:"scope"`
-	SessionID    string                 `json:"session_id"`
+	SessionID    Identifier             `json:"session_id"`
 	Generation   Counter                `json:"generation"`
 	FromRevision Counter                `json:"from_revision"`
 	ToRevision   Counter                `json:"to_revision"`
@@ -1054,11 +1063,11 @@ const (
 
 type AssetRequest struct {
 	Type        AssetRequestType `json:"type"`
-	RequestID   string           `json:"request_id"`
+	RequestID   Identifier       `json:"request_id"`
 	Scope       Scope            `json:"scope"`
-	SessionID   string           `json:"session_id"`
+	SessionID   Identifier       `json:"session_id"`
 	Revision    Counter          `json:"revision"`
-	AssetID     string           `json:"asset_id"`
+	AssetID     Identifier       `json:"asset_id"`
 	OffsetBytes Counter          `json:"offset_bytes"`
 	MaxBytes    PositiveCounter  `json:"max_bytes"`
 }
@@ -1071,10 +1080,10 @@ const (
 
 type AssetResult struct {
 	Type        AssetResultType `json:"type"`
-	RequestID   string          `json:"request_id"`
+	RequestID   Identifier      `json:"request_id"`
 	Scope       Scope           `json:"scope"`
 	Revision    Counter         `json:"revision"`
-	AssetID     string          `json:"asset_id"`
+	AssetID     Identifier      `json:"asset_id"`
 	OffsetBytes Counter         `json:"offset_bytes"`
 	SizeBytes   Counter         `json:"size_bytes"`
 	Digest      Digest          `json:"digest"`
@@ -1089,12 +1098,12 @@ const (
 
 type TicketValidationRequest struct {
 	Type            TicketValidationRequestType `json:"type"`
-	RequestID       string                      `json:"request_id"`
+	RequestID       Identifier                  `json:"request_id"`
 	Scope           Scope                       `json:"scope"`
-	SessionID       string                      `json:"session_id"`
+	SessionID       Identifier                  `json:"session_id"`
 	Fence           Fence                       `json:"fence"`
 	Ticket          string                      `json:"ticket"`
-	ValidationNonce string                      `json:"validation_nonce"`
+	ValidationNonce Identifier                  `json:"validation_nonce"`
 }
 
 type TicketValidationResultType string
@@ -1105,17 +1114,17 @@ const (
 
 type TicketValidationResult struct {
 	Type              TicketValidationResultType `json:"type"`
-	RequestID         string                     `json:"request_id"`
+	RequestID         Identifier                 `json:"request_id"`
 	Scope             Scope                      `json:"scope"`
-	SessionID         string                     `json:"session_id"`
+	SessionID         Identifier                 `json:"session_id"`
 	Generation        Counter                    `json:"generation"`
-	ParticipantRef    string                     `json:"participant_ref"`
+	ParticipantRef    Identifier                 `json:"participant_ref"`
 	PermissionVersion Counter                    `json:"permission_version"`
 	Granted           Capabilities               `json:"granted"`
 	Versions          Versions                   `json:"versions"`
 	ExpiresInMs       PositiveCounter            `json:"expires_in_ms"`
-	ValidationNonce   string                     `json:"validation_nonce"`
-	GateID            string                     `json:"gate_id"`
+	ValidationNonce   Identifier                 `json:"validation_nonce"`
+	GateID            Identifier                 `json:"gate_id"`
 }
 
 type RevocationNoticeType string
@@ -1126,14 +1135,14 @@ const (
 
 type RevocationNotice struct {
 	Type              RevocationNoticeType `json:"type"`
-	RequestID         string               `json:"request_id"`
+	RequestID         Identifier           `json:"request_id"`
 	Scope             Scope                `json:"scope"`
-	SessionID         string               `json:"session_id"`
+	SessionID         Identifier           `json:"session_id"`
 	Generation        Counter              `json:"generation"`
-	ParticipantRef    string               `json:"participant_ref"`
+	ParticipantRef    Identifier           `json:"participant_ref"`
 	PermissionVersion Counter              `json:"permission_version"`
-	BarrierID         string               `json:"barrier_id"`
-	GateIds           []string             `json:"gate_ids"`
+	BarrierID         Identifier           `json:"barrier_id"`
+	GateIds           []Identifier         `json:"gate_ids"`
 	BlockRead         bool                 `json:"block_read"`
 	BlockWrite        bool                 `json:"block_write"`
 }
@@ -1148,7 +1157,7 @@ const (
 )
 
 type TaskChangeStateVariant2 struct {
-	ChangeID string                        `json:"change_id"`
+	ChangeID Identifier                    `json:"change_id"`
 	Status   TaskChangeStateVariant2Status `json:"status"`
 }
 
@@ -1160,10 +1169,908 @@ const (
 	RuntimeReadyTypeRuntimeReady RuntimeReadyType = "runtime_ready"
 )
 
+type RuntimeReadySelectedControlProfile string
+
+const (
+	RuntimeReadySelectedControlProfileMooringPrepareV1       RuntimeReadySelectedControlProfile = "mooring.prepare.v1"
+	RuntimeReadySelectedControlProfileMooringPrepareCausalV1 RuntimeReadySelectedControlProfile = "mooring.prepare-causal.v1"
+	RuntimeReadySelectedControlProfileMooringSessionCausalV1 RuntimeReadySelectedControlProfile = "mooring.session-causal.v1"
+)
+
 type RuntimeReady struct {
-	Type      RuntimeReadyType `json:"type"`
-	RequestID string           `json:"request_id"`
-	Selected  Versions         `json:"selected"`
+	Type                   RuntimeReadyType                    `json:"type"`
+	RequestID              Identifier                          `json:"request_id"`
+	Selected               Versions                            `json:"selected"`
+	SelectedControlProfile *RuntimeReadySelectedControlProfile `json:"selected_control_profile,omitempty"`
+}
+
+type Identifier string
+
+type OpaquePreparedCheckpointEncoding string
+
+const (
+	OpaquePreparedCheckpointEncodingBase64 OpaquePreparedCheckpointEncoding = "base64"
+)
+
+type OpaquePreparedCheckpoint struct {
+	Encoding OpaquePreparedCheckpointEncoding `json:"encoding"`
+	State    string                           `json:"state"`
+	Digest   Digest                           `json:"digest"`
+}
+
+type TargetIdentity struct {
+	TargetID Identifier `json:"target_id"`
+	Deleted  bool       `json:"deleted"`
+}
+
+type TargetVersion struct {
+	TargetID          Identifier `json:"target_id"`
+	Revision          Counter    `json:"revision"`
+	StructureRevision Counter    `json:"structure_revision"`
+	Deleted           bool       `json:"deleted"`
+}
+
+type PreparedOperationRevision struct {
+	OpID     Identifier      `json:"op_id"`
+	Revision PositiveCounter `json:"revision"`
+}
+
+type PrepareContextReadPolicy string
+
+const (
+	PrepareContextReadPolicyAgentConfirmedCurrent PrepareContextReadPolicy = "agent_confirmed_current"
+)
+
+type PrepareContext struct {
+	ReadPolicy         PrepareContextReadPolicy    `json:"read_policy"`
+	DocumentRevision   Counter                     `json:"document_revision"`
+	Targets            []TargetVersion             `json:"targets"`
+	OperationRevisions []PreparedOperationRevision `json:"operation_revisions"`
+}
+
+type TargetEffect struct {
+	TargetID         Identifier `json:"target_id"`
+	ContentChanged   bool       `json:"content_changed"`
+	StructureChanged bool       `json:"structure_changed"`
+	Created          bool       `json:"created"`
+	Deleted          bool       `json:"deleted"`
+}
+
+type PreparedOperationEffects struct {
+	OpID    Identifier     `json:"op_id"`
+	Targets []TargetEffect `json:"targets"`
+}
+
+type ValidateCheckpointType string
+
+const (
+	ValidateCheckpointTypeValidateCheckpoint ValidateCheckpointType = "validate_checkpoint"
+)
+
+type ValidateCheckpointControlProfile string
+
+const (
+	ValidateCheckpointControlProfileMooringPrepareV1 ValidateCheckpointControlProfile = "mooring.prepare.v1"
+)
+
+type ValidateCheckpoint struct {
+	Type           ValidateCheckpointType           `json:"type"`
+	RequestID      Identifier                       `json:"request_id"`
+	Scope          Scope                            `json:"scope"`
+	Selected       Versions                         `json:"selected"`
+	Checkpoint     OpaquePreparedCheckpoint         `json:"checkpoint"`
+	ControlProfile ValidateCheckpointControlProfile `json:"control_profile"`
+}
+
+type CheckpointValidatedType string
+
+const (
+	CheckpointValidatedTypeCheckpointValidated CheckpointValidatedType = "checkpoint_validated"
+)
+
+type CheckpointValidatedControlProfile string
+
+const (
+	CheckpointValidatedControlProfileMooringPrepareV1 CheckpointValidatedControlProfile = "mooring.prepare.v1"
+)
+
+type CheckpointValidated struct {
+	Type                  CheckpointValidatedType           `json:"type"`
+	RequestID             Identifier                        `json:"request_id"`
+	Scope                 Scope                             `json:"scope"`
+	Selected              Versions                          `json:"selected"`
+	InputCheckpointDigest Digest                            `json:"input_checkpoint_digest"`
+	Inventory             []TargetIdentity                  `json:"inventory"`
+	ControlProfile        CheckpointValidatedControlProfile `json:"control_profile"`
+}
+
+type PrepareAtomicType string
+
+const (
+	PrepareAtomicTypePrepareAtomic PrepareAtomicType = "prepare_atomic"
+)
+
+type PrepareAtomicControlProfile string
+
+const (
+	PrepareAtomicControlProfileMooringPrepareV1 PrepareAtomicControlProfile = "mooring.prepare.v1"
+)
+
+type PrepareAtomic struct {
+	Type           PrepareAtomicType           `json:"type"`
+	RequestID      Identifier                  `json:"request_id"`
+	Scope          Scope                       `json:"scope"`
+	Selected       Versions                    `json:"selected"`
+	Checkpoint     OpaquePreparedCheckpoint    `json:"checkpoint"`
+	Context        PrepareContext              `json:"context"`
+	Change         AtomicChange                `json:"change"`
+	ControlProfile PrepareAtomicControlProfile `json:"control_profile"`
+}
+
+type PreparedCandidateKind string
+
+const (
+	PreparedCandidateKindCandidate PreparedCandidateKind = "candidate"
+)
+
+type PreparedCandidate struct {
+	Kind       PreparedCandidateKind      `json:"kind"`
+	Checkpoint OpaquePreparedCheckpoint   `json:"checkpoint"`
+	Effects    []PreparedOperationEffects `json:"effects"`
+	Inventory  []TargetIdentity           `json:"inventory"`
+}
+
+type PreparedDirectFailureKind string
+
+const (
+	PreparedDirectFailureKindFailure PreparedDirectFailureKind = "failure"
+)
+
+type PreparedDirectFailure struct {
+	Kind   PreparedDirectFailureKind `json:"kind"`
+	OpID   Identifier                `json:"op_id"`
+	Reason Rejection                 `json:"reason"`
+}
+
+type AtomicPreparedType string
+
+const (
+	AtomicPreparedTypeAtomicPrepared AtomicPreparedType = "atomic_prepared"
+)
+
+type AtomicPreparedOutcome = json.RawMessage
+
+type AtomicPreparedControlProfile string
+
+const (
+	AtomicPreparedControlProfileMooringPrepareV1 AtomicPreparedControlProfile = "mooring.prepare.v1"
+)
+
+type AtomicPrepared struct {
+	Type                  AtomicPreparedType           `json:"type"`
+	RequestID             Identifier                   `json:"request_id"`
+	Scope                 Scope                        `json:"scope"`
+	Selected              Versions                     `json:"selected"`
+	InputCheckpointDigest Digest                       `json:"input_checkpoint_digest"`
+	ChangeID              Identifier                   `json:"change_id"`
+	MembershipHash        Digest                       `json:"membership_hash"`
+	Outcome               AtomicPreparedOutcome        `json:"outcome"`
+	ControlProfile        AtomicPreparedControlProfile `json:"control_profile"`
+}
+
+type CausalReadIndex string
+
+type CausalEntryVersion struct {
+	Revision          Counter `json:"revision"`
+	StructureRevision Counter `json:"structure_revision"`
+	Deleted           bool    `json:"deleted"`
+}
+
+type QualifiedCausalReadEntry = json.RawMessage
+
+type QualifiedCausalRead struct {
+	OpID                      Identifier               `json:"op_id"`
+	ReadIndex                 CausalReadIndex          `json:"read_index"`
+	TargetID                  Identifier               `json:"target_id"`
+	ObservedRevision          Counter                  `json:"observed_revision"`
+	ObservedStructureRevision *Counter                 `json:"observed_structure_revision,omitempty"`
+	Entry                     QualifiedCausalReadEntry `json:"entry"`
+	Covered                   bool                     `json:"covered"`
+}
+
+type CausalPrepareContextReadPolicy string
+
+const (
+	CausalPrepareContextReadPolicyAgentDependencyCovered CausalPrepareContextReadPolicy = "agent_dependency_covered"
+)
+
+type CausalPrepareContext struct {
+	ReadPolicy         CausalPrepareContextReadPolicy `json:"read_policy"`
+	DocumentRevision   Counter                        `json:"document_revision"`
+	Targets            []TargetVersion                `json:"targets"`
+	OperationRevisions []PreparedOperationRevision    `json:"operation_revisions"`
+	QualifiedReads     []QualifiedCausalRead          `json:"qualified_reads"`
+}
+
+type ValidateCheckpointCausalType string
+
+const (
+	ValidateCheckpointCausalTypeValidateCheckpointCausal ValidateCheckpointCausalType = "validate_checkpoint_causal"
+)
+
+type ValidateCheckpointCausalControlProfile string
+
+const (
+	ValidateCheckpointCausalControlProfileMooringPrepareCausalV1 ValidateCheckpointCausalControlProfile = "mooring.prepare-causal.v1"
+)
+
+type ValidateCheckpointCausal struct {
+	Type           ValidateCheckpointCausalType           `json:"type"`
+	RequestID      Identifier                             `json:"request_id"`
+	Scope          Scope                                  `json:"scope"`
+	Selected       Versions                               `json:"selected"`
+	Checkpoint     OpaquePreparedCheckpoint               `json:"checkpoint"`
+	ControlProfile ValidateCheckpointCausalControlProfile `json:"control_profile"`
+}
+
+type CheckpointValidatedCausalType string
+
+const (
+	CheckpointValidatedCausalTypeCheckpointValidatedCausal CheckpointValidatedCausalType = "checkpoint_validated_causal"
+)
+
+type CheckpointValidatedCausalControlProfile string
+
+const (
+	CheckpointValidatedCausalControlProfileMooringPrepareCausalV1 CheckpointValidatedCausalControlProfile = "mooring.prepare-causal.v1"
+)
+
+type CheckpointValidatedCausal struct {
+	Type                  CheckpointValidatedCausalType           `json:"type"`
+	RequestID             Identifier                              `json:"request_id"`
+	Scope                 Scope                                   `json:"scope"`
+	Selected              Versions                                `json:"selected"`
+	InputCheckpointDigest Digest                                  `json:"input_checkpoint_digest"`
+	Inventory             []TargetIdentity                        `json:"inventory"`
+	ControlProfile        CheckpointValidatedCausalControlProfile `json:"control_profile"`
+}
+
+type PrepareAtomicCausalType string
+
+const (
+	PrepareAtomicCausalTypePrepareAtomicCausal PrepareAtomicCausalType = "prepare_atomic_causal"
+)
+
+type PrepareAtomicCausalControlProfile string
+
+const (
+	PrepareAtomicCausalControlProfileMooringPrepareCausalV1 PrepareAtomicCausalControlProfile = "mooring.prepare-causal.v1"
+)
+
+type PrepareAtomicCausal struct {
+	Type           PrepareAtomicCausalType           `json:"type"`
+	RequestID      Identifier                        `json:"request_id"`
+	Scope          Scope                             `json:"scope"`
+	Selected       Versions                          `json:"selected"`
+	Checkpoint     OpaquePreparedCheckpoint          `json:"checkpoint"`
+	Context        CausalPrepareContext              `json:"context"`
+	Change         AtomicChange                      `json:"change"`
+	ControlProfile PrepareAtomicCausalControlProfile `json:"control_profile"`
+	HumanContext   *SessionHumanPrepareContext       `json:"human_context,omitempty"`
+}
+
+type AtomicPreparedCausalType string
+
+const (
+	AtomicPreparedCausalTypeAtomicPreparedCausal AtomicPreparedCausalType = "atomic_prepared_causal"
+)
+
+type AtomicPreparedCausalOutcome = json.RawMessage
+
+type AtomicPreparedCausalControlProfile string
+
+const (
+	AtomicPreparedCausalControlProfileMooringPrepareCausalV1 AtomicPreparedCausalControlProfile = "mooring.prepare-causal.v1"
+)
+
+type AtomicPreparedCausal struct {
+	Type                  AtomicPreparedCausalType           `json:"type"`
+	RequestID             Identifier                         `json:"request_id"`
+	Scope                 Scope                              `json:"scope"`
+	Selected              Versions                           `json:"selected"`
+	InputCheckpointDigest Digest                             `json:"input_checkpoint_digest"`
+	ChangeID              Identifier                         `json:"change_id"`
+	MembershipHash        Digest                             `json:"membership_hash"`
+	Outcome               AtomicPreparedCausalOutcome        `json:"outcome"`
+	ControlProfile        AtomicPreparedCausalControlProfile `json:"control_profile"`
+	NativeDelta           *SessionNativeDelta                `json:"native_delta,omitempty"`
+}
+
+type ConfirmedCheckpointBasis struct {
+	Revision Counter `json:"revision"`
+	Digest   Digest  `json:"digest"`
+}
+
+type SessionOpenType string
+
+const (
+	SessionOpenTypeSessionOpen SessionOpenType = "session_open"
+)
+
+type SessionOpenControlProfile string
+
+const (
+	SessionOpenControlProfileMooringSessionCausalV1 SessionOpenControlProfile = "mooring.session-causal.v1"
+)
+
+type SessionOpenRequiredCapabilitiesItem string
+
+const (
+	SessionOpenRequiredCapabilitiesItemCheckpointIdentityV1 SessionOpenRequiredCapabilitiesItem = "checkpoint_identity_v1"
+	SessionOpenRequiredCapabilitiesItemOriginInventoryV1    SessionOpenRequiredCapabilitiesItem = "origin_inventory_v1"
+	SessionOpenRequiredCapabilitiesItemHumanNativePrepareV1 SessionOpenRequiredCapabilitiesItem = "human_native_prepare_v1"
+)
+
+type SessionOpen struct {
+	Type                 SessionOpenType                       `json:"type"`
+	RequestID            Identifier                            `json:"request_id"`
+	ControlProfile       SessionOpenControlProfile             `json:"control_profile"`
+	Scope                Scope                                 `json:"scope"`
+	SessionID            Identifier                            `json:"session_id"`
+	RuntimeRef           Identifier                            `json:"runtime_ref"`
+	Versions             Versions                              `json:"versions"`
+	RequiredCapabilities []SessionOpenRequiredCapabilitiesItem `json:"required_capabilities"`
+}
+
+type SessionRestoreType string
+
+const (
+	SessionRestoreTypeSessionRestore SessionRestoreType = "session_restore"
+)
+
+type SessionRestoreControlProfile string
+
+const (
+	SessionRestoreControlProfileMooringSessionCausalV1 SessionRestoreControlProfile = "mooring.session-causal.v1"
+)
+
+type SessionRestore struct {
+	Type           SessionRestoreType           `json:"type"`
+	RequestID      Identifier                   `json:"request_id"`
+	ControlProfile SessionRestoreControlProfile `json:"control_profile"`
+	Scope          Scope                        `json:"scope"`
+	SessionID      Identifier                   `json:"session_id"`
+	RuntimeRef     Identifier                   `json:"runtime_ref"`
+	Fence          Fence                        `json:"fence"`
+	Versions       Versions                     `json:"versions"`
+	Checkpoint     Checkpoint                   `json:"checkpoint"`
+	Targets        []TargetVersion              `json:"targets"`
+}
+
+type SessionOpenedType string
+
+const (
+	SessionOpenedTypeSessionOpened SessionOpenedType = "session_opened"
+)
+
+type SessionOpenedControlProfile string
+
+const (
+	SessionOpenedControlProfileMooringSessionCausalV1 SessionOpenedControlProfile = "mooring.session-causal.v1"
+)
+
+type SessionOpenedCapabilitiesItem string
+
+const (
+	SessionOpenedCapabilitiesItemCheckpointIdentityV1 SessionOpenedCapabilitiesItem = "checkpoint_identity_v1"
+	SessionOpenedCapabilitiesItemOriginInventoryV1    SessionOpenedCapabilitiesItem = "origin_inventory_v1"
+	SessionOpenedCapabilitiesItemHumanNativePrepareV1 SessionOpenedCapabilitiesItem = "human_native_prepare_v1"
+)
+
+type SessionOpened struct {
+	Type           SessionOpenedType               `json:"type"`
+	RequestID      Identifier                      `json:"request_id"`
+	ControlProfile SessionOpenedControlProfile     `json:"control_profile"`
+	Scope          Scope                           `json:"scope"`
+	SessionID      Identifier                      `json:"session_id"`
+	RuntimeRef     Identifier                      `json:"runtime_ref"`
+	Fence          Fence                           `json:"fence"`
+	Versions       Versions                        `json:"versions"`
+	ConfirmedBasis ConfirmedCheckpointBasis        `json:"confirmed_basis"`
+	Capabilities   []SessionOpenedCapabilitiesItem `json:"capabilities"`
+}
+
+type SessionSubmitBatchType string
+
+const (
+	SessionSubmitBatchTypeSessionSubmitBatch SessionSubmitBatchType = "session_submit_batch"
+)
+
+type SessionSubmitBatchControlProfile string
+
+const (
+	SessionSubmitBatchControlProfileMooringSessionCausalV1 SessionSubmitBatchControlProfile = "mooring.session-causal.v1"
+)
+
+type SessionSubmitBatch struct {
+	Type           SessionSubmitBatchType           `json:"type"`
+	RequestID      Identifier                       `json:"request_id"`
+	ControlProfile SessionSubmitBatchControlProfile `json:"control_profile"`
+	Scope          Scope                            `json:"scope"`
+	SessionID      Identifier                       `json:"session_id"`
+	RuntimeRef     Identifier                       `json:"runtime_ref"`
+	Fence          Fence                            `json:"fence"`
+	Versions       Versions                         `json:"versions"`
+	ConfirmedBasis ConfirmedCheckpointBasis         `json:"confirmed_basis"`
+	Changes        []AtomicChange                   `json:"changes"`
+}
+
+type SessionCommitResultType string
+
+const (
+	SessionCommitResultTypeSessionCommitResult SessionCommitResultType = "session_commit_result"
+)
+
+type SessionCommitResultControlProfile string
+
+const (
+	SessionCommitResultControlProfileMooringSessionCausalV1 SessionCommitResultControlProfile = "mooring.session-causal.v1"
+)
+
+type SessionCommitResult struct {
+	Type           SessionCommitResultType           `json:"type"`
+	RequestID      Identifier                        `json:"request_id"`
+	ControlProfile SessionCommitResultControlProfile `json:"control_profile"`
+	Scope          Scope                             `json:"scope"`
+	SessionID      Identifier                        `json:"session_id"`
+	RuntimeRef     Identifier                        `json:"runtime_ref"`
+	Fence          Fence                             `json:"fence"`
+	Versions       Versions                          `json:"versions"`
+	Receipt        CommitResult                      `json:"receipt"`
+	Checkpoint     Checkpoint                        `json:"checkpoint"`
+	Targets        []TargetVersion                   `json:"targets"`
+	NativeDeltas   *[]SessionCommittedNativeDelta    `json:"native_deltas,omitempty"`
+	PublicReceipt  *CommitResult                     `json:"public_receipt,omitempty"`
+}
+
+type SessionParticipantOpenType string
+
+const (
+	SessionParticipantOpenTypeSessionParticipantOpen SessionParticipantOpenType = "session_participant_open"
+)
+
+type SessionParticipantOpenControlProfile string
+
+const (
+	SessionParticipantOpenControlProfileMooringSessionCausalV1 SessionParticipantOpenControlProfile = "mooring.session-causal.v1"
+)
+
+type SessionParticipantOpenJoin = json.RawMessage
+
+type SessionParticipantOpen struct {
+	Type           SessionParticipantOpenType           `json:"type"`
+	RequestID      Identifier                           `json:"request_id"`
+	ControlProfile SessionParticipantOpenControlProfile `json:"control_profile"`
+	Scope          Scope                                `json:"scope"`
+	SessionID      Identifier                           `json:"session_id"`
+	RuntimeRef     Identifier                           `json:"runtime_ref"`
+	Fence          Fence                                `json:"fence"`
+	ConnectionRef  Identifier                           `json:"connection_ref"`
+	Join           SessionParticipantOpenJoin           `json:"join"`
+}
+
+type SessionParticipantInputType string
+
+const (
+	SessionParticipantInputTypeSessionParticipantInput SessionParticipantInputType = "session_participant_input"
+)
+
+type SessionParticipantInputControlProfile string
+
+const (
+	SessionParticipantInputControlProfileMooringSessionCausalV1 SessionParticipantInputControlProfile = "mooring.session-causal.v1"
+)
+
+type SessionParticipantInputMessage = json.RawMessage
+
+type SessionParticipantInput struct {
+	Type              SessionParticipantInputType           `json:"type"`
+	RequestID         Identifier                            `json:"request_id"`
+	ControlProfile    SessionParticipantInputControlProfile `json:"control_profile"`
+	Scope             Scope                                 `json:"scope"`
+	SessionID         Identifier                            `json:"session_id"`
+	RuntimeRef        Identifier                            `json:"runtime_ref"`
+	Fence             Fence                                 `json:"fence"`
+	ConnectionRef     Identifier                            `json:"connection_ref"`
+	ParticipantRef    Identifier                            `json:"participant_ref"`
+	GateID            Identifier                            `json:"gate_id"`
+	PermissionVersion Counter                               `json:"permission_version"`
+	Message           SessionParticipantInputMessage        `json:"message"`
+}
+
+type BoundedTransferBeginType string
+
+const (
+	BoundedTransferBeginTypeBoundedTransferBegin BoundedTransferBeginType = "bounded_transfer_begin"
+)
+
+type BoundedTransferBeginKind string
+
+const (
+	BoundedTransferBeginKindCheckpoint     BoundedTransferBeginKind = "checkpoint"
+	BoundedTransferBeginKindDocumentUpdate BoundedTransferBeginKind = "document_update"
+	BoundedTransferBeginKindHostReceipt    BoundedTransferBeginKind = "host_receipt"
+)
+
+type BoundedTransferBegin struct {
+	Type              BoundedTransferBeginType `json:"type"`
+	RequestID         Identifier               `json:"request_id"`
+	Scope             Scope                    `json:"scope"`
+	SessionID         Identifier               `json:"session_id"`
+	ParticipantRef    Identifier               `json:"participant_ref"`
+	GateID            Identifier               `json:"gate_id"`
+	Generation        Counter                  `json:"generation"`
+	PermissionVersion Counter                  `json:"permission_version"`
+	Versions          Versions                 `json:"versions"`
+	Revision          Counter                  `json:"revision"`
+	TransferID        Identifier               `json:"transfer_id"`
+	Kind              BoundedTransferBeginKind `json:"kind"`
+	TotalBytes        PositiveCounter          `json:"total_bytes"`
+	ChunkCount        PositiveCounter          `json:"chunk_count"`
+	Digest            Digest                   `json:"digest"`
+}
+
+type BoundedTransferChunkType string
+
+const (
+	BoundedTransferChunkTypeBoundedTransferChunk BoundedTransferChunkType = "bounded_transfer_chunk"
+)
+
+type BoundedTransferChunk struct {
+	Type              BoundedTransferChunkType `json:"type"`
+	RequestID         Identifier               `json:"request_id"`
+	Scope             Scope                    `json:"scope"`
+	SessionID         Identifier               `json:"session_id"`
+	ParticipantRef    Identifier               `json:"participant_ref"`
+	GateID            Identifier               `json:"gate_id"`
+	Generation        Counter                  `json:"generation"`
+	PermissionVersion Counter                  `json:"permission_version"`
+	Versions          Versions                 `json:"versions"`
+	Revision          Counter                  `json:"revision"`
+	TransferID        Identifier               `json:"transfer_id"`
+	Index             Counter                  `json:"index"`
+	Data              string                   `json:"data"`
+}
+
+type SessionParticipantOutputType string
+
+const (
+	SessionParticipantOutputTypeSessionParticipantOutput SessionParticipantOutputType = "session_participant_output"
+)
+
+type SessionParticipantOutputControlProfile string
+
+const (
+	SessionParticipantOutputControlProfileMooringSessionCausalV1 SessionParticipantOutputControlProfile = "mooring.session-causal.v1"
+)
+
+type SessionParticipantOutputMessage = json.RawMessage
+
+type SessionParticipantOutput struct {
+	Type              SessionParticipantOutputType           `json:"type"`
+	RequestID         Identifier                             `json:"request_id"`
+	ControlProfile    SessionParticipantOutputControlProfile `json:"control_profile"`
+	Scope             Scope                                  `json:"scope"`
+	SessionID         Identifier                             `json:"session_id"`
+	RuntimeRef        Identifier                             `json:"runtime_ref"`
+	Fence             Fence                                  `json:"fence"`
+	ConnectionRef     Identifier                             `json:"connection_ref"`
+	ParticipantRef    Identifier                             `json:"participant_ref"`
+	GateID            Identifier                             `json:"gate_id"`
+	PermissionVersion Counter                                `json:"permission_version"`
+	Message           SessionParticipantOutputMessage        `json:"message"`
+}
+
+type SessionJoinBoundedType string
+
+const (
+	SessionJoinBoundedTypeSessionJoinBounded SessionJoinBoundedType = "session_join_bounded"
+)
+
+type SessionJoinBoundedTransferProfile string
+
+const (
+	SessionJoinBoundedTransferProfileBoundedTransferV1 SessionJoinBoundedTransferProfile = "bounded_transfer_v1"
+)
+
+type SessionJoinBounded struct {
+	Type            SessionJoinBoundedType            `json:"type"`
+	RequestID       Identifier                        `json:"request_id"`
+	Ticket          string                            `json:"ticket"`
+	Versions        Versions                          `json:"versions"`
+	TransferProfile SessionJoinBoundedTransferProfile `json:"transfer_profile"`
+}
+
+type SessionJoinedBoundedType string
+
+const (
+	SessionJoinedBoundedTypeSessionJoinedBounded SessionJoinedBoundedType = "session_joined_bounded"
+)
+
+type SessionJoinedBoundedSelectedTransferProfile string
+
+const (
+	SessionJoinedBoundedSelectedTransferProfileBoundedTransferV1 SessionJoinedBoundedSelectedTransferProfile = "bounded_transfer_v1"
+)
+
+type SessionJoinedBounded struct {
+	Type                    SessionJoinedBoundedType                    `json:"type"`
+	RequestID               Identifier                                  `json:"request_id"`
+	Joined                  SessionJoined                               `json:"joined"`
+	SelectedTransferProfile SessionJoinedBoundedSelectedTransferProfile `json:"selected_transfer_profile"`
+}
+
+type SessionRestoredType string
+
+const (
+	SessionRestoredTypeSessionRestored SessionRestoredType = "session_restored"
+)
+
+type SessionRestoredControlProfile string
+
+const (
+	SessionRestoredControlProfileMooringSessionCausalV1 SessionRestoredControlProfile = "mooring.session-causal.v1"
+)
+
+type SessionRestored struct {
+	Type           SessionRestoredType           `json:"type"`
+	RequestID      Identifier                    `json:"request_id"`
+	ControlProfile SessionRestoredControlProfile `json:"control_profile"`
+	Scope          Scope                         `json:"scope"`
+	SessionID      Identifier                    `json:"session_id"`
+	RuntimeRef     Identifier                    `json:"runtime_ref"`
+	Fence          Fence                         `json:"fence"`
+	Versions       Versions                      `json:"versions"`
+	ConfirmedBasis ConfirmedCheckpointBasis      `json:"confirmed_basis"`
+}
+
+type SessionStatusRequestType string
+
+const (
+	SessionStatusRequestTypeSessionStatusRequest SessionStatusRequestType = "session_status_request"
+)
+
+type SessionStatusRequestControlProfile string
+
+const (
+	SessionStatusRequestControlProfileMooringSessionCausalV1 SessionStatusRequestControlProfile = "mooring.session-causal.v1"
+)
+
+type SessionStatusRequest struct {
+	Type              SessionStatusRequestType           `json:"type"`
+	RequestID         Identifier                         `json:"request_id"`
+	ControlProfile    SessionStatusRequestControlProfile `json:"control_profile"`
+	Scope             Scope                              `json:"scope"`
+	SessionID         Identifier                         `json:"session_id"`
+	RuntimeRef        Identifier                         `json:"runtime_ref"`
+	Fence             Fence                              `json:"fence"`
+	ConnectionRef     Identifier                         `json:"connection_ref"`
+	ParticipantRef    Identifier                         `json:"participant_ref"`
+	GateID            Identifier                         `json:"gate_id"`
+	PermissionVersion Counter                            `json:"permission_version"`
+	Message           StatusRequest                      `json:"message"`
+}
+
+type SessionStatusResultType string
+
+const (
+	SessionStatusResultTypeSessionStatusResult SessionStatusResultType = "session_status_result"
+)
+
+type SessionStatusResultControlProfile string
+
+const (
+	SessionStatusResultControlProfileMooringSessionCausalV1 SessionStatusResultControlProfile = "mooring.session-causal.v1"
+)
+
+type SessionStatusResult struct {
+	Type              SessionStatusResultType           `json:"type"`
+	RequestID         Identifier                        `json:"request_id"`
+	ControlProfile    SessionStatusResultControlProfile `json:"control_profile"`
+	Scope             Scope                             `json:"scope"`
+	SessionID         Identifier                        `json:"session_id"`
+	RuntimeRef        Identifier                        `json:"runtime_ref"`
+	Fence             Fence                             `json:"fence"`
+	ConnectionRef     Identifier                        `json:"connection_ref"`
+	ParticipantRef    Identifier                        `json:"participant_ref"`
+	GateID            Identifier                        `json:"gate_id"`
+	PermissionVersion Counter                           `json:"permission_version"`
+	Message           StatusResult                      `json:"message"`
+}
+
+type CheckpointDescription struct {
+	FormatVersion Identifier `json:"format_version"`
+	Versions      Versions   `json:"versions"`
+	Assets        []Asset    `json:"assets"`
+}
+
+type SessionDescribeCheckpointType string
+
+const (
+	SessionDescribeCheckpointTypeSessionDescribeCheckpoint SessionDescribeCheckpointType = "session_describe_checkpoint"
+)
+
+type SessionDescribeCheckpointControlProfile string
+
+const (
+	SessionDescribeCheckpointControlProfileMooringSessionCausalV1 SessionDescribeCheckpointControlProfile = "mooring.session-causal.v1"
+)
+
+type SessionDescribeCheckpoint struct {
+	Type           SessionDescribeCheckpointType           `json:"type"`
+	RequestID      Identifier                              `json:"request_id"`
+	ControlProfile SessionDescribeCheckpointControlProfile `json:"control_profile"`
+	Scope          Scope                                   `json:"scope"`
+	SessionID      Identifier                              `json:"session_id"`
+	RuntimeRef     Identifier                              `json:"runtime_ref"`
+	Versions       Versions                                `json:"versions"`
+	Checkpoint     OpaquePreparedCheckpoint                `json:"checkpoint"`
+}
+
+type SessionCheckpointDescribedType string
+
+const (
+	SessionCheckpointDescribedTypeSessionCheckpointDescribed SessionCheckpointDescribedType = "session_checkpoint_described"
+)
+
+type SessionCheckpointDescribedControlProfile string
+
+const (
+	SessionCheckpointDescribedControlProfileMooringSessionCausalV1 SessionCheckpointDescribedControlProfile = "mooring.session-causal.v1"
+)
+
+type SessionCheckpointDescribed struct {
+	Type           SessionCheckpointDescribedType           `json:"type"`
+	RequestID      Identifier                               `json:"request_id"`
+	ControlProfile SessionCheckpointDescribedControlProfile `json:"control_profile"`
+	Scope          Scope                                    `json:"scope"`
+	SessionID      Identifier                               `json:"session_id"`
+	RuntimeRef     Identifier                               `json:"runtime_ref"`
+	Versions       Versions                                 `json:"versions"`
+	InputDigest    Digest                                   `json:"input_digest"`
+	Description    CheckpointDescription                    `json:"description"`
+}
+
+type AllocatedCrdtOrigin struct {
+	Origin Counter         `json:"origin"`
+	Clock  PositiveCounter `json:"clock"`
+}
+
+type SessionInspectOriginsType string
+
+const (
+	SessionInspectOriginsTypeSessionInspectOrigins SessionInspectOriginsType = "session_inspect_origins"
+)
+
+type SessionInspectOriginsControlProfile string
+
+const (
+	SessionInspectOriginsControlProfileMooringSessionCausalV1 SessionInspectOriginsControlProfile = "mooring.session-causal.v1"
+)
+
+type SessionInspectOrigins struct {
+	Type           SessionInspectOriginsType           `json:"type"`
+	RequestID      Identifier                          `json:"request_id"`
+	ControlProfile SessionInspectOriginsControlProfile `json:"control_profile"`
+	Scope          Scope                               `json:"scope"`
+	SessionID      Identifier                          `json:"session_id"`
+	RuntimeRef     Identifier                          `json:"runtime_ref"`
+	Fence          Fence                               `json:"fence"`
+	Versions       Versions                            `json:"versions"`
+	Checkpoint     Checkpoint                          `json:"checkpoint"`
+}
+
+type SessionOriginsInspectedType string
+
+const (
+	SessionOriginsInspectedTypeSessionOriginsInspected SessionOriginsInspectedType = "session_origins_inspected"
+)
+
+type SessionOriginsInspectedControlProfile string
+
+const (
+	SessionOriginsInspectedControlProfileMooringSessionCausalV1 SessionOriginsInspectedControlProfile = "mooring.session-causal.v1"
+)
+
+type SessionOriginsInspected struct {
+	Type                 SessionOriginsInspectedType           `json:"type"`
+	RequestID            Identifier                            `json:"request_id"`
+	ControlProfile       SessionOriginsInspectedControlProfile `json:"control_profile"`
+	Scope                Scope                                 `json:"scope"`
+	SessionID            Identifier                            `json:"session_id"`
+	RuntimeRef           Identifier                            `json:"runtime_ref"`
+	Fence                Fence                                 `json:"fence"`
+	Versions             Versions                              `json:"versions"`
+	CheckpointBasis      ConfirmedCheckpointBasis              `json:"checkpoint_basis"`
+	CheckpointGeneration Counter                               `json:"checkpoint_generation"`
+	ContentDigest        Digest                                `json:"content_digest"`
+	Allocated            []AllocatedCrdtOrigin                 `json:"allocated"`
+}
+
+type SessionNativeDelta struct {
+	WriterOrigin      PositiveCounter   `json:"writer_origin"`
+	AllocationOrigins []PositiveCounter `json:"allocation_origins"`
+	Update            string            `json:"update"`
+	Targets           []Identifier      `json:"targets"`
+}
+
+type SessionSavedNativeDelta struct {
+	Reference             Identifier      `json:"reference"`
+	SourceRef             Identifier      `json:"source_ref"`
+	SourceOrder           PositiveCounter `json:"source_order"`
+	WriterOrigin          PositiveCounter `json:"writer_origin"`
+	Update                string          `json:"update"`
+	Targets               []Identifier    `json:"targets"`
+	Revision              PositiveCounter `json:"revision"`
+	CheckpointStateDigest Digest          `json:"checkpoint_state_digest"`
+}
+
+type SessionSavedHumanPrefix struct {
+	Reference   Identifier      `json:"reference"`
+	SourceRef   Identifier      `json:"source_ref"`
+	SourceOrder PositiveCounter `json:"source_order"`
+	Change      AtomicChange    `json:"change"`
+}
+
+type SessionHumanPrepareContext struct {
+	SessionID          Identifier                `json:"session_id"`
+	RuntimeRef         Identifier                `json:"runtime_ref"`
+	Fence              Fence                     `json:"fence"`
+	OpID               Identifier                `json:"op_id"`
+	SourceRef          Identifier                `json:"source_ref"`
+	OriginalReference  Identifier                `json:"original_reference"`
+	Origin             PositiveCounter           `json:"origin"`
+	SourceOrder        PositiveCounter           `json:"source_order"`
+	NextUnsettledOrder PositiveCounter           `json:"next_unsettled_order"`
+	OriginalBasis      Checkpoint                `json:"original_basis"`
+	SavedTranscript    []SessionSavedNativeDelta `json:"saved_transcript"`
+	OwnPrefix          []SessionSavedHumanPrefix `json:"own_prefix"`
+	OwnHistory         []SessionSavedNativeDelta `json:"own_history"`
+	ReplayBasis        *Checkpoint               `json:"replay_basis,omitempty"`
+	PreparedPrefix     *SessionPreparedPrefix    `json:"prepared_prefix,omitempty"`
+}
+
+type SessionPreparedNativeDelta struct {
+	Reference             Identifier      `json:"reference"`
+	SourceRef             Identifier      `json:"source_ref"`
+	SourceOrder           PositiveCounter `json:"source_order"`
+	WriterOrigin          PositiveCounter `json:"writer_origin"`
+	Update                string          `json:"update"`
+	Targets               []Identifier    `json:"targets"`
+	CheckpointStateDigest Digest          `json:"checkpoint_state_digest"`
+	ProspectiveRevision   PositiveCounter `json:"prospective_revision"`
+}
+
+type SessionPreparedHumanPrefix struct {
+	Reference   Identifier      `json:"reference"`
+	SourceRef   Identifier      `json:"source_ref"`
+	SourceOrder PositiveCounter `json:"source_order"`
+	Change      AtomicChange    `json:"change"`
+}
+
+type SessionPreparedPrefix struct {
+	TransactionRevision    Counter                      `json:"transaction_revision"`
+	TransactionStateDigest Digest                       `json:"transaction_state_digest"`
+	Deltas                 []SessionPreparedNativeDelta `json:"deltas"`
+	OwnPrefix              []SessionPreparedHumanPrefix `json:"own_prefix"`
+}
+
+type SessionCommittedNativeDelta struct {
+	ChangeID              Identifier         `json:"change_id"`
+	MembershipHash        Digest             `json:"membership_hash"`
+	Revision              PositiveCounter    `json:"revision"`
+	CheckpointStateDigest Digest             `json:"checkpoint_state_digest"`
+	NativeDelta           SessionNativeDelta `json:"native_delta"`
 }
 
 type Message = json.RawMessage
