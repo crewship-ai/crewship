@@ -9,6 +9,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Backup inspection reads metadata and reports that integrity has not been verified.** Restore, verification, recovery and conversion use operator-configured decoder, work, output, metadata, time and admission limits. Large operations can fail with an explicit resource allowance error; operators can tune the documented capacity settings.
+
+
 - Mooring SDK recovery refuses incomplete full snapshots even when Yrs reports no missing updates, preserving every original unsaved draft instead of accepting silently omitted history.
 
 - **Audit history damage is detected without operator requests.** Full instance and workspace verification now runs at startup and hourly outside writer transactions; post-upgrade defects and unchained fallback records alert instance admins. Delivery receipts commit with the inbox notice and survive inbox purge/retention, so handled security notices are not repeatedly restored or resent.

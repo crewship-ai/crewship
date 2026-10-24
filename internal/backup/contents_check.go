@@ -46,6 +46,12 @@ type ContentsCheck struct {
 // CheckBundleContents decrypts the bundle at path with identities or
 // passphrase, reads every section, and compares it with the manifest.
 func CheckBundleContents(ctx context.Context, bundlePath string, identities []age.Identity, passphrase string) (*ContentsCheck, error) {
+	ctx, release, limitErr := BeginRestoreRead(ctx)
+	if limitErr != nil {
+		return nil, limitErr
+	}
+	defer release()
+
 	res := &ContentsCheck{Problems: []string{}, Absent: []IncompleteItem{}}
 	vr, err := Verify(ctx, bundlePath)
 	if err != nil {
@@ -65,7 +71,7 @@ func CheckBundleContents(ctx context.Context, bundlePath string, identities []ag
 	if m.Encryption.Enabled && len(identities) == 0 && passphrase == "" {
 		return nil, fmt.Errorf("backup: a contents check needs the key that opens the bundle")
 	}
-	_, tr, closeAll, err := openInstancePayload(bundlePath, identities, passphrase)
+	_, tr, closeAll, err := openInstancePayload(bundlePath, identities, passphrase, ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -148,7 +154,7 @@ func checkInstanceContents(ctx context.Context, tr *TarZstReader, m *Manifest, t
 		case name == instanceDBEntry:
 			dbSeen = true
 			dbPath := filepath.Join(tmp, "db.sqlite")
-			sha, _, err := writeExtracted(dbPath, tr)
+			sha, _, err := writeExtracted(ctx, dbPath, tr)
 			if err != nil {
 				return err
 			}
@@ -176,14 +182,14 @@ func checkInstanceContents(ctx context.Context, tr *TarZstReader, m *Manifest, t
 			_ = os.Remove(dbPath)
 		case name == instanceIndexEntry:
 			var idx InstanceIndex
-			if err := json.NewDecoder(io.LimitReader(tr, maxBackupDBDumpBytes)).Decode(&idx); err != nil {
+			if err := json.NewDecoder(io.LimitReader(RestoreBufferedReader(ctx, tr), maxBackupDBDumpBytes)).Decode(&idx); err != nil {
 				res.Problems = append(res.Problems, "the file index does not parse")
 				continue
 			}
 			index = &idx
 		case name == RecoveryKitPath:
 			kitSeen = true
-			data, err := io.ReadAll(io.LimitReader(tr, 1<<20))
+			data, err := io.ReadAll(io.LimitReader(RestoreBufferedReader(ctx, tr), 1<<20))
 			if err != nil {
 				return err
 			}
@@ -295,7 +301,7 @@ func checkWorkspaceContents(ctx context.Context, tr *TarZstReader, m *Manifest, 
 				return err
 			}
 		case name == "db/dump.json" && hdr.Typeflag == tar.TypeReg:
-			data, err := io.ReadAll(io.LimitReader(tr, maxBackupDBDumpBytes))
+			data, err := io.ReadAll(io.LimitReader(RestoreBufferedReader(ctx, tr), maxBackupDBDumpBytes))
 			if err != nil {
 				return err
 			}

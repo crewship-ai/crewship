@@ -38,7 +38,7 @@ func (h *InstanceBackupsHandler) InspectBundle(w http.ResponseWriter, r *http.Re
 		replyError(w, http.StatusUnprocessableEntity, "the backup's manifest could not be read")
 		return
 	}
-	writeJSON(w, http.StatusOK, m)
+	writeJSON(w, http.StatusOK, backupInspectResponse{Manifest: m, IntegrityVerified: false})
 }
 
 // VerifyBundle is GET /api/v1/admin/instance/backups/bundles/verify: proof

@@ -284,6 +284,18 @@ func warnSecurityLevelClamps(logger func(string), clamps []SecurityLevelClamp, t
 // rejected up-front because it requires cross-workspace orchestration
 // that lives outside this package.
 func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result *RestoreResult, retErr error) {
+	ctx, release, limitErr := BeginRestoreRead(ctx)
+	if limitErr != nil {
+		return nil, limitErr
+	}
+	defer release()
+	operationCtx := ctx
+	defer func() {
+		if retErr == nil {
+			retErr = restoreOperationError(operationCtx)
+		}
+	}()
+
 	if opts.Actor.UserID == "" {
 		return nil, fmt.Errorf("backup: RestoreOptions.Actor.UserID required")
 	}
@@ -307,6 +319,9 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	// observe a DryRun — it is not a "real" restore and would skew the
 	// restored_total counter.
 	defer func() {
+		if retErr == nil {
+			retErr = restoreOperationError(operationCtx)
+		}
 		if opts.DryRun {
 			return
 		}
@@ -348,7 +363,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	}
 	defer func() { _ = f.Close() }()
 
-	manifest, sealedReader, closeBundle, err := ReadBundleStream(f)
+	manifest, sealedReader, closeBundle, err := ReadBundleStream(f, ctx)
 	if err != nil {
 		return nil, WithConvertHint(opts.Path, manifest, err)
 	}
@@ -804,6 +819,9 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		}
 		if envOutcomes == nil && opts.DryRun {
 			envOutcomes = restoreBundleEnvironments(ctx, opts, extracted, true)
+			if retErr == nil {
+				retErr = restoreOperationError(ctx)
+			}
 		}
 		result.Environments = envOutcomes
 	}()
@@ -833,6 +851,9 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		// for. Never fatal — each crew reports restored, rebuilt or
 		// skipped with its reason.
 		envOutcomes = restoreBundleEnvironments(ctx, opts, extracted, false)
+		if err := restoreOperationError(ctx); err != nil {
+			return err
+		}
 		// Preflight: every target container that ACTUALLY HAS DATA in
 		// the bundle must exist before we start writing. Crews whose
 		// manifest entries report WorkspaceIncluded=false AND

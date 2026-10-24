@@ -174,12 +174,27 @@ func Inspect(ctx context.Context, path string) (*Manifest, error) {
 // SetDefaultStorage swap could make iteration and per-entry inspect
 // talk to different backends.
 func inspectWithStorage(ctx context.Context, st StorageOps, path string) (*Manifest, error) {
+	ctx, release, limitErr := BeginRestoreRead(ctx)
+	if limitErr != nil {
+		return nil, limitErr
+	}
+	defer release()
+
 	f, err := st.Open(ctx, path)
 	if err != nil {
 		return nil, fmt.Errorf("backup: open %s: %w", path, err)
 	}
 	defer func() { _ = f.Close() }()
-	m, _, err := ReadBundle(f)
+	metadataCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	metadataBudget := &restoreBudget{limits: readBudget(ctx).limits, parent: readBudget(ctx)}
+	metadataBudget.limits.DecodedBytes = 16 << 20
+	metadataBudget.limits.Entries = 1024
+	metadataCtx = context.WithValue(metadataCtx, restoreBudgetKey{}, metadataBudget)
+	m, _, closeBundle, err := ReadBundleStream(f, metadataCtx)
+	if closeBundle != nil {
+		_ = closeBundle()
+	}
 	if err != nil {
 		return m, WithConvertHint(path, m, err)
 	}
@@ -247,6 +262,12 @@ type VerifyResult struct {
 // bundle is still restorable without actually committing to a restore
 // against a test instance.
 func Verify(ctx context.Context, path string) (*VerifyResult, error) {
+	ctx, release, limitErr := BeginRestoreRead(ctx)
+	if limitErr != nil {
+		return nil, limitErr
+	}
+	defer release()
+
 	st := getDefaultStorage()
 	info, err := st.Stat(ctx, path)
 	if err != nil {
@@ -258,7 +279,7 @@ func Verify(ctx context.Context, path string) (*VerifyResult, error) {
 	}
 	defer func() { _ = f.Close() }()
 
-	manifest, sealed, closeBundle, err := ReadBundleStream(f)
+	manifest, sealed, closeBundle, err := ReadBundleStream(f, ctx)
 	if err != nil {
 		return &VerifyResult{Manifest: manifest, Valid: false, Size: info.Size(), Err: WithConvertHint(path, manifest, err)}, nil
 	}
@@ -286,7 +307,11 @@ func Verify(ctx context.Context, path string) (*VerifyResult, error) {
 	// the checksum comparison below regardless of what happened here.
 	var dump *DBDump
 	if !manifest.Encryption.Enabled {
-		dump, _ = scanDumpFromTarEntry(hashed)
+		var scanErr error
+		dump, scanErr = scanDumpFromTarEntry(hashed, ctx)
+		if resourceFailure(scanErr) {
+			return &VerifyResult{Manifest: manifest, Valid: false, Size: info.Size(), Err: scanErr}, nil
+		}
 	}
 	// Drain whatever scanDumpFromTarEntry did not read (it stops as soon
 	// as it finds db/dump.json, hits real EOF, or gives up on a parse
