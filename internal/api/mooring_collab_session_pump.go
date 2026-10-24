@@ -13,14 +13,15 @@ import (
 
 var errCollaborationSessionPump = errors.New("Mooring session processing stopped")
 
-// These are trusted, inactive host callbacks, not participant authority or
+// These are trusted host callbacks, not participant authority or
 // author seals. Submit must return a definitive committed receipt, never a
 // speculative candidate. Status must enforce its own current reader authority.
 // Output must check current recipient delivery authority before forwarding any
 // bytes or reporting completion; the pump itself grants no content access.
 // Every callback must respect cancellation and retain no borrowed request data.
 // Returned values must be owned and immutable after the callback returns.
-// No routes or application handlers install these callbacks today.
+// The default-off HTTP session bootstrap installs these callbacks. Each
+// concrete callback owns its original-source and final store/delivery fences.
 type collaborationSessionPumpHandlers struct {
 	Submit   func(context.Context, protocol.SessionSubmitBatch) (protocol.SessionCommitResult, error)
 	Status   func(context.Context, protocol.SessionStatusRequest) (protocol.SessionStatusResult, error)
@@ -69,7 +70,9 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 	defer cancel()
 	stop := context.AfterFunc(ctx, func() { _ = p.runtime.Close() })
 	defer stop()
+	finishRuntimeWatch := beginBackgroundWork()
 	go func() {
+		defer finishRuntimeWatch()
 		select {
 		case <-p.runtime.Done():
 			cancel()
@@ -82,7 +85,9 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 	}
 	queue := make(chan pending, 128)
 	workerDone := make(chan struct{})
+	finishWorker := beginBackgroundWork()
 	go func() {
+		defer finishWorker()
 		defer close(workerDone)
 		defer cancel()
 		defer func() { _ = recover() }() // opaque failure; never publish panic data

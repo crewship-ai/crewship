@@ -10,6 +10,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 - Mooring CLI streams honor JSON/NDJSON and YAML output; unsupported quiet output is rejected before opening input or connecting. Original submitted packets remain unchanged. Literal HTTP registrations expose the existing authenticated session and WebSocket paths to route inventories.
+- Account for both Mooring FIFO lifecycle goroutines during API teardown, and make the file-download classification guard ignore braces inside Go literals and comments.
 
 - Connect default-off Mooring human submissions to immutable live originals, same-writer public receipts, and SQL-backed per-atomic peer updates. Bootstrap requires the actual native human and complete-origin-inventory capabilities; restart recovery and agent writing remain separate qualifications.
 
