@@ -65,6 +65,9 @@ pub struct HostCommittedOwnOperation<'a> {
     original: &'a [u8],
 }
 impl<'a> HostCommittedOwnOperation<'a> {
+    pub(crate) fn byte_len(&self) -> usize {
+        self.original.len()
+    }
     pub fn from_trusted_committed_host_store(origin: u64, original: &'a [u8]) -> Self {
         Self { origin, original }
     }
@@ -100,13 +103,37 @@ pub fn prepare_current(
     original: &[u8],
     targets: &[String],
 ) -> Result<Candidate, Error> {
+    prepare_current_with_history(authority, authored_frontier, original, targets, false)
+}
+
+pub(crate) fn prepare_author_view(
+    authority: Authority<'_>,
+    authored_frontier: &[u8],
+    original: &[u8],
+    targets: &[String],
+) -> Result<Candidate, Error> {
+    prepare_current_with_history(authority, authored_frontier, original, targets, true)
+}
+
+fn prepare_current_with_history(
+    authority: Authority<'_>,
+    authored_frontier: &[u8],
+    original: &[u8],
+    targets: &[String],
+    author_history: bool,
+) -> Result<Candidate, Error> {
     let Authority::Writer(writer) = authority else {
         return Err(Error::Forbidden);
     };
     if authored_frontier != checkpoint_frontier(writer.checkpoint)? {
         return Err(Error::UnqualifiedFrontier);
     }
-    let document = Document::restore(writer.checkpoint).map_err(|_| Error::InvalidCheckpoint)?;
+    let document = if author_history {
+        Document::restore_author_view(writer.checkpoint)
+    } else {
+        Document::restore(writer.checkpoint)
+    }
+    .map_err(|_| Error::InvalidCheckpoint)?;
     if document.is_read_only() {
         return Err(Error::UnsupportedMutation);
     }
@@ -145,7 +172,7 @@ pub fn prepare_current(
         }
     }
     drop(txn);
-    apply_audited(document, update, targets)
+    apply_audited(document, update, targets, author_history)
 }
 
 // Called only after original-basis qualification, or for a host-qualified
@@ -170,7 +197,7 @@ pub(crate) fn merge_qualified_original(
         return Err(Error::InvalidHostContext);
     }
     let document = Document::restore(checkpoint).map_err(|_| Error::InvalidCheckpoint)?;
-    apply_audited(document, update, targets)
+    apply_audited(document, update, targets, false)
 }
 
 fn declared_targets(ids: &[String], targets: &[String]) -> Result<BTreeSet<String>, Error> {
@@ -190,6 +217,7 @@ fn apply_audited(
     document: Document,
     update: Update,
     targets: &[String],
+    author_history: bool,
 ) -> Result<Candidate, Error> {
     if document.is_read_only() {
         return Err(Error::UnsupportedMutation);
@@ -300,8 +328,13 @@ fn apply_audited(
     }
     // Cold restore applies the same full model/root/retained-key integrity
     // checks as every other model0.2 checkpoint, on a disposable fork only.
-    let document = Document::restore(&document.checkpoint().map_err(|_| Error::InvalidUpdate)?)
-        .map_err(|_| Error::UnsupportedMutation)?;
+    let checkpoint = document.checkpoint().map_err(|_| Error::InvalidUpdate)?;
+    let document = if author_history {
+        Document::restore_author_view(&checkpoint)
+    } else {
+        Document::restore(&checkpoint)
+    }
+    .map_err(|_| Error::UnsupportedMutation)?;
     Ok(Candidate {
         document,
         affected: declared.into_iter().collect(),

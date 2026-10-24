@@ -366,6 +366,16 @@ impl Document {
     /// reach this function. It is not an arbitrary remote Yrs update endpoint.
     /// Decode into a fresh document so errors cannot mutate a live replica.
     pub fn restore(bytes: &[u8]) -> Result<Self, AdapterError> {
+        Self::restore_with_history(bytes, false)
+    }
+
+    // Disposable author-view replay only: mirrors the live producer retention
+    // policy. This never changes authoritative/global Saved restore semantics.
+    pub(crate) fn restore_author_view(bytes: &[u8]) -> Result<Self, AdapterError> {
+        Self::restore_with_history(bytes, true)
+    }
+
+    fn restore_with_history(bytes: &[u8], author_history: bool) -> Result<Self, AdapterError> {
         if bytes.len() > MAX_CHECKPOINT_BYTES {
             return Err(AdapterError::Limit);
         }
@@ -418,14 +428,34 @@ impl Document {
                 .ok_or(AdapterError::InvalidCheckpoint)?;
             format::validate_stored_stamps(&update, total_clock)?;
         }
-        let project_text = !unsupported
-            || recovered
-                .document
-                .transact()
-                .get_map("wordcraft.texts")
-                .is_some();
+        // Normal recovery above proves complete encoded allocation/delete
+        // coverage before this bounded second decode. Retain ORIGINAL history
+        // for the author view, rather than importing the already-GCed snapshot.
+        let document = if author_history {
+            use mooring_text::yrs::updates::decoder::Decode;
+            let doc = Doc::with_options(mooring_text::yrs::Options {
+                offset_kind: mooring_text::yrs::OffsetKind::Utf16,
+                skip_gc: true,
+                ..Default::default()
+            });
+            doc.transact_mut()
+                .apply_update(
+                    mooring_text::yrs::Update::decode_v1(&update)
+                        .map_err(|_| AdapterError::InvalidCheckpoint)?,
+                )
+                .map_err(|_| AdapterError::InvalidCheckpoint)?;
+            if doc.transact().has_missing_updates()
+                || doc.transact().state_vector() != recovered.document.transact().state_vector()
+            {
+                return Err(AdapterError::InvalidCheckpoint);
+            }
+            doc
+        } else {
+            recovered.document
+        };
+        let project_text = !unsupported || document.transact().get_map("wordcraft.texts").is_some();
         let result = Self {
-            doc: recovered.document,
+            doc: document,
             read_only: unsupported || model == format::Model::LegacyV1,
             project_text,
             model,
