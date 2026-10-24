@@ -15,6 +15,7 @@ mod human;
 mod human_decode;
 mod native_qualification;
 pub mod origin_inventory;
+pub mod producer_overlay;
 pub mod profile;
 pub mod read;
 
