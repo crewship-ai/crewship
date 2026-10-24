@@ -1,3 +1,5 @@
+// CI invokes this entrypoint explicitly; keep bounded checker regressions in it.
+import "./typecheck-tests-bounded-node-test.mjs"
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import fs from "node:fs"
