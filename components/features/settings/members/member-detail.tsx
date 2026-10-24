@@ -221,7 +221,7 @@ export function MemberDetail({
       )}
 
       {showCaps && (
-        <SettingsCard icon={Boxes} tint="var(--purple)" title="Crews & agents" description="Where they may use the abilities above">
+        <SettingsCard icon={Boxes} tint="var(--purple)" title="Resource access" description="Where they may use the abilities above">
           <div className="px-4 pb-3 [&>section]:mt-3">
             {member.access_mode && (
               <p className="mt-3 text-label text-muted-foreground" data-testid="member-access-mode">
