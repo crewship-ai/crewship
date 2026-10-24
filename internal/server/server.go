@@ -704,6 +704,7 @@ func (s *Server) mountAPIRouter(
 		opts = append(opts, goapi.WithPortExposeNetwork(cfg.Container.Network))
 	}
 	opts = append(opts, goapi.WithHub(wsHub))
+	opts = append(opts, goapi.WithDiffLimits(cfg.Diff))
 	// The terminal handler joins the hub as a session-revocation
 	// notifier: a Revoke/RevokeAllForUser through the API immediately
 	// tears down any open container shell for that session/user, instead

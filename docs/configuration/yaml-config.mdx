@@ -151,6 +151,12 @@ auth:
   google_client_secret: ""
   bootstrap_window: 0s          # First-run /bootstrap window; 0 = open until first admin exists
 
+# Shared routine-version and consolidation diff preview budget
+diff:
+  max_input_bytes: 0  # Default 262144 combined raw/pretty input bytes
+  max_lines: 0        # Default 2000 matcher elements per side
+  max_concurrent: 0   # Default 2 shared computations, no waiting queue
+
 # LLM proxy (token management)
 llm_proxy:
   enabled: true

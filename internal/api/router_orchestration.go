@@ -704,6 +704,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// decision side of that flow. Explain is read-only (MEMBER+);
 	// approve/reject are gated to OWNER/ADMIN by the handler itself.
 	propH := NewProposedHandler(r.db, r.logger)
+	propH.diffs = r.diffs
 	propH.SetJournal(r.Journal())
 	propH.SetBlobRoot(r.memoryVersionsBlobRoot)
 	r.authedMut("POST", "/api/v1/consolidate/proposed/{id}/approve", roleManage, propH.Approve)
@@ -714,6 +715,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// auth surface as Explain. Pairs with the existing approve/
 	// reject flow so the HITL UI can show a diff before the
 	// operator commits.
+	// openapi: responses 413,429
 	r.mux.Handle("GET /api/v1/consolidate/proposed/{id}/diff", authed(wsCtx(http.HandlerFunc(propH.Diff))))
 
 	// memory→Skills bridge HITL surface (PR #4 step 7). When the

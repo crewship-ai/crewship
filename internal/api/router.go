@@ -62,6 +62,8 @@ func (b *keeperWSBroadcaster) BroadcastInboxUpdated(workspaceID string, source s
 }
 
 type Router struct {
+	diffLimits             config.DiffConfig
+	diffs                  *diffComputeBudget
 	documentsServiceSocket string
 	documentsClient        *http.Client
 	documentsSocket        string
@@ -906,6 +908,11 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	notifiers = append(notifiers, r.revokeNotifiers...)
 	r.sessionsStore = newNotifyingSessionStore(r.sessionsStore, notifiers...)
 
+	limits, err := r.diffLimits.Resolve()
+	if err != nil {
+		return nil, err
+	}
+	r.diffs = newDiffComputeBudget(limits)
 	r.registerRoutes()
 
 	// Close the method-routing hole every Go 1.22 ServeMux has: a request
