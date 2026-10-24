@@ -1776,3 +1776,77 @@ fn native_public_receipt_or_cut_transplant_retains_originals_without_installatio
         assert_eq!(originals[0].value.as_ref(), &original, "{mode}");
     }
 }
+
+#[test]
+fn native_pending_ticket_decline_preserves_other_participant_and_originals() {
+    for attack in ["duplicate", "late-positive"] {
+        let (mut actor, peer, _) = admitted_actor_selected(true, 60000, 5000, true);
+        let checkpoint = actor.confirmed().checkpoint().clone();
+        let scope = checkpoint.scope.clone();
+        let versions = checkpoint.versions.clone();
+        let a = agent_change(&scope, "surviving-original", None, " kept");
+        let (mut peer, decline, ticket) = drive_peer_control(&mut actor, peer, move |mut peer| {
+            let open = json!({"type":"session_participant_open","request_id":"declined-open","control_profile":"mooring.session-causal.v1","scope":scope,"session_id":"host-session","runtime_ref":"fresh-authenticated-child","fence":{"generation":"7","token":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},"connection_ref":"declined-connection","join":{"type":"session_join","request_id":"declined-join","ticket":"MOCK_REVOKED_HOST_TICKET","versions":versions}});
+            mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&open).unwrap()).unwrap();
+            let ticket = receive_json(&mut peer).1;
+            assert_eq!(ticket["type"], "ticket_validate");
+            let decline = json!({"type":"protocol_error","request_id":ticket["request_id"],"scope":scope,"reason":{"code":"permission_revoked","message":"participant permission revoked","retry":"do_not_retry"}});
+            mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&decline).unwrap()).unwrap();
+            mooring_collab::write_frame(
+                &mut peer,
+                &serde_json::to_vec(&participant_input(&scope, &[a], "survivor")).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                receive_json(&mut peer).1["message"]["type"],
+                "changes_received"
+            );
+            assert_eq!(receive_json(&mut peer).1["type"], "session_submit_batch");
+            (peer, decline, ticket)
+        });
+        assert_eq!(actor.confirmed().checkpoint(), &checkpoint);
+        let bad = if attack == "duplicate" {
+            decline
+        } else {
+            json!({"type":"ticket_validated","request_id":ticket["request_id"],"scope":ticket["scope"],"session_id":ticket["session_id"],"generation":"7","participant_ref":"declined","permission_version":"3","granted":{"read":true},"versions":checkpoint.versions,"expires_in_ms":"5000","validation_nonce":ticket["validation_nonce"],"gate_id":"never-granted-gate"})
+        };
+        mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&bad).unwrap()).unwrap();
+        drive_actor_to_control_error(&mut actor);
+        let (confirmed, revision, originals) = actor.into_recovery();
+        assert_eq!(confirmed.checkpoint(), &checkpoint);
+        assert_eq!(revision, 10);
+        assert_eq!(originals.len(), 1);
+        assert_eq!(originals[0].value.operations[0].op_id, "surviving-original");
+    }
+}
+
+#[test]
+fn native_pending_ticket_decline_rejects_unrelated_scope_request_and_purpose() {
+    for attack in ["scope", "request", "code", "retry", "message"] {
+        let (mut actor, peer, _) = admitted_actor_selected(true, 60000, 5000, true);
+        let checkpoint = actor.confirmed().checkpoint().clone();
+        let scope = checkpoint.scope.clone();
+        let versions = checkpoint.versions.clone();
+        let (mut peer, ticket) = drive_peer_control(&mut actor, peer, move |mut peer| {
+            let open = json!({"type":"session_participant_open","request_id":"declined-open","control_profile":"mooring.session-causal.v1","scope":scope,"session_id":"host-session","runtime_ref":"fresh-authenticated-child","fence":{"generation":"7","token":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},"connection_ref":"declined-connection","join":{"type":"session_join","request_id":"declined-join","ticket":"MOCK_REVOKED_HOST_TICKET","versions":versions}});
+            mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&open).unwrap()).unwrap();
+            let ticket = receive_json(&mut peer).1;
+            (peer, ticket)
+        });
+        let mut decline = json!({"type":"protocol_error","request_id":ticket["request_id"],"scope":checkpoint.scope,"reason":{"code":"permission_revoked","message":"participant permission revoked","retry":"do_not_retry"}});
+        match attack {
+            "scope" => decline["scope"]["artifact_id"] = json!("foreign"),
+            "request" => decline["request_id"] = json!("unrelated-ticket"),
+            "code" => decline["reason"]["code"] = json!("invalid_request"),
+            "retry" => decline["reason"]["retry"] = json!("query_status"),
+            "message" => decline["reason"]["message"] = json!("different-purpose"),
+            _ => unreachable!(),
+        }
+        mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&decline).unwrap()).unwrap();
+        drive_actor_to_control_error(&mut actor);
+        let (confirmed, revision, originals) = actor.into_recovery();
+        assert_eq!(confirmed.checkpoint(), &checkpoint);
+        assert_eq!(revision, 10);
+        assert!(originals.is_empty());
+    }
+}

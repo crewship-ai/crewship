@@ -23,16 +23,21 @@ var errCollaborationSessionPump = errors.New("Mooring session processing stopped
 // The default-off HTTP session bootstrap installs these callbacks. Each
 // concrete callback owns its original-source and final store/delivery fences.
 type collaborationSessionPumpHandlers struct {
-	Submit   func(context.Context, protocol.SessionSubmitBatch) (protocol.SessionCommitResult, error)
-	Status   func(context.Context, protocol.SessionStatusRequest) (protocol.SessionStatusResult, error)
-	Acquire  func(context.Context, protocol.OwnerAcquire) (protocol.OwnerGrant, error)
-	Renew    func(context.Context, protocol.OwnerRenew) (protocol.OwnerGrant, error)
-	Ticket   func(context.Context, protocol.TicketValidationRequest) (protocol.TicketValidationResult, error)
-	Delivery func(context.Context, protocol.DeliveryRenew) (protocol.DeliveryGrant, error)
+	Submit        func(context.Context, protocol.SessionSubmitBatch) (protocol.SessionCommitResult, error)
+	Status        func(context.Context, protocol.SessionStatusRequest) (protocol.SessionStatusResult, error)
+	Acquire       func(context.Context, protocol.OwnerAcquire) (protocol.OwnerGrant, error)
+	Renew         func(context.Context, protocol.OwnerRenew) (protocol.OwnerGrant, error)
+	Ticket        func(context.Context, protocol.TicketValidationRequest) (protocol.TicketValidationResult, error)
+	TicketControl func(context.Context, mooring.SessionControl, protocol.TicketValidationRequest) error
+	Delivery      func(context.Context, protocol.DeliveryRenew) (protocol.DeliveryGrant, error)
 	// Optional host synchronization, not authority. It spans callback AND the
 	// actual correlated reply write, including every error/panic exit.
 	DeliveryGuard func(context.Context, protocol.DeliveryRenew) (func(), error)
 	Output        func(context.Context, protocol.SessionParticipantOutput) error
+	// Optional exact-token host composition. Delivery owns either its physical
+	// correlated reply or typed retirement completion; DATA remains queued opaque.
+	DeliveryControl func(context.Context, mooring.SessionControl, protocol.DeliveryRenew) error
+	OutputControl   func(context.Context, mooring.SessionControl, protocol.SessionParticipantOutput) error
 }
 
 type collaborationSessionPump struct {
@@ -105,10 +110,36 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 			}
 		}
 	}()
+	var outputQueue chan pending
+	outputDone := make(chan struct{})
+	if p.handlers.OutputControl == nil {
+		close(outputDone)
+	} else {
+		outputQueue = make(chan pending, 128)
+		finishOutput := beginBackgroundWork()
+		go func() {
+			defer finishOutput()
+			defer close(outputDone)
+			defer cancel()
+			defer func() { _ = recover() }()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case next := <-outputQueue:
+					raw, e := next.token.Frame()
+					if e != nil || p.control(ctx, next.token, next.kind, raw) != nil {
+						return
+					}
+				}
+			}
+		}()
+	}
 	defer func() {
 		cancel()
 		_ = p.runtime.Close()
 		<-workerDone
+		<-outputDone
 	}()
 	defer func() {
 		if recover() != nil {
@@ -140,6 +171,24 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 				return errCollaborationSessionPump
 			}
 			continue
+		}
+		if outputQueue != nil && header.Type == "session_participant_output" {
+			var envelope struct {
+				Message struct {
+					Type string `json:"type"`
+				} `json:"message"`
+			}
+			if json.Unmarshal(raw, &envelope) != nil {
+				return errCollaborationSessionPump
+			}
+			if envelope.Message.Type != "session_joined" {
+				select {
+				case outputQueue <- pending{token, header.Type}:
+				default:
+					return errCollaborationSessionPump
+				}
+				continue
+			}
 		}
 		if e = p.control(ctx, token, header.Type, raw); e != nil {
 			return errCollaborationSessionPump
@@ -281,8 +330,11 @@ func (p *collaborationSessionPump) control(ctx context.Context, token mooring.Se
 		return p.reply(ctx, token, result, err)
 	case "ticket_validate":
 		request, err := pumpRequest[protocol.TicketValidationRequest](ctx, raw)
-		if err != nil || p.handlers.Ticket == nil {
+		if err != nil || (p.handlers.Ticket == nil && p.handlers.TicketControl == nil) {
 			return errCollaborationSessionPump
+		}
+		if p.handlers.TicketControl != nil {
+			return p.handlers.TicketControl(ctx, token, request)
 		}
 		result, err := p.handlers.Ticket(ctx, request)
 		if err == nil && (result.RequestID != request.RequestID ||
@@ -294,8 +346,11 @@ func (p *collaborationSessionPump) control(ctx context.Context, token mooring.Se
 		return p.reply(ctx, token, result, err)
 	case "delivery_renew":
 		request, err := pumpRequest[protocol.DeliveryRenew](ctx, raw)
-		if err != nil || p.handlers.Delivery == nil {
+		if err != nil || (p.handlers.Delivery == nil && p.handlers.DeliveryControl == nil) {
 			return errCollaborationSessionPump
+		}
+		if p.handlers.DeliveryControl != nil {
+			return p.handlers.DeliveryControl(ctx, token, request)
 		}
 		if p.handlers.DeliveryGuard != nil {
 			release, e := p.handlers.DeliveryGuard(ctx, request)
@@ -318,8 +373,14 @@ func (p *collaborationSessionPump) control(ctx context.Context, token mooring.Se
 		return p.reply(ctx, token, result, err)
 	case "session_participant_output":
 		var output protocol.SessionParticipantOutput
-		if p.handlers.Output == nil || ctx.Err() != nil || json.Unmarshal(raw, &output) != nil {
+		if (p.handlers.Output == nil && p.handlers.OutputControl == nil) || ctx.Err() != nil || json.Unmarshal(raw, &output) != nil {
 			return errCollaborationSessionPump
+		}
+		if p.handlers.OutputControl != nil {
+			if p.handlers.OutputControl(ctx, token, output) != nil || ctx.Err() != nil {
+				return errCollaborationSessionPump
+			}
+			return p.runtime.CompleteControl(token)
 		}
 		if p.handlers.Output(ctx, output) != nil || ctx.Err() != nil {
 			return errCollaborationSessionPump
@@ -328,4 +389,27 @@ func (p *collaborationSessionPump) control(ctx context.Context, token mooring.Se
 	default:
 		return errCollaborationSessionPump
 	}
+}
+
+// The same positive correlation applies to the exact-token host composition.
+func collaborationPumpDeliveryReply(ctx context.Context, runtime *mooring.SessionRuntime, token mooring.SessionControl, request protocol.DeliveryRenew, result protocol.DeliveryGrant) error {
+	if ctx.Err() != nil || result.RequestID != request.RequestID || result.Scope != request.Scope || result.SessionID != request.SessionID || result.ParticipantRef != request.ParticipantRef || result.Generation != request.Fence.Generation || result.PermissionVersion != request.PermissionVersion || result.RenewalNonce != request.RenewalNonce || result.GateID != request.GateID {
+		return errCollaborationSessionPump
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return errCollaborationSessionPump
+	}
+	return runtime.ReplyControl(ctx, token, raw)
+}
+
+func collaborationPumpTicketReply(ctx context.Context, runtime *mooring.SessionRuntime, token mooring.SessionControl, request protocol.TicketValidationRequest, result protocol.TicketValidationResult) error {
+	if ctx.Err() != nil || result.RequestID != request.RequestID || result.Scope != request.Scope || result.SessionID != request.SessionID || result.Generation != request.Fence.Generation || result.ValidationNonce != request.ValidationNonce {
+		return errCollaborationSessionPump
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return errCollaborationSessionPump
+	}
+	return runtime.ReplyControl(ctx, token, raw)
 }

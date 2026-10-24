@@ -233,7 +233,7 @@ func (s *collaborationHumanRegistry) reconnect(ctx context.Context, binding coll
 	if err = s.owners.Check(ctx, tx, owner); err != nil {
 		return "", err
 	}
-	if _, err = s.checkCaptured(ctx, tx, admission, false, 2*time.Second); err != nil {
+	if _, err = s.checkCaptured(ctx, tx, admission, admission.write, 2*time.Second); err != nil {
 		return "", err
 	}
 	if err = s.owners.Check(ctx, tx, owner); err != nil {

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/mooring"
@@ -169,6 +170,8 @@ func TestCollaborationAuthorVectorHumanSchemaUncertaintyPrecedesCanonicalDeny(t 
 	}
 	if _, err = h.checkCaptured(t.Context(), tx, admission, true, 0); err == nil {
 		t.Fatal("schema drift allowed existing author")
+	} else if errors.Is(err, errCollaborationAuthorChanged) {
+		t.Fatal("SQL/schema uncertainty became successful canonical recipient denial")
 	}
 }
 

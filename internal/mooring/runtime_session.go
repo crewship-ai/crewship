@@ -62,6 +62,7 @@ type SessionRuntime struct {
 	next                       uint64
 	count, bytes               int
 	sessionID                  string
+	participantStates          map[*sessionParticipantState]struct{}
 	observed                   sessionObserved
 	openSent                   bool
 	closed                     bool
@@ -145,6 +146,7 @@ func (s *SessionRuntime) fail(err error) {
 		return
 	}
 	s.closed = true
+	s.releaseAllParticipantStatesLocked()
 	if err == nil {
 		err = io.EOF
 	}
@@ -412,6 +414,15 @@ func (s *SessionRuntime) ReplyControl(ctx context.Context, c SessionControl, raw
 		s.mu.Unlock()
 		return ErrSessionRuntime
 	}
+	if !s.participantGrantAllowedLocked(entry) {
+		s.mu.Unlock()
+		return ErrSessionRuntime
+	}
+	participant, err := s.prepareParticipantTicketLocked(entry, normalized)
+	if err != nil {
+		s.mu.Unlock()
+		return err
+	}
 	entry.replying = true
 	s.mu.Unlock()
 	if err = s.write(ctx, normalized); err != nil {
@@ -419,6 +430,9 @@ func (s *SessionRuntime) ReplyControl(ctx context.Context, c SessionControl, raw
 		return err
 	}
 	s.mu.Lock()
+	if participant != nil {
+		participant.ticketSent = true
+	}
 	s.observeOwnerLocked(entry, normalized)
 	s.mu.Unlock()
 	return s.complete(c, true)
@@ -438,6 +452,7 @@ func (s *SessionRuntime) complete(c SessionControl, replied bool) error {
 	delete(s.childIDs, entry.requestID)
 	s.count--
 	s.bytes -= len(entry.bytes)
+	s.drainParticipantRetirementsLocked()
 	return nil
 }
 func (s *SessionRuntime) write(ctx context.Context, raw []byte) error {

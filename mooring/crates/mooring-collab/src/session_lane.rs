@@ -405,6 +405,13 @@ fn validate_incoming(raw: &[u8], native: bool) -> io::Result<(Route, Vec<u8>)> {
         };
         return Ok((route, value.bytes().to_vec()));
     }
+    // One fixed existing public error is selected ONLY as an inherited-host
+    // native pending-ticket denial. Generic errors/control validation stay shut.
+    if native && crate::session_participants::validate_ticket_decline(raw).is_ok() {
+        let value = mooring_protocol::wire::validate_bounded_envelope(raw)
+            .map_err(|_| invalid("ticket decline shape"))?;
+        return Ok((Route::Actor, value.bytes().to_vec()));
+    }
     // Only these small host lease/admission controls belong to the session
     // driver. In particular a bare CommitResult cannot install session state.
     let value = mooring_protocol::wire::validate_bounded_envelope(raw)
@@ -777,5 +784,19 @@ mod tests {
             (q.retained_bytes, q.retained_count, q.bytes, q.count),
             (0, 0, 0, 0)
         );
+    }
+    #[test]
+    fn fixed_ticket_decline_is_host_native_actor_only() {
+        let open: Value = serde_json::from_slice(&fixture("valid-SessionParticipantOpen")).unwrap();
+        let raw=serde_json::to_vec(&serde_json::json!({"type":"protocol_error","request_id":"actual-pending-ticket","scope":open["scope"],"reason":{"code":"permission_revoked","message":"participant permission revoked","retry":"do_not_retry"}})).unwrap();
+        assert!(matches!(
+            validate_incoming(&raw, true),
+            Ok((Route::Actor, _))
+        ));
+        assert!(validate_incoming(&raw, false).is_err());
+        assert!(validate_outgoing(&raw, true).is_err());
+        assert!(control::validate(&raw, Peer::InheritedHost).is_err());
+        assert!(control::validate_causal(&raw, Peer::InheritedHost).is_err());
+        assert!(session_control::validate(&raw, Peer::InheritedHost).is_err());
     }
 }

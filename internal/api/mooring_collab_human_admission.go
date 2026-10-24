@@ -301,8 +301,11 @@ func (s *collaborationHumanRegistry) checkCaptured(ctx context.Context, tx *sql.
 		return "", errCollaborationAuthorUnqualified
 	}
 	changed, err := collaborationAuthorVectorChanged(ctx, tx, admission.authorVector)
-	if err != nil || changed {
+	if err != nil {
 		return "", errCollaborationAuthorUnqualified
+	}
+	if changed {
+		return "", errCollaborationAuthorChanged
 	}
 	intent := "read"
 	if write {
@@ -472,7 +475,7 @@ func (s *collaborationHumanRegistry) join(ctx context.Context, runtime collabora
 		if access.Scope != s.scope || access.Participant != admission.participant || (access.Intent != "connect" && access.Intent != "renew") {
 			return "", errCollaborationAdmission
 		}
-		permission, err := s.checkCaptured(ctx, tx, admission, false, ttl)
+		permission, err := s.checkCaptured(ctx, tx, admission, admission.write, ttl)
 		if err != nil {
 			return "", err
 		}
@@ -532,3 +535,5 @@ func (s *collaborationHumanRegistry) consume(runtime collaborationHumanProcess, 
 	release()
 	return admission, nil
 }
+
+var errCollaborationAuthorChanged = errors.Join(errCollaborationAuthorUnqualified, errors.New("original author relevance changed"))

@@ -184,6 +184,10 @@ impl RunningDriver {
                             .begin(opening, &self.owner, (self.driver.clock)()?)?;
                     self.send_control(&request)?;
                 }
+                Some("protocol_error") => {
+                    self.participants
+                        .decline(&raw, host, &self.owner, (self.driver.clock)()?)?
+                }
                 Some("ticket_validated") => {
                     let (opening, connection) = self.participants.accept(
                         &raw,

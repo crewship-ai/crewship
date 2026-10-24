@@ -148,7 +148,14 @@ func (m *collaborationHTTPManager) websocket(w http.ResponseWriter, r *http.Requ
 				if _, e := d.humans.checkCaptured(ctx, tx, c.admission, false, 0); e != nil {
 					return e
 				}
-				return d.cell.runtime.SendParticipantOpen(ctx, d.activation, protocol.SessionParticipantOpen{Type: "session_participant_open", RequestID: protocol.Identifier(request), ControlProfile: mooring.PrivateSessionProfile, Scope: d.wireScope(), SessionID: protocol.Identifier(d.activation.SessionID()), RuntimeRef: protocol.Identifier(d.cell.runtime.RuntimeRef()), Fence: d.wireFence(), ConnectionRef: protocol.Identifier(c.ref), Join: normalized})
+				pending, e := d.cell.runtime.PrepareParticipantOpen(d.activation, protocol.SessionParticipantOpen{Type: "session_participant_open", RequestID: protocol.Identifier(request), ControlProfile: mooring.PrivateSessionProfile, Scope: d.wireScope(), SessionID: protocol.Identifier(d.activation.SessionID()), RuntimeRef: protocol.Identifier(d.cell.runtime.RuntimeRef()), Fence: d.wireFence(), ConnectionRef: protocol.Identifier(c.ref), Join: normalized})
+				if e != nil {
+					return e
+				}
+				c.mu.Lock()
+				c.participantPending = pending
+				c.mu.Unlock()
+				return d.cell.runtime.SendPreparedParticipantOpen(ctx, d.activation, pending)
 			})
 		}); err != nil {
 			return
@@ -167,6 +174,9 @@ func (m *collaborationHTTPManager) websocket(w http.ResponseWriter, r *http.Requ
 				Type string `json:"type"`
 			}
 			if json.Unmarshal(normalized, &header) != nil {
+				return
+			}
+			if err = c.ensureCurrentGate(operationContext); err != nil {
 				return
 			}
 			if header.Type == "checkpoint_request" {
@@ -205,9 +215,6 @@ func (c *collaborationHTTPConnection) close() {
 	if c == nil {
 		return
 	}
-	// Completed grants must reach the single FD writer before SessionLeave.
-	// A request still unread by Go can still fail the process closed; this
-	// mutex does not claim to solve that availability tail race.
 	c.deliveryMu.Lock()
 	defer c.deliveryMu.Unlock()
 	c.mu.Lock()
@@ -216,9 +223,8 @@ func (c *collaborationHTTPConnection) close() {
 		return
 	}
 	c.closed = true
-	ws := c.socket
-	joined := c.joined
-	gate := joined.gate.GateID
+	ws, joined, pending, binding := c.socket, c.joined, c.participantPending, c.participantBinding
+	alreadyLeft := binding == nil && c.transition != nil
 	c.mu.Unlock()
 	d := c.document
 	if d.originals != nil {
@@ -232,26 +238,41 @@ func (c *collaborationHTTPConnection) close() {
 		delete(d.connections, c.ref)
 	}
 	d.mu.Unlock()
-	if gate != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		_, _ = d.manager.pages.db.ExecContext(ctx, `UPDATE mooring_delivery_gates SET closed=1 WHERE id=? AND page_id=? AND workspace_id=? AND application_id=? AND participant_ref=? AND owner_id=? AND owner_generation=?`, gate, d.key.ArtifactID, d.key.WorkspaceID, d.key.ApplicationID, c.admission.participant, d.owner.OwnerID, d.owner.Generation)
-	}
-	if gate != "" && d.ctx.Err() == nil {
-		// Trusted denial-only cleanup uses the original private tuple. Revoked
-		// human rights must not prevent closing their own exact recipient path.
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		id, e := collaborationOpaqueID()
-		if e == nil {
-			raw, _ := json.Marshal(protocol.SessionLeave{Type: "session_leave", RequestID: protocol.Identifier(id), Scope: d.wireScope(), SessionID: protocol.Identifier(d.activation.SessionID())})
-			e = d.cell.runtime.SendParticipantInput(ctx, d.activation, protocol.SessionParticipantInput{Type: "session_participant_input", RequestID: protocol.Identifier(id + "-leave"), ControlProfile: mooring.PrivateSessionProfile, Scope: d.wireScope(), SessionID: protocol.Identifier(d.activation.SessionID()), RuntimeRef: protocol.Identifier(d.cell.runtime.RuntimeRef()), Fence: d.wireFence(), ConnectionRef: protocol.Identifier(c.ref), ParticipantRef: protocol.Identifier(c.admission.participant), GateID: protocol.Identifier(joined.gate.GateID), PermissionVersion: protocol.Counter(joined.gate.PermissionVersion), Message: raw})
-		}
-		if e != nil {
+	if pending != nil {
+		// A possibly sent Open has no observed current Joined. Never fabricate a
+		// gate or send speculative/duplicate Leave on disconnect during handshake.
+		if d.cell.runtime.DiscardUnsentParticipantOpen(pending) != nil {
 			d.cancel()
 		}
+		return
 	}
-	// Closing a socket is not a runtime blocked-ACK or revocation completion.
+	if joined.gate.GateID == "" || alreadyLeft || d.ctx.Err() != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if _, err := d.manager.pages.db.ExecContext(ctx, `UPDATE mooring_delivery_gates SET closed=1 WHERE id=? AND page_id=? AND workspace_id=? AND application_id=? AND participant_ref=? AND owner_id=? AND owner_generation=?`, joined.gate.GateID, d.key.ArtifactID, d.key.WorkspaceID, d.key.ApplicationID, c.admission.participant, d.owner.OwnerID, d.owner.Generation); err != nil {
+		d.cancel()
+		return
+	}
+	if binding == nil {
+		d.cancel()
+		return
+	}
+	proof, err := d.cell.runtime.RetireParticipant(ctx, d.activation, binding)
+	if err != nil {
+		d.cancel()
+		return
+	}
+	c.mu.Lock()
+	if c.retirements == nil {
+		c.retirements = make(map[string]*collaborationRetiredGate)
+	}
+	c.retirements[joined.gate.GateID] = &collaborationRetiredGate{gate: joined.gate, proof: proof}
+	c.participantBinding = nil
+	c.mu.Unlock()
+	// This denial-only Leave is not a native revocation ACK. Without a fresh
+	// correlated Joined its proof stays charged through the unread FD tail.
 }
 
 func (d *collaborationHTTPDocument) ticket(ctx context.Context, q protocol.TicketValidationRequest) (protocol.TicketValidationResult, error) {
@@ -262,7 +283,10 @@ func (d *collaborationHTTPDocument) ticket(ctx context.Context, q protocol.Ticke
 	d.mu.Lock()
 	var c *collaborationHTTPConnection
 	for _, candidate := range d.connections {
-		if candidate.ticket == q.Ticket {
+		candidate.mu.Lock()
+		match := candidate.ticket == q.Ticket
+		candidate.mu.Unlock()
+		if match {
 			c = candidate
 			break
 		}
