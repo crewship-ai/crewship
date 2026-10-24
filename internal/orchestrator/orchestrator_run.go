@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"path"
 	"path/filepath"
 	"sort"
@@ -61,6 +62,10 @@ var ErrDetachedExecStopped = errors.New("orchestrator: detached exec stopped aft
 // runs out first does this give up and leave `running` true for the caller
 // to handle as ErrDetachedStillRunning.
 func (o *Orchestrator) awaitExecTerminal(ctx context.Context, execID string) (running bool, exitCode int, inspErr error) {
+	return o.awaitExecTerminalWithLogger(ctx, execID, o.logger)
+}
+
+func (o *Orchestrator) awaitExecTerminalWithLogger(ctx context.Context, execID string, logger *slog.Logger) (running bool, exitCode int, inspErr error) {
 	running, exitCode, inspErr = o.container.ExecInspect(ctx, execID)
 	if inspErr != nil || !running {
 		return running, exitCode, inspErr
@@ -71,7 +76,7 @@ func (o *Orchestrator) awaitExecTerminal(ctx context.Context, execID string) (ru
 	if interval <= 0 {
 		interval = defaultDetachedPollInterval
 	}
-	o.logger.Debug("exec stream ended while the process is alive; monitoring until it terminates",
+	logger.Debug("exec stream ended while the process is alive; monitoring until it terminates",
 		"exec_id", execID)
 	for {
 		select {
@@ -140,6 +145,13 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// private egress on a shared/cloud host — the operator must also set
 	// CREWSHIP_ALLOW_PRIVATE_ENDPOINTS. Normalizing once (rather than at each
 	// read site) keeps a future third consumer safe by construction.
+	if req.strictContentPrivacy {
+		req = req.WithStrictContentPrivacy()
+		// The private runtime confirms process existence through OnExecStarted.
+		// No generic event callback receives text, tool inputs or CLI metadata.
+		handler = nil
+	}
+	defer func() { err = privateRunError(req, err) }()
 	req.AllowPrivateEndpoints = effectiveAllowPrivateEndpoints(req.AllowPrivateEndpoints)
 
 	// E0 run identity. Normalised HERE, once, ahead of everything that derives
@@ -153,6 +165,11 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 
 	if err := o.configureHostOutput(&req); err != nil {
 		return err
+	}
+	if req.strictContentPrivacy && (req.HostOutputDir != "" || req.DurableOutputDir != "" || req.managedLaunch != nil) {
+		// These transports are already unsupported by the private command
+		// builder. Refuse before tracked state or admission resources are read.
+		return ErrPrivateRunUnqualified
 	}
 	ctx, finishTrackedRun, trackErr := o.trackAgentRun(ctx, &req)
 	if trackErr != nil {
@@ -184,6 +201,16 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	ctx, span := telemetry.StartAgentSpan(ctx, req.AgentID, req.AgentRole, req.CrewID, req.MissionID)
 	defer func() {
 		if r := recover(); r != nil {
+			if req.strictContentPrivacy {
+				// Never format, wrap, attach or rethrow the original value.
+				// Re-panicking can also expose the original recovered panic
+				// through Go's panic-chain printing. Remaining defers still
+				// release resources; callers receive an uncertain outcome.
+				err = ErrPrivateRunUnqualified
+				telemetry.RecordError(span, err)
+				span.End()
+				return
+			}
 			// telemetry.RecoverPanic stamps span + re-panics with a
 			// *PanicWithStack wrapper so the original crash stack is
 			// preserved across nested defers. Inner recover sites
@@ -191,7 +218,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 			// one just reuses the captured stack.
 			telemetry.RecoverPanic(span, r)
 		}
-		telemetry.RecordError(span, err)
+		telemetry.RecordError(span, privateRunError(req, err))
 		span.End()
 	}()
 
@@ -243,7 +270,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		// much to whom, and the chat_id to read it in the place it can still be
 		// deleted from.
 		msgChars := utf8.RuneCountInString(req.UserMessage)
-		_, _ = o.getJournal().Emit(ctx, JournalEntry{
+		_, _ = o.journalForRun(req).Emit(ctx, JournalEntry{
 			WorkspaceID: req.WorkspaceID,
 			CrewID:      req.CrewID,
 			AgentID:     req.AgentID,
@@ -302,7 +329,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// rather than storing {"user_prompt": "", "user_prompt_truncated":
 	// false} on every gated run regardless of ApprovalMode.
 	var review map[string]any
-	if req.UserMessage != "" {
+	if req.UserMessage != "" && !req.strictContentPrivacy {
 		review = map[string]any{
 			"user_prompt":           userPreview,
 			"user_prompt_truncated": userTruncated,
@@ -546,7 +573,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		if req.managedLaunch != nil {
 			return fmt.Errorf("managed launch: durable run identity persistence failed: %w", err)
 		}
-		o.logger.Error("failed to persist run state", "error", err)
+		o.loggerForRun(req).Error("failed to persist run state", "error", err)
 		if runState.Output != nil {
 			return fmt.Errorf("persist durable execution before launch: %w", err)
 		}
@@ -567,10 +594,10 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// Log auth mode for debugging
 	for _, e := range env {
 		if strings.HasPrefix(e, "CLAUDE_CODE_OAUTH_TOKEN=") {
-			o.logger.Info("agent auth mode: OAuth (CONNECT tunnel)", "agent_id", req.AgentID)
+			o.loggerForRun(req).Info("agent auth mode: OAuth (CONNECT tunnel)", "agent_id", req.AgentID)
 		}
 		if strings.HasPrefix(e, "ANTHROPIC_BASE_URL=") {
-			o.logger.Info("agent auth mode: API key (reverse proxy)", "agent_id", req.AgentID)
+			o.loggerForRun(req).Info("agent auth mode: API key (reverse proxy)", "agent_id", req.AgentID)
 		}
 	}
 
@@ -600,8 +627,8 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// defer cannot reach a value that does not exist yet.
 	o.mu.RLock()
 	runEndToken := agentRunAuthToken(
-		agentRunKey(o.ipcToken, req.WorkspaceID, req.CrewID, o.logger),
-		req.WorkspaceID, req.AgentID, req.RunID, o.logger)
+		agentRunKey(o.ipcToken, req.WorkspaceID, req.CrewID, o.loggerForRun(req)),
+		req.WorkspaceID, req.AgentID, req.RunID, o.loggerForRun(req))
 	o.mu.RUnlock()
 
 	fileCreds := hasFileMountedCreds(req.Credentials, keeperEnabled)
@@ -613,7 +640,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 				return
 			}
 			if o.releaseAgentSecrets(req.ContainerID, req.AgentSlug, req.RunID) {
-				o.cleanupAgentSecrets(req.ContainerID, req.AgentSlug, req.RunID)
+				o.cleanupAgentSecretsWithLogger(req.ContainerID, req.AgentSlug, req.RunID, o.loggerForRun(req))
 			}
 		}()
 	}
@@ -657,7 +684,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		// worked but that no refresh could reach: authenticating with a
 		// credential nothing was allowed to update.
 		releaseRunHome(req.ContainerID, req.AgentSlug, req.RunID)
-		o.cleanupRunHome(req.ContainerID, req.AgentSlug, req.RunID, runEndToken)
+		o.cleanupRunHomeWithLogger(req.ContainerID, req.AgentSlug, req.RunID, runEndToken, o.loggerForRun(req))
 	}()
 
 	transferHostHold := func(execID string) {
@@ -667,16 +694,16 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 			release: func() { crewRelease(); releaseRunSlot() },
 			finalize: func() {
 				releaseRunHome(req.ContainerID, req.AgentSlug, req.RunID)
-				o.cleanupRunHome(req.ContainerID, req.AgentSlug, req.RunID, runEndToken)
+				o.cleanupRunHomeWithLogger(req.ContainerID, req.AgentSlug, req.RunID, runEndToken, o.loggerForRun(req))
 				if fileCreds && o.releaseAgentSecrets(req.ContainerID, req.AgentSlug, req.RunID) {
-					o.cleanupAgentSecrets(req.ContainerID, req.AgentSlug, req.RunID)
+					o.cleanupAgentSecretsWithLogger(req.ContainerID, req.AgentSlug, req.RunID, o.loggerForRun(req))
 				}
 			},
 		}
 		if holdErr := o.registerDetachedHold(hold, o.detachedPollInterval); holdErr != nil {
 			// Duplicate registration already owns this identity. Never release
 			// possibly live capacity merely because bookkeeping could not register.
-			o.logger.Error("protected host hold registration failed; retaining resources", "run_id", req.RunID, "error", holdErr)
+			o.loggerForRun(req).Error("protected host hold registration failed; retaining resources", "run_id", req.RunID, "error", holdErr)
 		}
 		slotTransferredToHold = true
 	}
@@ -718,14 +745,14 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// place the whole prompt should not be copied to on every run (#2215),
 	// and the sanitised argv keeps the flags and the command shape an operator
 	// is actually reading it for.
-	o.logger.Info("exec agent", "agent_id", req.AgentID, "container_id", cIDShort, "cmd", journalCmd.argv)
+	o.loggerForRun(req).Info("exec agent", "agent_id", req.AgentID, "container_id", cIDShort, "cmd", journalCmd.argv)
 
 	// Crow's Nest: emit the command start so the live terminal UI can
 	// open a new block before any output streams. Payload carries the
 	// argv for the UI and the container ID + agent scope; full stdout
 	// is streamed separately by the existing handler pipeline.
 	execStart := time.Now()
-	j := o.getJournal()
+	j := o.journalForRun(req)
 	_, _ = j.Emit(ctx, JournalEntry{
 		WorkspaceID: req.WorkspaceID,
 		CrewID:      req.CrewID,
@@ -785,7 +812,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	if req.ExecGate != nil {
 		if gateErr := req.ExecGate(ctx); gateErr != nil {
 			refused := fmt.Errorf("%w: %w", ErrExecRefused, gateErr)
-			o.logger.Warn("exec creation refused at the gate; no process was created",
+			o.loggerForRun(req).Warn("exec creation refused at the gate; no process was created",
 				"agent_id", req.AgentID, "run_id", req.RunID, "error", gateErr)
 			o.failRun(ctx, req, runState.ID, "error")
 			_, _ = j.Emit(ctx, JournalEntry{
@@ -819,7 +846,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 			transferHostHold("")
 			return err
 		}
-		o.logger.Error("exec agent failed", "error", err, "agent_id", req.AgentID)
+		o.loggerForRun(req).Error("exec agent failed", "error", err, "agent_id", req.AgentID)
 		o.failRun(ctx, req, runState.ID, "error")
 		// Emit the terminal exec.command event for the failure path
 		// too so Crow's Nest doesn't show a hanging "running" block
@@ -862,7 +889,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	const responseCap = 8 * 1024
 	var responseBuf strings.Builder
 	journalTap := EventHandler(func(event AgentEvent) {
-		if event.Type == "text" && responseBuf.Len() < responseCap {
+		if !req.strictContentPrivacy && event.Type == "text" && responseBuf.Len() < responseCap {
 			remaining := responseCap - responseBuf.Len()
 			if len(event.Content) <= remaining {
 				responseBuf.WriteString(event.Content)
@@ -907,7 +934,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	usageModel := req.LLMModel
 	tappedHandler := EventHandler(func(event AgentEvent) {
 		inBand.observe(event)
-		if event.Type == "system" {
+		if !req.strictContentPrivacy && event.Type == "system" {
 			if meta, ok := event.Metadata.(map[string]any); ok {
 				if model, ok := meta["model"].(string); ok && model != "" {
 					usageModel = model
@@ -920,11 +947,11 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		// per run: the dropped field is data the CLI sent us and nothing else
 		// reports its loss, which is how a shape change stays invisible until
 		// somebody notices a surface has gone quiet (#1954).
-		if !loggedDecodeError {
+		if !req.strictContentPrivacy && !loggedDecodeError {
 			if m, ok := event.Metadata.(map[string]interface{}); ok {
 				if note, _ := m["decode_error"].(string); note != "" {
 					loggedDecodeError = true
-					o.logger.Warn("stream line only partly decoded — a field the CLI sent was dropped",
+					o.loggerForRun(req).Warn("stream line only partly decoded — a field the CLI sent was dropped",
 						"agent_id", req.AgentID,
 						"adapter", req.CLIAdapter,
 						"decode_error", note,
@@ -937,14 +964,14 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		// ground truth for what the API served (the subscription may serve
 		// a lower tier than the requested --model). Compare against the
 		// requested override and WARN loudly on a family fallback.
-		if event.Type == "system" {
+		if !req.strictContentPrivacy && event.Type == "system" {
 			if m, ok := event.Metadata.(map[string]interface{}); ok {
 				if !loggedModel {
 					if actual, ok := m["model"].(string); ok && actual != "" {
 						loggedModel = true
 						version, _ := m["claude_code_version"].(string)
 						keySource, _ := m["apiKeySource"].(string)
-						logResolvedModel(o.logger, req.AgentID, req.LLMModel, actual, version, keySource)
+						logResolvedModel(o.loggerForRun(req), req.AgentID, req.LLMModel, actual, version, keySource)
 					}
 				}
 				// Persist the session's provenance so a --mcp-config entry the
@@ -1007,10 +1034,17 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 			if m, ok := event.Metadata.(map[string]interface{}); ok {
 				name, _ := m["tool_name"].(string)
 				if guard.observe(name, m["input"]) {
-					o.logger.Warn("loop guard tripped — aborting run",
+					loggedTool := name
+					if req.strictContentPrivacy {
+						loggedTool = "[private tool]"
+						// A fixed host-side counter signal, without the tool,
+						// provider diagnostic or any child-selected fields.
+						o.logger.Warn("loop guard tripped — aborting private run", "run_id", req.RunID)
+					}
+					o.loggerForRun(req).Warn("loop guard tripped — aborting run",
 						"agent_id", req.AgentID,
 						"agent_slug", req.AgentSlug,
-						"tool", name,
+						"tool", loggedTool,
 						"threshold", loopGuardThreshold,
 					)
 					cancel()
@@ -1026,7 +1060,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// so any secret straddling the final chunk (or short output held back
 	// entirely) is scrubbed and the redacted tail still reaches the user.
 	flushScrub()
-	if response := strings.TrimSpace(responseBuf.String()); response != "" && req.HostOutputDir == "" {
+	if response := strings.TrimSpace(responseBuf.String()); response != "" && req.HostOutputDir == "" && !req.strictContentPrivacy {
 		responseSummary := response
 		if len(responseSummary) > 240 {
 			responseSummary = responseSummary[:240] + "…"
@@ -1039,7 +1073,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		if emitCtx.Err() != nil {
 			emitCtx = context.Background()
 		}
-		_, _ = o.getJournal().Emit(emitCtx, JournalEntry{
+		_, _ = o.journalForRun(req).Emit(emitCtx, JournalEntry{
 			WorkspaceID: req.WorkspaceID,
 			CrewID:      req.CrewID,
 			AgentID:     req.AgentID,
@@ -1077,7 +1111,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	if guard.Tripped() {
 		cleanCtx := context.Background()
 		o.failRun(cleanCtx, req, runState.ID, "error")
-		o.logger.Warn("run aborted by loop guard", "agent_id", req.AgentID, "exec_id", result.ExecID)
+		o.loggerForRun(req).Warn("run aborted by loop guard", "agent_id", req.AgentID, "exec_id", result.ExecID)
 		o.emitExecEnd(cleanCtx, req, result.ExecID, journalCmd, "warn",
 			fmt.Sprintf("%s: ABORTED — stuck loop (same tool call ×%d)", req.AgentSlug, loopGuardThreshold),
 			execStart, map[string]any{"reason": "loop_detected"})
@@ -1091,7 +1125,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	if ctx.Err() != nil {
 		cleanCtx := context.Background()
 		o.failRun(cleanCtx, req, runState.ID, "cancelled")
-		o.logger.Info("run cancelled", "agent_id", req.AgentID, "exec_id", result.ExecID)
+		o.loggerForRun(req).Info("run cancelled", "agent_id", req.AgentID, "exec_id", result.ExecID)
 		// Close the Crow's Nest exec.command block and flip the Watch
 		// Roster off busy on cancellation too — otherwise stopped
 		// runs leave the live terminal hanging and presence stuck on
@@ -1125,7 +1159,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		}
 		exitCode = snapshot.Result.ExitCode
 	} else {
-		running, exitCode, inspErr = o.awaitExecTerminal(ctx, result.ExecID)
+		running, exitCode, inspErr = o.awaitExecTerminalWithLogger(ctx, result.ExecID, o.loggerForRun(req))
 	}
 
 	if inspErr != nil {
@@ -1157,16 +1191,17 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		// as a clean or even a normal failed run, and return a typed error
 		// so callers can tell "the agent failed" apart from "we don't know
 		// what the agent did".
-		o.logger.Error("exec inspect failed; run outcome unknown, failing closed",
-			"agent_id", req.AgentID, "exec_id", result.ExecID, "error", inspErr)
+		visibleInspectErr := privateRunError(req, inspErr)
+		o.loggerForRun(req).Error("exec inspect failed; run outcome unknown, failing closed",
+			"agent_id", req.AgentID, "exec_id", result.ExecID, "error", visibleInspectErr)
 		o.failRun(ctx, req, runState.ID, "error")
 		o.emitExecEnd(ctx, req, result.ExecID, journalCmd, "warn",
-			fmt.Sprintf("%s: outcome UNKNOWN — exec inspect failed: %v", req.AgentSlug, inspErr),
-			execStart, map[string]any{"outcome": "unknown", "inspect_error": inspErr.Error()})
+			fmt.Sprintf("%s: outcome UNKNOWN — exec inspect failed: %v", req.AgentSlug, visibleInspectErr),
+			execStart, map[string]any{"outcome": "unknown", "inspect_error": visibleInspectErr.Error()})
 		o.markAgentOnline(ctx, req, map[string]any{"reason": "exec_inspect_failed"})
 		return fmt.Errorf("exec inspect failed, run outcome unknown: %w", inspErr)
 	}
-	o.logger.Info("exec finished", "agent_id", req.AgentID, "running", running, "exit_code", exitCode)
+	o.loggerForRun(req).Info("exec finished", "agent_id", req.AgentID, "running", running, "exit_code", exitCode)
 
 	// Crow's Nest: closing exec.command entry with exit code + duration
 	// so the live terminal UI can mark the block done and the dashboard
@@ -1182,14 +1217,16 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		// An exit-0 run the agent itself called failed must not read as a clean
 		// exec in Crow's Nest just because the process was polite about it.
 		endPayload["in_band_error"] = true
-		// Persist terminal diagnostics separately from the bounded raw-output
-		// prefix: a long run's final result is outside that prefix.
-		diagnosticScrub := scrubber.New()
-		diagnosticScrub.AddSecretValues(secretValues...)
-		endPayload["error_subtype"] = diagnosticScrub.Scrub(inBand.subtype)
-		endPayload["num_turns"] = inBand.turns
-		if cause := inBand.Err(); cause != nil {
-			endPayload["error_message"] = diagnosticScrub.Scrub(cause.Error())
+		if !req.strictContentPrivacy {
+			// Persist terminal diagnostics separately from the bounded raw-output
+			// prefix: a long run's final result is outside that prefix.
+			diagnosticScrub := scrubber.New()
+			diagnosticScrub.AddSecretValues(secretValues...)
+			endPayload["error_subtype"] = diagnosticScrub.Scrub(inBand.subtype)
+			endPayload["num_turns"] = inBand.turns
+			if cause := inBand.Err(); cause != nil {
+				endPayload["error_message"] = diagnosticScrub.Scrub(cause.Error())
+			}
 		}
 	}
 	if running {
@@ -1211,7 +1248,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		// runtime's end is CONFIRMED: here by a confirmed stop, or later
 		// by the detached hold's watcher.
 		agentExecStillRunning = true
-		o.updateRunStatus(ctx, runState.ID, "running")
+		o.updateRunStatusForRun(ctx, req, runState.ID, "running")
 		// Terminate the wedged exec INSIDE this ownership boundary (#2626
 		// review): every caller releases its own locks and slots when
 		// RunAgent returns, so a stop attempted after the return races the
@@ -1223,16 +1260,16 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		stopCancel()
 		switch {
 		case stopErr != nil:
-			o.logger.Error("detached exec outlived its monitoring budget and could not be stopped; holding the agent and its capacity until the runtime is confirmed gone",
+			o.loggerForRun(req).Error("detached exec outlived its monitoring budget and could not be stopped; holding the agent and its capacity until the runtime is confirmed gone",
 				"agent_id", req.AgentID, "run_id", req.RunID, "exec_id", result.ExecID, "error", stopErr)
 		case !stopped:
-			o.logger.Error("detached exec outlived its monitoring budget and ignored the stop signal; holding the agent and its capacity until the runtime is confirmed gone",
+			o.loggerForRun(req).Error("detached exec outlived its monitoring budget and ignored the stop signal; holding the agent and its capacity until the runtime is confirmed gone",
 				"agent_id", req.AgentID, "run_id", req.RunID, "exec_id", result.ExecID)
 		default:
 			agentExecStillRunning = false // normal defers now revoke and clean credentials
 			terminalCtx, terminalCancel := context.WithTimeout(context.Background(), preflightExecTimeout)
 			defer terminalCancel()
-			o.updateRunStatus(terminalCtx, runState.ID, "error") // confirmed end, unknown exit result
+			o.updateRunStatusForRun(terminalCtx, req, runState.ID, "error") // confirmed end, unknown exit result
 			// A stop that ANSWERED "gone" is a confirmed end: emit the
 			// terminal journal entry and return the agent to online now,
 			// then release normally. No live process remains.
@@ -1257,14 +1294,14 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 				release:     releaseRunSlot,
 				finalize: func() {
 					releaseRunHome(req.ContainerID, req.AgentSlug, req.RunID)
-					o.cleanupRunHome(req.ContainerID, req.AgentSlug, req.RunID, runEndToken)
+					o.cleanupRunHomeWithLogger(req.ContainerID, req.AgentSlug, req.RunID, runEndToken, o.loggerForRun(req))
 					if fileCreds && o.releaseAgentSecrets(req.ContainerID, req.AgentSlug, req.RunID) {
-						o.cleanupAgentSecrets(req.ContainerID, req.AgentSlug, req.RunID)
+						o.cleanupAgentSecretsWithLogger(req.ContainerID, req.AgentSlug, req.RunID, o.loggerForRun(req))
 					}
 				},
 				startedAt: execStart,
 			}, o.detachedPollInterval); err != nil {
-				o.logger.Error("could not register a detached hold; releasing the slot as the lesser failure",
+				o.loggerForRun(req).Error("could not register a detached hold; releasing the slot as the lesser failure",
 					"agent_id", req.AgentID, "run_id", req.RunID, "error", err)
 			} else {
 				slotTransferredToHold = true
@@ -1297,7 +1334,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		execErr = ErrAgentStopped
 	} else if exitCode != 0 {
 		status = "error"
-		o.logger.Warn("agent exited with error", "agent_id", req.AgentID, "exit_code", exitCode)
+		o.loggerForRun(req).Warn("agent exited with error", "agent_id", req.AgentID, "exit_code", exitCode)
 		// Typed error (not just a rendered sentence) so a caller like
 		// chatbridge's classifyAdapterExecError can tell "the binary is
 		// missing" (exit 127, "No such file or directory") apart from "the
@@ -1329,7 +1366,9 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// drift those two apart, and a quiet session writes no entry thanks
 	// to hash-based dedup. Best-effort: failures are swallowed inside
 	// recordContainerSnapshot so a probe error never breaks the run.
-	o.recordContainerSnapshot(ctx, req, req.ContainerID)
+	if !req.strictContentPrivacy {
+		o.recordContainerSnapshot(ctx, req, req.ContainerID)
+	}
 
 	return execErr
 }
@@ -1409,7 +1448,7 @@ func (o *Orchestrator) assembleSystemPrompt(ctx context.Context, req *AgentRunRe
 	// — a recall failure logs and continues so a flaky Ollama embed
 	// service never blocks a run. Budget is 2 KB of the 8 KB headroom
 	// reserved in promptBuf.Grow above.
-	if recaller := o.getEpisodicRecall(); recaller != nil && req.UserMessage != "" {
+	if recaller := o.getEpisodicRecall(); recaller != nil && req.UserMessage != "" && !req.strictContentPrivacy {
 		recallCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		rendered, err := recaller.Recall(recallCtx, EpisodicRecallInput{
 			WorkspaceID: req.WorkspaceID,
@@ -1432,11 +1471,11 @@ func (o *Orchestrator) assembleSystemPrompt(ctx context.Context, req *AgentRunRe
 				last := o.episodicUnreachableLastLogged.Load()
 				if last == 0 || time.Duration(now-last) >= episodicUnreachableLogInterval {
 					if o.episodicUnreachableLastLogged.CompareAndSwap(last, now) {
-						o.logger.Info("episodic recall backend unreachable; continuing without recall", "err", err)
+						o.loggerForRun(*req).Info("episodic recall backend unreachable; continuing without recall", "err", err)
 					}
 				}
 			} else {
-				o.logger.Debug("episodic recall failed; continuing without", "err", err, "agent", req.AgentSlug)
+				o.loggerForRun(*req).Debug("episodic recall failed; continuing without", "err", err, "agent", req.AgentSlug)
 			}
 		} else {
 			// Any successful recall (even an empty result for queries with
@@ -1495,7 +1534,7 @@ func (o *Orchestrator) assembleSystemPrompt(ctx context.Context, req *AgentRunRe
 	// it out of SystemPrompt is the whole point — see the volatile declaration.
 	req.UserMessage = prependSessionContext(volatile.String(), req.UserMessage)
 
-	o.logger.Info("system prompt assembled",
+	o.loggerForRun(*req).Info("system prompt assembled",
 		"agent", req.AgentSlug,
 		"est_tokens", tokenutil.EstimateTokens(req.SystemPrompt),
 		"session_context_bytes", volatile.Len(),
@@ -1543,21 +1582,21 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 		// config-side auto-enable in place this branch is reserved for
 		// CREWSHIP_SIDECAR_ENABLED=false; surface it so operators don't
 		// chase phantom "memory tools broken" reports.
-		o.logger.Warn("sidecar disabled — MCP memory tools and expose-port will be unreachable from agent",
+		o.loggerForRun(*req).Warn("sidecar disabled — MCP memory tools and expose-port will be unreachable from agent",
 			"agent_id", req.AgentID, "container_id", req.ContainerID)
 	}
 
 	var env []string
 	req.sidecarActive = sidecarEnabled
 	if sidecarEnabled {
-		agentTok := agentAuthToken(ipcToken, req.WorkspaceID, req.AgentID, o.logger)
-		internalAPIToken := sidecarIPCToken(ipcToken, req.WorkspaceID, req.CrewID, o.logger)
+		agentTok := agentAuthToken(ipcToken, req.WorkspaceID, req.AgentID, o.loggerForRun(*req))
+		internalAPIToken := sidecarIPCToken(ipcToken, req.WorkspaceID, req.CrewID, o.loggerForRun(*req))
 		// E0: the crew-scoped key the sidecar validates per-RUN tokens with,
 		// and this run's own token derived from it. The key goes to the
 		// sidecar (UID 1002); only the derived token enters the agent's
 		// environment (UID 1001), exactly like the LLM route key/token pair.
-		runKey := agentRunKey(ipcToken, req.WorkspaceID, req.CrewID, o.logger)
-		runToken := agentRunAuthToken(runKey, req.WorkspaceID, req.AgentID, req.RunID, o.logger)
+		runKey := agentRunKey(ipcToken, req.WorkspaceID, req.CrewID, o.loggerForRun(*req))
+		runToken := agentRunAuthToken(runKey, req.WorkspaceID, req.AgentID, req.RunID, o.loggerForRun(*req))
 		routeKey := internaltoken.DeriveLLMRouteKey(ipcToken, req.WorkspaceID, req.CrewID)
 		llmRouteToken := internaltoken.DeriveLLMRunRouteToken(routeKey, req.AgentID, req.RunID)
 		configFingerprint := gridcraftSidecarFingerprint(ipcToken, req.Credentials, o.gridCraftEnabled)
@@ -1594,10 +1633,10 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 		// structurally un-isolatable ones (OAuth / CLI tokens) stay at debug.
 		for _, exp := range AgentEnvCredentialExposures(*req, keeperEnabled) {
 			if exp.Actionable {
-				o.logger.Warn("credential plaintext exposed in agent environment",
+				o.loggerForRun(*req).Warn("credential plaintext exposed in agent environment",
 					"agent_id", req.AgentID, "env_var", exp.EnvVarName, "type", exp.Type, "reason", exp.Reason)
 			} else {
-				o.logger.Debug("credential present in agent environment (not isolatable)",
+				o.loggerForRun(*req).Debug("credential present in agent environment (not isolatable)",
 					"agent_id", req.AgentID, "env_var", exp.EnvVarName, "type", exp.Type, "reason", exp.Reason)
 			}
 		}
@@ -1613,12 +1652,12 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 				break
 			}
 		}
-		o.logger.Debug("env builder",
+		o.loggerForRun(*req).Debug("env builder",
 			"agent_id", req.AgentID,
 			"has_oauth_env", hasOAuthEnv,
 			"env_count", len(env),
 		)
-		o.logger.Info("sidecar proxy starting", "agent_id", req.AgentID)
+		o.loggerForRun(*req).Info("sidecar proxy starting", "agent_id", req.AgentID)
 		var memoryCfg *SidecarMemoryConfig
 		if req.MemoryEnabled {
 			memoryCfg = &SidecarMemoryConfig{
@@ -1655,7 +1694,7 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 				// #812: the boot agent's own per-agent token. req.CrewMembers
 				// excludes self, so the boot agent's identity would otherwise be
 				// missing from the sidecar's token→identity roster.
-				AgentToken: agentAuthToken(ipcToken, req.WorkspaceID, req.AgentID, o.logger),
+				AgentToken: agentAuthToken(ipcToken, req.WorkspaceID, req.AgentID, o.loggerForRun(*req)),
 				// E0: the validation key, plus the boot run's own context so
 				// the sidecar knows one run from the moment it starts without
 				// needing a control message for it.
@@ -1679,7 +1718,7 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 				Name:      m.Name,
 				RoleTitle: m.RoleTitle,
 				ChatID:    m.ChatID,
-				AuthToken: agentAuthToken(ipcToken, req.WorkspaceID, m.ID, o.logger),
+				AuthToken: agentAuthToken(ipcToken, req.WorkspaceID, m.ID, o.loggerForRun(*req)),
 			})
 		}
 		// Build network policy for sidecar.
@@ -1717,7 +1756,7 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 				AllowPrivateEndpoints: req.AllowPrivateEndpoints,
 			}
 		default:
-			o.logger.Error("unknown network mode, refusing to start sidecar", "mode", req.NetworkMode)
+			o.loggerForRun(*req).Error("unknown network mode, refusing to start sidecar", "mode", req.NetworkMode)
 			o.failRun(ctx, *req, runID, "error")
 			return nil, fmt.Errorf("unknown network mode: %s", req.NetworkMode)
 		}
@@ -1730,6 +1769,7 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 		// same container carrying the same proxy env, and two implementations of
 		// "make sure the sidecar is up" is exactly how these paths drift apart.
 		if _, err := o.settleSidecar(ctx, sidecarSettleSpec{
+			logger:             o.loggerForRun(*req),
 			containerID:        req.ContainerID,
 			logID:              req.AgentID,
 			desiredMode:        desiredMode,
@@ -1756,11 +1796,11 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 				// arrangement healthy.
 				if memoryCfg != nil && memoryCfg.Enabled && memoryCfg.BasePath != "" {
 					prepMemoryDirs(ctx, o.container, req.ContainerID,
-						memoryPrepPaths(memoryCfg, nil), o.logger)
+						memoryPrepPaths(memoryCfg, nil), o.loggerForRun(*req))
 				}
 			},
 		}); err != nil {
-			o.logger.Error("failed to start sidecar", "error", err, "agent_id", req.AgentID)
+			o.loggerForRun(*req).Error("failed to start sidecar", "error", err, "agent_id", req.AgentID)
 			o.failRun(ctx, *req, runID, "error")
 			return nil, fmt.Errorf("start sidecar: %w", err)
 		}
@@ -1770,7 +1810,7 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 				credCount++
 			}
 		}
-		o.logger.Info("sidecar ready", "agent_id", req.AgentID, "credentials", credCount)
+		o.loggerForRun(*req).Info("sidecar ready", "agent_id", req.AgentID, "credentials", credCount)
 
 		// MCP servers configured via .mcp.json use ${ENV_VAR} references that
 		// Claude Code expands from the process environment. With sidecar enabled
@@ -1779,7 +1819,7 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 		// #1362: reuse the keeperEnabled read taken under o.mu.RLock at the top
 		// of ensureSidecar (L830). injectMCPCredentialEnvVars is the third
 		// credential-delivery path and must withhold SECRETs under Keeper too.
-		env = injectMCPCredentialEnvVars(*req, env, keeperEnabled, o.logger)
+		env = injectMCPCredentialEnvVars(*req, env, keeperEnabled, o.loggerForRun(*req))
 	} else {
 		env = BuildEnvVars(*req, cred)
 		// #1754: a worker sub-agent skips STARTING a sidecar (the crew's is
@@ -1800,9 +1840,9 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 		// matters MORE, not less: SkipSidecar is how delegated sub-agents run,
 		// so it is the path that most reliably produces two concurrent runs
 		// inside one container.
-		subRunKey := agentRunKey(ipcToken, req.WorkspaceID, req.CrewID, o.logger)
-		subRunTok := agentRunAuthToken(subRunKey, req.WorkspaceID, req.AgentID, req.RunID, o.logger)
-		agentTok := agentAuthToken(ipcToken, req.WorkspaceID, req.AgentID, o.logger)
+		subRunKey := agentRunKey(ipcToken, req.WorkspaceID, req.CrewID, o.loggerForRun(*req))
+		subRunTok := agentRunAuthToken(subRunKey, req.WorkspaceID, req.AgentID, req.RunID, o.loggerForRun(*req))
+		agentTok := agentAuthToken(ipcToken, req.WorkspaceID, req.AgentID, o.loggerForRun(*req))
 		switch {
 		case subRunTok != "":
 			env = append(env, "CREWSHIP_AGENT_TOKEN="+subRunTok)
@@ -1876,7 +1916,7 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 	// The merged preflight script. Every write from here on is queued on it;
 	// it is flushed once at the bottom (and implicitly by any read probe that
 	// needs earlier writes to have landed first).
-	batch := newPreflightBatch(o.container, req.ContainerID, "1001:1001", o.logger)
+	batch := newPreflightBatch(o.container, req.ContainerID, "1001:1001", o.loggerForRun(req))
 
 	// Create scratch, output, per-agent crew, and secrets directories.
 	// outputDir is the agent's shared tree AND runOutputDir is this run's
@@ -1906,7 +1946,7 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 	// trade a ~4x latency win for a permanently root-privileged preflight.
 	// One extra exec is the cheaper side of that trade.
 	if mfErr := o.execPreflight(ctx, manifestCfg); mfErr != nil {
-		o.logger.Debug("manifest pre-create skipped", "error", mfErr)
+		o.loggerForRun(req).Debug("manifest pre-create skipped", "error", mfErr)
 	}
 
 	// Create .memory/ directories for persistent agent memory (in crew HOME).
@@ -1958,26 +1998,26 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 		unlockSecrets = func() { once.Do(lk.Unlock) }
 		defer unlockSecrets()
 	}
-	credWriteErr := writeCredentialFiles(ctx, batch, req.ContainerID, req.AgentSlug, req.Credentials, secretsAgentDir, secretsSharedDir, keeperEnabled, o.logger)
+	credWriteErr := writeCredentialFiles(ctx, batch, req.ContainerID, req.AgentSlug, req.Credentials, secretsAgentDir, secretsSharedDir, keeperEnabled, o.loggerForRun(req))
 	if credWriteErr != nil {
 		// Same fail-loud posture as the mkdir preflight above: a run that
 		// carries file-mounted credentials must not start without them.
 		if fileCreds {
-			o.logger.Error("failed to write credential files; run carries file-mounted credentials", "error", credWriteErr, "agent_id", req.AgentID)
+			o.loggerForRun(req).Error("failed to write credential files; run carries file-mounted credentials", "error", credWriteErr, "agent_id", req.AgentID)
 			o.failRun(ctx, req, runID, "error")
 			return nil, "", fmt.Errorf("write credential files for %s: %w — "+
 				"if this is a permission error on /secrets, the Docker daemon likely predates Docker Engine 26 "+
 				"(required for tmpfs uid/gid mount options); upgrade the daemon", req.AgentSlug, credWriteErr)
 		}
-		o.logger.Warn("failed to write credential files", "error", credWriteErr, "agent_id", req.AgentID)
+		o.loggerForRun(req).Warn("failed to write credential files", "error", credWriteErr, "agent_id", req.AgentID)
 	}
 	// A file-delivered login (Codex's $CODEX_HOME/auth.json, Gemini's
 	// ~/.gemini/oauth_creds.json — auth_delivery.go, #2428) lives under the
 	// agent's HOME, not /secrets. Same fail-loud posture as the file-mounted
 	// credentials above: without the file the CLI does not fail closed, it
 	// falls through to the dummy key. A no-op for adapters with no file form.
-	if err := syncLoginFile(ctx, batch, req.ContainerID, req, o.logger); err != nil {
-		o.logger.Error("failed to deliver login file", "error", err, "agent_id", req.AgentID, "cli_adapter", req.CLIAdapter)
+	if err := syncLoginFile(ctx, batch, req.ContainerID, req, o.loggerForRun(req)); err != nil {
+		o.loggerForRun(req).Error("failed to deliver login file", "error", err, "agent_id", req.AgentID, "cli_adapter", req.CLIAdapter)
 		o.failRun(ctx, req, runID, "error")
 		return nil, "", fmt.Errorf("deliver %s login for %s: %w", req.CLIAdapter, req.AgentSlug, err)
 	}
@@ -1985,15 +2025,15 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 
 	env = append(env, "CREWSHIP_OUTPUT_DIR="+outputDir)
 
-	if err := setupManagedToolchainSettings(ctx, batch, req, o.logger); err != nil {
+	if err := setupManagedToolchainSettings(ctx, batch, req, o.loggerForRun(req)); err != nil {
 		o.failRun(ctx, req, runID, "error")
 		return nil, "", fmt.Errorf("prepare managed toolchain settings: %w", err)
 	}
 
 	// Write non-secret Claude config (skip onboarding). Credentials are
 	// also available as files in /secrets/{agent-slug}/ for CLI tools.
-	if err := setupClaudeConfig(ctx, batch, req.ContainerID, req.AgentSlug, req.RunID, o.logger); err != nil {
-		o.logger.Warn("failed to inject claude config", "error", err, "agent_id", req.AgentID)
+	if err := setupClaudeConfig(ctx, batch, req.ContainerID, req.AgentSlug, req.RunID, o.loggerForRun(req)); err != nil {
+		o.loggerForRun(req).Warn("failed to inject claude config", "error", err, "agent_id", req.AgentID)
 	}
 
 	// Write MCP server configuration via the per-CLI adapter. Each adapter
@@ -2005,25 +2045,25 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 	hasMCP := req.CrewMCPConfigJSON != "" || req.AgentMCPConfigJSON != "" || len(req.MCPServers) > 0
 	mcpAdapter := getAdapter(req.CLIAdapter)
 	if mcpAdapter.SupportsMCP() {
-		if err := mcpAdapter.WriteMCPConfig(ctx, batch, req.ContainerID, req, workDir, o.logger); err != nil {
+		if err := mcpAdapter.WriteMCPConfig(ctx, batch, req.ContainerID, req, workDir, o.loggerForRun(req)); err != nil {
 			if hasMCP {
 				o.failRun(ctx, req, runID, "error")
 				return nil, "", fmt.Errorf("inject MCP config (%s): %w", req.CLIAdapter, err)
 			}
-			o.logger.Warn("failed to inject MCP config", "error", err, "agent_id", req.AgentID, "cli_adapter", req.CLIAdapter)
+			o.loggerForRun(req).Warn("failed to inject MCP config", "error", err, "agent_id", req.AgentID, "cli_adapter", req.CLIAdapter)
 		}
 	}
 
 	// Inject OAuth token files for MCP servers that need them.
 	// When Crewship holds access+refresh tokens from OAuth flow, write them
 	// to the location MCP servers expect (e.g. ~/.config/<server>/tokens.json).
-	if err := injectMCPOAuthTokens(ctx, batch, req.ContainerID, req.AgentSlug, req.RunID, req.MCPServers, req.Credentials, o.logger); err != nil {
-		o.logger.Warn("failed to inject MCP OAuth tokens", "error", err, "agent_id", req.AgentID)
+	if err := injectMCPOAuthTokens(ctx, batch, req.ContainerID, req.AgentSlug, req.RunID, req.MCPServers, req.Credentials, o.loggerForRun(req)); err != nil {
+		o.loggerForRun(req).Warn("failed to inject MCP OAuth tokens", "error", err, "agent_id", req.AgentID)
 	}
 
 	// Write CLI-specific system prompt files (e.g. AGENTS.md for OpenCode)
-	if err := setupSystemPromptFiles(ctx, batch, req.ContainerID, req, workDir, o.logger); err != nil {
-		o.logger.Warn("failed to write system prompt files", "error", err, "agent_id", req.AgentID, "cli_adapter", req.CLIAdapter)
+	if err := setupSystemPromptFiles(ctx, batch, req.ContainerID, req, workDir, o.loggerForRun(req)); err != nil {
+		o.loggerForRun(req).Warn("failed to write system prompt files", "error", err, "agent_id", req.AgentID, "cli_adapter", req.CLIAdapter)
 	}
 
 	// One exec for everything queued above. Steps that were their own exec
@@ -2033,7 +2073,7 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 	flushErr := batch.Flush(ctx)
 	unlockSecrets()
 	if flushErr != nil {
-		o.logger.Warn("preflight steps failed", "error", flushErr, "agent_id", req.AgentID)
+		o.loggerForRun(req).Warn("preflight steps failed", "error", flushErr, "agent_id", req.AgentID)
 	}
 
 	if req.CLIAdapter == "GEMINI_CLI" && batch.stepFailed("file:"+managedGeminiSettingsFile) {
@@ -2048,7 +2088,7 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 		// them. The classic cause is a Docker daemon older than Engine 26,
 		// which drops the /secrets tmpfs uid/gid options and leaves the mount
 		// root-owned so UID 1001 can't mkdir.
-		o.logger.Error("agent dirs or credential files failed; run carries file-mounted credentials",
+		o.loggerForRun(req).Error("agent dirs or credential files failed; run carries file-mounted credentials",
 			"error", flushErr, "agent_id", req.AgentID)
 		o.failRun(ctx, req, runID, "error")
 		return nil, "", fmt.Errorf("prepare /secrets/%s for file-mounted credentials: %w — "+
@@ -2096,6 +2136,20 @@ func shellJoin(args ...string) string {
 // the run. Pure extraction from RunAgent; the only error is the shared E2BIG
 // guard for arg-path adapters.
 func (o *Orchestrator) buildExecCommand(ctx context.Context, req AgentRunRequest, cmd, env []string, workDir string) (provider.ExecConfig, error) {
+	if req.strictContentPrivacy {
+		// Bypass tmux and its writable argv/env/script files. This does not
+		// qualify the native CLI's own histories or a shared container.
+		if req.HostOutputDir != "" || req.DurableOutputDir != "" || req.managedLaunch != nil {
+			return provider.ExecConfig{}, ErrPrivateRunUnqualified
+		}
+		cfg := provider.ExecConfig{ContainerID: req.ContainerID, Cmd: directRunCommand(req.RunID, cmd), Env: env, WorkingDir: workDir, User: "1001:1001"}
+		if getAdapter(req.CLIAdapter).PromptViaStdin(req) {
+			cfg.Stdin = strings.NewReader(req.UserMessage)
+		} else if tooLarge, _ := firstOversizedArg(cmd); tooLarge {
+			return provider.ExecConfig{}, ErrPrivateRunUnqualified
+		}
+		return cfg, nil
+	}
 	if req.HostOutputDir != "" {
 		if req.managedLaunch != nil {
 			return managedExecConfig(req, cmd, env, workDir)
@@ -2138,7 +2192,7 @@ func (o *Orchestrator) buildExecCommand(ctx context.Context, req AgentRunRequest
 	if getAdapter(req.CLIAdapter).PromptViaStdin(req) {
 		execCmd = directRunCommand(req.RunID, cmd)
 		execStdin = strings.NewReader(req.UserMessage)
-		o.logger.Info("delivering oversized agent prompt via stdin (tmux bypassed)",
+		o.loggerForRun(req).Info("delivering oversized agent prompt via stdin (tmux bypassed)",
 			"agent_id", req.AgentID, "prompt_bytes", len(req.UserMessage))
 	} else {
 		// Shared E2BIG guard. Only the Claude adapter currently routes
@@ -2161,9 +2215,9 @@ func (o *Orchestrator) buildExecCommand(ctx context.Context, req AgentRunRequest
 		execCmd, tmuxErr = o.setupTmuxExec(ctx, req.ContainerID, cmd, req.AgentSlug, req.RunID, env)
 		if tmuxErr != nil {
 			if _, seen := o.tmuxWarned.LoadOrStore(req.ContainerID, true); seen {
-				o.logger.Debug("tmux setup failed, falling back to direct exec", "error", tmuxErr)
+				o.loggerForRun(req).Debug("tmux setup failed, falling back to direct exec", "error", tmuxErr)
 			} else {
-				o.logger.Warn("tmux setup failed, falling back to direct exec (further occurrences for this container log at debug)",
+				o.loggerForRun(req).Warn("tmux setup failed, falling back to direct exec (further occurrences for this container log at debug)",
 					"error", tmuxErr, "container_id", req.ContainerID)
 			}
 			execCmd = directRunCommand(req.RunID, cmd)
@@ -2302,7 +2356,7 @@ func (o *Orchestrator) emitExecEnd(ctx context.Context, req AgentRunRequest, exe
 		fields[k] = v
 	}
 	payload := execCommandPayload(req, journalCmd, "end", fields)
-	_, _ = o.getJournal().Emit(ctx, JournalEntry{
+	_, _ = o.journalForRun(req).Emit(ctx, JournalEntry{
 		WorkspaceID: req.WorkspaceID,
 		CrewID:      req.CrewID,
 		AgentID:     req.AgentID,
@@ -2381,7 +2435,7 @@ var knownPackageLaunchers = map[string]bool{
 func (o *Orchestrator) emitStaleSidecarSignal(ctx context.Context, req AgentRunRequest, runningHash string) {
 	cIDShort := shortID(req.ContainerID)
 	const remediation = "crewship crew restart-agents"
-	o.logger.Error("stale sidecar detected: container is serving an OLD crewship-sidecar binary from before the last redeploy — memory recall and egress policy may be silently degraded; recreate the crew's containers ("+remediation+") to pick up the new sidecar",
+	o.loggerForRun(req).Error("stale sidecar detected: container is serving an OLD crewship-sidecar binary from before the last redeploy — memory recall and egress policy may be silently degraded; recreate the crew's containers ("+remediation+") to pick up the new sidecar",
 		"agent_id", req.AgentID,
 		"container_id", cIDShort,
 		"running_sidecar_hash", runningHash,
@@ -2395,7 +2449,7 @@ func (o *Orchestrator) emitStaleSidecarSignal(ctx context.Context, req AgentRunR
 		return
 	}
 
-	_, _ = o.getJournal().Emit(ctx, JournalEntry{
+	_, _ = o.journalForRun(req).Emit(ctx, JournalEntry{
 		WorkspaceID: req.WorkspaceID,
 		CrewID:      req.CrewID,
 		AgentID:     req.AgentID,

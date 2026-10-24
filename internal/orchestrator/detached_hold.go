@@ -88,6 +88,19 @@ func (o *Orchestrator) detachedHoldRunID(agentID string) (string, bool) {
 // mechanism exists to refuse. Every tenth tick re-attempts a bounded stop,
 // because a wedged exec that ignored one signal may honour the next.
 func (o *Orchestrator) watchDetachedHold(h *detachedHold, poll time.Duration) {
+	if h.req.strictContentPrivacy {
+		defer func() {
+			if recover() != nil {
+				// A failed observer proves nothing about runtime death. Keep
+				// the hold, admission and capacity; never publish the panic
+				// value or stack. Supervision recovery requires a separate
+				// trusted confirmation, not terminal bookkeeping here.
+				if o.logger != nil {
+					o.logger.Error("private detached supervision interrupted; runtime remains unconfirmed", "run_id", h.runID)
+				}
+			}
+		}()
+	}
 	t := time.NewTicker(poll)
 	defer t.Stop()
 	alertAfter := h.alertAfter
@@ -102,7 +115,7 @@ func (o *Orchestrator) watchDetachedHold(h *detachedHold, poll time.Duration) {
 		case <-h.done:
 			return
 		case <-capTimer.C:
-			o.logger.Error("detached runtime still unconfirmed; retaining admission and capacity, backing off probes", "agent_id", h.req.AgentID, "run_id", h.runID)
+			o.loggerForRun(h.req).Error("detached runtime still unconfirmed; retaining admission and capacity, backing off probes", "agent_id", h.req.AgentID, "run_id", h.runID)
 			if poll < time.Minute {
 				t.Reset(time.Minute)
 			}
@@ -150,7 +163,7 @@ func (o *Orchestrator) watchDetachedHold(h *detachedHold, poll time.Duration) {
 				// container fails every tick and the log must not become
 				// the outage.
 				if ticks%10 == 1 {
-					o.logger.Warn("detached hold: could not probe the runtime; holding the agent and slot",
+					o.loggerForRun(h.req).Warn("detached hold: could not probe the runtime; holding the agent and slot",
 						"agent_id", h.req.AgentID, "run_id", h.runID, "error", err)
 				}
 			}
@@ -167,14 +180,14 @@ func (o *Orchestrator) restopDetachedHold(h *detachedHold) bool {
 	})
 	switch {
 	case err != nil:
-		o.logger.Warn("detached hold: re-stop attempt failed", "agent_id", h.req.AgentID, "run_id", h.runID, "error", err)
+		o.loggerForRun(h.req).Warn("detached hold: re-stop attempt failed", "agent_id", h.req.AgentID, "run_id", h.runID, "error", err)
 	case stopped:
 		// Confirmed gone by the stop itself; the next tick's Alive probe
 		// would see it too, but the bookkeeping does not need to wait.
 		o.closeDetachedHold(h, true)
 		return true
 	case !stopped:
-		o.logger.Warn("detached hold: runtime ignored the re-stop signal", "agent_id", h.req.AgentID, "run_id", h.runID)
+		o.loggerForRun(h.req).Warn("detached hold: runtime ignored the re-stop signal", "agent_id", h.req.AgentID, "run_id", h.runID)
 	}
 	return false
 }
@@ -197,7 +210,7 @@ func (o *Orchestrator) closeDetachedHold(h *detachedHold, confirmedGone bool) {
 		o.emitExecEnd(ctx, h.req, h.execID, journalCmdView{argv: []string{"<detached exec>"}}, "info",
 			fmt.Sprintf("%s: detached exec confirmed gone (%s)", h.agentSlug, time.Since(h.startedAt).Round(time.Second)),
 			h.startedAt, map[string]any{"detached": true, "confirmed_gone": true})
-		o.updateRunStatus(ctx, h.runID, "error") // no trustworthy exit result survived detachment
+		o.updateRunStatusForRun(ctx, h.req, h.runID, "error") // no trustworthy exit result survived detachment
 		o.detachedMu.Lock()
 		other := false
 		for _, hold := range o.detached {
