@@ -100,9 +100,11 @@ func (e *instanceAuditTailError) Unwrap() error { return e.cause }
 
 type securityAuditFallbackKey struct{}
 
-// withSecurityAuditFallback marks ctx as a security-reducing action: CLI token
-// revocation, session revocation and password reset. Such an action must never
-// be held hostage by audit repair. Access-granting actions never carry it.
+// withSecurityAuditFallback permits a record outside a broken instance chain
+// for revocations, suspension, host-local password recovery, and audit incident
+// or workspace reseal notices. Web password change/reset and access-granting
+// operations stay chained-only. Callers must explicitly qualify each operation;
+// this marker never permits fallback for errors other than a broken tail.
 func withSecurityAuditFallback(ctx context.Context) context.Context {
 	return context.WithValue(ctx, securityAuditFallbackKey{}, true)
 }

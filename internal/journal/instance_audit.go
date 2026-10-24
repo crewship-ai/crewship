@@ -42,9 +42,10 @@ func instanceAuditMACWithKey(key []byte, seq int64, prev string, f InstanceAudit
 }
 
 // InstanceAuditFallbackKey/Value mark an instance audit row written outside the
-// chain. Only revocations and password reset may write one, and only while the
-// chain tail is broken (see appendInstanceAuditTx in internal/api): those
-// actions reduce access and must never wait on audit repair. The row has no
+// chain. Explicit revocations, suspension, host-local password recovery, and
+// audit incident or workspace reseal notices may use it only while the chain
+// tail is broken (see appendInstanceAuditTx in internal/api). Web password
+// change/reset and access-granting operations remain chained-only. The row has no
 // chain columns, so it neither extends nor launders the chain; verification
 // counts it in UnchainedFallback and never reports such a chain as OK.
 const (

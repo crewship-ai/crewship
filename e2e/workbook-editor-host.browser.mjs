@@ -151,8 +151,17 @@ const editorHits = []
 
 /** A stand-in for the editor bundle: the bridge side of protocol 1 and a tiny cell form. */
 function fakeEditor(mode) {
-  const hello = `parent.postMessage({ type: "gridcraft:hello", protocol: 1, bundle: ${JSON.stringify(mode === "bad-digest" ? "e".repeat(64) : mode === "prefixed-digest" ? `sha256:${BUNDLE}` : BUNDLE)} }, parentOrigin)`
-  return `<!doctype html><meta charset="utf-8"><title>Fake editor</title>
+  // Only static markup selects a fixture mode; no data is interpolated into JavaScript.
+  const modes = {
+    normal: '<meta name="fixture-mode" content="normal">',
+    "bad-digest": '<meta name="fixture-mode" content="bad-digest">',
+    "prefixed-digest": '<meta name="fixture-mode" content="prefixed-digest">',
+    "early-hello": '<meta name="fixture-mode" content="early-hello">',
+    renavigate: '<meta name="fixture-mode" content="renavigate">',
+    silent: '<meta name="fixture-mode" content="silent">',
+  }
+  assert.ok(Object.hasOwn(modes, mode), "known static editor fixture mode")
+  return '<!doctype html><meta charset="utf-8">' + modes[mode] + `<title>Fake editor</title>
 <label>Cell <input id="cell" value="B3"></label> <label>Value <input id="value"></label> <button id="commit">Commit</button>
 <label>Draft <input id="draft"></label> <button id="away">Navigate away</button>
 <pre id="state"></pre>
@@ -198,7 +207,13 @@ document.getElementById("commit").addEventListener("click", () => {
 })
 document.getElementById("away").addEventListener("click", () => { location.href = "next.html" })
 render()
-${mode === "silent" ? "" : mode === "early-hello" ? hello : mode === "renavigate" ? `addEventListener("load", () => setTimeout(() => { location.href = "next.html" }, 0))` : `addEventListener("load", () => setTimeout(() => { ${hello} }, 0))`}
+const fixtureMode = document.querySelector('meta[name="fixture-mode"]').content
+const hello = () => parent.postMessage({ type: "gridcraft:hello", protocol: 1,
+  bundle: fixtureMode === "bad-digest" ? "e".repeat(64) : fixtureMode === "prefixed-digest" ? "sha256:" + "c".repeat(64) : "c".repeat(64),
+}, parentOrigin)
+if (fixtureMode === "early-hello") hello()
+else if (fixtureMode === "renavigate") addEventListener("load", () => setTimeout(() => { location.href = "next.html" }, 0))
+else if (fixtureMode !== "silent") addEventListener("load", () => setTimeout(hello, 0))
 </script>`
 }
 

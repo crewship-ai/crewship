@@ -221,14 +221,14 @@ export function MemberDetail({
       )}
 
       {showCaps && (
-        <SettingsCard icon={Boxes} tint="var(--purple)" title="Crews & agents" description="Where they may use the abilities above">
+        <SettingsCard icon={Boxes} tint="var(--purple)" title="Resource access" description="Where they may use the abilities above">
           <div className="px-4 pb-3 [&>section]:mt-3">
             {member.access_mode && (
               <p className="mt-3 text-label text-muted-foreground" data-testid="member-access-mode">
                 <span className="font-medium text-foreground">{member.access_mode === "restricted" ? "Restricted" : "Trusted"}</span>
                 {" — "}
                 {member.access_mode === "restricted"
-                  ? "only the crews, agents and projects granted below."
+                  ? "only the agents, routines and projects granted below."
                   : "everything the role and abilities allow."}
               </p>
             )}

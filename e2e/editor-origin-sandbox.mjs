@@ -134,9 +134,8 @@ if (pinned) harnessEnv.CREWSHIP_TEST_EDITOR_PINNED = '1'
 let proxy
 async function startProxy(target) {
   const { request } = await import('node:http')
-  const t = new URL(target)
   proxy = createServer((req, res) => {
-    const up = request({ host: t.hostname, port: t.port, method: req.method, path: req.url, headers: req.headers }, r => {
+    const up = request({ host: '127.0.0.1', port: target, method: req.method, path: req.url, headers: req.headers }, r => {
       res.writeHead(r.statusCode, r.rawHeaders)
       r.pipe(res)
     })
@@ -153,6 +152,26 @@ harness.stderr.on('data', d => { log += d })
 const exited = new Promise(resolve => harness.on('exit', resolve))
 let browser
 const check = (ok, what) => { if (!ok) throw new Error(what) }
+// Metadata is private harness DATA, never an arbitrary HTTP destination. URLs
+// are reconstructed from a checked loopback port and a closed bundle digest.
+function parseEditorMetadata(raw) {
+  if (raw.length > 4096) throw new Error('editor metadata exceeds its fixed schema budget')
+  const value = JSON.parse(raw)
+  const keys = ['digest', 'frameSrc', 'index', 'origin']
+  if (!value || Array.isArray(value) || Object.keys(value).sort().join(',') !== keys.join(',') || keys.some(key => typeof value[key] !== 'string') || JSON.stringify(value) !== raw) throw new Error('invalid editor metadata schema')
+  const match = /^http:\/\/127[.]0[.]0[.]1:([1-9][0-9]{0,4})$/.exec(value.origin)
+  if (!match) throw new Error('invalid editor metadata origin')
+  const port = Number(match[1])
+  if (!Number.isInteger(port) || port < 1 || port > 65535 || String(port) !== match[1]) throw new Error('invalid editor metadata port')
+  const origin = `http://127.0.0.1:${port}`
+  const digest = value.digest
+  if (value.origin !== origin || digest.length !== 64 || !/^[a-f0-9]{64}$/.test(digest)) throw new Error('invalid editor metadata identity')
+  const index = sameHost ? `/_editor/b/${digest}/index.html` : `${origin}/b/${digest}/index.html`
+  const frameSrc = sameHost ? '' : origin
+  if (value.index !== index || value.frameSrc !== frameSrc) throw new Error('invalid editor metadata paths')
+  return Object.freeze({ origin, port, digest, index, frameSrc })
+}
+
 // The editor document URL as the host page frames it: same host resolves
 // the server's path against the page's own origin (F2 editorFrameSrc).
 const editorIndex = () => new URL(editor.index, parentOrigin).href
@@ -220,19 +239,30 @@ async function freshPage(path = '/') {
 }
 
 // Waits for a framed Studio document to report, or for nothing to happen.
-function runtimeReport(page, ms) {
-  return page.evaluate(ms => new Promise(resolve => {
-    const timer = setTimeout(() => resolve(null), ms)
-    addEventListener('message', e => { if (e.data?.type === 'runtime-probe') { clearTimeout(timer); resolve(e.data) } })
-  }), ms)
+function runtimeReport(page, ms, expectedOrigin) {
+  return page.evaluate(({ ms, expectedOrigin }) => new Promise(resolve => {
+    const frame = document.querySelector('iframe')
+    if (!frame?.contentWindow) throw new Error('runtime probe requires the controlled frame')
+    const source = frame.contentWindow
+    const finish = value => { clearTimeout(timer); removeEventListener('message', onMessage); resolve(value) }
+    const onMessage = event => {
+      if (event.source !== source || event.origin !== expectedOrigin || event.data?.type !== 'runtime-probe') return
+      finish(event.data)
+    }
+    const timer = setTimeout(() => finish(null), ms)
+    addEventListener('message', onMessage)
+  }), { ms, expectedOrigin })
 }
 
 try {
   for (let i = 0; i < 300 && !editor; i++) {
-    try { editor = JSON.parse(await readFile(file, 'utf8')) } catch { await new Promise(r => setTimeout(r, 100)) }
+    try { editor = parseEditorMetadata(await readFile(file, 'utf8')) } catch (error) {
+      if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error
+      await new Promise(r => setTimeout(r, 100))
+    }
   }
   check(editor, `editor harness did not start: ${log}`)
-  if (sameHost) parentOrigin = viaProxy ? await startProxy(editor.origin) : editor.origin
+  if (sameHost) parentOrigin = viaProxy ? await startProxy(editor.port) : editor.origin
   // Same host: the server names the editor by path only; the host page
   // resolves it against its own origin (what the browser shows), whatever
   // Host or scheme a proxy presents to Crewship.
@@ -289,7 +319,7 @@ try {
     for (const [sandbox, contained] of [['allow-scripts', true], ['allow-scripts allow-same-origin', false]]) {
       const { context, page } = await freshPage('/?frameself=1')
       await mount(page, { sandbox, credentialless: true })
-      const probe = runtimeReport(page, 5000)
+      const probe = runtimeReport(page, 5000, contained ? 'null' : parentOrigin)
       await page.evaluate(() => window.editorPort.postMessage({ navigate: '/runtime' }))
       const p = await probe
       check(p, 'runtime probe did not report')
@@ -358,7 +388,7 @@ try {
       for (const target of targets) {
         const { context, page } = await freshPage()
         await mount(page, { sandbox, credentialless: true })
-        const probe = runtimeReport(page, 1500)
+        const probe = runtimeReport(page, 1500, sandbox === 'allow-scripts' ? 'null' : parentOrigin)
         await page.evaluate(t => window.editorPort.postMessage({ navigate: t }), target)
         const p = await probe
         check(p === null && hits.runtime === 0, `sandbox=${JSON.stringify(sandbox)} self-navigation to ${target} reached a Studio document: ${JSON.stringify(p)}`)
@@ -373,7 +403,7 @@ try {
     {
       const { context, page } = await freshPage('/?frameself=1')
       await mount(page, { sandbox: 'allow-scripts allow-same-origin', credentialless: true })
-      const probe = runtimeReport(page, 5000)
+      const probe = runtimeReport(page, 5000, parentOrigin)
       await page.evaluate(() => window.editorPort.postMessage({ navigate: '/runtime' }))
       const p = await probe
       console.log('control, frame-src = whole Studio origin + allow-same-origin:', JSON.stringify(p))

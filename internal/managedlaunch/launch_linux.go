@@ -5,7 +5,6 @@ package managedlaunch
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -47,11 +46,7 @@ func Launch(encoded string, args []string) error {
 	if !ok || (stat.Uid != 0 && stat.Uid != 1001) {
 		return errors.New("managed launch: unsupported executable ownership")
 	}
-	content, err := io.ReadAll(io.LimitReader(f, MaxArtifactBytes+1))
-	if err != nil {
-		return errors.New("managed launch: executable read failed")
-	}
-	artifact, err := Capture(d.Path, content)
+	artifact, err := CaptureFile(d.Path, f)
 	if err != nil {
 		return err
 	}

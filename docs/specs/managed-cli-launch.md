@@ -153,9 +153,11 @@ become the managed candidate; its independently observed version must match
 the native lock and exact selector. Older revisions without independent
 `managed_path` and `managed_version` evidence require a rebuild.
 
-Artifact validation currently buffers up to 512 MiB per reader; operators must
-budget memory for launcher validation in addition to the native CLI. The bound
-limits individual allocations, not aggregate concurrency or an OOM guarantee.
+Artifact validation keeps the 512 MiB per-artifact cap while streaming file
+hashes and reading ELF metadata in bounded blocks. Unix archive capture uses
+private temporary filesystem storage; Windows archives retain whole-file
+buffering. See Verification storage below. Per-artifact limits do not bound
+aggregate concurrency or guarantee against OOM; tmpfs storage also uses memory.
 Attestation uses a 20-second provider bound within 30-second admission.
 Immutable launcher generations are retained. Conservative collection is tracked
 in [issue #2906](https://github.com/crewship-ai/crewship/issues/2906); it must
@@ -278,3 +280,18 @@ into this component. The implementation uses the Go standard library
 module dependency. The separately fetched upstream Codex executable has its
 own provenance/license; its packaging observation does not transfer its code
 or any authentication entitlement into this component.
+
+### Verification storage
+
+Native executable hashing and ELF inspection use the same open regular file
+descriptor later passed to `execveat`; the path is not reopened. This does not
+prevent in-place inode writes: immutable image, mount and trusted host staging
+checks remain required. The 512 MiB artifact cap and static-ELF qualification
+are unchanged. Dynamic metadata is read in fixed-size blocks.
+
+On Unix, forward-only image archives use a private 0600 temporary file that is
+unlinked before archive bytes are written and closed on every exit. This bounds
+Go buffering but needs up to 512 MiB temporary filesystem storage per capture.
+`TMPDIR` may be tmpfs, so this is not a guarantee of lower host or cgroup memory.
+Windows archive capture retains its prior whole-file buffering. Archive
+verification still compares every byte against the same opened host artifact.
