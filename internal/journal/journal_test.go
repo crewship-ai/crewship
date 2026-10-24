@@ -103,12 +103,16 @@ func quietLogger() *slog.Logger {
 
 func TestEmitAndList(t *testing.T) {
 	db := openTestDB(t)
+	// SQLite :memory: belongs to one connection; the asynchronous writer and
+	// reader must share it rather than opening a second empty database.
+	db.SetMaxOpenConns(1)
 	defer db.Close()
 
 	w := NewWriter(db, quietLogger(), WriterOptions{FlushSize: 2, FlushInterval: 10 * time.Millisecond})
 	defer w.Close()
 
 	ctx := context.Background()
+	flushed := w.Notify()
 	id, err := w.Emit(ctx, Entry{
 		WorkspaceID: "ws_test",
 		Type:        EntryPeerConversation,
@@ -124,8 +128,13 @@ func TestEmitAndList(t *testing.T) {
 		t.Fatal("expected id")
 	}
 
-	// Give the batcher a moment to flush.
-	time.Sleep(50 * time.Millisecond)
+	// Still exercise the actual background timer. Wait for its post-commit
+	// notification instead of assuming it finishes within an arbitrary sleep.
+	select {
+	case <-flushed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("background journal flush did not complete")
+	}
 
 	entries, _, err := List(ctx, db, Query{WorkspaceID: "ws_test"})
 	if err != nil {

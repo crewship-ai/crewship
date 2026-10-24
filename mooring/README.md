@@ -114,3 +114,12 @@ CLOCK_BOOTTIME owner, actual model0.2 Rust child and FULL host commit. It checks
 host-only status/retry after child death and source revocation closing the SQL
 gate. Its initializer/native command are fixtures: it does not qualify raw human
 deltas, a live participant actor/socket, production packaging or editor UI.
+
+The inactive session-store composition pairs an exact captured owner lease with
+queued causal commits. Its processing callback must verify original sealed
+operation membership before outcome lookup; a participant reference is never
+authority. Agent task mandates retain the original human source, exact confirmed
+work attempt and requested intent. Canonical permission changes are distinguished
+from unavailable proof, which remains nonterminal. These independently reviewed
+primitives are assembled here for the bounded host submission registry; no
+network ingress, provider execution or session profile is enabled.
