@@ -77,4 +77,7 @@ type TargetStoreConfig struct {
 	Enabled       bool
 	Adapter       TargetBatchAdapter
 	Limits        BatchTargetLimits
+	// Optional immutable hook used ONLY by the full-identity session commit
+	// path. Ordinary strict/causal calls never invoke or acquire this source.
+	SessionHumanPrepare SessionHumanPrepareResolver
 }

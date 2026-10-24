@@ -72,6 +72,14 @@ func (v *privateControlValidator) validateCausal(raw []byte, peer privateCausalP
 	if json.Unmarshal(normalized, &value) != nil || value["control_profile"] != PrivateCausalPrepareProfile {
 		return nil, ErrPrivateControl
 	}
+	// Optional session-native fields do not widen the standalone causal
+	// capability merely because the bundled schema knows their shapes.
+	if _, present := value["human_context"]; present {
+		return nil, ErrPrivateControl
+	}
+	if _, present := value["native_delta"]; present {
+		return nil, ErrPrivateControl
+	}
 	t, _ := value["type"].(string)
 	allowed := t == "validate_checkpoint_causal" || t == "prepare_atomic_causal"
 	if peer == privateCausalRuntime {

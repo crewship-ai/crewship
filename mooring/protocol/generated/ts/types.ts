@@ -1007,6 +1007,7 @@ export interface PrepareAtomicCausal {
   context: CausalPrepareContext;
   change: AtomicChange;
   control_profile: PrepareAtomicCausalControlProfile;
+  human_context?: SessionHumanPrepareContext;
 }
 
 export type AtomicPreparedCausalType = "atomic_prepared_causal";
@@ -1025,6 +1026,7 @@ export interface AtomicPreparedCausal {
   membership_hash: Digest;
   outcome: AtomicPreparedCausalOutcome;
   control_profile: AtomicPreparedCausalControlProfile;
+  native_delta?: SessionNativeDelta;
 }
 
 export interface ConfirmedCheckpointBasis {
@@ -1036,7 +1038,7 @@ export type SessionOpenType = "session_open";
 
 export type SessionOpenControlProfile = "mooring.session-causal.v1";
 
-export type SessionOpenRequiredCapabilitiesItem = "checkpoint_identity_v1" | "origin_inventory_v1";
+export type SessionOpenRequiredCapabilitiesItem = "checkpoint_identity_v1" | "origin_inventory_v1" | "human_native_prepare_v1";
 
 export interface SessionOpen {
   type: SessionOpenType;
@@ -1070,7 +1072,7 @@ export type SessionOpenedType = "session_opened";
 
 export type SessionOpenedControlProfile = "mooring.session-causal.v1";
 
-export type SessionOpenedCapabilitiesItem = "checkpoint_identity_v1" | "origin_inventory_v1";
+export type SessionOpenedCapabilitiesItem = "checkpoint_identity_v1" | "origin_inventory_v1" | "human_native_prepare_v1";
 
 export interface SessionOpened {
   type: SessionOpenedType;
@@ -1372,6 +1374,48 @@ export interface SessionOriginsInspected {
   checkpoint_generation: Counter;
   content_digest: Digest;
   allocated: Array<AllocatedCrdtOrigin>;
+}
+
+export interface SessionNativeDelta {
+  writer_origin: PositiveCounter;
+  allocation_origins: Array<PositiveCounter>;
+  update: string;
+  targets: Array<Identifier>;
+}
+
+export interface SessionSavedNativeDelta {
+  reference: Identifier;
+  source_ref: Identifier;
+  source_order: PositiveCounter;
+  writer_origin: PositiveCounter;
+  update: string;
+  targets: Array<Identifier>;
+  revision: PositiveCounter;
+  checkpoint_state_digest: Digest;
+}
+
+export interface SessionSavedHumanPrefix {
+  reference: Identifier;
+  source_ref: Identifier;
+  source_order: PositiveCounter;
+  change: AtomicChange;
+}
+
+export interface SessionHumanPrepareContext {
+  session_id: Identifier;
+  runtime_ref: Identifier;
+  fence: Fence;
+  op_id: Identifier;
+  source_ref: Identifier;
+  original_reference: Identifier;
+  origin: PositiveCounter;
+  source_order: PositiveCounter;
+  next_unsettled_order: PositiveCounter;
+  original_basis: Checkpoint;
+  saved_transcript: Array<SessionSavedNativeDelta>;
+  own_prefix: Array<SessionSavedHumanPrefix>;
+  own_history: Array<SessionSavedNativeDelta>;
+  replay_basis?: Checkpoint;
 }
 
 export type Message = Hello | Welcome | CommitBatch | CommitResult | StatusRequest | StatusResult | SessionTicketRequest | SessionTicket | OwnerAcquire | OwnerRenew | OwnerGrant | DeliveryRenew | DeliveryGrant | SessionClosed | DeliveryBlocked | RevocationConfirmed | ReadRequest | ReadResult | CheckpointRequest | CheckpointResult | Presence | TaskStatus | TaskResult | TaskCancel | Proposal | ProposalAccept | UndoRequest | ProtocolError | ManifestRequest | ManifestResult | LifecycleRequest | LifecycleResult | SessionJoin | SessionJoined | SessionLeave | SubmitChanges | ChangesReceived | TaskSubmit | ProposalRequest | CollaborationUpdate | DocumentUpdate | AssetRequest | AssetResult | TicketValidationRequest | TicketValidationResult | RevocationNotice | RuntimeReady | ValidateCheckpoint | CheckpointValidated | PrepareAtomic | AtomicPrepared | ValidateCheckpointCausal | CheckpointValidatedCausal | PrepareAtomicCausal | AtomicPreparedCausal | SessionOpen | SessionRestore | SessionOpened | SessionSubmitBatch | SessionCommitResult | SessionParticipantOpen | SessionParticipantInput | BoundedTransferBegin | BoundedTransferChunk | SessionParticipantOutput | SessionJoinBounded | SessionJoinedBounded | SessionRestored | SessionStatusRequest | SessionStatusResult | SessionDescribeCheckpoint | SessionCheckpointDescribed | SessionInspectOrigins | SessionOriginsInspected;

@@ -72,10 +72,11 @@ type SessionBatchResult struct {
 	EncodedOutput []byte
 }
 type SessionCommitter struct {
-	store     *BatchStore
-	owner     OwnerLease
-	authority SessionBatchAuthority
-	output    SessionOutputPreparer
+	store         *BatchStore
+	owner         OwnerLease
+	authority     SessionBatchAuthority
+	output        SessionOutputPreparer
+	humanResolver SessionHumanPrepareResolver
 }
 
 func NewSessionCommitter(store *BatchStore, owner OwnerLease, authority SessionBatchAuthority, output SessionOutputPreparer) (*SessionCommitter, error) {
@@ -87,17 +88,19 @@ func NewSessionCommitter(store *BatchStore, owner OwnerLease, authority SessionB
 	// does not replace the transactional OwnerStore.Check below.
 	// Copy immutable configuration; never replace the public store's current-reader
 	// authority. Only the commit-only clone below can use processing authority.
-	return &SessionCommitter{store: store, owner: owner, authority: authority, output: output}, nil
+	return &SessionCommitter{store: store, owner: owner, authority: authority, output: output, humanResolver: store.config.Targets.SessionHumanPrepare}, nil
 }
 
 type sessionMembership struct{ changeID, membershipHash string }
 
 type sessionCommitMode struct {
-	fullBasis *FullCheckpointBasis
-	members   map[string]sessionMembership
-	basis     SessionBasis
-	output    SessionOutputPreparer
-	encoded   []byte
+	originalStore *BatchStore
+	humanResolver SessionHumanPrepareResolver
+	fullBasis     *FullCheckpointBasis
+	members       map[string]sessionMembership
+	basis         SessionBasis
+	output        SessionOutputPreparer
+	encoded       []byte
 }
 
 func (s *SessionCommitter) Commit(ctx context.Context, request SessionBatchRequest) (SessionBatchResult, error) {
@@ -117,6 +120,8 @@ func (s *SessionCommitter) CommitFull(ctx context.Context, request SessionFullBa
 	return s.commitMode(ctx, SessionBatchRequest{Lease: request.Lease, Changes: request.Changes}, &sessionCommitMode{fullBasis: &basis, output: s.output})
 }
 func (s *SessionCommitter) commitMode(ctx context.Context, request SessionBatchRequest, mode *sessionCommitMode) (SessionBatchResult, error) {
+	mode.originalStore = s.store
+	mode.humanResolver = s.humanResolver
 	isolated := *s.store
 	isolated.config.Authority = func(ctx context.Context, tx *sql.Tx, access BatchAccess) error {
 		purpose := SessionProcessSealedOutcome

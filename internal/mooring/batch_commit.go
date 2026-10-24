@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+
+	protocol "github.com/crewship-ai/crewship/mooring/protocol/generated/go"
 )
 
 func (s *BatchStore) loadKnown(ctx context.Context, tx *sql.Tx, k SessionKey, changes []BatchChange) (map[int]BatchChangeResult, error) {
@@ -335,6 +337,20 @@ func (s *BatchStore) commit(ctx context.Context, request BatchRequest, session *
 						if e != nil {
 							return e
 						}
+						var humanContext *protocol.SessionHumanPrepareContext
+						sessionNative := session != nil && session.fullBasis != nil && session.humanResolver != nil
+						var sessionAdapter SessionNativeTargetBatchAdapter
+						if sessionNative {
+							var ok bool
+							sessionAdapter, ok = s.config.Targets.Adapter.(SessionNativeTargetBatchAdapter)
+							if !ok {
+								return ErrInvalid
+							}
+							humanContext, e = session.resolveHumanPrepare(ctx, tx, request.Lease, c, checkpoint, causalContext.DocumentRevision)
+							if e != nil {
+								return e
+							}
+						}
 						failure, e = causalTargetReadFailure(c, causalContext, inventory)
 						if e != nil {
 							return e
@@ -348,7 +364,11 @@ func (s *BatchStore) commit(ctx context.Context, request BatchRequest, session *
 							return e
 						}
 						if failure == nil {
-							targetCandidate, failure, e = s.config.Targets.Adapter.(CausalTargetBatchAdapter).PrepareCausalTargets(ctx, append([]byte(nil), checkpoint...), isolated, isolatedContext)
+							if sessionNative {
+								targetCandidate, failure, e = sessionAdapter.PrepareSessionTargets(ctx, append([]byte(nil), checkpoint...), isolated, isolatedContext, humanContext)
+							} else {
+								targetCandidate, failure, e = s.config.Targets.Adapter.(CausalTargetBatchAdapter).PrepareCausalTargets(ctx, append([]byte(nil), checkpoint...), isolated, isolatedContext)
+							}
 						}
 					} else {
 						targetContext, e = s.targetContext(ctx, tx, key, c, rev)

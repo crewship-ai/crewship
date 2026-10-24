@@ -366,6 +366,9 @@ impl ReadySession {
                     SessionOpenRequiredCapabilitiesItem::OriginInventoryV1 => {
                         SessionOpenedCapabilitiesItem::OriginInventoryV1
                     }
+                    SessionOpenRequiredCapabilitiesItem::HumanNativePrepareV1 => {
+                        SessionOpenedCapabilitiesItem::HumanNativePrepareV1
+                    }
                 })
                 .collect(),
         };

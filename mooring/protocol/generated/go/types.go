@@ -1456,6 +1456,7 @@ type PrepareAtomicCausal struct {
 	Context        CausalPrepareContext              `json:"context"`
 	Change         AtomicChange                      `json:"change"`
 	ControlProfile PrepareAtomicCausalControlProfile `json:"control_profile"`
+	HumanContext   *SessionHumanPrepareContext       `json:"human_context,omitempty"`
 }
 
 type AtomicPreparedCausalType string
@@ -1482,6 +1483,7 @@ type AtomicPreparedCausal struct {
 	MembershipHash        Digest                             `json:"membership_hash"`
 	Outcome               AtomicPreparedCausalOutcome        `json:"outcome"`
 	ControlProfile        AtomicPreparedCausalControlProfile `json:"control_profile"`
+	NativeDelta           *SessionNativeDelta                `json:"native_delta,omitempty"`
 }
 
 type ConfirmedCheckpointBasis struct {
@@ -1506,6 +1508,7 @@ type SessionOpenRequiredCapabilitiesItem string
 const (
 	SessionOpenRequiredCapabilitiesItemCheckpointIdentityV1 SessionOpenRequiredCapabilitiesItem = "checkpoint_identity_v1"
 	SessionOpenRequiredCapabilitiesItemOriginInventoryV1    SessionOpenRequiredCapabilitiesItem = "origin_inventory_v1"
+	SessionOpenRequiredCapabilitiesItemHumanNativePrepareV1 SessionOpenRequiredCapabilitiesItem = "human_native_prepare_v1"
 )
 
 type SessionOpen struct {
@@ -1561,6 +1564,7 @@ type SessionOpenedCapabilitiesItem string
 const (
 	SessionOpenedCapabilitiesItemCheckpointIdentityV1 SessionOpenedCapabilitiesItem = "checkpoint_identity_v1"
 	SessionOpenedCapabilitiesItemOriginInventoryV1    SessionOpenedCapabilitiesItem = "origin_inventory_v1"
+	SessionOpenedCapabilitiesItemHumanNativePrepareV1 SessionOpenedCapabilitiesItem = "human_native_prepare_v1"
 )
 
 type SessionOpened struct {
@@ -1989,6 +1993,48 @@ type SessionOriginsInspected struct {
 	CheckpointGeneration Counter                               `json:"checkpoint_generation"`
 	ContentDigest        Digest                                `json:"content_digest"`
 	Allocated            []AllocatedCrdtOrigin                 `json:"allocated"`
+}
+
+type SessionNativeDelta struct {
+	WriterOrigin      PositiveCounter   `json:"writer_origin"`
+	AllocationOrigins []PositiveCounter `json:"allocation_origins"`
+	Update            string            `json:"update"`
+	Targets           []Identifier      `json:"targets"`
+}
+
+type SessionSavedNativeDelta struct {
+	Reference             Identifier      `json:"reference"`
+	SourceRef             Identifier      `json:"source_ref"`
+	SourceOrder           PositiveCounter `json:"source_order"`
+	WriterOrigin          PositiveCounter `json:"writer_origin"`
+	Update                string          `json:"update"`
+	Targets               []Identifier    `json:"targets"`
+	Revision              PositiveCounter `json:"revision"`
+	CheckpointStateDigest Digest          `json:"checkpoint_state_digest"`
+}
+
+type SessionSavedHumanPrefix struct {
+	Reference   Identifier      `json:"reference"`
+	SourceRef   Identifier      `json:"source_ref"`
+	SourceOrder PositiveCounter `json:"source_order"`
+	Change      AtomicChange    `json:"change"`
+}
+
+type SessionHumanPrepareContext struct {
+	SessionID          Identifier                `json:"session_id"`
+	RuntimeRef         Identifier                `json:"runtime_ref"`
+	Fence              Fence                     `json:"fence"`
+	OpID               Identifier                `json:"op_id"`
+	SourceRef          Identifier                `json:"source_ref"`
+	OriginalReference  Identifier                `json:"original_reference"`
+	Origin             PositiveCounter           `json:"origin"`
+	SourceOrder        PositiveCounter           `json:"source_order"`
+	NextUnsettledOrder PositiveCounter           `json:"next_unsettled_order"`
+	OriginalBasis      Checkpoint                `json:"original_basis"`
+	SavedTranscript    []SessionSavedNativeDelta `json:"saved_transcript"`
+	OwnPrefix          []SessionSavedHumanPrefix `json:"own_prefix"`
+	OwnHistory         []SessionSavedNativeDelta `json:"own_history"`
+	ReplayBasis        *Checkpoint               `json:"replay_basis,omitempty"`
 }
 
 type Message = json.RawMessage
