@@ -87,12 +87,14 @@ pub mod private_rpc {
     enum ControlProfile {
         Strict,
         Causal,
+        Session,
     }
     impl ControlProfile {
         fn offer(self) -> mooring_protocol::HelloControlProfilesItem {
             match self {
                 Self::Strict => mooring_protocol::HelloControlProfilesItem::MooringPrepareV1,
                 Self::Causal => mooring_protocol::HelloControlProfilesItem::MooringPrepareCausalV1,
+                Self::Session => mooring_protocol::HelloControlProfilesItem::MooringSessionCausalV1,
             }
         }
         fn selection(self) -> mooring_protocol::RuntimeReadySelectedControlProfile {
@@ -102,6 +104,9 @@ pub mod private_rpc {
                 }
                 Self::Causal => {
                     mooring_protocol::RuntimeReadySelectedControlProfile::MooringPrepareCausalV1
+                }
+                Self::Session => {
+                    mooring_protocol::RuntimeReadySelectedControlProfile::MooringSessionCausalV1
                 }
             }
         }
@@ -137,6 +142,20 @@ pub mod private_rpc {
 
     pub fn bootstrap(stream: &mut UnixStream, bootstrap_timeout: Duration) -> io::Result<()> {
         bootstrap_selected(stream, bootstrap_timeout, &versions(), false).map(|_| ())
+    }
+    /// Explicit unselected session startup. Neither the production CLI nor
+    /// stateless serve functions call this capability.
+    pub fn bootstrap_session(stream: &mut UnixStream, timeout: Duration) -> io::Result<()> {
+        let selected = bootstrap_profiles(
+            stream,
+            timeout,
+            &crate::dispatch::wordcraft_versions(),
+            &[ControlProfile::Session],
+        )?;
+        if !matches!(selected, Some(ControlProfile::Session)) {
+            return Err(invalid("session profile not selected"));
+        }
+        Ok(())
     }
     fn bootstrap_selected(
         stream: &mut UnixStream,
@@ -259,6 +278,9 @@ pub mod private_rpc {
             let response = match selected {
                 ControlProfile::Strict => registration.respond(&frame)?,
                 ControlProfile::Causal => registration.respond_causal(&frame)?,
+                ControlProfile::Session => {
+                    return Err(invalid("session unavailable in stateless dispatcher"))
+                }
             };
             write_profile_frame(&mut stream, &response, true)?;
         }

@@ -163,3 +163,14 @@ processed yet, and no CLI selects this constructor. The injected clock and host
 transport assertion must come from verified native integration. Tests use real
 Unix socket pairs plus an injected clock; they do not qualify suspend behavior,
 production owner renewal, author admission, durable settlement or distribution.
+
+`session_startup_peer` is an explicit integration example, not the production
+`mooring-collab` entry point. It selects only the offered session profile,
+retains FD3 close-on-exec, uses native CLOCK_BOOTTIME, restores an actual owned
+WordCraft Doc and serves scoped stateless prepare callbacks. It has no
+participant, submission or author-permission implementation. Its logical host
+mode is fixed to `crewship`/node solely for this isolated host-transport proof.
+The production CLI continues selecting only its previous stateless causal
+profile. This composition includes the core-metadata readonly repair and native
+compatibility regressions; broader typed native-engine losslessness remains a
+separate activation requirement. No human draft APIs or Cargo changes are added.

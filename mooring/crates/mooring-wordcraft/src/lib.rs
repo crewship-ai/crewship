@@ -5,6 +5,7 @@ pub mod adapter;
 mod candidate;
 mod checkpoint_wire;
 pub mod command;
+mod core_fields;
 mod format;
 #[cfg(test)]
 mod human;
@@ -389,10 +390,16 @@ impl Document {
                 .ok_or(AdapterError::InvalidCheckpoint)?;
             format::validate_stored_stamps(&update, total_clock)?;
         }
+        let project_text = !unsupported
+            || recovered
+                .document
+                .transact()
+                .get_map("wordcraft.texts")
+                .is_some();
         let result = Self {
             doc: recovered.document,
             read_only: unsupported || model == format::Model::LegacyV1,
-            project_text: !unsupported,
+            project_text,
             model,
         };
         result.validate_shape()?;
@@ -465,6 +472,7 @@ fn classify(native: &Value) -> Result<bool, AdapterError> {
     let mut unsupported = object
         .keys()
         .any(|key| !ROOT_FIELDS.contains(&key.as_str()));
+    unsupported |= !core_fields::supported(&native["core"]);
     for field in ["parts", "comments", "revisions"] {
         unsupported |= match object.get(field) {
             Some(Value::Object(v)) => !v.is_empty(),
