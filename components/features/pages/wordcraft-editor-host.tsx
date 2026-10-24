@@ -47,6 +47,9 @@ export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange }
     }
     const receive = (raw: unknown) => {
       if (dead) return
+      // IPC already delivered the string, but do not allocate a second UTF-8
+      // copy of an unbounded child value before checking the cheap lower bound.
+      if (typeof raw !== "string" || raw.length > WORDCRAFT_FRAME_BYTES) { close("invalid_editor_frame"); return }
       const message = decodeMessage(raw, WORDCRAFT_FRAME_BYTES)
       // The private flat machine envelope is compact round-trip JSON. This
       // rejects duplicate keys before accepting a child command; the opaque

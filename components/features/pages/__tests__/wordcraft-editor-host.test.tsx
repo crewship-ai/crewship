@@ -71,3 +71,15 @@ it("refuses duplicate private-envelope keys before accepting any child command",
   expect(mocks.stop).toHaveBeenCalledWith("invalid_editor_frame")
   expect(frame.hidden).toBe(true)
 })
+
+it("rejects oversized child strings before making a second UTF-8 allocation", async () => {
+  const { frame, port } = await open()
+  const oversized = "x".repeat(262145)
+  const encoder = vi.spyOn(TextEncoder.prototype, "encode")
+  try {
+    await act(async () => { port.postMessage(oversized); await new Promise(resolve => setTimeout(resolve, 10)) })
+    expect(encoder.mock.calls.some(([raw]) => raw === oversized)).toBe(false)
+    expect(mocks.stop).toHaveBeenCalledWith("invalid_editor_frame")
+    expect(frame.hidden).toBe(true)
+  } finally { encoder.mockRestore() }
+})
