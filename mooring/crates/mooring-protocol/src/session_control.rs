@@ -85,7 +85,11 @@ pub fn validate(raw: &[u8], peer: control::Peer) -> Result<CanonicalValue, WireE
     if !allowed || !crate::shape::envelope(value.value()) {
         return Err(WireError::InvalidShape);
     }
-    if message_type == "session_submit_batch" {
+    // Only complete restoration and committed checkpoint replies need the
+    // larger private frame. Ordinary wrappers include their metadata in the
+    // small raw/canonical budget, so normalization cannot hide escaped raw
+    // inner bytes. Drivers reject over-budget ingress before sealing it.
+    if !matches!(message_type, "session_restore" | "session_commit_result") {
         wire::preflight_with_limit(raw, MAX_BATCH_BYTES)?;
         if value.bytes().len() > MAX_BATCH_BYTES {
             return Err(WireError::ResourceLimit);
