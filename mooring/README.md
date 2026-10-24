@@ -112,3 +112,16 @@ run cancellation and mandate revocation closing issued delivery gates, and
 restore drain/barrier integration remain required before enabling any content
 path. Tests use canonical SQL with synthetic trusted transport contexts and a
 synthetic suspend-aware clock; they do not establish live agent E3 acceptance.
+
+
+The dormant captured-agent decision callback accepts only the private proof
+returned by a previous authenticated check. It retains that check's original
+intent as well as the task ceiling; a read proof cannot become a write proof.
+It validates the original mandate, ingress, credential, live attempt and
+principal/chat/journal identity before checking canonical fences in the writer.
+Only a successful original workspace/user/member fence comparison can establish
+`CanonicalPermissionChanged`. SQL failures and opaque Page/application policy
+denials stay `Unqualified` and nonterminal. Neither result supplies an allowed
+proof or writes a durable outcome. Allowed proofs never extend their original
+horizon. Participant/submission binding, durable outcome classification and
+issued delivery-gate revocation barriers still require separate integration.

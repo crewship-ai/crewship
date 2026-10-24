@@ -112,6 +112,7 @@ type collaborationAgentPageAccess struct {
 	store                          *collaborationAgentMandateStore
 	mandateRef                     string
 	credentialBinding              [32]byte
+	intent                         string
 }
 
 // This default-off registry is deliberately absent from PageHandler routes.
@@ -388,7 +389,7 @@ func (s *collaborationAgentMandateStore) Check(r *http.Request, tx *sql.Tx, hand
 	if !time.Now().Before(page.credentialExpiry) {
 		return result, errCollaborationAgentAccess
 	}
-	result = collaborationAgentPageAccess{collaborationHumanPageAccess: page, agentID: a.agentID, crewID: a.crewID, runID: a.runID, workID: a.workID, attempt: a.attempt, generation: a.generation, store: s, mandateRef: handle, credentialBinding: entry.binding.credentialSHA256}
+	result = collaborationAgentPageAccess{collaborationHumanPageAccess: page, agentID: a.agentID, crewID: a.crewID, runID: a.runID, workID: a.workID, attempt: a.attempt, generation: a.generation, store: s, mandateRef: handle, credentialBinding: entry.binding.credentialSHA256, intent: intent}
 	return result, nil
 }
 
