@@ -447,3 +447,20 @@ issuance still requires opaque runtime inventory evidence, original author and
 owner checks in the same writer, persistent burned exclusions and COMMIT before
 publication. The current 4,096-entry inspector bound is not an unbounded
 document-lifetime entitlement. No ingress or issuance route uses these helpers.
+
+
+Origin ingress metadata is a dormant target-local record contract. Permanent
+origin exclusions include baseline and issued-but-unused reservations; immutable
+source and operation identities retain their original ordinal order and hashes.
+Owner correlation stores a token hash, never the live owner bearer. SQL rows and
+author digests cannot recreate host capabilities after restart or restore.
+
+Portable content carries only an immutable lineage marker. Portable bundles
+exclude the four local metadata tables, and replacement preserves target burns
+while closing retired sources. A matching marker is correlation, not proof that
+the union includes all previously issued origins. Missing lineage or lost
+physical history remains unqualified; this change supplies no recovery journal,
+issuance, raw Saved history, native constructor or participant route. Logical
+operation metadata is bounded to 100,000 rows and 64 MiB per lineage; the 4,096
+origin-exclusion bound is conservative capacity refusal, not an unlimited
+lifetime entitlement or permission to recycle an origin.
