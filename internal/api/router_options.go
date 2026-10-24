@@ -229,6 +229,12 @@ func WithComposioConfig(cfg *config.ComposioConfig) RouterOption {
 
 // WithKeeperConversations attaches a conversation reader so Keeper can inspect
 // the agent's actual chat history before making access decisions.
+// WithPublicPagePasswords configures nonblocking password-work admission.
+// NewRouter validates and resolves automatic values before serving requests.
+func WithPublicPagePasswords(limits config.PublicPagePasswordsConfig) RouterOption {
+	return func(r *Router) { r.publicPagePasswords = limits }
+}
+
 func WithAllowSignup(allow bool) RouterOption {
 	return func(r *Router) {
 		r.allowSignup = allow

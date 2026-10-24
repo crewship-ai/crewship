@@ -716,7 +716,7 @@ func (s *Server) mountAPIRouter(
 	if missionEngine != nil {
 		opts = append(opts, goapi.WithMissionCallback(missionEngine))
 	}
-	opts = append(opts, goapi.WithAllowSignup(cfg.Auth.AllowSignup))
+	opts = append(opts, goapi.WithAllowSignup(cfg.Auth.AllowSignup), goapi.WithPublicPagePasswords(cfg.Auth.PublicPagePasswords))
 	if cfg.Auth.GoogleClientID != "" {
 		opts = append(opts, goapi.WithGoogleOAuth(cfg.Auth.GoogleClientID, cfg.Auth.GoogleSecret, cfg.Auth.NextjsURL))
 	}
