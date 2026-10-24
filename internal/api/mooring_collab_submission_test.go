@@ -289,3 +289,34 @@ func TestCollaborationSubmissionReadAdmissionCannotSealWriterOperation(t *testin
 		t.Fatal("read admission acquired sealed write proof")
 	}
 }
+
+func TestCollaborationSubmissionCannotMixOriginalIngressFences(t *testing.T) {
+	x := newCollaborationAgentTestFixture(t)
+	handle := x.attach(t, x.prepare(t))
+	otherFence, err := newCollaborationIngressFence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stamp, err := collaborationHumanLifecycleStamp(otherFence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Same SQL document and authenticated agent, but two distinct restore fences.
+	// Holding one must never stand in for the original mandate's other fence.
+	h := &collaborationHumanRegistry{lifecycle: stamp, bindingID: "other-fence-runtime", runtime: &mooring.Runtime{}, pages: x.f.pages, fence: otherFence, clock: x.clock, scope: x.key}
+	registry, err := newCollaborationSubmissionRegistry(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, _ := h.storeBinding()
+	request := x.request()
+	var participant *collaborationAgentSubmissionParticipant
+	err = registry.run(request.Context(), binding, func(ctx context.Context) error {
+		var err error
+		participant, err = registry.admitAgent(ctx, request, x.store, handle)
+		return err
+	})
+	if err == nil || participant != nil || len(registry.agents) != 0 {
+		t.Fatal("different original restore fence admitted an agent participant")
+	}
+}

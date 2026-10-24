@@ -151,7 +151,7 @@ func (s *collaborationSubmissionRegistry) admitAgent(ctx context.Context, r *htt
 	if _, err := s.active(ctx); err != nil {
 		return nil, err
 	}
-	if r == nil || store == nil {
+	if r == nil || store == nil || store.fence != s.humans.fence || store.pages == nil || store.pages.db != s.humans.pages.db {
 		return nil, errCollaborationSubmission
 	}
 	var captured collaborationAgentPageAccess

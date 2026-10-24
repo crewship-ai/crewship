@@ -145,3 +145,7 @@ workspace epoch may over-invalidate an independent author when another person
 is revoked; actual mixed-author D3 qualification is explicitly blocked until a
 separate regression and reviewed subject-relevance design resolve that case.
 No session FIFO, provider execution, participant delivery or editor UI is enabled.
+
+Agent submission admission also requires the mandate registry to share the exact
+original restore fence and SQL handle with the document registry. A short check
+under a different fence cannot substitute for the enclosing operation's lease.
