@@ -26,6 +26,14 @@ native data. Invalid native field types/run boundaries are refused. Inspect
 `read_only_reason()` before any future mutation admission; no per-block lossy
 fallback is offered. Richer supported fields require qualification first.
 
+Tracked-change mode, any protection setting, formatting protection and protection
+hashes are also read-only: direct CRDT edits do not implement those native
+command semantics. Non-null `fmtChange`, `numChange`, `ins` or `del` metadata
+anywhere in the retained document is unqualified, even without a revision table.
+The metadata scan stops at depth 32 or 262144 values and fails read-only.
+Previously projected checkpoints keep their original bytes and stable IDs when
+this classification changes; no application rights are inferred from settings.
+
 Host callers must generate fresh IDs once during initial import, then include
 those IDs and full Yrs state in the same confirmed checkpoint. Body indexes are
 not identities. `restore` accepts only host-authenticated, scope/revision-verified
