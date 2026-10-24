@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +31,7 @@ type MooringHTTPConfig struct {
 	Enabled              bool
 	Binary, BinarySHA256 string
 	PublicOrigin         string
+	SDKPrefix            string
 	DeliveryTTL          time.Duration
 }
 
@@ -78,15 +80,18 @@ type collaborationHTTPDocument struct {
 	connections map[string]*collaborationHTTPConnection
 }
 type collaborationHTTPConnection struct {
-	document            *collaborationHTTPDocument
-	request             *http.Request
-	admission           collaborationHumanAdmission
-	ticket, ref, origin string
-	mu                  sync.Mutex
-	joined              collaborationHumanJoined
-	socket              *websocket.Conn
-	used, closed        bool
-	auditedOwner        string
+	document                 *collaborationHTTPDocument
+	request                  *http.Request
+	admission                collaborationHumanAdmission
+	ticket, ref, origin      string
+	mu                       sync.Mutex
+	joined                   collaborationHumanJoined
+	socket                   *websocket.Conn
+	used, closed             bool
+	auditedOwner             string
+	joinRequest, openRequest protocol.Identifier
+	joinedDelivered          bool
+	deliveryMu               sync.Mutex
 }
 
 func newCollaborationHTTPManager(pages *PageHandler, c MooringHTTPConfig) (*collaborationHTTPManager, error) {
@@ -99,9 +104,20 @@ func newCollaborationHTTPManager(pages *PageHandler, c MooringHTTPConfig) (*coll
 	if c.DeliveryTTL < time.Millisecond || c.DeliveryTTL > 5*time.Second {
 		return nil, errCollaborationHTTP
 	}
+	if c.SDKPrefix != "" {
+		const prefix = "/mooring-sdk/generated/"
+		if !strings.HasPrefix(c.SDKPrefix, prefix) || len(c.SDKPrefix) != len(prefix)+64 {
+			return nil, errCollaborationHTTP
+		}
+		for _, r := range c.SDKPrefix[len(prefix):] {
+			if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f') {
+				return nil, errCollaborationHTTP
+			}
+		}
+	}
 	if c.PublicOrigin != "" {
 		u, e := url.Parse(c.PublicOrigin)
-		if e != nil || u.User != nil || u.Host == "" || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") {
+		if e != nil || u.User != nil || u.Host == "" || u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") {
 			return nil, errCollaborationHTTP
 		}
 	}
@@ -344,5 +360,5 @@ func (m *collaborationHTTPManager) session(w http.ResponseWriter, r *http.Reques
 	d.connections[ref] = c
 	d.mu.Unlock()
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, 200, map[string]any{"session_id": d.activation.SessionID(), "checkpoint_revision": head, "participant_ref": admission.participant, "ticket": ticket, "connection_ref": ref, "origin": origin, "versions": protocol.Versions{ProtocolVersion: "0.4.0", ModelVersion: "0.2.0", EngineVersion: "0.10.0"}, "websocket_path": "/api/v1/pages/@" + key.ArtifactID + "/mooring/ws?workspace_id=" + key.WorkspaceID})
+	writeJSON(w, 200, map[string]any{"session_id": d.activation.SessionID(), "checkpoint_revision": head, "sdk_prefix": m.config.SDKPrefix, "participant_ref": admission.participant, "ticket": ticket, "connection_ref": ref, "origin": origin, "versions": protocol.Versions{ProtocolVersion: "0.4.0", ModelVersion: "0.2.0", EngineVersion: "0.10.0"}, "websocket_path": "/api/v1/pages/@" + key.ArtifactID + "/mooring/ws?workspace_id=" + key.WorkspaceID})
 }

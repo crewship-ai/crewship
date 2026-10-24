@@ -139,6 +139,10 @@ func (m *collaborationHTTPManager) websocket(w http.ResponseWriter, r *http.Requ
 		if err != nil {
 			return
 		}
+		c.mu.Lock()
+		c.joinRequest = join.RequestID
+		c.openRequest = protocol.Identifier(request)
+		c.mu.Unlock()
 		if err = d.humans.runHumanOperation(c.request, c.admission.participant, func(ctx context.Context) error {
 			return d.submissions.withWriter(ctx, func(tx *sql.Tx) error {
 				if _, e := d.humans.checkCaptured(ctx, tx, c.admission, false, 0); e != nil {
@@ -171,17 +175,17 @@ func (m *collaborationHTTPManager) websocket(w http.ResponseWriter, r *http.Requ
 				}
 				continue
 			}
-			// Raw human changes require the typed host-original prepare context. No
-			// agent-command fallback or loose role/context callback can qualify them.
-			if header.Type == "submit_changes" {
-				return
+			// These controls are not qualified by the current native actor/source
+			// bridge. Reject locally without sending them into the shared process or
+			// converting them to a durable operation outcome.
+			if header.Type == "submit_changes" || header.Type == "presence" || header.Type == "operation_status" {
+				if c.rejectUnqualified(normalized) != nil {
+					return
+				}
+				continue
 			}
-			if header.Type != "presence" && header.Type != "operation_status" {
-				return
-			}
-			if err = c.input(normalized); err != nil {
-				return
-			}
+			return
+
 		}
 	}}
 	server.ServeHTTP(w, r)
@@ -191,6 +195,11 @@ func (c *collaborationHTTPConnection) close() {
 	if c == nil {
 		return
 	}
+	// Completed grants must reach the single FD writer before SessionLeave.
+	// A request still unread by Go can still fail the process closed; this
+	// mutex does not claim to solve that availability tail race.
+	c.deliveryMu.Lock()
+	defer c.deliveryMu.Unlock()
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
@@ -198,7 +207,8 @@ func (c *collaborationHTTPConnection) close() {
 	}
 	c.closed = true
 	ws := c.socket
-	gate := c.joined.gate.GateID
+	joined := c.joined
+	gate := joined.gate.GateID
 	c.mu.Unlock()
 	if ws != nil {
 		_ = ws.Close()
@@ -213,6 +223,20 @@ func (c *collaborationHTTPConnection) close() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		_, _ = d.manager.pages.db.ExecContext(ctx, `UPDATE mooring_delivery_gates SET closed=1 WHERE id=? AND page_id=? AND workspace_id=? AND application_id=? AND participant_ref=? AND owner_id=? AND owner_generation=?`, gate, d.key.ArtifactID, d.key.WorkspaceID, d.key.ApplicationID, c.admission.participant, d.owner.OwnerID, d.owner.Generation)
+	}
+	if gate != "" && d.ctx.Err() == nil {
+		// Trusted denial-only cleanup uses the original private tuple. Revoked
+		// human rights must not prevent closing their own exact recipient path.
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		id, e := collaborationOpaqueID()
+		if e == nil {
+			raw, _ := json.Marshal(protocol.SessionLeave{Type: "session_leave", RequestID: protocol.Identifier(id), Scope: d.wireScope(), SessionID: protocol.Identifier(d.activation.SessionID())})
+			e = d.cell.runtime.SendParticipantInput(ctx, d.activation, protocol.SessionParticipantInput{Type: "session_participant_input", RequestID: protocol.Identifier(id + "-leave"), ControlProfile: mooring.PrivateSessionProfile, Scope: d.wireScope(), SessionID: protocol.Identifier(d.activation.SessionID()), RuntimeRef: protocol.Identifier(d.cell.runtime.RuntimeRef()), Fence: d.wireFence(), ConnectionRef: protocol.Identifier(c.ref), ParticipantRef: protocol.Identifier(c.admission.participant), GateID: protocol.Identifier(joined.gate.GateID), PermissionVersion: protocol.Counter(joined.gate.PermissionVersion), Message: raw})
+		}
+		if e != nil {
+			d.cancel()
+		}
 	}
 	// Closing a socket is not a runtime blocked-ACK or revocation completion.
 }
@@ -250,6 +274,35 @@ func (d *collaborationHTTPDocument) ticket(ctx context.Context, q protocol.Ticke
 	read, write := true, c.admission.write
 	return protocol.TicketValidationResult{Type: "ticket_validated", RequestID: q.RequestID, Scope: q.Scope, SessionID: q.SessionID, Generation: q.Fence.Generation, ParticipantRef: protocol.Identifier(c.admission.participant), PermissionVersion: protocol.Counter(joined.gate.PermissionVersion), Granted: protocol.Capabilities{Read: &read, Write: &write}, Versions: d.wireVersions(), ExpiresInMs: protocol.PositiveCounter(strconv.FormatInt(joined.gate.DurationMilliseconds, 10)), ValidationNonce: q.ValidationNonce, GateID: protocol.Identifier(joined.gate.GateID)}, nil
 }
+
+// Only an already-entered callback/reply is serialized here. This does not
+// erase queued renewals, authorize a recipient or acknowledge revocation.
+func (d *collaborationHTTPDocument) deliveryGuard(ctx context.Context, q protocol.DeliveryRenew) (func(), error) {
+	if ctx.Err() != nil || q.Scope != d.wireScope() || q.SessionID != protocol.Identifier(d.activation.SessionID()) || q.Fence != d.wireFence() {
+		return nil, errCollaborationHTTP
+	}
+	d.mu.Lock()
+	var c *collaborationHTTPConnection
+	for _, candidate := range d.connections {
+		if candidate.admission.participant == string(q.ParticipantRef) {
+			c = candidate
+			break
+		}
+	}
+	d.mu.Unlock()
+	if c == nil {
+		return nil, errCollaborationHTTP
+	}
+	c.deliveryMu.Lock()
+	c.mu.Lock()
+	valid := !c.closed && c.joined.delivery != nil && q.GateID == protocol.Identifier(c.joined.gate.GateID) && q.PermissionVersion == protocol.Counter(c.joined.gate.PermissionVersion)
+	c.mu.Unlock()
+	if !valid || ctx.Err() != nil {
+		c.deliveryMu.Unlock()
+		return nil, errCollaborationHTTP
+	}
+	return c.deliveryMu.Unlock, nil
+}
 func (d *collaborationHTTPDocument) renewDelivery(ctx context.Context, q protocol.DeliveryRenew) (protocol.DeliveryGrant, error) {
 	d.mu.Lock()
 	var c *collaborationHTTPConnection
@@ -275,12 +328,14 @@ func (d *collaborationHTTPDocument) renewDelivery(ctx context.Context, q protoco
 // bounded send. A current canonical authorization, exact SQL gate and current
 // owner must all have enough remaining horizon for that send; no renewal here.
 func (c *collaborationHTTPConnection) checkedSend(raw []byte) error {
-	if len(raw) > collaborationHTTPFrameLimit {
-		return errCollaborationHTTP
-	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.closed || c.socket == nil || c.joined.delivery == nil {
+	return c.checkedSendLocked(raw)
+}
+
+// Caller holds c.mu through the SQL writer and physical send.
+func (c *collaborationHTTPConnection) checkedSendLocked(raw []byte) error {
+	if len(raw) > collaborationHTTPFrameLimit || c.closed || c.socket == nil || c.joined.delivery == nil {
 		return errCollaborationHTTP
 	}
 	d := c.document
@@ -333,55 +388,46 @@ func (d *collaborationHTTPDocument) output(_ context.Context, q protocol.Session
 	if c == nil {
 		return errCollaborationHTTP
 	}
-	c.mu.Lock()
-	valid := q.ParticipantRef == protocol.Identifier(c.admission.participant) && q.GateID == protocol.Identifier(c.joined.gate.GateID) && q.PermissionVersion == protocol.Counter(c.joined.gate.PermissionVersion)
-	c.mu.Unlock()
-	if !valid {
-		return errCollaborationHTTP
-	}
+	// This join/read checkpoint qualifies exactly one Joined confirmation.
+	// A child cannot invent host Saved, status or document history. Those output
+	// kinds require a separate actual SQL-COMMIT receipt/checkpoint correlator.
 	raw, e := d.manager.schema.ValidateE3(q.Message)
 	if e != nil {
 		return e
 	}
-	var inner struct {
-		Type       string               `json:"type"`
-		Scope      *protocol.Scope      `json:"scope"`
-		Session    *protocol.Identifier `json:"session_id"`
-		Versions   *protocol.Versions   `json:"versions"`
-		Generation *protocol.Counter    `json:"generation"`
-	}
-	if json.Unmarshal(raw, &inner) != nil || inner.Scope == nil || *inner.Scope != d.wireScope() || inner.Session != nil && *inner.Session != protocol.Identifier(d.activation.SessionID()) || inner.Versions != nil && *inner.Versions != d.wireVersions() || inner.Generation != nil && *inner.Generation != d.wireFence().Generation {
+	var joined protocol.SessionJoined
+	if json.Unmarshal(raw, &joined) != nil || joined.Type != "session_joined" || joined.Scope != d.wireScope() || joined.SessionID != protocol.Identifier(d.activation.SessionID()) || joined.Versions != d.wireVersions() || joined.Generation != d.wireFence().Generation {
 		return errCollaborationHTTP
 	}
-	if inner.Type == "session_joined" {
-		var j protocol.SessionJoined
-		if json.Unmarshal(raw, &j) != nil || j.ParticipantRef != q.ParticipantRef || j.GateID != q.GateID || j.PermissionVersion != q.PermissionVersion {
-			return errCollaborationHTTP
-		}
-	}
-	return c.checkedSend(raw)
-}
-func (c *collaborationHTTPConnection) input(raw []byte) error {
-	d := c.document
 	c.mu.Lock()
-	joined, closed := c.joined, c.closed
-	c.mu.Unlock()
-	if closed || joined.delivery == nil {
+	defer c.mu.Unlock()
+	if c.joinedDelivered || c.joinRequest == "" || c.openRequest == "" || q.RequestID != c.openRequest || joined.RequestID != c.joinRequest || q.ParticipantRef != protocol.Identifier(c.admission.participant) || q.GateID != protocol.Identifier(c.joined.gate.GateID) || q.PermissionVersion != protocol.Counter(c.joined.gate.PermissionVersion) || joined.ParticipantRef != q.ParticipantRef || joined.GateID != q.GateID || joined.PermissionVersion != q.PermissionVersion {
 		return errCollaborationHTTP
 	}
-	id, e := collaborationOpaqueID()
+	if e = c.checkedSendLocked(raw); e != nil {
+		return e
+	}
+	c.joinedDelivered = true
+	return nil
+}
+
+func (c *collaborationHTTPConnection) rejectUnqualified(raw []byte) error {
+	var request struct {
+		RequestID protocol.Identifier  `json:"request_id"`
+		Scope     protocol.Scope       `json:"scope"`
+		Session   *protocol.Identifier `json:"session_id"`
+	}
+	if json.Unmarshal(raw, &request) != nil || request.Scope != c.document.wireScope() || request.Session != nil && *request.Session != protocol.Identifier(c.document.activation.SessionID()) {
+		return errCollaborationHTTP
+	}
+	scope := c.document.wireScope()
+	response, e := json.Marshal(protocol.ProtocolError{Type: "protocol_error", RequestID: request.RequestID, Scope: &scope, Reason: protocol.Rejection{Code: "invalid_request", Message: "control not available in this session", Retry: "do_not_retry"}})
 	if e != nil {
 		return e
 	}
-	return d.humans.runHumanOperation(c.request, c.admission.participant, func(ctx context.Context) error {
-		return d.submissions.withWriter(ctx, func(tx *sql.Tx) error {
-			if _, e := d.humans.checkCaptured(ctx, tx, c.admission, false, 0); e != nil {
-				return e
-			}
-			return d.cell.runtime.SendParticipantInput(ctx, d.activation, protocol.SessionParticipantInput{Type: "session_participant_input", RequestID: protocol.Identifier(id), ControlProfile: mooring.PrivateSessionProfile, Scope: d.wireScope(), SessionID: protocol.Identifier(d.activation.SessionID()), RuntimeRef: protocol.Identifier(d.cell.runtime.RuntimeRef()), Fence: d.wireFence(), ConnectionRef: protocol.Identifier(c.ref), ParticipantRef: protocol.Identifier(c.admission.participant), GateID: protocol.Identifier(joined.gate.GateID), PermissionVersion: protocol.Counter(joined.gate.PermissionVersion), Message: raw})
-		})
-	})
+	return c.checkedSend(response)
 }
+
 func (c *collaborationHTTPConnection) checkpoint(raw []byte) error {
 	var q protocol.CheckpointRequest
 	if json.Unmarshal(raw, &q) != nil || q.Type != "checkpoint_request" || q.Scope != c.document.wireScope() {

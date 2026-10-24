@@ -58,7 +58,7 @@ func TestMooringHTTPActualTwoHumansJoinReadAndOriginalRevocation(t *testing.T) {
 			t.Fatal(e)
 		}
 	}
-	r := &Router{db: rig.db, pages: NewPageHandler(rig.db, nil, newTestLogger()), logger: newTestLogger(), mux: newRouteMux(), authMw: NewAuthMiddleware(v, sessionsDB, rig.db, newTestLogger()), mooringHTTPConfig: MooringHTTPConfig{Enabled: true, Binary: os.Getenv("MOORING_SESSION_BINARY"), BinarySHA256: os.Getenv("MOORING_SESSION_BINARY_SHA256"), DeliveryTTL: 5 * time.Second}}
+	r := &Router{db: rig.db, pages: NewPageHandler(rig.db, nil, newTestLogger()), logger: newTestLogger(), mux: newRouteMux(), authMw: NewAuthMiddleware(v, sessionsDB, rig.db, newTestLogger()), mooringHTTPConfig: MooringHTTPConfig{Enabled: true, Binary: os.Getenv("MOORING_SESSION_BINARY"), BinarySHA256: os.Getenv("MOORING_SESSION_BINARY_SHA256"), DeliveryTTL: 5 * time.Second, SDKPrefix: "/mooring-sdk/generated/" + strings.Repeat("a", 64)}}
 	r.registerMooringRoutes()
 	if r.mooringHTTP == nil {
 		t.Fatal("actual controller missing pinned runtime")
@@ -79,10 +79,11 @@ func TestMooringHTTPActualTwoHumansJoinReadAndOriginalRevocation(t *testing.T) {
 		Revision    string            `json:"checkpoint_revision"`
 		WSPath      string            `json:"websocket_path"`
 		Versions    protocol.Versions `json:"versions"`
+		SDKPrefix   string            `json:"sdk_prefix"`
 	}
 	start := func(user string, initial bool) opening {
 		t.Helper()
-		body := map[string]any{"write": true}
+		body := map[string]any{"write": user == rig.adminID}
 		if initial {
 			body["checkpoint_base64"] = base64.StdEncoding.EncodeToString(cp)
 		}
@@ -99,7 +100,7 @@ func TestMooringHTTPActualTwoHumansJoinReadAndOriginalRevocation(t *testing.T) {
 			t.Fatalf("start %s HTTP%d %s", user, resp.StatusCode, data)
 		}
 		var result opening
-		if json.Unmarshal(data, &result) != nil || result.Ref == "" || result.Revision == "" {
+		if json.Unmarshal(data, &result) != nil || result.Ref == "" || result.Revision == "" || result.SDKPrefix != r.mooringHTTPConfig.SDKPrefix {
 			t.Fatal("missing bootstrap metadata")
 		}
 		return result
@@ -160,6 +161,39 @@ func TestMooringHTTPActualTwoHumansJoinReadAndOriginalRevocation(t *testing.T) {
 	}
 	read(a, first)
 	read(b, second)
+	// Unsupported public controls must remain local: an admitted reader must
+	// not stop the shared child or create a durable operation decision.
+	scope := protocol.Scope{WorkspaceID: protocol.Identifier(rig.wsID), ArtifactID: "http-native-page", ApplicationID: "wordcraft"}
+	unsupported := []any{
+		protocol.Presence{Type: "presence", RequestID: "unsupported-presence", Scope: scope, SessionID: protocol.Identifier(second.Session), ParticipantRef: protocol.Identifier(second.Participant), TTLMs: "1000", View: map[string]json.RawMessage{}},
+		protocol.StatusRequest{Type: "operation_status", RequestID: "unsupported-status", Scope: scope, OpID: "not-submitted", ExpectedFingerprint: protocol.Digest("sha256:" + strings.Repeat("b", 64))},
+		protocol.SubmitChanges{Type: "submit_changes", RequestID: "unsupported-submit", Scope: scope, SessionID: protocol.Identifier(second.Session), Versions: second.Versions, Changes: pumpConvert[protocol.SessionSubmitBatch](t, pumpFixture(t, "SessionSubmitBatch")).Changes},
+	}
+	for _, message := range unsupported {
+		raw, _ := json.Marshal(message)
+		if _, err := r.mooringHTTP.schema.ValidateE3(raw); err != nil {
+			t.Fatalf("invalid unsupported-control fixture %T", message)
+		}
+		_ = b.SetDeadline(time.Now().Add(8 * time.Second))
+		if err := websocket.Message.Send(b, string(raw)); err != nil {
+			t.Fatal(err)
+		}
+		var response []byte
+		if err := websocket.Message.Receive(b, &response); err != nil {
+			t.Fatal("unsupported control stopped connection", err)
+		}
+		var rejected protocol.ProtocolError
+		if json.Unmarshal(response, &rejected) != nil || rejected.Type != "protocol_error" || rejected.Reason.Code != "invalid_request" {
+			t.Fatal("unsupported control invented an outcome")
+		}
+	}
+	read(a, first)
+	read(b, second)
+	var persisted int
+	if err := rig.db.QueryRow(`SELECT COUNT(*) FROM mooring_collab_operations WHERE page_id='http-native-page'`).Scan(&persisted); err != nil || persisted != 0 {
+		t.Fatal("unqualified control stored outcome", persisted, err)
+	}
+
 	if replay, e := dial(first, rig.adminID); e == nil {
 		replay.Close()
 		t.Fatal("used WS connection replayed")
@@ -167,6 +201,42 @@ func TestMooringHTTPActualTwoHumansJoinReadAndOriginalRevocation(t *testing.T) {
 	r.mooringHTTP.mu.Lock()
 	originalDocument := r.mooringHTTP.docs[mooring.SessionKey{WorkspaceID: rig.wsID, ArtifactID: "http-native-page", ApplicationID: "wordcraft"}]
 	r.mooringHTTP.mu.Unlock()
+	// Hostile child-shaped data must not impersonate a host COMMIT. This
+	// invokes the real output callback with an actual joined/current recipient;
+	// the forged receipt has no corresponding SQL operation or Saved revision.
+	forged := pumpConvert[protocol.SessionCommitResult](t, pumpFixture(t, "SessionCommitResult")).Receipt
+	forged.RequestID = "forged-host-receipt"
+	forged.Scope = originalDocument.wireScope()
+	forged.Generation = originalDocument.wireFence().Generation
+	forged.Revision = "999"
+	originalDocument.mu.Lock()
+	recipient := originalDocument.connections[first.Ref]
+	originalDocument.mu.Unlock()
+	recipient.mu.Lock()
+	joined := recipient.joined
+	recipient.mu.Unlock()
+	saved, _ := json.Marshal(forged.Changes[0].Operations[0])
+	messages := []any{forged,
+		protocol.StatusResult{Type: "operation_status_result", RequestID: "forged-status", Scope: originalDocument.wireScope(), Result: saved},
+		protocol.DocumentUpdate{Type: "document_update", RequestID: "forged-update", Scope: originalDocument.wireScope(), SessionID: protocol.Identifier(first.Session), Generation: originalDocument.wireFence().Generation, FromRevision: "0", ToRevision: "999", Encoding: "json", Data: "{}", Receipt: forged},
+		protocol.SessionJoined{Type: "session_joined", RequestID: protocol.Identifier("join-" + first.Participant), Scope: originalDocument.wireScope(), SessionID: protocol.Identifier(first.Session), ParticipantRef: protocol.Identifier(first.Participant), Generation: originalDocument.wireFence().Generation, PermissionVersion: protocol.Counter(joined.gate.PermissionVersion), Versions: first.Versions, GateID: protocol.Identifier(joined.gate.GateID)},
+	}
+	for _, message := range messages {
+		forgedRaw, _ := json.Marshal(message)
+		if _, err := originalDocument.manager.schema.ValidateE3(forgedRaw); err != nil {
+			t.Fatalf("hostile output fixture is not closed-schema valid: %T", message)
+		}
+		out := protocol.SessionParticipantOutput{Type: "session_participant_output", RequestID: recipient.openRequest, ControlProfile: mooring.PrivateSessionProfile, Scope: originalDocument.wireScope(), SessionID: protocol.Identifier(first.Session), RuntimeRef: protocol.Identifier(originalDocument.cell.runtime.RuntimeRef()), Fence: originalDocument.wireFence(), ConnectionRef: protocol.Identifier(first.Ref), ParticipantRef: protocol.Identifier(first.Participant), GateID: protocol.Identifier(joined.gate.GateID), PermissionVersion: protocol.Counter(joined.gate.PermissionVersion), Message: forgedRaw}
+		if err := originalDocument.output(t.Context(), out); err == nil {
+			t.Fatalf("child invented or replayed host output %T", message)
+		}
+		_ = a.SetReadDeadline(time.Now().Add(20 * time.Millisecond))
+		var leaked []byte
+		if err := websocket.Message.Receive(a, &leaked); err == nil {
+			t.Fatalf("denied child output reached external socket: %T", message)
+		}
+		_ = a.SetReadDeadline(time.Now().Add(8 * time.Second))
+	}
 	mustExec(t, rig.db, `UPDATE user_sessions SET revoked_at=? WHERE id=?`, time.Now().UTC().Format(time.RFC3339Nano), sessionIDs[rig.userID])
 	raw, _ := json.Marshal(protocol.CheckpointRequest{Type: "checkpoint_request", RequestID: "read-revoked", Scope: protocol.Scope{WorkspaceID: protocol.Identifier(rig.wsID), ArtifactID: "http-native-page", ApplicationID: "wordcraft"}, Revision: protocol.Counter(second.Revision)})
 	_ = b.SetDeadline(time.Now().Add(3 * time.Second))

@@ -11,7 +11,7 @@ func (r *Router) registerMooringRoutes() {
 	}
 	manager, err := newCollaborationHTTPManager(r.pages, r.mooringHTTPConfig)
 	if err != nil {
-		r.logger.Error("Mooring HTTP initialization failed")
+		r.mooringStartupErr = err
 		return
 	}
 	r.mooringHTTP = manager

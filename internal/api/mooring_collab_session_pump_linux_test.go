@@ -64,6 +64,12 @@ func pumpConvert[T any](t *testing.T, value any) T {
 // no SQL, authentication, WordCraft engine or ability to establish Saved.
 func TestCollaborationSessionPumpChild(t *testing.T) {
 	mode := ""
+	marker := ""
+	for i, arg := range os.Args {
+		if arg == "--pump-marker" && i+1 < len(os.Args) {
+			marker = os.Args[i+1]
+		}
+	}
 	for i, arg := range os.Args {
 		if arg == "--pump-peer" && i+1 < len(os.Args) {
 			mode = os.Args[i+1]
@@ -209,6 +215,11 @@ func TestCollaborationSessionPumpChild(t *testing.T) {
 				return
 			}
 		}
+		if id == "delivery" && mode == "guard" {
+			if marker == "" || os.WriteFile(marker, []byte("delivery-grant-received"), 0600) != nil {
+				t.Fatal("mock delivery witness")
+			}
+		}
 		if id == "delivery" && !write(renew("delivery-roundtrip")) {
 			return
 		}
@@ -246,6 +257,9 @@ type pumpTestRig struct {
 }
 
 func newPumpTestRig(t *testing.T, mode, outcome string) *pumpTestRig {
+	return newConfiguredPumpTestRig(t, mode, outcome, "", nil)
+}
+func newConfiguredPumpTestRig(t *testing.T, mode, outcome, marker string, configure func(*collaborationSessionPumpHandlers)) *pumpTestRig {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	t.Cleanup(cancel)
@@ -255,7 +269,11 @@ func newPumpTestRig(t *testing.T, mode, outcome string) *pumpTestRig {
 	}
 	wrapper := filepath.Join(t.TempDir(), "mock-session-peer")
 	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
-	if err = os.WriteFile(wrapper, []byte("#!/bin/sh\nexec "+quote(binaryPath)+" -test.run=^TestCollaborationSessionPumpChild$ -- --pump-peer "+quote(mode)+"\n"), 0700); err != nil {
+	markerArg := ""
+	if marker != "" {
+		markerArg = " --pump-marker " + quote(marker)
+	}
+	if err = os.WriteFile(wrapper, []byte("#!/bin/sh\nexec "+quote(binaryPath)+" -test.run=^TestCollaborationSessionPumpChild$ -- --pump-peer "+quote(mode)+markerArg+"\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	versions := mooring.RuntimeVersions{Protocol: "0.4.0", Model: "0.2.0", Engine: "0.10.0"}
@@ -427,6 +445,9 @@ func newPumpTestRig(t *testing.T, mode, outcome string) *pumpTestRig {
 	}
 	if outcome == "missing-renew" {
 		h.Renew = nil
+	}
+	if configure != nil {
+		configure(&h)
 	}
 	r.pump, err = newCollaborationSessionPump(runtime, h)
 	if err != nil {
