@@ -181,3 +181,16 @@ origins (including pending authors absent from the checkpoint), count those
 reservations within capacity, and bind the original author, full checkpoint
 identity and source order in its authorized writer. This helper alone issues
 no allocation, participant capability, human update admission or Saved.
+
+`WordCraftAdapter::prepare_owned_atomic` is an opt-in data-only path for an
+already owned document. It qualifies the existing strict read context without
+restoring a new CRDT identity. A `Candidate` retains that actual document as well
+as its immutable serialized checkpoint; `into_document` consumes it without
+restoration. These APIs do not verify a host receipt, issue a source/origin or
+install authoritative state. The native owner controller must verify its full
+receipt/owner/basis/metadata bindings and exact candidate checkpoint before
+adoption. Unknown host outcomes retain the candidate and immutable original;
+failed/rejected sources must retire instead of rewinding their allocation clock.
+A new host-issued fresh origin is required for recovery. The legacy adapter
+methods, wire profile and write classification are unchanged. Retaining the live
+CRDT with serialized bytes has a memory cost; no new runtime RSS bound is claimed.

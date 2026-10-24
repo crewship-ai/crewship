@@ -24,9 +24,37 @@ pub enum PrepareError {
     UnqualifiedDescription,
 }
 pub struct Candidate {
+    document: Document,
     checkpoint: Vec<u8>,
     effects: Vec<PreparedOperationEffects>,
     inventory: Vec<TargetIdentity>,
+}
+impl Candidate {
+    /// Owned data only. This method does not verify a host receipt or admit a source.
+    pub fn into_document(self) -> Document {
+        self.document
+    }
+}
+impl WordCraftAdapter {
+    /// Pure opt-in mechanics. An owned document is not host source authority.
+    /// This preserves its actual CRDT client identity instead of restoring it.
+    /// The caller retains the immutable original request, and must retire this
+    /// source on preparation failure/rejection rather than rewind its clock.
+    /// Unknown host outcomes retain the returned Candidate without reexecution.
+    /// Host receipt/owner/identity correlation is required BEFORE adoption.
+    pub fn prepare_owned_atomic(
+        &self,
+        document: Document,
+        change: &AtomicChange,
+        context: &PrepareContext,
+    ) -> Result<Prepared<Candidate>, PrepareError> {
+        let identities = inventory(&document)?;
+        let confirmed = match ConfirmedContext::qualify(context, change, &identities) {
+            Ok(value) => value,
+            Err(error) => return context_failure(error),
+        };
+        prepare_commands(document, change, Working::Strict(confirmed.working()))
+    }
 }
 impl PreparedCandidate for Candidate {
     fn checkpoint_bytes(&self) -> &[u8] {
@@ -216,8 +244,10 @@ fn prepare_commands(
     if !working.complete() || working.inventory() != identities {
         return Err(PrepareError::Context);
     }
+    let checkpoint = document.checkpoint().map_err(PrepareError::State)?;
     Ok(Prepared::Candidate(Candidate {
-        checkpoint: document.checkpoint().map_err(PrepareError::State)?,
+        document,
+        checkpoint,
         effects,
         inventory: identities,
     }))
@@ -648,3 +678,7 @@ mod tests {
         assert_eq!(before, checkpoint_of_same(&before));
     }
 }
+
+#[cfg(test)]
+#[path = "adapter_owned_tests.rs"]
+mod owned_tests;
