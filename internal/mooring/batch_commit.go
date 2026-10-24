@@ -309,6 +309,7 @@ func (s *BatchStore) commit(ctx context.Context, request BatchRequest, session *
 				}
 			}
 			var candidate []byte
+			var checkpointMetadata []byte
 			var targetRows []preparedTargetRow
 			var targetCandidate BatchTargetCandidate
 			var targetContext BatchPrepareContext
@@ -395,7 +396,11 @@ func (s *BatchStore) commit(ctx context.Context, request BatchRequest, session *
 					} else if e = s.config.Adapter.ValidateCheckpoint(ctx, append([]byte(nil), candidate...)); e != nil {
 						return e
 					}
-					e = s.checkpointCapacity(ctx, tx, key.ArtifactID, len(candidate))
+					checkpointMetadata, e = s.describeCheckpoint(ctx, candidate)
+					if e != nil {
+						return e
+					}
+					e = s.checkpointCapacity(ctx, tx, key.ArtifactID, len(candidate), checkpointMetadata)
 					if errors.Is(e, ErrBatchCapacity) {
 						reason = batchReason("quota_exceeded")
 					} else if e != nil {
@@ -431,7 +436,7 @@ func (s *BatchStore) commit(ctx context.Context, request BatchRequest, session *
 						return e
 					}
 				}
-				if e = s.saveCheckpoint(ctx, tx, request.Lease, stored.LastRevision, candidate); e != nil {
+				if e = s.saveCheckpoint(ctx, tx, request.Lease, stored.LastRevision, candidate, checkpointMetadata); e != nil {
 					return e
 				}
 				checkpoint = append([]byte(nil), candidate...)
@@ -467,6 +472,9 @@ func (s *BatchStore) commit(ctx context.Context, request BatchRequest, session *
 			}
 		}
 		if emitted {
+			if e = s.checkpointStoredCapacity(ctx, tx, key.ArtifactID); e != nil {
+				return e
+			}
 			// Rejected operations also retain immutable dependency history. A prior
 			// candidate may consume the remaining budget after pre-admission checks;
 			// charge the complete transaction before final authority/fence checks.

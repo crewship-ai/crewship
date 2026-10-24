@@ -363,3 +363,21 @@ source ABA and wrong-store bindings fail closed. The existing prepare-only
 replacement seam cannot replace a live session. Actual session recovery, raw
 participant admission, FIFO settlement, full checkpoint identity translation,
 provider isolation, UI and deployment remain separate qualification requirements.
+
+The dormant checkpoint identity configuration retains an application-qualified
+format, semantic tuple and complete asset manifest beside each new checkpoint.
+There is no default empty manifest or backfill: legacy NULL remains unknown.
+Canonical metadata sorts unique asset IDs by UTF-16 and preserves decimal u64
+sizes. The generic host never parses application state to guess its references.
+A future live constructor must require the concrete negotiated descriptor adapter;
+the generic callback interface itself grants no process or participant authority.
+
+Both initialization and Saved account metadata bytes alongside decoded checkpoint
+bytes in retained history capacity. Complete SQL usage is checked again after
+trigger/output effects and before final authority/owner fences. Capacity errors
+publish no partial checkpoint or event. Exact retries retain the original metadata
+and do not call the descriptor again. An UPDATE guard prevents normal writers
+from relabelling retained metadata; it is not authenticity against arbitrary trusted
+SQL deletion/replacement or tampered portable input. Portable restore retains exact
+known metadata and legacy NULL. Writer-bound full-to-content basis translation and
+actual descriptor transport are separate prerequisites before full session activation.
