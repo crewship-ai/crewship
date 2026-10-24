@@ -5,6 +5,7 @@ pub mod adapter;
 mod candidate;
 mod checkpoint_wire;
 pub mod command;
+mod core_fields;
 /// Unqualified local-draft experiment; no human protocol capability.
 pub mod experimental_draft;
 /// Pure host-only current-frontier experiment; no advertised human capability.
@@ -414,10 +415,21 @@ impl Document {
                 .ok_or(AdapterError::InvalidCheckpoint)?;
             format::validate_stored_stamps(&update, total_clock)?;
         }
+        // An earlier qualified encoding can contain real Y.Text identities
+        // even when newly detected native metadata now forces read-only mode.
+        // Retain that ACTUAL projection; never synthesize missing text roots or
+        // replace native state from the wrapper. Shape and full equality below
+        // remain mandatory before returning any read-only compatibility view.
+        let project_text = !unsupported
+            || recovered
+                .document
+                .transact()
+                .get_map("wordcraft.texts")
+                .is_some();
         let result = Self {
             doc: recovered.document,
             read_only: unsupported || model == format::Model::LegacyV1,
-            project_text: !unsupported,
+            project_text,
             model,
         };
         result.validate_shape()?;
@@ -490,6 +502,7 @@ fn classify(native: &Value) -> Result<bool, AdapterError> {
     let mut unsupported = object
         .keys()
         .any(|key| !ROOT_FIELDS.contains(&key.as_str()));
+    unsupported |= !core_fields::supported(&native["core"]);
     for field in ["parts", "comments", "revisions"] {
         unsupported |= match object.get(field) {
             Some(Value::Object(v)) => !v.is_empty(),

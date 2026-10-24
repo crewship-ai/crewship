@@ -780,7 +780,6 @@ mod native_transition_tests {
         let mut native: Value =
             serde_json::from_str(include_str!("../tests/fixtures/d1-native.json")).unwrap();
         native["body"] = json!([{"kind":"para","text":"Č😀e\u{301}","runs":[{"len":9}]}]);
-        native["core"]["opaqueConnectorInteger"] = json!(9007199254740993_u64);
         let doc = Document::import(native.clone(), vec!["p_one".into()]).unwrap();
         (native, doc.checkpoint().unwrap())
     }
