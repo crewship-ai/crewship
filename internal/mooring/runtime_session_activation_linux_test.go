@@ -17,6 +17,11 @@ import (
 // The child is a synthetic scoped transport peer. Actual FULL SQL ownership,
 // initialized checkpoint and target inventory are used, not participant auth.
 func TestSessionActivationRequiresActualTranscriptAndSameSQLStore(t *testing.T) {
+	for _, forged := range []bool{false, true} {
+		t.Run(strconv.FormatBool(forged), func(t *testing.T) { sessionActivationProvenance(t, forged) })
+	}
+}
+func sessionActivationProvenance(t *testing.T, forged bool) {
 	owners, db, clock, key := ownerFixture(t)
 	key.ApplicationID = "wordcraft"
 	s := sessionPeerKey(t, "activation", key)
@@ -47,6 +52,17 @@ func TestSessionActivationRequiresActualTranscriptAndSameSQLStore(t *testing.T) 
 	if json.Unmarshal(raw, &acquire) != nil {
 		t.Fatal("acquire")
 	}
+	// The retained checkpoint was created under owner 1. A fresh owner 2 must
+	// restore it without rewriting either its bytes or creator provenance.
+	initial, err := owners.Acquire(t.Context(), key, "initial-runtime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkpoint := []byte("synthetic-opaque-checkpoint-not-a-document-engine")
+	if err = store.Initialize(ctx, initial, checkpoint); err != nil {
+		t.Fatal(err)
+	}
+	clock.advance(6 * time.Second)
 	lease, err := owners.Acquire(t.Context(), key, s.RuntimeRef())
 	if err != nil {
 		t.Fatal(err)
@@ -56,23 +72,28 @@ func TestSessionActivationRequiresActualTranscriptAndSameSQLStore(t *testing.T) 
 	if err = s.ReplyControl(ctx, control, grantRaw); err != nil {
 		t.Fatal(err)
 	}
-	checkpoint := []byte("synthetic-opaque-checkpoint-not-a-document-engine")
-	if err = store.Initialize(ctx, lease, checkpoint); err != nil {
-		t.Fatal(err)
-	}
 	opaque, err := encodePreparedCheckpoint(checkpoint)
 	if err != nil {
 		t.Fatal(err)
 	}
-	restore := protocol.SessionRestore{Type: "session_restore", RequestID: "restore", ControlProfile: PrivateSessionProfile, Scope: open.Scope, SessionID: open.SessionID, RuntimeRef: open.RuntimeRef, Fence: grant.Fence, Versions: open.Versions, Targets: []protocol.TargetVersion{}, Checkpoint: protocol.Checkpoint{Scope: open.Scope, Revision: "0", Generation: grant.Fence.Generation, FormatVersion: "wordcraft-0.10.0/yrs-0.28.0/v2", Versions: open.Versions, Encoding: "base64", State: opaque.State, Digest: opaque.Digest, Assets: []protocol.Asset{}}}
+	restore := protocol.SessionRestore{Type: "session_restore", RequestID: "restore", ControlProfile: PrivateSessionProfile, Scope: open.Scope, SessionID: open.SessionID, RuntimeRef: open.RuntimeRef, Fence: grant.Fence, Versions: open.Versions, Targets: []protocol.TargetVersion{}, Checkpoint: protocol.Checkpoint{Scope: open.Scope, Revision: "0", Generation: protocol.Counter(strconv.FormatInt(initial.Generation, 10)), FormatVersion: "wordcraft-0.10.0/yrs-0.28.0/v2", Versions: open.Versions, Encoding: "base64", State: opaque.State, Digest: opaque.Digest, Assets: []protocol.Asset{}}}
 	if _, err = s.Activate(ctx, store, lease, restore); err == nil {
 		t.Fatal("unobserved restore activated")
+	}
+	if forged {
+		restore.Checkpoint.Generation = grant.Fence.Generation
 	}
 	if _, err = s.Restore(ctx, restore); err != nil {
 		t.Fatal(err)
 	}
 	if err = <-opened; err != nil {
 		t.Fatal(err)
+	}
+	if forged {
+		if _, err = s.Activate(ctx, store, lease, restore); err == nil {
+			t.Fatal("falsely relabeled checkpoint provenance activated")
+		}
+		return
 	}
 	wrong := restore
 	wrong.Checkpoint.State = ""

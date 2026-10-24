@@ -99,13 +99,21 @@ func TestSessionActivationActualRustOwnedDocumentAndBootOwner(t *testing.T) {
 	if json.Unmarshal(raw, &acquire) != nil || acquire.Type != "owner_acquire" || acquire.Scope != scope || acquire.RuntimeRef != open.RuntimeRef {
 		t.Fatal("actual owner acquisition binding")
 	}
-	lease, err := owners.Acquire(ctx, key, runtime.RuntimeRef())
+	initialOwners := NewOwnerStore(db.DB, true, clock, 2*time.Second)
+	initial, err := initialOwners.Acquire(ctx, key, "prior-runtime")
 	if err != nil {
 		t.Fatal(err)
 	}
 	// The real Rust prepare worker must progress even before owner grant/restore.
-	if err = store.Initialize(ctx, lease, checkpoint); err != nil {
+	if err = store.Initialize(ctx, initial, checkpoint); err != nil {
 		t.Fatal("actual initialization while Open pending", err)
+	}
+	// A real BOOTTIME expiry allows owner 2 to take over; the retained
+	// checkpoint remains creator generation 1 and its bytes are unchanged.
+	time.Sleep(2100 * time.Millisecond)
+	lease, err := owners.Acquire(ctx, key, runtime.RuntimeRef())
+	if err != nil || lease.Generation != initial.Generation+1 {
+		t.Fatal("actual owner takeover", lease.Generation, err)
 	}
 	grant := protocol.OwnerGrant{Type: "owner_grant", RequestID: acquire.RequestID, Scope: scope, SessionID: sessionID, RuntimeRef: open.RuntimeRef, Fence: protocol.Fence{Generation: protocol.Counter(strconv.FormatInt(lease.Generation, 10)), Token: lease.Token}, LeaseDurationMs: "60000", Revision: "0", RenewalNonce: acquire.RenewalNonce, PermissionVersion: "1"}
 	grantRaw, _ := json.Marshal(grant)
@@ -141,7 +149,7 @@ func TestSessionActivationActualRustOwnedDocumentAndBootOwner(t *testing.T) {
 	for _, v := range targets {
 		wireTargets = append(wireTargets, protocol.TargetVersion{TargetID: protocol.Identifier(v.TargetID), Revision: protocol.Counter(v.Revision), StructureRevision: protocol.Counter(v.StructureRevision), Deleted: v.Deleted})
 	}
-	restore := protocol.SessionRestore{Type: "session_restore", RequestID: "actual-restore", ControlProfile: PrivateSessionProfile, Scope: scope, SessionID: sessionID, RuntimeRef: open.RuntimeRef, Fence: grant.Fence, Versions: versions, Targets: wireTargets, Checkpoint: protocol.Checkpoint{Scope: scope, Revision: "0", Generation: grant.Fence.Generation, FormatVersion: "wordcraft-0.10.0/yrs-0.28.0/v2", Versions: versions, Encoding: "base64", State: opaque.State, Digest: opaque.Digest, Assets: []protocol.Asset{}}}
+	restore := protocol.SessionRestore{Type: "session_restore", RequestID: "actual-restore", ControlProfile: PrivateSessionProfile, Scope: scope, SessionID: sessionID, RuntimeRef: open.RuntimeRef, Fence: grant.Fence, Versions: versions, Targets: wireTargets, Checkpoint: protocol.Checkpoint{Scope: scope, Revision: "0", Generation: protocol.Counter(strconv.FormatInt(initial.Generation, 10)), FormatVersion: "wordcraft-0.10.0/yrs-0.28.0/v2", Versions: versions, Encoding: "base64", State: opaque.State, Digest: opaque.Digest, Assets: []protocol.Asset{}}}
 	if _, err = runtime.Restore(ctx, restore); err != nil {
 		t.Fatal("actual owned document restore", err)
 	}
@@ -175,7 +183,7 @@ func TestSessionActivationActualRustOwnedDocumentAndBootOwner(t *testing.T) {
 	}); err != nil || !bytes.Equal(retained, checkpoint) {
 		t.Fatal("host checkpoint changed after actual child death", err)
 	}
-	report := map[string]any{"rust_source": source, "binary_sha256": binarySHA, "checkpoint_sha256": checkpointSHA, "owner_clock": "Linux CLOCK_BOOTTIME", "ownership_sql": "FULL", "startup_acknowledged": true, "prepare_while_restore_withheld": true, "target_count": len(targets), "checkpoint_bytes": len(checkpoint), "participant_authority": "MOCK_ALLOW_ALL", "saved_receipts": 0, "production_cli_enabled": false}
+	report := map[string]any{"rust_source": source, "binary_sha256": binarySHA, "checkpoint_sha256": checkpointSHA, "owner_clock": "Linux CLOCK_BOOTTIME", "checkpoint_generation": initial.Generation, "active_owner_generation": lease.Generation, "checkpoint_digest_profile": "opaque-content-sha256", "ownership_sql": "FULL", "startup_acknowledged": true, "prepare_while_restore_withheld": true, "target_count": len(targets), "checkpoint_bytes": len(checkpoint), "participant_authority": "MOCK_ALLOW_ALL", "saved_receipts": 0, "production_cli_enabled": false}
 	encoded, _ := json.MarshalIndent(report, "", "  ")
 	if err = os.WriteFile(filepath.Join(output, "activation-evidence.json"), append(encoded, '\n'), 0600); err != nil {
 		t.Fatal(err)

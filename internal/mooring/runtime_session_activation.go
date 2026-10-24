@@ -209,7 +209,7 @@ func (s *SessionRuntime) Activate(ctx context.Context, store *BatchStore, owner 
 		return nil, ErrSessionRuntime
 	}
 	cp := restore.Checkpoint
-	if cp.Scope != scope || cp.Generation != fence.Generation || cp.Versions != versions || cp.Revision != o.grant.Revision {
+	if cp.Scope != scope || cp.Versions != versions || cp.Revision != o.grant.Revision {
 		return nil, ErrSessionRuntime
 	}
 	if cp.FormatVersion != "wordcraft-0.10.0/yrs-0.28.0/v2" {
@@ -257,6 +257,12 @@ func (s *SessionRuntime) Activate(ctx context.Context, store *BatchStore, owner 
 		}
 		head, checkpoint, err := sessionScopeCheckpoint(ctx, tx, owner.Key, SessionBasis{Revision: string(cp.Revision), Digest: string(cp.Digest)})
 		if err != nil || head != string(cp.Revision) || canonicalDigest(checkpoint) != string(cp.Digest) || !bytes.Equal(checkpoint, restoredBytes) {
+			return ErrSessionRuntime
+		}
+		// The creator generation is retained checkpoint provenance, not the current
+		// owner's fence. Unknown legacy provenance must not be guessed or relabeled.
+		var generation sql.NullString
+		if err = tx.QueryRowContext(ctx, `SELECT checkpoint_generation FROM mooring_collab_checkpoints WHERE page_id=? AND workspace_id=? AND revision=?`, owner.Key.ArtifactID, owner.Key.WorkspaceID, head).Scan(&generation); err != nil || !generation.Valid || generation.String != string(cp.Generation) {
 			return ErrSessionRuntime
 		}
 		var tracking int
