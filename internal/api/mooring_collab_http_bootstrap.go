@@ -38,6 +38,7 @@ func (m *collaborationHTTPManager) document(r *http.Request, key mooring.Session
 	}
 	ctx, cancel := context.WithCancel(m.ctx)
 	d := &collaborationHTTPDocument{manager: m, key: key, ready: make(chan struct{}), ctx: ctx, cancel: cancel, connections: make(map[string]*collaborationHTTPConnection)}
+	d.originals = newCollaborationLiveOriginals(d)
 	m.docs[key] = d
 	m.mu.Unlock()
 	d.err = d.bootstrap(r, checkpoint)
@@ -60,7 +61,7 @@ func (d *collaborationHTTPDocument) bootstrap(r *http.Request, checkpoint []byte
 	if e != nil {
 		return e
 	}
-	d.cell, e = newCollaborationSessionStore(true, m.pages, m.owners, m.fence, runtime, d.key, versions)
+	d.cell, e = newCollaborationSessionStoreWithNative(true, m.pages, m.owners, m.fence, runtime, d.key, versions, d.originals.prepareHuman, d.originals.validateNative)
 	if e != nil {
 		_ = runtime.Close()
 		return e
@@ -76,7 +77,7 @@ func (d *collaborationHTTPDocument) bootstrap(r *http.Request, checkpoint []byte
 	stop := context.AfterFunc(d.ctx, cancel)
 	defer stop()
 	r = r.WithContext(ctx)
-	open := protocol.SessionOpen{Type: "session_open", RequestID: protocol.Identifier(session + "-open"), ControlProfile: mooring.PrivateSessionProfile, Scope: scope, SessionID: protocol.Identifier(session), RuntimeRef: protocol.Identifier(runtime.RuntimeRef()), Versions: tuple, RequiredCapabilities: []protocol.SessionOpenRequiredCapabilitiesItem{"checkpoint_identity_v1"}}
+	open := protocol.SessionOpen{Type: "session_open", RequestID: protocol.Identifier(session + "-open"), ControlProfile: mooring.PrivateSessionProfile, Scope: scope, SessionID: protocol.Identifier(session), RuntimeRef: protocol.Identifier(runtime.RuntimeRef()), Versions: tuple, RequiredCapabilities: []protocol.SessionOpenRequiredCapabilitiesItem{"checkpoint_identity_v1", "human_native_prepare_v1", "origin_inventory_v1"}}
 	opened := make(chan error, 1)
 	finishOpen := beginBackgroundWork()
 	go func() { defer finishOpen(); _, err := runtime.Open(ctx, open); opened <- err }()
@@ -138,6 +139,9 @@ func (d *collaborationHTTPDocument) bootstrap(r *http.Request, checkpoint []byte
 	if e != nil {
 		return e
 	}
+	if e = d.activation.RequireHumanNativePrepare(); e != nil {
+		return e
+	}
 	d.humans, e = newCollaborationSessionHumanRegistry(ctx, d.cell, d.activation, d.owner, m.clock, collaborationHTTPParticipantLimit, m.config.DeliveryTTL)
 	if e != nil {
 		return e
@@ -146,7 +150,7 @@ func (d *collaborationHTTPDocument) bootstrap(r *http.Request, checkpoint []byte
 	if e != nil {
 		return e
 	}
-	d.committer, e = newCollaborationSessionCommitter(ctx, d.cell, d.submissions, d.owner)
+	d.committer, e = newCollaborationSessionCommitterWithOriginals(ctx, d.cell, d.submissions, d.owner, d.originals)
 	if e != nil {
 		return e
 	}

@@ -175,10 +175,20 @@ func (m *collaborationHTTPManager) websocket(w http.ResponseWriter, r *http.Requ
 				}
 				continue
 			}
+			if header.Type == "submit_changes" {
+				if !c.admission.write {
+					if c.rejectUnqualified(normalized) != nil {
+						return
+					}
+				} else if c.submitOriginal(normalized) != nil {
+					return
+				}
+				continue
+			}
 			// These controls are not qualified by the current native actor/source
 			// bridge. Reject locally without sending them into the shared process or
 			// converting them to a durable operation outcome.
-			if header.Type == "submit_changes" || header.Type == "presence" || header.Type == "operation_status" {
+			if header.Type == "presence" || header.Type == "operation_status" {
 				if c.rejectUnqualified(normalized) != nil {
 					return
 				}
@@ -210,10 +220,13 @@ func (c *collaborationHTTPConnection) close() {
 	joined := c.joined
 	gate := joined.gate.GateID
 	c.mu.Unlock()
+	d := c.document
+	if d.originals != nil {
+		d.originals.retire(c)
+	}
 	if ws != nil {
 		_ = ws.Close()
 	}
-	d := c.document
 	d.mu.Lock()
 	if d.connections[c.ref] == c {
 		delete(d.connections, c.ref)
@@ -388,13 +401,20 @@ func (d *collaborationHTTPDocument) output(_ context.Context, q protocol.Session
 	if c == nil {
 		return errCollaborationHTTP
 	}
-	// This join/read checkpoint qualifies exactly one Joined confirmation.
-	// A child cannot invent host Saved, status or document history. Those output
-	// kinds require a separate actual SQL-COMMIT receipt/checkpoint correlator.
 	raw, e := d.manager.schema.ValidateE3(q.Message)
 	if e != nil {
 		return e
 	}
+	var header struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(raw, &header) != nil {
+		return errCollaborationHTTP
+	}
+	if header.Type != "session_joined" {
+		return c.committedOutput(q, raw, header.Type)
+	}
+
 	var joined protocol.SessionJoined
 	if json.Unmarshal(raw, &joined) != nil || joined.Type != "session_joined" || joined.Scope != d.wireScope() || joined.SessionID != protocol.Identifier(d.activation.SessionID()) || joined.Versions != d.wireVersions() || joined.Generation != d.wireFence().Generation {
 		return errCollaborationHTTP
@@ -434,6 +454,7 @@ func (c *collaborationHTTPConnection) checkpoint(raw []byte) error {
 		return errCollaborationHTTP
 	}
 	var response []byte
+	var delivered protocol.Checkpoint
 	e := c.document.humans.runHumanOperation(c.request, c.admission.participant, func(ctx context.Context) error {
 		snapshot, e := c.document.cell.store.ReadFullCheckpoint(ctx, c.document.owner)
 		if e != nil {
@@ -445,12 +466,16 @@ func (c *collaborationHTTPConnection) checkpoint(raw []byte) error {
 			return errCollaborationHTTP
 		}
 		response, e = json.Marshal(protocol.CheckpointResult{Type: "checkpoint_result", RequestID: q.RequestID, Checkpoint: snapshot.Checkpoint})
+		delivered = snapshot.Checkpoint
 		return e
 	})
 	if e != nil {
 		return e
 	}
-	return c.checkedSend(response)
+	if e = c.checkedSend(response); e != nil {
+		return e
+	}
+	return c.recordObservedCheckpoint(delivered)
 }
 func (d *collaborationHTTPDocument) submit(ctx context.Context, q protocol.SessionSubmitBatch) (protocol.SessionCommitResult, error) {
 	return d.committer.submit(ctx, q)

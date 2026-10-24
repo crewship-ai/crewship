@@ -385,3 +385,25 @@ host-authorized status recovery; retained memory is not a durable outcome log.
 Large receipt chunking and the native status path remain separate work. Tests
 use actual inherited sockets with deterministic clocks and mock host authority;
 actual slow FULL-SQL renewal/delivery remains a paired integration check.
+
+### Default-off human HTTP composition
+
+The human controller requires the actual activated checkpoint-identity,
+human-native-prepare and origin-inventory capabilities. Fresh connection origins
+exclude the complete native baseline and live or retired local reservations.
+Original whole submissions remain immutable in bounded process memory; their
+published admission proof is checked before every sealed outcome lookup.
+
+The same SQL writer prepares the original public receipt and per-atomic native
+cuts. Neither is published before COMMIT. Earlier candidates in that writer
+have a distinct provisional prefix and never become Saved history prematurely.
+Peer delivery requires the current recipient's SQL read gate and exact committed
+cut, receipt and recipient-bound transport correlation. A Pending notification
+only acknowledges native queue admission.
+
+This composition remains disabled pending final application, browser and release
+qualification. Live originals are not a durable recovery log, agent writing is
+not admitted here, and in-process destructive restore remains refused. Human
+native delivery must retain the exact original update after proving it replays
+from the previous cut to the candidate; a derived diff containing redundant peer
+DeleteSets cannot replace the original source witness.

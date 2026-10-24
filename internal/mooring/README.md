@@ -507,7 +507,26 @@ and FULL SQL produce revisions1/2, native receipt forwarding follows verificatio
 and a subsequent C request carries B's exact full basis. Intentional uncertainty
 for C closes the child with no C SQL operation. The independent late-owner probe
 requires zero SQL/Saved and no later submit callback. Authentication/original
-commands remain synthetic fixtures and output is a private collector. Normal Go
-with an optimized actor passes; race-instrumented SQL can exceed the initial2s
-delivery gate, so continuous participant renewal/status recovery is still an
-explicit missing qualification. No route, raw source issuer or deployment is added.
+commands remain synthetic fixtures and output is a private collector. Its original
+fixed two-second delivery fixture is historical, not the current configurable
+HTTP participant policy, which defaults to five seconds and renews from the
+original request-send time. Status and restart recovery remain separate
+qualifications; this probe itself adds no route or deployment.
+
+The default-off HTTP controller's live original ledger retains at most 256
+proposals and 256 KiB of charged immutable data. An actual authenticated human
+seal writer must commit before a slot becomes usable. Original observed bases,
+connection origins, order and membership cannot refresh on retry. Every sealed
+human processing outcome checks that publication proof before any outcome lookup
+or dependency reason; missing or uncertain publication remains nonterminal.
+Already captured processing proofs survive source retirement, while new captures
+on that source are refused. These volatile records are neither restored SQL
+authority nor native application qualification. The default-off human HTTP path
+now requires negotiated native preparation and complete origin inventory. It
+binds original packets to same-writer application candidates before COMMIT,
+then releases whole original public receipts and per-atomic peer deltas through
+current-reader gates. The human native delta retains the exact original bytes
+only after application replay verifies the complete candidate checkpoint.
+Actual HTTP/WS/Rust/SQL tests cover two authenticated subjects, peer deletion,
+original-credential revocation, and exact SDK replay. Browser UI, real agent
+writing, performance, and restart/status recovery remain separate qualifications.

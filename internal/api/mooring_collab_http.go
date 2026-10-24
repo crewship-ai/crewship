@@ -33,6 +33,9 @@ type MooringHTTPConfig struct {
 	PublicOrigin         string
 	SDKPrefix            string
 	DeliveryTTL          time.Duration
+	// The trusted loaded-bundle provider owns digest/URL verification and the
+	// per-request editor-origin gate. Requests cannot nominate this metadata.
+	EditorBundle func(*http.Request) (digest, indexURL string)
 }
 
 func WithMooringHTTP(c MooringHTTPConfig) RouterOption {
@@ -75,6 +78,7 @@ type collaborationHTTPDocument struct {
 	submissions *collaborationSubmissionRegistry
 	committer   *collaborationSessionCommitter
 	pump        *collaborationSessionPump
+	originals   *collaborationLiveOriginals
 	mu          sync.Mutex
 	closed      bool
 	connections map[string]*collaborationHTTPConnection
@@ -323,18 +327,7 @@ func (m *collaborationHTTPManager) session(w http.ResponseWriter, r *http.Reques
 		replyError(w, 403, "Mooring access denied")
 		return
 	}
-	var head string
-	if e = d.humans.runHumanOperation(r, admission.participant, func(ctx context.Context) error {
-		snapshot, err := d.cell.store.ReadFullCheckpoint(ctx, d.owner)
-		if err == nil {
-			head = string(snapshot.Checkpoint.Revision)
-		}
-		return err
-	}); e != nil {
-		replyError(w, 403, "Mooring access denied")
-		return
-	}
-	origin, e := m.origin(key)
+	head, origin, e := d.reserveHumanOrigin(r, admission)
 	if e != nil {
 		replyError(w, 503, "Mooring participant capacity exhausted")
 		return
@@ -360,5 +353,12 @@ func (m *collaborationHTTPManager) session(w http.ResponseWriter, r *http.Reques
 	d.connections[ref] = c
 	d.mu.Unlock()
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, 200, map[string]any{"session_id": d.activation.SessionID(), "checkpoint_revision": head, "sdk_prefix": m.config.SDKPrefix, "participant_ref": admission.participant, "ticket": ticket, "connection_ref": ref, "origin": origin, "versions": protocol.Versions{ProtocolVersion: "0.4.0", ModelVersion: "0.2.0", EngineVersion: "0.10.0"}, "websocket_path": "/api/v1/pages/@" + key.ArtifactID + "/mooring/ws?workspace_id=" + key.WorkspaceID})
+	response := map[string]any{"session_id": d.activation.SessionID(), "checkpoint_revision": head, "sdk_prefix": m.config.SDKPrefix, "participant_ref": admission.participant, "ticket": ticket, "connection_ref": ref, "origin": origin, "versions": protocol.Versions{ProtocolVersion: "0.4.0", ModelVersion: "0.2.0", EngineVersion: "0.10.0"}, "websocket_path": "/api/v1/pages/@" + key.ArtifactID + "/mooring/ws?workspace_id=" + key.WorkspaceID}
+	if m.config.EditorBundle != nil {
+		digest, indexURL := m.config.EditorBundle(r)
+		if digest != "" && indexURL != "" {
+			response["editor"] = map[string]string{"url": indexURL, "bundle_digest": digest}
+		}
+	}
+	writeJSON(w, 200, response)
 }

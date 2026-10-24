@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"net/http"
 	"time"
 
 	goapi "github.com/crewship-ai/crewship/internal/api"
@@ -45,6 +46,9 @@ func (s *Server) configureMooringHTTP(opts []goapi.RouterOption) []goapi.RouterO
 		PublicOrigin: s.cfg.PageStudioOrigin(),
 		SDKPrefix:    prepared.Manifest.SDKPrefix,
 		DeliveryTTL:  lease,
+		EditorBundle: func(r *http.Request) (string, string) {
+			return s.editor.PinnedBundle(r, prepared.Manifest.EditorBundleDigest)
+		},
 	}))
 }
 
