@@ -308,7 +308,8 @@ impl DraftReplica {
             .map(|_| ())
             .map_err(|_| ClientError::InvalidCommand)
     }
-    fn require_native_access(&self) -> Result<(), ClientError> {
+    /// Local UX gate only; never host authority or an admission proof.
+    pub fn require_native_access(&self) -> Result<(), ClientError> {
         if self.blocked {
             return Err(ClientError::RecoveryRequired);
         }

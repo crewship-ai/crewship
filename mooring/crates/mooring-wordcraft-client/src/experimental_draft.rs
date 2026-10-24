@@ -2,7 +2,9 @@
 use super::{encode, parse, state_error, MAX_CHECKPOINT};
 use mooring_wordcraft::{
     command::Command,
-    experimental_draft::{ClientError, DraftAccess, DraftReplica, Proposal, RecoveryDraft},
+    experimental_draft::{
+        ClientError, DraftAccess, DraftReplica, NativeSelection, Proposal, RecoveryDraft,
+    },
 };
 use wasm_bindgen::prelude::*;
 
@@ -20,6 +22,15 @@ fn error(error: ClientError) -> String {
         ClientError::Limit => "quota_exceeded",
     }
     .into()
+}
+fn native(raw: &str) -> Result<serde_json::Value, String> {
+    if raw.len() > super::MAX_JSON {
+        return Err("quota_exceeded".into());
+    }
+    // Validate duplicate/depth/token/byte bounds, then parse ORIGINAL bytes.
+    // Normalization is not the native model: opaque integers remain lossless.
+    mooring_protocol::wire::normalize_bounded(raw.as_bytes()).map_err(|_| "invalid_request")?;
+    serde_json::from_str(raw).map_err(|_| "invalid_native".into())
 }
 fn origin(raw: &str) -> Result<u64, String> {
     if raw.len() > 16 {
@@ -92,6 +103,61 @@ impl WordCraftLocalDraft {
             proposal: self.client.edit(operation_id, command).map_err(error)?,
         })
     }
+    /// Capture only from actual outer native Session state before mutation.
+    /// This opaque local object is neither host authority nor a JSON proof.
+    pub fn observe_native_selection(
+        &self,
+        before_json: &str,
+        target: &str,
+        start: &str,
+        end: &str,
+    ) -> Result<WordCraftNativeSelection, String> {
+        self.client.require_native_access().map_err(error)?;
+        let before = native(before_json)?;
+        Ok(WordCraftNativeSelection {
+            selection: self
+                .client
+                .observe_native_selection(&before, target, super::bound(start)?, super::bound(end)?)
+                .map_err(error)?,
+        })
+    }
+    /// Pure post gate. Refusal may roll back native state only before emission.
+    pub fn validate_native_transition_selected(
+        &self,
+        before_json: &str,
+        after_json: &str,
+        selection: &WordCraftNativeSelection,
+    ) -> Result<(), String> {
+        self.client.require_native_access().map_err(error)?;
+        self.client
+            .validate_native_transition_selected(
+                &native(before_json)?,
+                &native(after_json)?,
+                &selection.selection,
+            )
+            .map_err(error)
+    }
+    /// One local original delta, never a server command or Saved acknowledgement.
+    pub fn native_transition_selected(
+        &mut self,
+        operation_id: &str,
+        before_json: &str,
+        after_json: &str,
+        selection: &WordCraftNativeSelection,
+    ) -> Result<WordCraftLocalProposal, String> {
+        self.client.require_native_access().map_err(error)?;
+        Ok(WordCraftLocalProposal {
+            proposal: self
+                .client
+                .native_transition_selected(
+                    operation_id,
+                    &native(before_json)?,
+                    &native(after_json)?,
+                    &selection.selection,
+                )
+                .map_err(error)?,
+        })
+    }
     pub fn undo(&mut self, operation_id: &str) -> Result<WordCraftLocalProposal, String> {
         Ok(WordCraftLocalProposal {
             proposal: self.client.undo(operation_id).map_err(error)?,
@@ -134,6 +200,11 @@ impl WordCraftLocalDraft {
                 .map_err(error)?,
         })
     }
+}
+/// Opaque local observation. No JS/JSON constructor can mint a host proof.
+#[wasm_bindgen]
+pub struct WordCraftNativeSelection {
+    selection: NativeSelection,
 }
 #[wasm_bindgen]
 pub struct WordCraftLocalProposal {
@@ -183,5 +254,73 @@ impl WordCraftLocalRecoveryDraft {
             .cloned()
             .ok_or("invalid_request")?;
         Ok(WordCraftLocalProposal { proposal })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::{json, Value};
+    fn fixture() -> (Value, Vec<u8>) {
+        let mut v: Value = serde_json::from_str(include_str!(
+            "../../mooring-wordcraft/tests/fixtures/d1-native.json"
+        ))
+        .unwrap();
+        v["body"] = json!([{"kind":"para","text":"aa","runs":[{"len":2}]}]);
+        v["core"]["opaqueConnectorInteger"] = json!(9007199254740993_u64);
+        let cp = mooring_wordcraft::Document::import(v.clone(), vec!["p_one".into()])
+            .unwrap()
+            .checkpoint()
+            .unwrap();
+        (v, cp)
+    }
+    #[test]
+    fn native_selection_facade_preserves_original_opaque_native_bytes_and_retry() {
+        let (before, cp) = fixture();
+        let raw = before.to_string();
+        let mut after = before.clone();
+        after["body"][0]["text"] = json!("aaa");
+        after["body"][0]["runs"] = json!([{"len":3}]);
+        let out = after.to_string();
+        let mut c = WordCraftLocalDraft::new(&cp, "17", "writer").unwrap();
+        let frontier = c.state_vector();
+        let selection = c.observe_native_selection(&raw, "p_one", "0", "0").unwrap();
+        c.validate_native_transition_selected(&raw, &out, &selection)
+            .unwrap();
+        let p = c
+            .native_transition_selected("native_1", &raw, &out, &selection)
+            .unwrap();
+        assert_eq!(p.authored_frontier(), frontier);
+        assert_eq!(
+            serde_json::from_str::<Value>(&c.native_json().unwrap()).unwrap(),
+            after
+        );
+        assert_eq!(
+            c.native_transition_selected("native_1", &raw, &out, &selection)
+                .unwrap()
+                .update(),
+            p.update()
+        );
+        c.undo("undo").unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&c.native_json().unwrap()).unwrap(),
+            before
+        );
+        c.redo("redo").unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&c.native_json().unwrap()).unwrap(),
+            after
+        );
+    }
+    #[test]
+    fn native_selection_facade_reader_is_denied_before_invalid_json_or_position() {
+        let (_, cp) = fixture();
+        let reader = WordCraftLocalDraft::new(&cp, "18", "reader").unwrap();
+        assert_eq!(
+            reader
+                .observe_native_selection("{not-json", "bad", "not-a-counter", "-1")
+                .err(),
+            Some("forbidden".into())
+        );
     }
 }
