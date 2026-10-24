@@ -98,6 +98,7 @@ impl WordCraftLocalDraft {
         operation_id: &str,
         command_json: &str,
     ) -> Result<WordCraftLocalProposal, String> {
+        self.client.require_native_access().map_err(error)?;
         let command: Command = parse(command_json)?;
         Ok(WordCraftLocalProposal {
             proposal: self.client.edit(operation_id, command).map_err(error)?,
@@ -367,5 +368,31 @@ mod tests {
                 .err(),
             Some("forbidden".into())
         );
+    }
+}
+
+#[cfg(test)]
+mod active_mode_tests {
+    use super::*;
+    #[test]
+    fn protected_old_checkpoint_denies_facade_before_any_command_parse() {
+        let cp = include_bytes!(
+            "../../mooring-wordcraft/tests/fixtures/protected-old-v2-checkpoint.json"
+        );
+        let model = crate::WordCraftModel::restore(cp).unwrap();
+        assert!(model.is_read_only());
+        assert_eq!(
+            model.preview_agent("{bad", "{bad", "{bad").err(),
+            Some("forbidden".into())
+        );
+        let mut client = WordCraftLocalDraft::new(cp, "18", "writer").unwrap();
+        assert_eq!(client.edit("!bad", "{bad").err(), Some("forbidden".into()));
+        assert_eq!(
+            client
+                .observe_native_selection("{bad", "bad", "invalid", "-1")
+                .err(),
+            Some("forbidden".into())
+        );
+        assert_eq!(client.optimistic_checkpoint().unwrap(), cp);
     }
 }
