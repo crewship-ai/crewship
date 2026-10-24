@@ -39,7 +39,14 @@ type collaborationSessionStartup struct {
 }
 
 func newCollaborationSessionStore(enabled bool, pages *PageHandler, owners *mooring.OwnerStore, fence *collaborationIngressFence, runtime *mooring.SessionRuntime, scope mooring.SessionKey, versions mooring.RuntimeVersions) (*collaborationSessionStore, error) {
+	return newCollaborationSessionStoreWithNative(enabled, pages, owners, fence, runtime, scope, versions, nil, nil)
+}
+
+func newCollaborationSessionStoreWithNative(enabled bool, pages *PageHandler, owners *mooring.OwnerStore, fence *collaborationIngressFence, runtime *mooring.SessionRuntime, scope mooring.SessionKey, versions mooring.RuntimeVersions, prepare mooring.SessionHumanPrepareResolver, validate mooring.SessionNativeCandidateValidator) (*collaborationSessionStore, error) {
 	if !enabled || pages == nil || pages.db == nil || owners == nil || fence == nil || scope.ApplicationID != "wordcraft" {
+		return nil, errCollaborationAdmission
+	}
+	if (prepare == nil) != (validate == nil) {
 		return nil, errCollaborationAdmission
 	}
 	adapter, err := mooring.NewSessionCausalAdapter(runtime, scope, versions)
@@ -51,7 +58,7 @@ func newCollaborationSessionStore(enabled bool, pages *PageHandler, owners *moor
 		return nil, err
 	}
 	c := &collaborationSessionStore{pages: pages, owners: owners, fence: fence, lifecycle: lifecycle, scope: scope, runtime: runtime, adapter: adapter}
-	c.store = mooring.NewBatchStore(pages.db, mooring.BatchStoreConfig{Enabled: true, Owners: owners, Authority: c.authorize, Limits: mooring.DefaultBatchLimits(), CheckpointIdentity: &mooring.BatchCheckpointIdentityConfig{Enabled: true, Adapter: adapter, MaxMetadataBytes: mooring.MaxPrivatePrepareRPCFrame}, Targets: &mooring.TargetStoreConfig{Enabled: true, ReadPolicy: mooring.CausalTargetReadPolicy, HistoryBudget: mooring.DefaultBatchHistoryBudget(), Adapter: adapter, Limits: mooring.DefaultBatchTargetLimits()}})
+	c.store = mooring.NewBatchStore(pages.db, mooring.BatchStoreConfig{Enabled: true, Owners: owners, Authority: c.authorize, Limits: mooring.DefaultBatchLimits(), CheckpointIdentity: &mooring.BatchCheckpointIdentityConfig{Enabled: true, Adapter: adapter, MaxMetadataBytes: mooring.MaxPrivatePrepareRPCFrame}, Targets: &mooring.TargetStoreConfig{Enabled: true, ReadPolicy: mooring.CausalTargetReadPolicy, HistoryBudget: mooring.DefaultBatchHistoryBudget(), Adapter: adapter, Limits: mooring.DefaultBatchTargetLimits(), SessionHumanPrepare: prepare, SessionNativeCandidate: validate}})
 	return c, nil
 }
 

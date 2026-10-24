@@ -112,6 +112,20 @@ impl<D, T: Send + 'static> Actor<D, T> {
         }
         self.scheduler.enqueue(change)
     }
+    /// One original closed transport group, with unchanged atomic membership.
+    /// Refusal returns all originals; an unsent group is never merged or split.
+    pub fn enqueue_group(
+        &self,
+        changes: Vec<Change<T>>,
+    ) -> Result<(), crate::schedule::GroupNotEnqueued<T>> {
+        if self.state.is_closed() {
+            return Err(crate::schedule::GroupNotEnqueued {
+                reason: EnqueueReason::Closed,
+                changes,
+            });
+        }
+        self.scheduler.enqueue_group(changes)
+    }
     /// None means timeout OR all four outstanding slots are occupied. At full
     /// capacity the event loop must wait for host/control input, not busy-poll.
     /// The timer still runs and retains at most256ops/256KiB unsent independently.

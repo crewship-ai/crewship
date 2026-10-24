@@ -442,6 +442,15 @@ func (s *BatchStore) commit(ctx context.Context, request BatchRequest, session *
 					}
 				}
 			}
+			if reason == nil && session != nil && session.humanResolver != nil {
+				_, candidateRevision, rangeErr := batchRange(rev, len(c.Operations))
+				if rangeErr != nil {
+					return rangeErr
+				}
+				if e = session.validateNativeCandidate(ctx, tx, request.Lease, c, candidateRevision, targetCandidate); e != nil {
+					return e
+				}
+			}
 			// Recheck every original participant after expensive engine validation.
 			// A prepared apply does not carry authorization and cannot issue Saved.
 			for i := range c.Operations {

@@ -175,10 +175,20 @@ func (m *collaborationHTTPManager) websocket(w http.ResponseWriter, r *http.Requ
 				}
 				continue
 			}
+			if header.Type == "submit_changes" {
+				if !c.admission.write {
+					if c.rejectUnqualified(normalized) != nil {
+						return
+					}
+				} else if c.submitOriginal(normalized) != nil {
+					return
+				}
+				continue
+			}
 			// These controls are not qualified by the current native actor/source
 			// bridge. Reject locally without sending them into the shared process or
 			// converting them to a durable operation outcome.
-			if header.Type == "submit_changes" || header.Type == "presence" || header.Type == "operation_status" {
+			if header.Type == "presence" || header.Type == "operation_status" {
 				if c.rejectUnqualified(normalized) != nil {
 					return
 				}
@@ -391,13 +401,20 @@ func (d *collaborationHTTPDocument) output(_ context.Context, q protocol.Session
 	if c == nil {
 		return errCollaborationHTTP
 	}
-	// This join/read checkpoint qualifies exactly one Joined confirmation.
-	// A child cannot invent host Saved, status or document history. Those output
-	// kinds require a separate actual SQL-COMMIT receipt/checkpoint correlator.
 	raw, e := d.manager.schema.ValidateE3(q.Message)
 	if e != nil {
 		return e
 	}
+	var header struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(raw, &header) != nil {
+		return errCollaborationHTTP
+	}
+	if header.Type != "session_joined" {
+		return c.committedOutput(q, raw, header.Type)
+	}
+
 	var joined protocol.SessionJoined
 	if json.Unmarshal(raw, &joined) != nil || joined.Type != "session_joined" || joined.Scope != d.wireScope() || joined.SessionID != protocol.Identifier(d.activation.SessionID()) || joined.Versions != d.wireVersions() || joined.Generation != d.wireFence().Generation {
 		return errCollaborationHTTP

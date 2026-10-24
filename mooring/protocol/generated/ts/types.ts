@@ -1121,6 +1121,7 @@ export interface SessionCommitResult {
   checkpoint: Checkpoint;
   targets: Array<TargetVersion>;
   native_deltas?: Array<SessionCommittedNativeDelta>;
+  public_receipt?: CommitResult;
 }
 
 export type SessionParticipantOpenType = "session_participant_open";

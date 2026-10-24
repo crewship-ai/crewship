@@ -94,7 +94,8 @@ def typed(name, node, allow_named=True):
         # The optional session witness owns bounded checkpoint/history DATA.
         # Keep it off the stack so adding that opt-in witness does not enlarge
         # every ordinary Message enum value. Serde's wire shape is unchanged.
-        if name == 'PrepareAtomicCausalHumanContext' and ref == 'SessionHumanPrepareContext':
+        if (name, ref) in {('PrepareAtomicCausalHumanContext', 'SessionHumanPrepareContext'),
+                           ('SessionCommitResultPublicReceipt', 'CommitResult')}:
             return f'Box<{ref}>', ref, ref
         return ref, ref, ref
     if allow_named and ('oneOf' in node or 'enum' in node or 'const' in node or 'properties' in node):

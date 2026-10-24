@@ -20,12 +20,12 @@ fn preexisting_definitions_only_add_session_native_optional_fields() {
         // validator. Removing them must recover every byte of the old shape;
         // required fields and all standalone semantics remain unchanged.
         let optional = match name.as_str() {
-            "PrepareAtomicCausal" => Some("human_context"),
-            "AtomicPreparedCausal" => Some("native_delta"),
-            "SessionCommitResult" => Some("native_deltas"),
-            _ => None,
+            "PrepareAtomicCausal" => vec!["human_context"],
+            "AtomicPreparedCausal" => vec!["native_delta"],
+            "SessionCommitResult" => vec!["native_deltas", "public_receipt"],
+            _ => vec![],
         };
-        if let Some(field) = optional {
+        for field in optional {
             assert!(!definition["required"]
                 .as_array()
                 .unwrap()

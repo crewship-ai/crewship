@@ -4,6 +4,8 @@ package api
 
 import (
 	"bytes"
+	"context"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -108,6 +110,41 @@ func TestMooringHTTPActualTwoHumansJoinReadAndOriginalRevocation(t *testing.T) {
 	first, second := start(rig.adminID, true), start(rig.userID, false)
 	if first.Session != second.Session || first.Origin == second.Origin || first.Participant == second.Participant {
 		t.Fatal("connections not independently bound")
+	}
+	// The complete baseline comes from the actual activated native inventory,
+	// never a caller list or the assigned numeric writer label.
+	key := mooring.SessionKey{WorkspaceID: rig.wsID, ArtifactID: "http-native-page", ApplicationID: "wordcraft"}
+	r.mooringHTTP.mu.Lock()
+	document := r.mooringHTTP.docs[key]
+	r.mooringHTTP.mu.Unlock()
+	if document == nil || document.activation.RequireHumanNativePrepare() != nil {
+		t.Fatal("actual human capability not activated")
+	}
+	document.mu.Lock()
+	original := document.connections[first.Ref]
+	document.mu.Unlock()
+	allocated := 0
+	e = document.humans.runHumanOperation(original.request, original.admission.participant, func(ctx context.Context) error {
+		snapshot, err := document.cell.store.ReadFullCheckpoint(ctx, document.owner)
+		if err != nil {
+			return err
+		}
+		basis := mooring.FullCheckpointBasis{Revision: string(snapshot.Checkpoint.Revision), Digest: string(snapshot.Checkpoint.Digest)}
+		return document.cell.store.WithSessionOrigins(ctx, document.activation, basis, func(scoped context.Context, tx *sql.Tx, proof *mooring.SessionOriginInventory) error {
+			return proof.Visit(scoped, tx, document.cell.store, document.owner, basis, func(origin uint64, _ uint32) error {
+				allocated++
+				r.mooringHTTP.mu.Lock()
+				_, found := r.mooringHTTP.usedOrigins[key][origin]
+				r.mooringHTTP.mu.Unlock()
+				if !found || first.Origin == jsonNumber(origin) || second.Origin == jsonNumber(origin) {
+					t.Fatal("source allocation ignored actual baseline namespace")
+				}
+				return nil
+			})
+		})
+	})
+	if e != nil || allocated == 0 {
+		t.Fatal("complete native baseline was not qualified", allocated, e)
 	}
 	dial := func(o opening, user string) (*websocket.Conn, error) {
 		cfg, e := websocket.NewConfig("ws"+strings.TrimPrefix(server.URL, "http")+o.WSPath+"&connection_ref="+o.Ref, server.URL)

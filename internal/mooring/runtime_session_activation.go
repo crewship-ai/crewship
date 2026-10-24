@@ -171,6 +171,9 @@ func (a *SessionActivation) RequireHumanNativePrepare() error {
 	if err != nil {
 		return err
 	}
+	if !a.store.hasSessionNativeCallbacks() {
+		return ErrSessionRuntime
+	}
 	return s.requireHumanNativePrepare()
 }
 
@@ -248,6 +251,11 @@ func (s *SessionRuntime) Activate(ctx context.Context, store *BatchStore, owner 
 	s.mu.Unlock()
 	if closed || o.invalid || o.activated || o.openHash == "" || o.restoreHash != canonicalDigest(canonical) || o.acquire == nil || o.grant == nil || o.restored == nil || o.opened == nil {
 		return nil, ErrSessionRuntime
+	}
+	for _, capability := range o.requiredCapabilities {
+		if capability == "human_native_prepare_v1" && !store.hasSessionNativeCallbacks() {
+			return nil, ErrSessionRuntime
+		}
 	}
 	scope := restore.Scope
 	versions := restore.Versions

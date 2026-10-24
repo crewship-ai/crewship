@@ -85,15 +85,19 @@ type SessionBatchResult struct {
 	NativeDeltas []SessionCommittedNativeDelta
 }
 type SessionCommitter struct {
-	store         *BatchStore
-	owner         OwnerLease
-	authority     SessionBatchAuthority
-	output        SessionOutputPreparer
-	humanResolver SessionHumanPrepareResolver
+	store           *BatchStore
+	owner           OwnerLease
+	authority       SessionBatchAuthority
+	output          SessionOutputPreparer
+	humanResolver   SessionHumanPrepareResolver
+	nativeValidator SessionNativeCandidateValidator
 }
 
 func NewSessionCommitter(store *BatchStore, owner OwnerLease, authority SessionBatchAuthority, output SessionOutputPreparer) (*SessionCommitter, error) {
 	if store == nil || store.ready() != nil || !store.targetsEnabled() || store.config.Targets.ReadPolicy != CausalTargetReadPolicy || !batchID(owner.Key.WorkspaceID) || !batchID(owner.Key.ArtifactID) || !batchID(owner.Key.ApplicationID) || !ownerIDValid(owner.OwnerID) || owner.Generation <= 0 || len(owner.Token) != 64 || authority == nil || output == nil {
+		return nil, ErrInvalid
+	}
+	if store.config.Targets.SessionHumanPrepare != nil && !store.hasSessionNativeCallbacks() {
 		return nil, ErrInvalid
 	}
 	// Capture the exact host-owned lease, including generation and secret token.
@@ -101,7 +105,7 @@ func NewSessionCommitter(store *BatchStore, owner OwnerLease, authority SessionB
 	// does not replace the transactional OwnerStore.Check below.
 	// Copy immutable configuration; never replace the public store's current-reader
 	// authority. Only the commit-only clone below can use processing authority.
-	return &SessionCommitter{store: store, owner: owner, authority: authority, output: output, humanResolver: store.config.Targets.SessionHumanPrepare}, nil
+	return &SessionCommitter{store: store, owner: owner, authority: authority, output: output, humanResolver: store.config.Targets.SessionHumanPrepare, nativeValidator: store.config.Targets.SessionNativeCandidate}, nil
 }
 
 type sessionMembership struct{ changeID, membershipHash string }
@@ -109,6 +113,7 @@ type sessionMembership struct{ changeID, membershipHash string }
 type sessionCommitMode struct {
 	originalStore                   *BatchStore
 	humanResolver                   SessionHumanPrepareResolver
+	nativeValidator                 SessionNativeCandidateValidator
 	fullBasis                       *FullCheckpointBasis
 	members                         map[string]sessionMembership
 	basis                           SessionBasis
@@ -138,6 +143,7 @@ func (s *SessionCommitter) CommitFull(ctx context.Context, request SessionFullBa
 func (s *SessionCommitter) commitMode(ctx context.Context, request SessionBatchRequest, mode *sessionCommitMode) (SessionBatchResult, error) {
 	mode.originalStore = s.store
 	mode.humanResolver = s.humanResolver
+	mode.nativeValidator = s.nativeValidator
 	isolated := *s.store
 	isolated.config.Authority = func(ctx context.Context, tx *sql.Tx, access BatchAccess) error {
 		purpose := SessionProcessSealedOutcome
@@ -410,6 +416,24 @@ func validateFullSessionOutputSelected(raw []byte, lease OwnerLease, result Batc
 		return nil, ErrPrivateControl
 	}
 	if native {
+		if message.PublicReceipt == nil {
+			return nil, ErrPrivateControl
+		}
+		expectedPublic := message.Receipt
+		expectedPublic.RequestID = message.PublicReceipt.RequestID
+		if !reflect.DeepEqual(*message.PublicReceipt, expectedPublic) {
+			return nil, ErrPrivateControl
+		}
+		publicBytes, e := json.Marshal(message.PublicReceipt)
+		if e != nil {
+			return nil, e
+		}
+		if _, e = CanonicalE3WireJSON(publicBytes); e != nil {
+			return nil, e
+		}
+		if e := validateSessionParticipantBudgets(message); e != nil {
+			return nil, e
+		}
 		if message.NativeDeltas == nil {
 			return nil, ErrPrivateControl
 		}
@@ -418,7 +442,7 @@ func validateFullSessionOutputSelected(raw []byte, lease OwnerLease, result Batc
 		if !bytes.Equal(actual, expected) {
 			return nil, ErrPrivateControl
 		}
-	} else if message.NativeDeltas != nil {
+	} else if message.NativeDeltas != nil || message.PublicReceipt != nil {
 		return nil, ErrPrivateControl
 	}
 	if message.Scope != cp.Scope || message.Versions != cp.Versions || message.Fence.Generation != protocol.Counter(strconv.FormatInt(lease.Generation, 10)) || message.Fence.Token != lease.Token || !reflect.DeepEqual(message.Checkpoint, cp) || message.Receipt.RequestID != message.RequestID || message.Receipt.Issuer != "crewship" || message.Receipt.Scope != cp.Scope || message.Receipt.Generation != message.Fence.Generation || string(message.Receipt.Revision) != result.Revision {
@@ -448,4 +472,50 @@ func validateFullSessionOutputSelected(raw []byte, lease OwnerLease, result Batc
 		}
 	}
 	return canonical, nil
+}
+
+// Ordinary participant wrappers retain their original 256KiB raw/JCS bound.
+// Reserve the largest valid recipient identifiers/counter before COMMIT, since
+// a fresh authenticated gate may receive an already retained terminal result.
+func validateSessionParticipantBudgets(result protocol.SessionCommitResult) error {
+	maximumID := strings.Repeat("\x01", 200) // six JSON bytes per valid scalar
+	check := func(request string, message any) error {
+		wrapper := map[string]any{"type": "session_participant_output", "request_id": request,
+			"control_profile": result.ControlProfile, "scope": result.Scope, "session_id": result.SessionID,
+			"runtime_ref": result.RuntimeRef, "fence": result.Fence, "connection_ref": maximumID,
+			"participant_ref": maximumID, "gate_id": maximumID, "permission_version": "18446744073709551615", "message": message}
+		raw, err := json.Marshal(wrapper)
+		if err != nil {
+			return err
+		}
+		_, err = CanonicalE3WireJSON(raw)
+		return err
+	}
+	if result.PublicReceipt == nil || result.NativeDeltas == nil {
+		return ErrPrivateControl
+	}
+	if err := check(maximumID, result.PublicReceipt); err != nil {
+		return err
+	}
+	for _, cut := range *result.NativeDeltas {
+		// This is only the closed DATA codec. The concrete Rust adapter validates
+		// the original encoded Yrs delta and targets before this SQL output seam.
+		data, err := json.Marshal(struct {
+			Kind    string                `json:"kind"`
+			Update  string                `json:"update"`
+			Targets []protocol.Identifier `json:"targets"`
+		}{"wordcraft.yrs-update.v1", cut.NativeDelta.Update, cut.NativeDelta.Targets})
+		if err != nil {
+			return err
+		}
+		request := "actor-update:" + string(cut.Revision)
+		message := map[string]any{"type": "document_update", "request_id": request, "scope": result.Scope,
+			"session_id": result.SessionID, "generation": result.Fence.Generation,
+			"from_revision": "18446744073709551615", "to_revision": cut.Revision,
+			"encoding": "json", "data": string(data), "receipt": result.Receipt}
+		if err := check(maximumID, message); err != nil {
+			return err
+		}
+	}
+	return nil
 }

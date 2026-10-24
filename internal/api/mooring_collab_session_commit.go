@@ -25,6 +25,7 @@ type collaborationSessionCommitter struct {
 	versions    protocol.Versions
 	fence       protocol.Fence
 	originals   *collaborationLiveOriginals
+	native      bool
 }
 
 func newCollaborationSessionCommitter(ctx context.Context, cell *collaborationSessionStore, submissions *collaborationSubmissionRegistry, owner mooring.OwnerLease) (*collaborationSessionCommitter, error) {
@@ -64,7 +65,11 @@ func newCollaborationSessionCommitterWithOriginals(ctx context.Context, cell *co
 		return nil, err
 	}
 	versions := activation.Versions()
-	return &collaborationSessionCommitter{cell: cell, submissions: submissions, binding: binding, owner: owner, originals: originals,
+	native := activation.RequireHumanNativePrepare() == nil
+	if native && originals == nil {
+		return nil, errCollaborationSubmission
+	}
+	return &collaborationSessionCommitter{cell: cell, submissions: submissions, binding: binding, owner: owner, originals: originals, native: native,
 		scope:   protocol.Scope{WorkspaceID: protocol.Identifier(cell.scope.WorkspaceID), ArtifactID: protocol.Identifier(cell.scope.ArtifactID), ApplicationID: protocol.Identifier(cell.scope.ApplicationID)},
 		session: protocol.Identifier(activation.SessionID()), runtime: protocol.Identifier(runtime.RuntimeRef()),
 		versions: protocol.Versions{ProtocolVersion: versions.Protocol, ModelVersion: versions.Model, EngineVersion: versions.Engine},
@@ -107,6 +112,13 @@ func (s *collaborationSessionCommitter) submitWithCuts(ctx context.Context, requ
 	if err != nil {
 		return empty, nil, err
 	}
+	var group *collaborationOriginalGroup
+	if s.native {
+		group, err = s.originals.boundPublicGroup(changes)
+		if err != nil {
+			return empty, nil, err
+		}
+	}
 	var result protocol.SessionCommitResult
 	var cuts []mooring.SessionSavedCut
 	err = s.submissions.run(ctx, s.binding, func(bound context.Context) error {
@@ -148,11 +160,18 @@ func (s *collaborationSessionCommitter) submitWithCuts(ctx context.Context, requ
 			if err = json.Unmarshal(targetBytes, &targets); err != nil {
 				return nil, err
 			}
-			return json.Marshal(protocol.SessionCommitResult{Type: "session_commit_result", RequestID: frozen.RequestID, ControlProfile: mooring.PrivateSessionProfile,
+			candidate := protocol.SessionCommitResult{Type: "session_commit_result", RequestID: frozen.RequestID, ControlProfile: mooring.PrivateSessionProfile,
 				Scope: s.scope, SessionID: s.session, RuntimeRef: s.runtime, Fence: s.fence, Versions: s.versions,
 				Checkpoint: *pending.FullCheckpoint, Targets: targets,
 				Receipt: protocol.CommitResult{Type: "commit_result", RequestID: frozen.RequestID, Scope: s.scope, Generation: s.fence.Generation,
-					Revision: protocol.Counter(pending.Result.Revision), Issuer: "crewship", Durability: "node", Changes: outcomes}})
+					Revision: protocol.Counter(pending.Result.Revision), Issuer: "crewship", Durability: "node", Changes: outcomes}}
+			if s.native {
+				candidate.PublicReceipt, err = s.originals.preparePublicReceipt(group, candidate.Receipt)
+				if err != nil {
+					return nil, err
+				}
+			}
+			return json.Marshal(candidate)
 		})
 		if err != nil {
 			return err
@@ -166,6 +185,11 @@ func (s *collaborationSessionCommitter) submitWithCuts(ctx context.Context, requ
 		// uncertainty return zero output; they are never terminal rejection receipts.
 		if err := json.Unmarshal(committed.EncodedOutput, &result); err != nil {
 			return err
+		}
+		if s.native {
+			if err := s.originals.publishCommitted(group, changes, result, committed.SavedCuts, committed.NativeDeltas); err != nil {
+				return err
+			}
 		}
 		cuts = append([]mooring.SessionSavedCut(nil), committed.SavedCuts...)
 		return nil

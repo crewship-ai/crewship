@@ -570,7 +570,8 @@ func (s *SessionRuntime) validate(raw []byte, fromRuntime bool) ([]byte, session
 	_, humanContext := value["human_context"]
 	_, nativeDelta := value["native_delta"]
 	_, nativeDeltas := value["native_deltas"]
-	if (humanContext || nativeDelta || nativeDeltas) && s.requireHumanNativePrepare() != nil {
+	_, publicReceipt := value["public_receipt"]
+	if (humanContext || nativeDelta || nativeDeltas || publicReceipt) && s.requireHumanNativePrepare() != nil {
 		return nil, empty, ErrSessionRuntime
 	}
 	if !large {

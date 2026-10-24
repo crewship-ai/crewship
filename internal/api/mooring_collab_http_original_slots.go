@@ -39,19 +39,24 @@ type collaborationLiveOriginal struct {
 	ready      chan struct{}
 	captured   bool
 	captureErr error
+	saved      *collaborationSavedOriginal
+	rejected   bool
+	group      *collaborationOriginalGroup
 }
 
 type collaborationLiveOriginals struct {
-	mu         sync.Mutex
-	document   *collaborationHTTPDocument
-	sources    map[*collaborationHTTPConnection]*collaborationOriginalSource
-	changes    map[string]*collaborationLiveOriginal
-	operations map[string]*collaborationLiveOriginal
-	bytes      int
+	mu           sync.Mutex
+	document     *collaborationHTTPDocument
+	sources      map[*collaborationHTTPConnection]*collaborationOriginalSource
+	changes      map[string]*collaborationLiveOriginal
+	operations   map[string]*collaborationLiveOriginal
+	groups       map[string]*collaborationOriginalGroup
+	bytes        int
+	receiptBytes int
 }
 
 func newCollaborationLiveOriginals(d *collaborationHTTPDocument) *collaborationLiveOriginals {
-	return &collaborationLiveOriginals{document: d, sources: make(map[*collaborationHTTPConnection]*collaborationOriginalSource), changes: make(map[string]*collaborationLiveOriginal), operations: make(map[string]*collaborationLiveOriginal)}
+	return &collaborationLiveOriginals{document: d, sources: make(map[*collaborationHTTPConnection]*collaborationOriginalSource), changes: make(map[string]*collaborationLiveOriginal), operations: make(map[string]*collaborationLiveOriginal), groups: make(map[string]*collaborationOriginalGroup)}
 }
 
 // observe is called only after actual current-reader checked physical delivery.

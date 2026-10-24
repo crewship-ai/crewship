@@ -61,7 +61,7 @@ func (d *collaborationHTTPDocument) bootstrap(r *http.Request, checkpoint []byte
 	if e != nil {
 		return e
 	}
-	d.cell, e = newCollaborationSessionStore(true, m.pages, m.owners, m.fence, runtime, d.key, versions)
+	d.cell, e = newCollaborationSessionStoreWithNative(true, m.pages, m.owners, m.fence, runtime, d.key, versions, d.originals.prepareHuman, d.originals.validateNative)
 	if e != nil {
 		_ = runtime.Close()
 		return e
@@ -77,7 +77,7 @@ func (d *collaborationHTTPDocument) bootstrap(r *http.Request, checkpoint []byte
 	stop := context.AfterFunc(d.ctx, cancel)
 	defer stop()
 	r = r.WithContext(ctx)
-	open := protocol.SessionOpen{Type: "session_open", RequestID: protocol.Identifier(session + "-open"), ControlProfile: mooring.PrivateSessionProfile, Scope: scope, SessionID: protocol.Identifier(session), RuntimeRef: protocol.Identifier(runtime.RuntimeRef()), Versions: tuple, RequiredCapabilities: []protocol.SessionOpenRequiredCapabilitiesItem{"checkpoint_identity_v1"}}
+	open := protocol.SessionOpen{Type: "session_open", RequestID: protocol.Identifier(session + "-open"), ControlProfile: mooring.PrivateSessionProfile, Scope: scope, SessionID: protocol.Identifier(session), RuntimeRef: protocol.Identifier(runtime.RuntimeRef()), Versions: tuple, RequiredCapabilities: []protocol.SessionOpenRequiredCapabilitiesItem{"checkpoint_identity_v1", "human_native_prepare_v1", "origin_inventory_v1"}}
 	opened := make(chan error, 1)
 	finishOpen := beginBackgroundWork()
 	go func() { defer finishOpen(); _, err := runtime.Open(ctx, open); opened <- err }()
@@ -137,6 +137,9 @@ func (d *collaborationHTTPDocument) bootstrap(r *http.Request, checkpoint []byte
 	}
 	d.activation, e = runtime.Activate(ctx, d.cell.store, d.owner, restore)
 	if e != nil {
+		return e
+	}
+	if e = d.activation.RequireHumanNativePrepare(); e != nil {
 		return e
 	}
 	d.humans, e = newCollaborationSessionHumanRegistry(ctx, d.cell, d.activation, d.owner, m.clock, collaborationHTTPParticipantLimit, m.config.DeliveryTTL)
