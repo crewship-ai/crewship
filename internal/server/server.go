@@ -826,7 +826,7 @@ func (s *Server) mountAPIRouter(
 	})
 
 	// Wire Composio managed-integration provider (API key from env/yaml)
-	opts = append(opts, goapi.WithComposioConfig(&cfg.Composio))
+	opts = append(opts, goapi.WithComposioConfig(&cfg.Composio), goapi.WithSkillGitImportPolicy(cfg.Skills))
 
 	// M2a/M2b (#1001): ONE gov-model resolver shared by the access
 	// gatekeeper AND the Phase-2 aux evaluators, so a workspace's

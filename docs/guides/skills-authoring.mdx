@@ -226,3 +226,31 @@ Or commit the SKILL.md to a git repo and bulk-import:
 crewship skill import --repo https://github.com/your-org/skills \
   --paths 'invoice-classifier/*'
 ```
+
+Bulk Git imports require HTTPS and a native Git version of at least 2.37 with
+working `http.curloptResolve` support. Each import checks the installed HTTPS
+transport against a temporary, owned TLS listener on `127.0.0.2`; if support
+cannot be demonstrated, the import is refused. DNS answers are validated and
+one approved address is pinned while certificate verification retains the
+original hostname. Redirects and inherited Git configuration, proxy settings,
+credential helpers and hooks are disabled. Private repositories requiring
+inherited authentication are consequently unsupported by this import path.
+
+Administrators can permit an exact private Git hostname in boot configuration:
+
+```yaml
+skills:
+  private_hosts:
+    - git.internal.example
+```
+
+`CREWSHIP_SKILLS_PRIVATE_HOSTS` overrides this list with comma-separated exact
+hostnames; an explicitly empty value clears it. Changes require a server
+restart. Workspace owners and import request bodies cannot modify this policy.
+It does not permit loopback, link-local, metadata or other reserved destinations.
+
+The importer reads only regular `SKILL.md` files of at most 512 KiB from the
+opened source directory. Relative symlinks resolving within that directory
+remain supported. Absolute links and links escaping the directory are skipped.
+This is a file-read boundary, not a filesystem or process sandbox for local
+imports authorized by the host OS user.

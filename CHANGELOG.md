@@ -9,6 +9,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Skill repository imports use verified, pinned HTTPS connections.** Redirects and inherited Git/proxy/credential configuration are disabled. Administrators can allow exact private Git hosts with `skills.private_hosts`; loopback and metadata targets stay blocked. Imported `SKILL.md` files are read within the chosen import root, with bounded regular-file reads.
+
+
 - Mooring SDK recovery refuses incomplete full snapshots even when Yrs reports no missing updates, preserving every original unsaved draft instead of accepting silently omitted history.
 
 - **Audit history damage is detected without operator requests.** Full instance and workspace verification now runs at startup and hourly outside writer transactions; post-upgrade defects and unchained fallback records alert instance admins. Delivery receipts commit with the inbox notice and survive inbox purge/retention, so handled security notices are not repeatedly restored or resent.
