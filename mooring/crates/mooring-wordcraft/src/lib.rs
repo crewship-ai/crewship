@@ -104,12 +104,32 @@ impl Document {
     /// IDs must be assigned once by the host during first import and included
     /// in its confirmed checkpoint. They are not regenerated from body indexes.
     pub fn import(native: Value, ids: Vec<String>) -> Result<Self, AdapterError> {
+        Self::import_using(native, ids, mooring_text::new_document)
+    }
+
+    /// Explicit numeric data only: proves no host issuance or writer authority.
+    /// Stable paragraph IDs and the existing read-only classifier are unchanged.
+    pub fn import_with_origin(
+        native: Value,
+        ids: Vec<String>,
+        origin: mooring_text::CheckedClientOrigin,
+    ) -> Result<Self, AdapterError> {
+        Self::import_using(native, ids, || {
+            mooring_text::new_document_with_origin(origin)
+        })
+    }
+
+    fn import_using(
+        native: Value,
+        ids: Vec<String>,
+        make_document: impl FnOnce() -> Doc,
+    ) -> Result<Self, AdapterError> {
         let read_only = classify(&native)?;
         let body = native["body"]
             .as_array()
             .ok_or(AdapterError::InvalidNative)?;
         validate_ids(&ids, body.len())?;
-        let doc = mooring_text::new_document();
+        let doc = make_document();
         let metadata = doc.get_or_insert_map("wordcraft.metadata");
         let blocks = doc.get_or_insert_map("wordcraft.blocks");
         let order = doc.get_or_insert_array("wordcraft.order");
@@ -342,6 +362,24 @@ impl Document {
     /// reach this function. It is not an arbitrary remote Yrs update endpoint.
     /// Decode into a fresh document so errors cannot mutate a live replica.
     pub fn restore(bytes: &[u8]) -> Result<Self, AdapterError> {
+        Self::restore_using(bytes, None)
+    }
+
+    /// Same authenticated/scoped storage-input precondition as `restore`.
+    /// A fresh numeric origin is not host issuance, permission or an unburned ID.
+    /// Rejects every origin already allocated in the complete checkpoint history.
+    /// No continuation constructor or native admission profile is supplied.
+    pub fn restore_with_fresh_origin(
+        bytes: &[u8],
+        origin: mooring_text::CheckedClientOrigin,
+    ) -> Result<Self, AdapterError> {
+        Self::restore_using(bytes, Some(origin))
+    }
+
+    fn restore_using(
+        bytes: &[u8],
+        origin: Option<mooring_text::CheckedClientOrigin>,
+    ) -> Result<Self, AdapterError> {
         if bytes.len() > MAX_CHECKPOINT_BYTES {
             return Err(AdapterError::Limit);
         }
@@ -382,8 +420,11 @@ impl Document {
         };
         let unsupported = classify(&native).map_err(|_| AdapterError::InvalidCheckpoint)?;
         checkpoint_wire::preflight(&update)?;
-        let recovered = mooring_text::recover(&update, Vec::new())
-            .map_err(|_| AdapterError::InvalidCheckpoint)?;
+        let recovered = match origin {
+            Some(origin) => mooring_text::recover_with_origin(&update, Vec::new(), origin),
+            None => mooring_text::recover(&update, Vec::new()),
+        }
+        .map_err(|_| AdapterError::InvalidCheckpoint)?;
         if model == format::Model::V2 {
             let total_clock = recovered
                 .document
@@ -639,3 +680,6 @@ mod model_v2_tests;
 
 #[cfg(test)]
 mod checkpoint_budget_tests;
+
+#[cfg(test)]
+mod explicit_origin_tests;
