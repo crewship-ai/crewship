@@ -34,7 +34,7 @@ Supported commands are `share <routine|project> <resource-id>`,
 and `--operation`; operations are repeatable or comma-separated. Routine
 operations support `view`, `results`, `run`, `edit` and `publish`; project operations support independent
 `list`, `read`, `contribute`, `manage` and `delete_issues`. Routine Run also requires all agent grants and a qualified
-installed runtime. Edit supplements View for collaborative draft changes; Publish requires Edit on the same routine in the resulting policy; it does not add View, Results or Run. Granting Publish does not publish or execute a draft.
+installed runtime. Edit supplements View for collaborative draft changes; Publish requires Edit on the same routine in the resulting policy; it does not add View, Results or Run. Publishing additionally requires current View. Granting Publish does not publish or execute a draft.
 
 Each mutation reads the selected member's current snapshot once and submits
 its membership ID and revision. Other objects, operations and unchanged
