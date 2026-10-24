@@ -1,7 +1,7 @@
 //! Pure host-only v2 current-frontier experiment. No transport admission,
 //! credential verification, durable outcome, retirement or Saved semantics.
 use crate::{AdapterError, Document};
-use mooring_text::yrs::{ClientID, Map, Observable, Out, ReadTxn, StateVector, Transact};
+use mooring_text::yrs::{ClientID, Map, Observable, Out, ReadTxn, StateVector, Transact, Update};
 use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -110,37 +110,10 @@ pub fn prepare_current(
     if document.is_read_only() {
         return Err(Error::UnsupportedMutation);
     }
-    let before_native = document.native().map_err(|_| Error::InvalidCheckpoint)?;
-    let ids = document.block_ids().map_err(|_| Error::InvalidCheckpoint)?;
-    let declared: BTreeSet<_> = targets.iter().cloned().collect();
-    if targets.is_empty()
-        || declared.len() != targets.len()
-        || !declared.iter().all(|id| ids.contains(id))
-    {
-        return Err(Error::InvalidTargets);
-    }
-    let txn = document.doc.transact();
-    let roots: BTreeSet<_> = txn.root_refs().map(|(name, _)| name.to_string()).collect();
-    let allowed: BTreeSet<_> = [
-        "wordcraft.metadata",
-        "wordcraft.blocks",
-        "wordcraft.order",
-        "wordcraft.texts",
-    ]
-    .into_iter()
-    .map(String::from)
-    .collect();
-    if roots != allowed {
-        return Err(Error::InvalidCheckpoint);
-    }
-    drop(txn);
-    // Named root types are not encoded in a Yrs state update. Materialize the
-    // already verified application root types before observing them; an
-    // undefined restored root otherwise emits no typed shallow event.
-    for name in ["wordcraft.metadata", "wordcraft.blocks", "wordcraft.texts"] {
-        document.doc.get_or_insert_map(name);
-    }
-    document.doc.get_or_insert_array("wordcraft.order");
+    declared_targets(
+        &document.block_ids().map_err(|_| Error::InvalidCheckpoint)?,
+        targets,
+    )?;
     let txn = document.doc.transact();
     let clock = txn.state_vector().get(&ClientID::new(writer.origin));
     let before_vector = txn.state_vector();
@@ -164,7 +137,6 @@ pub fn prepare_current(
     }
     let update =
         crate::human_current_wire::original(original, writer.origin, clock, stamp, &history)?;
-    let allocated = update.insertions(true);
     for (client, ranges) in update.delete_set().iter() {
         for range in ranges.iter() {
             if before_vector.get(client) < range.end {
@@ -172,6 +144,83 @@ pub fn prepare_current(
             }
         }
     }
+    drop(txn);
+    apply_audited(document, update, targets)
+}
+
+// Called only after original-basis qualification, or for a host-qualified
+// durable Saved transcript entry. This grants no authority to raw client bytes.
+pub(crate) fn merge_qualified_original(
+    checkpoint: &[u8],
+    original: &[u8],
+    targets: &[String],
+    origin: u64,
+) -> Result<Candidate, Error> {
+    use mooring_text::yrs::updates::decoder::Decode;
+    if original.len() > 262144 || origin >= 1 << 53 {
+        return Err(Error::InvalidHostContext);
+    }
+    crate::checkpoint_wire::preflight(original).map_err(|_| Error::InvalidUpdate)?;
+    let update = Update::decode_v1(original).map_err(|_| Error::InvalidUpdate)?;
+    if update
+        .insertions(true)
+        .iter()
+        .any(|(client, _)| client.get() != origin)
+    {
+        return Err(Error::InvalidHostContext);
+    }
+    let document = Document::restore(checkpoint).map_err(|_| Error::InvalidCheckpoint)?;
+    apply_audited(document, update, targets)
+}
+
+fn declared_targets(ids: &[String], targets: &[String]) -> Result<BTreeSet<String>, Error> {
+    let declared: BTreeSet<_> = targets.iter().cloned().collect();
+    if targets.is_empty()
+        || declared.len() != targets.len()
+        || !declared.iter().all(|id| ids.contains(id))
+    {
+        return Err(Error::InvalidTargets);
+    }
+    Ok(declared)
+}
+
+// Shared full-state audit. Callers must first qualify the ORIGINAL immutable
+// update against its actual authoring basis, origin, clock and format history.
+fn apply_audited(
+    document: Document,
+    update: Update,
+    targets: &[String],
+) -> Result<Candidate, Error> {
+    if document.is_read_only() {
+        return Err(Error::UnsupportedMutation);
+    }
+    let before_native = document.native().map_err(|_| Error::InvalidCheckpoint)?;
+    let ids = document.block_ids().map_err(|_| Error::InvalidCheckpoint)?;
+    let declared = declared_targets(&ids, targets)?;
+    let txn = document.doc.transact();
+    let roots: BTreeSet<_> = txn.root_refs().map(|(name, _)| name.to_string()).collect();
+    let allowed: BTreeSet<_> = [
+        "wordcraft.metadata",
+        "wordcraft.blocks",
+        "wordcraft.order",
+        "wordcraft.texts",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect();
+    if roots != allowed {
+        return Err(Error::InvalidCheckpoint);
+    }
+    drop(txn);
+    // Named root types are not encoded in a Yrs state update. Materialize the
+    // already verified application root types before observing them; an
+    // undefined restored root otherwise emits no typed shallow event.
+    for name in ["wordcraft.metadata", "wordcraft.blocks", "wordcraft.texts"] {
+        document.doc.get_or_insert_map(name);
+    }
+    document.doc.get_or_insert_array("wordcraft.order");
+    let txn = document.doc.transact();
+    let allocated = update.insertions(true);
     let root_changed = Rc::new(RefCell::new(false));
     for name in ["wordcraft.metadata", "wordcraft.blocks", "wordcraft.texts"] {
         let map = txn.get_map(name).ok_or(Error::InvalidCheckpoint)?;
