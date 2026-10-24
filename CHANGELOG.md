@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Private task runtime groundwork:** an uninstalled adapter preserves original human admission through actual ledger confirmation and host-only provider binding. Missing environment qualification blocks provider start; process exit does not imply a saved or completed Mooring task.
+
 - **Private runtime groundwork:** a host-only, unused output-suppression option prevents selected journal, observer and session-stream content copies. Native CLI histories, tools and shared-container readouts remain unqualified; this does not enable private execution.
 
 - **Mooring task dispatch groundwork:** an inactive host controller commits fresh work before publishing pending consent and binds dispatch to the original human and exact first attempt. No task execution or content endpoint is enabled.

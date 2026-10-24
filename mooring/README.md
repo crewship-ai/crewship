@@ -31,6 +31,24 @@ No router, generic dispatcher kind or provider execution is enabled. Runtime
 privacy, participant binding, sealed completion and retirement barriers still
 require separate integration and review.
 
+The uninstalled private task runtime requires a separate host environment
+qualifier before starting a provider. No production caller supplies one. It
+retains the original host receipt through authenticated run admission, captures
+the strict principal before execution, then publishes a mandate only after the
+dispatcher has committed the exact confirmed attempt. The callback copies the
+actual provider location and exec ID; it does not authenticate an agent
+participant. An original ingress lease covers creation through this committed
+host publication. Source validation and the generic creation intent still use
+separate transactions; this is not an atomic source-and-creation protocol.
+
+General agent run credentials do not inherit a task's one-Page limits. Native
+execution must qualify restricted tools/network/IPC as well as private disk,
+history, mounts and readouts. The runtime has no generic content handler,
+conversation append, hub broadcast or output log writer. CLI exit alone remains
+an unqualified outcome: no sealed Mooring completion, save, cancellation or
+retirement barrier is claimed. Synthetic provider tests are not real execution
+or privacy qualification. No route or paid provider execution is enabled.
+
 `mooring_core::adapter::PrepareAdapter` is a pure application boundary: validate
 an opaque checkpoint and prepare one normalized immutable atomic change from a
 restored/forked authoritative state. Its candidate owns a full checkpoint and
