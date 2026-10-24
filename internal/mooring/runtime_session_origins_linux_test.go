@@ -88,6 +88,21 @@ func TestSessionOriginsHelper(t *testing.T) {
 				result["capabilities"] = []string{"checkpoint_identity_v1"}
 			}
 			write(result)
+			if mode == "participant-notification-stall" {
+				time.Sleep(20 * time.Second)
+				return
+			}
+		case "session_participant_open", "session_participant_input":
+			if mode != "participant-notifications" {
+				return
+			}
+			participant, gate, permission := v["participant_ref"], v["gate_id"], v["permission_version"]
+			if v["type"] == "session_participant_open" {
+				participant, gate, permission = "synthetic-participant", "synthetic-gate", "1"
+			}
+			fence := v["fence"].(map[string]any)
+			message := map[string]any{"type": "session_joined", "request_id": "joined", "scope": v["scope"], "session_id": v["session_id"], "participant_ref": participant, "generation": fence["generation"], "permission_version": permission, "versions": sessionTestVersions, "gate_id": gate}
+			write(map[string]any{"type": "session_participant_output", "request_id": "output-" + v["request_id"].(string), "control_profile": PrivateSessionProfile, "scope": v["scope"], "session_id": v["session_id"], "runtime_ref": v["runtime_ref"], "fence": v["fence"], "connection_ref": v["connection_ref"], "participant_ref": participant, "gate_id": gate, "permission_version": permission, "message": message})
 		case "session_inspect_origins":
 			cp := v["checkpoint"].(map[string]any)
 			var full protocol.Checkpoint

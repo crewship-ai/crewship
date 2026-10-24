@@ -477,3 +477,16 @@ HTTP/confirmed-attempt fixtures. It issues no origin or participant capability.
 Read-only D3 checkpoint access does not qualify its origin inventory: the app
 explicitly rejects that inventory. The host integration verifies this refusal
 reaches neither consumer nor an empty-inventory fallback for either reader.
+
+`SendParticipantOpen` and `SendParticipantInput` send bounded host notifications
+on the original activated FD. They check the exact initial activation binding,
+closed canonical envelope and shared 128-control/4MiB budget, retaining the
+serialized writer and rechecking process provenance after waiting. Queued
+cancellation emits nothing; uncertain physical writes close the process before
+any later notification. Success means transport write only.
+
+Initial activation is not perpetual owner, current author, source/origin or
+recipient authority. Callers must retain the complete original host operation,
+check current source/owner and delivery policy, bound original raw ingress and
+retain original proposal bytes separately. These methods create no public route,
+join confirmation, terminal result, Saved receipt or production profile.
