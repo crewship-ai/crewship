@@ -4,6 +4,7 @@ package managedlaunch
 
 import (
 	"archive/tar"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,15 +23,20 @@ func (ownedCaptureZeroReader) Read(p []byte) (int, error) { clear(p); return len
 // Run explicitly in a fresh test process with CREWSHIP_CAPTURE_RSS=file|archive
 // and CREWSHIP_CAPTURE_RSS_BYTES. VmHWM is process RSS including the test runtime,
 // not allocated bytes, and is deliberately not a timing-sensitive assertion.
+// With neither profile variable present, only a tiny functional smoke runs;
+// it validates native capture and VmHWM without reporting performance metrics.
 func TestManagedStreamingRSSMeasurement(t *testing.T) {
-	mode := os.Getenv("CREWSHIP_CAPTURE_RSS")
-	if mode == "" {
-		t.Skip("explicit fresh-process RSS measurement helper")
+	mode, modeSet := os.LookupEnv("CREWSHIP_CAPTURE_RSS")
+	sizeText, sizeSet := os.LookupEnv("CREWSHIP_CAPTURE_RSS_BYTES")
+	smoke := !modeSet && !sizeSet
+	if smoke {
+		mode = "file"
+		sizeText = strconv.Itoa(len(nativeFixture()))
 	}
 	if mode != "file" && mode != "archive" {
 		t.Fatal("unknown measurement mode")
 	}
-	size, e := strconv.ParseInt(os.Getenv("CREWSHIP_CAPTURE_RSS_BYTES"), 10, 64)
+	size, e := strconv.ParseInt(sizeText, 10, 64)
 	if e != nil || size < int64(len(nativeFixture())) || size > MaxArtifactBytes {
 		t.Fatal("invalid owned fixture size")
 	}
@@ -95,6 +101,13 @@ func TestManagedStreamingRSSMeasurement(t *testing.T) {
 	}
 	if peak == 0 {
 		t.Fatal("peak RSS unavailable")
+	}
+	if smoke {
+		if artifact.Path != "/opt/native/codex" || artifact.Format != "static_elf" || artifact.SHA256 != fmt.Sprintf("%x", sha256.Sum256(nativeFixture())) {
+			t.Fatal("smoke capture did not preserve the exact native fixture")
+		}
+		fmt.Println("OWNED_CAPTURE_RSS_SMOKE native capture and VmHWM validated; functional smoke only")
+		return
 	}
 	encoded, e := json.Marshal(map[string]any{"mode": mode, "fixture_bytes": size, "capture_wall_ns": elapsed.Nanoseconds(), "process_peak_rss_bytes": peak, "artifact_sha256": artifact.SHA256})
 	if e != nil {
