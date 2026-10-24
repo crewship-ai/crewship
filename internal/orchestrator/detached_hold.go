@@ -95,7 +95,9 @@ func (o *Orchestrator) watchDetachedHold(h *detachedHold, poll time.Duration) {
 				// the hold, admission and capacity; never publish the panic
 				// value or stack. Supervision recovery requires a separate
 				// trusted confirmation, not terminal bookkeeping here.
-				o.logger.Error("private detached supervision interrupted; runtime remains unconfirmed", "run_id", h.runID)
+				if o.logger != nil {
+					o.logger.Error("private detached supervision interrupted; runtime remains unconfirmed", "run_id", h.runID)
+				}
 			}
 		}()
 	}
