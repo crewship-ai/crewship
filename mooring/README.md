@@ -125,3 +125,22 @@ with the original update bytes; ordered recovery evidence retains both. Shared
 entire checkpoint for each keystroke. WASM model/local-draft getters expose
 observed state and the proposal's immutable observation only; neither is a
 confirmed receipt or human causal authority. No wire profile is extended.
+
+The inactive local native connector can validate a complete native before/after
+pair without emitting a proposal, then capture one original CRDT transaction.
+It requires the exact current native basis, one existing paragraph, unchanged
+metadata/order/structure and a disposable full-native postcondition. Native
+UTF-8 runs are converted at checked Unicode boundaries to local UTF-16 edits;
+unaffected CRDT text items remain intact. Each action/property identity keeps
+one immutable value. Unrepresentable run layouts, mixed insertion properties,
+conflicting property assignments and ambiguous repeated-glyph splice locations
+are refused before live mutation. An actual native selection/effect witness is
+required to support those ambiguous locations; this is not a permanent product
+exception. Native caret-only pending formatting is not qualified here.
+
+Exact retries retain the original delta/frontier using a bounded streaming
+SHA256 identity over complete typed before/after JSON, without binary64 numeric
+normalization or rounding opaque integers. Local selective undo/redo uses the
+existing own-origin manager, not native whole-document history. No native UI
+entrypoint, host admission, service profile, durable receipt or Saved state is
+installed by these local mechanics.
