@@ -438,3 +438,14 @@ A private-owner override during restoration does not itself record
 content leaves the host, a future delivery handler must durably record the
 required owner-access audit and recheck the current recipient and delivery
 lease. This startup helper supplies neither audit nor delivery authority.
+
+The inactive API session submitter connects the original host-sealed submission
+registry to `CommitFull` on the exact activated store. It captures the actual
+runtime, session, owner and registry binding, checks every submit envelope, and
+builds the receipt/full checkpoint/targets from the writer's actual SQL result.
+A candidate is released only after successful COMMIT. Errors return no output;
+the trusted FIFO pump must stop the child and subsequent queued work on any
+uncertainty. A known sealed retry remains host processing after revocation and
+does not give the revoked author permission to receive its result. This seam
+adds no raw human/agent ingress, origin issuance, original raw Saved history,
+participant output gate, public route, browser Saved or production enablement.

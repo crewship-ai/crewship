@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"strconv"
@@ -30,7 +31,7 @@ func TestCollaborationSessionActualInitializeSourceABARollsBack(t *testing.T) {
 	runCollaborationSessionActualStartup(t, true)
 }
 
-func runCollaborationSessionActualStartup(t *testing.T, initializeSourceABA bool) {
+func runCollaborationSessionActualStartup(t *testing.T, initializeSourceABA bool, afterActivation ...func(*collaborationSessionStore, *collaborationHumanRegistry, mooring.OwnerLease, *http.Request)) {
 	pinned := func(pathEnv, hashEnv string, limit int64) []byte {
 		t.Helper()
 		path, hash := os.Getenv(pathEnv), os.Getenv(hashEnv)
@@ -202,6 +203,10 @@ func runCollaborationSessionActualStartup(t *testing.T, initializeSourceABA bool
 	}
 	if _, err = cell.startupCheckpoint(request, owner); err == nil {
 		t.Fatal("bound cell reopened preactivation read authority")
+	}
+	if len(afterActivation) != 0 {
+		afterActivation[0](cell, registry, owner, request)
+		return
 	}
 	if registry.hostSessionID() != sessionID || registry.runtime != runtime {
 		t.Fatal("actual startup identity replaced")
