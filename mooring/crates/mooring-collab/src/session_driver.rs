@@ -154,6 +154,15 @@ fn prepare_loop(inbox: Inbox, output: Output, open: SessionOpen) {
         let Some(raw) = inbox.receive(Duration::from_millis(50))? else {
             continue;
         };
+        if let Ok(normalized) =
+            mooring_protocol::session_control::validate(&raw, control::Peer::InheritedHost)
+        {
+            if normalized.value()["type"] != "session_describe_checkpoint" {
+                return Err(invalid("unexpected preparation control"));
+            }
+            output.send(&crate::session_description::respond(&raw, &open)?)?;
+            continue;
+        }
         let normalized = control::validate_causal(&raw, control::Peer::InheritedHost)
             .map_err(|_| invalid("invalid scoped prepare"))?;
         // Application-only registration is insufficient for an owned session:

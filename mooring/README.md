@@ -195,9 +195,8 @@ revisions must cover the entire advancement in immutable batch order; a rejected
 or already-confirmed result keeps the original checkpoint identity. Invalid or
 uncertain replies close owner metadata and require the driver to recover all
 original intents. Actual FIFO request correlation and participant delivery gates
-remain driver obligations. The current experimental private checkpoint digest is
-opaque-content SHA256; generic full-tuple checkpoint identity is not qualified by
-these tests. No live transport or writable application profile is enabled here.
+remain driver obligations. The original opaque startup/settlement proof used content SHA256; that historical
+proof does not qualify generic full-tuple checkpoint identity. No live transport or writable application profile is enabled here.
 ### WordCraft native serialization qualification
 
 The application adapter alone links `wordcraft-doc` and `wordcraft-geom` from
@@ -224,3 +223,37 @@ with the qualified actual engine, and initializes writable connector tests.
 Existing projected checkpoints that no longer qualify retain their actual CRDT
 roots and stable IDs read-only, subject to full shape and native equality checks.
 There is no silent migration or numeric tolerance.
+
+### Explicit checkpoint identity capability
+
+The unexposed session profile now requires the closed `checkpoint_identity_v1`
+capability in SessionOpen and echoes it in SessionOpened. Old peers fail before
+owner acquisition rather than silently interpreting a content hash as a full
+checkpoint identity. Existing strict/stateless profiles and public frame limits
+are unchanged. These corrected session controls are not an enabled CLI or API.
+
+`session_describe_checkpoint` and `session_checkpoint_described` run on the
+independent bounded prepare lane, including while startup awaits an owner grant.
+Their opaque input digest binds exact content; the concrete app must separately
+prove its format, semantic tuple and COMPLETE external-asset manifest. Unknown
+references and unsupported checkpoints fail nonterminally by closing the private
+channel; no native diagnostic or content is sent as an error. These two named
+controls alone obtain the existing 2MiB raw/canonical bound and share the lane's
+aggregate 128-entry/4MiB budget. Final encoded output must fit; decoded-component
+limits do not guarantee an enclosing frame fits.
+
+Startup and host settlement verify the generic full-tuple checkpoint digest,
+then require application-qualified metadata and the complete target inventory
+before retaining one owned document. Creator provenance stays distinct from the
+current owner fence. Opaque preparation still uses raw-content hashes. The first
+app descriptor supports closed, self-contained engine-canonical D1 only; old raw
+checkpoints and unsupported documents are not rewritten or assigned an empty
+manifest. Broader document portability remains qualification work.
+
+Native socket tests prove descriptor progress before OwnerGrant, full identity
+restore/settlement, original creator retention on takeover, and rejection of
+missing capability, content-only hashes, relabelled provenance and forged assets.
+They use injected clocks and trusted host fixtures. Retained SQL metadata,
+authorized writer-bound full-to-content conversion, actual Go startup, live FIFO,
+participant gates and provider/human admission must be composed separately before
+enablement. The earlier pinned Go/Rust opaque proofs remain historical evidence.

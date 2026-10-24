@@ -5,7 +5,9 @@ use crate::{
     session_owner_guard::{OwnerGuard, PermissionAdvance},
     session_startup::ConfirmedDocument,
 };
-use mooring_core::{adapter::PrepareAdapter, batch::Tick};
+use mooring_core::{
+    adapter::PrepareAdapter, batch::Tick, checkpoint_description::DescribeCheckpoint,
+};
 use mooring_protocol::{
     boundary::{PendingAtomic, Transport},
     session_receipt, Counter, OperationResult, OwnerGrant, Scope, SessionOpen, Versions,
@@ -200,6 +202,15 @@ impl OwnerController {
                     {
                         return Err(invalid("new target lacks current creation revision"));
                     }
+                }
+                let metadata = WordCraftAdapter
+                    .describe_checkpoint(checked.checkpoint_bytes())
+                    .map_err(|_| invalid("unqualified committed checkpoint metadata"))?;
+                if metadata.format_version != result.checkpoint.format_version
+                    || metadata.versions != result.checkpoint.versions
+                    || metadata.assets != result.checkpoint.assets
+                {
+                    return Err(invalid("committed checkpoint metadata mismatch"));
                 }
                 let inventory = WordCraftAdapter
                     .validate_checkpoint(checked.checkpoint_bytes())

@@ -263,7 +263,12 @@ fn validate_incoming(raw: &[u8]) -> io::Result<(Route, Vec<u8>)> {
         return Ok((Route::Prepare, value.bytes().to_vec()));
     }
     if let Ok(value) = session_control::validate(raw, Peer::InheritedHost) {
-        return Ok((Route::Actor, value.bytes().to_vec()));
+        let route = if value.value()["type"] == "session_describe_checkpoint" {
+            Route::Prepare
+        } else {
+            Route::Actor
+        };
+        return Ok((route, value.bytes().to_vec()));
     }
     // Only these small host lease/admission controls belong to the session
     // driver. In particular a bare CommitResult cannot install session state.

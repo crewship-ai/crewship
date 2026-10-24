@@ -27,7 +27,7 @@ fn host() -> Transport<'static> {
     }
 }
 fn open() -> Vec<u8> {
-    serde_json::to_vec(&json!({"type":"session_open","request_id":"host-open","control_profile":"mooring.session-causal.v1","scope":{"workspace_id":"workspace","artifact_id":"artifact","application_id":"wordcraft"},"session_id":"host-session","runtime_ref":"fresh-authenticated-child","versions":mooring_collab::dispatch::wordcraft_versions()})).unwrap()
+    serde_json::to_vec(&json!({"type":"session_open","required_capabilities":["checkpoint_identity_v1"],"request_id":"host-open","control_profile":"mooring.session-causal.v1","scope":{"workspace_id":"workspace","artifact_id":"artifact","application_id":"wordcraft"},"session_id":"host-session","runtime_ref":"fresh-authenticated-child","versions":mooring_collab::dispatch::wordcraft_versions()})).unwrap()
 }
 fn grant(acquire: &[u8]) -> Vec<u8> {
     let acquire: Value = serde_json::from_slice(acquire).unwrap();
@@ -35,7 +35,7 @@ fn grant(acquire: &[u8]) -> Vec<u8> {
 }
 fn restore() -> (Vec<u8>, Value, Vec<String>) {
     let native: Value = serde_json::from_str(include_str!(
-        "../../mooring-wordcraft/tests/fixtures/d1-native.json"
+        "../../mooring-wordcraft/tests/fixtures/d1-engine-canonical.json"
     ))
     .unwrap();
     let ids: Vec<_> = (0..native["body"].as_array().unwrap().len())
@@ -57,7 +57,8 @@ fn restore() -> (Vec<u8>, Value, Vec<String>) {
             structure_revision: Counter(0),
         })
         .collect();
-    let request = json!({"type":"session_restore","request_id":"host-restore","control_profile":"mooring.session-causal.v1","scope":{"workspace_id":"workspace","artifact_id":"artifact","application_id":"wordcraft"},"session_id":"host-session","runtime_ref":"fresh-authenticated-child","fence":{"generation":"7","token":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},"versions":mooring_collab::dispatch::wordcraft_versions(),"checkpoint":{"scope":{"workspace_id":"workspace","artifact_id":"artifact","application_id":"wordcraft"},"revision":"10","generation":"7","format_version":mooring_wordcraft::profile::CHECKPOINT_FORMAT,"versions":mooring_collab::dispatch::wordcraft_versions(),"encoding":"base64","state":opaque.state,"digest":opaque.digest,"assets":[]},"targets":targets});
+    let mut request = json!({"type":"session_restore","request_id":"host-restore","control_profile":"mooring.session-causal.v1","scope":{"workspace_id":"workspace","artifact_id":"artifact","application_id":"wordcraft"},"session_id":"host-session","runtime_ref":"fresh-authenticated-child","fence":{"generation":"7","token":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},"versions":mooring_collab::dispatch::wordcraft_versions(),"checkpoint":{"scope":{"workspace_id":"workspace","artifact_id":"artifact","application_id":"wordcraft"},"revision":"10","generation":"7","format_version":mooring_wordcraft::profile::CHECKPOINT_FORMAT,"versions":mooring_collab::dispatch::wordcraft_versions(),"encoding":"base64","state":opaque.state,"digest":opaque.digest,"assets":[]},"targets":targets});
+    bind_checkpoint_identity(&mut request["checkpoint"]);
     (serde_json::to_vec(&request).unwrap(), native, ids)
 }
 
@@ -93,6 +94,7 @@ fn reply(owner: &OwnerController, current: &ConfirmedDocument, saved: bool) -> V
     } else {
         json!([{"change_id":"change","status":"rejected","operations":[{"op_id":"op","status":"rejected","reason":{"code":"forbidden","message":"denied","retry":"new_operation_after_refresh"}}]}])
     };
+    bind_checkpoint_identity(&mut checkpoint);
     json!({"type":"session_commit_result","request_id":"submit","control_profile":"mooring.session-causal.v1","scope":owner.scope(),"session_id":owner.session_id(),"runtime_ref":owner.runtime_ref(),"fence":owner.initial_owner().fence,"versions":owner.versions(),"receipt":{"type":"commit_result","request_id":"submit","scope":owner.scope(),"generation":owner.initial_owner().fence.generation,"revision":revision,"issuer":"crewship","durability":"node","changes":changes},"checkpoint":checkpoint,"targets":targets})
 }
 fn verify(
@@ -166,7 +168,7 @@ fn invalid_receipt_or_application_state_closes_owner_without_touching_confirmed_
             "corrupt-app" => {
                 let opaque = control::encode_checkpoint(b"{}").unwrap();
                 value["checkpoint"]["state"] = json!(opaque.state);
-                value["checkpoint"]["digest"] = json!(opaque.digest);
+                bind_checkpoint_identity(&mut value["checkpoint"]);
             }
             "omitted-inventory" => value["targets"] = json!([]),
             "counter-regression" => value["targets"][0]["revision"] = json!("9"),
@@ -180,6 +182,11 @@ fn invalid_receipt_or_application_state_closes_owner_without_touching_confirmed_
             }
             "sql-failed" => value = json!({"type":"protocol_error","code":"internal_error"}),
             _ => unreachable!(),
+        }
+        if matches!(mode, "wrong-provenance" | "gap") {
+            // Keep full identity valid so these test the settlement boundary,
+            // not an earlier generic digest mismatch.
+            bind_checkpoint_identity(&mut value["checkpoint"]);
         }
         assert!(verify(&owner, &current, &value).is_err(), "accepted {mode}");
         assert!(!owner.may_own(at(6)), "owner reopened after {mode}");
@@ -251,4 +258,17 @@ fn expiry_or_clock_failure_after_restore_discards_replacement_and_preserves_orig
         assert_eq!(current.document().native().unwrap(), native);
         assert_eq!(current.checkpoint().revision, Counter(10));
     }
+}
+
+fn bind_checkpoint_identity(value: &mut Value) {
+    let cp = serde_json::from_value(value.clone()).unwrap();
+    let identity = mooring_protocol::checkpoint::compute(
+        &cp,
+        mooring_protocol::checkpoint::Limits {
+            decoded_bytes: control::MAX_CHECKPOINT_BYTES,
+            preimage_bytes: control::MAX_CONTROL_BYTES,
+        },
+    )
+    .unwrap();
+    value["digest"] = json!(identity.full_digest());
 }

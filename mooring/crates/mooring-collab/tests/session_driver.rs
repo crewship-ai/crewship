@@ -19,7 +19,7 @@ fn host() -> Transport<'static> {
     }
 }
 fn open() -> Vec<u8> {
-    serde_json::to_vec(&json!({"type":"session_open","request_id":"host-open","control_profile":"mooring.session-causal.v1","scope":{"workspace_id":"workspace","artifact_id":"artifact","application_id":"wordcraft"},"session_id":"host-session","runtime_ref":"fresh-authenticated-child","versions":mooring_collab::dispatch::wordcraft_versions()})).unwrap()
+    serde_json::to_vec(&json!({"type":"session_open","required_capabilities":["checkpoint_identity_v1"],"request_id":"host-open","control_profile":"mooring.session-causal.v1","scope":{"workspace_id":"workspace","artifact_id":"artifact","application_id":"wordcraft"},"session_id":"host-session","runtime_ref":"fresh-authenticated-child","versions":mooring_collab::dispatch::wordcraft_versions()})).unwrap()
 }
 fn grant(acquire: &[u8]) -> Vec<u8> {
     let acquire: Value = serde_json::from_slice(acquire).unwrap();
@@ -27,7 +27,7 @@ fn grant(acquire: &[u8]) -> Vec<u8> {
 }
 fn restore() -> (Vec<u8>, Value, Vec<String>) {
     let native: Value = serde_json::from_str(include_str!(
-        "../../mooring-wordcraft/tests/fixtures/d1-native.json"
+        "../../mooring-wordcraft/tests/fixtures/d1-engine-canonical.json"
     ))
     .unwrap();
     let ids: Vec<_> = (0..native["body"].as_array().unwrap().len())
@@ -49,7 +49,8 @@ fn restore() -> (Vec<u8>, Value, Vec<String>) {
             structure_revision: Counter(0),
         })
         .collect();
-    let request = json!({"type":"session_restore","request_id":"host-restore","control_profile":"mooring.session-causal.v1","scope":{"workspace_id":"workspace","artifact_id":"artifact","application_id":"wordcraft"},"session_id":"host-session","runtime_ref":"fresh-authenticated-child","fence":{"generation":"7","token":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},"versions":mooring_collab::dispatch::wordcraft_versions(),"checkpoint":{"scope":{"workspace_id":"workspace","artifact_id":"artifact","application_id":"wordcraft"},"revision":"10","generation":"7","format_version":mooring_wordcraft::profile::CHECKPOINT_FORMAT,"versions":mooring_collab::dispatch::wordcraft_versions(),"encoding":"base64","state":opaque.state,"digest":opaque.digest,"assets":[]},"targets":targets});
+    let mut request = json!({"type":"session_restore","request_id":"host-restore","control_profile":"mooring.session-causal.v1","scope":{"workspace_id":"workspace","artifact_id":"artifact","application_id":"wordcraft"},"session_id":"host-session","runtime_ref":"fresh-authenticated-child","fence":{"generation":"7","token":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},"versions":mooring_collab::dispatch::wordcraft_versions(),"checkpoint":{"scope":{"workspace_id":"workspace","artifact_id":"artifact","application_id":"wordcraft"},"revision":"10","generation":"7","format_version":mooring_wordcraft::profile::CHECKPOINT_FORMAT,"versions":mooring_collab::dispatch::wordcraft_versions(),"encoding":"base64","state":opaque.state,"digest":opaque.digest,"assets":[]},"targets":targets});
+    bind_checkpoint_identity(&mut request["checkpoint"]);
     (serde_json::to_vec(&request).unwrap(), native, ids)
 }
 
@@ -64,9 +65,29 @@ fn owned_driver_prepares_on_same_fd_while_restore_is_withheld() {
         let acquire = mooring_collab::read_frame(&mut peer).unwrap().unwrap();
         let owner: Value = serde_json::from_slice(&acquire).unwrap();
         assert_eq!(owner["type"], "owner_acquire");
-        mooring_collab::write_frame(&mut peer, &grant(&acquire)).unwrap();
         let restore: Value = serde_json::from_slice(&restore_bytes).unwrap();
-        let request = json!({"type":"validate_checkpoint_causal","request_id":"prepare-before-restore","scope":restore["scope"],"selected":restore["versions"],"checkpoint":{"encoding":"base64","state":restore["checkpoint"]["state"],"digest":restore["checkpoint"]["digest"]},"control_profile":"mooring.prepare-causal.v1"});
+        let full: mooring_protocol::Checkpoint =
+            serde_json::from_value(restore["checkpoint"].clone()).unwrap();
+        let identity = mooring_protocol::checkpoint::verify(
+            &full,
+            mooring_protocol::checkpoint::Limits {
+                decoded_bytes: control::MAX_CHECKPOINT_BYTES,
+                preimage_bytes: control::MAX_CONTROL_BYTES,
+            },
+        )
+        .unwrap();
+        let describe = json!({"type":"session_describe_checkpoint","request_id":"describe-before-owner","control_profile":"mooring.session-causal.v1","scope":restore["scope"],"session_id":restore["session_id"],"runtime_ref":restore["runtime_ref"],"versions":restore["versions"],"checkpoint":{"encoding":"base64","state":full.state,"digest":identity.content_digest()}});
+        mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&describe).unwrap()).unwrap();
+        let described: Value =
+            serde_json::from_slice(&mooring_collab::read_frame(&mut peer).unwrap().unwrap())
+                .unwrap();
+        assert_eq!(described["type"], "session_checkpoint_described");
+        assert_eq!(described["request_id"], "describe-before-owner");
+        assert_eq!(described["input_digest"], identity.content_digest());
+        assert_eq!(described["description"]["assets"], json!([]));
+        assert_eq!(described["description"]["versions"], restore["versions"]);
+        mooring_collab::write_frame(&mut peer, &grant(&acquire)).unwrap();
+        let request = json!({"type":"validate_checkpoint_causal","request_id":"prepare-before-restore","scope":restore["scope"],"selected":restore["versions"],"checkpoint":{"encoding":"base64","state":restore["checkpoint"]["state"],"digest":mooring_protocol::checkpoint::verify(&serde_json::from_value(restore["checkpoint"].clone()).unwrap(), mooring_protocol::checkpoint::Limits { decoded_bytes: control::MAX_CHECKPOINT_BYTES, preimage_bytes: control::MAX_CONTROL_BYTES }).unwrap().content_digest()},"control_profile":"mooring.prepare-causal.v1"});
         mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&request).unwrap()).unwrap();
         let response: Value =
             serde_json::from_slice(&mooring_collab::read_frame(&mut peer).unwrap().unwrap())
@@ -112,7 +133,7 @@ fn prepare_cannot_escape_owned_scope_during_startup() {
         let acquire = mooring_collab::read_frame(&mut peer).unwrap().unwrap();
         mooring_collab::write_frame(&mut peer, &grant(&acquire)).unwrap();
         let restore: Value = serde_json::from_slice(&restore_bytes).unwrap();
-        let request = json!({"type":"validate_checkpoint_causal","request_id":"wrong-artifact","scope":{"workspace_id":"workspace","artifact_id":"another-artifact","application_id":"wordcraft"},"selected":restore["versions"],"checkpoint":{"encoding":"base64","state":restore["checkpoint"]["state"],"digest":restore["checkpoint"]["digest"]},"control_profile":"mooring.prepare-causal.v1"});
+        let request = json!({"type":"validate_checkpoint_causal","request_id":"wrong-artifact","scope":{"workspace_id":"workspace","artifact_id":"another-artifact","application_id":"wordcraft"},"selected":restore["versions"],"checkpoint":{"encoding":"base64","state":restore["checkpoint"]["state"],"digest":mooring_protocol::checkpoint::verify(&serde_json::from_value(restore["checkpoint"].clone()).unwrap(), mooring_protocol::checkpoint::Limits { decoded_bytes: control::MAX_CHECKPOINT_BYTES, preimage_bytes: control::MAX_CONTROL_BYTES }).unwrap().content_digest()},"control_profile":"mooring.prepare-causal.v1"});
         mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&request).unwrap()).unwrap();
         // No inventory response or ownership acknowledgement may escape.
         assert!(matches!(
@@ -190,4 +211,17 @@ fn clock_error_permanently_closes_even_if_clock_later_recovers() {
     ));
     failing.store(false, Ordering::SeqCst);
     assert!(driver.check_owner().is_err());
+}
+
+fn bind_checkpoint_identity(value: &mut Value) {
+    let cp = serde_json::from_value(value.clone()).unwrap();
+    let identity = mooring_protocol::checkpoint::compute(
+        &cp,
+        mooring_protocol::checkpoint::Limits {
+            decoded_bytes: control::MAX_CHECKPOINT_BYTES,
+            preimage_bytes: control::MAX_CONTROL_BYTES,
+        },
+    )
+    .unwrap();
+    value["digest"] = json!(identity.full_digest());
 }

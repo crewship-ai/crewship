@@ -19,7 +19,7 @@ fn host() -> Transport<'static> {
     }
 }
 fn open() -> Vec<u8> {
-    serde_json::to_vec(&json!({"type":"session_open","request_id":"host-open","control_profile":"mooring.session-causal.v1","scope":{"workspace_id":"workspace","artifact_id":"artifact","application_id":"wordcraft"},"session_id":"host-session","runtime_ref":"fresh-authenticated-child","versions":mooring_collab::dispatch::wordcraft_versions()})).unwrap()
+    serde_json::to_vec(&json!({"type":"session_open","required_capabilities":["checkpoint_identity_v1"],"request_id":"host-open","control_profile":"mooring.session-causal.v1","scope":{"workspace_id":"workspace","artifact_id":"artifact","application_id":"wordcraft"},"session_id":"host-session","runtime_ref":"fresh-authenticated-child","versions":mooring_collab::dispatch::wordcraft_versions()})).unwrap()
 }
 fn grant(acquire: &[u8]) -> Vec<u8> {
     let acquire: Value = serde_json::from_slice(acquire).unwrap();
@@ -27,7 +27,7 @@ fn grant(acquire: &[u8]) -> Vec<u8> {
 }
 fn restore() -> (Vec<u8>, Value, Vec<String>) {
     let native: Value = serde_json::from_str(include_str!(
-        "../../mooring-wordcraft/tests/fixtures/d1-native.json"
+        "../../mooring-wordcraft/tests/fixtures/d1-engine-canonical.json"
     ))
     .unwrap();
     let ids: Vec<_> = (0..native["body"].as_array().unwrap().len())
@@ -49,7 +49,8 @@ fn restore() -> (Vec<u8>, Value, Vec<String>) {
             structure_revision: Counter(0),
         })
         .collect();
-    let request = json!({"type":"session_restore","request_id":"host-restore","control_profile":"mooring.session-causal.v1","scope":{"workspace_id":"workspace","artifact_id":"artifact","application_id":"wordcraft"},"session_id":"host-session","runtime_ref":"fresh-authenticated-child","fence":{"generation":"7","token":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},"versions":mooring_collab::dispatch::wordcraft_versions(),"checkpoint":{"scope":{"workspace_id":"workspace","artifact_id":"artifact","application_id":"wordcraft"},"revision":"10","generation":"7","format_version":mooring_wordcraft::profile::CHECKPOINT_FORMAT,"versions":mooring_collab::dispatch::wordcraft_versions(),"encoding":"base64","state":opaque.state,"digest":opaque.digest,"assets":[]},"targets":targets});
+    let mut request = json!({"type":"session_restore","request_id":"host-restore","control_profile":"mooring.session-causal.v1","scope":{"workspace_id":"workspace","artifact_id":"artifact","application_id":"wordcraft"},"session_id":"host-session","runtime_ref":"fresh-authenticated-child","fence":{"generation":"7","token":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},"versions":mooring_collab::dispatch::wordcraft_versions(),"checkpoint":{"scope":{"workspace_id":"workspace","artifact_id":"artifact","application_id":"wordcraft"},"revision":"10","generation":"7","format_version":mooring_wordcraft::profile::CHECKPOINT_FORMAT,"versions":mooring_collab::dispatch::wordcraft_versions(),"encoding":"base64","state":opaque.state,"digest":opaque.digest,"assets":[]},"targets":targets});
+    bind_checkpoint_identity(&mut request["checkpoint"]);
     (serde_json::to_vec(&request).unwrap(), native, ids)
 }
 #[test]
@@ -220,14 +221,70 @@ fn owner_epoch_advances_without_mutating_confirmed_document_or_granting_old_gate
 #[test]
 fn new_owner_restores_unchanged_prior_generation_checkpoint() {
     let (startup, acquire) = Startup::from_open(&open(), at(0)).unwrap();
-    let owner = startup.accept_owner(&grant(&acquire), &host(), at(1)).unwrap();
+    let owner = startup
+        .accept_owner(&grant(&acquire), &host(), at(1))
+        .unwrap();
     let (raw, native, ids) = restore();
     let mut value: Value = serde_json::from_slice(&raw).unwrap();
     value["checkpoint"]["generation"] = json!("1");
+    bind_checkpoint_identity(&mut value["checkpoint"]);
     let raw = serde_json::to_vec(&value).unwrap();
     let ready = owner.restore(&raw, || Ok(at(2))).unwrap();
     assert_eq!(ready.owner().fence.generation, Counter(7));
     assert_eq!(ready.confirmed().checkpoint().generation, Counter(1));
     assert_eq!(ready.confirmed().document().native().unwrap(), native);
     assert_eq!(ready.confirmed().document().block_ids().unwrap(), ids);
+}
+
+fn bind_checkpoint_identity(value: &mut Value) {
+    let cp = serde_json::from_value(value.clone()).unwrap();
+    let identity = mooring_protocol::checkpoint::compute(
+        &cp,
+        mooring_protocol::checkpoint::Limits {
+            decoded_bytes: control::MAX_CHECKPOINT_BYTES,
+            preimage_bytes: control::MAX_CONTROL_BYTES,
+        },
+    )
+    .unwrap();
+    value["digest"] = json!(identity.full_digest());
+}
+
+#[test]
+fn legacy_capability_and_content_only_identity_cannot_activate() {
+    let mut old: Value = serde_json::from_slice(&open()).unwrap();
+    old.as_object_mut().unwrap().remove("required_capabilities");
+    assert!(Startup::from_open(&serde_json::to_vec(&old).unwrap(), at(0)).is_err());
+    for mode in ["content-only", "relabelled-creator", "unqualified-assets"] {
+        let (startup, acquire) = Startup::from_open(&open(), at(0)).unwrap();
+        let owner = startup
+            .accept_owner(&grant(&acquire), &host(), at(1))
+            .unwrap();
+        let mut restore: Value = serde_json::from_slice(&restore().0).unwrap();
+        match mode {
+            "content-only" => {
+                let cp = serde_json::from_value(restore["checkpoint"].clone()).unwrap();
+                let identity = mooring_protocol::checkpoint::compute(
+                    &cp,
+                    mooring_protocol::checkpoint::Limits {
+                        decoded_bytes: control::MAX_CHECKPOINT_BYTES,
+                        preimage_bytes: control::MAX_CONTROL_BYTES,
+                    },
+                )
+                .unwrap();
+                restore["checkpoint"]["digest"] = json!(identity.content_digest());
+            }
+            "relabelled-creator" => restore["checkpoint"]["generation"] = json!("1"),
+            "unqualified-assets" => {
+                restore["checkpoint"]["assets"] = json!([{"asset_id":"claimed-external","digest":format!("sha256:{}", "0".repeat(64)),"size_bytes":"1"}]);
+                bind_checkpoint_identity(&mut restore["checkpoint"]);
+            }
+            _ => unreachable!(),
+        }
+        assert!(
+            owner
+                .restore(&serde_json::to_vec(&restore).unwrap(), || Ok(at(2)))
+                .is_err(),
+            "{mode}"
+        );
+    }
 }

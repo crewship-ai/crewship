@@ -171,7 +171,7 @@ mod tests {
         }
     }
     fn guard() -> OwnerGuard {
-        let open:SessionOpen=serde_json::from_value(json!({"type":"session_open","request_id":"open","control_profile":"mooring.session-causal.v1","scope":{"workspace_id":"w","artifact_id":"p","application_id":"wordcraft"},"session_id":"session","runtime_ref":"fresh-runtime","versions":{"protocol_version":"0.4.0","model_version":"0.2.0","engine_version":"0.10.0"}})).unwrap();
+        let open:SessionOpen=serde_json::from_value(json!({"type":"session_open","required_capabilities":["checkpoint_identity_v1"],"request_id":"open","control_profile":"mooring.session-causal.v1","scope":{"workspace_id":"w","artifact_id":"p","application_id":"wordcraft"},"session_id":"session","runtime_ref":"fresh-runtime","versions":{"protocol_version":"0.4.0","model_version":"0.2.0","engine_version":"0.10.0"}})).unwrap();
         let owner:OwnerGrant=serde_json::from_value(json!({"type":"owner_grant","request_id":"initial","scope":open.scope,"session_id":open.session_id,"runtime_ref":open.runtime_ref,"fence":{"generation":"1","token":"01234567890123456789012345678901"},"lease_duration_ms":"1000","revision":"0","renewal_nonce":"unique-initial-namespace","permission_version":"1"})).unwrap();
         OwnerGuard::new(
             &open,

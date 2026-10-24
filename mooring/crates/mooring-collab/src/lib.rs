@@ -296,3 +296,6 @@ mod session_owner_guard;
 
 #[cfg(unix)]
 pub mod session_confirmed;
+
+#[cfg(unix)]
+mod session_description;

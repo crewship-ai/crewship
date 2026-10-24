@@ -42,7 +42,17 @@ fn fixture() -> (Value, Scope, Fence, Versions, Vec<PendingAtomic>) {
                 .collect(),
         })
         .collect();
-    let value = json!({"type":"session_commit_result","request_id":"batch1","control_profile":"mooring.session-causal.v1","scope":scope,"session_id":"session","runtime_ref":"runtime","fence":fence,"versions":versions,"receipt":old["base_receipt"],"checkpoint":{"scope":scope,"revision":"12","generation":"6","format_version":"test-only-opaque","versions":versions,"encoding":"base64","state":opaque.state,"digest":opaque.digest,"assets":[]},"targets":[{"target_id":"p","revision":"12","structure_revision":"0","deleted":false}]});
+    let mut value = json!({"type":"session_commit_result","request_id":"batch1","control_profile":"mooring.session-causal.v1","scope":scope,"session_id":"session","runtime_ref":"runtime","fence":fence,"versions":versions,"receipt":old["base_receipt"],"checkpoint":{"scope":scope,"revision":"12","generation":"6","format_version":"test-only-opaque","versions":versions,"encoding":"base64","state":opaque.state,"digest":opaque.digest,"assets":[]},"targets":[{"target_id":"p","revision":"12","structure_revision":"0","deleted":false}]});
+    let cp = serde_json::from_value(value["checkpoint"].clone()).unwrap();
+    let identity = mooring_protocol::checkpoint::compute(
+        &cp,
+        mooring_protocol::checkpoint::Limits {
+            decoded_bytes: control::MAX_CHECKPOINT_BYTES,
+            preimage_bytes: control::MAX_CONTROL_BYTES,
+        },
+    )
+    .unwrap();
+    value["checkpoint"]["digest"] = json!(identity.full_digest());
     (value, scope, fence, versions, changes)
 }
 #[test]

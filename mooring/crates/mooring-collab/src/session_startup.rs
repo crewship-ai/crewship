@@ -7,7 +7,9 @@ use crate::{
     session_lane::Output,
     session_owner_guard::OwnerGuard,
 };
-use mooring_core::{adapter::PrepareAdapter, batch::Tick};
+use mooring_core::{
+    adapter::PrepareAdapter, batch::Tick, checkpoint_description::DescribeCheckpoint,
+};
 use mooring_protocol::{boundary::Transport, control, grant::PendingGrant, session_control, *};
 use mooring_wordcraft::{adapter::WordCraftAdapter, Document};
 use std::{collections::BTreeMap, io, time::Duration};
@@ -168,23 +170,25 @@ impl OwnerAccepted {
         {
             return Err(invalid("restore checkpoint binding"));
         }
-        let bytes = match checkpoint.encoding {
-            CheckpointEncoding::Base64 => control::decode_checkpoint(&OpaquePreparedCheckpoint {
-                encoding: OpaquePreparedCheckpointEncoding::Base64,
-                state: checkpoint.state.clone(),
-                digest: checkpoint.digest.clone(),
-            })
-            .map_err(|_| invalid("checkpoint digest or encoding"))?,
-            CheckpointEncoding::Json => {
-                let bytes = checkpoint.state.as_bytes();
-                let encoded = control::encode_checkpoint(bytes)
-                    .map_err(|_| invalid("checkpoint resource bound"))?;
-                if encoded.digest != checkpoint.digest {
-                    return Err(invalid("checkpoint digest"));
-                }
-                bytes.to_vec()
-            }
-        };
+        let bytes = checkpoint::verify(
+            checkpoint,
+            checkpoint::Limits {
+                decoded_bytes: control::MAX_CHECKPOINT_BYTES,
+                preimage_bytes: control::MAX_CONTROL_BYTES,
+            },
+        )
+        .map_err(|_| invalid("checkpoint full identity"))?
+        .state()
+        .to_vec();
+        let description = WordCraftAdapter
+            .describe_checkpoint(&bytes)
+            .map_err(|_| invalid("unqualified restored checkpoint metadata"))?;
+        if description.format_version != checkpoint.format_version
+            || description.versions != checkpoint.versions
+            || description.assets != checkpoint.assets
+        {
+            return Err(invalid("restored checkpoint metadata mismatch"));
+        }
         // Validate complete actual application inventory, not a projection that
         // can hide unsupported roots. Its temporary owned doc is dropped before
         // restoring the retained live doc; no app revision ledger is introduced.
@@ -328,6 +332,7 @@ impl ReadySession {
             fence: self.owner.fence.clone(),
             versions: self.open.versions.clone(),
             confirmed_basis: self.basis(),
+            capabilities: vec![SessionOpenedCapabilitiesItem::CheckpointIdentityV1],
         };
         for raw in [serde_json::to_vec(&restored), serde_json::to_vec(&opened)] {
             let raw = raw.map_err(|_| invalid("startup reply encoding"))?;

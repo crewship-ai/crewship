@@ -1501,14 +1501,21 @@ const (
 	SessionOpenControlProfileMooringSessionCausalV1 SessionOpenControlProfile = "mooring.session-causal.v1"
 )
 
+type SessionOpenRequiredCapabilitiesItem string
+
+const (
+	SessionOpenRequiredCapabilitiesItemCheckpointIdentityV1 SessionOpenRequiredCapabilitiesItem = "checkpoint_identity_v1"
+)
+
 type SessionOpen struct {
-	Type           SessionOpenType           `json:"type"`
-	RequestID      Identifier                `json:"request_id"`
-	ControlProfile SessionOpenControlProfile `json:"control_profile"`
-	Scope          Scope                     `json:"scope"`
-	SessionID      Identifier                `json:"session_id"`
-	RuntimeRef     Identifier                `json:"runtime_ref"`
-	Versions       Versions                  `json:"versions"`
+	Type                 SessionOpenType                       `json:"type"`
+	RequestID            Identifier                            `json:"request_id"`
+	ControlProfile       SessionOpenControlProfile             `json:"control_profile"`
+	Scope                Scope                                 `json:"scope"`
+	SessionID            Identifier                            `json:"session_id"`
+	RuntimeRef           Identifier                            `json:"runtime_ref"`
+	Versions             Versions                              `json:"versions"`
+	RequiredCapabilities []SessionOpenRequiredCapabilitiesItem `json:"required_capabilities"`
 }
 
 type SessionRestoreType string
@@ -1548,16 +1555,23 @@ const (
 	SessionOpenedControlProfileMooringSessionCausalV1 SessionOpenedControlProfile = "mooring.session-causal.v1"
 )
 
+type SessionOpenedCapabilitiesItem string
+
+const (
+	SessionOpenedCapabilitiesItemCheckpointIdentityV1 SessionOpenedCapabilitiesItem = "checkpoint_identity_v1"
+)
+
 type SessionOpened struct {
-	Type           SessionOpenedType           `json:"type"`
-	RequestID      Identifier                  `json:"request_id"`
-	ControlProfile SessionOpenedControlProfile `json:"control_profile"`
-	Scope          Scope                       `json:"scope"`
-	SessionID      Identifier                  `json:"session_id"`
-	RuntimeRef     Identifier                  `json:"runtime_ref"`
-	Fence          Fence                       `json:"fence"`
-	Versions       Versions                    `json:"versions"`
-	ConfirmedBasis ConfirmedCheckpointBasis    `json:"confirmed_basis"`
+	Type           SessionOpenedType               `json:"type"`
+	RequestID      Identifier                      `json:"request_id"`
+	ControlProfile SessionOpenedControlProfile     `json:"control_profile"`
+	Scope          Scope                           `json:"scope"`
+	SessionID      Identifier                      `json:"session_id"`
+	RuntimeRef     Identifier                      `json:"runtime_ref"`
+	Fence          Fence                           `json:"fence"`
+	Versions       Versions                        `json:"versions"`
+	ConfirmedBasis ConfirmedCheckpointBasis        `json:"confirmed_basis"`
+	Capabilities   []SessionOpenedCapabilitiesItem `json:"capabilities"`
 }
 
 type SessionSubmitBatchType string
@@ -1864,6 +1878,59 @@ type SessionStatusResult struct {
 	GateID            Identifier                        `json:"gate_id"`
 	PermissionVersion Counter                           `json:"permission_version"`
 	Message           StatusResult                      `json:"message"`
+}
+
+type CheckpointDescription struct {
+	FormatVersion Identifier `json:"format_version"`
+	Versions      Versions   `json:"versions"`
+	Assets        []Asset    `json:"assets"`
+}
+
+type SessionDescribeCheckpointType string
+
+const (
+	SessionDescribeCheckpointTypeSessionDescribeCheckpoint SessionDescribeCheckpointType = "session_describe_checkpoint"
+)
+
+type SessionDescribeCheckpointControlProfile string
+
+const (
+	SessionDescribeCheckpointControlProfileMooringSessionCausalV1 SessionDescribeCheckpointControlProfile = "mooring.session-causal.v1"
+)
+
+type SessionDescribeCheckpoint struct {
+	Type           SessionDescribeCheckpointType           `json:"type"`
+	RequestID      Identifier                              `json:"request_id"`
+	ControlProfile SessionDescribeCheckpointControlProfile `json:"control_profile"`
+	Scope          Scope                                   `json:"scope"`
+	SessionID      Identifier                              `json:"session_id"`
+	RuntimeRef     Identifier                              `json:"runtime_ref"`
+	Versions       Versions                                `json:"versions"`
+	Checkpoint     OpaquePreparedCheckpoint                `json:"checkpoint"`
+}
+
+type SessionCheckpointDescribedType string
+
+const (
+	SessionCheckpointDescribedTypeSessionCheckpointDescribed SessionCheckpointDescribedType = "session_checkpoint_described"
+)
+
+type SessionCheckpointDescribedControlProfile string
+
+const (
+	SessionCheckpointDescribedControlProfileMooringSessionCausalV1 SessionCheckpointDescribedControlProfile = "mooring.session-causal.v1"
+)
+
+type SessionCheckpointDescribed struct {
+	Type           SessionCheckpointDescribedType           `json:"type"`
+	RequestID      Identifier                               `json:"request_id"`
+	ControlProfile SessionCheckpointDescribedControlProfile `json:"control_profile"`
+	Scope          Scope                                    `json:"scope"`
+	SessionID      Identifier                               `json:"session_id"`
+	RuntimeRef     Identifier                               `json:"runtime_ref"`
+	Versions       Versions                                 `json:"versions"`
+	InputDigest    Digest                                   `json:"input_digest"`
+	Description    CheckpointDescription                    `json:"description"`
 }
 
 type Message = json.RawMessage

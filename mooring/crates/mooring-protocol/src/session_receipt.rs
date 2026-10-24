@@ -3,8 +3,7 @@
 //! value cannot establish transport provenance, participant rights, or Saved.
 use crate::{
     boundary::{self, BoundaryError, CommitBinding, HostReceipt, PendingAtomic, Transport},
-    canonical, control, session_control, CheckpointEncoding, Counter, Fence,
-    OpaquePreparedCheckpoint, OpaquePreparedCheckpointEncoding, Scope, SessionCommitResult,
+    canonical, checkpoint, control, session_control, Counter, Fence, Scope, SessionCommitResult,
     Versions,
 };
 use std::collections::BTreeSet;
@@ -114,22 +113,16 @@ pub fn validate(
     {
         return Err(BoundaryError::Binding);
     }
-    let checkpoint = match cp.encoding {
-        CheckpointEncoding::Base64 => control::decode_checkpoint(&OpaquePreparedCheckpoint {
-            encoding: OpaquePreparedCheckpointEncoding::Base64,
-            state: cp.state.clone(),
-            digest: cp.digest.clone(),
-        })
-        .map_err(|_| BoundaryError::Encoding)?,
-        CheckpointEncoding::Json => {
-            let encoded = control::encode_checkpoint(cp.state.as_bytes())
-                .map_err(|_| BoundaryError::Capacity)?;
-            if encoded.digest != cp.digest {
-                return Err(BoundaryError::Encoding);
-            }
-            cp.state.as_bytes().to_vec()
-        }
-    };
+    let checkpoint = checkpoint::verify(
+        cp,
+        checkpoint::Limits {
+            decoded_bytes: control::MAX_CHECKPOINT_BYTES,
+            preimage_bytes: control::MAX_CONTROL_BYTES,
+        },
+    )
+    .map_err(|_| BoundaryError::Encoding)?
+    .state()
+    .to_vec();
     let mut targets = BTreeSet::new();
     for target in &result.targets {
         if target.structure_revision > target.revision
