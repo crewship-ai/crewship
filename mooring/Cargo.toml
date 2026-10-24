@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/mooring-core", "crates/mooring-text", "crates/mooring-protocol"]
+members = ["crates/mooring-core", "crates/mooring-text", "crates/mooring-protocol", "crates/mooring-client"]
 resolver = "2"
 
 [workspace.package]
@@ -7,3 +7,10 @@ edition = "2021"
 rust-version = "1.85"
 license = "Apache-2.0"
 publish = false
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
