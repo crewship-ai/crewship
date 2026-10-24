@@ -7,6 +7,7 @@ mod checkpoint_wire;
 pub mod command;
 mod core_fields;
 mod format;
+mod native_qualification;
 #[cfg(test)]
 mod human;
 #[cfg(test)]
@@ -553,6 +554,9 @@ fn classify(native: &Value) -> Result<bool, AdapterError> {
                 }
             }
         }
+    }
+    if !unsupported {
+        unsupported = !native_qualification::lossless(native);
     }
     Ok(unsupported)
 }

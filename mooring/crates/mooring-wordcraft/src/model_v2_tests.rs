@@ -22,7 +22,7 @@ struct Replica {
 impl Replica {
     fn initial(origin: u64) -> Self {
         let native: Value =
-            serde_json::from_str(include_str!("../tests/fixtures/d1-native.json")).unwrap();
+            serde_json::from_str(include_str!("../tests/fixtures/d1-engine-canonical.json")).unwrap();
         let ids: Vec<_> = (0..8).map(|i| format!("p{i}")).collect();
         let document = Document::import(native.clone(), ids.clone()).unwrap();
         let update = document

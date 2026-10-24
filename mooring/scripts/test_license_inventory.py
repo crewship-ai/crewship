@@ -74,6 +74,30 @@ class IntegrityTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 inventory.verify_git_index(repository, expected)
 
+    def test_git_vendor_null_package_still_checks_every_source_file(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            source = directory / 'source.rs'
+            source.write_text('immutable upstream source')
+            metadata = {'package': None, 'files': {'source.rs': hashlib.sha256(source.read_bytes()).hexdigest()}}
+            checksum = directory / '.cargo-checksum.json'
+            checksum.write_text(json.dumps(metadata))
+            inventory.verify_checksums(directory, None)
+            source.write_text('changed upstream source')
+            with self.assertRaises(ValueError):
+                inventory.verify_checksums(directory, None)
+            source.write_text('immutable upstream source')
+            checksum.write_text(json.dumps({**metadata, 'package': 'a' * 64}))
+            with self.assertRaises(ValueError):
+                inventory.verify_checksums(directory, None)
+
+    def test_only_qualified_git_package_can_omit_registry_checksum(self):
+        good = {'source': inventory.WORDCRAFT_SOURCE, 'name': 'wordcraft-doc', 'version': '0.10.0'}
+        self.assertIsNone(inventory.locked_checksum(good))
+        for bad in [{**good, 'source': good['source'].replace('668d7ce3', '00000000')}, {**good, 'name': 'wordcraft-engine'}, {**good, 'version': '0.11.0'}, {**good, 'checksum': 'a' * 64}, {**good, 'source': 'registry+https://github.com/rust-lang/crates.io-index'}]:
+            with self.assertRaises(ValueError):
+                inventory.locked_checksum(bad)
+
     def test_duplicate_json_keys_fail(self):
         with self.assertRaises(ValueError):
             json.loads('{"files":{},"files":{}}', object_pairs_hook=inventory.unique_object)
