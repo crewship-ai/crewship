@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Original author groundwork:** inactive host references retain existing human and fixed-attempt agent proofs without upgrading read scope, recapturing credentials or assigning origins.
+
 - **Origin metadata groundwork:** retain target-local origin exclusions and immutable source ordinals across portable replacement. A portable lineage marker supplies correlation only; issuance, recovery coverage and content ingress remain disabled.
 
 - **Mooring origin groundwork:** bounded data helpers preserve occupied and issued origin exclusions when computing a candidate. They provide no inventory provenance, reservation, source capability or enabled ingress path.
