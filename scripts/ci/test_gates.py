@@ -183,6 +183,16 @@ class GateTests(unittest.TestCase):
         needs['release-rehearsal']['result'] = 'success'
         self.assertEqual(failures(needs), [])
 
+    def test_mooring_requires_actual_success_for_code_changes(self):
+        self.assertIn('mooring', CODE)
+        for result in ['failure', 'cancelled', 'skipped', None]:
+            needs = self.results()
+            needs['mooring']['result'] = result
+            self.assertTrue(failures(needs), result)
+        needs = self.results()
+        del needs['mooring']
+        self.assertTrue(failures(needs))
+
     def test_valid_plans(self):
         for code, go in [('true', 'true'), ('true', 'false'), ('false', 'false')]:
             self.assertEqual(failures(self.results(code, go)), [])
