@@ -45,6 +45,11 @@ type collaborationAgentTestFixture struct {
 func newCollaborationAgentTestFixture(t *testing.T, grantLevel ...string) *collaborationAgentTestFixture {
 	t.Helper()
 	f, source := originalSessionFixture(t)
+	return newCollaborationAgentTestFixtureForPrincipal(t, f, source, grantLevel...)
+}
+
+func newCollaborationAgentTestFixtureForPrincipal(t *testing.T, f *artifactPrincipalFixture, source *auth.OriginalCredential, grantLevel ...string) *collaborationAgentTestFixture {
+	t.Helper()
 	receipt, e := NewInternalHandler(f.rig.db, "synthetic-mandate-ipc", newTestLogger()).originalHumanChatReceipt(t.Context(), f.a.ChatID, f.a.HumanUserID, nil, source)
 	if e != nil || receipt == nil {
 		t.Fatal(e)
