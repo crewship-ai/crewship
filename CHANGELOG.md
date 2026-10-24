@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Mooring CLI streams honor JSON/NDJSON and YAML output; unsupported quiet output is rejected before opening input or connecting. Original submitted packets remain unchanged. Literal HTTP registrations expose the existing authenticated session and WebSocket paths to route inventories.
+
 - Connect default-off Mooring human submissions to immutable live originals, same-writer public receipts, and SQL-backed per-atomic peer updates. Bootstrap requires the actual native human and complete-origin-inventory capabilities; restart recovery and agent writing remain separate qualifications.
 
 - Add a default-off authenticated Mooring HTTP/WebSocket controller with one-use human joins and current SQL-gated checkpoint delivery. Raw editing remains refused until the native human prepare capability is integrated; in-process backup restore requires disabling the controller and restarting.

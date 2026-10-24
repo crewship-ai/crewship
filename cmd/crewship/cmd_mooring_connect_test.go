@@ -18,12 +18,25 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/gorilla/websocket"
+	"gopkg.in/yaml.v3"
 )
 
 func TestMooringConnectOriginalFramesAndCredentialGuard(t *testing.T) {
 	original := `{ "type":"session_join", "request_id":"original-join", "ticket":"synthetic-one-use" }`
-	for _, mode := range []string{"valid", "oversized-server", "oversized-input", "host-mismatch", "missing-file"} {
+	for _, mode := range []string{"valid", "valid-json", "valid-ndjson", "valid-yaml", "quiet-format", "oversized-server", "oversized-input", "host-mismatch", "missing-file"} {
 		t.Run(mode, func(t *testing.T) {
+			previousFormat := flagFormat
+			t.Cleanup(func() { flagFormat = previousFormat })
+			switch mode {
+			case "valid-json":
+				flagFormat = "json"
+			case "valid-ndjson":
+				flagFormat = "ndjson"
+			case "valid-yaml":
+				flagFormat = "yaml"
+			case "quiet-format":
+				flagFormat = "quiet"
+			}
 			var hits atomic.Int32
 			completed := make(chan struct{}, 1)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -78,18 +91,27 @@ func TestMooringConnectOriginalFramesAndCredentialGuard(t *testing.T) {
 			var output bytes.Buffer
 			cmd.SetOut(&output)
 			err := runMooringConnect(cmd, "page/raw", client)
-			if mode == "valid" {
+			if strings.HasPrefix(mode, "valid") {
 				if err != nil {
 					t.Fatal(err)
 				}
 				var result map[string]string
-				if json.Unmarshal(output.Bytes(), &result) != nil || result["counter"] != "9007199254740991" || result["request_id"] != "original-join" {
-					t.Fatalf("server JSON changed: %s", output.String())
+				var decodeErr error
+				if mode == "valid-yaml" {
+					if !strings.HasPrefix(output.String(), "---\n") {
+						t.Fatal("YAML stream has no document boundary")
+					}
+					decodeErr = yaml.Unmarshal(output.Bytes(), &result)
+				} else {
+					decodeErr = json.Unmarshal(output.Bytes(), &result)
+				}
+				if decodeErr != nil || result["counter"] != "9007199254740991" || result["request_id"] != "original-join" {
+					t.Fatalf("server frame changed: %s / %v", output.String(), decodeErr)
 				}
 			} else if err == nil {
 				t.Fatal("invalid stream accepted")
 			}
-			if mode == "host-mismatch" || mode == "missing-file" {
+			if mode == "host-mismatch" || mode == "missing-file" || mode == "quiet-format" {
 				if hits.Load() != 0 {
 					t.Fatal("credential/filesystem rejection happened after network request")
 				}
@@ -100,7 +122,7 @@ func TestMooringConnectOriginalFramesAndCredentialGuard(t *testing.T) {
 					t.Fatal("server did not finish")
 				}
 			}
-			if mode != "valid" && output.Len() != 0 {
+			if !strings.HasPrefix(mode, "valid") && output.Len() != 0 {
 				t.Fatal("invalid frame reached output")
 			}
 		})

@@ -15,10 +15,10 @@ func (r *Router) registerMooringRoutes() {
 		return
 	}
 	r.mooringHTTP = manager
-	r.recordMut("POST", "/api/v1/pages/{slug}/mooring/session", roleSelf, scopeSelf)
-	register := func(method, path string, h http.HandlerFunc) {
-		r.mux.Handle(method+" "+path, manager.fence.Wrap(r.authMw.RequireAuth(r.authMw.RequireWorkspace(r.providerAccountPolicy(h)))))
-	}
-	register("POST", "/api/v1/pages/{slug}/mooring/session", manager.session)
-	register("GET", "/api/v1/pages/{slug}/mooring/ws", manager.websocket)
+	authed := r.authMw.RequireAuth
+	wsCtx := r.authMw.RequireWorkspace
+	// Literal registrations keep the CLI and documentation route inventories
+	// able to verify these paths and their workspace requirement.
+	r.authedMut("POST", "/api/v1/pages/{slug}/mooring/session", roleSelf, manager.session, manager.fence.Wrap)
+	r.mux.Handle("GET /api/v1/pages/{slug}/mooring/ws", manager.fence.Wrap(authed(wsCtx(r.providerAccountPolicy(http.HandlerFunc(manager.websocket))))))
 }

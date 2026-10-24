@@ -2,11 +2,9 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -25,7 +23,7 @@ func newMooringConnectCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "connect <page-slug|@ID>",
 		Short: "Exchange original collaboration frames over an authenticated connection",
-		Long:  "Send one original JSON frame per input line and print one server frame per line. The first frame must be the original session_join. Keep the original packets for retries; this command creates no receipts.",
+		Long:  "Send one original JSON frame per input line. Print server frames as JSON lines by default, or YAML documents with -f yaml. The first frame must be the original session_join. Keep the original packets for retries; this command creates no receipts.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, err := humanWorkbookClient()
@@ -41,6 +39,14 @@ func newMooringConnectCommand() *cobra.Command {
 }
 
 func runMooringConnect(cmd *cobra.Command, page string, client *cli.Client) error {
+	formatter := resolvedFormatter(cmd)
+	formatter.Writer = cmd.OutOrStdout()
+	switch formatter.Format {
+	case "table", "json", "ndjson", "yaml":
+		// The default human mode retains the original JSON-lines interface.
+	default:
+		return errors.New("Mooring streams require json, ndjson or yaml output")
+	}
 	connection, _ := cmd.Flags().GetString("connection")
 	inputPath, _ := cmd.Flags().GetString("file")
 	if !mooring.ValidWireIdentifier(connection) || inputPath == "" {
@@ -153,11 +159,7 @@ func runMooringConnect(cmd *cobra.Command, page string, client *cli.Client) erro
 		if kind != websocket.TextMessage || !json.Valid(frame) {
 			return errors.New("invalid Mooring server frame")
 		}
-		var safe bytes.Buffer
-		if err := json.Compact(&safe, frame); err != nil {
-			return errors.New("invalid Mooring server frame")
-		}
-		if _, err := fmt.Fprintln(cmd.OutOrStdout(), safe.String()); err != nil {
+		if err := formatter.WriteStreamRow(cli.RawJSON(frame)); err != nil {
 			return err
 		}
 	}
