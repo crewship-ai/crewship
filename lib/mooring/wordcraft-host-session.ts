@@ -79,7 +79,7 @@ export function connectWordCraftHost(workspaceId: string, pageId: string, openin
   const socket = new WebSocket(`${resolveWsBase()}/api/v1/pages/${encodeURIComponent("@" + pageId)}/mooring/ws?${query}`)
   const joinRequest = crypto.randomUUID(), checkpointRequest = crypto.randomUUID()
   let joined = "", checkpoint = "", generation = "", stopped = false, bootstrapped = false, childReady = false, draftEpoch = 0, confirmedEpoch = 0, pendingBytes = 0
-  const pending = new Map<string, { receipt: WordCraftPendingReceipt; raw: string; epoch: number }>()
+  const pending = new Map<string, { receipt: WordCraftPendingReceipt; raw: string; epoch: number; changeIds: readonly string[] }>()
   const settled = new Map<string, string>()
   let settledBytes = 0
   // Semantic identities live for this ORIGINAL source, including after Saved.
@@ -113,6 +113,18 @@ export function connectWordCraftHost(workspaceId: string, pageId: string, openin
         const value: WordCraftBootstrap = { joined_json: joined, checkpoint_json: checkpoint, assigned_origin: opening.origin, access: write ? "writer" : "reader" }
         if (encoder.encode(JSON.stringify({ protocol: 1, type: "wordcraft:bootstrap", ...value })).length > WORDCRAFT_BOOTSTRAP_BYTES) throw new Error("quota_exceeded")
         bootstrapped = true; callbacks.bootstrap(value); return
+      }
+      if (frame.type === "changes_received") {
+        const keys = ["type", "request_id", "scope", "session_id", "change_ids", "state"]
+        if (Object.keys(frame).length !== keys.length || Object.keys(frame).some(key => !keys.includes(key))
+          || !identifier(frame.request_id) || !sameScope(frame.scope) || Object.keys(frame.scope as object).length !== 3
+          || frame.session_id !== opening.session_id || (frame.state !== "pending" && frame.state !== "synchronized")) throw new Error("invalid_pending")
+        const original = pending.get(frame.request_id)
+        if (!original || !Array.isArray(frame.change_ids) || frame.change_ids.length !== original.changeIds.length
+          || frame.change_ids.some((id, index) => id !== original.changeIds[index])) throw new Error("invalid_pending")
+        // This is receipt of the original group, never a durable acknowledgement.
+        // Preserve a newer unsent Draft and keep the original packet retryable.
+        return
       }
       if (frame.type === "commit_result") {
         if (!identifier(frame.request_id)) throw new Error("invalid_receipt")
@@ -176,7 +188,7 @@ export function connectWordCraftHost(workspaceId: string, pageId: string, openin
         } catch (error) { receipt.free(); throw error }
         for (const id of nextChanges) changeIds.add(id)
         for (const id of nextOperations) operationIds.add(id)
-        pending.set(request.request_id, { receipt, raw, epoch: draftEpoch }); pendingBytes += encoder.encode(raw).length
+        pending.set(request.request_id, { receipt, raw, epoch: draftEpoch, changeIds: Object.freeze(nextChanges) }); pendingBytes += encoder.encode(raw).length
         state("pending"); send(raw)
       } catch { stop("unqualified_original") }
     },

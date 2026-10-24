@@ -116,3 +116,80 @@ it("does not let a known Saved operation under a new request clear a later draft
   expect(socket.sent.some(raw => JSON.parse(raw).request_id === "A2")).toBe(false)
   host.close()
 })
+
+// Synthetic transport + MOCK Rust receipt boundary, as in the lifecycle tests
+// above. These exercise Pending correlation only, never SQL/Saved qualification.
+const pendingNotice = (request: string, changes: string[] = [request]) => ({
+  type: "changes_received", request_id: request, scope, session_id: "session", change_ids: changes, state: "pending",
+})
+it("keeps a valid runtime Pending diagnostic live until the unchanged original receipt arrives", () => {
+  const { host, socket, callbacks } = rig()
+  host.draft(); host.submit(submit("P1-pending"))
+  socket.receive(pendingNotice("P1-pending"))
+  expect(callbacks.stopped).not.toHaveBeenCalled()
+  expect(callbacks.state).toHaveBeenLastCalledWith("pending")
+  expect(callbacks.state).not.toHaveBeenCalledWith("saved")
+  expect(Pending.check).not.toHaveBeenCalled()
+  expect(callbacks.hostFrame).not.toHaveBeenCalled() // child does not consume this diagnostic
+  host.submit(submit("P1-pending")) // Pending did not consume exact original retry
+  socket.receive(pendingNotice("P1-pending"))
+  socket.receive(receipt("P1-pending"))
+  expect(Pending.check).toHaveBeenCalledTimes(1)
+  expect(callbacks.state).toHaveBeenLastCalledWith("saved")
+  host.close()
+})
+it("does not clear a later unsent Draft when an older Pending diagnostic is received", () => {
+  const { host, socket, callbacks } = rig()
+  host.draft(); host.submit(submit("P1-older")); host.draft()
+  socket.receive(pendingNotice("P1-older"))
+  expect(callbacks.stopped).not.toHaveBeenCalled()
+  expect(callbacks.state).toHaveBeenLastCalledWith("draft")
+  expect(Pending.check).not.toHaveBeenCalled()
+  expect(callbacks.hostFrame).not.toHaveBeenCalled()
+  host.close()
+})
+for (const mode of ["request", "scope", "session", "member", "order", "duplicate", "state", "extra"]) {
+  it(`refuses an uncorrelated runtime Pending diagnostic: ${mode}`, () => {
+    const { host, socket, callbacks } = rig()
+    const original = JSON.parse(submit("P1-group"))
+    original.changes.push({change_id:"P1-second",operations:[{op_id:"P1-second"}]})
+    host.draft(); host.submit(JSON.stringify(original))
+    const notice = pendingNotice("P1-group", ["P1-group", "P1-second"])
+    if (mode === "request") notice.request_id = "other"
+    if (mode === "scope") notice.scope = { ...scope, artifact_id: "other" }
+    if (mode === "session") notice.session_id = "other"
+    if (mode === "member") notice.change_ids = ["P1-group", "other"]
+    if (mode === "order") notice.change_ids.reverse()
+    if (mode === "duplicate") notice.change_ids = ["P1-group", "P1-group"]
+    if (mode === "state") notice.state = "saved"
+    if (mode === "extra") Object.assign(notice, { acknowledged: true })
+    socket.receive(notice)
+    expect(callbacks.stopped).toHaveBeenCalled()
+    expect(callbacks.state).toHaveBeenLastCalledWith("unsaved-draft")
+    expect(callbacks.state).not.toHaveBeenCalledWith("saved")
+    expect(Pending.check).not.toHaveBeenCalled()
+    expect(callbacks.hostFrame).not.toHaveBeenCalled()
+    host.close()
+  })
+}
+
+it("does not treat a correlated synchronized diagnostic as durable Saved", () => {
+  const { host, socket, callbacks } = rig()
+  host.draft(); host.submit(submit("synchronized"))
+  socket.receive({ ...pendingNotice("synchronized"), state: "synchronized" })
+  expect(callbacks.stopped).not.toHaveBeenCalled()
+  expect(callbacks.state).toHaveBeenLastCalledWith("pending")
+  expect(callbacks.state).not.toHaveBeenCalledWith("saved")
+  expect(Pending.check).not.toHaveBeenCalled()
+  expect(callbacks.hostFrame).not.toHaveBeenCalled()
+  host.close()
+})
+it("refuses extra scope fields in a Pending diagnostic", () => {
+  const { host, socket, callbacks } = rig()
+  host.draft(); host.submit(submit("scope-extra"))
+  socket.receive({ ...pendingNotice("scope-extra"), scope: { ...scope, acknowledged: true } })
+  expect(callbacks.stopped).toHaveBeenCalled()
+  expect(callbacks.state).toHaveBeenLastCalledWith("unsaved-draft")
+  expect(Pending.check).not.toHaveBeenCalled()
+  host.close()
+})
