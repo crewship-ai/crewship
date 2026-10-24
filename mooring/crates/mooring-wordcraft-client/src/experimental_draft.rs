@@ -267,7 +267,6 @@ mod tests {
         ))
         .unwrap();
         v["body"] = json!([{"kind":"para","text":"aa","runs":[{"len":2}]}]);
-        v["core"]["opaqueConnectorInteger"] = json!(9007199254740993_u64);
         let cp = mooring_wordcraft::Document::import(v.clone(), vec!["p_one".into()])
             .unwrap()
             .checkpoint()
@@ -275,7 +274,7 @@ mod tests {
         (v, cp)
     }
     #[test]
-    fn native_selection_facade_preserves_original_opaque_native_bytes_and_retry() {
+    fn native_selection_facade_preserves_original_native_bytes_and_retry() {
         let (before, cp) = fixture();
         let raw = before.to_string();
         let mut after = before.clone();
@@ -319,6 +318,52 @@ mod tests {
         assert_eq!(
             reader
                 .observe_native_selection("{not-json", "bad", "not-a-counter", "-1")
+                .err(),
+            Some("forbidden".into())
+        );
+    }
+    #[test]
+    fn unsupported_core_facade_is_lossless_readonly_and_denied_before_parse() {
+        let (mut native, _) = fixture();
+        native["core"]["opaqueConnectorInteger"] = json!(9007199254740993_u64);
+        let model = crate::WordCraftModel::new(&native.to_string(), "[\"p_one\"]").unwrap();
+        assert!(model.is_read_only());
+        assert!(model
+            .native_json()
+            .unwrap()
+            .contains("\"opaqueConnectorInteger\":9007199254740993"));
+        assert_eq!(
+            model.preview_agent("{bad", "{bad", "{bad").err(),
+            Some("forbidden".into())
+        );
+        let cp = model.checkpoint().unwrap();
+        let restored = crate::WordCraftModel::restore(&cp).unwrap();
+        assert!(restored.is_read_only());
+        assert_eq!(
+            restored.native_json().unwrap(),
+            model.native_json().unwrap()
+        );
+        let mut client = WordCraftLocalDraft::new(&cp, "20", "writer").unwrap();
+        assert_eq!(
+            client
+                .observe_native_selection("{bad", "bad", "invalid", "-1")
+                .err(),
+            Some("forbidden".into())
+        );
+        // Obtain any separate valid opaque observation: read-only checks must
+        // precede parsing even when the caller supplies a well-typed handle.
+        let (_, valid) = fixture();
+        let writer = WordCraftLocalDraft::new(&valid, "21", "writer").unwrap();
+        let selection = writer
+            .observe_native_selection(&writer.native_json().unwrap(), "p_one", "0", "0")
+            .unwrap();
+        assert_eq!(
+            client.validate_native_transition_selected("{bad", "{bad", &selection),
+            Err("forbidden".into())
+        );
+        assert_eq!(
+            client
+                .native_transition_selected("invalid", "{bad", "{bad", &selection)
                 .err(),
             Some("forbidden".into())
         );

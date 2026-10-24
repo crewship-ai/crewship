@@ -171,3 +171,15 @@ proposal with its immutable frontier. These methods do not capture a real UI
 selection automatically, authenticate a host origin, issue a receipt or enable
 any human profile. Synthetic opaque metadata preservation is a storage/digest
 property, not proof that the native WordCraft engine can edit that encoding.
+
+Native `core` metadata must use the exact qualified WordCraft CoreProps fields
+and types. Unknown/missing fields or an unqualified revision encoding keep the
+whole original document read-only: the actual engine drops unknown fields or
+inserts defaults, so writable native roundtrip would not be exact. Opaque large
+integers are still preserved in storage and readonly exports. Earlier projected
+checkpoints retain their actual known Y.Text identities when restored readonly;
+shape, complete native equality and stable IDs remain mandatory. Missing,
+partial, wrong-typed or foreign roots are rejected, never reconstructed from the
+wrapper's native copy. No checkpoint/native rewrite or automatic migration is
+performed. Native/local SDK gates and the WASM model candidate gate reject
+readonly writes before parsing operation inputs or emitting a local proposal.

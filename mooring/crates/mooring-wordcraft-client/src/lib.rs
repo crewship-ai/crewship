@@ -138,6 +138,9 @@ impl WordCraftModel {
         change_json: &str,
         context_json: &str,
     ) -> Result<UnconfirmedWordCraftCandidate, String> {
+        if self.document.is_read_only() {
+            return Err("forbidden".into());
+        }
         let scope = scope(scope_json)?;
         normalize_bounded(change_json.as_bytes()).map_err(|_| "invalid_request")?;
         let fingerprinted =
