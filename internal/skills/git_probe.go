@@ -15,14 +15,15 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
+	"sync/atomic"
 	"time"
 )
 
 // A version/config listing cannot prove that the actual HTTPS helper's
 // runtime libcurl honored CURLOPT_RESOLVE: Git ignores its setopt return.
-// Qualify each invocation with an owned TLS endpoint on a loopback address
-// different from localhost's normal destination. No repository is served.
+// Qualify each invocation against two reserved owned endpoints. A wrong pin
+// must reach the wrong endpoint; a correct pin must reach verified TLS. No
+// repository is served and no external DNS name is needed.
 // This is internal qualification, never an exception to destination policy.
 func qualifyPinnedGit(ctx context.Context, gitPath, home string) error {
 	if err := requirePinnedGit(ctx, gitPath, home); err != nil {
@@ -42,7 +43,7 @@ func qualifyPinnedGit(ctx context.Context, gitPath, home string) error {
 		return fmt.Errorf("git import transport qualification unavailable")
 	}
 	path := "/" + hex.EncodeToString(nonce[:]) + ".git"
-	listener, err := net.Listen("tcp4", "127.0.0.2:0")
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		return fmt.Errorf("git import transport qualification unavailable")
 	}
@@ -51,6 +52,14 @@ func qualifyPinnedGit(ctx context.Context, gitPath, home string) error {
 		_ = listener.Close()
 		return fmt.Errorf("git import transport qualification unavailable")
 	}
+	wrongIP, wrongSeen, closeWrong, err := gitProbeWrongEndpoint(port)
+	if err != nil {
+		_ = listener.Close()
+		return fmt.Errorf("git import transport qualification unavailable: %w", err)
+	}
+	defer closeWrong()
+	var positiveContacts atomic.Int64
+	listener = &gitProbeCountingListener{Listener: listener, accepts: &positiveContacts}
 	seen := make(chan struct{}, 1)
 	server := &http.Server{ReadHeaderTimeout: time.Second, ReadTimeout: 2 * time.Second, WriteTimeout: 2 * time.Second, IdleTimeout: time.Second,
 		TLSConfig: &tls.Config{Certificates: []tls.Certificate{certificate}, MinVersion: tls.VersionTLS12},
@@ -69,56 +78,56 @@ func qualifyPinnedGit(ctx context.Context, gitPath, home string) error {
 	stopped := make(chan struct{})
 	go func() { defer close(stopped); _ = server.Serve(tls.NewListener(listener, server.TLSConfig)) }()
 	defer func() { _ = server.Close(); _ = listener.Close(); <-stopped }()
-	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	probe := gitClonePlan{url: "https://localhost:" + port + path, host: "localhost", port: port, address: net.ParseIP("127.0.0.2"), caFile: caPath}
-	// Use the same transport flags and isolated runner as the real clone.
-	args, err := pinnedGitCloneArgs(probe, home, filepath.Join(home, "unused"), "")
+	probe := gitClonePlan{url: "https://localhost:" + port + path, host: "localhost", port: port, address: net.ParseIP("127.0.0.1"), caFile: caPath}
+	makeArgs := func(plan gitClonePlan) ([]string, error) {
+		args, err := pinnedGitCloneArgs(plan, home, filepath.Join(home, "unused"), "")
+		if err != nil {
+			return nil, err
+		}
+		for i, arg := range args {
+			if arg == "clone" {
+				return append(args[:i], "ls-remote", "--", plan.url), nil
+			}
+		}
+		return nil, fmt.Errorf("missing clone command")
+	}
+	negative := probe
+	negative.address = wrongIP
+	negativeArgs, err := makeArgs(negative)
 	if err != nil {
 		return fmt.Errorf("git import transport qualification unavailable")
 	}
-	for i, arg := range args {
-		if arg == "clone" {
-			args = append(args[:i], "ls-remote", "--", probe.url)
-			break
-		}
-	}
-	// Negative control catches a nonstandard localhost mapping or a local
-	// listener which would make the pin unnecessary. Host processes and the
-	// installed Git/helper/libraries remain trusted during this operation.
-	negative := append([]string(nil), args...)
-	removed := false
-	for i, arg := range negative {
-		if strings.HasPrefix(arg, "http.curloptResolve=") {
-			negative = append(negative[:i-1], negative[i+1:]...)
-			removed = true
-			break
-		}
-	}
-	if !removed {
-		return fmt.Errorf("git import transport qualification unavailable")
-	}
-	_, _ = runIsolatedGit(probeCtx, gitPath, home, negative...)
-	if probeCtx.Err() != nil {
-		return fmt.Errorf("git import transport qualification timed out")
+	negativeCtx, stopNegative := context.WithTimeout(ctx, 5*time.Second)
+	_, _ = runIsolatedGit(negativeCtx, gitPath, home, negativeArgs...)
+	negativeErr := negativeCtx.Err()
+	stopNegative()
+	if negativeErr != nil || positiveContacts.Load() != 0 {
+		return fmt.Errorf("git import transport failed the negative pin control")
 	}
 	select {
-	case <-seen:
-		return fmt.Errorf("git import transport qualification needs an isolated loopback endpoint")
+	case <-wrongSeen:
 	default:
+		return fmt.Errorf("git import transport cannot prove the negative pin was honored")
 	}
-	_, _ = runIsolatedGit(probeCtx, gitPath, home, args...)
-	if probeCtx.Err() != nil {
+	args, err := makeArgs(probe)
+	if err != nil {
+		return fmt.Errorf("git import transport qualification unavailable")
+	}
+	positiveCtx, stopPositive := context.WithTimeout(ctx, 5*time.Second)
+	defer stopPositive()
+	_, _ = runIsolatedGit(positiveCtx, gitPath, home, args...)
+	if positiveCtx.Err() != nil {
 		return fmt.Errorf("git import transport qualification timed out")
 	}
-	// A deliberate404 is expected. Only an observed TLS request qualifies;
-	// a successful process exit or accepted config string is not evidence.
+	// The owned endpoint deliberately returns404. A zero process exit or an
+	// accepted config string cannot replace a nonce/Host/SNI-verified request.
 	select {
 	case <-seen:
 		return nil
 	default:
 		return fmt.Errorf("git import transport cannot prove pinned HTTPS support; import refused")
 	}
+
 }
 
 func gitProbeCertificate() (tls.Certificate, []byte, error) {

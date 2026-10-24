@@ -111,27 +111,39 @@ func TestPinnedGitNativeTLS(t *testing.T) {
 		w.WriteHeader(status)
 		_, _ = io.Copy(w, reader)
 	})
-	server := ownedGitTLSServer(t, cert, "127.0.0.2", backendHandler)
+	server := ownedGitTLSServer(t, cert, "127.0.0.1", backendHandler)
 	_, port, err := net.SplitHostPort(server.Listener.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := gitClonePlan{url: "https://localhost:" + port + "/repo.git", host: "localhost", port: port, address: net.ParseIP("127.0.0.2"), caFile: caPath}
+	plan := gitClonePlan{url: "https://localhost:" + port + "/repo.git", host: "localhost", port: port, address: net.ParseIP("127.0.0.1"), caFile: caPath}
 	template := t.TempDir()
-	runClone := func(p gitClonePlan, stripPin bool) (string, error) {
+	runClone := func(p gitClonePlan, wrongPin bool) (string, error) {
 		destination := filepath.Join(t.TempDir(), "checkout")
 		args, err := pinnedGitCloneArgs(p, template, destination, "")
 		if err != nil {
 			return destination, err
 		}
-		if stripPin {
-			for i := 0; i < len(args); i++ {
-				if strings.HasPrefix(args[i], "http.curloptResolve=") {
-					args = append(args[:i-1], args[i+1:]...)
-					break
-				}
+		if wrongPin {
+			wrongIP, seen, closeWrong, err := gitProbeWrongEndpoint(p.port)
+			if err != nil {
+				return destination, err
 			}
+			defer closeWrong()
+			p.address = wrongIP
+			args, err = pinnedGitCloneArgs(p, template, destination, "")
+			if err != nil {
+				return destination, err
+			}
+			defer func() {
+				select {
+				case <-seen:
+				default:
+					t.Error("wrong-pin control never reached its owned endpoint")
+				}
+			}()
 		}
+
 		bounded, cancel := context.WithTimeout(ctx, 8*time.Second)
 		defer cancel()
 		_, err = runIsolatedGit(bounded, gitPath, home, args...)
@@ -157,10 +169,10 @@ func TestPinnedGitNativeTLS(t *testing.T) {
 	}
 	before := contacts.Load()
 	if _, err := runClone(plan, true); err == nil {
-		t.Fatal("without pin unexpectedly cloned listener on127.0.0.2 through localhost")
+		t.Fatal("wrong pin unexpectedly cloned the positive listener")
 	}
 	if contacts.Load() != before {
-		t.Fatal("unpinned localhost contacted127.0.0.2 fixture")
+		t.Fatal("wrong pin contacted the positive fixture")
 	}
 	noCA := plan
 	noCA.caFile = ""
@@ -171,7 +183,7 @@ func TestPinnedGitNativeTLS(t *testing.T) {
 	target := ownedGitTLSServer(t, cert, "127.0.0.1", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { redirected.Add(1); http.Error(w, "unexpected", 500) }))
 	targetURL := "https://localhost:" + strings.Split(target.Listener.Addr().String(), ":")[1] + "/repo.git"
 	var redirectOrigin atomic.Int32
-	redirect := ownedGitTLSServer(t, cert, "127.0.0.2", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	redirect := ownedGitTLSServer(t, cert, "127.0.0.1", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		redirectOrigin.Add(1)
 		http.Redirect(w, r, targetURL, http.StatusFound)
 	}))
@@ -243,7 +255,7 @@ func TestPinnedGitNativeTLS(t *testing.T) {
 	}), &alternateSockets)
 	_, foreignPort, _ := net.SplitHostPort(foreign.Listener.Addr().String())
 	oid := git("-C", src, "rev-parse", "HEAD")
-	dumb := ownedGitTLSServer(t, cert, "127.0.0.2", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	dumb := ownedGitTLSServer(t, cert, "127.0.0.1", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/dumb.git/info/refs":
 			w.Header().Set("Content-Type", "text/plain")
