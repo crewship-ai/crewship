@@ -299,3 +299,11 @@ no session manager, Rust control messages, browser route or raw-human write
 profile. The tagged replacement test uses actual pinned native child processes
 and canonical FULL SQL with an explicit fixture clock/ingress; the separate
 actual HTTP test qualifies signed authentication and BOOTTIME storage behavior.
+`OwnerStore.Release` is a host-only voluntary shutdown primitive. The exact
+current token/scope/generation must pass under the FULL SQL writer; expiry and
+closure of its gates commit together. It never deletes the owner generation,
+changes original gate expiry/ordinal, or fabricates a blocked acknowledgement.
+The manager must stop/drain the actual old runtime. A subsequent Acquire may
+immediately issue a new owner generation, but replacement content admission
+must still wait for the original outstanding delivery barrier. A stale release
+cannot affect that new owner. This does not enable any session or public route.

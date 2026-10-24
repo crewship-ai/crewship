@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"net/http/httptest"
 	"os"
 	"testing"
@@ -88,11 +89,32 @@ func TestCollaborationHumanActualRuntimeReplacementPreservesAdmission(t *testing
 	if _, err = registry.replaceRuntime(t.Context(), second, owner); err == nil {
 		t.Fatal("same owner generation reused")
 	}
-	clock.now += time.Minute + time.Nanosecond
+	// Voluntary release permits a fresh owner BEFORE the issued two-second
+	// delivery lease expires. Owner succession must not acknowledge that lease.
+	if err = unit.owners.Release(t.Context(), owner); err != nil {
+		t.Fatal(err)
+	}
 	newOwner, err := unit.owners.Acquire(t.Context(), unit.scope, "replacement-native-owner")
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err = registry.replaceRuntime(t.Context(), second, newOwner); !errors.Is(err, mooring.ErrDeliveryClosed) {
+		t.Fatal("fresh owner bypassed original pending delivery lease", err)
+	}
+	var pendingClosed, pendingBlocked bool
+	var pendingExpiry int64
+	if err = rig.db.QueryRow(`SELECT closed,blocked,expires_ns FROM mooring_delivery_gates WHERE id=?`, joined.gate.GateID).Scan(&pendingClosed, &pendingBlocked, &pendingExpiry); err != nil {
+		t.Fatal(err)
+	}
+	if !pendingClosed || pendingBlocked || pendingExpiry <= int64(clock.now) {
+		t.Fatal("replacement invented an acknowledgement or erased pending expiry")
+	}
+	check(old, false)
+	clock.now += 2*time.Second - time.Nanosecond
+	if _, err = registry.replaceRuntime(t.Context(), second, newOwner); !errors.Is(err, mooring.ErrDeliveryClosed) {
+		t.Fatal("delivery barrier completed before the final original nanosecond", err)
+	}
+	clock.now += time.Nanosecond
 	fresh, err := registry.replaceRuntime(t.Context(), second, newOwner)
 	if err != nil {
 		t.Fatal(err)
@@ -113,7 +135,7 @@ func TestCollaborationHumanActualRuntimeReplacementPreservesAdmission(t *testing
 	if err = rig.db.QueryRow(`SELECT closed,expires_ns FROM mooring_delivery_gates WHERE id=?`, joined.gate.GateID).Scan(&closed, &originalExpiry); err != nil {
 		t.Fatal(err)
 	}
-	if !closed || originalExpiry >= int64(clock.now) {
+	if !closed || originalExpiry != pendingExpiry || originalExpiry > int64(clock.now) {
 		t.Fatal("old gate not retained closed/expired")
 	}
 	if _, err = registry.consume(second, newOwner, spareTicket, "stale-ticket"); err == nil {
