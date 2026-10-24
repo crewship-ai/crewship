@@ -2,6 +2,8 @@
 use std::io::{self, Read, Write};
 pub mod dispatch;
 pub mod dispatch_causal;
+#[cfg(unix)]
+pub mod session_lane;
 
 pub const MAX_FRAME: usize = 262_144;
 
