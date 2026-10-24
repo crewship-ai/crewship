@@ -1,6 +1,9 @@
 package mooring
 
-import "context"
+import (
+	"context"
+	protocol "github.com/crewship-ai/crewship/mooring/protocol/generated/go"
+)
 
 // Target versions are host bookkeeping. Application meaning and CRDT identities
 // remain in the opaque checkpoint; no application text is interpreted here.
@@ -39,6 +42,8 @@ type BatchTargetCandidate struct {
 	Checkpoint []byte
 	Inventory  []BatchTargetIdentity
 	Effects    []BatchOperationEffects
+	// Session-only application DATA, never an author or Saved capability.
+	NativeDelta *protocol.SessionNativeDelta
 }
 
 // TargetBatchAdapter runs the qualified private preparation contract. Context
@@ -77,4 +82,8 @@ type TargetStoreConfig struct {
 	Enabled       bool
 	Adapter       TargetBatchAdapter
 	Limits        BatchTargetLimits
+	// Optional immutable hook used ONLY by the full-identity session commit
+	// path. Ordinary strict/causal calls never invoke or acquire this source.
+	SessionHumanPrepare    SessionHumanPrepareResolver
+	SessionNativeCandidate SessionNativeCandidateValidator
 }

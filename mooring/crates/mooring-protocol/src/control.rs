@@ -57,21 +57,43 @@ pub fn is_control_type(value: &str) -> bool {
 /// This validates shape/resources/direction, not scope, revision, fingerprint,
 /// checkpoint digest or adapter effects. Those checks precede app interpretation.
 pub fn validate(raw: &[u8], peer: Peer) -> Result<CanonicalValue, WireError> {
-    validate_selected(raw, peer, false)
+    validate_selected(raw, peer, false, false)
 }
 
 /// Separate explicitly selected causal contract, never a fallback for strict
 /// requests. Caller-verified inherited channel provenance and profile selection
 /// are required before use; this does not qualify SQL history or app effects.
 pub fn validate_causal(raw: &[u8], peer: Peer) -> Result<CanonicalValue, WireError> {
-    validate_selected(raw, peer, true)
+    validate_selected(raw, peer, true, false)
 }
 
-fn validate_selected(raw: &[u8], peer: Peer, causal: bool) -> Result<CanonicalValue, WireError> {
+/// Shape/resource validation for an actual inherited session that negotiated
+/// human_native_prepare_v1. This function verifies no negotiation, source or
+/// Saved provenance; only the concrete session integration may supply those.
+/// Standalone causal preparation deliberately rejects these optional fields.
+pub fn validate_session_native_prepare(
+    raw: &[u8],
+    peer: Peer,
+) -> Result<CanonicalValue, WireError> {
+    validate_selected(raw, peer, true, true)
+}
+
+fn validate_selected(
+    raw: &[u8],
+    peer: Peer,
+    causal: bool,
+    session_native: bool,
+) -> Result<CanonicalValue, WireError> {
     if matches!(peer, Peer::Participant) {
         return Err(WireError::InvalidShape);
     }
     let value = normalize(raw)?;
+    if !session_native
+        && (value.value().get("human_context").is_some()
+            || value.value().get("native_delta").is_some())
+    {
+        return Err(WireError::InvalidShape);
+    }
     let message_type = value.value()["type"]
         .as_str()
         .ok_or(WireError::InvalidShape)?;
@@ -93,6 +115,11 @@ fn validate_selected(raw: &[u8], peer: Peer, causal: bool) -> Result<CanonicalVa
         (Peer::Participant, _) => false,
     };
     if !allowed || !crate::shape::envelope(value.value()) {
+        return Err(WireError::InvalidShape);
+    }
+    if value.value().get("native_delta").is_some()
+        && value.value()["outcome"]["kind"] != "candidate"
+    {
         return Err(WireError::InvalidShape);
     }
     Ok(value)

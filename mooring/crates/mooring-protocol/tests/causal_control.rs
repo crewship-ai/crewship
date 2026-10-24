@@ -104,3 +104,41 @@ fn required_nullable_entry_preserves_null_and_original_optional_absence() {
             .is_none()
     );
 }
+
+#[test]
+fn session_native_fields_never_leak_into_standalone_causal_profile() {
+    let cases = fixture();
+    let mut message = cases["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| case["id"] == "atomic_prepared-causal")
+        .unwrap()["message"]
+        .clone();
+    message["native_delta"] = serde_json::json!({
+        "writer_origin":"1", "allocation_origins":[], "update":"", "targets":["p"]
+    });
+    let bytes = serde_json::to_vec(&message).unwrap();
+    assert!(control::validate_session_native_prepare(&bytes, Peer::InheritedRuntime).is_ok());
+    assert!(control::validate_session_native_prepare(&bytes, Peer::InheritedHost).is_err());
+    assert!(control::validate_session_native_prepare(&bytes, Peer::Participant).is_err());
+    assert!(control::validate_causal(&bytes, Peer::InheritedRuntime).is_err());
+    assert!(control::validate(&bytes, Peer::InheritedRuntime).is_err());
+    assert!(wire::validate_bounded_envelope(&bytes).is_err());
+    message["native_delta"] = Value::Null;
+    let bytes = serde_json::to_vec(&message).unwrap();
+    assert!(control::validate_session_native_prepare(&bytes, Peer::InheritedRuntime).is_err());
+    assert!(control::validate_causal(&bytes, Peer::InheritedRuntime).is_err());
+
+    let mut request = cases["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| case["message"]["type"] == "prepare_atomic_causal" && case["valid"] == true)
+        .unwrap()["message"]
+        .clone();
+    request["human_context"] = Value::Null;
+    let bytes = serde_json::to_vec(&request).unwrap();
+    assert!(control::validate_session_native_prepare(&bytes, Peer::InheritedHost).is_err());
+    assert!(control::validate_causal(&bytes, Peer::InheritedHost).is_err());
+}

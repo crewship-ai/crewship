@@ -61,6 +61,9 @@ const (
 )
 
 func (v *privateControlValidator) validateCausal(raw []byte, peer privateCausalPeer) ([]byte, error) {
+	return v.validateCausalSelected(raw, peer, false)
+}
+func (v *privateControlValidator) validateCausalSelected(raw []byte, peer privateCausalPeer, native bool) ([]byte, error) {
 	if v == nil || v.schema == nil || (peer != privateCausalHost && peer != privateCausalRuntime) {
 		return nil, ErrPrivateControl
 	}
@@ -72,6 +75,14 @@ func (v *privateControlValidator) validateCausal(raw []byte, peer privateCausalP
 	if json.Unmarshal(normalized, &value) != nil || value["control_profile"] != PrivateCausalPrepareProfile {
 		return nil, ErrPrivateControl
 	}
+	// Optional session-native fields do not widen the standalone causal
+	// capability merely because the bundled schema knows their shapes.
+	if _, present := value["human_context"]; present && !native {
+		return nil, ErrPrivateControl
+	}
+	if _, present := value["native_delta"]; present && !native {
+		return nil, ErrPrivateControl
+	}
 	t, _ := value["type"].(string)
 	allowed := t == "validate_checkpoint_causal" || t == "prepare_atomic_causal"
 	if peer == privateCausalRuntime {
@@ -79,6 +90,12 @@ func (v *privateControlValidator) validateCausal(raw []byte, peer privateCausalP
 	}
 	if !allowed || !v.schema.matches(v.schema.root, value, 0) {
 		return nil, ErrPrivateControl
+	}
+	if _, present := value["native_delta"]; present {
+		outcome, ok := value["outcome"].(map[string]any)
+		if !ok || outcome["kind"] != "candidate" {
+			return nil, ErrPrivateControl
+		}
 	}
 	return normalized, nil
 }
