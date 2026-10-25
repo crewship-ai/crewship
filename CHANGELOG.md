@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Open document links in their accessible workspace before requesting document content, preserving unsaved-work navigation guards.
+
 - **One departing or expired collaborator could disconnect everyone.** Keep late lease replies scoped to the original closed participant and finish an already reserved reply before that participant leaves, preserving the other collaborators' session.
 
 - **Opening large collaborative documents could time out.** Avoid repeated checkpoint validation in incompatible message variants and scan the existing base64 schema vocabulary directly, preserving checkpoint integrity and the five-second startup deadline.

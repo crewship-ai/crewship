@@ -3,7 +3,7 @@
 import { Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useWorkspace } from "@/hooks/use-workspace"
+import { usePageWorkspace } from "@/hooks/use-page-workspace"
 import { useAccessMode } from "@/hooks/use-access-mode"
 import { PagesLayout } from "@/components/features/pages/pages-layout"
 import { useAccessContext } from "@/components/features/restricted/access-notice"
@@ -25,11 +25,13 @@ export default function PagesPage() {
 function PagesEntry() {
   const params = useSearchParams()
   const search = params?.toString() ?? ""
-  const { workspaceId, loading: wsLoading } = useWorkspace()
+  const { workspaceId, loading: wsLoading, linkUnavailable } = usePageWorkspace()
   const access = useAccessContext()
   // Session-level, not the selected workspace's row: one restricted
   // membership restricts every request the account makes (#2861).
   const accessMode = useAccessMode()
+
+  if (linkUnavailable) return <p className="p-6" role="alert">Document unavailable.</p>
 
   if (wsLoading || !workspaceId || accessMode === "loading") {
     return (
