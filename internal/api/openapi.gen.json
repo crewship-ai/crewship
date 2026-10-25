@@ -2194,6 +2194,9 @@
       },
       "ChatDocumentTaskView": {
         "properties": {
+          "allow_partial": {
+            "type": "boolean"
+          },
           "can_read": {
             "type": "boolean"
           },
@@ -2220,7 +2223,8 @@
           "scope",
           "expires_at",
           "can_read",
-          "can_write"
+          "can_write",
+          "allow_partial"
         ],
         "type": "object"
       },
