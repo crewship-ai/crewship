@@ -121,8 +121,8 @@ jobs:
           IMAGE: ${{ steps.target.outputs.image }}@${{ steps.build.outputs.digest }}
         run: |
           docker pull "$IMAGE"
-          image=$(docker image inspect --format '{{.Id}}' "$IMAGE")
-          CREWSHIP_RESTRICTED_LIVE=1 CREWSHIP_RESTRICTED_PRODUCTION_IMAGE="$image" \
+          immutable_image_id=$(docker image inspect --format '{{.Id}}' "$IMAGE")
+          CREWSHIP_RESTRICTED_LIVE=1 CREWSHIP_RESTRICTED_PRODUCTION_IMAGE="$immutable_image_id" \
             go test -tags restrictedruntime_live ./internal/restricteddispatch \
               -run '^TestLiveProductionWorkerDurableAccounting$' -count=1 -timeout 10m -json > "$RUNNER_TEMP/text-worker-tests.jsonl"
           python3 - "$RUNNER_TEMP/text-worker-tests.jsonl" <<'PYTEST'

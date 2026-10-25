@@ -1,0 +1,28 @@
+--- a/bind-mount.c
++++ b/bind-mount.c
+@@ -20,6 +20,7 @@
+ #include <sys/mount.h>
+ #include "utils.h"
+ #include "bind-mount.h"
++#include "crewship-atime.h"
+ 
+ static char *
+ skip_token (char *line, bool eat_whitespace)
+@@ -423,7 +424,7 @@
+   new_flags = current_flags | (devices ? 0 : MS_NODEV) | MS_NOSUID | (readonly ? MS_RDONLY : 0);
+   if (new_flags != current_flags &&
+       mount ("none", resolved_dest,
+-             NULL, MS_SILENT | MS_BIND | MS_REMOUNT | new_flags, NULL) != 0)
++             NULL, MS_SILENT | MS_BIND | MS_REMOUNT | preserve_atime_flags (new_flags), NULL) != 0)
+     {
+       if (failing_path != NULL)
+         *failing_path = steal_pointer (&resolved_dest);
+@@ -442,7 +443,7 @@
+           new_flags = current_flags | (devices ? 0 : MS_NODEV) | MS_NOSUID | (readonly ? MS_RDONLY : 0);
+           if (new_flags != current_flags &&
+               mount ("none", mount_tab[i].mountpoint,
+-                     NULL, MS_SILENT | MS_BIND | MS_REMOUNT | new_flags, NULL) != 0)
++                     NULL, MS_SILENT | MS_BIND | MS_REMOUNT | preserve_atime_flags (new_flags), NULL) != 0)
+             {
+               /* If we can't read the mountpoint we can't remount it, but that should
+                  be safe to ignore because its not something the user can access. */

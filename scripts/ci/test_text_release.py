@@ -35,7 +35,7 @@ class TextReleaseTests(unittest.TestCase):
         self.assertIn('cosign sign --yes "$IMAGE"', publish)
         self.assertLess(publish.index('go test -tags restrictedruntime_live'), publish.index('cosign sign --yes'))
         self.assertIn('docker pull "$IMAGE"', publish)
-        self.assertIn('CREWSHIP_RESTRICTED_PRODUCTION_IMAGE="$image"', publish)
+        self.assertIn('CREWSHIP_RESTRICTED_PRODUCTION_IMAGE="$immutable_image_id"', publish)
         self.assertIn('runner.sha256', publish)
         self.assertIn('provenance: mode=max', publish)
         self.assertIn('sbom: true', publish)
