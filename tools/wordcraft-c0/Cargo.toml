@@ -1,0 +1,20 @@
+[package]
+name = "wordcraft-c0-conditions"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "Apache-2.0"
+
+[workspace]
+
+[dependencies]
+wordcraft-engine = { git = "https://github.com/storytold/wordcraft", rev = "7ef2633a7e84956522d1ca47b99fe6feef16c1db" }
+wordcraft-doc = { git = "https://github.com/storytold/wordcraft", rev = "7ef2633a7e84956522d1ca47b99fe6feef16c1db" }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+unicode-segmentation = "1"
+
+[patch.crates-io]
+krilla = { git = "https://github.com/storytold/craft-libs", rev = "17744430be327d0257496a6a31c8d38fe20a6756" }
+
+[profile.release]
+opt-level = 3
