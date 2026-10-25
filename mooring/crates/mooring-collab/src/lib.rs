@@ -1,4 +1,6 @@
 //! Private inherited host control. Stateless preparation is not a host commit.
+#[cfg(all(target_os = "linux", feature = "wordcraft-command-experiment"))]
+pub mod command_experiment;
 use std::io::{self, Read, Write};
 pub mod dispatch;
 pub mod dispatch_causal;

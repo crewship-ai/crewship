@@ -1,0 +1,18 @@
+[package]
+name = "wordcraft-c1-engine"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "Apache-2.0"
+[workspace]
+[dependencies]
+libc = "0.2"
+wordcraft-engine = { path = "../source/crates/engine" }
+wordcraft-doc = { path = "../source/crates/doc" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+unicode-segmentation = "1"
+[patch.crates-io]
+krilla = { git = "https://github.com/storytold/craft-libs", rev = "17744430be327d0257496a6a31c8d38fe20a6756" }
+[profile.release]
+opt-level = 3

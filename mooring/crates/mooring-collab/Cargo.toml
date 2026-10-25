@@ -6,6 +6,10 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+default = []
+wordcraft-command-experiment = ["serde_json/float_roundtrip"]
+
 [dependencies]
 mooring-core = { path = "../mooring-core" }
 mooring-protocol = { path = "../mooring-protocol" }
