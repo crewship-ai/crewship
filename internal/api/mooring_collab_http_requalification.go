@@ -173,10 +173,22 @@ func (c *collaborationHTTPConnection) startGateTransition(ctx context.Context) (
 	return t, nil
 }
 func (c *collaborationHTTPConnection) ensureCurrentGate(ctx context.Context) error {
+	return c.ensureCurrentGateForOutput(ctx, false)
+}
+
+// Only already qualified saved DATA / captured Joined continuations may consume
+// a known closed recipient without cancelling others. This never grants a gate.
+func (c *collaborationHTTPConnection) ensureCurrentGateForOutput(ctx context.Context, closedTrigger bool) error {
 	c.deliveryMu.Lock()
 	t, err := c.startGateTransition(ctx)
 	c.deliveryMu.Unlock()
 	if err != nil {
+		c.mu.Lock()
+		closed := c.closed
+		c.mu.Unlock()
+		if closedTrigger && closed {
+			return errCollaborationRecipientDenied
+		}
 		c.document.cancel()
 		return err
 	}
@@ -285,32 +297,7 @@ func (d *collaborationHTTPDocument) outputControl(ctx context.Context, token moo
 		return errCollaborationHTTP
 	}
 	if header.Type == "session_joined" {
-		c.mu.Lock()
-		pending := c.participantPending
-		if c.closed || pending == nil {
-			c.mu.Unlock()
-			return errCollaborationHTTP
-		}
-		binding, err := d.cell.runtime.CaptureParticipantJoined(d.activation, pending, token)
-		if err != nil {
-			c.mu.Unlock()
-			return err
-		}
-		c.participantBinding = binding
-		c.participantPending = nil
-		transition := c.transition
-		if transition != nil {
-			if !c.joinedDelivered {
-				c.mu.Unlock()
-				return errCollaborationHTTP
-			}
-			c.transition = nil
-			close(transition.ready)
-			c.mu.Unlock()
-			return nil // Existing connection/source; not a new public admission.
-		}
-		c.mu.Unlock()
-		return d.output(ctx, q)
+		return errCollaborationHTTP
 	}
 	c.mu.Lock()
 	retired := c.retirements[string(q.GateID)]
@@ -334,12 +321,12 @@ func (d *collaborationHTTPDocument) outputControl(ctx context.Context, token moo
 		if err = d.cell.runtime.ValidateRetiredOutput(token, retired.proof); err != nil {
 			return err
 		}
-		return c.committedOutputRecipient(q, raw, header.Type, retired.gate, denied)
+		return c.committedOutputRecipient(ctx, q, raw, header.Type, retired.gate, denied)
 	}
 	if denied {
 		return errCollaborationHTTP
 	}
-	return c.committedOutput(q, raw, header.Type)
+	return c.committedOutput(ctx, q, raw, header.Type)
 }
 
 // Serial management callback: a successful original-vector denial after Open
@@ -384,4 +371,45 @@ func (d *collaborationHTTPDocument) ticketControl(ctx context.Context, token moo
 	c.mu.Unlock()
 	c.closeRetiredRecipient() // negative already written: no second Leave
 	return nil
+}
+
+// The continuation is created only after the opaque Joined capture succeeds.
+// It owns a connection reference, never borrowed envelope data or old-gate rights.
+// A later retirement may be pruned while this token waits in the DATA FIFO.
+func (d *collaborationHTTPDocument) joinedControl(ctx context.Context, token mooring.SessionControl, q protocol.SessionParticipantOutput) (func(context.Context) error, error) {
+	if q.Scope != d.wireScope() || q.SessionID != protocol.Identifier(d.activation.SessionID()) || q.RuntimeRef != protocol.Identifier(d.cell.runtime.RuntimeRef()) || q.Fence != d.wireFence() {
+		return nil, errCollaborationHTTP
+	}
+	c := d.participantConnection(string(q.ConnectionRef), string(q.ParticipantRef))
+	if c == nil {
+		return nil, errCollaborationHTTP
+	}
+
+	c.mu.Lock()
+	pending := c.participantPending
+	if c.closed || pending == nil {
+		c.mu.Unlock()
+		return nil, errCollaborationHTTP
+	}
+	binding, err := d.cell.runtime.CaptureParticipantJoined(d.activation, pending, token)
+	if err != nil {
+		c.mu.Unlock()
+		return nil, err
+	}
+	c.participantBinding = binding
+	c.participantPending = nil
+	transition := c.transition
+	if transition != nil {
+		if !c.joinedDelivered {
+			c.mu.Unlock()
+			return nil, errCollaborationHTTP
+		}
+		c.transition = nil
+		close(transition.ready)
+		c.mu.Unlock()
+		return c.catchUpAfterJoined, nil // Host DATA trigger; no old-gate authority.
+	}
+	c.mu.Unlock()
+	return nil, d.output(ctx, q)
+
 }
