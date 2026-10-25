@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Bound Mooring session admission request and response I/O, flush buffered responses under the original ingress lease, and retain the read deadline through HTTP body cleanup.
+
 - **Document access in chat:** distinguish the agent's current document grants from verified active task permissions. Hide inaccessible document metadata, expire unverified views, and identify unknown output provenance explicitly.
 
 - Mooring sessions retain a Pending notification and its matching terminal receipt separately while delivery is blocked, preserving each until its own completion.

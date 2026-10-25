@@ -284,7 +284,48 @@ type collaborationHTTPSessionEditor struct {
 	BundleDigest string `json:"bundle_digest"`
 }
 
+// Keep admission I/O within the existing bootstrap ceiling. This bounds the
+// original request lifecycle; it does not extend any delivery gate or source.
+const collaborationHTTPSessionTimeout = 12 * time.Second
+
+// Match ResponseController's supported flush interfaces through trusted HTTP
+// wrappers, without flushing a success header before the original checks.
+func collaborationSessionCanFlush(w http.ResponseWriter) bool {
+	for {
+		switch v := w.(type) {
+		case interface{ FlushError() error }:
+			return true
+		case http.Flusher:
+			return true
+		case interface{ Unwrap() http.ResponseWriter }:
+			w = v.Unwrap()
+		default:
+			return false
+		}
+	}
+}
+
 func (m *collaborationHTTPManager) session(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), collaborationHTTPSessionTimeout)
+	defer cancel()
+	r = r.WithContext(ctx)
+	controller := http.NewResponseController(w)
+	deadline, _ := ctx.Deadline()
+	if err := controller.SetWriteDeadline(deadline); err != nil {
+		replyError(w, 503, "bounded Mooring response unavailable")
+		return
+	}
+	defer func() { _ = controller.SetWriteDeadline(time.Time{}) }()
+	if err := controller.SetReadDeadline(deadline); err != nil {
+		replyError(w, 503, "bounded Mooring request unavailable")
+		return
+	}
+	// Keep this read deadline through net/http unread-body cleanup, including
+	// pre-lease denials. The server installs its own deadline for the next request.
+	if !collaborationSessionCanFlush(w) || ctx.Err() != nil {
+		replyError(w, 503, "bounded Mooring response unavailable")
+		return
+	}
 	stamp, e := m.fence.capture(r.Context())
 	if e != nil {
 		replyError(w, 503, "Mooring session unavailable")
@@ -296,6 +337,8 @@ func (m *collaborationHTTPManager) session(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	defer release()
+	// Flush buffered success AND denial bytes before releasing original ingress.
+	defer func() { _ = controller.Flush() }()
 	key, rec, e := m.scope(r)
 	if e != nil {
 		replyError(w, 403, "Mooring access denied")
