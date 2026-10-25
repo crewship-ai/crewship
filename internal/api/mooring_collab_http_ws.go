@@ -372,11 +372,17 @@ func (c *collaborationHTTPConnection) checkedSend(raw []byte) error {
 
 // Caller holds c.mu through the SQL writer and physical send.
 func (c *collaborationHTTPConnection) checkedSendLocked(raw []byte) error {
+	return c.checkedSendRequestLocked(c.request, raw)
+}
+
+// The operation request preserves the original principal/context deadline.
+// A catch-up phase only adds cancellation; it never renews the original source.
+func (c *collaborationHTTPConnection) checkedSendRequestLocked(request *http.Request, raw []byte) error {
 	if len(raw) > collaborationHTTPFrameLimit || c.closed || c.socket == nil || c.joined.delivery == nil {
 		return errCollaborationHTTP
 	}
 	d := c.document
-	return d.humans.runHumanOperation(c.request, c.admission.participant, func(ctx context.Context) error {
+	return d.humans.runHumanOperation(request, c.admission.participant, func(ctx context.Context) error {
 		return d.submissions.withWriter(ctx, func(tx *sql.Tx) error {
 			if e := d.cell.check(ctx, tx); e != nil {
 				return e
@@ -415,7 +421,7 @@ func (c *collaborationHTTPConnection) checkedSendLocked(raw []byte) error {
 		})
 	})
 }
-func (d *collaborationHTTPDocument) output(_ context.Context, q protocol.SessionParticipantOutput) error {
+func (d *collaborationHTTPDocument) output(ctx context.Context, q protocol.SessionParticipantOutput) error {
 	if q.Scope != d.wireScope() || q.SessionID != protocol.Identifier(d.activation.SessionID()) || q.RuntimeRef != protocol.Identifier(d.cell.runtime.RuntimeRef()) || q.Fence != d.wireFence() {
 		return errCollaborationHTTP
 	}
@@ -436,7 +442,7 @@ func (d *collaborationHTTPDocument) output(_ context.Context, q protocol.Session
 		return errCollaborationHTTP
 	}
 	if header.Type != "session_joined" {
-		return c.committedOutput(q, raw, header.Type)
+		return c.committedOutput(ctx, q, raw, header.Type)
 	}
 
 	var joined protocol.SessionJoined
@@ -477,6 +483,8 @@ func (c *collaborationHTTPConnection) checkpoint(raw []byte) error {
 	if json.Unmarshal(raw, &q) != nil || q.Type != "checkpoint_request" || q.Scope != c.document.wireScope() {
 		return errCollaborationHTTP
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	var response []byte
 	var delivered protocol.Checkpoint
 	e := c.document.humans.runHumanOperation(c.request, c.admission.participant, func(ctx context.Context) error {
@@ -496,7 +504,7 @@ func (c *collaborationHTTPConnection) checkpoint(raw []byte) error {
 	if e != nil {
 		return e
 	}
-	if e = c.checkedSend(response); e != nil {
+	if e = c.checkedSendLocked(response); e != nil {
 		return e
 	}
 	return c.recordObservedCheckpoint(delivered)

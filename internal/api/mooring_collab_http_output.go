@@ -2,10 +2,10 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"strconv"
 
 	"github.com/crewship-ai/crewship/internal/mooring"
 	protocol "github.com/crewship-ai/crewship/mooring/protocol/generated/go"
@@ -14,7 +14,7 @@ import (
 // The child supplies transport DATA. Only receipts and native deltas retained
 // after this host's actual SQL COMMIT can qualify these two output shapes.
 // The original current-reader SQL gate still covers every physical send.
-func (c *collaborationHTTPConnection) committedOutput(q protocol.SessionParticipantOutput, raw []byte, kind string) error {
+func (c *collaborationHTTPConnection) committedOutput(ctx context.Context, q protocol.SessionParticipantOutput, raw []byte, kind string) error {
 	d := c.document
 	if d.originals == nil {
 		return errCollaborationHTTP
@@ -22,15 +22,18 @@ func (c *collaborationHTTPConnection) committedOutput(q protocol.SessionParticip
 	c.mu.Lock()
 	gate := c.joined.gate
 	c.mu.Unlock()
-	return c.committedOutputRecipient(q, raw, kind, gate, false)
+	return c.committedOutputRecipient(ctx, q, raw, kind, gate, false)
 }
 
 // originalGate validates the unchanged old envelope; checkedSendLocked below
 // independently uses the NEW current SQL gate. Denial never publishes bytes.
-func (c *collaborationHTTPConnection) committedOutputRecipient(q protocol.SessionParticipantOutput, raw []byte, kind string, originalGate mooring.DeliveryGrant, denied bool) error {
+func (c *collaborationHTTPConnection) committedOutputRecipient(ctx context.Context, q protocol.SessionParticipantOutput, raw []byte, kind string, originalGate mooring.DeliveryGrant, denied bool) error {
 	d := c.document
 	if d.originals == nil {
 		return errCollaborationHTTP
+	}
+	if kind == "document_update" {
+		return c.committedDocumentUpdate(ctx, q, raw, originalGate, denied)
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -79,78 +82,7 @@ func (c *collaborationHTTPConnection) committedOutputRecipient(q protocol.Sessio
 			return nil
 		}
 		return c.checkedSendLocked(raw)
-	case "document_update":
-		var update protocol.DocumentUpdate
-		if json.Unmarshal(raw, &update) != nil || update.Scope != d.wireScope() || update.SessionID != protocol.Identifier(d.activation.SessionID()) || update.Generation != d.wireFence().Generation || update.Encoding != "json" || update.RequestID != protocol.Identifier("actor-update:"+string(update.ToRevision)) {
-			return errCollaborationHTTP
-		}
-		expectedOuter, err := collaborationPeerOutputID(string(update.ToRevision), c.ref, c.admission.participant, originalGate.GateID)
-		if err != nil || q.RequestID != expectedOuter {
-			return errCollaborationHTTP
-		}
-		d.originals.mu.Lock()
-		var observed collaborationObservedCut
-		valid := false
-		for _, slot := range d.originals.changes {
-			if slot.saved == nil || slot.saved.cut.Revision != string(update.ToRevision) || slot.group == nil || slot.group.privateReceipt == nil || !collaborationEqualJSONReceipt(update.Receipt, slot.group.privateReceipt) {
-				continue
-			}
-			var outcome *protocol.ChangeResult
-			for i := range slot.group.privateReceipt.Changes {
-				if slot.group.privateReceipt.Changes[i].ChangeID == protocol.Identifier(slot.change.ID) {
-					outcome = &slot.group.privateReceipt.Changes[i]
-					break
-				}
-			}
-			if outcome == nil || outcome.FirstRevision == nil || outcome.LastRevision == nil || *outcome.FirstRevision != *outcome.LastRevision {
-				break
-			}
-			first, err := strconv.ParseUint(string(*outcome.FirstRevision), 10, 64)
-			if err != nil || first == 0 || update.FromRevision != protocol.Counter(strconv.FormatUint(first-1, 10)) {
-				break
-			}
-			expected := struct {
-				Kind    string                `json:"kind"`
-				Update  string                `json:"update"`
-				Targets []protocol.Identifier `json:"targets"`
-			}{"wordcraft.yrs-update.v1", slot.saved.delta.Update, slot.saved.delta.Targets}
-			if !collaborationEqualJSON([]byte(update.Data), expected) {
-				break
-			}
-			observed = collaborationObservedCut{revision: slot.saved.cut.Revision, stateDigest: slot.saved.cut.StateDigest}
-			valid = true
-			break
-		}
-		var latest string
-		if source := d.originals.sources[c]; source != nil && !source.retired {
-			for revision := range source.observed {
-				if latest == "" || collaborationRevisionLess(latest, revision) {
-					latest = revision
-				}
-			}
-		}
-		d.originals.mu.Unlock()
-		if !valid {
-			return errCollaborationHTTP
-		}
-		if denied {
-			return nil
-		}
-		if latest == "" {
-			return errCollaborationHTTP
-		}
-		// A current FULL snapshot can already include an older queued delta.
-		// Suppress that duplicate; never mint a historical observed basis for it.
-		if !collaborationRevisionLess(latest, observed.revision) {
-			return nil
-		}
-		if latest != string(update.FromRevision) {
-			return errCollaborationHTTP
-		}
-		if err := c.checkedSendLocked(raw); err != nil {
-			return err
-		}
-		return d.originals.observe(c, observed)
+
 	default:
 		return errCollaborationHTTP
 	}
@@ -188,4 +120,69 @@ func collaborationPeerOutputID(revision, connection, participant, gate string) (
 	}
 	digest := sha256.Sum256(canonical)
 	return protocol.Identifier("actor-update:" + revision + ":sha256:" + hex.EncodeToString(digest[:])), nil
+}
+
+// Validate the original child envelope before planning any missing DATA. Release
+// recipient/RAM locks before requalification; each physical frame is serialized
+// separately with its cursor publication so management renewals can progress.
+func (c *collaborationHTTPConnection) committedDocumentUpdate(ctx context.Context, q protocol.SessionParticipantOutput, raw []byte, originalGate mooring.DeliveryGrant, denied bool) error {
+	plan := func() ([]collaborationSavedFrame, error) {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		d := c.document
+		if !c.joinedDelivered || (c.closed && !denied) || q.ParticipantRef != protocol.Identifier(c.admission.participant) || q.GateID != protocol.Identifier(originalGate.GateID) || q.PermissionVersion != protocol.Counter(originalGate.PermissionVersion) {
+			return nil, errCollaborationHTTP
+		}
+		var update protocol.DocumentUpdate
+		if json.Unmarshal(raw, &update) != nil || update.Scope != d.wireScope() || update.SessionID != protocol.Identifier(d.activation.SessionID()) || update.Generation != d.wireFence().Generation || update.Encoding != "json" || update.RequestID != protocol.Identifier("actor-update:"+string(update.ToRevision)) {
+			return nil, errCollaborationHTTP
+		}
+		expectedOuter, err := collaborationPeerOutputID(string(update.ToRevision), c.ref, c.admission.participant, originalGate.GateID)
+		if err != nil || q.RequestID != expectedOuter {
+			return nil, errCollaborationHTTP
+		}
+		latest, frames, err := c.savedFramesLocked()
+		if err != nil {
+			return nil, err
+		}
+		var observed collaborationObservedCut
+		valid := false
+		for _, frame := range frames {
+			if frame.update.ToRevision == update.ToRevision {
+				if valid || frame.update.FromRevision != update.FromRevision || !collaborationEqualJSONReceipt(update.Receipt, &frame.update.Receipt) || !collaborationEqualJSON([]byte(update.Data), json.RawMessage(frame.update.Data)) {
+					return nil, errCollaborationHTTP
+				}
+				observed, valid = frame.observed, true
+			}
+		}
+		if !valid {
+			return nil, errCollaborationHTTP
+		}
+		if denied {
+			return nil, nil
+		}
+		if latest == "" {
+			return nil, errCollaborationHTTP
+		}
+		// A current FULL snapshot can already include an older queued delta.
+		// Suppress that duplicate; never mint a historical observed basis for it.
+		if !collaborationRevisionLess(latest, observed.revision) {
+			return nil, nil
+		}
+		if collaborationRevisionLess(string(update.FromRevision), latest) {
+			return nil, errCollaborationHTTP
+		}
+		chain, err := collaborationSavedChain(latest, string(update.FromRevision), frames)
+		if err != nil {
+			return nil, err
+		}
+		chain = append(chain, collaborationSavedFrame{update: update, observed: observed, raw: append([]byte(nil), raw...)})
+		return chain, nil
+
+	}
+	chain, err := plan()
+	if err != nil {
+		return err
+	}
+	return c.sendSavedChain(ctx, chain)
 }
