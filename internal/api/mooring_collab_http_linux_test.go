@@ -52,17 +52,20 @@ func TestMooringHTTPAuthenticatesAndChecksPageBeforeBody(t *testing.T) {
 	defer r.mooringHTTP.Close()
 	registered := registeredPublicRoutes(r)
 	spec := loadGeneratedSpec(t)
-	if len(registered) != 2 {
-		t.Fatalf("enabled transport registered %d paths, want exactly two", len(registered))
+	if len(registered) != 3 {
+		t.Fatalf("enabled transport registered %d paths, want exactly three", len(registered))
 	}
 	for path, method := range map[string]string{
 		"/api/v1/pages/{slug}/mooring/session": "POST",
 		"/api/v1/pages/{slug}/mooring/ws":      "GET",
+		"/api/v1/pages/{slug}/mooring/tasks":   "POST",
 	} {
 		if len(registered[path]) != 1 || !registered[path][method] || !spec[path][method] {
 			t.Fatalf("enabled transport %s: registered=%v spec=%v", path, registered[path], spec[path])
 		}
 	}
+	// Keep these authorization/body negatives on a deadline-capable transport;
+	// unsupported response writers are covered by the dedicated I/O regressions.
 	for _, tc := range []struct {
 		name, token string
 		want        int
@@ -74,7 +77,7 @@ func TestMooringHTTPAuthenticatesAndChecksPageBeforeBody(t *testing.T) {
 			if tc.token != "" {
 				req.Header.Set("Authorization", "Bearer "+tc.token)
 			}
-			rr := httptest.NewRecorder()
+			rr := &collaborationSessionIOWriter{ResponseRecorder: httptest.NewRecorder(), fence: r.mooringHTTP.fence}
 			r.mux.ServeHTTP(rr, req)
 			if rr.Code != tc.want || body.reads != 0 {
 				t.Fatalf("status=%d reads=%d", rr.Code, body.reads)
@@ -84,7 +87,7 @@ func TestMooringHTTPAuthenticatesAndChecksPageBeforeBody(t *testing.T) {
 	for _, payload := range []string{`{"write":true,"write":false}`, `{"Write":true}`, `{"write":false,"Write":true}`, `{"role":"OWNER"}`, `{"checkpoint_base64":"e31="}`, `null`, `[]`} {
 		req := httptest.NewRequest("POST", "/api/v1/pages/http-private/mooring/session?workspace_id="+rig.wsID, bytes.NewBufferString(payload))
 		req.Header.Set("Authorization", "Bearer "+tokens[rig.adminID])
-		rr := httptest.NewRecorder()
+		rr := &collaborationSessionIOWriter{ResponseRecorder: httptest.NewRecorder(), fence: r.mooringHTTP.fence}
 		r.mux.ServeHTTP(rr, req)
 		if rr.Code != 400 {
 			t.Fatalf("untrusted body %q got %d", payload, rr.Code)
@@ -93,8 +96,19 @@ func TestMooringHTTPAuthenticatesAndChecksPageBeforeBody(t *testing.T) {
 	if len(r.mooringHTTP.docs) != 0 {
 		t.Fatal("negative request launched runtime")
 	}
-	if len(r.mutationRoutes) != 1 || r.mutationRoutes[0].Scope != scopeSelf {
-		t.Fatal("missing explicit mutation policy")
+	if len(r.mutationRoutes) != 2 {
+		t.Fatal("missing explicit session/task mutation policies")
+	}
+	policies := map[string]bool{
+		"/api/v1/pages/{slug}/mooring/session": false,
+		"/api/v1/pages/{slug}/mooring/tasks":   false,
+	}
+	for _, route := range r.mutationRoutes {
+		seen, expected := policies[route.Pattern]
+		if !expected || seen || route.Method != "POST" || route.Role != roleSelf || route.Scope != scopeSelf {
+			t.Fatal("incorrect or duplicate session/task mutation policy", route)
+		}
+		policies[route.Pattern] = true
 	}
 	// The route wrapper stamps before authentication; suspending the very same
 	// fence must reject even a still-valid signed human credential before decode.
@@ -103,7 +117,7 @@ func TestMooringHTTPAuthenticatesAndChecksPageBeforeBody(t *testing.T) {
 	req := httptest.NewRequest("POST", "/api/v1/pages/http-private/mooring/session?workspace_id="+rig.wsID, nil)
 	req.Body = body
 	req.Header.Set("Authorization", "Bearer "+tokens[rig.adminID])
-	rr := httptest.NewRecorder()
+	rr := &collaborationSessionIOWriter{ResponseRecorder: httptest.NewRecorder(), fence: r.mooringHTTP.fence}
 	r.mux.ServeHTTP(rr, req)
 	if rr.Code != 503 || body.reads != 0 {
 		t.Fatalf("suspended HTTP%d reads%d", rr.Code, body.reads)
