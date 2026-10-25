@@ -7,23 +7,29 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/database"
 	protocol "github.com/crewship-ai/crewship/mooring/protocol/generated/go"
 )
 
 // Real inherited Go child and FULL owner/gate SQL; MOCK participant/application
 // semantics. These tests qualify correlation/accounting, not source authority.
 type retirementTestPeer struct {
-	t     *testing.T
-	write func(any)
-	mode  string
-	open  map[string]any
-	old   map[string]any
-	joins int
+	t      *testing.T
+	write  func(any)
+	mode   string
+	open   map[string]any
+	old    map[string]any
+	joins  int
+	left   bool
+	grants int
 }
 
 func (p *retirementTestPeer) handle(v map[string]any) {
@@ -51,6 +57,13 @@ func (p *retirementTestPeer) handle(v map[string]any) {
 			p.old["request_id"] = "late-old-output"
 			p.write(p.old)
 		}
+	case "delivery_grant":
+		if p.mode == "retirement-overlap" {
+			if p.left || v["gate_id"] != p.old["gate_id"] {
+				p.t.Fatal("old delivery grant was physically written after Leave or changed gate")
+			}
+			p.grants++
+		}
 	case "protocol_error":
 		if p.mode != "retirement-decline" || v["request_id"] != "ticket-"+p.open["request_id"].(string) || v["reason"].(map[string]any)["code"] != "permission_revoked" {
 			p.t.Fatal("unexpected negative admission")
@@ -61,6 +74,10 @@ func (p *retirementTestPeer) handle(v map[string]any) {
 		if v["message"].(map[string]any)["type"] != "session_leave" {
 			p.t.Fatal("unexpected retirement input")
 		}
+		if p.mode == "retirement-overlap" && p.grants != 1 {
+			p.t.Fatal("Leave did not follow the one already reserved grant")
+		}
+		p.left = true
 	}
 }
 func (p *retirementTestPeer) output(id string, gate, permission any, message any) map[string]any {
@@ -168,7 +185,11 @@ func TestSessionParticipantRetirementWatermarkDrainsBorrowedOutputs(t *testing.T
 				if err := f.runtime.ReplyControl(t.Context(), renewal, raw); err == nil {
 					t.Fatal("old positive delivery grant physically written after Leave")
 				}
-				return
+				if err := f.runtime.Err(); err != nil {
+					t.Fatal("refusing late retired renewal killed shared runtime", err)
+				}
+				// Continue through denial completion, fresh admission and the
+				// physical Joined watermark: the owner must remain usable.
 			}
 			if e = f.runtime.CompleteRetiredDeliveryControl(output, retired); e == nil {
 				t.Fatal("notification used as renewal cancellation")
@@ -521,5 +542,172 @@ func TestSessionParticipantTicketDeclineCanceledWriteNeverCompletes(t *testing.T
 	f.runtime.mu.Unlock()
 	if entry == nil {
 		t.Fatal("failed negative completed original ticket")
+	}
+}
+
+func TestSessionParticipantRetirementOverlapsQueuedDeliveryReply(t *testing.T) {
+	for _, stop := range []string{"finish", "cancel", "close"} {
+		t.Run(stop, func(t *testing.T) { runRetirementDeliveryOverlap(t, stop) })
+	}
+}
+
+func runRetirementDeliveryOverlap(t *testing.T, stop string) {
+	f := sessionOriginsFixture(t, "retirement-overlap", false)
+	if dir := os.Getenv("CREWSHIP_TEST_FAILURE_SNAPSHOT_DIR"); dir != "" {
+		t.Cleanup(func() {
+			if t.Failed() {
+				if err := database.SnapshotTo(context.Background(), f.store.db, filepath.Join(dir, "retirement-overlap-"+stop+".db")); err != nil {
+					t.Error("preserve overlap failure database", err)
+				}
+			}
+		})
+	}
+	version := "1"
+	delivery := NewDeliveryStore(f.activation.store.config.Owners, true, func(context.Context, *sql.Tx, DeliveryAccess) (string, error) { return version, nil }, 2*time.Second, 16)
+	gate, err := delivery.Open(t.Context(), f.owner, "stable-participant", "initial-gate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := f.runtime.SendTrackedParticipantOpen(t.Context(), f.activation, retirementOpen(t, f, "initial"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	retirementReply(t, f, retirementControl(t, f.runtime), gate)
+	joined := retirementControl(t, f.runtime)
+	binding, err := f.runtime.CaptureParticipantJoined(f.activation, pending, joined)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.runtime.CompleteControl(joined); err != nil {
+		t.Fatal(err)
+	}
+	renewal, output := retirementControl(t, f.runtime), retirementControl(t, f.runtime)
+	raw, err := renewal.Frame()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var q protocol.DeliveryRenew
+	if err = json.Unmarshal(raw, &q); err != nil {
+		t.Fatal(err)
+	}
+	grant := protocol.DeliveryGrant{Type: "delivery_grant", RequestID: q.RequestID, Scope: q.Scope, SessionID: q.SessionID, ParticipantRef: q.ParticipantRef, Generation: q.Fence.Generation, PermissionVersion: q.PermissionVersion, RenewalNonce: q.RenewalNonce, GateID: q.GateID, DurationMs: "2000"}
+	raw, err = json.Marshal(grant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	version = "2"
+	if _, err = delivery.Renew(t.Context(), f.owner, gate.GateID, "epoch-change"); !errors.Is(err, ErrDeliveryClosed) {
+		t.Fatal(err)
+	}
+	// Block the existing sole FD writer, then observe the exact borrowed reply
+	// reservation. No scheduling delay is used to manufacture the overlap.
+	<-f.runtime.writer
+	held := true
+	retireStarted := false
+	ctx, cancel := context.WithCancel(t.Context())
+	replyDone := make(chan error, 1)
+	retiredDone := make(chan error, 1)
+	var retired *SessionRetiredDelivery
+	defer func() {
+		cancel()
+		if held {
+			f.runtime.writer <- struct{}{}
+		}
+		<-replyDone
+		if retireStarted {
+			<-retiredDone
+		}
+	}()
+	go func() { replyDone <- f.runtime.ReplyControl(t.Context(), renewal, raw) }()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		f.runtime.mu.Lock()
+		entry := f.runtime.child[renewal.id]
+		replying := entry != nil && entry.replying
+		f.runtime.mu.Unlock()
+		if replying {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("reply never reserved the held writer")
+		}
+		runtime.Gosched()
+	}
+	retireStarted = true
+	go func() {
+		var e error
+		retired, e = f.runtime.RetireParticipant(ctx, f.activation, binding)
+		retiredDone <- e
+	}()
+	for {
+		if err := f.runtime.Err(); err != nil {
+			t.Fatal("queued renewal/Leave overlap killed shared owner runtime", err)
+		}
+		f.runtime.mu.Lock()
+		retiring := binding.state.retiring
+		f.runtime.mu.Unlock()
+		if retiring {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("retirement never fenced queued reply")
+		}
+		runtime.Gosched()
+	}
+	if stop != "finish" {
+		if stop == "cancel" {
+			cancel()
+		} else {
+			_ = f.runtime.Close()
+		}
+		retireErr := <-retiredDone
+		retiredDone <- retireErr
+		if retireErr == nil {
+			t.Fatal("interrupted retirement succeeded without physical Leave")
+		}
+		if f.runtime.Err() == nil {
+			t.Fatal("interrupted retirement left uncertain runtime live")
+		}
+		return
+	}
+	f.runtime.writer <- struct{}{}
+	held = false
+	replyErr := <-replyDone
+	replyDone <- replyErr
+	if replyErr != nil {
+		t.Fatal("already reserved reply did not complete before Leave", replyErr)
+	}
+	retireErr := <-retiredDone
+	retiredDone <- retireErr
+	if retireErr != nil {
+		t.Fatal(retireErr)
+	}
+	if err = f.runtime.CompleteRetiredDeliveryControl(renewal, retired); err == nil {
+		t.Fatal("normally completed reply was completed twice")
+	}
+	if err = f.runtime.ValidateRetiredOutput(output, retired); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.runtime.CompleteControl(output); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := delivery.Open(t.Context(), f.owner, "stable-participant", "fresh-gate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := f.runtime.SendParticipantReopen(t.Context(), f.activation, retired, retirementOpen(t, f, "replacement"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	retirementReply(t, f, retirementControl(t, f.runtime), fresh)
+	mark := retirementControl(t, f.runtime)
+	if _, err = f.runtime.CaptureParticipantJoined(f.activation, next, mark); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.runtime.CompleteControl(mark); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.runtime.Err(); err != nil {
+		t.Fatal("owner runtime failed after overlapped retirement and fresh admission", err)
 	}
 }

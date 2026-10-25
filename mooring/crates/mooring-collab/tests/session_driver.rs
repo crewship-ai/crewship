@@ -1224,6 +1224,28 @@ fn drive_actor_to_control_error(actor: &mut mooring_collab::session_actor::Runni
     }
 }
 
+// A fresh pending ticket proves the Actor lane processed the preceding late
+// reply without closing the shared owner. It does NOT reauthorize the old gate.
+fn late_reply_then_fresh_ticket(
+    actor: &mut mooring_collab::session_actor::RunningDriver,
+    peer: UnixStream,
+    reply: Vec<u8>,
+) -> UnixStream {
+    let cp = actor.confirmed().checkpoint();
+    let (scope, versions) = (cp.scope.clone(), cp.versions.clone());
+    drive_peer_control(actor, peer, move |mut peer| {
+        mooring_collab::write_frame(&mut peer, &reply).unwrap();
+        let opening = json!({"type":"session_participant_open","request_id":"fresh-after-expiry","control_profile":"mooring.session-causal.v1",
+            "scope":scope,"session_id":"host-session","runtime_ref":"fresh-authenticated-child","fence":{"generation":"7","token":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},
+            "connection_ref":"fresh-after-expiry","join":{"type":"session_join","request_id":"fresh-join","ticket":"MOCK_FRESH_HOST_TICKET","versions":versions}});
+        mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&opening).unwrap()).unwrap();
+        let ticket = receive_json(&mut peer).1;
+        assert_eq!(ticket["type"], "ticket_validate");
+        assert_eq!(ticket["ticket"], "MOCK_FRESH_HOST_TICKET");
+        peer // Keep original transport alive; no replacement grant was issued.
+    })
+}
+
 fn drive_peer_control<T: Send + 'static>(
     actor: &mut mooring_collab::session_actor::RunningDriver,
     peer: UnixStream,
@@ -1285,7 +1307,7 @@ fn actor_delivery_renewal_retains_first_send_and_immediately_catches_up_after_de
     // The late response immediately starts the next request: due time was
     // firstsend250+interval250, NOT receive1900+interval250.
     now.store(2200, Ordering::SeqCst);
-    let (mut peer, third) = drive_peer_control(&mut actor, peer, move |mut peer| {
+    let (peer, third) = drive_peer_control(&mut actor, peer, move |mut peer| {
         mooring_collab::write_frame(&mut peer, &response).unwrap(); // exactduplicate
         mooring_collab::write_frame(
             &mut peer,
@@ -1300,12 +1322,11 @@ fn actor_delivery_renewal_retains_first_send_and_immediately_catches_up_after_de
     // A pending newer reply would fit its OWN first-send window, but cannot
     // resurrect the previous live gate once that gate actually expired.
     now.store(3900, Ordering::SeqCst); // second firstsend1900+2000, exclusiveexpiry
-    mooring_collab::write_frame(
-        &mut peer,
-        &serde_json::to_vec(&delivery_reply(&third)).unwrap(),
-    )
-    .unwrap();
-    drive_actor_to_control_error(&mut actor);
+    let _peer = late_reply_then_fresh_ticket(
+        &mut actor,
+        peer,
+        serde_json::to_vec(&delivery_reply(&third)).unwrap(),
+    );
     let (document, _, originals) = actor.into_recovery();
     assert_eq!(document.document().checkpoint().unwrap(), before);
     assert!(originals.is_empty());
@@ -1482,7 +1503,7 @@ fn p3_five_second_pending_grant_cannot_reopen_current_gate_at_its_first_send_exp
     });
     now.store(250, Ordering::SeqCst);
     let clock = now.clone();
-    let (mut peer, second) = drive_peer_control(&mut actor, peer, move |mut peer| {
+    let (peer, second) = drive_peer_control(&mut actor, peer, move |mut peer| {
         let first = receive_json(&mut peer).0;
         let mut grant = delivery_reply(&first);
         grant["duration_ms"] = json!("5000");
@@ -1503,8 +1524,7 @@ fn p3_five_second_pending_grant_cannot_reopen_current_gate_at_its_first_send_exp
     now.store(5250, Ordering::SeqCst);
     let mut late = delivery_reply(&second);
     late["duration_ms"] = json!("5000");
-    mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&late).unwrap()).unwrap();
-    drive_actor_to_control_error(&mut actor);
+    let _peer = late_reply_then_fresh_ticket(&mut actor, peer, serde_json::to_vec(&late).unwrap());
     let (confirmed, revision, originals) = actor.into_recovery();
     assert_eq!(confirmed.checkpoint(), &checkpoint);
     assert_eq!(confirmed.document().native().unwrap(), native);
@@ -1849,4 +1869,267 @@ fn native_pending_ticket_decline_rejects_unrelated_scope_request_and_purpose() {
         assert_eq!(revision, 10);
         assert!(originals.is_empty());
     }
+}
+
+// A real native actor/Participants registry with controlled authenticated-host
+// tickets and BOOTTIME. The mock host receipt is NOT SQL/browser qualification.
+#[test]
+fn expired_recipient_late_correlated_grant_preserves_live_owner_recipient() {
+    use mooring_protocol::grant::PendingGrant;
+    use std::{io, sync::atomic::Ordering};
+
+    let (driver, peer, now) = renewing_driver_selected(60_000, true);
+    let mut actor = driver.into_actor().unwrap();
+    let scope = actor.confirmed().checkpoint().scope.clone();
+    let versions = actor.confirmed().checkpoint().versions.clone();
+    let admit = |actor: &mut mooring_collab::session_actor::RunningDriver,
+                 peer: UnixStream,
+                 connection: &str,
+                 participant: &str,
+                 gate: &str,
+                 existing_renewal: Option<&[u8]>| {
+        let (connection, participant, gate) = (
+            connection.to_owned(),
+            participant.to_owned(),
+            gate.to_owned(),
+        );
+        let (scope, versions) = (scope.clone(), versions.clone());
+        let existing_renewal = existing_renewal.map(<[u8]>::to_vec);
+        drive_peer_control(actor, peer, move |mut peer| {
+            let opening = json!({"type":"session_participant_open","request_id":format!("open-{connection}"),"control_profile":"mooring.session-causal.v1",
+                "scope":scope,"session_id":"host-session","runtime_ref":"fresh-authenticated-child",
+                "fence":{"generation":"7","token":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},
+                "connection_ref":connection,"join":{"type":"session_join","request_id":format!("join-{connection}"),"ticket":format!("MOCK_AUTHENTICATED_{connection}"),"versions":versions}});
+            mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&opening).unwrap()).unwrap();
+            let ticket = loop {
+                let (raw, value) = receive_json(&mut peer);
+                if value["type"] == "delivery_renew" {
+                    assert_eq!(Some(raw.as_slice()), existing_renewal.as_deref());
+                } else {
+                    assert_eq!(value["type"], "ticket_validate");
+                    break value;
+                }
+            };
+            let reply = json!({"type":"ticket_validated","request_id":ticket["request_id"],"scope":ticket["scope"],"session_id":ticket["session_id"],
+                "generation":"7","participant_ref":participant,"permission_version":"3","granted":{"read":true,"write":true},
+                "versions":versions,"expires_in_ms":"5000","validation_nonce":ticket["validation_nonce"],"gate_id":gate});
+            let raw = serde_json::to_vec(&reply).unwrap();
+            let namespace = mooring_protocol::canonical::normalize(&raw)
+                .unwrap()
+                .digest();
+            mooring_collab::write_frame(&mut peer, &raw).unwrap();
+            let joined = receive_json(&mut peer).1;
+            assert_eq!(joined["message"]["type"], "session_joined");
+            assert_eq!(joined["connection_ref"], connection);
+            assert_eq!(joined["participant_ref"], participant);
+            (peer, namespace)
+        })
+    };
+    let (mut peer, expired_namespace) =
+        admit(&mut actor, peer, "connection", "participant", "gate", None);
+    now.store(250, Ordering::SeqCst);
+    actor.step(&host(), Duration::ZERO).unwrap();
+    let (first, first_value) = receive_json(&mut peer);
+    assert_eq!(first_value["type"], "delivery_renew");
+    assert_eq!(
+        first_value["renewal_nonce"],
+        format!("{expired_namespace}:1")
+    );
+    assert_eq!(first_value["request_id"], first_value["renewal_nonce"]);
+    let mut first_reply = delivery_reply(&first);
+    first_reply["duration_ms"] = json!("5000");
+    now.store(500, Ordering::SeqCst);
+    let (peer, second) = drive_peer_control(&mut actor, peer, move |mut peer| {
+        mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&first_reply).unwrap()).unwrap();
+        loop {
+            let (raw, value) = receive_json(&mut peer);
+            if raw == first {
+                continue; // Exact retry may already have been queued, never a new request.
+            }
+            assert_eq!(value["type"], "delivery_renew");
+            break (peer, raw);
+        }
+    });
+    let second_value: Value = serde_json::from_slice(&second).unwrap();
+    assert_eq!(
+        second_value["renewal_nonce"],
+        format!("{expired_namespace}:2")
+    );
+    assert_eq!(second_value["request_id"], second_value["renewal_nonce"]);
+    // Actual seq2 proves seq1 was accepted: current A expiry is 250+5000=5250,
+    // not reply-time+5000. Seq2's own first-send window remains [500,5500).
+    now.store(1000, Ordering::SeqCst);
+    let (peer, owner_namespace) = admit(
+        &mut actor,
+        peer,
+        "owner-connection",
+        "owner-participant",
+        "owner-gate",
+        Some(&second),
+    );
+
+    fn next_nonrenewal(
+        peer: &mut UnixStream,
+        expired: &[u8],
+        owner_namespace: &str,
+        owner_request: &mut Option<Vec<u8>>,
+    ) -> io::Result<Value> {
+        for _ in 0..128 {
+            let raw = mooring_collab::read_frame(peer)?.ok_or_else(|| {
+                io::Error::new(io::ErrorKind::UnexpectedEof, "live owner channel closed")
+            })?;
+            let value: Value = serde_json::from_slice(&raw)?;
+            if value["type"] != "delivery_renew" {
+                return Ok(value);
+            }
+            if value["gate_id"] == "gate" {
+                assert_eq!(
+                    raw.as_slice(),
+                    expired,
+                    "retry changed expired recipient's exact request"
+                );
+            } else {
+                assert_eq!(value["gate_id"], "owner-gate");
+                assert_eq!(value["participant_ref"], "owner-participant");
+                assert_eq!(value["renewal_nonce"], format!("{owner_namespace}:1"));
+                assert_eq!(value["request_id"], value["renewal_nonce"]);
+                if let Some(original) = owner_request {
+                    assert_eq!(
+                        raw.as_slice(),
+                        original.as_slice(),
+                        "owner renewal retry was not exact"
+                    );
+                } else {
+                    *owner_request = Some(raw);
+                }
+            }
+        }
+        panic!("control bound exceeded before expected native output")
+    }
+
+    let mut change = agent_change(&scope, "unaffected-owner", None, " owner survives");
+    change.operations[0].participant_ref = "owner-participant".into();
+    let change = mooring_protocol::canonical::fingerprint_atomic(
+        &scope,
+        &serde_json::to_vec(&change).unwrap(),
+    )
+    .unwrap()
+    .with_fingerprints();
+    let mut input = participant_input(&scope, std::slice::from_ref(&change), "owner-save");
+    input["connection_ref"] = json!("owner-connection");
+    input["participant_ref"] = json!("owner-participant");
+    input["gate_id"] = json!("owner-gate");
+    now.store(1500, Ordering::SeqCst);
+    let second_for_batch = second.clone();
+    let namespace_for_batch = owner_namespace.clone();
+    let (peer, batch, mut owner_renewal) = drive_peer_control(&mut actor, peer, move |mut peer| {
+        let mut owner_request = None;
+        mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&input).unwrap()).unwrap();
+        let pending = next_nonrenewal(
+            &mut peer,
+            &second_for_batch,
+            &namespace_for_batch,
+            &mut owner_request,
+        )
+        .unwrap();
+        assert_eq!(pending["connection_ref"], "owner-connection");
+        assert_eq!(pending["message"]["state"], "pending");
+        let batch = next_nonrenewal(
+            &mut peer,
+            &second_for_batch,
+            &namespace_for_batch,
+            &mut owner_request,
+        )
+        .unwrap();
+        assert_eq!(batch["type"], "session_submit_batch");
+        assert_eq!(batch["changes"], json!([change]));
+        (peer, batch, owner_request)
+    });
+    let mut checkpoint = actor.confirmed().checkpoint().clone();
+    let mut targets = actor.confirmed().targets().to_vec();
+    let before = checkpoint.clone();
+    let mut committed = mock_commit_selected(&batch, &mut checkpoint, &mut targets, true);
+    let mut public = committed["receipt"].clone();
+    public["request_id"] = json!("owner-save");
+    committed["public_receipt"] = public.clone();
+    let expected_identity = mooring_protocol::checkpoint::verify(
+        &checkpoint,
+        mooring_protocol::checkpoint::Limits {
+            decoded_bytes: 1572864,
+            preimage_bytes: 2097152,
+        },
+    )
+    .unwrap();
+    let expected = Document::restore(expected_identity.state()).unwrap();
+    let mut late = delivery_reply(&second);
+    late["duration_ms"] = json!("5000");
+    let late = serde_json::to_vec(&late).unwrap();
+    // Full real binding proof at the REAL arrival tick, no fake old Tick. The
+    // request reply window is live although A's previously accepted gate is not.
+    PendingGrant::delivery(&second, at(500).0, Duration::from_millis(5000))
+        .unwrap()
+        .validate_reply(&late, &host(), at(5250).0)
+        .unwrap();
+    now.store(5250, Ordering::SeqCst); // B still owns [1000,6000); owner [0,60000).
+    assert_eq!(actor.confirmed().checkpoint(), &before);
+    let worker = std::thread::spawn(move || -> io::Result<UnixStream> {
+        let mut peer = peer;
+        mooring_collab::write_frame(&mut peer, &late)?;
+        mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&committed).unwrap())?;
+        let update = next_nonrenewal(&mut peer, &second, &owner_namespace, &mut owner_renewal)?;
+        assert_eq!(update["connection_ref"], "owner-connection");
+        assert_eq!(update["gate_id"], "owner-gate");
+        assert_eq!(update["message"]["type"], "document_update");
+        assert_eq!(update["message"]["from_revision"], "10");
+        assert_eq!(update["message"]["to_revision"], "11");
+        assert_eq!(update["message"]["receipt"], committed["receipt"]);
+        let saved = next_nonrenewal(&mut peer, &second, &owner_namespace, &mut owner_renewal)?;
+        assert_eq!(saved["connection_ref"], "owner-connection");
+        assert_eq!(saved["gate_id"], "owner-gate");
+        assert_eq!(saved["request_id"], "private-owner-save");
+        assert_eq!(saved["message"], public);
+        // A subsequent Actor-lane read is an ordering barrier, not a timed
+        // absence check: every output from the committed flush precedes it.
+        // Reopening A would leak a peer update here and fail this exact oracle.
+        let read = json!({"type":"session_participant_input","request_id":"owner-after-save-read","control_profile":"mooring.session-causal.v1",
+            "scope":committed["scope"],"session_id":"host-session","runtime_ref":"fresh-authenticated-child","fence":committed["fence"],
+            "connection_ref":"owner-connection","participant_ref":"owner-participant","gate_id":"owner-gate","permission_version":"3",
+            "message":{"type":"read_request","request_id":"owner-read","scope":committed["scope"],"session_id":"host-session","revision":"11","max_bytes":"65536"}});
+        mooring_collab::write_frame(&mut peer, &serde_json::to_vec(&read).unwrap())?;
+        let after = next_nonrenewal(&mut peer, &second, &owner_namespace, &mut owner_renewal)?;
+        assert_eq!(after["connection_ref"], "owner-connection");
+        assert_eq!(after["gate_id"], "owner-gate");
+        assert_eq!(after["message"]["type"], "read_result");
+        assert_eq!(after["message"]["revision"], "11");
+        Ok(peer)
+    });
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    let mut fatal = false;
+    while !worker.is_finished() {
+        if actor.step(&host(), Duration::from_millis(20)).is_err() {
+            fatal = true;
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "live owner receipt stalled"
+        );
+    }
+    let outcome = worker.join().unwrap();
+    assert!(
+        !fatal,
+        "correlated expired A renewal killed the independently live owner recipient"
+    );
+    let _peer = outcome.unwrap(); // Keep the authenticated FD alive through final checks.
+    actor.check_owner().unwrap();
+    assert_eq!(actor.confirmed().checkpoint(), &checkpoint);
+    assert_eq!(
+        actor.confirmed().document().native().unwrap(),
+        expected.native().unwrap()
+    );
+    assert_eq!(
+        actor.confirmed().document().block_ids().unwrap(),
+        expected.block_ids().unwrap()
+    );
+    assert_eq!(actor.confirmed().checkpoint().revision, Counter(11));
 }

@@ -40,6 +40,9 @@ pub struct ReadLease {
     gate: DeliveryGate,
     pending: Option<Pending>,
     closed: bool,
+    // Denial-only last observed Tick after a real horizon expiry. At most the
+    // already owned pending proof survives; this never makes the gate live.
+    expired_observed: Option<Tick>,
 }
 
 impl ReadLease {
@@ -91,6 +94,7 @@ impl ReadLease {
             gate,
             pending: None,
             closed: false,
+            expired_observed: None,
         })
     }
 
@@ -182,18 +186,76 @@ impl ReadLease {
 
     pub fn may_deliver(&mut self, now: Tick) -> bool {
         if self.closed {
+            if let Some(last) = self.expired_observed {
+                if now < last {
+                    self.revoke(); // A reversed observation is never scoped expiry.
+                } else {
+                    self.expired_observed = Some(now);
+                }
+            }
             return false;
         }
-        if !self.gate.may_deliver(now) {
-            // Expiry/clock failure requires a NEW authenticated gate, not a late renewal.
+        match self.gate.observe_delivery(now) {
+            Ok(true) => true,
+            Ok(false) => {
+                // Admission always installs a horizon. Keep ONLY the existing
+                // pending request to classify its eventual reply, not to renew.
+                self.closed = true;
+                self.expired_observed = Some(now);
+                self.gate.revoke();
+                false
+            }
+            Err(_) => {
+                self.revoke(); // Clock/explicit-close failure drops every proof.
+                false
+            }
+        }
+    }
+
+    /// Denial state only; neither a delivery capability nor a fresh grant.
+    pub fn is_expired(&self) -> bool {
+        self.closed && self.expired_observed.is_some()
+    }
+
+    /// Consume the ORIGINAL pending proof at the REAL arrival time, without
+    /// installing any grant. Even an expired reply is fully bound first by
+    /// PendingGrant; malformed/foreign/clock failures remain errors.
+    pub fn accept_expired_reply(
+        &mut self,
+        raw: &[u8],
+        host: &Transport<'_>,
+        now: Tick,
+    ) -> Result<(), DeliveryError> {
+        let last = self.expired_observed.ok_or(DeliveryError::Closed)?;
+        if !self.closed || now < last {
             self.revoke();
-            return false;
+            return Err(DeliveryError::Lease(LeaseError::ClockReversed));
         }
-        true
+        // Failed replies still observe time, just as live reply validation
+        // does. An earlier later call must never reuse this denial proof.
+        self.expired_observed = Some(now);
+        if !matches!(host, Transport::AuthenticatedHost { issuer, .. } if *issuer == self.host_issuer)
+        {
+            return Err(DeliveryError::Grant(BoundaryError::Forbidden));
+        }
+        let pending = self.pending.as_ref().ok_or(DeliveryError::Binding)?;
+        match pending.grant.validate_reply(raw, host, now.0) {
+            Ok(_) | Err(BoundaryError::Expired) => {
+                self.pending = None;
+                self.expired_observed = Some(now);
+                Ok(()) // The DeliveryGate stays permanently revoked.
+            }
+            Err(error @ BoundaryError::Clock) => {
+                self.revoke();
+                Err(DeliveryError::Grant(error))
+            }
+            Err(error) => Err(DeliveryError::Grant(error)),
+        }
     }
 
     pub fn revoke(&mut self) {
         self.closed = true;
+        self.expired_observed = None;
         self.pending = None;
         self.gate.revoke();
     }

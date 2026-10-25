@@ -146,3 +146,153 @@ fn nonce_sequence_exhaustion_closes_without_reusing_any_nonce() {
     assert_eq!(lease.retry_bytes(), Err(DeliveryError::Closed));
     assert!(!lease.may_deliver(at(1202)));
 }
+
+#[test]
+fn expired_pending_reply_is_fully_bound_without_renewing_or_reissuing() {
+    for arrival in [3000, 4900] {
+        let mut lease = lease(true).unwrap();
+        let request = lease.begin(at(2900)).unwrap().to_vec();
+        let response = reply(&request, 2000);
+        assert!(!lease.may_deliver(at(3000)));
+        assert!(lease.is_expired());
+        assert_eq!(
+            lease.accept(&response, &host(), at(arrival)),
+            Err(DeliveryError::Closed)
+        );
+        lease
+            .accept_expired_reply(&response, &host(), at(arrival))
+            .unwrap();
+        assert!(lease.is_expired());
+        assert!(lease.pending.is_none());
+        assert!(!lease.may_deliver(at(arrival)));
+        assert_eq!(lease.begin(at(arrival)), Err(DeliveryError::Closed));
+        assert_eq!(lease.retry_bytes(), Err(DeliveryError::Closed));
+        // The original request was consumed, never recreated for another reply.
+        assert_eq!(
+            lease.accept_expired_reply(&response, &host(), at(arrival)),
+            Err(DeliveryError::Binding)
+        );
+    }
+}
+
+#[test]
+fn expired_reply_window_never_masks_foreign_or_malformed_pending_binding() {
+    for field in [
+        "scope",
+        "request_id",
+        "session_id",
+        "participant_ref",
+        "generation",
+        "permission_version",
+        "gate_id",
+        "renewal_nonce",
+        "duration_ms",
+        "unknown",
+    ] {
+        let mut lease = lease(true).unwrap();
+        let request = lease.begin(at(2900)).unwrap().to_vec();
+        assert!(!lease.may_deliver(at(3000)));
+        let response = String::from_utf8(reply(&request, 2000)).unwrap();
+        let raw = match field {
+            "scope" => response.replace("\"artifact_id\":\"d\"", "\"artifact_id\":\"foreign\""),
+            "duration_ms" => response.replace("\"duration_ms\":\"2000\"", "\"duration_ms\":\"2001\""),
+            "unknown" => response.replacen('{', "{\"unknown\":\"foreign\",", 1),
+            _ => {
+                let prefix = format!("\"{field}\":\"");
+                let value_start = response.find(&prefix).unwrap() + prefix.len();
+                let value_end = value_start + response[value_start..].find('"').unwrap();
+                let mut forged = response.clone();
+                forged.replace_range(value_start..value_end, if matches!(field, "generation" | "permission_version") { "999" } else { "foreign" });
+                forged
+            }
+        }.into_bytes();
+        assert!(
+            lease.accept_expired_reply(&raw, &host(), at(4900)).is_err(),
+            "{field}"
+        );
+        assert_eq!(
+            lease.pending.as_ref().unwrap().grant.bytes_for_retry(),
+            request
+        );
+        assert!(!lease.may_deliver(at(4900)));
+        assert_eq!(lease.begin(at(4900)), Err(DeliveryError::Closed));
+    }
+}
+
+#[test]
+fn expired_reply_keeps_original_issuer_and_clock_failure_fatal() {
+    let mut expired = lease(true).unwrap();
+    let request = expired.begin(at(2900)).unwrap().to_vec();
+    assert!(!expired.may_deliver(at(3000)));
+    let response = reply(&request, 2000);
+    for source in [
+        Transport::Participant,
+        Transport::AuthenticatedHost {
+            issuer: "foreign",
+            durabilities: &[Durability::Node],
+            required: Durability::Node,
+        },
+    ] {
+        assert_eq!(
+            expired.accept_expired_reply(&response, &source, at(3001)),
+            Err(DeliveryError::Grant(
+                mooring_protocol::boundary::BoundaryError::Forbidden
+            ))
+        );
+        assert!(expired.pending.is_some());
+    }
+    // A later denial observation is retained; no older Tick can classify a reply.
+    assert!(!expired.may_deliver(at(3100)));
+    assert_eq!(
+        expired.accept_expired_reply(&response, &host(), at(3099)),
+        Err(DeliveryError::Lease(
+            crate::lease::LeaseError::ClockReversed
+        ))
+    );
+    assert!(!expired.is_expired());
+    assert!(expired.pending.is_none());
+    assert!(expired
+        .accept_expired_reply(&response, &host(), at(3200))
+        .is_err());
+
+    let mut reversed = lease(true).unwrap();
+    let request = reversed.begin(at(1200)).unwrap().to_vec();
+    assert!(!reversed.may_deliver(at(1199)));
+    assert!(!reversed.is_expired());
+    assert!(reversed
+        .accept_expired_reply(&reply(&request, 2000), &host(), at(1300))
+        .is_err());
+    let mut revoked = lease(true).unwrap();
+    let request = revoked.begin(at(1200)).unwrap().to_vec();
+    revoked.revoke();
+    assert!(!revoked.is_expired());
+    assert!(revoked
+        .accept_expired_reply(&reply(&request, 2000), &host(), at(1300))
+        .is_err());
+}
+
+#[test]
+fn failed_expired_reply_observes_time_before_a_later_reversed_reply() {
+    for foreign in [false, true] {
+        let mut expired = lease(true).unwrap();
+        let request = expired.begin(at(2900)).unwrap().to_vec();
+        let response = reply(&request, 2000);
+        assert!(!expired.may_deliver(at(3000)));
+        let source = if foreign {
+            Transport::Participant
+        } else {
+            host()
+        };
+        let failed = if foreign { response.as_slice() } else { b"malformed" };
+        assert!(expired.accept_expired_reply(failed, &source, at(4000)).is_err());
+        assert!(expired.pending.is_some());
+        assert_eq!(
+            expired.accept_expired_reply(&response, &host(), at(3500)),
+            Err(DeliveryError::Lease(crate::lease::LeaseError::ClockReversed)),
+            "failed observation must still advance time, foreign={foreign}"
+        );
+        assert!(!expired.is_expired());
+        assert!(expired.pending.is_none());
+        assert!(!expired.may_deliver(at(4001)));
+    }
+}

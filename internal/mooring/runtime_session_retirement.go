@@ -234,13 +234,8 @@ func (s *SessionRuntime) RetireParticipant(ctx context.Context, a *SessionActiva
 		s.mu.Unlock()
 		return nil, ErrSessionRuntime
 	}
-	for _, entry := range s.child {
-		if entry.replying && s.retiredEntryLocked(st, entry) {
-			s.mu.Unlock()
-			s.fail(ErrSessionRuntime)
-			return nil, ErrSessionRuntime
-		}
-	}
+	// Close new reply reservations now. An already reserved reply still owns
+	// its original first-send grant and must finish before the physical Leave.
 	st.retiring = true
 	open := st.open
 	gateID, participant, permission := st.gate, st.participant, st.permission
@@ -265,6 +260,36 @@ func (s *SessionRuntime) RetireParticipant(ctx context.Context, a *SessionActiva
 	if e != nil {
 		s.fail(e)
 		return nil, e
+	}
+	for {
+		s.mu.Lock()
+		if s.closed {
+			err := s.err
+			s.mu.Unlock()
+			return nil, err
+		}
+		waiting := false
+		for _, entry := range s.child {
+			if entry.replying && s.retiredEntryLocked(st, entry) {
+				waiting = true
+				break
+			}
+		}
+		notify := s.notify
+		s.mu.Unlock()
+		if !waiting {
+			break
+		}
+		// Neither the runtime mutex nor the SQL transaction spans this wait.
+		// Completion signals under the same mutex, so no wake can be lost.
+		select {
+		case <-ctx.Done():
+			s.fail(ctx.Err())
+			return nil, ctx.Err()
+		case <-s.closedCh:
+			return nil, s.Err()
+		case <-notify:
+		}
 	}
 	id, e := prepareRequestID()
 	if e != nil {

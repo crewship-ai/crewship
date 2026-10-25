@@ -97,7 +97,7 @@ func TestSessionOriginsHelper(t *testing.T) {
 				time.Sleep(20 * time.Second)
 				return
 			}
-		case "ticket_validated", "protocol_error":
+		case "ticket_validated", "protocol_error", "delivery_grant":
 			if retirement != nil {
 				retirement.handle(v)
 			}

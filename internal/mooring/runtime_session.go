@@ -465,6 +465,7 @@ func (s *SessionRuntime) complete(c SessionControl, replied bool) error {
 	s.count--
 	s.bytes -= len(entry.bytes)
 	s.drainParticipantRetirementsLocked()
+	s.signalLocked() // A retiring participant may be waiting for this reply.
 	return nil
 }
 func (s *SessionRuntime) write(ctx context.Context, raw []byte) error {

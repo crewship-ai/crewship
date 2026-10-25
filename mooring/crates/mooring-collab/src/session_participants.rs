@@ -252,11 +252,22 @@ impl Participants {
         }
         let mut ready = Vec::new();
         for (connection, p) in &mut self.live {
-            if p.permission < owner.known_permission() || !p.lease.may_deliver(now) {
+            if p.permission < owner.known_permission() {
                 p.lease.revoke();
                 p.maintenance.abandon();
                 self.bytes -= p.renewal_charge;
                 p.renewal_charge = 0;
+                continue;
+            }
+            if !p.lease.may_deliver(now) {
+                if !p.lease.is_expired() {
+                    p.lease.revoke();
+                    p.maintenance.abandon();
+                    self.bytes -= p.renewal_charge;
+                    p.renewal_charge = 0;
+                }
+                // Genuine expiry keeps the ONE original pending/completed
+                // correlation proof fully charged until reply or Leave.
                 continue;
             }
             let raw = if p.maintenance.begin_due(now) {
@@ -304,17 +315,27 @@ impl Participants {
             .values_mut()
             .find(|p| p.gate == response.gate_id && p.participant == response.participant_ref)
             .ok_or_else(|| invalid("unrelated delivery grant"))?;
-        if !owner.may_own(now)
-            || p.permission < owner.known_permission()
-            || !p.lease.may_deliver(now)
-        {
+        if !owner.may_own(now) || p.permission < owner.known_permission() {
             p.lease.revoke();
             return Err(invalid("delivery grant cannot revive closed gate"));
         }
-        // One exact completed canonical response is harmless. It neither
-        // changes deadline nor suppresses a different current pending nonce.
+        let live = p.lease.may_deliver(now);
+        if !live && !p.lease.is_expired() {
+            return Err(invalid("delivery grant cannot revive closed gate"));
+        }
+        // Already fully verified exact bytes remain harmless even after this
+        // recipient expires. They never replace a different pending request.
         if p.maintenance.completed == raw {
             return Ok(());
+        }
+        if !live {
+            p.lease
+                .accept_expired_reply(raw, host, now)
+                .map_err(|_| invalid("expired delivery grant binding"))?;
+            update_charge(&mut self.bytes, p, raw.len())?;
+            p.maintenance.pending = None;
+            p.maintenance.completed = raw.to_vec();
+            return Ok(()); // Denial-only completion; no scheduling or grant.
         }
         p.lease
             .accept(raw, host, now)
@@ -458,4 +479,151 @@ pub(crate) fn validate_ticket_decline(raw: &[u8]) -> io::Result<mooring_protocol
         return Err(invalid("ticket decline purpose"));
     }
     Ok(reply)
+}
+
+#[cfg(test)]
+mod expiry_tests {
+    use super::*;
+    use crate::{session_confirmed::OwnerController, session_owner_guard::OwnerGuard};
+    use serde_json::{json, Value};
+
+    fn at(ms: u64) -> Tick {
+        Tick(Duration::from_millis(ms))
+    }
+    fn host() -> Transport<'static> {
+        Transport::AuthenticatedHost {
+            issuer: "crewship",
+            durabilities: &[mooring_protocol::boundary::Durability::Node],
+            required: mooring_protocol::boundary::Durability::Node,
+        }
+    }
+    // Controlled owner metadata; real Participants/PendingGrant admission and
+    // retained accounting. This is not external human/SQL authority evidence.
+    fn fixture() -> (Participants, OwnerController) {
+        let open: mooring_protocol::SessionOpen = serde_json::from_value(json!({"type":"session_open","request_id":"open","control_profile":"mooring.session-causal.v1",
+            "scope":{"workspace_id":"w","artifact_id":"d","application_id":"wordcraft"},"session_id":"s","runtime_ref":"runtime",
+            "required_capabilities":["checkpoint_identity_v1"],"versions":crate::dispatch::wordcraft_versions()})).unwrap();
+        let grant: mooring_protocol::OwnerGrant = serde_json::from_value(json!({"type":"owner_grant","request_id":"owner","scope":open.scope,"session_id":"s","runtime_ref":"runtime",
+            "fence":{"generation":"7","token":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},"lease_duration_ms":"60000","revision":"0","renewal_nonce":"owner","permission_version":"3"})).unwrap();
+        let guard = OwnerGuard::new(&open, &grant, "crewship", Duration::from_secs(60), at(0));
+        let owner = OwnerController::from_parts(open, grant, "crewship".into(), guard);
+        let opening: SessionParticipantOpen = serde_json::from_value(json!({"type":"session_participant_open","request_id":"participant-open","control_profile":"mooring.session-causal.v1",
+            "scope":owner.scope(),"session_id":"s","runtime_ref":"runtime","fence":owner.initial_owner().fence,"connection_ref":"c",
+            "join":{"type":"session_join","request_id":"join","ticket":"MOCK_BOUND_HOST_TICKET","versions":owner.versions()}})).unwrap();
+        let mut registry = Participants::new();
+        let request: Value =
+            serde_json::from_slice(&registry.begin(opening, &owner, at(0)).unwrap()).unwrap();
+        let ticket = json!({"type":"ticket_validated","request_id":request["request_id"],"scope":owner.scope(),"session_id":"s","generation":"7",
+            "participant_ref":"p","permission_version":"3","granted":{"read":true,"write":true},"versions":owner.versions(),"expires_in_ms":"2000","validation_nonce":request["validation_nonce"],"gate_id":"g"});
+        registry
+            .accept(
+                &serde_json::to_vec(&ticket).unwrap(),
+                &host(),
+                &owner,
+                at(0),
+            )
+            .unwrap();
+        (registry, owner)
+    }
+    fn response(raw: &[u8]) -> Vec<u8> {
+        let q: Value = serde_json::from_slice(raw).unwrap();
+        serde_json::to_vec(&json!({"type":"delivery_grant","request_id":q["request_id"],"scope":q["scope"],"session_id":q["session_id"],"participant_ref":q["participant_ref"],
+            "generation":q["fence"]["generation"],"permission_version":q["permission_version"],"renewal_nonce":q["renewal_nonce"],"duration_ms":"2000","gate_id":q["gate_id"]})).unwrap()
+    }
+    fn leave(owner: &OwnerController) -> SessionParticipantInput {
+        serde_json::from_value(json!({"type":"session_participant_input","request_id":"leave","control_profile":"mooring.session-causal.v1",
+            "scope":owner.scope(),"session_id":"s","runtime_ref":"runtime","fence":owner.initial_owner().fence,"connection_ref":"c","participant_ref":"p","gate_id":"g","permission_version":"3",
+            "message":{"type":"session_leave","request_id":"public-leave","scope":owner.scope(),"session_id":"s"}})).unwrap()
+    }
+    #[test]
+    fn expired_pending_proof_stays_charged_until_bound_reply_and_leave() {
+        let (mut registry, owner) = fixture();
+        let admission = registry.bytes;
+        let first = registry.renewals(&owner, at(250)).unwrap().remove(0).1;
+        registry
+            .accept_renewal(&response(&first), &host(), &owner, at(260))
+            .unwrap();
+        let second = registry.renewals(&owner, at(500)).unwrap().remove(0).1;
+        let charged = registry.bytes;
+        let renewal_charge = registry.live["c"].renewal_charge;
+        assert!(renewal_charge >= second.len() * 2);
+        assert_eq!(charged, admission + renewal_charge);
+        for now in [2250, 2251, 2300] {
+            assert!(registry.renewals(&owner, at(now)).unwrap().is_empty());
+            assert_eq!(registry.bytes, charged, "expiry forgot owned pending bytes");
+            assert!(registry.live["c"].lease.is_expired());
+            assert_eq!(registry.live["c"].renewal_charge, renewal_charge);
+        }
+        let raw = response(&second);
+        registry
+            .accept_renewal(&raw, &host(), &owner, at(2300))
+            .unwrap();
+        assert_eq!(registry.bytes, admission + raw.len());
+        assert_eq!(registry.live["c"].maintenance.completed, raw);
+        assert!(registry.live["c"].maintenance.pending.is_none());
+        for _ in 0..64 {
+            registry
+                .accept_renewal(&raw, &host(), &owner, at(2600))
+                .unwrap();
+            assert_eq!(registry.bytes, admission + raw.len());
+            assert!(registry.renewals(&owner, at(2600)).unwrap().is_empty());
+            assert!(!registry
+                .live
+                .get_mut("c")
+                .unwrap()
+                .lease
+                .may_deliver(at(2600)));
+        }
+        registry.leave(&leave(&owner), &owner, at(2600)).unwrap();
+        assert_eq!(registry.bytes, 0);
+        assert!(registry.live.is_empty());
+        assert!(registry
+            .accept_renewal(&raw, &host(), &owner, at(2600))
+            .is_err());
+    }
+    #[test]
+    fn expired_mismatched_reply_cannot_consume_proof_or_replace_cached_result() {
+        let (mut registry, owner) = fixture();
+        let pending = registry.renewals(&owner, at(250)).unwrap().remove(0).1;
+        assert!(registry.renewals(&owner, at(2000)).unwrap().is_empty());
+        let charged = registry.bytes;
+        let valid = response(&pending);
+        let mut wrong: Value = serde_json::from_slice(&valid).unwrap();
+        wrong["renewal_nonce"] = json!("foreign-sequence");
+        assert!(registry
+            .accept_renewal(
+                &serde_json::to_vec(&wrong).unwrap(),
+                &host(),
+                &owner,
+                at(2300)
+            )
+            .is_err());
+        assert_eq!(registry.bytes, charged);
+        assert!(registry.live["c"].maintenance.pending.is_some());
+        registry
+            .accept_renewal(&valid, &host(), &owner, at(2300))
+            .unwrap();
+        let after = registry.bytes;
+        let mut contradiction: Value = serde_json::from_slice(&valid).unwrap();
+        contradiction["duration_ms"] = json!("1999");
+        assert!(registry
+            .accept_renewal(
+                &serde_json::to_vec(&contradiction).unwrap(),
+                &host(),
+                &owner,
+                at(2300)
+            )
+            .is_err());
+        assert_eq!(registry.bytes, after);
+        assert_eq!(registry.live["c"].maintenance.completed, valid);
+        registry
+            .accept_renewal(&valid, &host(), &owner, at(2300))
+            .unwrap();
+        assert!(!registry
+            .live
+            .get_mut("c")
+            .unwrap()
+            .lease
+            .may_deliver(at(2300)));
+    }
 }

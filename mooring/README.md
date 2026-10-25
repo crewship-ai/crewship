@@ -358,6 +358,11 @@ bytes are charged to the existing4MiB participant metadata budget.
 The core ReadLease and2s maximum are unchanged. Owner/permission/read-gate
 checks run again after writer wait. A reply arriving after the CURRENT gate
 expired cannot reopen it even if the reply's own request window would still fit.
+A fully correlated late reply closes only that recipient's delivery: its existing
+pending proof remains charged until the denial-only reply or Leave, while other
+current recipients and the owner continue. Exact verified duplicate bytes do not
+renew a closed gate. Malformed/unrelated replies, clock failures and global owner
+failures still close the actor; no new gate or authority is inferred.
 Owner permission advancement revokes stale participant gates; it does not grant
 new rights. Preparation continues independently while renewal is pending.
 Deterministic-clock actual-socket tests cover delayed replies, retry/duplicate
