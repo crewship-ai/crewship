@@ -32,7 +32,7 @@ func (s *Server) handleMooringMCP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 	case "tools/list":
 		tools := []memoryMCPToolDescriptor{
-			{Name: "doc_read", Description: "Read this confirmed live task's current D1 document and typed command targets. No other document is accessible. Read again after a definitive conflict; retain original uncertain submissions unchanged.", InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)},
+			{Name: "doc_read", Description: "Read only this confirmed live task's document. {} returns the current whole D1 command view. {page:{}} starts a bounded immutable D1/D3 read; continue with the returned cursor and exact revision until next_cursor is absent. max_bytes bounds the complete ReadResult JSON (1024–262144); the MCP envelope is separately capped at 2 MiB. Native JSON is losslessly encoded in each item's data.native_json string. An expired or replaced cursor requires a new read. D3 is read-only. Retain original uncertain submissions unchanged.", InputSchema: json.RawMessage(mooringReadToolSchema)},
 			{Name: "doc_submit", Description: "Submit explicit typed text.insert/delete/format operations using an unchanged doc_read view, mutation_id and changes[].operations[] with explicit read_preconditions[] and dependencies[]. The sidecar deterministically computes the existing protocol fingerprints without rereading. Retain the returned original submission for uncertain retry; retry with submission unchanged. At most 256 operations per original group; larger tasks use multiple groups. Only the actual host outcome receipt establishes Saved.", InputSchema: mooringSubmitToolSchema},
 		}
 		writeJSONResponse(w, 200, memoryMCPResponse{JSONRPC: "2.0", ID: req.ID, Result: mustJSON(map[string]any{"tools": tools})})
@@ -45,13 +45,15 @@ func (s *Server) handleMooringMCP(w http.ResponseWriter, r *http.Request) {
 			s.writeRoutinesMCPToolResult(w, req, 400, mustJSON(map[string]string{"error": "invalid arguments"}))
 			return
 		}
-		method, path := http.MethodGet, "/api/v1/internal/mooring/task"
+		method := http.MethodGet
+		var path string
 		var body []byte
+		pagedRead := false
 		switch params.Name {
 		case "doc_read":
-			var args map[string]json.RawMessage
-			if decodeMooringMCP(params.Arguments, &args) != nil || args == nil || len(args) != 0 {
-				s.writeRoutinesMCPToolResult(w, req, 400, mustJSON(map[string]string{"error": "read accepts an empty object"}))
+			path, pagedRead, err = mooringReadToolPath(params.Arguments)
+			if err != nil {
+				s.writeRoutinesMCPToolResult(w, req, 400, mustJSON(map[string]string{"error": "read accepts {} or a bounded page object"}))
 				return
 			}
 		case "doc_submit":
@@ -92,6 +94,10 @@ func (s *Server) handleMooringMCP(w http.ResponseWriter, r *http.Request) {
 		}
 		if body != nil {
 			s.writeRoutinesMCPToolResult(w, req, response.status, mustJSON(map[string]any{"submission": json.RawMessage(body), "outcome": json.RawMessage(response.body)}))
+			return
+		}
+		if pagedRead && !boundedMooringPageResult(req, response.status, response.body) {
+			s.writeRoutinesMCPToolResult(w, req, 503, mustJSON(map[string]string{"error": "document read exceeds the MCP envelope budget"}))
 			return
 		}
 		s.writeRoutinesMCPToolResult(w, req, response.status, response.body)

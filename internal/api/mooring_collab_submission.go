@@ -156,8 +156,17 @@ func (s *collaborationSubmissionRegistry) admitAgent(ctx context.Context, r *htt
 	}
 	var captured collaborationAgentPageAccess
 	err := s.withWriter(ctx, func(tx *sql.Tx) error {
+		// Mode DATA comes only from the ORIGINAL attached task. Release the store
+		// lock before Check, which revalidates the full original authority itself.
+		store.mu.Lock()
+		entry, known := store.attached[handle]
+		intent, scope := entry.binding.task.intent, entry.binding.task.key
+		store.mu.Unlock()
+		if !known || scope != s.humans.scope || (intent != "task" && intent != "read") {
+			return errCollaborationSubmission
+		}
 		var err error
-		captured, err = store.Check(r.WithContext(ctx), tx, handle, s.humans.scope, "task")
+		captured, err = store.Check(r.WithContext(ctx), tx, handle, s.humans.scope, intent)
 		return err
 	})
 	if err != nil {
@@ -171,7 +180,7 @@ func (s *collaborationSubmissionRegistry) admitAgent(ctx context.Context, r *htt
 	defer s.mu.Unlock()
 	for _, prior := range s.agents {
 		if prior.captured.workID == captured.workID {
-			if prior.captured.store != captured.store || prior.captured.runID != captured.runID || prior.captured.attempt != captured.attempt || prior.captured.generation != captured.generation || prior.captured.mandateRef != captured.mandateRef || prior.captured.credentialBinding != captured.credentialBinding {
+			if prior.captured.store != captured.store || prior.captured.runID != captured.runID || prior.captured.attempt != captured.attempt || prior.captured.generation != captured.generation || prior.captured.mandateRef != captured.mandateRef || prior.captured.credentialBinding != captured.credentialBinding || prior.captured.intent != captured.intent {
 				return nil, errCollaborationSubmission
 			}
 			// Repeated bridge admission cannot allocate a new participant identity for

@@ -25,6 +25,9 @@ func TestMooringMCPUsesOnlyOriginalRunAndFixedHostToolPaths(t *testing.T) {
 		if r.URL.Path != "/api/v1/internal/mooring/task" || r.Header.Get("Authorization") != "Bearer "+token || r.Header.Get("X-Internal-Token") == "" {
 			t.Error("host transport identity or route changed")
 		}
+		if calls == 3 && (r.Method != http.MethodGet || r.URL.Query().Get("page") != "1" || r.URL.Query().Get("revision") != "18446744073709551615" || r.URL.Query().Get("cursor") != `["frozen","stable&?="]` || r.URL.Query().Get("max_bytes") != "4096") {
+			t.Error("paged read lost fixed method or exact original cursor/revision")
+		}
 		body, _ := io.ReadAll(r.Body)
 		if r.Method == http.MethodPost && string(body) != original {
 			t.Error("original submit bytes changed")
@@ -41,14 +44,14 @@ func TestMooringMCPUsesOnlyOriginalRunAndFixedHostToolPaths(t *testing.T) {
 		s.handleMooringMCP(w, r)
 		return w
 	}
-	for _, request := range []string{`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"doc_read","arguments":{}}}`, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"doc_submit","arguments":{"submission":` + original + `}}}`} {
+	for _, request := range []string{`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"doc_read","arguments":{}}}`, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"doc_submit","arguments":{"submission":` + original + `}}}`, `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"doc_read","arguments":{"page":{"cursor":"[\"frozen\",\"stable&?=\"]","revision":"18446744073709551615","max_bytes":4096}}}}`} {
 		w := call(request, token)
 		failed, _ := documentCreateMCPResult(t, w)
 		if failed {
 			t.Fatal("fixed run transport refused")
 		}
 	}
-	if calls != 2 {
+	if calls != 3 {
 		t.Fatal("missing fixed host operations")
 	}
 	for _, args := range []string{`{"name":"doc_read","arguments":{"page_id":"other"}}`, `{"name":"doc_submit","arguments":{"submission":{},"agent_id":"other"}}`, `{"name":"doc_read","name":"doc_submit","arguments":{}}`, `{"name":"doc_draft_apply","arguments":{}}`} {
@@ -60,7 +63,7 @@ func TestMooringMCPUsesOnlyOriginalRunAndFixedHostToolPaths(t *testing.T) {
 			}
 		}
 	}
-	if calls != 2 {
+	if calls != 3 {
 		t.Fatal("invalid tool reached host")
 	}
 	for _, credential := range []string{"", "agentv1.synthetic", "agtv2.invalid"} {

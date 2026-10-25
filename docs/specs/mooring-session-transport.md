@@ -98,14 +98,19 @@ access query and selects an existing WordCraft document with a current agent
 write grant and allowed policy. The picker is metadata, not a runtime capability
 or a new grant. Existing document sharing remains the only grant-management path.
 
-`POST /api/v1/pages/{slug}/mooring/tasks` accepts only `chat_id` and `message_id`
-strings in a closed JSON body of at most 4096 bytes. The host reads the original
+`POST /api/v1/pages/{slug}/mooring/tasks` requires `chat_id` and `message_id`
+strings in a closed JSON body of at most 4096 bytes. Omitting `access` preserves
+the original write task. The only accepted optional value is `access: "read"`,
+which narrows the same original-message task to existing human and agent read
+rights. Its attached native participant has no write capability and rejects
+submissions even if a later grant includes write. Unknown values or fields are denied. The host reads the original
 stored instruction, checks the original human, current chat audience, existing
-human/agent write rights and workspace policy, and qualifies the actual native
-D1 runtime. It cannot add or widen an agent grant. Reusing an accepted original
+human/agent rights at the selected access level and workspace policy, and preserves actual native runtime qualification (writable D1 for writes,
+read-only D3 may be used by a read task). This admission is not proof of complete
+D3 stable paged-read acceptance. It cannot add or widen an agent grant. Reusing an accepted original
 message is refused; an uncertain response does not authorize a new instruction.
 HTTP 202 returns `work_id` and `status: "queued"`. It is task acceptance, not a
-committed document mutation or a Saved receipt. The CLI equivalent is
+committed document mutation or a Saved receipt. The existing CLI invocation creates the default write task:
 `crewship mooring task <page-slug|@ID> --chat <chat-id> --message <message-id>`.
 
 The supported private execution path exposes only `doc_read` and `doc_submit`
@@ -115,6 +120,39 @@ explicit typed commands and their original read preconditions against a retained
 returned original submission must be retried unchanged. Actual native preparation,
 SQL COMMIT and correlated receipts remain the Saved boundary. A test fixture or
 an accepted task does not qualify an actual private agent environment.
+
+`doc_read({})` retains the whole-D1 command view. `doc_read({"page":{}})`
+uses the existing participant `read_request` / `read_result` messages over the
+private session transport. It starts an immutable native projection of the
+confirmed revision. Continue with `page.cursor` and the exact string-valued
+`page.revision` returned by that read; a concurrent commit does not change
+later pages. D3 native content is read-only. A cursor cannot select a document,
+principal or workspace and confers no permission. The original task, participant,
+current grants and delivery lease are checked on every request and at physical
+HTTP flush. Read task admission and read-only native grants are a separate
+prerequisite; this pagination path does not create or widen them.
+
+Each item contains lossless application JSON as `data.native_json`, a JSON
+string, so opaque native integers never pass through the protocol's binary64
+number representation. The header preserves document-level fields; paragraph
+items preserve stable IDs and complete native blocks. Each item's `revision`
+is its target revision, while the result's `revision` identifies the frozen
+document. Reassemble by decoding these strings and appending the paragraph
+blocks to the header's `body` in page order. Missing `next_cursor` ends the read.
+
+`page.max_bytes` is an integer from 1024 to 262144 (default 131072), bounding
+the complete serialized inner `read_result`, including metadata and cursor.
+The private frame also reserves its complete outer-envelope overhead; the MCP
+JSON envelope is independently bounded at 2 MiB after text escaping. A native
+block or header which cannot fit is refused without truncation. At most one
+snapshot per connection is retained, with a 4 MiB aggregate serialized-data
+budget per native actor; this is not an RSS estimate. A completed snapshot stays
+available for retry. A successful new first page replaces the connection's old
+snapshot; failed creation preserves it. Replacement, participant leave and
+runtime restart invalidate old cursors. An unavailable snapshot returns a
+definitive conflict requiring a fresh first page, never a silently newer page.
+An unresolved transport request retains only its bounded correlation tombstone;
+its abandoned content is discarded and cannot satisfy a later request.
 
 After a validated recipient reopen, and before an update whose starting revision
 is ahead of the recipient's observed cut, the host may replay a strictly

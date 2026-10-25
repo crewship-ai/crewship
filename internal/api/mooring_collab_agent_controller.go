@@ -174,15 +174,14 @@ func (m *collaborationHTTPManager) task(w http.ResponseWriter, r *http.Request) 
 		replyError(w, 413, "document task request too large")
 		return
 	}
-	canonical, err := mooring.CanonicalJSON(raw)
-	var fields map[string]json.RawMessage
-	var input struct {
-		ChatID    string `json:"chat_id"`
-		MessageID string `json:"message_id"`
-	}
-	if err != nil || json.Unmarshal(canonical, &fields) != nil || len(fields) != 2 || fields["chat_id"] == nil || fields["message_id"] == nil || json.Unmarshal(canonical, &input) != nil || !mooring.ValidWireIdentifier(input.ChatID) || !mooring.ValidWireIdentifier(input.MessageID) {
+	input, err := parseCollaborationAgentTaskRequest(raw)
+	if err != nil {
 		replyError(w, 400, "invalid document task request")
 		return
+	}
+	intent := "task"
+	if input.Access == "read" {
+		intent = "read"
 	}
 	source := auth.OriginalCredentialFromContext(r.Context())
 	if source == nil {
@@ -205,11 +204,40 @@ func (m *collaborationHTTPManager) task(w http.ResponseWriter, r *http.Request) 
 		replyError(w, 503, "native document unavailable")
 		return
 	}
-	accepted, err := c.tasks.Produce(r.Context(), key, "task", input.MessageID, receipt)
+	accepted, err := c.tasks.Produce(r.Context(), key, intent, input.MessageID, receipt)
 	if err != nil {
 		replyError(w, 409, "document task not accepted; use a new explicit message")
 		return
 	}
 	c.dispatcher.Hint(accepted.WorkID)
 	writeJSON(w, http.StatusAccepted, map[string]string{"work_id": accepted.WorkID, "status": "queued"})
+}
+
+// Request DATA may only narrow the default writer task to the existing read
+// intent. Authority is still captured by StartTask from the original human.
+type collaborationAgentTaskRequest struct {
+	ChatID    string `json:"chat_id"`
+	MessageID string `json:"message_id"`
+	Access    string `json:"access,omitempty"`
+}
+
+func parseCollaborationAgentTaskRequest(raw []byte) (collaborationAgentTaskRequest, error) {
+	var input collaborationAgentTaskRequest
+	canonical, err := mooring.CanonicalJSON(raw)
+	var fields map[string]json.RawMessage
+	if err != nil || json.Unmarshal(canonical, &fields) != nil || (len(fields) != 2 && len(fields) != 3) || fields["chat_id"] == nil || fields["message_id"] == nil {
+		return input, errCollaborationAgentAccess
+	}
+	for name := range fields {
+		if name != "chat_id" && name != "message_id" && name != "access" {
+			return input, errCollaborationAgentAccess
+		}
+	}
+	if json.Unmarshal(canonical, &input) != nil || !mooring.ValidWireIdentifier(input.ChatID) || !mooring.ValidWireIdentifier(input.MessageID) {
+		return input, errCollaborationAgentAccess
+	}
+	if _, present := fields["access"]; present && input.Access != "read" {
+		return input, errCollaborationAgentAccess
+	}
+	return input, nil
 }

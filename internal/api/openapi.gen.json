@@ -12029,6 +12029,12 @@
       "MooringTaskRequest": {
         "additionalProperties": false,
         "properties": {
+          "access": {
+            "enum": [
+              "read"
+            ],
+            "type": "string"
+          },
           "chat_id": {
             "type": "string"
           },

@@ -9,6 +9,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Add bounded native document pages to the original task's `doc_read` tool, preserving one immutable revision, complete application data and current read authorization across continuations and physical delivery.
+
+- Allow an explicit read-only native document task through the existing original-message flow, preserving its attached read intent across admission, native grants, renewal and retirement while rejecting submissions. Default tasks retain their original write mode.
+
 - Qualify Mooring startup metadata and complete targets from one checked owned WordCraft document, preserving checkpoint integrity and final owner checks without changing runtime deadlines.
 
 - Replay contiguous committed Mooring native deltas after recipient reopen or a delivery gap, checking current reader rights for every frame without creating a new snapshot or source authority.

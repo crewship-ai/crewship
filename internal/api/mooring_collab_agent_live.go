@@ -32,6 +32,7 @@ type collaborationLiveAgent struct {
 	ready                  chan struct{}
 	joined, closed         bool
 	retired                *mooring.SessionRetiredDelivery
+	pageRead               *collaborationAgentPageRead
 }
 
 func (d *collaborationHTTPDocument) agentParticipant(ref, participant, ticket string) *collaborationLiveAgent {
@@ -158,7 +159,7 @@ func (a *collaborationLiveAgent) ensure(ctx context.Context, r *http.Request) er
 		a.mu.Unlock()
 		if err = a.run(ctx, func(ctx context.Context) error {
 			return d.submissions.withWriter(ctx, func(tx *sql.Tx) error {
-				if _, e := a.allowed(ctx, tx, "task"); e != nil {
+				if _, e := a.allowed(ctx, tx, p.captured.intent); e != nil {
 					return e
 				}
 				return d.cell.runtime.SendPreparedParticipantOpen(ctx, d.activation, pending)
@@ -191,7 +192,12 @@ func (a *collaborationLiveAgent) ticketReply(ctx context.Context, token mooring.
 	defer a.deliveryMu.Unlock()
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.closed || a.pending == nil || a.delivery != nil || a.ticket != q.Ticket || q.Scope != d.wireScope() || q.SessionID != protocol.Identifier(d.activation.SessionID()) || q.Fence != d.wireFence() {
+	if a.closed || a.participant == nil || a.pending == nil || a.delivery != nil || a.ticket != q.Ticket || q.Scope != d.wireScope() || q.SessionID != protocol.Identifier(d.activation.SessionID()) || q.Fence != d.wireFence() {
+		return errCollaborationAgentAccess
+	}
+	intent := a.participant.captured.intent
+	write, valid := collaborationAgentIntent(intent)
+	if !valid || (intent != "task" && intent != "read") {
 		return errCollaborationAgentAccess
 	}
 	ttl := d.manager.config.DeliveryTTL
@@ -199,7 +205,7 @@ func (a *collaborationLiveAgent) ticketReply(ctx context.Context, token mooring.
 		if access.Scope != d.key || access.Participant != a.participant.id || (access.Intent != "connect" && access.Intent != "renew") {
 			return "", errCollaborationAgentAccess
 		}
-		proof, err := a.allowed(ctx, tx, "task")
+		proof, err := a.allowed(ctx, tx, intent)
 		if err != nil {
 			return "", err
 		}
@@ -237,7 +243,7 @@ func (a *collaborationLiveAgent) ticketReply(ctx context.Context, token mooring.
 		return err
 	}
 	a.delivery, a.gate = delivery, grant
-	read, write := true, true
+	read := true
 	result := protocol.TicketValidationResult{Type: "ticket_validated", RequestID: q.RequestID, Scope: q.Scope, SessionID: q.SessionID, Generation: q.Fence.Generation, ParticipantRef: protocol.Identifier(a.participant.id), PermissionVersion: protocol.Counter(grant.PermissionVersion), Granted: protocol.Capabilities{Read: &read, Write: &write}, Versions: d.wireVersions(), ExpiresInMs: protocol.PositiveCounter(strconv.FormatInt(grant.DurationMilliseconds, 10)), ValidationNonce: q.ValidationNonce, GateID: protocol.Identifier(grant.GateID)}
 	return collaborationPumpTicketReply(ctx, d.cell.runtime, token, q, result)
 }
@@ -289,6 +295,12 @@ func (a *collaborationLiveAgent) tool(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method != http.MethodPost {
 		replyError(w, 405, "method unavailable")
+		return
+	}
+	// A read task cannot enter typed/raw submission capture, even when its
+	// current grants happen to include write. The original task remains read.
+	if a.participant == nil || a.participant.captured.intent != "task" {
+		replyError(w, 403, "read-only document task")
 		return
 	}
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, collaborationHTTPFrameLimit))
@@ -358,6 +370,15 @@ func (a *collaborationLiveAgent) tool(w http.ResponseWriter, r *http.Request) {
 
 func (a *collaborationLiveAgent) read(w http.ResponseWriter, r *http.Request) {
 	d := a.document
+	page, queryErr := collaborationPageQuery(r, d.key.WorkspaceID)
+	if queryErr != nil {
+		replyError(w, 400, "invalid document read request")
+		return
+	}
+	if page != nil {
+		a.readPage(w, r, page)
+		return
+	}
 	snapshot, err := d.cell.agentCheckpoint(r, a.confirmed.store, a.confirmed.mandate, d.owner)
 	if err != nil {
 		replyError(w, 403, "document task denied")
@@ -395,6 +416,10 @@ func (a *collaborationLiveAgent) read(w http.ResponseWriter, r *http.Request) {
 // Physical HTTP delivery is serialized with the current SAME-writer authority
 // and exact SQL gate. No previously captured proof can waive a current check.
 func (a *collaborationLiveAgent) send(r *http.Request, w http.ResponseWriter, raw []byte) error {
+	return a.sendStatus(r, w, raw, http.StatusOK)
+}
+
+func (a *collaborationLiveAgent) sendStatus(r *http.Request, w http.ResponseWriter, raw []byte, status int) error {
 	if len(raw) > 2<<20 {
 		return mooring.ErrBatchCapacity
 	}
@@ -408,6 +433,7 @@ func (a *collaborationLiveAgent) send(r *http.Request, w http.ResponseWriter, ra
 				return err
 			}
 			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
 			if _, err := w.Write(raw); err != nil {
 				return err
 			}

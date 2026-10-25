@@ -143,7 +143,7 @@ func (a *collaborationLiveAgent) retireClosedGate(ctx context.Context) error {
 				return errCollaborationAgentAccess
 			}
 			if !closed && int64(now) < expires {
-				decision, err := a.confirmed.store.DecideCaptured(ctx, tx, a.participant.captured, d.key, "task")
+				decision, err := a.confirmed.store.DecideCaptured(ctx, tx, a.participant.captured, d.key, a.participant.captured.intent)
 				if err != nil {
 					return err
 				}
@@ -219,6 +219,9 @@ func (a *collaborationLiveAgent) output(ctx context.Context, token mooring.Sessi
 		if err = d.cell.runtime.ValidateRetiredOutput(token, retired); err != nil {
 			return err
 		}
+	}
+	if header.Type == "read_result" || header.Type == "protocol_error" {
+		return a.capturePageRead(ctx, token, q, raw, retired)
 	}
 	l := d.originals
 	l.mu.Lock()
