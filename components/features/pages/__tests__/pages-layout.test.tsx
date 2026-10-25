@@ -165,7 +165,7 @@ describe("PagesLayout", () => {
     const original = await screen.findByTestId("native-wordcraft")
     view.qc.setQueryData(pagesKeys.detail("ws-1", FLEET.slug!, "second-human"), page)
     identity.id = "second-human"
-    view.rerender(<QueryClientProvider client={view.qc}><PagesLayout workspaceId="ws-1" slug={FLEET.slug} now={NOW} /></QueryClientProvider>)
+    view.rerender(<QueryClientProvider client={view.qc}><PagesLayout workspaceId="ws-1" slug={FLEET.slug!} now={NOW} /></QueryClientProvider>)
     await waitFor(() => expect(screen.getByTestId("native-wordcraft")).not.toBe(original))
     expect(original.isConnected).toBe(false)
   })
