@@ -18,6 +18,7 @@ import (
 // through production defaults so FULL applies to every pooled connection.
 func openFullMooringFixture(t *testing.T, path string) *database.DB {
 	t.Helper()
+	path = testutil.ActualEvidenceDBPath(t, path)
 	source, err := os.Open(testutil.MigratedTemplatePath(t))
 	if err != nil {
 		t.Fatal(err)

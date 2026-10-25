@@ -125,6 +125,18 @@
       "tests": [
         "TestMooringAgentToolActualOriginalTaskRegistration"
       ]
+    },
+    {
+      "path": "internal/testutil/migrateddb_evidence_test.go",
+      "tests": [
+        "TestActualFailureDBEvidenceSurvivesCleanup"
+      ]
+    },
+    {
+      "path": "internal/mooring/runtime_evidence_test.go",
+      "tests": [
+        "TestActualRuntimeStderrSurvivesFailure"
+      ]
     }
   ]
 }

@@ -30,6 +30,12 @@ func startRuntimeSelected(_ context.Context, c RuntimeConfig, cmd *exec.Cmd, ses
 	// Never inherit backend encryption/provider credentials or loader options.
 	cmd.Env = []string{"LANG=C.UTF-8", "TZ=UTC"}
 	cmd.ExtraFiles = []*os.File{child}
+	closeEvidence, err := actualRuntimeEvidence(cmd)
+	if err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	defer closeEvidence()
 	if err = cmd.Start(); err != nil {
 		_ = conn.Close()
 		return nil, err

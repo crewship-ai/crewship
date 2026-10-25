@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -78,6 +79,9 @@ func withActualAgentReadSession(t *testing.T, call func(*collaborationAgentTestF
 		t.Fatal("agent startup stage 3", err)
 	}
 	defer runtime.Close()
+	defer func() {
+		testutil.SnapshotActualFailure(t, full.DB, filepath.Join(filepath.Dir(path), "before-close.sqlite"))
+	}()
 	cell, err := newCollaborationSessionStore(true, x.f.pages, owners, x.fence, runtime, x.key, versions)
 	if err != nil {
 		t.Fatal("agent startup stage 4", err)

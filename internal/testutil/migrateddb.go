@@ -203,11 +203,19 @@ func MigratedTemplate() (string, error) {
 // type; reach for .DB when a plain *sql.DB is wanted, or call MigratedSQLDB.
 func MigratedDB(t testing.TB) *database.DB {
 	t.Helper()
+	if actualEvidenceEnabled() {
+		dir, err := newActualEvidenceDBDir()
+		if err != nil {
+			t.Fatal(err)
+		}
+		registerTestDirCleanup(t, dir)
+		return MigratedDBAt(t, filepath.Join(dir, "test.db"))
+	}
 	if p, ok := takePrefetched(); ok {
 		// Same two cleanups, in the same LIFO order, as the synchronous path
 		// below: quiesce the handle first, then remove its directory.
 		registerTestDirCleanup(t, p.dir)
-		t.Cleanup(func() { quiesce(p.db, p.path) })
+		t.Cleanup(func() { closeMigratedTestDB(t, p.db, p.path) })
 		return p.db
 	}
 	return MigratedDBAt(t, filepath.Join(migratedTestDir(t), "test.db"))
@@ -236,7 +244,7 @@ func MigratedDBAt(t testing.TB, path string) *database.DB {
 	if err != nil {
 		t.Fatalf("testutil: %v", err)
 	}
-	t.Cleanup(func() { quiesce(db, path) })
+	t.Cleanup(func() { closeMigratedTestDB(t, db, path) })
 	return db
 }
 
@@ -276,6 +284,9 @@ func openMigratedCopy(path string) (*database.DB, error) {
 	}
 	if err := copyFileForTest(template, path); err != nil {
 		return nil, fmt.Errorf("copy migrated template: %w", err)
+	}
+	if err := secureActualDB(path); err != nil {
+		return nil, err
 	}
 	db, err := database.Open("file:"+path, testSynchronous)
 	if err != nil {
@@ -334,6 +345,9 @@ func migratedTestDir(t testing.TB) string {
 func registerTestDirCleanup(t testing.TB, dir string) {
 	t.Helper()
 	t.Cleanup(func() {
+		if retainActualFailure(t, dir) {
+			return
+		}
 		if err := os.RemoveAll(dir); err != nil {
 			leftovers, _ := os.ReadDir(dir)
 			names := make([]string, 0, len(leftovers))
@@ -343,6 +357,16 @@ func registerTestDirCleanup(t testing.TB, dir string) {
 			t.Logf("testutil: test DB temp dir not fully removed (non-fatal): %v; survivors: %v", err, names)
 		}
 	})
+}
+
+// Keep failed actual evidence intact: no forced WAL checkpoint or sidecar unlink.
+func closeMigratedTestDB(t testing.TB, db *database.DB, path string) {
+	if retainActualFailure(t, filepath.Dir(path)) {
+		snapshotActualFailure(t, path)
+		_ = db.Close()
+		return
+	}
+	quiesce(db, path)
 }
 
 // quiesce shuts a test DB down deterministically.

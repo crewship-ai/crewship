@@ -104,7 +104,7 @@ def main():
     for name, path in declared.items():
         document = "d3" if name == READONLY else "d1"
         case_dir = output / name
-        case_dir.mkdir()
+        case_dir.mkdir(mode=0o700)
         env = dict(os.environ)
         # Never inherit private fixture selections or an old source/binary pin.
         env = {key: value for key, value in env.items() if not key.startswith("MOORING_")}

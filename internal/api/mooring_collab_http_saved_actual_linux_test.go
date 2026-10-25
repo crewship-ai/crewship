@@ -98,6 +98,9 @@ func runMooringHTTPActualSDK(t *testing.T, peerDelete bool, grantChange ...strin
 	defer r.mooringHTTP.Close()
 	server := httptest.NewServer(r.mux)
 	defer server.Close()
+	defer func() {
+		testutil.SnapshotActualFailure(t, full.DB, filepath.Join(filepath.Dir(path), "before-close.sqlite"))
+	}()
 	setGrant := func(level string) error {
 		subject := rig.userID
 		if level == "unrelated-read" {
