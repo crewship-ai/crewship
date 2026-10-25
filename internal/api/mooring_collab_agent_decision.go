@@ -58,7 +58,7 @@ func (s *collaborationAgentMandateStore) DecideCaptured(ctx context.Context, tx 
 	write, valid := collaborationAgentIntent(intent)
 	capturedWrite, capturedValid := collaborationAgentIntent(captured.intent)
 	allowedWrite, _ := collaborationAgentIntent(task.intent)
-	if !valid || !capturedValid || capturedWrite && !allowedWrite || write && !capturedWrite || captured.agentID != a.agentID || captured.crewID != a.crewID || captured.runID != a.runID || captured.workID != a.workID || captured.attempt != a.attempt || captured.generation != a.generation || captured.credentialBinding != entry.binding.credentialSHA256 || captured.permissionVersion != task.permissionVersion || captured.authorVector != task.authorVector || captured.memberID != task.memberID || captured.memberRevision != task.memberRevision || captured.credentialExpiry.IsZero() || !time.Now().Before(captured.credentialExpiry) {
+	if !valid || !capturedValid || captured.allowPartial != task.allowPartial || capturedWrite && !allowedWrite || write && !capturedWrite || captured.agentID != a.agentID || captured.crewID != a.crewID || captured.runID != a.runID || captured.workID != a.workID || captured.attempt != a.attempt || captured.generation != a.generation || captured.credentialBinding != entry.binding.credentialSHA256 || captured.permissionVersion != task.permissionVersion || captured.authorVector != task.authorVector || captured.memberID != task.memberID || captured.memberRevision != task.memberRevision || captured.credentialExpiry.IsZero() || !time.Now().Before(captured.credentialExpiry) {
 		return result, errCollaborationAgentAccess
 	}
 	release, err := s.fence.acquireOriginal(task.ingress)

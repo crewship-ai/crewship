@@ -133,6 +133,11 @@ func (a *collaborationLiveAgent) ensure(ctx context.Context, r *http.Request) er
 		if err != nil {
 			return err
 		}
+		if p.captured.intent == "task" {
+			if err := a.document.submissions.registerAgentTask(ctx, p, a.document.owner); err != nil {
+				return err
+			}
+		}
 		ticket, err := collaborationOpaqueID()
 		if err != nil {
 			return err
@@ -398,16 +403,17 @@ func (a *collaborationLiveAgent) read(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	raw, err := json.Marshal(struct {
-		Scope       protocol.Scope               `json:"scope"`
-		SessionID   string                       `json:"session_id"`
-		Versions    protocol.Versions            `json:"versions"`
-		TaskID      string                       `json:"task_id"`
-		Participant string                       `json:"participant_ref"`
-		Revision    protocol.Counter             `json:"revision"`
-		Native      json.RawMessage              `json:"native"`
-		BlockIDs    []string                     `json:"block_ids"`
-		Targets     []mooring.BatchTargetVersion `json:"targets"`
-	}{d.wireScope(), d.activation.SessionID(), d.wireVersions(), a.confirmed.workID, a.participant.id, snapshot.Checkpoint.Revision, cp.Native, cp.BlockIDs, snapshot.Targets})
+		Scope        protocol.Scope               `json:"scope"`
+		SessionID    string                       `json:"session_id"`
+		Versions     protocol.Versions            `json:"versions"`
+		TaskID       string                       `json:"task_id"`
+		AllowPartial bool                         `json:"allow_partial"`
+		Participant  string                       `json:"participant_ref"`
+		Revision     protocol.Counter             `json:"revision"`
+		Native       json.RawMessage              `json:"native"`
+		BlockIDs     []string                     `json:"block_ids"`
+		Targets      []mooring.BatchTargetVersion `json:"targets"`
+	}{d.wireScope(), d.activation.SessionID(), d.wireVersions(), a.confirmed.workID, a.participant.captured.allowPartial, a.participant.id, snapshot.Checkpoint.Revision, cp.Native, cp.BlockIDs, snapshot.Targets})
 	if err != nil || a.send(r, w, raw) != nil {
 		return
 	}

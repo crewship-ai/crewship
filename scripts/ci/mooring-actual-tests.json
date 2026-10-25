@@ -119,6 +119,12 @@
       "tests": [
         "TestSessionOriginInventoryActualRustOwnedDocumentAndSQLFence"
       ]
+    },
+    {
+      "path": "internal/api/mooring_collab_agent_task_registration_actual_linux_test.go",
+      "tests": [
+        "TestMooringAgentToolActualOriginalTaskRegistration"
+      ]
     }
   ]
 }

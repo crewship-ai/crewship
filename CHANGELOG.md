@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Bind document-agent task registration and partial-result policy to the original admitted human task before native submission.
+
 - Add bounded native document pages to the original task's `doc_read` tool, preserving one immutable revision, complete application data and current read authorization across continuations and physical delivery.
 
 - Allow an explicit read-only native document task through the existing original-message flow, preserving its attached read intent across admission, native grants, renewal and retirement while rejecting submissions. Default tasks retain their original write mode.

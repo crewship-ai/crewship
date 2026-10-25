@@ -14,12 +14,13 @@ import (
 // A task view is display data, never an admission or an agent credential.
 // Standing document grants and queued work cannot create one.
 type collaborationAgentTaskView struct {
-	WorkID    string    `json:"work_id"`
-	RunID     string    `json:"run_id"`
-	Scope     string    `json:"scope"`
-	ExpiresAt time.Time `json:"expires_at"`
-	CanRead   bool      `json:"can_read"`
-	CanWrite  bool      `json:"can_write"`
+	WorkID       string    `json:"work_id"`
+	RunID        string    `json:"run_id"`
+	Scope        string    `json:"scope"`
+	ExpiresAt    time.Time `json:"expires_at"`
+	CanRead      bool      `json:"can_read"`
+	CanWrite     bool      `json:"can_write"`
+	AllowPartial bool      `json:"allow_partial"`
 }
 
 // currentTaskViews projects only the canonical in-memory attached registry.
@@ -79,7 +80,7 @@ func (s *collaborationAgentMandateStore) currentTaskViews(ctx context.Context, t
 		if !valid {
 			return nil, errCollaborationAgentAccess
 		}
-		views = append(views, collaborationAgentTaskView{WorkID: a.workID, RunID: a.runID, Scope: task.intent, ExpiresAt: horizon, CanRead: true, CanWrite: write})
+		views = append(views, collaborationAgentTaskView{WorkID: a.workID, RunID: a.runID, Scope: task.intent, ExpiresAt: horizon, CanRead: true, CanWrite: write, AllowPartial: task.allowPartial})
 	}
 
 	s.mu.Lock()

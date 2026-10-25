@@ -13,15 +13,16 @@ import (
 // these labels as authority and independently checks the original live task,
 // every read precondition and full atomic membership before application.
 type mooringToolView struct {
-	Scope       protocol.Scope      `json:"scope"`
-	SessionID   protocol.Identifier `json:"session_id"`
-	Versions    protocol.Versions   `json:"versions"`
-	TaskID      string              `json:"task_id"`
-	Participant string              `json:"participant_ref"`
-	Revision    string              `json:"revision"`
-	Native      json.RawMessage     `json:"native,omitempty"`
-	BlockIDs    []string            `json:"block_ids,omitempty"`
-	Targets     json.RawMessage     `json:"targets,omitempty"`
+	Scope        protocol.Scope      `json:"scope"`
+	SessionID    protocol.Identifier `json:"session_id"`
+	Versions     protocol.Versions   `json:"versions"`
+	TaskID       string              `json:"task_id"`
+	AllowPartial bool                `json:"allow_partial,omitempty"`
+	Participant  string              `json:"participant_ref"`
+	Revision     string              `json:"revision"`
+	Native       json.RawMessage     `json:"native,omitempty"`
+	BlockIDs     []string            `json:"block_ids,omitempty"`
+	Targets      json.RawMessage     `json:"targets,omitempty"`
 }
 
 func prepareMooringToolPacket(raw []byte) (json.RawMessage, error) {

@@ -36,12 +36,17 @@ func withMooringAgentToolHostFixtureOutput(t *testing.T, call func(*collaboratio
 	t.Helper()
 	withActualAgentReadSession(t, func(x *collaborationAgentTestFixture, cell *collaborationSessionStore, humans *collaborationHumanRegistry, owner mooring.OwnerLease) {
 		var handle string
-		if len(intent) == 1 && intent[0] == "read" {
+		if len(intent) == 1 && (intent[0] == "read" || intent[0] == "task-partial") {
+			mode, partial := intent[0], intent[0] == "task-partial"
+			if partial {
+				mode = "task"
+				mustExec(t, x.f.rig.db, `UPDATE page_grants SET level='write' WHERE page_id=? AND subject_type='agent'`, x.key.ArtifactID)
+			}
 			var pending *collaborationAgentPending
 			x.tx(t, func(tx *sql.Tx) {
 				var accepted work.Receipt
 				var err error
-				pending, accepted, err = x.store.StartTask(x.human, tx, x.key, "read", x.f.a.MessageID, x.f.receipt)
+				pending, accepted, err = x.store.StartTask(x.human, tx, x.key, mode, x.f.a.MessageID, x.f.receipt, partial)
 				if err != nil {
 					t.Fatal("original read task", err)
 				}

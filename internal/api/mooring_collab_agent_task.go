@@ -25,9 +25,13 @@ import (
 // roll back on every error, retain the lease through commit/response, and keep
 // the returned pending handle only in trusted host memory. No queued/accepted
 // response precedes SQL commit. No route or dispatcher uses this method yet.
-func (s *collaborationAgentMandateStore) StartTask(ctx context.Context, tx *sql.Tx, key mooring.SessionKey, intent, message string, receipt *chataudience.Receipt) (*collaborationAgentPending, work.Receipt, error) {
+func (s *collaborationAgentMandateStore) StartTask(ctx context.Context, tx *sql.Tx, key mooring.SessionKey, intent, message string, receipt *chataudience.Receipt, partial ...bool) (*collaborationAgentPending, work.Receipt, error) {
 	var accepted work.Receipt
-	if s == nil || tx == nil || receipt == nil {
+	if s == nil || tx == nil || receipt == nil || len(partial) > 1 {
+		return nil, accepted, errCollaborationAgentAccess
+	}
+	allowPartial := len(partial) == 1 && partial[0]
+	if allowPartial && intent != "task" {
 		return nil, accepted, errCollaborationAgentAccess
 	}
 	// Disabled stores reject before touching SQL or a missing dependency.
@@ -86,12 +90,13 @@ func (s *collaborationAgentMandateStore) StartTask(ctx context.Context, tx *sql.
 	// Routing fields are explicit host values. User text stays opaque instruction
 	// data; actor/run/credential metadata inside that text has no authority.
 	input, e := json.Marshal(struct {
-		Application string `json:"application_id"`
-		Page        string `json:"page_id"`
-		Chat        string `json:"chat_id"`
-		Message     string `json:"message_id"`
-		Instruction string `json:"instruction"`
-	}{key.ApplicationID, key.ArtifactID, receipt.ChatID, message, instruction})
+		Application  string `json:"application_id"`
+		Page         string `json:"page_id"`
+		Chat         string `json:"chat_id"`
+		Message      string `json:"message_id"`
+		Instruction  string `json:"instruction"`
+		AllowPartial bool   `json:"allow_partial,omitempty"`
+	}{key.ApplicationID, key.ArtifactID, receipt.ChatID, message, instruction, allowPartial})
 	if e != nil || len(input) > mooring.MaxRPCFrame {
 		return nil, accepted, errCollaborationAgentAccess
 	}
@@ -109,7 +114,7 @@ func (s *collaborationAgentMandateStore) StartTask(ctx context.Context, tx *sql.
 	if e != nil {
 		return nil, work.Receipt{}, e
 	}
-	pending, e := s.prepareAcceptedTask(ctx, tx, key, intent, message, receipt, collaborationAgentFreshWork{seal: s.workSeal, workID: accepted.WorkID, boot: boot, expiresTick: tick + int64(s.ttl)})
+	pending, e := s.prepareAcceptedTask(ctx, tx, key, intent, message, receipt, collaborationAgentFreshWork{seal: s.workSeal, workID: accepted.WorkID, boot: boot, expiresTick: tick + int64(s.ttl), allowPartial: allowPartial})
 	if e != nil {
 		return nil, work.Receipt{}, e
 	}

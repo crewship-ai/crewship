@@ -183,3 +183,18 @@ visibility changes and a three-second send-time horizon, and retains the native
 editor while metadata refreshes. First edit is not creation. Native creation,
 crew/agent artifact listing and exact historical content/version browsing are
 not established by this projection; legacy files retain unknown origin.
+
+### Original agent task registration
+
+The human task request may declare `allow_partial: true` for a writer task.
+Omitting it retains the default of one atomic change for the entire task.
+A read-only task cannot request partial writes. The declaration is captured in
+the original work input and retained task proof; operation payloads and tool
+view metadata cannot change it.
+
+The host explicitly registers the confirmed task's immutable work ID,
+participant and partial-result policy during native participant admission.
+Registration uses the existing current-rights and writer-fence transaction,
+before any task submission. An unknown task is never created by submitting
+operations. Read-only tasks do not acquire a writer registration. Retries retain
+the original participant and cannot replace an existing task's policy.

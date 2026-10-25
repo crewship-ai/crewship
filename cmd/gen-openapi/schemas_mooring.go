@@ -38,7 +38,7 @@ func mooringSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		"versions": versions, "websocket_path": text,
 		"editor": obj(map[string]any{"url": text, "bundle_digest": text}, "url", "bundle_digest"),
 	}, "session_id", "checkpoint_revision", "sdk_prefix", "participant_ref", "ticket", "connection_ref", "origin", "versions", "websocket_path")
-	schemas["MooringTaskRequest"] = obj(map[string]any{"chat_id": text, "message_id": text, "access": map[string]any{"type": "string", "enum": []string{"read"}}}, "chat_id", "message_id")
+	schemas["MooringTaskRequest"] = obj(map[string]any{"chat_id": text, "message_id": text, "access": map[string]any{"type": "string", "enum": []string{"read"}}, "allow_partial": map[string]any{"type": "boolean"}}, "chat_id", "message_id")
 	schemas["MooringTaskAccepted"] = obj(map[string]any{"work_id": text, "status": map[string]any{"type": "string", "enum": []string{"queued"}}}, "work_id", "status")
 	base := "/api/v1/pages/{slug}/mooring"
 	routes := map[string]DomainSchema{"GET /api/v1/mooring/apps": {Response: ref("MooringApplications")}, "POST /api/v1/mooring/documents": {Request: ref("MooringCreate"), RequestRequired: true, Response: ref("MooringCreated"), SuccessStatuses: []string{"200", "201"}}, "GET " + base: {Response: ref("MooringRead")}, "POST " + base + "/commands": {Request: ref("MooringCommand"), RequestRequired: true, Response: ref("MooringReceipt")}, "POST " + base + "/mandates": {Request: ref("MooringMandate"), RequestRequired: true, Response: ref("MooringMandate")}, "DELETE " + base + "/mandates/{mandate}": {Response: ref("MooringRevoked")}}

@@ -41,7 +41,7 @@ func newCollaborationAgentTaskDispatcher(s *collaborationAgentMandateStore) (*co
 // Produce holds the original ingress lease before acquiring SQL's writer, and
 // publishes only after COMMIT. An authorizer that sees the committed row waits
 // on mu until publication. No accepted response or dispatcher hint precedes it.
-func (d *collaborationAgentTaskDispatcher) Produce(ctx context.Context, key mooring.SessionKey, intent, message string, original *chataudience.Receipt) (work.Receipt, error) {
+func (d *collaborationAgentTaskDispatcher) Produce(ctx context.Context, key mooring.SessionKey, intent, message string, original *chataudience.Receipt, partial ...bool) (work.Receipt, error) {
 	var result work.Receipt
 	if d == nil || d.mandates == nil || original == nil {
 		return result, errCollaborationAgentAccess
@@ -75,7 +75,7 @@ func (d *collaborationAgentTaskDispatcher) Produce(ctx context.Context, key moor
 	if err != nil || duplicate {
 		return result, errCollaborationAgentAccess
 	}
-	pending, accepted, err := s.StartTask(ctx, tx, key, intent, message, original)
+	pending, accepted, err := s.StartTask(ctx, tx, key, intent, message, original, partial...)
 	if err != nil {
 		return result, err
 	}

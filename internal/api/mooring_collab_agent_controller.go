@@ -204,7 +204,7 @@ func (m *collaborationHTTPManager) task(w http.ResponseWriter, r *http.Request) 
 		replyError(w, 503, "native document unavailable")
 		return
 	}
-	accepted, err := c.tasks.Produce(r.Context(), key, intent, input.MessageID, receipt)
+	accepted, err := c.tasks.Produce(r.Context(), key, intent, input.MessageID, receipt, input.AllowPartial)
 	if err != nil {
 		replyError(w, 409, "document task not accepted; use a new explicit message")
 		return
@@ -216,20 +216,21 @@ func (m *collaborationHTTPManager) task(w http.ResponseWriter, r *http.Request) 
 // Request DATA may only narrow the default writer task to the existing read
 // intent. Authority is still captured by StartTask from the original human.
 type collaborationAgentTaskRequest struct {
-	ChatID    string `json:"chat_id"`
-	MessageID string `json:"message_id"`
-	Access    string `json:"access,omitempty"`
+	ChatID       string `json:"chat_id"`
+	MessageID    string `json:"message_id"`
+	Access       string `json:"access,omitempty"`
+	AllowPartial bool   `json:"allow_partial,omitempty"`
 }
 
 func parseCollaborationAgentTaskRequest(raw []byte) (collaborationAgentTaskRequest, error) {
 	var input collaborationAgentTaskRequest
 	canonical, err := mooring.CanonicalJSON(raw)
 	var fields map[string]json.RawMessage
-	if err != nil || json.Unmarshal(canonical, &fields) != nil || (len(fields) != 2 && len(fields) != 3) || fields["chat_id"] == nil || fields["message_id"] == nil {
+	if err != nil || json.Unmarshal(canonical, &fields) != nil || (len(fields) < 2 || len(fields) > 4) || fields["chat_id"] == nil || fields["message_id"] == nil {
 		return input, errCollaborationAgentAccess
 	}
 	for name := range fields {
-		if name != "chat_id" && name != "message_id" && name != "access" {
+		if name != "chat_id" && name != "message_id" && name != "access" && name != "allow_partial" {
 			return input, errCollaborationAgentAccess
 		}
 	}
@@ -237,6 +238,12 @@ func parseCollaborationAgentTaskRequest(raw []byte) (collaborationAgentTaskReque
 		return input, errCollaborationAgentAccess
 	}
 	if _, present := fields["access"]; present && input.Access != "read" {
+		return input, errCollaborationAgentAccess
+	}
+	if value, present := fields["allow_partial"]; present && string(value) != "true" && string(value) != "false" {
+		return input, errCollaborationAgentAccess
+	}
+	if input.AllowPartial && input.Access == "read" {
 		return input, errCollaborationAgentAccess
 	}
 	return input, nil

@@ -26,6 +26,7 @@ type collaborationAgentTaskBinding struct {
 	authorVector       collaborationAuthorVector
 	key                mooring.SessionKey
 	intent             string
+	allowPartial       bool
 	work               collaborationAgentWorkBinding
 	messageID          string
 	originalHuman      chataudience.Receipt
@@ -85,10 +86,11 @@ type collaborationAgentPending struct {
 
 type collaborationAgentWorkSeal struct{ marker byte }
 type collaborationAgentFreshWork struct {
-	seal        *collaborationAgentWorkSeal
-	workID      string
-	boot        string
-	expiresTick int64
+	seal         *collaborationAgentWorkSeal
+	workID       string
+	boot         string
+	expiresTick  int64
+	allowPartial bool
 }
 
 type collaborationAgentPendingEntry struct {
@@ -116,6 +118,7 @@ type collaborationAgentPageAccess struct {
 	mandateRef                     string
 	credentialBinding              [32]byte
 	intent                         string
+	allowPartial                   bool
 }
 
 // This default-off registry is deliberately absent from PageHandler routes.
@@ -214,7 +217,7 @@ func (s *collaborationAgentMandateStore) prepareAcceptedTask(ctx context.Context
 	}
 	defer release() // Callback check only; caller holds its full-operation lease.
 	write, valid := collaborationAgentIntent(intent)
-	if !valid {
+	if !valid || fresh.allowPartial && !write {
 		return nil, errCollaborationAgentAccess
 	}
 	source := auth.OriginalCredentialFromContext(ctx)
@@ -267,7 +270,7 @@ func (s *collaborationAgentMandateStore) prepareAcceptedTask(ctx context.Context
 	if tickNow >= expiry {
 		return nil, errCollaborationAgentAccess
 	}
-	task := collaborationAgentTaskBinding{authorVector: vector, key: key, intent: intent, work: w, messageID: message, originalHuman: *receipt, originalCredential: *source, permissionVersion: proof.permissionVersion, memberID: proof.memberID, memberRevision: proof.memberRevision, ingress: stamp}
+	task := collaborationAgentTaskBinding{authorVector: vector, key: key, intent: intent, allowPartial: fresh.allowPartial, work: w, messageID: message, originalHuman: *receipt, originalCredential: *source, permissionVersion: proof.permissionVersion, memberID: proof.memberID, memberRevision: proof.memberRevision, ingress: stamp}
 	s.pending[id] = collaborationAgentPendingEntry{task: task, boot: boot, expiresTick: expiry}
 	return &collaborationAgentPending{store: s, id: id}, nil
 }
@@ -398,7 +401,7 @@ func (s *collaborationAgentMandateStore) Check(r *http.Request, tx *sql.Tx, hand
 	}
 	deliveryPermission := page.permissionVersion
 	page.permissionVersion = entry.binding.task.permissionVersion // immutable original metadata
-	result = collaborationAgentPageAccess{authorVector: entry.binding.task.authorVector, currentDeliveryPermission: deliveryPermission, collaborationHumanPageAccess: page, agentID: a.agentID, crewID: a.crewID, runID: a.runID, workID: a.workID, attempt: a.attempt, generation: a.generation, store: s, mandateRef: handle, credentialBinding: entry.binding.credentialSHA256, intent: intent}
+	result = collaborationAgentPageAccess{authorVector: entry.binding.task.authorVector, currentDeliveryPermission: deliveryPermission, collaborationHumanPageAccess: page, agentID: a.agentID, crewID: a.crewID, runID: a.runID, workID: a.workID, attempt: a.attempt, generation: a.generation, store: s, mandateRef: handle, credentialBinding: entry.binding.credentialSHA256, intent: intent, allowPartial: entry.binding.task.allowPartial}
 	return result, nil
 }
 

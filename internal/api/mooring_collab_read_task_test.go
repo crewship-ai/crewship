@@ -102,3 +102,55 @@ func TestCollaborationAgentAdmissionPreservesAttachedOriginalIntent(t *testing.T
 		})
 	}
 }
+
+func TestCollaborationAgentTaskRequestPartialPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name, extra    string
+		valid, partial bool
+	}{
+		{"default", "", true, false},
+		{"atomic", `,"allow_partial":false`, true, false},
+		{"partial", `,"allow_partial":true`, true, true},
+		{"read", `,"access":"read","allow_partial":false`, true, false},
+		{"reader-partial", `,"access":"read","allow_partial":true`, false, false},
+		{"null", `,"allow_partial":null`, false, false},
+		{"string", `,"allow_partial":"true"`, false, false},
+		{"duplicate", `,"allow_partial":false,"allow_partial":true`, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in, err := parseCollaborationAgentTaskRequest([]byte(`{"chat_id":"original-chat","message_id":"original-message"` + tc.extra + `}`))
+			if (err == nil) != tc.valid || err == nil && in.AllowPartial != tc.partial {
+				t.Fatalf("partial policy parsed as %v/%v; want valid=%v partial=%v", in.AllowPartial, err, tc.valid, tc.partial)
+			}
+		})
+	}
+}
+
+func TestCollaborationAgentOriginalPartialPolicyCannotBeChanged(t *testing.T) {
+	x := newCollaborationAgentTestFixture(t, "write")
+	var pending *collaborationAgentPending
+	x.tx(t, func(tx *sql.Tx) {
+		var receipt work.Receipt
+		var err error
+		pending, receipt, err = x.store.StartTask(x.human, tx, x.key, "task", x.f.a.MessageID, x.f.receipt, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		x.workID = receipt.WorkID
+	})
+	handle := x.attach(t, pending)
+	x.tx(t, func(tx *sql.Tx) {
+		captured, err := x.store.Check(x.request(), tx, handle, x.key, "task")
+		if err != nil || !captured.allowPartial {
+			t.Fatal("original declared policy missing", err)
+		}
+		decision, err := x.store.DecideCaptured(x.request().Context(), tx, captured, x.key, "task")
+		if err != nil || decision.kind != collaborationAgentAllowed {
+			t.Fatal("original partial policy denied", err)
+		}
+		captured.allowPartial = false
+		if _, err := x.store.DecideCaptured(x.request().Context(), tx, captured, x.key, "task"); err == nil {
+			t.Fatal("changed captured policy accepted")
+		}
+	})
+}
