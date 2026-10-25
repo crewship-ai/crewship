@@ -20,7 +20,11 @@ func TestCollaborationSocketLiveness(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			result := make(chan error, 1)
+			handlerDone := make(chan struct{})
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Runs after deferred stop: the heartbeat must be joined before
+				// the owning request finishes, for responsive and expired peers.
+				defer close(handlerDone)
 				ws, err := (&websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}).Upgrade(w, r, nil)
 				if err != nil {
 					result <- err
@@ -77,6 +81,11 @@ func TestCollaborationSocketLiveness(t *testing.T) {
 				case <-time.After(2 * time.Second):
 					t.Fatal("silent peer outlived idle bound")
 				}
+			}
+			select {
+			case <-handlerDone:
+			case <-time.After(2 * time.Second):
+				t.Fatal("heartbeat stop/join outlived its owning handler")
 			}
 		})
 	}
