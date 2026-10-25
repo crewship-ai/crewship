@@ -47,6 +47,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"mooring_collab_operations":      IntentInclude,        // durable collaboration state; no runtime capabilities
 	"mooring_collab_checkpoints":     IntentInclude,        // durable collaboration state; no runtime capabilities
 	"mooring_collab_audit":           IntentInclude,        // durable collaboration state; no runtime capabilities
+	"mooring_collab_artifact_edits":  IntentInclude,        // historical attribution DATA, never live authority
 	"mooring_session_owners":         IntentExcludeRuntime, // process-bound owner capability requires fresh admission after restore
 	"mooring_documents":              IntentInclude,        // durable generic application state
 	"mooring_receipts":               IntentInclude,        // immutable history and idempotence evidence

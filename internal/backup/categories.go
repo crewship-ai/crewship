@@ -191,6 +191,7 @@ var TableCategory = map[string]string{
 	"mooring_collab_operations":      CategoryPages,
 	"mooring_collab_checkpoints":     CategoryPages,
 	"mooring_collab_audit":           CategoryPages,
+	"mooring_collab_artifact_edits":  CategoryPages,
 	"mooring_documents":              CategoryPages, "mooring_receipts": CategoryPages,
 	"workspace_artifact_creation_policy": CategoryAgents,
 	"workspace_artifact_creation_crews":  CategoryAgents,

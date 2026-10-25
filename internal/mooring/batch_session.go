@@ -69,6 +69,12 @@ type SessionPendingOutput struct {
 }
 type SessionOutputPreparer func(context.Context, *sql.Tx, SessionPendingOutput) ([]byte, error)
 
+// SessionSavedRecorder records host-owned attribution in the SAME transaction
+// as a newly saved atomic change. It grants no authority and must not publish
+// or mutate external state. Errors abort the entire transaction. Known retries
+// and rejected changes never invoke it; final author/owner fences still follow.
+type SessionSavedRecorder func(context.Context, *sql.Tx, BatchChange, BatchChangeResult) error
+
 // SessionSavedCut is committed DATA about one exact atomic boundary, not an
 // author or delivery capability. StateDigest hashes the decoded checkpoint
 // state, not its base64 encoding or full wire identity. Known Saved retries
@@ -91,6 +97,7 @@ type SessionCommitter struct {
 	output          SessionOutputPreparer
 	humanResolver   SessionHumanPrepareResolver
 	nativeValidator SessionNativeCandidateValidator
+	recordSaved     SessionSavedRecorder
 }
 
 func NewSessionCommitter(store *BatchStore, owner OwnerLease, authority SessionBatchAuthority, output SessionOutputPreparer) (*SessionCommitter, error) {
@@ -108,6 +115,20 @@ func NewSessionCommitter(store *BatchStore, owner OwnerLease, authority SessionB
 	return &SessionCommitter{store: store, owner: owner, authority: authority, output: output, humanResolver: store.config.Targets.SessionHumanPrepare, nativeValidator: store.config.Targets.SessionNativeCandidate}, nil
 }
 
+// NewSessionCommitterWithSavedRecorder keeps the pure output callback separate
+// from transactional host metadata. The recorder cannot replace author checks.
+func NewSessionCommitterWithSavedRecorder(store *BatchStore, owner OwnerLease, authority SessionBatchAuthority, output SessionOutputPreparer, record SessionSavedRecorder) (*SessionCommitter, error) {
+	if record == nil {
+		return nil, ErrInvalid
+	}
+	s, err := NewSessionCommitter(store, owner, authority, output)
+	if err != nil {
+		return nil, err
+	}
+	s.recordSaved = record
+	return s, nil
+}
+
 type sessionMembership struct{ changeID, membershipHash string }
 
 type sessionCommitMode struct {
@@ -118,6 +139,7 @@ type sessionCommitMode struct {
 	members                         map[string]sessionMembership
 	basis                           SessionBasis
 	output                          SessionOutputPreparer
+	recordSaved                     SessionSavedRecorder
 	encoded                         []byte
 	savedCuts                       []SessionSavedCut
 	prepared                        SessionPreparedCandidates
@@ -144,6 +166,7 @@ func (s *SessionCommitter) commitMode(ctx context.Context, request SessionBatchR
 	mode.originalStore = s.store
 	mode.humanResolver = s.humanResolver
 	mode.nativeValidator = s.nativeValidator
+	mode.recordSaved = s.recordSaved
 	isolated := *s.store
 	isolated.config.Authority = func(ctx context.Context, tx *sql.Tx, access BatchAccess) error {
 		purpose := SessionProcessSealedOutcome
