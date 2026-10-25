@@ -151,16 +151,22 @@ func TestDiffBudgetAdmissionAndOverflowBoundaries(t *testing.T) {
 }
 
 func FuzzDiffBudgetPrettyMatchesEncoder(f *testing.F) {
-	for _, raw := range []string{`{"a":[1,2]}`, `"<&>"`, `{}`, "\xff", "invalid\nJSON"} {
+	for _, raw := range []string{`{"a":[1,2]}`, `"<&>"`, `{}`, "\xff", "invalid\nJSON", strings.Repeat("x", 4097), strings.Repeat("[", 800) + "0" + strings.Repeat("]", 800)} {
 		f.Add(raw)
 	}
 	f.Fuzz(func(t *testing.T, raw string) {
 		if len(raw) > 4096 {
-			t.Skip()
+			if _, _, err := testDiffBudget(4096, 20000).prettyPair(raw, ""); !errors.Is(err, errDiffTooLarge) {
+				t.Fatalf("oversized raw input was not rejected: %v", err)
+			}
+			return
 		}
 		want := prettyJSONOrRaw(raw)
 		if len(want) > 1<<20 {
-			t.Skip()
+			if _, err := testDiffBudget(1<<20, strings.Count(want, "\n")+1).pretty(raw, 1<<20); !errors.Is(err, errDiffTooLarge) {
+				t.Fatalf("oversized encoded output was not rejected: %v", err)
+			}
+			return
 		}
 		b := testDiffBudget(max(len(raw), len(want))+1, strings.Count(want, "\n")+1)
 		got, err := b.pretty(raw, b.limits.MaxInputBytes)

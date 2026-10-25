@@ -1,4 +1,4 @@
-//go:build !clionly
+//go:build !clionly && !windows
 
 package main
 
@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -24,9 +23,6 @@ import (
 // Real CLI process -> real authenticated router -> actual importer. The owned
 // fake Git never connects anywhere; it records whether forbidden clone starts.
 func TestAcceptance_SkillRepoRejectsLoopbackBeforeGit(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Git wrapper fixture requires a POSIX shell")
-	}
 	t.Setenv("CREWSHIP_DATA_DIR", t.TempDir())
 	db := testutil.MigratedDB(t).DB
 	for _, q := range []string{

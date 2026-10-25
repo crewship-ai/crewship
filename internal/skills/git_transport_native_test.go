@@ -1,3 +1,5 @@
+//go:build !windows
+
 package skills
 
 import (
@@ -27,13 +29,15 @@ import (
 	"time"
 )
 
+// These POSIX acceptance fixtures require Git, git-http-backend and an owned
+// private IPv4 interface. Missing prerequisites fail rather than hiding coverage.
 // Native acceptance deliberately constructs an INTERNAL approved plan. The
 // production planner never permits loopback, including for allowlisted hosts.
 // No public bypass, external DNS, live service, or TLS verification disable.
 func TestPinnedGitNativeTLS(t *testing.T) {
 	gitPath, err := exec.LookPath("git")
 	if err != nil {
-		t.Skip("native Git unavailable: acceptance not executed")
+		t.Fatalf("native acceptance requires Git on PATH: %v", err)
 	}
 	home := t.TempDir()
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
@@ -52,7 +56,7 @@ func TestPinnedGitNativeTLS(t *testing.T) {
 	execPath := git("--exec-path")
 	backend := filepath.Join(execPath, "git-http-backend")
 	if _, err := os.Stat(backend); err != nil {
-		t.Skip("native git-http-backend missing: acceptance not executed")
+		t.Fatalf("native acceptance requires git-http-backend at %s: %v", backend, err)
 	}
 	root := t.TempDir()
 	src := filepath.Join(t.TempDir(), "source")
@@ -212,7 +216,7 @@ func TestPinnedGitNativeTLS(t *testing.T) {
 			}
 		}
 		if ownedIP == nil {
-			t.Skip("no owned private interface; complete import acceptance not executed")
+			t.Fatal("native acceptance requires an owned private IPv4 interface for the administrator-allowlisted import fixture")
 		}
 		privateCert, privateCA := ownedGitCertificate(t, ownedIP)
 		private := ownedGitTLSServer(t, privateCert, ownedIP.String(), backendHandler)
@@ -354,9 +358,6 @@ func ownedGitCertificate(t *testing.T, ips ...net.IP) (tls.Certificate, string) 
 }
 
 func TestGitQualificationFailsClosedForUnqualifiedHelper(t *testing.T) {
-	if os.PathSeparator == '\\' {
-		t.Skip("owned shell fixture is Unix only")
-	}
 	dir := t.TempDir()
 	fake := filepath.Join(dir, "git")
 	body := "#!/bin/sh\ncase \"$*\" in\n *--version*) echo 'git version 2.43.0';;\n *help*) echo 'http.curloptResolve';;\n *) exit 0;;\nesac\n"
