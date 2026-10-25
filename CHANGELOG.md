@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Qualify Mooring startup metadata and complete targets from one checked owned WordCraft document, preserving checkpoint integrity and final owner checks without changing runtime deadlines.
+
 - Replay contiguous committed Mooring native deltas after recipient reopen or a delivery gap, checking current reader rights for every frame without creating a new snapshot or source authority.
 
 - Show recorded native agent edits separately from current document grants and tasks, with independently authorized source-chat backlinks. Historical references grant no rights and do not claim artifact creation or complete version history.
