@@ -5,6 +5,7 @@ package api
 import (
 	"bytes"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -25,6 +26,25 @@ import (
 // and confirmed runtime identity remain controlled fixtures: no model/container,
 // network authentication or two real human browser acceptance is claimed.
 func testMooringAgentActualProductionSave(t *testing.T) {
+	withMooringAgentActualProductionSaved(t, nil)
+}
+
+type mooringAgentSavedFixtureOptions struct {
+	allowPartial bool
+	readerGrant  bool
+}
+
+// The callback runs only after an actual production Save and its exact retry.
+// It shares the live native process/FULL store, never a fabricated Saved row.
+func withMooringAgentActualProductionSaved(t *testing.T, check func(*collaborationAgentTestFixture, *collaborationHTTPManager, *collaborationHTTPDocument, *collaborationLiveAgent), options ...mooringAgentSavedFixtureOptions) {
+	t.Helper()
+	if len(options) > 1 {
+		t.Fatal("multiple original fixture policies")
+	}
+	var policy mooringAgentSavedFixtureOptions
+	if len(options) == 1 {
+		policy = options[0]
+	}
 	checkpoint, err := os.ReadFile(os.Getenv("MOORING_SESSION_CHECKPOINT"))
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +86,23 @@ func testMooringAgentActualProductionSave(t *testing.T) {
 		t.Fatalf("production bootstrap: %v", err)
 	}
 	mustExec(t, x.f.rig.db, `UPDATE page_grants SET level='write' WHERE page_id=? AND subject_type='agent'`, x.key.ArtifactID)
-	handle := x.attach(t, x.prepare(t))
+	if policy.readerGrant {
+		// Setup precedes original task capture and every positive admission.
+		mustExec(t, x.f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'agent',?,'read',?)`, x.key.ArtifactID, x.f.a.AgentID, x.f.a.HumanUserID)
+	}
+	var pending *collaborationAgentPending
+	if policy.allowPartial {
+		x.tx(t, func(tx *sql.Tx) {
+			original, accepted, err := x.store.StartTask(x.human, tx, x.key, "task", x.f.a.MessageID, x.f.receipt, true)
+			if err != nil {
+				t.Fatal("original declared multi-save policy", err)
+			}
+			pending, x.workID = original, accepted.WorkID
+		})
+	} else {
+		pending = x.prepare(t)
+	}
+	handle := x.attach(t, pending)
 	a := &collaborationLiveAgent{document: d, ref: "actual-production-agent-save", confirmed: collaborationAgentConfirmed{store: x.store, key: x.key, mandate: handle, workID: x.workID, runID: x.f.a.RunID, agentID: x.f.a.AgentID, crewID: x.f.a.CrewID, attempt: 1, generation: 1, execID: "synthetic-confirmed-exec"}, ready: make(chan struct{})}
 	d.agents = map[string]*collaborationLiveAgent{a.ref: a}
 	m.agentMandates = x.store
@@ -153,5 +189,7 @@ func testMooringAgentActualProductionSave(t *testing.T) {
 	if err := x.f.rig.db.QueryRow(`SELECT count(*) FROM mooring_collab_operations WHERE page_id=?`, x.key.ArtifactID).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("retry duplicated SQL operations: %d %v", count, err)
 	}
-
+	if check != nil {
+		check(x, m, d, a)
+	}
 }

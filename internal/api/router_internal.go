@@ -67,10 +67,7 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	// (Router.DrainVerdicts). Otherwise `internal` is local to this func.
 	r.internalHandler = internal
 	internalAuth := func(next http.Handler) http.Handler { return internal.requireInternal(withHostChatOrigin(next)) }
-	if r.mooringHTTP != nil {
-		r.mux.Handle("GET /api/v1/internal/mooring/task", internalAuth(http.HandlerFunc(r.mooringHTTP.agentTool)))
-		r.mux.Handle("POST /api/v1/internal/mooring/task", internalAuth(http.HandlerFunc(r.mooringHTTP.agentTool)))
-	}
+	r.registerMooringAgentTaskRoutes(internalAuth)
 	r.mux.Handle("POST /api/v1/internal/documents/create", internalAuth(http.HandlerFunc(r.pages.CreateDocumentAgent)))
 	r.mux.Handle("GET /api/v1/internal/documents/draft", internalAuth(http.HandlerFunc(r.pages.GetDocumentDraftAgent)))
 	r.mux.Handle("POST /api/v1/internal/documents/draft", internalAuth(http.HandlerFunc(r.pages.MutateDocumentDraftAgent)))
@@ -396,4 +393,14 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	// so the public capability + revoke endpoints share its registry
 	// state with this internal create call.
 	r.mux.Handle("POST /api/v1/internal/port-expose", internalAuth(http.HandlerFunc(oh.portExposeH.RequestExpose)))
+}
+
+// Capture the same ingress fence before authentication on both task methods.
+// The controller still checks the immutable original task and current rights.
+func (r *Router) registerMooringAgentTaskRoutes(internalAuth func(http.Handler) http.Handler) {
+	if r.mooringHTTP == nil {
+		return
+	}
+	r.mux.Handle("GET /api/v1/internal/mooring/task", r.mooringHTTP.fence.Wrap(internalAuth(http.HandlerFunc(r.mooringHTTP.agentTool))))
+	r.mux.Handle("POST /api/v1/internal/mooring/task", r.mooringHTTP.fence.Wrap(internalAuth(http.HandlerFunc(r.mooringHTTP.agentTool))))
 }
