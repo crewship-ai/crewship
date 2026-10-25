@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Opening large collaborative documents could time out.** Avoid repeated checkpoint validation in incompatible message variants and scan the existing base64 schema vocabulary directly, preserving checkpoint integrity and the five-second startup deadline.
+
 - Bind document-agent task registration and partial-result policy to the original admitted human task before native submission.
 
 - Add bounded native document pages to the original task's `doc_read` tool, preserving one immutable revision, complete application data and current read authorization across continuations and physical delivery.

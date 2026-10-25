@@ -3,6 +3,7 @@ package mooring
 import (
 	"encoding/json"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -170,5 +171,62 @@ func TestWireSchemaRequiredNullableCausalEntry(t *testing.T) {
 	}
 	if _, err := NewWireSchema([]byte(`{"type":"number"}`)); err == nil {
 		t.Fatal("unadvertised type became supported")
+	}
+}
+
+// Compare the specialized large-string checks with the original schema regex,
+// including noncanonical padding bits which the schema itself allows.
+func TestWireSchemaBase64PatternLanguage(t *testing.T) {
+	patterns := []string{`[^A-Za-z0-9+/=]`, `^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$`}
+	for _, pattern := range patterns {
+		compiled := regexp.MustCompile(pattern)
+		check := func(text string) {
+			t.Helper()
+			if got, want := matchWirePattern(pattern, compiled, text), compiled.MatchString(text); got != want {
+				t.Fatalf("pattern=%q input=%q got=%v want=%v", pattern, text, got, want)
+			}
+		}
+		var visit func(string, int)
+		visit = func(prefix string, left int) {
+			check(prefix)
+			if left > 0 {
+				for _, r := range "A/=\n_é" {
+					visit(prefix+string(r), left-1)
+				}
+			}
+		}
+		visit("", 6)
+		for _, text := range []string{"Zh==", "Zm9=", "AZaz09+/", strings.Repeat("A", 1<<20), strings.Repeat("A", 1<<20) + "\n", strings.Repeat("A", 1<<20) + "=", strings.Repeat("A", 1<<20) + "===="} {
+			check(text)
+		}
+	}
+}
+func TestWireSchemaDiscriminatorPreservesConstraints(t *testing.T) {
+	cases := []struct {
+		schema, input string
+		valid         bool
+	}{
+		{`{"properties":{"kind":{"const":"a"},"optional":{"const":null}}}`, `{"kind":"a"}`, true},
+		{`{"properties":{"kind":{"const":"a"},"optional":{"const":null}}}`, `{"kind":"a","optional":null}`, true},
+		{`{"properties":{"kind":{"const":"a"},"optional":{"const":null}}}`, `{"kind":"a","optional":false}`, false},
+		{`{"type":"object","required":["body"],"properties":{"kind":{"const":"a"},"body":{"type":"string"}},"additionalProperties":false}`, `{"kind":"a","body":false}`, false},
+		{`{"type":"object","required":["body"],"properties":{"kind":{"const":"a"},"body":{"type":"string"}},"additionalProperties":false}`, `{"kind":"a"}`, false},
+		{`{"type":"object","properties":{"kind":{"const":"a"}},"additionalProperties":false}`, `{"kind":"a","extra":true}`, false},
+		{`{"oneOf":[{"properties":{"kind":{"const":"a"}}},{"properties":{"kind":{"const":"a"}}}]}`, `{"kind":"a"}`, false},
+		{`{"not":{"properties":{"kind":{"const":"a"}}}}`, `{"kind":"a"}`, false},
+		{`{"if":{"properties":{"kind":{"const":"a"}}},"then":{"required":["body"]},"else":{"not":{"required":["body"]}}}`, `{"kind":"a"}`, false},
+		{`{"if":{"properties":{"kind":{"const":"a"}}},"then":{"required":["body"]},"else":{"not":{"required":["body"]}}}`, `{"kind":"b","body":"x"}`, false},
+		{`{"$defs":{"base":{"properties":{"kind":{"const":"a"}}}},"$ref":"#/$defs/base","properties":{"body":{"const":"x"}}}`, `{"kind":"a","body":"y"}`, false},
+		{`{"$defs":{"base":{"properties":{"kind":{"const":"a"}}}},"$ref":"#/$defs/base","properties":{"body":{"const":"x"}}}`, `{"kind":"b","body":"x"}`, false},
+	}
+	for _, tc := range cases {
+		s, err := NewWireSchema([]byte(tc.schema))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = s.ValidateE3([]byte(tc.input))
+		if (err == nil) != tc.valid {
+			t.Fatalf("schema=%s input=%s err=%v want=%v", tc.schema, tc.input, err, tc.valid)
+		}
 	}
 }

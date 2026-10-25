@@ -261,7 +261,7 @@ func (s *WireSchema) matches(n map[string]any, v any, depth int) bool {
 		}
 		if p, ok := n["pattern"].(string); ok {
 			r := s.patterns[p]
-			if r == nil || !r.MatchString(text) {
+			if r == nil || !matchWirePattern(p, r, text) {
 				return false
 			}
 		}
@@ -303,6 +303,17 @@ func (s *WireSchema) matches(n map[string]any, v any, depth int) bool {
 			}
 		}
 		props, _ := wireObject(n["properties"])
+		// Reject incompatible envelope discriminators before inspecting a large
+		// checkpoint in a sibling oneOf branch. Map traversal order must not
+		// decide whether an unrelated branch scans the complete payload again.
+		// This is only a necessary condition; all constraints still run below.
+		for k, x := range m {
+			if prop, ok := wireObject(props[k]); ok {
+				if constant, exists := prop["const"]; exists && !reflect.DeepEqual(constant, x) {
+					return false
+				}
+			}
+		}
 		for k, x := range m {
 			if prop, ok := wireObject(props[k]); ok {
 				if !s.matches(prop, x, depth+1) {
@@ -342,6 +353,46 @@ func (s *WireSchema) matches(n map[string]any, v any, depth int) bool {
 		}
 	}
 	return true
+}
+
+// These two frozen base64 patterns describe an ASCII vocabulary. Scanning it
+// directly avoids the generic regexp machine's per-character bookkeeping on
+// large checkpoint envelopes, particularly under the race detector. Padding
+// bits are deliberately not checked here: that belongs to the opaque decoder,
+// and rejecting them here would change the bundled schema's language.
+func matchWirePattern(pattern string, compiled *regexp.Regexp, text string) bool {
+	switch pattern {
+	case "[^A-Za-z0-9+/=]":
+		for i := 0; i < len(text); i++ {
+			if !wireBase64Byte(text[i]) && text[i] != '=' {
+				return true
+			}
+		}
+		return false
+	case `^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$`:
+		if len(text)%4 != 0 {
+			return false
+		}
+		end := len(text)
+		for end > 0 && text[end-1] == '=' {
+			end--
+		}
+		if len(text)-end > 2 {
+			return false
+		}
+		for i := 0; i < end; i++ {
+			if !wireBase64Byte(text[i]) {
+				return false
+			}
+		}
+		return true
+	default:
+		return compiled.MatchString(text)
+	}
+}
+
+func wireBase64Byte(b byte) bool {
+	return b >= 'A' && b <= 'Z' || b >= 'a' && b <= 'z' || b >= '0' && b <= '9' || b == '+' || b == '/'
 }
 
 // expandedDepth proves the trusted schema reference graph acyclic and derives
