@@ -106,6 +106,21 @@ func (*runAgentHostProvider) RestoreHostCapture(runoutput.HostInput, string) (ru
 	return nil, nil, errors.New("completed fixture must not restore")
 }
 
+func TestPrivateRunUsesDirectExecWithGlobalRetainedOutputConfigured(t *testing.T) {
+	p := &runAgentHostProvider{covContainer: covNewRunContainer(covRunOpts{})}
+	o := New(p, newMemState(), covQuietLogger())
+	o.SetHostOutputRoot(t.TempDir())
+	req := covRunReq().WithStrictContentPrivacy()
+	starts := 0
+	req.OnExecStarted = func(string) { starts++ }
+	if err := o.RunAgent(t.Context(), req, nil); err != nil {
+		t.Fatal(err)
+	}
+	if starts != 1 || len(p.prepared) != 0 {
+		t.Fatalf("private exec starts=%d protected captures=%d", starts, len(p.prepared))
+	}
+}
+
 func TestHostRunAgentCompletesThroughDetachedHelperAndPreservesLiteralLaunch(t *testing.T) {
 	requireProtectedHostTestUID(t)
 	state, err := bbolt.New(filepath.Join(t.TempDir(), "state.db"))
