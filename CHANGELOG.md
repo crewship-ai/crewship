@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Replay contiguous committed Mooring native deltas after recipient reopen or a delivery gap, checking current reader rights for every frame without creating a new snapshot or source authority.
+
 - Bound Mooring session admission request and response I/O, flush buffered responses under the original ingress lease, and retain the read deadline through HTTP body cleanup.
 
 - Rust-backed Mooring saves retain immutable original human/agent task attribution in the same transaction as each new saved atomic change. Rejections, failed commits and known retries do not create another edit record; this does not yet provide artifact creation, version browsing or live chat acceptance.

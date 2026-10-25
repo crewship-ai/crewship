@@ -48,11 +48,14 @@ func withMooringAgentToolHostFixture(t *testing.T, call func(*collaborationAgent
 		a := &collaborationLiveAgent{document: d, ref: "actual-task-host-fixture", confirmed: collaborationAgentConfirmed{store: x.store, key: x.key, mandate: handle, workID: x.workID, runID: x.f.a.RunID, agentID: x.f.a.AgentID, crewID: x.f.a.CrewID, attempt: 1, generation: 1, execID: "synthetic-confirmed-exec"}, ready: make(chan struct{})}
 		d.agents[a.ref] = a
 		m.agentTasks = &collaborationAgentTaskController{manager: m, confirmed: map[string]*collaborationLiveAgent{x.f.a.RunID: a}}
+		// Exercise the production Joined dispatcher as well as ordinary output.
+		// Otherwise this fixture can pass while agent admission is intercepted
+		// by the human-only reopen/catch-up path in the composed session pump.
 		pump, err := newCollaborationSessionPump(cell.runtime, collaborationSessionPumpHandlers{Submit: func(context.Context, protocol.SessionSubmitBatch) (protocol.SessionCommitResult, error) {
 			return protocol.SessionCommitResult{}, errors.New("fixture does not execute SQL submissions")
 		}, Status: func(context.Context, protocol.SessionStatusRequest) (protocol.SessionStatusResult, error) {
 			return protocol.SessionStatusResult{}, errors.New("fixture has no status operation")
-		}, TicketControl: d.ticketControl, DeliveryControl: d.deliveryControl, OutputControl: d.outputControl})
+		}, TicketControl: d.ticketControl, DeliveryControl: d.deliveryControl, OutputControl: d.outputControl, JoinedControl: d.joinedControl})
 		if err != nil {
 			t.Fatal(err)
 		}

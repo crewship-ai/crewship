@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -140,13 +141,38 @@ func TestCollaborationSessionPumpChild(t *testing.T) {
 		value["request_id"], value["scope"], value["session_id"], value["runtime_ref"], value["fence"] = id, scope, session, ref, grant["fence"]
 		return value
 	}
-	if mode == "output-fifo" {
+	if mode == "output-fifo" || mode == "joined-handoff-128" || mode == "joined-handoff-129" {
 		output := func(id, kind string) map[string]any {
 			message := map[string]any{"type": "changes_received", "request_id": id, "scope": scope, "session_id": session, "change_ids": []string{"original-change"}, "state": "pending"}
 			if kind == "session_joined" {
 				message = map[string]any{"type": kind, "request_id": id, "scope": scope, "session_id": session, "participant_ref": "participant", "generation": "1", "permission_version": "1", "versions": open["versions"], "gate_id": "gate"}
 			}
 			return bind(map[string]any{"type": "session_participant_output", "control_profile": mooring.PrivateSessionProfile, "connection_ref": "connection", "participant_ref": "participant", "gate_id": "gate", "permission_version": "1", "message": message}, id)
+		}
+		if strings.HasPrefix(mode, "joined-handoff-") {
+			if !write(output("held-joined-0", "session_joined")) {
+				return
+			}
+			if !write(map[string]any{"type": "owner_renew", "request_id": "joined-barrier", "scope": scope, "session_id": session, "fence": grant["fence"], "renewal_nonce": "management-nonce", "permission_version": "1"}) {
+				return
+			}
+			if _, err = read(); err != nil {
+				return
+			}
+			count := 128
+			if mode == "joined-handoff-129" {
+				count = 129
+			}
+			for i := 1; i < count; i++ {
+				if !write(output(fmt.Sprintf("held-joined-%d", i), "session_joined")) {
+					return
+				}
+			}
+			for {
+				if _, err = read(); err != nil {
+					return
+				}
+			}
 		}
 		if !write(output("old-output-1", "changes_received")) || !write(output("old-output-2", "changes_received")) || !write(output("correlated-management", "session_joined")) {
 			return
@@ -744,6 +770,167 @@ func TestCollaborationSessionPumpOpaqueOutputFIFOAndManagement(t *testing.T) {
 			if _, err = original.Frame(); err == nil {
 				t.Fatal("completed original token retained")
 			}
+		})
+	}
+}
+
+// Actual Go FD/token FIFO, MOCK Joined capture/recipient callback: no SQL gate
+// rotation orchestration or new recipient authority is claimed here.
+func TestCollaborationSessionPumpJoinedHandoffRetainsSameToken(t *testing.T) {
+	for _, mode := range []string{"complete", "cancel", "failure"} {
+		t.Run(mode, func(t *testing.T) {
+			entered := make(chan mooring.SessionControl, 1)
+			captured := make(chan mooring.SessionControl, 1)
+			continuation := make(chan struct{}, 1)
+			finished := make(chan struct{}, 1)
+			releaseData := make(chan struct{})
+			releaseAfter := make(chan struct{})
+			var captures, afters, data atomic.Int32
+			r := newConfiguredPumpTestRig(t, "output-fifo", "", "", func(h *collaborationSessionPumpHandlers) {
+				h.OutputControl = func(ctx context.Context, token mooring.SessionControl, q protocol.SessionParticipantOutput) error {
+					if data.Add(1) == 1 {
+						entered <- token
+						select {
+						case <-releaseData:
+						case <-ctx.Done():
+							return ctx.Err()
+						}
+					}
+					return nil
+				}
+				h.JoinedControl = func(ctx context.Context, token mooring.SessionControl, q protocol.SessionParticipantOutput) (func(context.Context) error, error) {
+					captures.Add(1)
+					captured <- token
+					return func(ctx context.Context) error {
+						afters.Add(1)
+						continuation <- struct{}{}
+						select {
+						case <-releaseAfter:
+						case <-ctx.Done():
+							return ctx.Err()
+						}
+						if mode == "failure" {
+							return errCollaborationSessionPump
+						}
+						finished <- struct{}{}
+						return nil
+					}, nil
+				}
+			})
+			if err := pumpWait(t, r.ctx, r.opened); err != nil {
+				t.Fatal(err)
+			}
+			first := pumpWait(t, r.ctx, entered)
+			joined := pumpWait(t, r.ctx, captured)
+			if id := pumpWait(t, r.ctx, r.renewed); id != "independent-renew" {
+				t.Fatal("management blocked behind catch-up", id)
+			}
+			if _, err := joined.Frame(); err != nil {
+				t.Fatal("Joined completed before DATA worker", err)
+			}
+			if afters.Load() != 0 {
+				t.Fatal("Joined overtook older DATA")
+			}
+			close(releaseData)
+			pumpWait(t, r.ctx, continuation)
+			if _, err := first.Frame(); err == nil {
+				t.Fatal("older DATA not completed")
+			}
+			if _, err := joined.Frame(); err != nil {
+				t.Fatal("Joined token released while catch-up held", err)
+			}
+			if mode == "cancel" {
+				r.cancel()
+			} else {
+				close(releaseAfter)
+			}
+			if mode != "complete" {
+				select {
+				case <-r.runtime.Done():
+				case <-time.After(5 * time.Second):
+					t.Fatal("cancelled/failed Joined left child alive")
+				}
+				return
+			}
+			pumpWait(t, r.ctx, finished)
+			// Barrier via a later runtime request is unnecessary: CompleteControl is
+			// observable on this exact token. Bounded wait only observes completion.
+			deadline := time.Now().Add(time.Second)
+			for {
+				if _, err := joined.Frame(); err != nil {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("Joined never completed")
+				}
+				runtime.Gosched()
+			}
+			if captures.Load() != 1 || afters.Load() != 1 || data.Load() != 2 {
+				t.Fatal("capture/continuation not exactly once")
+			}
+			if err := r.runtime.CompleteControl(joined); err == nil {
+				t.Fatal("Joined completed twice")
+			}
+		})
+	}
+}
+
+// Actual inherited FD, MOCK Joined capture. No added queue reservation or early
+// completion may free a held Joined token: 128 fit, the 129th is fail-closed.
+func TestCollaborationSessionPumpJoinedHandoffSharesControlBudget(t *testing.T) {
+	for _, count := range []int{128, 129} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			captured := make(chan int, 128)
+			entered := make(chan mooring.SessionControl, 1)
+			started := make(chan struct{})
+			var captures atomic.Int32
+			r := newConfiguredPumpTestRig(t, fmt.Sprintf("joined-handoff-%d", count), "", "", func(h *collaborationSessionPumpHandlers) {
+				baseRenew := h.Renew
+				h.Renew = func(ctx context.Context, q protocol.OwnerRenew) (protocol.OwnerGrant, error) {
+					select {
+					case <-started:
+					case <-ctx.Done():
+						return protocol.OwnerGrant{}, ctx.Err()
+					}
+					return baseRenew(ctx, q)
+				}
+				h.OutputControl = func(context.Context, mooring.SessionControl, protocol.SessionParticipantOutput) error {
+					return errCollaborationSessionPump
+				}
+				h.JoinedControl = func(ctx context.Context, token mooring.SessionControl, q protocol.SessionParticipantOutput) (func(context.Context) error, error) {
+					n := captures.Add(1)
+					captured <- int(n)
+					return func(ctx context.Context) error { entered <- token; <-ctx.Done(); return ctx.Err() }, nil
+				}
+			})
+			if err := pumpWait(t, r.ctx, r.opened); err != nil {
+				t.Fatal(err)
+			}
+			token := pumpWait(t, r.ctx, entered)
+			close(started) // Actual held continuation is entered before the FD flood.
+			if id := pumpWait(t, r.ctx, r.renewed); id != "joined-barrier" {
+				t.Fatal(id)
+			}
+			if count == 129 {
+				select {
+				case <-r.runtime.Done():
+				case <-time.After(5 * time.Second):
+					t.Fatal("129 charged Joined notifications did not exhaust shared cap")
+				}
+				return
+			}
+			for n := 0; n < 128; n++ {
+				pumpWait(t, r.ctx, captured)
+			}
+			select {
+			case <-r.runtime.Done():
+				t.Fatal("128 charged notifications failed before cap")
+			default:
+			}
+			if _, err := token.Frame(); err != nil {
+				t.Fatal("handoff released held token", err)
+			}
+			r.cancel()
 		})
 	}
 }

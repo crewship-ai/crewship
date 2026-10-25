@@ -154,7 +154,7 @@ func (d *collaborationHTTPDocument) bootstrap(r *http.Request, checkpoint []byte
 	if e != nil {
 		return e
 	}
-	d.pump, e = newCollaborationSessionPump(runtime, collaborationSessionPumpHandlers{Submit: d.submit, Status: d.status, Renew: d.renewOwner, Ticket: d.ticket, TicketControl: d.ticketControl, Delivery: d.renewDelivery, DeliveryGuard: d.deliveryGuard, Output: d.output, DeliveryControl: d.deliveryControl, OutputControl: d.outputControl})
+	d.pump, e = newCollaborationSessionPump(runtime, collaborationSessionPumpHandlers{Submit: d.submit, Status: d.status, Renew: d.renewOwner, Ticket: d.ticket, TicketControl: d.ticketControl, Delivery: d.renewDelivery, DeliveryGuard: d.deliveryGuard, Output: d.output, DeliveryControl: d.deliveryControl, OutputControl: d.outputControl, JoinedControl: d.joinedControl})
 	if e != nil {
 		return e
 	}

@@ -115,3 +115,14 @@ explicit typed commands and their original read preconditions against a retained
 returned original submission must be retried unchanged. Actual native preparation,
 SQL COMMIT and correlated receipts remain the Saved boundary. A test fixture or
 an accepted task does not qualify an actual private agent environment.
+
+After a validated recipient reopen, and before an update whose starting revision
+is ahead of the recipient's observed cut, the host may replay a strictly
+contiguous chain of immutable native deltas retained only after SQL COMMIT.
+Each frame preserves the complete original receipt and actual atomic revision
+interval, including multi-operation atomics, and passes the same public wire
+validation and current reader/owner/delivery-gate checks at physical send. The
+existing bounded live records and output FIFO also trigger catch-up for a quiet
+reopened reader when no later write arrives. Missing cuts fail closed; replay
+never creates a snapshot, intent, source identity, author consent or authority.
+An initial reader without a physically observed basis receives no invented cut.
