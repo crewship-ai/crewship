@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/mooring"
@@ -116,9 +117,31 @@ func (m *collaborationHTTPManager) websocket(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		return
 	}
+	closedReason := "transport_error"
+	var stopLiveness func() bool
+	defer func() {
+		pingFailed := false
+		if stopLiveness != nil {
+			pingFailed = stopLiveness()
+		}
+		phase := "join"
+		c.mu.Lock()
+		if c.joinedDelivered {
+			phase = "active"
+		}
+		sessionClosed := c.closed
+		c.mu.Unlock()
+		if sessionClosed || d.ctx.Err() != nil {
+			closedReason = "session_closed"
+		} else if pingFailed {
+			closedReason = "ping_write_failed"
+		}
+		collaborationLogSocketTermination(m.pages.logger, c.ref, phase, closedReason)
+	}()
 	func() {
 		c.mu.Lock()
 		if c.closed {
+			closedReason = "session_closed"
 			c.mu.Unlock()
 			_ = ws.Close()
 			return
@@ -131,6 +154,7 @@ func (m *collaborationHTTPManager) websocket(w http.ResponseWriter, r *http.Requ
 		_ = ws.SetReadDeadline(time.Now().Add(5 * time.Second))
 		_, raw, err := ws.ReadMessage()
 		if err != nil {
+			closedReason = collaborationSocketCloseReason(err)
 			return
 		}
 		normalized, err := m.schema.ValidateE3(raw)
@@ -166,12 +190,12 @@ func (m *collaborationHTTPManager) websocket(w http.ResponseWriter, r *http.Requ
 		}); err != nil {
 			return
 		}
-		stopLiveness := collaborationSocketLiveness(operationContext, ws, time.Minute, 30*time.Second)
-		defer stopLiveness()
+		stopLiveness = collaborationSocketLiveness(operationContext, ws, time.Minute, 30*time.Second)
 		for {
 			_ = ws.SetReadDeadline(time.Now().Add(time.Minute))
 			_, raw, err = ws.ReadMessage()
 			if err != nil {
+				closedReason = collaborationSocketCloseReason(err)
 				return
 			}
 			normalized, err = m.schema.ValidateE3(raw)
@@ -222,9 +246,10 @@ func (m *collaborationHTTPManager) websocket(w http.ResponseWriter, r *http.Requ
 // never refresh an admission, delivery gate, lease, or application authority.
 // Keep the existing idle bound while allowing a browser with no authored data
 // to remain connected; browsers answer RFC 6455 pings without application code.
-func collaborationSocketLiveness(parent context.Context, ws *websocket.Conn, idle, interval time.Duration) func() {
+func collaborationSocketLiveness(parent context.Context, ws *websocket.Conn, idle, interval time.Duration) func() bool {
 	ctx, cancel := context.WithCancel(parent)
 	done := make(chan struct{})
+	var pingFailed atomic.Bool
 	_ = ws.SetReadDeadline(time.Now().Add(idle))
 	ws.SetPongHandler(func(payload string) error {
 		if payload != "mooring" {
@@ -242,13 +267,14 @@ func collaborationSocketLiveness(parent context.Context, ws *websocket.Conn, idl
 				return
 			case <-ticker.C:
 				if ws.WriteControl(websocket.PingMessage, []byte("mooring"), time.Now().Add(collaborationHTTPSendDeadline)) != nil {
+					pingFailed.Store(true)
 					_ = ws.Close()
 					return
 				}
 			}
 		}
 	}()
-	return func() { cancel(); <-done }
+	return func() bool { cancel(); <-done; return pingFailed.Load() }
 }
 
 func (c *collaborationHTTPConnection) close() {
