@@ -183,6 +183,16 @@ class GateTests(unittest.TestCase):
         needs['release-rehearsal']['result'] = 'success'
         self.assertEqual(failures(needs), [])
 
+    def test_all_actual_mooring_lane_cannot_be_missing_or_not_executed(self):
+        self.assertIn('mooring-actual', CODE)
+        for result in ['failure', 'cancelled', 'skipped', None]:
+            needs = self.results()
+            needs['mooring-actual']['result'] = result
+            self.assertTrue(failures(needs), result)
+        needs = self.results()
+        del needs['mooring-actual']
+        self.assertTrue(failures(needs))
+
     def test_mooring_requires_actual_success_for_code_changes(self):
         self.assertIn('mooring', CODE)
         for result in ['failure', 'cancelled', 'skipped', None]:

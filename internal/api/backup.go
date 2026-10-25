@@ -62,6 +62,10 @@ type BackupHandler struct {
 	// and RestoreBackup can land them back + rewrite payload_ref.
 	// Empty disables both (matches the rest of the memory subsystem's
 	// "empty BlobRoot disables versioning" convention).
+	// In-process restore is deliberately unavailable while the live Mooring
+	// controller is configured. Disable it and restart before recovery; a SQL
+	// restore alone cannot retire original process-local admissions and sockets.
+	mooringHTTPEnabled  bool
 	lockTranscripts     func(context.Context) (func(), error)
 	snapshotTranscripts func(context.Context) (func(), error)
 	memoryBlobRoot      string
@@ -416,6 +420,10 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	}
 	if user == nil {
 		replyError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	if h.mooringHTTPEnabled {
+		replyError(w, http.StatusConflict, "disable Mooring and restart before restoring")
 		return
 	}
 	var req restoreRequest

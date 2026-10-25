@@ -9,6 +9,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Bound Mooring session admission request and response I/O, flush buffered responses under the original ingress lease, and retain the read deadline through HTTP body cleanup.
+
+- Mooring document sessions retain original author checks and SQL-backed Saved receipts over the disabled-by-default HTTP/WebSocket boundary; the actual native integration cases run in CI.
+
 - Mooring collaboration storage and its Go session runtime retain checkpoint identities, original batch outcomes and independent delivery notifications behind the existing disabled route boundary.
 
 - **Mooring Rust and protocol sources receive native and WASM CI coverage.** This consolidation keeps the reviewed runtime, SDK, generated wire types and locked third-party sources together; the required CI lane executes the current shared vectors through the actual WASM ABI. Document routes remain disabled by default.

@@ -18,6 +18,24 @@ class WorkflowContracts(unittest.TestCase):
     def job(self, text, name):
         return re.search(r'^  ' + re.escape(name) + r':\n(.*?)(?=^  [a-z][\w-]*:\n|\Z)', text, re.M | re.S).group(1)
 
+    def test_all_actual_mooring_lane_executes_public_build_and_every_case(self):
+        ci = self.text('ci.yml')
+        lane = self.job(ci, 'mooring-actual')
+        self.assertIn("if: needs.changes.outputs.code == 'true'", lane)
+        self.assertIn('./.github/actions/setup-go-embed', lane)
+        self.assertIn('rustup toolchain install 1.99.1', lane)
+        self.assertIn('sha256sum --check --strict', lane)
+        self.assertLess(lane.index('sha256sum --check --strict'), lane.index('tar -xzf'))
+        self.assertIn('mooring-actual-fixtures.py --output', lane)
+        self.assertIn('mooring-actual.py --fixtures', lane)
+        self.assertLess(lane.index('mooring-actual-fixtures.py --output'), lane.index('mooring-actual.py --fixtures'))
+        self.assertIn('if-no-files-found: error', lane)
+        self.assertIn('${{ runner.temp }}/mooring-actual-fixtures/', lane)
+        self.assertNotIn('${{ runner.temp }}/mooring-actual-fixtures/fixtures.json', lane)
+        self.assertNotIn('continue-on-error', lane)
+        self.assertNotIn('/home/ubuntu', lane)
+        self.assertIn('mooring-actual', self.job(ci, 'result').split('runs-on:')[0])
+
     def test_mooring_executes_native_and_wasm_fixtures_in_required_result(self):
         ci = self.text('ci.yml')
         lane = self.job(ci, 'mooring')

@@ -22,6 +22,16 @@ All Crewship configuration can be set via environment variables. These override 
 | `CREWSHIP_HOST` | `0.0.0.0` | Server listen address |
 | `CREWSHIP_PORT` | `8080` | Server listen port |
 
+## Mooring session profile
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_MOORING_ENABLED` | `false` | Opt in to the experimental Rust-backed human session HTTP/WS profile. Disabled registers neither session route. Startup requires Linux suspend-aware timing and verified embedded runtime assets; invalid enabled configuration fails closed. This flag does not grant Page access or qualify multiuser/agent acceptance. |
+| `CREWSHIP_MOORING_DELIVERY_LEASE_MS` | `5000` | Delivery authorization lease in milliseconds. Zero selects the default; explicit nonzero values must be 1–5000. A grant is timed from sending its request, so a late reply cannot extend the horizon. This operator policy cannot grant participant authority. |
+
+See the [session transport contract](/specs/mooring-session-transport) for the
+current HTTP boundary and acceptance limitations.
+
 ## IPC
 
 | Variable | Default | Description |
