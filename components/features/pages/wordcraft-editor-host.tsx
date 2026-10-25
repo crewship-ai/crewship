@@ -18,6 +18,8 @@ const exact = (message: Record<string, unknown>, keys: string[]) => Object.keys(
 export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange, onUnavailable, unavailable = false }: { unavailable?: boolean; workspaceId: string; pageId: string; name?: string; onDirtyChange?: (dirty: boolean) => void; onUnavailable?: () => void }) {
   const session = useSessionSafe()
   const humanId = session.status === "authenticated" ? session.data?.user?.id ?? null : null
+  const displayName = React.useRef("WordCraft")
+  displayName.current = Array.from((name ?? "WordCraft").replace(/\p{Cc}/gu, " ").trim()).slice(0, 128).join("") || "WordCraft"
   const mount = React.useRef<HTMLDivElement>(null)
   const stopCurrent = React.useRef<((reason: string) => void) | null>(null)
   const pageUnavailable = React.useRef(unavailable)
@@ -52,7 +54,7 @@ export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange, 
       setError("The editor is unavailable. Unconfirmed changes are not saved.")
     }
     const deliverBootstrap = () => {
-      if (bootstrap && port) { send({ type: "wordcraft:bootstrap", ...bootstrap }, WORDCRAFT_BOOTSTRAP_BYTES); bootstrap = undefined }
+      if (bootstrap && port) { send({ type: "wordcraft:bootstrap", ...bootstrap, display_name: displayName.current }, WORDCRAFT_BOOTSTRAP_BYTES); bootstrap = undefined }
     }
     const receive = (raw: unknown) => {
       if (dead) return

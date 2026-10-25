@@ -33,6 +33,8 @@ export interface WordCraftChildSDK {
 interface NativeHandle { project_native(raw: string): void; stop(): void }
 export interface WordCraftNativeWeb {
   start_collaborative(native: string, ids: string, callbacks: {
+    /** Display-only host label; never native document metadata or authority. */
+    display_name: string
     can_edit(): boolean
     before(before: string, target: string, start: string, end: string, command: string): void
     validate(before: string, after: string): boolean
@@ -224,8 +226,9 @@ export function startWordCraftChild(
     if (!value || JSON.stringify(value) !== raw) { stop("invalid-port-message"); return }
     try {
       if (value.type === "wordcraft:bootstrap") {
-        if (booted || !keys(value, ["protocol", "type", "joined_json", "checkpoint_json", "assigned_origin", "access"])
+        if (booted || !keys(value, ["protocol", "type", "joined_json", "checkpoint_json", "assigned_origin", "access", "display_name"])
           || typeof value.joined_json !== "string" || typeof value.checkpoint_json !== "string"
+          || typeof value.display_name !== "string" || value.display_name.length === 0 || bytes(value.display_name) > 512 || /\p{Cc}/u.test(value.display_name)
           || typeof value.assigned_origin !== "string" || !["reader", "writer"].includes(String(value.access))) throw new Error("invalid_bootstrap")
         const state = sdk.validate_host_bootstrap(value.joined_json, value.checkpoint_json)
         joinedRaw = value.joined_json; checkpointRaw = value.checkpoint_json
@@ -238,7 +241,7 @@ export function startWordCraftChild(
         writableModel = !model.is_read_only()
         model.free?.()
         draft = new sdk.WordCraftLocalDraft(state, value.assigned_origin, access)
-        handle = native.start_collaborative(draft.native_json(), draft.stable_ids_json(), callbacks)
+        handle = native.start_collaborative(draft.native_json(), draft.stable_ids_json(), { ...callbacks, display_name: value.display_name })
         booted = true
         void waitForNativeReady().then(() => { if (!stopped) send("wordcraft:ready") }).catch(() => stop("native-start-failed"))
       } else if (value.type === "wordcraft:host-frame" && booted && keys(value, ["protocol", "type", "raw"]) && typeof value.raw === "string") {

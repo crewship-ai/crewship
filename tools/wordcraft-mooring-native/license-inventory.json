@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "native_base": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-  "native_patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+  "native_patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
   "cargo_lock_sha256": "be3d0675270364a44b7011d1d80a6a255d5823c1a52088347faa18fa9cebfd88",
   "filter_platform": "wasm32-unknown-unknown",
   "root": {
@@ -9852,7 +9852,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/doc"
             },
             "path": "ATTRIBUTION.md"
@@ -9868,7 +9868,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/doc"
             },
             "path": "LICENSE-APACHE"
@@ -9884,7 +9884,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/doc"
             },
             "path": "LICENSE-MIT"
@@ -9900,7 +9900,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/doc"
             },
             "path": "NOTICE"
@@ -9929,7 +9929,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/docbin"
             },
             "path": "ATTRIBUTION.md"
@@ -9945,7 +9945,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/docbin"
             },
             "path": "LICENSE-APACHE"
@@ -9961,7 +9961,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/docbin"
             },
             "path": "LICENSE-MIT"
@@ -9977,7 +9977,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/docbin"
             },
             "path": "NOTICE"
@@ -10006,7 +10006,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/docx"
             },
             "path": "ATTRIBUTION.md"
@@ -10022,7 +10022,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/docx"
             },
             "path": "LICENSE-APACHE"
@@ -10038,7 +10038,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/docx"
             },
             "path": "LICENSE-MIT"
@@ -10054,7 +10054,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/docx"
             },
             "path": "NOTICE"
@@ -10083,7 +10083,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/engine"
             },
             "path": "ATTRIBUTION.md"
@@ -10099,7 +10099,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/engine"
             },
             "path": "LICENSE-APACHE"
@@ -10115,7 +10115,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/engine"
             },
             "path": "LICENSE-MIT"
@@ -10131,7 +10131,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/engine"
             },
             "path": "NOTICE"
@@ -10160,7 +10160,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/fonts"
             },
             "path": "ATTRIBUTION.md"
@@ -10176,7 +10176,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/fonts"
             },
             "path": "LICENSE-APACHE"
@@ -10192,7 +10192,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/fonts"
             },
             "path": "LICENSE-MIT"
@@ -10208,7 +10208,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/fonts"
             },
             "path": "NOTICE"
@@ -10237,7 +10237,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/formats"
             },
             "path": "ATTRIBUTION.md"
@@ -10253,7 +10253,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/formats"
             },
             "path": "LICENSE-APACHE"
@@ -10269,7 +10269,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/formats"
             },
             "path": "LICENSE-MIT"
@@ -10285,7 +10285,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/formats"
             },
             "path": "NOTICE"
@@ -10314,7 +10314,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/geom"
             },
             "path": "ATTRIBUTION.md"
@@ -10330,7 +10330,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/geom"
             },
             "path": "LICENSE-APACHE"
@@ -10346,7 +10346,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/geom"
             },
             "path": "LICENSE-MIT"
@@ -10362,7 +10362,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/geom"
             },
             "path": "NOTICE"
@@ -10391,7 +10391,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/layout"
             },
             "path": "ATTRIBUTION.md"
@@ -10407,7 +10407,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/layout"
             },
             "path": "LICENSE-APACHE"
@@ -10423,7 +10423,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/layout"
             },
             "path": "LICENSE-MIT"
@@ -10439,7 +10439,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/layout"
             },
             "path": "NOTICE"
@@ -10468,7 +10468,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/metafile"
             },
             "path": "ATTRIBUTION.md"
@@ -10484,7 +10484,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/metafile"
             },
             "path": "LICENSE-APACHE"
@@ -10500,7 +10500,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/metafile"
             },
             "path": "LICENSE-MIT"
@@ -10516,7 +10516,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/metafile"
             },
             "path": "NOTICE"
@@ -10545,7 +10545,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/pdf"
             },
             "path": "ATTRIBUTION.md"
@@ -10561,7 +10561,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/pdf"
             },
             "path": "LICENSE-APACHE"
@@ -10577,7 +10577,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/pdf"
             },
             "path": "LICENSE-MIT"
@@ -10593,7 +10593,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/pdf"
             },
             "path": "NOTICE"
@@ -10622,7 +10622,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/proof"
             },
             "path": "ATTRIBUTION.md"
@@ -10638,7 +10638,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/proof"
             },
             "path": "LICENSE-APACHE"
@@ -10654,7 +10654,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/proof"
             },
             "path": "LICENSE-MIT"
@@ -10670,7 +10670,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/proof"
             },
             "path": "NOTICE"
@@ -10699,7 +10699,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/render"
             },
             "path": "ATTRIBUTION.md"
@@ -10715,7 +10715,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/render"
             },
             "path": "LICENSE-APACHE"
@@ -10731,7 +10731,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/render"
             },
             "path": "LICENSE-MIT"
@@ -10747,7 +10747,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/render"
             },
             "path": "NOTICE"
@@ -10776,7 +10776,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/ui-egui"
             },
             "path": "ATTRIBUTION.md"
@@ -10792,7 +10792,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/ui-egui"
             },
             "path": "LICENSE-APACHE"
@@ -10808,7 +10808,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/ui-egui"
             },
             "path": "LICENSE-MIT"
@@ -10824,7 +10824,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/ui-egui"
             },
             "path": "NOTICE"
@@ -10853,7 +10853,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "apps/wordcraft-web"
             },
             "path": "ATTRIBUTION.md"
@@ -10869,7 +10869,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "apps/wordcraft-web"
             },
             "path": "LICENSE-APACHE"
@@ -10885,7 +10885,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "apps/wordcraft-web"
             },
             "path": "LICENSE-MIT"
@@ -10901,7 +10901,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "apps/wordcraft-web"
             },
             "path": "NOTICE"
@@ -10930,7 +10930,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/zotero"
             },
             "path": "ATTRIBUTION.md"
@@ -10946,7 +10946,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/zotero"
             },
             "path": "LICENSE-APACHE"
@@ -10962,7 +10962,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/zotero"
             },
             "path": "LICENSE-MIT"
@@ -10978,7 +10978,7 @@
               "kind": "native-workspace",
               "repository": "https://github.com/storytold/wordcraft",
               "revision": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-              "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+              "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
               "package_path": "crates/zotero"
             },
             "path": "NOTICE"

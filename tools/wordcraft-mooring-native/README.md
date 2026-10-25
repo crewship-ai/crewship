@@ -13,7 +13,11 @@ audited command IDs. The native file Save operation does not produce host Saved.
 The default application remains unattached. The optional web entry selected by
 `?mooring=1` waits for `start_collaborative(native_json, stable_ids_json, callbacks)`
 instead of creating a blank document. Its native JSON inputs are exact strings;
-callbacks delegate selection, full-model validation, original capture and restricted
+The callbacks object also carries `display_name`: a nonempty display-only label of at
+most 512 UTF-8 bytes with no control characters. It labels the attached title bar
+without changing the native document, file identity or checkpoint. Attached chrome
+hides standalone Discord, Share and Zotero controls; unattached behavior is unchanged.
+Callbacks delegate selection, full-model validation, original capture and restricted
 history to an app-owned SDK. Local capture/projection failure stops edits and
 reports a retained unsaved draft. This creates no authenticated host connection.
 
@@ -91,7 +95,7 @@ different source bytes.
 ## Reproducible web inputs
 
 `source-manifest.json` now binds native patch commit
-`37268b7a66199254fc64ebd557411350532ad6d5`. The patch applies to the same public
+`046e32030099c66d5bdd10cf080a45a606998245`. The patch applies to the same public
 source revision above; no private Git object is needed by `prepare.sh`.
 The corresponding Crewship SDK/child source is
 `c66e5a61878f0942c976d26746d2e3e05fb9c063`. Its child entry is

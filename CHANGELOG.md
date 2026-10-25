@@ -10,6 +10,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 - Keep idle WordCraft editors connected through standard WebSocket ping/pong while preserving the existing response and inactivity limits.
+- Show the Crewship page name in attached WordCraft chrome and hide its standalone Discord, Share and Zotero controls.
 
 - Open document links in their accessible workspace before requesting document content, preserving unsaved-work navigation guards.
 

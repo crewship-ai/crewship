@@ -28,8 +28,8 @@ afterEach(() => {
   else delete (HTMLIFrameElement.prototype as { credentialless?: unknown }).credentialless
   if (contentWindow) Object.defineProperty(HTMLIFrameElement.prototype, "contentWindow", contentWindow)
 })
-async function open() {
-  const view = render(<WordCraftEditorHost workspaceId="workspace" pageId="page" name="Original title" />)
+async function open(name = "Original title") {
+  const view = render(<WordCraftEditorHost workspaceId="workspace" pageId="page" name={name} />)
   await waitFor(() => expect(document.querySelector("iframe")).not.toBeNull())
   const frame = document.querySelector("iframe")!
   expect(new URL(frame.src).searchParams.get("mooring")).toBe("1")
@@ -41,6 +41,15 @@ async function open() {
   const send = async (message: object) => { await act(async () => { port.postMessage(JSON.stringify({ protocol: 1, ...message })); await new Promise(resolve => setTimeout(resolve, 10)) }) }
   return { frame, send, view, port }
 }
+it("bounds display metadata separately from unchanged host checkpoint and origin", async () => {
+  const { port } = await open("Name\n" + "😀".repeat(200))
+  const messages: string[] = []
+  port.onmessage = event => messages.push(event.data)
+  const proof = { joined_json: "joined original", checkpoint_json: "checkpoint original", assigned_origin: "17", access: "writer" }
+  await act(async () => { mocks.connect.mock.calls[0][5].bootstrap(proof); await new Promise(resolve => setTimeout(resolve, 10)) })
+  expect(messages).toHaveLength(1)
+  expect(JSON.parse(messages[0])).toEqual({ protocol: 1, type: "wordcraft:bootstrap", ...proof, display_name: "Name " + "😀".repeat(123) })
+})
 it("rejects a child Saved assertion and hides the editor without destroying its producer", async () => {
   const { frame, send } = await open()
   await send({ type: "wordcraft:saved", receipt: { issuer: "crewship" } })

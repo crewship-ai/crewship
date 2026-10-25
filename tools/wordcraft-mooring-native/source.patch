@@ -45,10 +45,10 @@ index 39c2f981..046d1ed1 100644
  
 diff --git a/apps/wordcraft-web/src/mooring.rs b/apps/wordcraft-web/src/mooring.rs
 new file mode 100644
-index 00000000..41f0de84
+index 00000000..143d5b7d
 --- /dev/null
 +++ b/apps/wordcraft-web/src/mooring.rs
-@@ -0,0 +1,202 @@
+@@ -0,0 +1,210 @@
 +//! Local browser adapter only. Parent owns authentication, WS and receipt trust.
 +use js_sys::Function;
 +use std::{
@@ -93,6 +93,7 @@ index 00000000..41f0de84
 +}
 +pub(crate) struct Collaboration {
 +    pub(crate) initial: Document,
++    display_title: String,
 +    ids: Vec<String>,
 +    stopped: Cell<bool>,
 +    failure_reported: Cell<bool>,
@@ -155,6 +156,11 @@ index 00000000..41f0de84
 +    if stable_ids_json.len() > 262144 {
 +        return Err(JsValue::from_str("invalid stable IDs"));
 +    }
++    let display_title = js_sys::Reflect::get(&callbacks, &JsValue::from_str("display_name"))?
++        .as_string().ok_or_else(|| JsValue::from_str("invalid display name"))?;
++    if display_title.is_empty() || display_title.len() > 512 || display_title.chars().any(char::is_control) {
++        return Err(JsValue::from_str("invalid display name"));
++    }
 +    let initial = document(native_json).map_err(|e| JsValue::from_str(&e))?;
 +    let ids: Vec<String> = serde_json::from_str(stable_ids_json).map_err(|_| JsValue::from_str("invalid stable IDs"))?;
 +    if ids.len() != initial.body.len()
@@ -167,6 +173,7 @@ index 00000000..41f0de84
 +    }
 +    let state = Rc::new(Collaboration {
 +        initial,
++        display_title,
 +        ids,
 +        stopped: Cell::new(false),
 +        failure_reported: Cell::new(false),
@@ -182,6 +189,7 @@ index 00000000..41f0de84
 +    Ok(WordCraftCollaborativeHandle { state })
 +}
 +impl NativeCommandBridge for Collaboration {
++    fn display_title(&self) -> Option<&str> { Some(&self.display_title) }
 +    fn capture_failed(&self) {
 +        self.fail();
 +    }
@@ -863,14 +871,25 @@ index 00000000..9312a66a
 +    assert_eq!(snapshot(&s), before);
 +}
 diff --git a/crates/ui-egui/src/chrome.rs b/crates/ui-egui/src/chrome.rs
-index 3caafc90..1508f201 100644
+index 3caafc90..1f7e88f7 100644
 --- a/crates/ui-egui/src/chrome.rs
 +++ b/crates/ui-egui/src/chrome.rs
-@@ -365,7 +365,9 @@ pub fn title_bar(app: &mut WordApp, ui: &mut Ui) {
+@@ -337,7 +337,7 @@ pub fn title_bar(app: &mut WordApp, ui: &mut Ui) {
+                         let _ = app.run("ui.backstage", json!({"value": true, "page": "options", "pane": "general"}));
+                     }
+                     ui.add_space(8.0);
+-                    if app.ui.show_discord {
++                    if app.ui.show_discord && app.mooring_bridge.is_none() {
+                         let (r, resp) = ui.allocate_exact_size(vec2(84.0, 22.0), Sense::click());
+                         ui.painter().rect_filled(r, 11.0, if resp.hovered() { t.accent_text } else { t.accent });
+                         icons::paint(
+@@ -364,8 +364,10 @@ pub fn title_bar(app: &mut WordApp, ui: &mut Ui) {
+             } else {
                  format!(
                      "{} — {}",
-                     app.title_stem(),
+-                    app.title_stem(),
 -                    if app.session.dirty {
++                    app.mooring_display_title().map(str::to_owned).unwrap_or_else(|| app.title_stem()),
 +                    if let Some(state) = app.mooring_local_state() {
 +                        if state == "unsaved_draft" { tl!("Not saved") } else { tl!("Draft") }
 +                    } else if app.session.dirty {
@@ -997,10 +1016,10 @@ index 3a9a00fb..273d5a0a 100644
 +mod tests_mooring_recovery;
 diff --git a/crates/ui-egui/src/mooring_boundary.rs b/crates/ui-egui/src/mooring_boundary.rs
 new file mode 100644
-index 00000000..67696271
+index 00000000..ffc9bd3a
 --- /dev/null
 +++ b/crates/ui-egui/src/mooring_boundary.rs
-@@ -0,0 +1,159 @@
+@@ -0,0 +1,164 @@
 +//! EXPERIMENTAL inactive native command seam. A local UX gate, never authority.
 +use crate::WordApp;
 +use serde_json::Value;
@@ -1018,6 +1037,8 @@ index 00000000..67696271
 +    Draft,
 +}
 +pub trait NativeCommandBridge {
++    /// Display metadata only; never a document title, path or authority.
++    fn display_title(&self) -> Option<&str> { None }
 +    fn can_edit(&self) -> bool;
 +    fn before(&self, session: &Session, id: &str, params: &Value) -> Result<(), CmdError>;
 +    fn validate(&self, before: &Document, after: &Document) -> Result<(), CmdError>;
@@ -1095,6 +1116,9 @@ index 00000000..67696271
 +}
 +
 +impl WordApp {
++    pub(crate) fn mooring_display_title(&self) -> Option<&str> {
++        self.mooring_bridge.as_ref().and_then(|bridge| bridge.display_title())
++    }
 +    /// No host receipt exists in this prototype; file saves cannot imply Saved.
 +    pub fn mooring_local_state(&self) -> Option<&'static str> {
 +        self.mooring_bridge.as_ref().map(|_| if self.mooring_blocked { "unsaved_draft" } else { "draft" })
@@ -1160,12 +1184,51 @@ index 00000000..67696271
 +        }
 +    }
 +}
+diff --git a/crates/ui-egui/src/ribbon.rs b/crates/ui-egui/src/ribbon.rs
+index c741b856..9d66ece4 100644
+--- a/crates/ui-egui/src/ribbon.rs
++++ b/crates/ui-egui/src/ribbon.rs
+@@ -287,6 +287,9 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
+             tabs.push((ct.to_string(), false));
+         }
+     }
++    if app.mooring_bridge.is_some() {
++        tabs.retain(|(name, _)| name != "Zotero");
++    }
+     {
+         let names: Vec<&str> = tabs.iter().map(|(n, _)| n.as_str()).collect();
+         let next = resolve_tab(&app.ui.tab, &names);
+@@ -316,7 +319,7 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
+                     let editing = crate::widgets::icon_text_button_width(ui, editing_label, regular(12.0), true, labels);
+                     let comment = crate::widgets::icon_text_button_width(ui, comments, regular(12.0), false, labels);
+                     // The gaps (6 + 4 + 8) and the strip's margin.
+-                    spaced(share_button) + spaced(editing) + spaced(comment) + 18.0 + 12.0
++                    (if app.mooring_bridge.is_none() { spaced(share_button) + 6.0 } else { 0.0 }) + spaced(editing) + spaced(comment) + 12.0 + 12.0
+                 };
+                 let button_levels = [button_widths(0), button_widths(1), button_widths(2)];
+                 let labels: Vec<&str> = tabs.iter().map(|(tab, custom)| if *custom { tab.as_str() } else { tl!(tab) }).collect();
+@@ -337,6 +340,7 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
+                     // tabs took clicks that did nothing, so the empty window had no way back to
+                     // the Start screen (#3045).
+                     ui.add_enabled_ui(app.has_document(), |ui| {
++                        if app.mooring_bridge.is_none() {
+                         let (share_size, share_text) =
+                             if plan.buttons < 2 { (((share_w + 36.0).max(74.0), 24.0), true) } else { ((30.0, 24.0), false) };
+                         let (r, resp) = ui.allocate_exact_size(vec2(share_size.0, share_size.1), Sense::click());
+@@ -357,6 +361,7 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
+                             let _ = app.run("ui.backstage", json!({"value": true, "page": "export"}));
+                         }
+                         ui.add_space(6.0);
++                        }
+                         let track = app.session.doc.settings.track_changes;
+                         let mode = if plan.buttons == 0 {
+                             crate::widgets::icon_text_menu_button(ui, "pencil", editing_label, regular(12.0))
 diff --git a/crates/ui-egui/src/tests_mooring_boundary.rs b/crates/ui-egui/src/tests_mooring_boundary.rs
 new file mode 100644
-index 00000000..4febd587
+index 00000000..cd004849
 --- /dev/null
 +++ b/crates/ui-egui/src/tests_mooring_boundary.rs
-@@ -0,0 +1,240 @@
+@@ -0,0 +1,253 @@
 +#[cfg(test)]
 +mod tests {
 +    use crate::{
@@ -1183,6 +1246,7 @@ index 00000000..4febd587
 +        original: Document,
 +    }
 +    impl NativeCommandBridge for Bridge {
++        fn display_title(&self) -> Option<&str> { Some("Crewship page") }
 +        fn can_edit(&self) -> bool {
 +            self.writer
 +        }
@@ -1208,6 +1272,18 @@ index 00000000..4febd587
 +    }
 +    fn native(app: &WordApp) -> Value {
 +        serde_json::to_value(&app.session.doc).unwrap()
++    }
++    #[test]
++    fn attached_display_title_preserves_native_document_and_file_identity() {
++        let (app, _) = app(true, false);
++        let before = native(&app);
++        let title = app.title_stem();
++        assert_eq!(app.mooring_display_title(), Some("Crewship page"));
++        assert_eq!(app.title_stem(), title);
++        assert!(app.session.path.is_none());
++        assert_eq!(native(&app), before);
++        let unattached = WordApp::new(Session::new(Document::from_text("aa")), Services::default());
++        assert_eq!(unattached.mooring_display_title(), None);
 +    }
 +    #[test]
 +    fn actual_wordapp_collaborative_undo_reaches_source_controller_without_native_history() {

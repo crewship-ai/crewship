@@ -1,7 +1,7 @@
 {
   "base": "668d7ce3a4b1dcf241a9c50a20754a85647a02c4",
-  "native_patch_commit": "37268b7a66199254fc64ebd557411350532ad6d5",
-  "patch_sha256": "d06a1b0eaeec8711b1d071051535d66e748754ede9991da9d4d0ecba3f15268a",
+  "native_patch_commit": "046e32030099c66d5bdd10cf080a45a606998245",
+  "patch_sha256": "33d9962a2ab541d089995a3ed2ba0681a19e1bb945c1cd3f5a1211cbaf3b98a7",
   "source_archive_sha256": "3d4a868545d592ae3c499e93852a889c0393288f1a868e4e8790574d1a5c1b5c",
   "files": [
     {
@@ -18,8 +18,8 @@
     },
     {
       "path": "apps/wordcraft-web/src/mooring.rs",
-      "bytes": 8552,
-      "sha256": "38dbaf902cc387b547ba8c415234ea051b7c933f51c18796b9328ef5710e9340",
+      "bytes": 9029,
+      "sha256": "694af100221d6d94c305ed9c0c7ad0491f275d09c18261a59d27c8f4c3f6ca1f",
       "before_sha256": null
     },
     {
@@ -48,8 +48,8 @@
     },
     {
       "path": "crates/ui-egui/src/chrome.rs",
-      "bytes": 55979,
-      "sha256": "27438c878b2baa4e645f8b8370dc1ef677eb46de211570907e3c11e9b0d405c2",
+      "bytes": 56077,
+      "sha256": "682189722183b22e6bbc0d53b0196e0be73bc577b511c7150c72b3f56f21c9f1",
       "before_sha256": "2d56fd40c2bb183c1dd7db1165dc90c4b8d0018522ed0518f5ce065838a5f9df"
     },
     {
@@ -66,14 +66,20 @@
     },
     {
       "path": "crates/ui-egui/src/mooring_boundary.rs",
-      "bytes": 7864,
-      "sha256": "a182793151d04f708c88071a8e89ccee7563745af0ffe5af547800eb8bf498eb",
+      "bytes": 8141,
+      "sha256": "ee30da06c1a63aec2465fbb2ac7f08517f094b8d39eafd1c056c3103dc246f86",
       "before_sha256": null
     },
     {
+      "path": "crates/ui-egui/src/ribbon.rs",
+      "bytes": 204488,
+      "sha256": "20c987ee6687ec0c298c813225ca0254da08041481f39371db472e3bd48a5eed",
+      "before_sha256": "926e436d19e7a99d2fe49d943af9a1f3b52c548b55c558aab131b838f106fb9b"
+    },
+    {
       "path": "crates/ui-egui/src/tests_mooring_boundary.rs",
-      "bytes": 10548,
-      "sha256": "a36f02c59396bef6d6bd224c7b5e0b9a3190cc39ae5ec39471cc2f9ad7a458c7",
+      "bytes": 11199,
+      "sha256": "ca32b5bf09771471f72e3870a5eb76364a09b61517b6f0799d70fbed21b1851a",
       "before_sha256": null
     },
     {

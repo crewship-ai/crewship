@@ -79,7 +79,7 @@ function setup(historyError?: string) {
   connect?.({ source: parent, data: { type: "wordcraft:connect", protocol: 1, bundle: "a".repeat(64) }, ports: [port] } as unknown as MessageEvent)
   const receive = (value: unknown) => port.onmessage?.({ data: typeof value === "string" ? value : JSON.stringify(value) })
   const joined = { type: "session_joined", scope: { workspace_id: "w", artifact_id: "p", application_id: "wordcraft" }, session_id: "s", participant_ref: "p", generation: "1", versions: {} }
-  const bootstrap = { protocol: 1, type: "wordcraft:bootstrap", joined_json: JSON.stringify(joined), checkpoint_json: '{"revision":"10","opaque":"untouched"}', assigned_origin: "17", access: "writer" }
+  const bootstrap = { protocol: 1, type: "wordcraft:bootstrap", joined_json: JSON.stringify(joined), checkpoint_json: '{"revision":"10","opaque":"untouched"}', assigned_origin: "17", access: "writer", display_name: "Crewship page" }
   const emit = (after: string) => {
     const before = localNative
     callbacks.before(before, "p_one", "0", "0", "text.insert")
@@ -90,9 +90,16 @@ function setup(historyError?: string) {
 }
 
 describe("isolated WordApp child original transport", () => {
+  it.each([undefined, "", "x".repeat(513), "bad\nname", "bad\u0085name"])("refuses invalid display metadata before SDK/native init: %s", (display_name) => {
+    const s = setup(); s.receive({ ...s.bootstrap, display_name })
+    expect(s.sdk.validate_host_bootstrap).not.toHaveBeenCalled()
+    expect(s.native.start_collaborative).not.toHaveBeenCalled()
+  })
+
   it("Rust checks bootstrap before native init and preserves native strings", async () => {
     const s = setup(); s.receive(s.bootstrap); await Promise.resolve()
     expect(s.sdk.validate_host_bootstrap).toHaveBeenCalledWith(s.bootstrap.joined_json, s.bootstrap.checkpoint_json)
+    expect(s.native.start_collaborative.mock.calls[0][2].display_name).toBe("Crewship page")
     expect(s.native.start_collaborative.mock.calls[0][0]).toContain("18446744073709551615")
     expect(s.sent.map(raw => JSON.parse(raw).type)).toEqual(["wordcraft:ready"])
   })
