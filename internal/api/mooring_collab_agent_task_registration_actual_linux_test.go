@@ -4,18 +4,21 @@ package api
 
 import (
 	"context"
-
-	"github.com/crewship-ai/crewship/internal/mooring"
+	"database/sql"
 	"net/http"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/mooring"
 )
 
 // Native admission and the ordinary document-tool read are real; the confirmed
 // task identity is the existing controlled fixture. This checks registration,
-// not a model/container dispatch or a successful mutation/Save.
+// not a model/container dispatch. The production-save subtest separately uses
+// the production bootstrap and committer, with controlled original identity.
 func TestMooringAgentToolActualOriginalTaskRegistration(t *testing.T) {
 	t.Run("proof-isolation", testMooringAgentToolActualTaskRegistrationProofIsolation)
 	t.Run("production-save", testMooringAgentActualProductionSave)
+	t.Run("current-authority", testMooringAgentActualTaskRegistrationCurrentAuthority)
 	t.Run("writer-original-task", func(t *testing.T) {
 		withMooringAgentToolHostFixture(t, func(x *collaborationAgentTestFixture, m *collaborationHTTPManager, a *collaborationLiveAgent) {
 			response := newAgentToolBufferedWriter(false)
@@ -114,7 +117,8 @@ func testMooringAgentToolActualTaskRegistrationProofIsolation(t *testing.T) {
 			}{
 				{"inactive", func(v *collaborationAgentTaskRegistration) { v.active.Store(false) }},
 				{"unknown-participant", func(v *collaborationAgentTaskRegistration) {
-					v.participant = &collaborationAgentSubmissionParticipant{}
+					copy := *p
+					v.participant = &copy
 				}},
 				{"missing-registry", func(v *collaborationAgentTaskRegistration) { v.registry = nil }},
 				{"wrong-owner-generation", func(v *collaborationAgentTaskRegistration) { v.owner.Generation++ }},
@@ -137,6 +141,15 @@ func testMooringAgentToolActualTaskRegistrationProofIsolation(t *testing.T) {
 			live := original()
 			defer live.active.Store(false)
 			authorized := context.WithValue(bound, collaborationAgentTaskRegistrationKey{}, live)
+			reached := false
+			foreignStore := mooring.NewBatchStore(x.f.rig.db, mooring.BatchStoreConfig{Enabled: true, Owners: d.cell.owners, Limits: mooring.DefaultBatchLimits(), CheckpointIdentity: &mooring.BatchCheckpointIdentityConfig{Enabled: true, Adapter: d.cell.adapter, MaxMetadataBytes: mooring.MaxPrivatePrepareRPCFrame}, Targets: &mooring.TargetStoreConfig{Enabled: true, ReadPolicy: mooring.CausalTargetReadPolicy, HistoryBudget: mooring.DefaultBatchHistoryBudget(), Adapter: d.cell.adapter, Limits: mooring.DefaultBatchTargetLimits()}, Authority: func(ctx context.Context, tx *sql.Tx, access mooring.BatchAccess) error {
+				reached = true
+				return d.cell.authorize(ctx, tx, access)
+			}})
+			if err := foreignStore.RegisterTask(authorized, d.owner, x.workID, p.id, p.captured.allowPartial); err == nil || !reached {
+				t.Fatalf("foreign store did not reach and fail original authority: %v reached=%v", err, reached)
+			}
+
 			if err := register(authorized, d.owner, "different-task", p.id); err == nil {
 				t.Fatal("foreign task accepted")
 			}

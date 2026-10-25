@@ -198,3 +198,7 @@ Registration uses the existing current-rights and writer-fence transaction,
 before any task submission. An unknown task is never created by submitting
 operations. Read-only tasks do not acquire a writer registration. Retries retain
 the original participant and cannot replace an existing task's policy.
+
+A canonical cancellation request for the current work attempt withdraws document
+authority even while that attempt still reports running/confirmed. It cannot
+register, read or submit through its retained original proof after cancellation.

@@ -20,6 +20,8 @@ var errCollaborationAgentAccess = errors.New("collaboration agent access denied"
 // policy and registry incarnation in this same already-acquired writer.
 // Unlike the legacy run checker, a missing attempt can never fall back to the
 // journal. Only a confirmed running runtime may obtain this first agent cap.
+// A canonical cancel request withdraws document authority immediately, even
+// while the worker is still running and waiting for its termination signal.
 func loadCollaborationAgentAttempt(ctx context.Context, tx *sql.Tx, runID string) (collaborationAgentAttemptBinding, time.Time, error) {
 	var a collaborationAgentAttemptBinding
 	if tx == nil || !mooring.ValidWireIdentifier(runID) {
@@ -31,7 +33,7 @@ func loadCollaborationAgentAttempt(ctx context.Context, tx *sql.Tx, runID string
 	err := tx.QueryRowContext(ctx, `SELECT at.run_id,at.work_id,at.attempt,at.generation,at.started_at,at.lease_owner,at.runtime_locator,
  w.workspace_id,w.agent_id,w.crew_id,w.authorized_by_user_id,w.session_id,w.source,w.source_ref,w.domain_kind,w.domain_id,w.authorized_scope,w.input_sha256,w.target_revision,
  w.state,at.runtime_phase,w.class,at.lease_expires_at,w.generation,w.attempts,w.deadline_at,at.ended_at,w.terminal_at,w.input_json
- FROM work_attempts at JOIN work_items w ON w.id=at.work_id WHERE at.run_id=? AND length(CAST(w.input_json AS BLOB))<=?`, runID, mooring.MaxRPCFrame).Scan(
+ FROM work_attempts at JOIN work_items w ON w.id=at.work_id WHERE at.run_id=? AND at.cancel_requested_at IS NULL AND length(CAST(w.input_json AS BLOB))<=?`, runID, mooring.MaxRPCFrame).Scan(
 		&a.runID, &a.workID, &a.attempt, &a.generation, &a.startedAt, &a.leaseOwner, &a.runtimeLocator,
 		&a.workspaceID, &a.agentID, &a.crewID, &a.humanUserID, &a.chatID, &a.source, &a.sourceRef, &a.domainKind, &a.domainID, &a.authorizedScope, &a.inputSHA256, &a.targetRevision,
 		&state, &phase, &class, &lease, &generation, &currentAttempt, &deadline, &ended, &terminal, &input)
