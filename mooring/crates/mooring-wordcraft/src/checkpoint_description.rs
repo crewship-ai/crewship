@@ -13,7 +13,17 @@ impl DescribeCheckpoint for WordCraftAdapter {
         // Restore EXACT provided bytes, including hidden CRDT/model integrity.
         // A description neither changes these bytes nor grants read/write access.
         let document = Document::restore(checkpoint).map_err(PrepareError::State)?;
-        if !closed_self_contained(&document) {
+        self.describe_document(&document)
+    }
+}
+impl WordCraftAdapter {
+    /// Qualify metadata from the same application-owned, checked document.
+    /// This immutable DATA view neither changes state nor supplies authority.
+    pub fn describe_document(
+        &self,
+        document: &Document,
+    ) -> Result<CheckpointDescription, PrepareError> {
+        if !closed_self_contained(document) {
             return Err(PrepareError::UnqualifiedDescription);
         }
         Ok(CheckpointDescription {

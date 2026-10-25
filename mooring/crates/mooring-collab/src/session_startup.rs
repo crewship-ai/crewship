@@ -7,9 +7,7 @@ use crate::{
     session_lane::Output,
     session_owner_guard::OwnerGuard,
 };
-use mooring_core::{
-    adapter::PrepareAdapter, batch::Tick, checkpoint_description::DescribeCheckpoint,
-};
+use mooring_core::batch::Tick;
 use mooring_protocol::{boundary::Transport, control, grant::PendingGrant, session_control, *};
 use mooring_wordcraft::{adapter::WordCraftAdapter, Document};
 use std::{collections::BTreeMap, io, time::Duration};
@@ -213,8 +211,13 @@ impl OwnerAccepted {
         .map_err(|_| invalid("checkpoint full identity"))?
         .state()
         .to_vec();
+        // Restore the exact checked bytes once. Metadata and complete inventory
+        // borrow this immutable owned doc; it becomes live only after ALL checks
+        // below and the final owner/BOOTTIME observation succeed.
+        let document = Document::restore(&bytes)
+            .map_err(|_| invalid("unqualified restored checkpoint metadata"))?;
         let description = WordCraftAdapter
-            .describe_checkpoint(&bytes)
+            .describe_document(&document)
             .map_err(|_| invalid("unqualified restored checkpoint metadata"))?;
         if description.format_version != checkpoint.format_version
             || description.versions != checkpoint.versions
@@ -223,10 +226,9 @@ impl OwnerAccepted {
             return Err(invalid("restored checkpoint metadata mismatch"));
         }
         // Validate complete actual application inventory, not a projection that
-        // can hide unsupported roots. Its temporary owned doc is dropped before
-        // restoring the retained live doc; no app revision ledger is introduced.
+        // can hide unsupported roots. No app revision ledger is introduced.
         let inventory = WordCraftAdapter
-            .validate_checkpoint(&bytes)
+            .validate_document(&document)
             .map_err(|_| invalid("invalid app checkpoint"))?;
         let inventory = inventory_set(&inventory)?;
         let mut targets = BTreeMap::new();
@@ -243,7 +245,6 @@ impl OwnerAccepted {
         if inventory != targets {
             return Err(invalid("incomplete app target inventory"));
         }
-        let document = Document::restore(&bytes).map_err(|_| invalid("live document restore"))?;
         self.observe(clock()?)?;
         let guard = OwnerGuard::new(
             &self.open,

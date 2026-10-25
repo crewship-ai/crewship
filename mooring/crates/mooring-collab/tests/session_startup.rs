@@ -1,6 +1,8 @@
 #![cfg(unix)]
 use mooring_collab::{session_lane::Lane, session_startup::Startup};
-use mooring_core::{adapter::PrepareAdapter, batch::Tick};
+use mooring_core::{
+    adapter::PrepareAdapter, batch::Tick, checkpoint_description::DescribeCheckpoint,
+};
 use mooring_protocol::{
     boundary::{Durability, Transport},
     control, Counter, TargetVersion,
@@ -112,6 +114,9 @@ fn restore_binds_full_inventory_digest_fence_versions_and_counters() {
         "counters",
         "head",
         "format",
+        "duplicate-target",
+        "deleted-target",
+        "foreign-target",
     ] {
         let (startup, acquire) = Startup::from_open(&open(), at(0)).unwrap();
         let owner = startup
@@ -122,6 +127,14 @@ fn restore_binds_full_inventory_digest_fence_versions_and_counters() {
         match field {
             "inventory" => {
                 value["targets"].as_array_mut().unwrap().pop();
+            }
+            "duplicate-target" => {
+                let duplicate = value["targets"][0].clone();
+                value["targets"].as_array_mut().unwrap().push(duplicate);
+            }
+            "deleted-target" => value["targets"][0]["deleted"] = json!(true),
+            "foreign-target" => {
+                value["targets"][0]["target_id"] = json!("wordcraft:foreign-reserved")
             }
             "digest" => value["checkpoint"]["digest"] = json!(format!("sha256:{}", "0".repeat(64))),
             "fence" => value["fence"]["generation"] = json!("8"),
@@ -399,4 +412,164 @@ fn declared_optional_origin_shapes_do_not_enable_identity_only_driver() {
     // This constructor cannot acknowledge an inventory handler it does not own,
     // and returns before constructing/publishing any OwnerAcquire.
     assert!(Startup::from_open(&raw, at(0)).is_err());
+}
+
+#[test]
+fn startup_borrowed_views_retain_exact_d1_and_d3_checkpoint_metadata_and_inventory() {
+    for raw_native in [
+        include_str!("../../mooring-wordcraft/tests/fixtures/d1-engine-canonical.json"),
+        include_str!("../../mooring-wordcraft/tests/fixtures/d3-engine-canonical.json"),
+    ] {
+        let native: Value = serde_json::from_str(raw_native).unwrap();
+        let (raw, native, ids) = restore_native(native);
+        let request: mooring_protocol::SessionRestore = serde_json::from_slice(&raw).unwrap();
+        let bytes = mooring_protocol::boundary::decode_base64(
+            &request.checkpoint.state,
+            control::MAX_CHECKPOINT_BYTES,
+        )
+        .unwrap();
+        let old_document = Document::restore(&bytes).unwrap();
+        let old_description = WordCraftAdapter.describe_checkpoint(&bytes).unwrap();
+        let old_inventory = WordCraftAdapter.validate_checkpoint(&bytes).unwrap();
+        let (startup, acquire) = Startup::from_open(&open(), at(0)).unwrap();
+        let owner = startup
+            .accept_owner(&grant(&acquire), &host(), at(1))
+            .unwrap();
+        let ready = owner.restore(&raw, || Ok(at(2))).unwrap();
+        let retained = ready.confirmed().document();
+        assert_eq!(retained.native().unwrap(), native);
+        assert_eq!(retained.block_ids().unwrap(), ids);
+        assert_eq!(retained.checkpoint().unwrap(), bytes);
+        assert_eq!(retained.is_read_only(), old_document.is_read_only());
+        assert_eq!(ready.confirmed().checkpoint(), &request.checkpoint);
+        assert_eq!(ready.confirmed().targets(), request.targets);
+        let description = WordCraftAdapter.describe_document(retained).unwrap();
+        assert_eq!(description.format_version, old_description.format_version);
+        assert_eq!(description.versions, old_description.versions);
+        assert_eq!(description.assets, old_description.assets);
+        assert_eq!(
+            WordCraftAdapter.validate_document(retained).unwrap(),
+            old_inventory
+        );
+    }
+}
+
+#[test]
+fn startup_rejects_hidden_crdt_and_native_mismatch_after_valid_full_wrapper_identity() {
+    use mooring_text::yrs::{
+        types::Attrs, updates::decoder::Decode, Any, Doc, Map, OffsetKind, Options, ReadTxn,
+        StateVector, Text, TextRef, Transact, Update,
+    };
+    for mode in [
+        "native-mismatch",
+        "malformed-causal",
+        "hidden-root",
+        "inactive-future-stamp",
+    ] {
+        let (raw, _, ids) = restore();
+        let mut request: Value = serde_json::from_slice(&raw).unwrap();
+        let bytes = mooring_protocol::boundary::decode_base64(
+            request["checkpoint"]["state"].as_str().unwrap(),
+            control::MAX_CHECKPOINT_BYTES,
+        )
+        .unwrap();
+        let mut packed: Value = serde_json::from_slice(&bytes).unwrap();
+        match mode {
+            "native-mismatch" => packed["native"]["core"]["title"] = json!("substituted"),
+            "malformed-causal" => packed["update_base64"] = json!("AQ=="),
+            "hidden-root" | "inactive-future-stamp" => {
+                let update = mooring_protocol::boundary::decode_base64(
+                    packed["update_base64"].as_str().unwrap(),
+                    control::MAX_CHECKPOINT_BYTES,
+                )
+                .unwrap();
+                // Keep the deliberately invalid inactive formatting item in
+                // encoded history, like the existing model-v2 integrity test.
+                let doc = Doc::with_options(Options {
+                    offset_kind: OffsetKind::Utf16,
+                    skip_gc: true,
+                    ..Options::default()
+                });
+                doc.transact_mut()
+                    .apply_update(Update::decode_v1(&update).unwrap())
+                    .unwrap();
+                if mode == "hidden-root" {
+                    doc.get_or_insert_map("hidden.unqualified").insert(
+                        &mut doc.transact_mut(),
+                        "key",
+                        "value",
+                    );
+                } else {
+                    let text: TextRef = doc
+                        .transact()
+                        .get_map("wordcraft.texts")
+                        .unwrap()
+                        .get(&doc.transact(), &ids[0])
+                        .unwrap()
+                        .try_into()
+                        .unwrap();
+                    let key = "wc2:bold:9007199254740991:17";
+                    text.format(
+                        &mut doc.transact_mut(),
+                        0,
+                        1,
+                        Attrs::from([(key.into(), Any::Bool(true))]),
+                    );
+                    text.format(
+                        &mut doc.transact_mut(),
+                        0,
+                        1,
+                        Attrs::from([(key.into(), Any::Null)]),
+                    );
+                }
+                let altered = doc
+                    .transact()
+                    .encode_state_as_update_v1(&StateVector::default());
+                if mode == "inactive-future-stamp" {
+                    let key = "wc2:bold:9007199254740991:17";
+                    assert!(
+                        altered
+                            .windows(key.len())
+                            .any(|part| part == key.as_bytes()),
+                        "forged inactive marker must still exist in the encoded bytes"
+                    );
+                }
+                packed["update_base64"] = json!(mooring_protocol::boundary::encode_base64(
+                    &altered,
+                    control::MAX_CHECKPOINT_BYTES
+                )
+                .unwrap());
+            }
+            _ => unreachable!(),
+        }
+        let altered = serde_json::to_vec(&packed).unwrap();
+        assert!(Document::restore(&altered).is_err(), "{mode}");
+        assert!(
+            WordCraftAdapter.validate_checkpoint(&altered).is_err(),
+            "{mode}"
+        );
+        assert!(
+            WordCraftAdapter.describe_checkpoint(&altered).is_err(),
+            "{mode}"
+        );
+        request["checkpoint"]["state"] = json!(mooring_protocol::boundary::encode_base64(
+            &altered,
+            control::MAX_CHECKPOINT_BYTES
+        )
+        .unwrap());
+        bind_checkpoint_identity(&mut request["checkpoint"]);
+        let (startup, acquire) = Startup::from_open(&open(), at(0)).unwrap();
+        let owner = startup
+            .accept_owner(&grant(&acquire), &host(), at(1))
+            .unwrap();
+        let error = match owner.restore(&serde_json::to_vec(&request).unwrap(), || Ok(at(2))) {
+            Ok(_) => panic!("invalid document retained: {mode}"),
+            Err(error) => error,
+        };
+        assert_eq!(
+            error.to_string(),
+            "unqualified restored checkpoint metadata",
+            "{mode}"
+        );
+    }
 }
