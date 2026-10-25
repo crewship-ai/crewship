@@ -27,6 +27,16 @@ jobs:
       - uses: actions/setup-go@90ad2b35f69faf97585ad74d28fa006d2739b7af
         with:
           go-version-file: go.mod
+      - name: Install the unchanged policy on this disposable runner only
+        run: |
+          sha256sum internal/restrictedruntime/nativepolicy/{apparmor.profile,seccomp.json}
+          sudo bash scripts/install-restricted-native-policy.sh
+      - name: Diagnose the exact loaded policy metadata without weakening readiness
+        run: |
+          sudo /usr/sbin/apparmor_parser --version
+          sudo bash -c 'for parameter in enabled hash_policy export_binary; do echo "$parameter"; cat "/sys/module/apparmor/parameters/$parameter"; done'
+          sudo bash -c 'for policy in /sys/kernel/security/apparmor/policy/profiles/crewship-native-codex-v159.*; do echo "$policy"; for field in name mode raw_sha256; do echo "$field"; cat "$policy/$field"; done; done'
+          sudo /usr/sbin/apparmor_parser --skip-kernel-load --skip-read-cache --stdout internal/restrictedruntime/nativepolicy/apparmor.profile | sha256sum
       - name: Test runner and authenticate upstream release context
         run: |
           go test ./cmd/crewship-restricted-native-runner -count=1 -timeout 5m
@@ -46,10 +56,6 @@ jobs:
           fail-build: true
           severity-cutoff: critical
           output-format: sarif
-      - name: Install the unchanged policy on this disposable runner only
-        run: |
-          sha256sum internal/restrictedruntime/nativepolicy/{apparmor.profile,seccomp.json}
-          sudo bash scripts/install-restricted-native-policy.sh
       - name: Create owned network-file fixtures with the failing host mount flags
         run: |
           mkdir "$RUNNER_TEMP/noatime-network-files"
