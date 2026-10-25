@@ -55,6 +55,8 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.authedMut("POST", "/api/v1/chats/{chatId}/proposals/{sourceId}/confirm", roleInline, r.chatProposalConfirm)
 	r.authedMut("POST", "/api/v1/chats/{chatId}/proposals/{sourceId}/discard", roleInline, r.chatProposalDiscard)
 	r.mux.Handle("GET /api/v1/chats/{chatId}/entity-refs", authed(wsCtx(http.HandlerFunc(r.chatEntityRefs))))
+	// openapi: responses 200,401,403,404,503
+	r.mux.Handle("GET /api/v1/chats/{chatId}/document-access", r.chatDocumentAccessIngress(authed(wsCtx(http.HandlerFunc(r.chatDocumentAccess)))))
 	r.mux.Handle("GET /api/v1/chats/{chatId}/run-preflight", authed(wsCtx(http.HandlerFunc(r.chatRunPreflight))))
 	r.mux.Handle("GET /api/v1/chats/{chatId}/decisions", authed(wsCtx(http.HandlerFunc(r.chatDecisionList))))
 	r.mux.Handle("GET /api/v1/chats/{chatId}/decisions/{sourceType}/{sourceId}", authed(wsCtx(http.HandlerFunc(r.chatDecisionGet))))

@@ -2100,6 +2100,114 @@
         ],
         "type": "object"
       },
+      "ChatDocumentAccess": {
+        "properties": {
+          "application_id": {
+            "type": "string"
+          },
+          "document_grant": {
+            "enum": [
+              "read",
+              "write"
+            ],
+            "type": "string"
+          },
+          "document_type": {
+            "enum": [
+              "document",
+              "spreadsheet"
+            ],
+            "type": "string"
+          },
+          "page_id": {
+            "type": "string"
+          },
+          "policy_allows": {
+            "type": "boolean"
+          },
+          "provenance": {
+            "enum": [
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "task_status": {
+            "enum": [
+              "unavailable",
+              "no_active_task",
+              "active"
+            ],
+            "type": "string"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/ChatDocumentTaskView"
+            },
+            "type": "array"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "page_id",
+          "title",
+          "document_type",
+          "application_id",
+          "document_grant",
+          "policy_allows",
+          "task_status",
+          "tasks",
+          "provenance"
+        ],
+        "type": "object"
+      },
+      "ChatDocumentAccessList": {
+        "properties": {
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/ChatDocumentAccess"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "documents"
+        ],
+        "type": "object"
+      },
+      "ChatDocumentTaskView": {
+        "properties": {
+          "can_read": {
+            "type": "boolean"
+          },
+          "can_write": {
+            "type": "boolean"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "work_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_id",
+          "run_id",
+          "scope",
+          "expires_at",
+          "can_read",
+          "can_write"
+        ],
+        "type": "object"
+      },
       "ChatEntityIdentity": {
         "properties": {
           "deleted": {
@@ -62772,6 +62880,157 @@
           "chats"
         ],
         "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/chats/{chatId}/document-access": {
+      "get": {
+        "description": "List chat document access (GET /api/v1/chats/{chatId}/document-access).",
+        "operationId": "get_api_v1_chats_chatId_document-access",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chatId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatDocumentAccessList"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "description": "Authorization-sensitive projection; never store in shared caches.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "List chat document access",
+        "tags": [
+          "chats"
+        ],
+        "x-crewship-read-only": true
       }
     },
     "/api/v1/chats/{chatId}/document-results": {

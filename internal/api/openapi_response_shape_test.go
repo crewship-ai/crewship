@@ -51,6 +51,9 @@ var responseShapeContracts = []struct {
 	value any
 }{
 	{name: "MooringSession", pointer: "/components/schemas/MooringSession", value: collaborationHTTPSessionResponse{}},
+	{name: "ChatDocumentAccessList", pointer: "/components/schemas/ChatDocumentAccessList", value: chatDocumentAccessResponse{}},
+	{name: "ChatDocumentAccess", pointer: "/components/schemas/ChatDocumentAccess", value: chatDocumentAccess{}},
+	{name: "ChatDocumentTaskView", pointer: "/components/schemas/ChatDocumentTaskView", value: collaborationAgentTaskView{}},
 	{name: "MooringSessionEditor", pointer: "/components/schemas/MooringSession/properties/editor", value: collaborationHTTPSessionEditor{}},
 	{name: "MooringSessionVersions", pointer: "/components/schemas/MooringSession/properties/versions", value: protocol.Versions{}},
 	{name: "CredentialFolder", pointer: "/components/schemas/CredentialFolder", value: credentialFolderResponse{}},

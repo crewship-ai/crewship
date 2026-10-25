@@ -44,6 +44,9 @@ var schemaKeyContracts = []struct {
 	value any
 }{
 	{name: "WorkspacePendingRunResponseV1", pointer: "/components/schemas/WorkspacePendingRunResponseV1", value: pendingRunReceipt{}},
+	{name: "ChatDocumentAccessList", pointer: "/components/schemas/ChatDocumentAccessList", value: chatDocumentAccessResponse{}},
+	{name: "ChatDocumentAccess", pointer: "/components/schemas/ChatDocumentAccess", value: chatDocumentAccess{}},
+	{name: "ChatDocumentTaskView", pointer: "/components/schemas/ChatDocumentTaskView", value: collaborationAgentTaskView{}},
 	{name: "WorkspacePendingRunsResponseV1[]", pointer: "/components/schemas/WorkspacePendingRunsResponseV1/items", value: pendingRunReceipt{}},
 	{name: "Run", pointer: "/components/schemas/Run", value: runResponse{}},
 	{name: "RunList", pointer: "/components/schemas/RunList", value: runListResponse{}},

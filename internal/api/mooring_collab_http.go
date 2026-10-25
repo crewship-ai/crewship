@@ -63,6 +63,8 @@ type collaborationHTTPManager struct {
 	closed      bool
 	docs        map[mooring.SessionKey]*collaborationHTTPDocument
 	usedOrigins map[mooring.SessionKey]map[uint64]struct{}
+
+	agentMandates *collaborationAgentMandateStore
 }
 type collaborationHTTPDocument struct {
 	manager     *collaborationHTTPManager

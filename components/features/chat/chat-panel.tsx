@@ -1452,9 +1452,11 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
       <div className="relative h-full">
         {mobileDecisionPanel}
         <RightPanel
-          key={`${workspaceId}:${agentId}:${sessionId}`}
+          key={`${currentUserId}:${workspaceId}:${agentId}:${sessionId}`}
           agentId={agentId}
           workspaceId={workspaceId}
+          chatId={sessionId}
+          viewerId={currentUserId}
           initialTab={mobilePanel}
           workHeader={waitingForYou}
           style={{ width: "100%", height: "100%" }}
@@ -1691,9 +1693,11 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
       {executionProfile === "trusted" && <ArtifactPane scopeKey={artifactScope} onAskSelection={askArtifactSelection} agentId={agentId} expanded={artifactFocus} />}
       {executionProfile === "trusted" && (!artifactOpen || artifactFocus) && <RightDrawer>
         {(drawerActiveTab === "work" ? decisionPanel ?? proposalPanel ?? issuePanel : null) ?? <RightPanel
-          key={`${workspaceId}:${agentId}:${sessionId}`}
+          key={`${currentUserId}:${workspaceId}:${agentId}:${sessionId}`}
           agentId={agentId}
           workspaceId={workspaceId}
+          chatId={sessionId}
+          viewerId={currentUserId}
           initialTab={drawerActiveTab}
           workHeader={waitingForYou}
           hideTabs
