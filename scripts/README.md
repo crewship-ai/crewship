@@ -181,3 +181,10 @@ runs `go vet -tags conformance ./...`, which compiles this test but does not
 execute Chromium. Executing either tagged test set requires the explicit browser
 environment and real static export; missing configuration fails rather than skips.
 `go test -tags conformance ./...` therefore also requires those prerequisites.
+
+`ci/native-noatime-fixture.sh IMAGE OUTPUT red|green` is restricted to a
+disposable Linux acceptance host with the unchanged native AppArmor policy and
+an owned atime fixture on its Docker network-file source directory. It invokes the real production native canary,
+rejecting skips; the RED control must exhibit the expected resolver remount
+failure. It neither publishes an image nor activates a runtime. Do not run its
+fixture setup on a shared development host; use the candidate workflow.
