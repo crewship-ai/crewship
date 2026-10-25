@@ -35,8 +35,14 @@ fn run() -> std::io::Result<()> {
     ))
 }
 fn main() {
-    if run().is_err() {
+    if let Err(error) = run() {
         // No untrusted frames or credentials enter diagnostics.
+        use std::io::Write;
+        let _ = writeln!(
+            std::io::stderr(),
+            "mooring runtime stopped: kind={:?}",
+            error.kind()
+        );
         std::process::exit(1);
     }
 }

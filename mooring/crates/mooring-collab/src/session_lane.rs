@@ -7,7 +7,7 @@ use mooring_protocol::{
 };
 use std::{
     collections::VecDeque,
-    io,
+    io::{self, Write},
     net::Shutdown,
     os::unix::net::UnixStream,
     sync::{Arc, Condvar, Mutex},
@@ -243,8 +243,13 @@ impl Output {
             writer.write_all(bytes)?;
             writer.flush()
         })();
-        if result.is_err() {
+        if let Err(error) = &result {
             self.shared.close();
+            let _ = writeln!(
+                io::stderr(),
+                "mooring session lane: output-error kind={:?}",
+                error.kind()
+            );
         }
         result
     }
@@ -281,19 +286,28 @@ impl Lane {
         let reader = thread::Builder::new()
             .name("mooring-session-reader".into())
             .spawn(move || {
-                while let Ok(Some(frame)) = super::read_profile_frame(&mut stream, true) {
+                let (reason, kind) = loop {
+                    // Preserve the failing boundary without recording frames,
+                    // document data or participant identifiers.
+                    let frame = match super::read_profile_frame(&mut stream, true) {
+                        Ok(Some(frame)) => frame,
+                        Ok(None) => break ("peer-eof", None),
+                        Err(error) => break ("frame-read-error", Some(error.kind())),
+                    };
                     let native = read_shared.state.lock().unwrap().human_native;
                     let (route, canonical) = match validate_incoming(&frame, native) {
                         Ok(frame) => frame,
-                        Err(_) => break,
+                        Err(_) => break ("invalid-incoming-control", None),
                     };
                     let mut q = read_shared.state.lock().unwrap();
-                    if q.closed
-                        || q.count + q.retained_count >= session_control::MAX_QUEUED_CONTROLS
+                    if q.closed {
+                        break ("already-closed", None);
+                    }
+                    if q.count + q.retained_count >= session_control::MAX_QUEUED_CONTROLS
                         || canonical.len()
                             > session_control::MAX_QUEUED_CONTROL_BYTES - q.bytes - q.retained_bytes
                     {
-                        break;
+                        break ("queue-capacity", None);
                     }
                     q.bytes += canonical.len();
                     q.count += 1;
@@ -302,8 +316,11 @@ impl Lane {
                     if matches!(route, Route::Actor) {
                         read_shared.wake_actor();
                     }
-                }
+                };
                 read_shared.close();
+                // Best effort after closing, with no queue lock held. Stderr
+                // failure must never prevent the original denial transition.
+                let _ = writeln!(io::stderr(), "mooring session lane: {reason} kind={kind:?}");
             })?;
         let output = Output {
             shared: shared.clone(),
