@@ -49,6 +49,7 @@ export interface PageRowMenuProps {
   onOpenChange: (open: boolean) => void
   onMove?: () => void
   onRemoveFromFolder?: () => void
+  onShare?: (opener: HTMLButtonElement | null) => void
 }
 
 export function PageRowMenu({
@@ -58,7 +59,9 @@ export function PageRowMenu({
   onOpenChange,
   onMove,
   onRemoveFromFolder,
+  onShare,
 }: PageRowMenuProps) {
+  const trigger = React.useRef<HTMLButtonElement>(null)
   return (
     // `modal={false}`: an item here opens a dialog, and a modal menu closing
     // in the same tick as a modal dialog opening leaves `pointer-events:none`
@@ -68,6 +71,7 @@ export function PageRowMenu({
         <button
           type="button"
           aria-label={`Actions for ${pageName}`}
+          ref={trigger}
           data-rail-row-menu
           className={TRIGGER_CLASS}
           onClick={stop}
@@ -86,6 +90,10 @@ export function PageRowMenu({
         onClick={stop}
         onPointerDown={stop}
       >
+        {onShare && <DropdownMenuItem onSelect={() => onShare(trigger.current)}>
+          <Users aria-hidden />
+          Share…
+        </DropdownMenuItem>}
         {onMove && <DropdownMenuItem onSelect={onMove}>
           <FolderInput aria-hidden />
           Move to folder…

@@ -13,7 +13,8 @@ import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react"
 
-vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "pages-test-human" } }, status: "authenticated" }) }))
+const identity = vi.hoisted(() => ({ id: "pages-test-human" }))
+vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: identity.id } }, status: "authenticated" }) }))
 
 const access = vi.hoisted(() => ({role: "MANAGER" as string | null, capabilities: [] as string[], loading: false, error: false}))
 vi.mock("@/hooks/use-workspace", async (importOriginal) => ({
@@ -70,11 +71,17 @@ vi.mock("@/components/features/pages/page-application", () => ({
 }))
 
 vi.mock("@/components/features/pages/page-document",()=>({PageDocument:({pageId,workspaceId}:{pageId:string;workspaceId:string})=><div data-testid="native-document">Native document {workspaceId}:{pageId}</div>}))
+const nativeHost = vi.hoisted(() => ({ unavailable: undefined as undefined | (() => void) }))
+vi.mock("@/components/features/pages/wordcraft-editor-host", () => ({ WordCraftEditorHost: ({ onDirtyChange, onUnavailable, unavailable }: { unavailable?: boolean; onDirtyChange: (dirty: boolean) => void; onUnavailable?: () => void }) => {
+  nativeHost.unavailable = onUnavailable
+  return <div data-testid="native-wordcraft" data-blocked={String(Boolean(unavailable))}><button onClick={() => onDirtyChange(true)}>Make draft</button></div>
+} }))
+vi.mock("@/components/features/pages/native-document-access-dialog", () => ({ NativeDocumentAccessDialog: ({ slug, onClose }: { slug: string; onClose: () => void }) => <div role="dialog">Access {slug}<button onClick={onClose}>Close access</button></div> }))
 
 import { PagesLayout } from "@/components/features/pages/pages-layout"
 import { PAGE_STATE_ORDER } from "@/components/features/pages/page-state"
 import { PANEL_STATES } from "@/components/features/pages/panels/types"
-import type { WirePage } from "@/hooks/use-pages"
+import { pagesKeys, type WirePage } from "@/hooks/use-pages"
 
 const NOW = new Date("2026-08-12T12:00:00Z")
 
@@ -118,17 +125,18 @@ function renderLayout(list: WirePage[], slug?: string) {
     return okJSON(list)
   })
   vi.stubGlobal("fetch", mockFetch)
-  render(
+  const view = render(
     <QueryClientProvider client={qc}>
       <PagesLayout workspaceId="ws-1" slug={slug} now={NOW} />
     </QueryClientProvider>,
   )
-  return { qc, mockFetch }
+  return { ...view, qc, mockFetch }
 }
 
 describe("PagesLayout", () => {
   beforeEach(() => {
     cleanup()
+    identity.id = "pages-test-human"
     Object.assign(access, {role:"MANAGER",capabilities:[],loading:false,error:false})
     push.mockReset()
     // The editor's mode and section live in the address now, so a test that
@@ -137,6 +145,45 @@ describe("PagesLayout", () => {
     window.history.replaceState(null, "", "/pages")
   })
   afterEach(() => vi.unstubAllGlobals())
+
+  it("opens native sharing without replacing a dirty WordCraft editor and closes it when the host stops", async () => {
+    renderLayout([{ ...FLEET, has_collaboration: true }], FLEET.slug!)
+    const editor = await screen.findByTestId("native-wordcraft")
+    fireEvent.click(screen.getByRole("button", { name: "Make draft" }))
+    fireEvent.click(screen.getByRole("button", { name: "Share" }))
+    expect(screen.getByRole("dialog")).toHaveTextContent(`Access ${FLEET.slug}`)
+    expect(screen.getByTestId("native-wordcraft")).toBe(editor)
+    expect(screen.queryByTestId("section-content")).not.toBeInTheDocument()
+    act(() => nativeHost.unavailable?.())
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    expect(screen.getByTestId("native-wordcraft")).toBe(editor)
+  })
+
+  it("replaces the old native host even when the new human Page cache is already warm", async () => {
+    const page = { ...FLEET, has_collaboration: true }
+    const view = renderLayout([page], FLEET.slug!)
+    const original = await screen.findByTestId("native-wordcraft")
+    view.qc.setQueryData(pagesKeys.detail("ws-1", FLEET.slug!, "second-human"), page)
+    identity.id = "second-human"
+    view.rerender(<QueryClientProvider client={view.qc}><PagesLayout workspaceId="ws-1" slug={FLEET.slug} now={NOW} /></QueryClientProvider>)
+    await waitFor(() => expect(screen.getByTestId("native-wordcraft")).not.toBe(original))
+    expect(original.isConnected).toBe(false)
+  })
+
+  it.each([403, 404])("retains and blocks the dirty original native host when its actual Page refetch returns %s", async status => {
+    const view = renderLayout([{ ...FLEET, has_collaboration: true }], FLEET.slug!)
+    const original = await screen.findByTestId("native-wordcraft")
+    fireEvent.click(screen.getByRole("button", { name: "Make draft" }))
+    view.mockFetch.mockImplementation(async input => String(input).includes(`/api/v1/pages/${FLEET.slug}`)
+      ? new Response(JSON.stringify({ error: "Current Page denied." }), { status, headers: { "Content-Type": "application/json" } })
+      : okJSON([]))
+    await act(async () => { await view.qc.refetchQueries({ queryKey: pagesKeys.detail("ws-1", FLEET.slug!, identity.id) }) })
+    await waitFor(() => {
+      expect(screen.getByTestId("native-wordcraft")).toBe(original)
+      expect(original).toHaveAttribute("data-blocked", "true")
+    })
+    expect(screen.queryByRole("dialog")).toBeNull()
+  })
 
   it("keeps readable Pages while hiding creation and import for VIEWER without page.create", async () => {
     access.role = "VIEWER"
