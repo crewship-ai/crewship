@@ -81,7 +81,7 @@ func TestApprovedLegacyHostObservationRetainsApprovalDuringDispatch(t *testing.T
 		rec.mu.Lock()
 		var payload map[string]any
 		if len(rec.entries) > 0 {
-			payload, _ = rec.entries[0].Payload.(map[string]any)
+			payload = rec.entries[0].Payload
 		}
 		rec.mu.Unlock()
 		if payload != nil {
