@@ -418,7 +418,7 @@ func SetEnabled(ctx context.Context, db *sql.DB, workspaceID, id string, enabled
 func SetEnabledAuthorized(ctx context.Context, db *sql.DB, workspaceID, id string, enabled, allowedHost bool) error {
 	h, err := Get(ctx, db, workspaceID, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("hooks: set enabled: %w", err)
 	}
 	if h == nil {
 		return sql.ErrNoRows
