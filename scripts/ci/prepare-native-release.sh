@@ -40,7 +40,7 @@ cp -- cmd/crewship-restricted-native-runner/bubblewrap/{atime-remount.patch,crew
 # Keep the reviewed runtime recipe and pinned base/bwrap/Codex checks intact.
 printf '\nCOPY --chown=0:0 licenses /usr/share/licenses/crewship-native/\nCOPY --chown=0:0 release-source.json /usr/share/crewship-native/release-source.json\n' >> "$context_dir/Dockerfile"
 SOURCE_SHA=$(git rev-parse HEAD) CONTEXT_DIR="$context_dir" UPSTREAM_SHA="$upstream" CODEX_SHA="$binary_sha" ARCHIVE_SHA="$archive_sha" python3 - <<'PY'
-import json, os, pathlib
+import hashlib, json, os, pathlib
 root = pathlib.Path(os.environ['CONTEXT_DIR'])
 (root / 'release-source.json').write_text(json.dumps({
     'schema': 1, 'source_sha': os.environ['SOURCE_SHA'],
@@ -50,5 +50,10 @@ root = pathlib.Path(os.environ['CONTEXT_DIR'])
     'upstream_archive_sha256': os.environ['ARCHIVE_SHA'],
     'upstream_archive_url': 'https://github.com/openai/codex/releases/download/rust-v0.159.0/codex-x86_64-unknown-linux-musl.tar.gz',
     'platform': 'linux/amd64',
+    'bubblewrap_source_version': '0.8.0-2+deb12u1',
+    'bubblewrap_package_version': '0.8.0-2+deb12u1+crewship1',
+    'bubblewrap_binary_sha256': 'c3cd4aa9990c6aee9f084ea6790f4c77056b42262d2a2364073e2295bf6d855f',
+    'bubblewrap_patch_sha256': hashlib.sha256((root / 'atime-remount.patch').read_bytes()).hexdigest(),
+    'bubblewrap_header_sha256': hashlib.sha256((root / 'crewship-atime.h').read_bytes()).hexdigest(),
 }, sort_keys=True) + '\n')
 PY

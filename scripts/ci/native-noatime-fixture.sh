@@ -8,7 +8,7 @@ image=$1 output=$2 expected=$3
 [[ $expected == red || $expected == green ]]
 mkdir -- "$output"
 set +e
-CREWSHIP_RESTRICTED_LIVE=1 CREWSHIP_RESTRICTED_NATIVE_IMAGE="$image" \
+CREWSHIP_NATIVE_EXPECT_NOATIME=1 CREWSHIP_RESTRICTED_LIVE=1 CREWSHIP_RESTRICTED_NATIVE_IMAGE="$image" \
   go test -tags restrictedruntime_live ./internal/restricteddispatch \
   -run '^TestLiveNativeFrozenToolsAndDurableAccounting$' -count=1 -timeout 10m -json > "$output/go-test.jsonl" 2> "$output/stderr.log"
 result=$?

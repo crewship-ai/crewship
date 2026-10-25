@@ -36,7 +36,7 @@ RUN apt-get update && apt-get upgrade -y --no-install-recommends \
     && bwrap --version | grep -Fx 'bubblewrap 0.8.0' \
     && sha256sum /usr/bin/bwrap \
     && dpkg-query -W -f='${Version}\n' bubblewrap | grep -Fx '0.8.0-2+deb12u1+crewship1' \
-    && echo '85580dd52ed366ece8844e90fa75ac7c4de8802963071344e123221fb9f6f11e  /usr/bin/bwrap' | sha256sum -c - \
+    && echo 'c3cd4aa9990c6aee9f084ea6790f4c77056b42262d2a2364073e2295bf6d855f  /usr/bin/bwrap' | sha256sum -c - \
     && rm -rf /var/lib/apt/lists/* /tmp/bubblewrap.deb
 COPY crewship-restricted-native-runner /opt/crewship-runner
 COPY crewship-restricted-native-runner /opt/crewship-native-runner
