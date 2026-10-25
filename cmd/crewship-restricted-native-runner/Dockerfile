@@ -20,6 +20,7 @@ COPY crewship-restricted-native-runner /opt/crewship-runner
 COPY crewship-restricted-native-runner /opt/crewship-native-runner
 COPY codex /opt/codex
 RUN echo 'd2752c52353401f7f6efbfcea68796f4f7a3d3e4769f5d1da53fa49d4856b72f  /opt/codex' | sha256sum -c - \
-    && /opt/codex --version | grep -Fx 'codex-cli 0.159.0'
+    && ln /opt/codex /usr/bin/codex \
+    && /usr/bin/codex --version | grep -Fx 'codex-cli 0.159.0'
 USER 1001:1001
 ENTRYPOINT ["/opt/crewship-runner", "hold"]

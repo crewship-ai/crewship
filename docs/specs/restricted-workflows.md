@@ -197,7 +197,10 @@ which inherits workspace write protections and denies root reads except for
 built-in protected metadata rules. It does not combine permission profiles with
 `--sandbox`, which would override the profile. Command network access remains
 restricted. The agent CLI and Debian bubblewrap executable pins, container
-capabilities and seccomp/AppArmor bytes are unchanged.
+capabilities and seccomp/AppArmor bytes are unchanged. The same authenticated
+Codex executable is also linked at `/usr/bin/codex` and launched there, so its
+inner seccomp helper re-execution remains visible under the allowed `/usr` root.
+The regular `/opt/codex` file remains available to existing image consumers.
 
 This avoids recursively importing Docker's synthetic network files into the
 inner filesystem. On a noatime-backed Docker data filesystem, those mounts can

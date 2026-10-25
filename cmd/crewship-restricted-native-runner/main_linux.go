@@ -117,7 +117,7 @@ func nativeArgs(model string) []string {
 
 func native(ctx context.Context, model string, output io.Writer) error {
 	for path, want := range map[string]string{
-		"/opt/codex":     "d2752c52353401f7f6efbfcea68796f4f7a3d3e4769f5d1da53fa49d4856b72f",
+		"/usr/bin/codex": "d2752c52353401f7f6efbfcea68796f4f7a3d3e4769f5d1da53fa49d4856b72f",
 		"/usr/bin/bwrap": "85580dd52ed366ece8844e90fa75ac7c4de8802963071344e123221fb9f6f11e",
 	} {
 		file, err := os.Open(path)
@@ -142,7 +142,7 @@ func native(ctx context.Context, model string, output io.Writer) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "/opt/codex", nativeArgs(model)...)
+	cmd := exec.CommandContext(ctx, "/usr/bin/codex", nativeArgs(model)...)
 	cmd.Dir = "/home/agent/work"
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=/home/agent", "CODEX_HOME=/home/agent/.codex", "LANG=C.UTF-8", "CREWSHIP_BROKER_TOKEN=" + os.Getenv("CREWSHIP_BROKER_TOKEN")}
 	return runNativeProcess(cmd, cancel, output, "/home/agent/work")
