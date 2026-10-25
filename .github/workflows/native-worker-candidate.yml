@@ -56,15 +56,15 @@ jobs:
           fail-build: true
           severity-cutoff: critical
           output-format: sarif
-      - name: Create owned network-file fixtures with the failing host mount flags
+      - name: Reproduce the Docker network-file source flags on this disposable VM only
         run: |
-          mkdir "$RUNNER_TEMP/noatime-network-files"
-          sudo mount -t tmpfs -o size=1m,noatime tmpfs "$RUNNER_TEMP/noatime-network-files"
-          printf '\n' | sudo tee "$RUNNER_TEMP/noatime-network-files/resolv.conf" >/dev/null
-          printf '127.0.0.1 localhost\n' | sudo tee "$RUNNER_TEMP/noatime-network-files/hosts" >/dev/null
-          printf 'native-fixture\n' | sudo tee "$RUNNER_TEMP/noatime-network-files/hostname" >/dev/null
-          sudo chmod 0644 "$RUNNER_TEMP/noatime-network-files/"*
-          findmnt -T "$RUNNER_TEMP/noatime-network-files/resolv.conf"
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$(docker info --format '{{.DockerRootDir}}')" = /var/lib/docker
+          sudo test -d /var/lib/docker/containers
+          sudo mount --bind /var/lib/docker/containers /var/lib/docker/containers
+          touch "$RUNNER_TEMP/native-docker-fixture-mounted"
+          sudo mount -o remount,bind,noatime /var/lib/docker/containers
+          sudo findmnt -T /var/lib/docker/containers
       - name: Freeze the original application source for differential controls
         run: |
           git fetch --no-tags origin 6b39cadb8906fa797eb1503b351cc1ef07bb2501
@@ -76,24 +76,26 @@ jobs:
           image=$(docker image inspect --format '{{.Id}}' "$image")
           cd "$RUNNER_TEMP/native-baseline-source"
           sudo env "PATH=$PATH" GOTOOLCHAIN=local bash "$GITHUB_WORKSPACE/scripts/ci/native-noatime-fixture.sh" \
-            "$image" "$RUNNER_TEMP/noatime-network-files" "$RUNNER_TEMP/native-red" red
+            "$image" "$RUNNER_TEMP/native-red" red
       - name: Prove the original image passes when only the fixture atime flag changes
         run: |
-          sudo mount -o remount,relatime "$RUNNER_TEMP/noatime-network-files"
+          sudo mount -o remount,bind,relatime /var/lib/docker/containers
+          sudo findmnt -T /var/lib/docker/containers
           image=$(docker image inspect --format '{{.Id}}' ghcr.io/crewship-ai/crewship-restricted-native@sha256:4acc8f2c982ae3d178b04509ab778c6960b8121f1b948d02d9bacc8d2982d5a9)
           cd "$RUNNER_TEMP/native-baseline-source"
           sudo env "PATH=$PATH" GOTOOLCHAIN=local bash "$GITHUB_WORKSPACE/scripts/ci/native-noatime-fixture.sh" \
-            "$image" "$RUNNER_TEMP/noatime-network-files" "$RUNNER_TEMP/native-relatime-control" green
+            "$image" "$RUNNER_TEMP/native-relatime-control" green
       - name: Require the production canary and negative sandbox checks on the candidate
         run: |
-          sudo mount -o remount,noatime "$RUNNER_TEMP/noatime-network-files"
+          sudo mount -o remount,bind,noatime /var/lib/docker/containers
+          sudo findmnt -T /var/lib/docker/containers
           sudo env "PATH=$PATH" GOTOOLCHAIN=local bash scripts/ci/native-noatime-fixture.sh "$(docker image inspect --format '{{.Id}}' crewship-native-candidate:verify)" \
-            "$RUNNER_TEMP/noatime-network-files" "$RUNNER_TEMP/native-green" green
+            "$RUNNER_TEMP/native-green" green
       - name: Release only the owned fixture mount
         if: always()
         run: |
-          if mountpoint -q "$RUNNER_TEMP/noatime-network-files"; then
-            sudo umount "$RUNNER_TEMP/noatime-network-files"
+          if test -e "$RUNNER_TEMP/native-docker-fixture-mounted"; then
+            sudo umount /var/lib/docker/containers
           fi
       - name: Record the tested source and local image identity
         env:

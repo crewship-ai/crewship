@@ -1,32 +1,14 @@
 #!/usr/bin/env bash
-# Ephemeral Linux acceptance host only. The caller mounts an owned noatime tmpfs.
-# Run the production native canary with read-only synthetic Docker network files.
+# Ephemeral Linux acceptance host only. The caller sets Docker network-file
+# source mount flags. The production canary container arguments remain unchanged.
 set -euo pipefail
-[[ $# == 4 ]] || { echo 'usage: native-noatime-fixture.sh IMAGE FIXTURE OUTPUT red|green' >&2; exit 2; }
-image=$1 fixture=$2 output=$3 expected=$4
-[[ $fixture = /* && $output = /* && ! -e $output ]]
+[[ $# == 3 ]] || { echo 'usage: native-noatime-fixture.sh IMAGE OUTPUT red|green' >&2; exit 2; }
+image=$1 output=$2 expected=$3
+[[ $output = /* && ! -e $output ]]
 [[ $expected == red || $expected == green ]]
 mkdir -- "$output"
-actual_docker=$(command -v docker)
-readonly actual_docker
-for file in resolv.conf hosts hostname; do
-  [[ -f $fixture/$file && ! -L $fixture/$file ]]
-done
-export NATIVE_FIXTURE_ROOT="$fixture" NATIVE_FIXTURE_DOCKER="$actual_docker"
-cat > "$output/docker" <<'PY'
-#!/usr/bin/env python3
-import os, sys
-args = sys.argv[1:]
-if args and args[0] == 'create':
-    mounts = []
-    for name in ('resolv.conf', 'hosts', 'hostname'):
-        mounts += ['--mount', 'type=bind,src=' + os.environ['NATIVE_FIXTURE_ROOT'] + '/' + name + ',dst=/etc/' + name + ',readonly']
-    args = [args[0], *mounts, *args[1:]]
-os.execv(os.environ['NATIVE_FIXTURE_DOCKER'], [os.environ['NATIVE_FIXTURE_DOCKER'], *args])
-PY
-chmod 0755 "$output/docker"
 set +e
-PATH="$output:$PATH" CREWSHIP_RESTRICTED_LIVE=1 CREWSHIP_RESTRICTED_NATIVE_IMAGE="$image" \
+CREWSHIP_RESTRICTED_LIVE=1 CREWSHIP_RESTRICTED_NATIVE_IMAGE="$image" \
   go test -tags restrictedruntime_live ./internal/restricteddispatch \
   -run '^TestLiveNativeFrozenToolsAndDurableAccounting$' -count=1 -timeout 10m -json > "$output/go-test.jsonl" 2> "$output/stderr.log"
 result=$?

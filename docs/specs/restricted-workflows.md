@@ -209,8 +209,9 @@ uses the original signed image as an expected RED control and requires the
 production native canary to execute and PASS on the candidate, including failed
 reads outside the profile, protected metadata/outside-workspace writes and a
 loopback broker connection attempt. The original application6b39/image pair
-provides a second control with only the fixture atime flag changed. Its three owned
-read-only synthetic network-file binds reproduce that filesystem condition;
-they are test fixtures, not production mounts or runtime qualification.
+provides a second control with only the fixture atime flag changed. The disposable hosted VM changes only the mount atime flags on the Docker
+network-file source directory and restores its owned fixture bind afterward.
+Container creation arguments and the strict runtime mount audit remain unchanged;
+no extra container mounts or runtime qualification are introduced.
 Neither candidate checks nor publication release an infrastructure activation
 hold or establish provider-backed Guest acceptance.

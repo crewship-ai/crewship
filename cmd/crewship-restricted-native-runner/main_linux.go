@@ -109,6 +109,7 @@ func nativeArgs(model string) []string {
 	args = append(args,
 		"-c", `default_permissions="crewship_native"`,
 		"-c", `permissions.crewship_native.extends=":workspace"`,
+		"-c", `permissions.crewship_native.network.enabled=false`,
 		"-c", `permissions.crewship_native.filesystem={":root"="deny","/usr"="read","/bin"="read","/lib"="read","/lib64"="read"}`,
 	)
 	return append(args, "Complete the scoped task provided by the host.")
