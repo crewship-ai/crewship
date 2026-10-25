@@ -27,7 +27,9 @@ func (c *collaborationHTTPConnection) committedOutput(ctx context.Context, q pro
 
 // originalGate validates the unchanged old envelope; checkedSendLocked below
 // independently uses the NEW current SQL gate. Denial never publishes bytes.
-func (c *collaborationHTTPConnection) committedOutputRecipient(ctx context.Context, q protocol.SessionParticipantOutput, raw []byte, kind string, originalGate mooring.DeliveryGrant, denied bool) error {
+func (c *collaborationHTTPConnection) committedOutputRecipient(ctx context.Context, q protocol.SessionParticipantOutput, raw []byte, kind string, originalGate mooring.DeliveryGrant, denied bool) (failure error) {
+	stage := hostReceiptBinding
+	defer func() { c.document.observeHostFailure(ctx, stage, failure) }()
 	d := c.document
 	if d.originals == nil {
 		return errCollaborationHTTP
@@ -42,10 +44,12 @@ func (c *collaborationHTTPConnection) committedOutputRecipient(ctx context.Conte
 	}
 	switch kind {
 	case "changes_received":
+		stage = hostPendingShape
 		var pending protocol.ChangesReceived
 		if json.Unmarshal(raw, &pending) != nil || pending.State != "pending" || pending.Scope != d.wireScope() || pending.SessionID != protocol.Identifier(d.activation.SessionID()) {
 			return errCollaborationHTTP
 		}
+		stage = hostPendingMembership
 		d.originals.mu.Lock()
 		group := d.originals.groups[c.ref+"\x00"+string(pending.RequestID)]
 		valid := group != nil && group.captured && group.sent && group.source != nil && group.source.connection == c && q.RequestID == group.outerID && len(group.changes) == len(pending.ChangeIds)
@@ -67,10 +71,12 @@ func (c *collaborationHTTPConnection) committedOutputRecipient(ctx context.Conte
 		}
 		return c.checkedSendLocked(raw)
 	case "commit_result":
+		stage = hostReceiptShape
 		var receipt protocol.CommitResult
 		if json.Unmarshal(raw, &receipt) != nil {
 			return errCollaborationHTTP
 		}
+		stage = hostReceiptMatch
 		d.originals.mu.Lock()
 		group := d.originals.groups[c.ref+"\x00"+string(receipt.RequestID)]
 		valid := group != nil && group.source != nil && group.source.connection == c && group.captured && group.sent && group.receipt != nil && q.RequestID == group.outerID && collaborationEqualJSON(raw, group.receipt)
@@ -125,7 +131,9 @@ func collaborationPeerOutputID(revision, connection, participant, gate string) (
 // Validate the original child envelope before planning any missing DATA. Release
 // recipient/RAM locks before requalification; each physical frame is serialized
 // separately with its cursor publication so management renewals can progress.
-func (c *collaborationHTTPConnection) committedDocumentUpdate(ctx context.Context, q protocol.SessionParticipantOutput, raw []byte, originalGate mooring.DeliveryGrant, denied bool) error {
+func (c *collaborationHTTPConnection) committedDocumentUpdate(ctx context.Context, q protocol.SessionParticipantOutput, raw []byte, originalGate mooring.DeliveryGrant, denied bool) (failure error) {
+	stage := hostUpdateTuple
+	defer func() { c.document.observeHostFailure(ctx, stage, failure) }()
 	plan := func() ([]collaborationSavedFrame, error) {
 		c.mu.Lock()
 		defer c.mu.Unlock()
@@ -133,18 +141,22 @@ func (c *collaborationHTTPConnection) committedDocumentUpdate(ctx context.Contex
 		if !c.joinedDelivered || (c.closed && !denied) || q.ParticipantRef != protocol.Identifier(c.admission.participant) || q.GateID != protocol.Identifier(originalGate.GateID) || q.PermissionVersion != protocol.Counter(originalGate.PermissionVersion) {
 			return nil, errCollaborationHTTP
 		}
+		stage = hostUpdateShape
 		var update protocol.DocumentUpdate
 		if json.Unmarshal(raw, &update) != nil || update.Scope != d.wireScope() || update.SessionID != protocol.Identifier(d.activation.SessionID()) || update.Generation != d.wireFence().Generation || update.Encoding != "json" || update.RequestID != protocol.Identifier("actor-update:"+string(update.ToRevision)) {
 			return nil, errCollaborationHTTP
 		}
+		stage = hostUpdateOuter
 		expectedOuter, err := collaborationPeerOutputID(string(update.ToRevision), c.ref, c.admission.participant, originalGate.GateID)
 		if err != nil || q.RequestID != expectedOuter {
 			return nil, errCollaborationHTTP
 		}
+		stage = hostSavedSnapshot
 		latest, frames, err := c.savedFramesLocked()
 		if err != nil {
 			return nil, err
 		}
+		stage = hostSavedCorrelation
 		var observed collaborationObservedCut
 		valid := false
 		for _, frame := range frames {
@@ -161,6 +173,7 @@ func (c *collaborationHTTPConnection) committedDocumentUpdate(ctx context.Contex
 		if denied {
 			return nil, nil
 		}
+		stage = hostSavedCursor
 		if latest == "" {
 			return nil, errCollaborationHTTP
 		}
@@ -172,6 +185,7 @@ func (c *collaborationHTTPConnection) committedDocumentUpdate(ctx context.Contex
 		if collaborationRevisionLess(string(update.FromRevision), latest) {
 			return nil, errCollaborationHTTP
 		}
+		stage = hostSavedChain
 		chain, err := collaborationSavedChain(latest, string(update.FromRevision), frames)
 		if err != nil {
 			return nil, err
@@ -184,5 +198,6 @@ func (c *collaborationHTTPConnection) committedDocumentUpdate(ctx context.Contex
 	if err != nil {
 		return err
 	}
+	stage = hostCatchupSend
 	return c.sendSavedChain(ctx, chain)
 }

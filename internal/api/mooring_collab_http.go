@@ -49,6 +49,9 @@ const collaborationHTTPParticipantLimit = 128
 var errCollaborationHTTP = errors.New("Mooring session unavailable")
 
 type collaborationHTTPManager struct {
+	// Private diagnostic only; installed by the synthetic actual fixture before requests.
+	hostFailure *collaborationHostFailure
+
 	workers       sync.WaitGroup
 	stopped       chan struct{}
 	mu            sync.Mutex

@@ -206,8 +206,11 @@ func (c *collaborationHTTPConnection) savedCatchupPlanLocked() ([]collaborationS
 // The output FIFO owns ordering, not a long-lived recipient lock. Yield between
 // frames so serial management can renew/rotate; each send+observe remains atomic
 // with checkpoint load/send/observe and rechecks the CURRENT SQL reader gate.
-func (c *collaborationHTTPConnection) sendSavedChain(ctx context.Context, chain []collaborationSavedFrame) error {
+func (c *collaborationHTTPConnection) sendSavedChain(ctx context.Context, chain []collaborationSavedFrame) (failure error) {
+	stage := hostCatchupContext
+	defer func() { c.document.observeHostFailure(ctx, stage, failure) }()
 	for _, frame := range chain {
+		stage = hostCatchupContext
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -217,6 +220,7 @@ func (c *collaborationHTTPConnection) sendSavedChain(ctx context.Context, chain 
 		if deferred {
 			return nil
 		}
+		stage = hostCatchupGate
 		if err := c.ensureCurrentGateForOutput(ctx, true); err != nil {
 			if err == errCollaborationRecipientDenied {
 				return nil
@@ -227,6 +231,7 @@ func (c *collaborationHTTPConnection) sendSavedChain(ctx context.Context, chain 
 		err := func() error {
 			c.mu.Lock()
 			defer c.mu.Unlock()
+			stage = hostCatchupContext
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
@@ -245,10 +250,12 @@ func (c *collaborationHTTPConnection) sendSavedChain(ctx context.Context, chain 
 				}
 			}
 			l.mu.Unlock()
+			stage = hostCatchupCursor
 			needed, err := collaborationSavedFrameNeeded(latest, frame)
 			if err != nil || !needed {
 				return err
 			}
+			stage = hostCatchupEncode
 			raw, err := c.encodeSavedFrame(frame)
 			if err != nil {
 				return err
@@ -259,12 +266,15 @@ func (c *collaborationHTTPConnection) sendSavedChain(ctx context.Context, chain 
 			stop := context.AfterFunc(ctx, cancel)
 			defer stop()
 			defer cancel()
+			stage = hostCatchupContext
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
+			stage = hostCatchupPhysical
 			if err = c.checkedSendRequestLocked(c.request.WithContext(operation), raw); err != nil {
 				return err
 			}
+			stage = hostCatchupObserve
 			return l.observe(c, frame.observed)
 		}()
 		if err != nil || deferredDuringSend {
@@ -277,7 +287,9 @@ func (c *collaborationHTTPConnection) sendSavedChain(ctx context.Context, chain 
 // This owned DATA continuation is created only after opaque Joined capture.
 // Its old envelope/gate need not survive retirement pruning. Current rights are
 // established again by every checked send, never by this scheduling obligation.
-func (c *collaborationHTTPConnection) catchUpAfterJoined(ctx context.Context) error {
+func (c *collaborationHTTPConnection) catchUpAfterJoined(ctx context.Context) (failure error) {
+	stage := hostJoinedCatchup
+	defer func() { c.document.observeHostFailure(ctx, stage, failure) }()
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}

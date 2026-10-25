@@ -95,9 +95,19 @@ func runMooringHTTPActualSDK(t *testing.T, peerDelete bool, grantChange ...strin
 	if r.mooringHTTP == nil {
 		t.Fatal("actual controller missing pinned runtime")
 	}
+	// Diagnostic-only pointer is published before any request/bootstrap/worker.
+	hostFailure := new(collaborationHostFailure)
+	hostReceiveFailed := false
+	r.mooringHTTP.hostFailure = hostFailure
+	defer func() {
+		if hostReceiveFailed {
+			v := hostFailure.first.Load()
+			t.Logf("private host first stage=%s cancelled=%v cleanup=%v", collaborationHostStageName(v), v&hostCancelledBit != 0, v&hostCleanupBit != 0)
+		}
+	}()
 	defer r.mooringHTTP.Close()
 	server := httptest.NewServer(r.mux)
-	defer server.Close()
+	defer func() { hostFailure.cleanup.Store(true); server.Close() }()
 	setGrant := func(level string) error {
 		subject := rig.userID
 		if level == "unrelated-read" {
@@ -499,6 +509,9 @@ process.stdout.write(JSON.stringify(changes));`
 			_ = recipient.ws.SetReadDeadline(time.Now().Add(15 * time.Second))
 			var raw []byte
 			if err := websocket.Message.Receive(recipient.ws, &raw); err != nil {
+				hostReceiveFailed = true
+				v := hostFailure.first.Load()
+				t.Logf("private host first before cleanup stage=%s cancelled=%v cleanup=%v", collaborationHostStageName(v), v&hostCancelledBit != 0, v&hostCleanupBit != 0)
 				phase("receive-failed")
 				t.Logf("runtime error=%v", document.cell.runtime.Err())
 				_, now, clockErr := document.manager.clock.Now()

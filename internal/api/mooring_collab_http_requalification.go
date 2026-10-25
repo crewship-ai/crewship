@@ -189,6 +189,7 @@ func (c *collaborationHTTPConnection) ensureCurrentGateForOutput(ctx context.Con
 		if closedTrigger && closed {
 			return errCollaborationRecipientDenied
 		}
+		c.document.observeHostFailure(ctx, hostGateTransitionFailure, err)
 		c.document.cancel()
 		return err
 	}
@@ -281,7 +282,9 @@ func (d *collaborationHTTPDocument) deliveryControl(ctx context.Context, token m
 
 // Ticket and Joined remain on ONE serial management dispatcher. Only DATA
 // enters the separate opaque-token FIFO, preserving the physical Ticket observer.
-func (d *collaborationHTTPDocument) outputControl(ctx context.Context, token mooring.SessionControl, q protocol.SessionParticipantOutput) error {
+func (d *collaborationHTTPDocument) outputControl(ctx context.Context, token mooring.SessionControl, q protocol.SessionParticipantOutput) (failure error) {
+	stage := hostOutputBinding
+	defer func() { d.observeHostFailure(ctx, stage, failure) }()
 	if q.Scope != d.wireScope() || q.SessionID != protocol.Identifier(d.activation.SessionID()) || q.RuntimeRef != protocol.Identifier(d.cell.runtime.RuntimeRef()) || q.Fence != d.wireFence() {
 		return errCollaborationHTTP
 	}
@@ -292,6 +295,7 @@ func (d *collaborationHTTPDocument) outputControl(ctx context.Context, token moo
 	if c == nil {
 		return errCollaborationHTTP
 	}
+	stage = hostOutputSchema
 	raw, err := d.manager.schema.ValidateE3(q.Message)
 	if err != nil {
 		return err
@@ -302,6 +306,7 @@ func (d *collaborationHTTPDocument) outputControl(ctx context.Context, token moo
 	if json.Unmarshal(raw, &header) != nil {
 		return errCollaborationHTTP
 	}
+	stage = hostOutputKind
 	if header.Type == "session_joined" {
 		return errCollaborationHTTP
 	}
@@ -310,10 +315,12 @@ func (d *collaborationHTTPDocument) outputControl(ctx context.Context, token moo
 	validCurrent := !c.closed && c.participantBinding != nil && q.GateID == protocol.Identifier(c.joined.gate.GateID) && q.PermissionVersion == protocol.Counter(c.joined.gate.PermissionVersion)
 	closed := c.closed
 	c.mu.Unlock()
+	stage = hostOutputUnknownTuple
 	if retired == nil && !validCurrent {
 		return errCollaborationHTTP
 	}
 	if !closed {
+		stage = hostOutputCurrentGate
 		err = c.ensureCurrentGate(ctx)
 		if err != nil && !errors.Is(err, errCollaborationRecipientDenied) {
 			return err
@@ -324,14 +331,18 @@ func (d *collaborationHTTPDocument) outputControl(ctx context.Context, token moo
 	denied := c.closed
 	c.mu.Unlock()
 	if retired != nil {
+		stage = hostOutputRetiredProof
 		if err = d.cell.runtime.ValidateRetiredOutput(token, retired.proof); err != nil {
 			return err
 		}
+		stage = hostOutputRetiredDispatch
 		return c.committedOutputRecipient(ctx, q, raw, header.Type, retired.gate, denied)
 	}
+	stage = hostOutputDenied
 	if denied {
 		return errCollaborationHTTP
 	}
+	stage = hostOutputCurrentDispatch
 	return c.committedOutput(ctx, q, raw, header.Type)
 }
 

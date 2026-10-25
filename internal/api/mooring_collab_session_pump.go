@@ -23,6 +23,8 @@ var errCollaborationSessionPump = errors.New("Mooring session processing stopped
 // The default-off HTTP session bootstrap installs these callbacks. Each
 // concrete callback owns its original-source and final store/delivery fences.
 type collaborationSessionPumpHandlers struct {
+	hostFailure *collaborationHostFailure
+
 	Submit        func(context.Context, protocol.SessionSubmitBatch) (protocol.SessionCommitResult, error)
 	Status        func(context.Context, protocol.SessionStatusRequest) (protocol.SessionStatusResult, error)
 	Acquire       func(context.Context, protocol.OwnerAcquire) (protocol.OwnerGrant, error)
@@ -45,6 +47,8 @@ type collaborationSessionPumpHandlers struct {
 }
 
 type collaborationSessionPump struct {
+	hostFailure *collaborationHostFailure
+
 	runtime  *mooring.SessionRuntime
 	handlers collaborationSessionPumpHandlers
 	started  atomic.Bool
@@ -62,7 +66,7 @@ func newCollaborationSessionPump(runtime *mooring.SessionRuntime, handlers colla
 		return nil, errCollaborationSessionPump
 	default:
 	}
-	return &collaborationSessionPump{runtime: runtime, handlers: handlers}, nil
+	return &collaborationSessionPump{runtime: runtime, handlers: handlers, hostFailure: handlers.hostFailure}, nil
 }
 
 // run exclusively owns NextControl for this process. It queues only opaque
@@ -84,6 +88,7 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 		defer finishRuntimeWatch()
 		select {
 		case <-p.runtime.Done():
+			p.hostFailure.record(ctx, hostRuntimeStopped)
 			cancel()
 		case <-ctx.Done():
 		}
@@ -100,7 +105,11 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 		defer finishWorker()
 		defer close(workerDone)
 		defer cancel()
-		defer func() { _ = recover() }() // opaque failure; never publish panic data
+		defer func() {
+			if recover() != nil {
+				p.hostFailure.record(ctx, hostPumpPanic)
+			}
+		}() // opaque failure; never publish panic data
 		for {
 			select {
 			case <-ctx.Done():
@@ -109,7 +118,7 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 				if ctx.Err() != nil {
 					return
 				}
-				if p.mutation(ctx, next.token, next.kind) != nil {
+				if p.observeHostFailure(ctx, hostPumpMutation, p.mutation(ctx, next.token, next.kind)) != nil {
 					return
 				}
 			}
@@ -126,7 +135,11 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 			defer finishOutput()
 			defer close(outputDone)
 			defer cancel()
-			defer func() { _ = recover() }()
+			defer func() {
+				if recover() != nil {
+					p.hostFailure.record(ctx, hostPumpPanic)
+				}
+			}()
 			for {
 				select {
 				case <-ctx.Done():
@@ -137,13 +150,14 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 					}
 					raw, e := next.token.Frame()
 					if e != nil {
+						p.hostFailure.record(ctx, hostPumpFrame)
 						return
 					}
 					if next.afterJoined != nil {
-						if next.afterJoined(ctx) != nil || ctx.Err() != nil || p.runtime.CompleteControl(next.token) != nil {
+						if p.observeHostFailure(ctx, hostPumpJoined, next.afterJoined(ctx)) != nil || ctx.Err() != nil || p.observeHostFailure(ctx, hostPumpComplete, p.runtime.CompleteControl(next.token)) != nil {
 							return
 						}
-					} else if p.control(ctx, next.token, next.kind, raw) != nil {
+					} else if p.observeHostFailure(ctx, hostPumpOutput, p.control(ctx, next.token, next.kind, raw)) != nil {
 						return
 					}
 				}
@@ -164,6 +178,7 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 	for {
 		token, e := p.runtime.NextControl(ctx)
 		if e != nil {
+			p.hostFailure.record(ctx, hostPumpRead)
 			return errCollaborationSessionPump
 		}
 		raw, e := token.Frame()
@@ -227,7 +242,7 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 				continue
 			}
 		}
-		if e = p.control(ctx, token, header.Type, raw); e != nil {
+		if e = p.observeHostFailure(ctx, hostPumpManagement, p.control(ctx, token, header.Type, raw)); e != nil {
 			return errCollaborationSessionPump
 		}
 	}
@@ -417,12 +432,12 @@ func (p *collaborationSessionPump) control(ctx context.Context, token mooring.Se
 			if p.handlers.OutputControl(ctx, token, output) != nil || ctx.Err() != nil {
 				return errCollaborationSessionPump
 			}
-			return p.runtime.CompleteControl(token)
+			return p.observeHostFailure(ctx, hostPumpComplete, p.runtime.CompleteControl(token))
 		}
 		if p.handlers.Output(ctx, output) != nil || ctx.Err() != nil {
 			return errCollaborationSessionPump
 		}
-		return p.runtime.CompleteControl(token)
+		return p.observeHostFailure(ctx, hostPumpComplete, p.runtime.CompleteControl(token))
 	default:
 		return errCollaborationSessionPump
 	}

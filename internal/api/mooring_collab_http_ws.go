@@ -377,16 +377,28 @@ func (c *collaborationHTTPConnection) checkedSendLocked(raw []byte) error {
 
 // The operation request preserves the original principal/context deadline.
 // A catch-up phase only adds cancellation; it never renews the original source.
-func (c *collaborationHTTPConnection) checkedSendRequestLocked(request *http.Request, raw []byte) error {
+func (c *collaborationHTTPConnection) checkedSendRequestLocked(request *http.Request, raw []byte) (failure error) {
+	stage := hostSendPrecondition
+	defer func() {
+		var ctx context.Context
+		if request != nil {
+			ctx = request.Context()
+		}
+		c.document.observeHostFailure(ctx, stage, failure)
+	}()
 	if len(raw) > collaborationHTTPFrameLimit || c.closed || c.socket == nil || c.joined.delivery == nil {
 		return errCollaborationHTTP
 	}
 	d := c.document
+	stage = hostSendOriginalOperation
 	return d.humans.runHumanOperation(request, c.admission.participant, func(ctx context.Context) error {
+		stage = hostSendWriter
 		return d.submissions.withWriter(ctx, func(tx *sql.Tx) error {
+			stage = hostSendCell
 			if e := d.cell.check(ctx, tx); e != nil {
 				return e
 			}
+			stage = hostSendCurrentRights
 			permission, e := d.humans.checkCaptured(ctx, tx, c.admission, false, collaborationHTTPSendDeadline)
 			if e != nil {
 				return e
@@ -395,29 +407,40 @@ func (c *collaborationHTTPConnection) checkedSendRequestLocked(request *http.Req
 			var boot string
 			var expires int64
 			var closed bool
+			stage = hostSendSQLGateLookup
 			e = tx.QueryRowContext(ctx, `SELECT boot_id,expires_ns,closed FROM mooring_delivery_gates WHERE id=? AND page_id=? AND workspace_id=? AND application_id=? AND participant_ref=? AND owner_id=? AND owner_generation=? AND owner_token_hash=? AND permission_version=?`, c.joined.gate.GateID, d.key.ArtifactID, d.key.WorkspaceID, d.key.ApplicationID, c.admission.participant, d.owner.OwnerID, d.owner.Generation, tokenHash[:], permission).Scan(&boot, &expires, &closed)
 			if e != nil {
 				return e
 			}
+			stage = hostSendSQLGateLive
 			currentBoot, now, e := d.manager.clock.Now()
 			if e != nil || boot != currentBoot || closed || now < 0 || int64(now) >= expires || expires-int64(now) < int64(collaborationHTTPSendDeadline) {
 				return errCollaborationHTTP
 			}
+			stage = hostSendOwnerLookup
 			var ownerBoot string
 			var ownerExpires int64
 			if e = tx.QueryRowContext(ctx, `SELECT boot_id,expires_ns FROM mooring_session_owners WHERE page_id=? AND workspace_id=? AND application_id=? AND owner_id=? AND generation=?`, d.key.ArtifactID, d.key.WorkspaceID, d.key.ApplicationID, d.owner.OwnerID, d.owner.Generation).Scan(&ownerBoot, &ownerExpires); e != nil {
 				return e
 			}
+			stage = hostSendOwnerLive
 			if ownerBoot != currentBoot || int64(now) >= ownerExpires || ownerExpires-int64(now) < int64(collaborationHTTPSendDeadline) {
 				return errCollaborationHTTP
 			}
+			stage = hostSendOwnerFence
 			if e = d.cell.owners.Check(ctx, tx, d.owner); e != nil {
 				return e
 			}
+			stage = hostSendDeadline
 			if e = c.socket.SetWriteDeadline(time.Now().Add(collaborationHTTPSendDeadline)); e != nil {
 				return e
 			}
-			return websocket.Message.Send(c.socket, string(raw))
+			stage = hostSendPhysical
+			e = websocket.Message.Send(c.socket, string(raw))
+			if e == nil {
+				stage = hostSendWriterCommit
+			}
+			return e
 		})
 	})
 }
