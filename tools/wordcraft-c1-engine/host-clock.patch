@@ -1,0 +1,173 @@
+--- a/crates/engine/src/cmd/mod.rs
++++ b/crates/engine/src/cmd/mod.rs
+@@ -541,9 +541,27 @@
+     }
+ }
+ 
++std::thread_local! {
++ static HOST_COMMAND_CLOCK: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
++}
++// Scope includes nested commands; restore on normal return AND unwinding.
++pub(crate) fn with_host_command_clock<T>(time: &str, run: impl FnOnce() -> T) -> T {
++    struct Restore(Option<String>);
++    impl Drop for Restore {
++        fn drop(&mut self) {
++            HOST_COMMAND_CLOCK.with(|clock| {
++                clock.replace(self.0.take());
++            });
++        }
++    }
++    let _restore = Restore(HOST_COMMAND_CLOCK.with(|clock| clock.replace(Some(time.to_owned()))));
++    run()
++}
+ /// ISO-8601 timestamp (UTC, seconds).
+ pub fn now_iso() -> String {
+-    iso_from_unix_secs(now_unix())
++    HOST_COMMAND_CLOCK
++        .with(|clock| clock.borrow().clone())
++        .unwrap_or_else(|| iso_from_unix_secs(now_unix()))
+ }
+ 
+ /// Days since 1970-01-01 → (year, month, day).
+@@ -629,3 +647,87 @@
+         let _ = (civil_from_days(i64::MAX), civil_from_days(i64::MIN));
+     }
+ }
++
++#[cfg(test)]
++mod c1_host_context_tests {
++    use crate::Session;
++    use wordcraft_doc::Document;
++    use serde_json::json;
++    const A: &str = "2001-02-03T04:05:06Z";
++    const B: &str = "2002-03-04T05:06:07Z";
++    #[test]
++    fn original_records_receive_context_before_command_and_old_records_stay() {
++        let mut s = Session::new(Document::new());
++        s.author = "original".into();
++        s.run("text.insert", &json!({"text":"target"})).unwrap();
++        let id = s
++            .run_with_host_context("review.newComment", &json!({"text":"one"}), "Alice", A)
++            .unwrap()["id"]
++            .as_u64()
++            .unwrap() as u32;
++        let first = serde_json::to_value(&s.doc.comments[&id]).unwrap();
++        assert_eq!(first["author"], "Alice");
++        assert_eq!(first["date"], A);
++        assert_eq!(first["dateUtc"], A);
++        assert_eq!(s.author, "original");
++        s.run_with_host_context("review.newComment", &json!({"text":"two"}), "Bob", B)
++            .unwrap();
++        assert_eq!(serde_json::to_value(&s.doc.comments[&id]).unwrap(), first);
++        assert_eq!(s.author, "original");
++        assert_ne!(super::now_iso(), A);
++    }
++    #[test]
++    fn invalid_and_engine_error_leave_author_clock_and_document_untouched() {
++        let mut s = Session::new(Document::new());
++        s.author = "original".into();
++        let doc = serde_json::to_value(&s.doc).unwrap();
++        for bad in [
++            "not-time",
++            "2001-99-03T04:05:06Z",
++            "2001-02-03T04:05:06+00:00",
++        ] {
++            assert!(
++                s.run_with_host_context("text.insert", &json!({"text":"bad"}), "wrong", bad)
++                    .is_err()
++            );
++        }
++        assert!(
++            s.run_with_host_context("unknown.c1.command", &json!({}), "wrong", A)
++                .is_err()
++        );
++        assert_eq!(s.author, "original");
++        assert_eq!(serde_json::to_value(&s.doc).unwrap(), doc);
++        assert_ne!(super::now_iso(), A);
++    }
++    #[test]
++    fn nested_panic_restores_author_clock_and_does_not_affect_another_thread() {
++        let mut s = Session::new(Document::new());
++        s.author = "original".into();
++        s.with_host_command_context("Alice", A, |s| {
++            assert_eq!(s.author, "Alice");
++            assert_eq!(super::now_iso(), A);
++            std::thread::spawn(|| assert_ne!(super::now_iso(), A))
++                .join()
++                .unwrap();
++            let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
++                s.with_host_command_context("Bob", B, |s| {
++                    assert_eq!(s.author, "Bob");
++                    assert_eq!(super::now_iso(), B);
++                    panic!("c1 synthetic unwind")
++                })
++            }));
++            assert!(failure.is_err());
++            assert_eq!(s.author, "Alice");
++            assert_eq!(super::now_iso(), A);
++            s.with_host_command_context("Bob", B, |s| {
++                assert_eq!(s.author, "Bob");
++                assert_eq!(super::now_iso(), B)
++            });
++            assert_eq!(s.author, "Alice");
++            assert_eq!(super::now_iso(), A);
++        });
++        assert_eq!(s.author, "original");
++        assert_ne!(super::now_iso(), A);
++        assert_ne!(super::now_iso(), B);
++    }
++}
+--- a/crates/engine/src/session.rs
++++ b/crates/engine/src/session.rs
+@@ -1814,6 +1814,51 @@
+     /// Run a command by id with JSON params (the single entry point for the UI, CLI, MCP and
+     /// control channel). Mutating commands are undoable; a failed command leaves the document as
+     /// it was; a panic inside a command becomes an error.
++    // Package-private scope seam also permits direct unwinding regression tests.
++    pub(crate) fn with_host_command_context<T>(
++        &mut self,
++        author: &str,
++        time: &str,
++        run: impl FnOnce(&mut Session) -> T,
++    ) -> T {
++        struct Restore<'a> {
++            session: &'a mut Session,
++            author: String,
++        }
++        impl Drop for Restore<'_> {
++            fn drop(&mut self) {
++                std::mem::swap(&mut self.session.author, &mut self.author);
++            }
++        }
++        let previous = std::mem::replace(&mut self.author, author.to_owned());
++        let restore = Restore {
++            session: self,
++            author: previous,
++        };
++        crate::cmd::with_host_command_clock(time, || run(&mut *restore.session))
++    }
++    /// Trusted caller context, never authentication. Install BOTH author and time
++    /// before any command bookkeeping; neither survives this scope on error/panic.
++    pub fn run_with_host_context(
++        &mut self,
++        id: &str,
++        params: &Value,
++        author: &str,
++        time: &str,
++    ) -> Result<Value, CmdError> {
++        let parsed = chrono::DateTime::parse_from_rfc3339(time)
++            .map_err(|_| CmdError::Failed("invalid host command clock".into()))?;
++        if time.len() != 20
++            || parsed.format("%Y-%m-%dT%H:%M:%SZ").to_string() != time
++            || !time.ends_with('Z')
++            || author.is_empty()
++            || author.len() > 200
++        {
++            return Err(CmdError::Failed("invalid host command context".into()));
++        }
++        self.with_host_command_context(author, time, |session| session.run(id, params))
++    }
++
+     pub fn run(&mut self, id: &str, params: &Value) -> Result<Value, CmdError> {
+         // Every dispatch starts from an unclassified outcome. Early returns (unknown, disabled,
+         // protected) leave it at the default.
