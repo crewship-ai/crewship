@@ -1,6 +1,8 @@
 package pipeline
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -418,9 +420,9 @@ func (r *OrchestratorRunner) RunScript(ctx context.Context, req ScriptRunRequest
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return ScriptRunResult{}, err
 	}
-	controlDir := "/tmp/crewship-script-" + hex.EncodeToString(nonce[:])
-	stderrFile := controlDir + "/stderr"
-	cmd := append([]string{"setsid", "--wait", "sh", "-c", scriptProcessWrapper, "crewship-script", controlDir}, argv...)
+	nonceText := hex.EncodeToString(nonce[:])
+	controlDir := scriptControlPrefix + nonceText
+	cmd := append([]string{"setsid", "--wait", "sh", "-c", scriptProcessWrapper, "crewship-script", controlDir, nonceText}, argv...)
 
 	// #1473: a script step runs inside the agent container but used to build
 	// its environment from the step's own inputs alone, so it carried no
@@ -472,126 +474,113 @@ func (r *OrchestratorRunner) RunScript(ctx context.Context, req ScriptRunRequest
 		return ScriptRunResult{}, fmt.Errorf("script runner: exec: %w", err)
 	}
 
+	// The watcher only closes the stream. Main owns receipt parsing and stop
+	// dispatch, so cancellation cannot signal a preexisting collision path.
 	readDone := make(chan struct{})
-	watcherDone := make(chan error, 1)
+	watcherDone := make(chan struct{})
 	go func() {
+		defer close(watcherDone)
 		select {
 		case <-execCtx.Done():
 			_ = execRes.Reader.Close()
-			stopErr := r.stopScriptProcess(ctx, containerID, controlDir)
-			watcherDone <- stopErr
 		case <-readDone:
-			watcherDone <- nil
 		}
 	}()
-	stdout, readErr := io.ReadAll(io.LimitReader(execRes.Reader, int64(maxBytes)+1))
+	buffered := bufio.NewReaderSize(execRes.Reader, scriptControlFrameLimit)
+	line, frameErr := buffered.ReadSlice('\n')
+	control, receiptErr := parseScriptControlReceipt(controlDir, nonceText, line, frameErr)
+	var output io.Reader = buffered
+	var framingReadErr error
+	if receiptErr != nil {
+		// Preserve bounded setup diagnostics rather than dropping the first line.
+		output = io.MultiReader(bytes.NewReader(bytes.Clone(line)), buffered)
+	} else {
+		metadata, metadataErr := buffered.ReadSlice('\n')
+		if metadataErr != nil && !errors.Is(metadataErr, io.EOF) && !errors.Is(metadataErr, bufio.ErrBufferFull) {
+			framingReadErr = metadataErr
+		}
+		if !control.acceptMetadata(metadata) {
+			// Optional evidence is not permission to discard arbitrary user bytes.
+			output = io.MultiReader(bytes.NewReader(bytes.Clone(metadata)), buffered)
+		}
+	}
+	stdout, readErr := io.ReadAll(io.LimitReader(output, int64(maxBytes)+1))
+	readErr = errors.Join(framingReadErr, readErr)
 	close(readDone)
 	_ = execRes.Reader.Close()
-	stopErr := <-watcherDone
-	if execCtx.Err() != nil || readErr != nil || len(stdout) > maxBytes {
-		if stopErr == nil {
-			stopErr = r.stopScriptProcess(ctx, containerID, controlDir)
-		}
-		reason := "script output read failed"
-		if execCtx.Err() != nil {
-			reason = "script cancelled or timed out"
-		}
-		if len(stdout) > maxBytes {
-			stdout = stdout[:maxBytes]
-			reason = "script output exceeded limit"
-		}
-		if stopErr != nil {
-			return ScriptRunResult{Stdout: string(stdout), ExitCode: -1}, fmt.Errorf("%s; process termination could not be confirmed: %w", reason, stopErr)
-		}
-		return ScriptRunResult{Stdout: string(stdout), ExitCode: -1}, fmt.Errorf("%s; process group stopped", reason)
-	}
+	<-watcherDone
 
-	running, exitCode, inspErr := r.container.ExecInspect(execCtx, execRes.ExecID)
-	if inspErr != nil {
-		// Unknown outcome must NOT read as success — a failed inspect would
-		// otherwise default exitCode to 0 and falsely mark the step COMPLETED.
-		return ScriptRunResult{Stdout: string(stdout), ExitCode: -1},
-			errors.Join(fmt.Errorf("script runner: exec inspect failed (outcome unknown, refusing to assume exit 0): %w", inspErr), r.stopScriptProcess(ctx, containerID, controlDir))
-	}
-	if running {
-		return ScriptRunResult{Stdout: string(stdout), ExitCode: -1},
-			errors.Join(fmt.Errorf("script runner: process still reported running after stream EOF — outcome unknown"), r.stopScriptProcess(ctx, containerID, controlDir))
-	}
-
-	res := ScriptRunResult{Stdout: string(stdout), ExitCode: exitCode}
-
-	// On failure, surface stderr (and clean the temp file). Happy path leaves
-	// control directory in tmpfs until the container recycles. Every invocation
-	// owns a distinct directory, including concurrent items and retries.
-	if exitCode != 0 {
-		if errRes, e := r.container.Exec(ctx, provider.ExecConfig{
-			ContainerID: containerID,
-			Cmd:         []string{"sh", "-c", "cat " + stderrFile + " 2>/dev/null; rm -f " + stderrFile},
-			User:        "1001:1001",
-		}); e == nil {
-			stderrOut, _ := io.ReadAll(io.LimitReader(errRes.Reader, 64*1024))
-			_ = errRes.Reader.Close()
-			res.Stderr = string(stderrOut)
+	// One budget covers stop, diagnostics and cleanup, including every helper
+	// reader/watcher/inspect. Nested helpers must preserve this deadline.
+	finalCtx, finalCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer finalCancel()
+	cleanupAllowed := control.eligible()
+	res, runErr := func() (ScriptRunResult, error) {
+		if execCtx.Err() != nil || readErr != nil || len(stdout) > maxBytes {
+			reason := "script output read failed"
+			if execCtx.Err() != nil {
+				reason = "script cancelled or timed out"
+			}
+			if len(stdout) > maxBytes {
+				stdout = stdout[:maxBytes]
+				reason = "script output exceeded limit"
+			}
+			var stopErr error
+			if control.owned {
+				stopErr = r.stopScriptProcess(finalCtx, containerID, controlDir, control.pid)
+			} else {
+				stopErr = fmt.Errorf("no exclusive-create receipt; control ownership unknown")
+			}
+			if stopErr != nil {
+				cleanupAllowed = false
+				return ScriptRunResult{Stdout: string(stdout), ExitCode: -1}, fmt.Errorf("%s; process termination could not be confirmed: %w", reason, stopErr)
+			}
+			return ScriptRunResult{Stdout: string(stdout), ExitCode: -1}, fmt.Errorf("%s; process group stopped", reason)
 		}
-	}
-	return res, nil
-}
-
-// Arguments stay positional: neither paths nor user arguments become shell code.
-const scriptProcessWrapper = `original_umask=$(umask)
-umask 077
-control=$1
-shift
-mkdir "$control" || exit 125
-printf '%s' "$$" > "$control/pid"
-umask "$original_umask"
-"$@" 2>"$control/stderr"
-`
-
-const scriptStopWrapper = `control=$1
-n=0
-while [ ! -s "$control/pid" ] && [ "$n" -lt 20 ]; do sleep 0.05; n=$((n+1)); done
-[ -s "$control/pid" ] || exit 1
-read -r pid < "$control/pid" || :
-case "$pid" in ''|*[!0-9]*) exit 1;; esac
-/bin/kill -KILL -- "-$pid" 2>/dev/null || :
-n=0
-while [ "$n" -lt 20 ]; do
-  live=$(ps -eo pgid=,stat= | awk -v group="$pid" '$1 == group && $2 !~ /^Z/ { print $1 }')
-  [ -z "$live" ] && exit 0
-  sleep 0.05
-  n=$((n+1))
-done
-exit 1
-`
-
-func (r *OrchestratorRunner) stopScriptProcess(ctx context.Context, containerID, controlDir string) error {
-	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	res, err := r.container.Exec(stopCtx, provider.ExecConfig{ContainerID: containerID, Cmd: []string{"sh", "-c", scriptStopWrapper, "crewship-script-stop", controlDir}, User: "1001:1001"})
-	if err != nil {
-		return err
-	}
-	done := make(chan struct{})
-	go func() {
-		select {
-		case <-stopCtx.Done():
-			_ = res.Reader.Close()
-		case <-done:
+		if receiptErr != nil {
+			cleanupAllowed = false
+			return ScriptRunResult{Stdout: string(stdout), ExitCode: -1}, fmt.Errorf("script runner: setup ownership unknown: %w", receiptErr)
 		}
+		finalDeadline, _ := finalCtx.Deadline()
+		inspectCtx, inspectCancel := context.WithDeadline(execCtx, finalDeadline)
+		running, exitCode, inspErr := r.container.ExecInspect(inspectCtx, execRes.ExecID)
+		if inspErr == nil {
+			inspErr = inspectCtx.Err()
+		}
+		inspectCancel()
+		if inspErr != nil {
+			cleanupAllowed = false
+			return ScriptRunResult{Stdout: string(stdout), ExitCode: -1}, errors.Join(
+				fmt.Errorf("script runner: exec inspect failed (outcome unknown, refusing to assume exit 0): %w", inspErr),
+				r.stopScriptProcess(finalCtx, containerID, controlDir, control.pid))
+		}
+		if running {
+			cleanupAllowed = false
+			return ScriptRunResult{Stdout: string(stdout), ExitCode: -1}, errors.Join(
+				fmt.Errorf("script runner: process still reported running after stream EOF — outcome unknown"),
+				r.stopScriptProcess(finalCtx, containerID, controlDir, control.pid))
+		}
+		res := ScriptRunResult{Stdout: string(stdout), ExitCode: exitCode}
+		if exitCode != 0 {
+			// Read only. Directory deletion happens after this helper terminates.
+			stderr, diagnosticCode, err := r.scriptControlExec(finalCtx, containerID,
+				[]string{"sh", "-c", scriptDiagnosticWrapper, "crewship-script-stderr", controlDir + "/stderr"}, 64*1024)
+			res.Stderr = string(stderr)
+			if err != nil {
+				cleanupAllowed = false
+				r.scriptCleanupWarning(req, "diagnostic helper outcome unknown; retained", err)
+			} else if diagnosticCode != 0 {
+				r.scriptCleanupWarning(req, fmt.Sprintf("diagnostic retrieval failed (exit %d)", diagnosticCode), nil)
+			}
+		}
+		return res, nil
 	}()
-	_, readErr := io.Copy(io.Discard, io.LimitReader(res.Reader, 4096))
-	close(done)
-	_ = res.Reader.Close()
-	if readErr != nil {
-		return readErr
+	if cleanupAllowed {
+		// Main reader/watcher and all attempted stop/diagnostic helpers have
+		// completed. The guard must still verify current identity + empty group.
+		r.finishScriptControl(finalCtx, containerID, control, req)
+	} else {
+		r.scriptCleanupWarning(req, "ownership, metadata or lifecycle evidence incomplete; retained", nil)
 	}
-	running, code, err := r.container.ExecInspect(stopCtx, res.ExecID)
-	if err != nil {
-		return err
-	}
-	if running || code != 0 {
-		return fmt.Errorf("stop process group: exit %d, running %t", code, running)
-	}
-	return nil
+	return res, runErr
 }
