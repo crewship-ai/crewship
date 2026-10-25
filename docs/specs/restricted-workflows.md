@@ -202,9 +202,14 @@ capabilities and seccomp/AppArmor bytes are unchanged.
 This avoids recursively importing Docker's synthetic network files into the
 inner filesystem. On a noatime-backed Docker data filesystem, those mounts can
 carry `ro,noatime`; the closed seccomp mount-flag allowlist does not authorize
-the additional noatime remount combination. A dedicated disposable-runner test
+the additional noatime remount combination. This is a suspected EPERM mechanism
+until the differential fixture confirms it; the initial local trace proves the
+resolver-remount failure, not a kernel lock diagnosis. A dedicated disposable-runner test
 uses the original signed image as an expected RED control and requires the
-production native canary to execute and PASS on the candidate. Its three owned
+production native canary to execute and PASS on the candidate, including failed
+reads outside the profile, protected metadata/outside-workspace writes and a
+loopback broker connection attempt. The original application6b39/image pair
+provides a second control with only the fixture atime flag changed. Its three owned
 read-only synthetic network-file binds reproduce that filesystem condition;
 they are test fixtures, not production mounts or runtime qualification.
 Neither candidate checks nor publication release an infrastructure activation

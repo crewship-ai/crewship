@@ -59,15 +59,29 @@ jobs:
           printf 'native-fixture\n' | sudo tee "$RUNNER_TEMP/noatime-network-files/hostname" >/dev/null
           sudo chmod 0644 "$RUNNER_TEMP/noatime-network-files/"*
           findmnt -T "$RUNNER_TEMP/noatime-network-files/resolv.conf"
+      - name: Freeze the original application source for differential controls
+        run: |
+          git fetch --no-tags origin 6b39cadb8906fa797eb1503b351cc1ef07bb2501
+          git worktree add --detach "$RUNNER_TEMP/native-baseline-source" 6b39cadb8906fa797eb1503b351cc1ef07bb2501
       - name: Reproduce the released image failure with the production canary
         run: |
           image='ghcr.io/crewship-ai/crewship-restricted-native@sha256:4acc8f2c982ae3d178b04509ab778c6960b8121f1b948d02d9bacc8d2982d5a9'
           docker pull "$image"
           image=$(docker image inspect --format '{{.Id}}' "$image")
-          bash scripts/ci/native-noatime-fixture.sh "$image" "$RUNNER_TEMP/noatime-network-files" "$RUNNER_TEMP/native-red" red
-      - name: Require the unchanged production canary to pass on the candidate
+          cd "$RUNNER_TEMP/native-baseline-source"
+          sudo env "PATH=$PATH" GOTOOLCHAIN=local bash "$GITHUB_WORKSPACE/scripts/ci/native-noatime-fixture.sh" \
+            "$image" "$RUNNER_TEMP/noatime-network-files" "$RUNNER_TEMP/native-red" red
+      - name: Prove the original image passes when only the fixture atime flag changes
         run: |
-          bash scripts/ci/native-noatime-fixture.sh "$(docker image inspect --format '{{.Id}}' crewship-native-candidate:verify)" \
+          sudo mount -o remount,relatime "$RUNNER_TEMP/noatime-network-files"
+          image=$(docker image inspect --format '{{.Id}}' ghcr.io/crewship-ai/crewship-restricted-native@sha256:4acc8f2c982ae3d178b04509ab778c6960b8121f1b948d02d9bacc8d2982d5a9)
+          cd "$RUNNER_TEMP/native-baseline-source"
+          sudo env "PATH=$PATH" GOTOOLCHAIN=local bash "$GITHUB_WORKSPACE/scripts/ci/native-noatime-fixture.sh" \
+            "$image" "$RUNNER_TEMP/noatime-network-files" "$RUNNER_TEMP/native-relatime-control" green
+      - name: Require the production canary and negative sandbox checks on the candidate
+        run: |
+          sudo mount -o remount,noatime "$RUNNER_TEMP/noatime-network-files"
+          sudo env "PATH=$PATH" GOTOOLCHAIN=local bash scripts/ci/native-noatime-fixture.sh "$(docker image inspect --format '{{.Id}}' crewship-native-candidate:verify)" \
             "$RUNNER_TEMP/noatime-network-files" "$RUNNER_TEMP/native-green" green
       - name: Release only the owned fixture mount
         if: always()
@@ -92,5 +106,6 @@ jobs:
             ${{ steps.scan.outputs.sarif }}
             ${{ runner.temp }}/native-red/
             ${{ runner.temp }}/native-green/
+            ${{ runner.temp }}/native-relatime-control/
           if-no-files-found: warn
           retention-days: 14
