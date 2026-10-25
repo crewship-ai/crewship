@@ -56,6 +56,15 @@ publication or provider calls. The main-only `Native Worker Release` workflow
 owns candidate publication and signing; see the
 [release procedure](../docs/guides/restricted-native-codex.md#independent-release-candidates).
 
+`ci/prepare-text-release.sh /absolute/new/context-directory` prepares the
+`responses_text` runner, pinned image recipe, binary checksum, source identity
+and Go/project license bundle. The main-only `Text Worker Release` workflow
+publishes and signs candidates only when explicitly dispatched with
+`publish=true`, after exact-source CI/Security/CodeQL verification. The separate
+PR candidate check runs the actual production text-worker accounting canary
+against synthetic TLS data and refuses missing, skipped or failed execution.
+See the [runtime contract](../docs/specs/restricted-workflows.md#independent-text-worker-candidates).
+
 Publishing helpers under `ci/` are workflow components, not general local test
 commands. They may publish or remove release/package artifacts.
 

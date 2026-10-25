@@ -188,3 +188,31 @@ shared agent capacity without retrying the graph or asserting that no paid
 request or external effect occurred. Failure before graph execution is likewise
 terminal. Failed physical cleanup and recovered start intents retain
 `needs_reconciliation` and their capacity hold until explicitly resolved.
+
+
+## Independent text worker candidates
+
+The manual `Text Worker Release` workflow (`text-worker-release.yml`) prepares
+a Linux/amd64 `responses_text` image from the exact main source after CI,
+Security and CodeQL succeed on that commit. Preparation produces the static
+runner, pinned base recipe, runner SHA-256, source/profile identity and Go/project
+license texts. It refuses an existing output directory.
+
+Publication is off by default. An explicitly authorized `publish=true` dispatch
+builds a unique `responses-text-v1-<SHA>-<run>-<attempt>` candidate under
+`ghcr.io/<owner>/crewship-restricted-text`, with provenance and SBOM. It checks
+the distributed binary checksum and legal contents and refuses critical scan
+findings before keyless signing. The candidate artifact records its digest,
+source, profile, runner checksum and publisher run. No mutable latest tag is
+promoted. The separate PR candidate workflow builds without publication or
+signing permissions and requires the production text-worker accounting canary
+to execute and pass against synthetic TLS data; SKIP is failure.
+
+Before runtime use, review the publisher/source and verify the immutable digest
+signature against
+`https://github.com/<owner>/<repo>/.github/workflows/text-worker-release.yml@refs/heads/main`
+and issuer `https://token.actions.githubusercontent.com`. Candidate publication
+does not approve or activate the image. Host configuration and real image
+qualification use the supported infrastructure process. Provider-backed Guest
+browser/CLI publication, run, revocation and deadline acceptance are separate
+requirements; the synthetic PR canary does not establish them.

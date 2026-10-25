@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Restricted text workers have an independent release producer.** A main-only manual workflow can publish scanned, signed immutable `responses_text` candidates with source, binary and license provenance. Pull requests test the real production worker against synthetic data. Image approval, host qualification and Guest runtime acceptance remain separate steps.
+
 - **Administrative security operations explicitly opt in to emergency audit fallback.** Only single/all-session revocation can use this fallback in the session handler; unlock remains chained-only, and unknown internal operations are rejected before any account or audit mutation. Web password changes and resets continue to fail closed on a broken audit chain.
 
 - **CLI object sharing accepts routine Publish.** `crewship share` and `unshare` now accept `--operation publish`, matching the Share dialog. The server still requires Edit in the resulting policy; unrelated grants and issuer provenance are preserved, and conflicts are never retried.
