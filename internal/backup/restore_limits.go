@@ -32,7 +32,7 @@ type RestoreLimits struct {
 }
 
 func DefaultRestoreLimits() RestoreLimits {
-	return RestoreLimits{Concurrency: 1, CompressedBytes: 64 << 30, DecodedBytes: 128 << 30, Entries: 100000, GeneratedBytes: 64 << 30, BufferedBytes: 64 << 20, HeaderBytes: 8 << 20, SectionSinks: 256, DecoderMemory: 64 << 20, DecoderWindow: 64 << 20, Depth: 4, Timeout: 2 * time.Hour}
+	return RestoreLimits{Concurrency: 1, CompressedBytes: 64 << 30, DecodedBytes: 128 << 30, Entries: 1_000_000, GeneratedBytes: 64 << 30, BufferedBytes: 64 << 20, HeaderBytes: 256 << 20, SectionSinks: 256, DecoderMemory: 64 << 20, DecoderWindow: 64 << 20, Depth: 4, Timeout: 2 * time.Hour}
 }
 
 // RestoreLimitsFromEnv is shared by online and offline backup readers. These

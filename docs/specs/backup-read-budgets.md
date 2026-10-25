@@ -15,10 +15,10 @@ except the Go duration string for timeout.
 | --- | ---: |
 | `COMPRESSED_BYTES` | 68719476736 (64 GiB per opened reader) |
 | `DECODED_BYTES` | 137438953472 (128 GiB aggregate decoded work) |
-| `ENTRIES` | 100000 logical entries across all passes |
+| `ENTRIES` | 1000000 logical entries across all passes |
 | `GENERATED_BYTES` | 68719476736 (64 GiB aggregate generated output) |
 | `BUFFERED_BYTES` | 67108864 (64 MiB aggregate source retained/parsed in memory) |
-| `HEADER_BYTES` | 8388608 (8 MiB aggregate logical names and link names) |
+| `HEADER_BYTES` | 268435456 (256 MiB aggregate logical names and link names) |
 | `SECTION_SINKS` | 256 (aggregate extraction section files) |
 | `DECODER_MEMORY_BYTES` | 67108864 (64 MiB per decoder) |
 | `DECODER_WINDOW_BYTES` | 67108864 (64 MiB maximum window) |
@@ -45,6 +45,14 @@ Git object/reference stores reserve conservative representation/metadata upper
 bounds. Reservations can exceed actual writes, including already-present data. It is a monotonic work allowance: removing a file does not refund
 it. Thus it is conservative, not a measurement/reservation of free disk space.
 Logical entries exclude PAX/GNU extension records consumed internally by Go; their decoded bytes still count. Buffered source, names and sink limits also apply; they are conservative work allowances, not measured heap size. Existing section-specific limits still apply.
+
+The name/link allowance counts UTF-8 bytes, not characters or the fixed 512-byte
+TAR header blocks. At one million logical entries, 256 MiB permits about 268
+name/link bytes per entry on average; longer paths can exhaust this independent
+allowance earlier. Names stream through the reader, so this is not a reserved
+256 MiB allocation. Both entry and name/link counters are shared across passes:
+reading a file twice counts twice, so these defaults do not promise that every
+multi-pass workflow can restore one million distinct files.
 
 Metadata inspection also has fixed limits of 16 MiB decoded prefix, 1024 logical entries
 and 30 seconds, and the existing 4 MiB manifest cap. It does not scan a large
