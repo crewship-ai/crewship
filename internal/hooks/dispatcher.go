@@ -99,13 +99,8 @@ func Dispatch(ctx context.Context, db *sql.DB, emitter journal.Emitter, event Ev
 			continue
 		}
 		if Matches(h.Matcher, ec) {
-			// Rows created before observation events were made explicitly
-			// non-blocking may still carry blocking=1. Preserve their configured
-			// row for display, but dispatch with the only semantics the event's
-			// call site can honestly provide.
-			if !event.SupportsBlocking() {
-				h.Blocking = false
-			}
+			// Keep the authorized configuration immutable. Effective blocking is
+			// evaluated below without changing the approved stored revision.
 			filtered = append(filtered, h)
 		}
 	}
@@ -119,7 +114,7 @@ func Dispatch(ctx context.Context, db *sql.DB, emitter journal.Emitter, event Ev
 	// returns OutcomeError does not masquerade as an explicit Block. It is
 	// accumulated as DispatchError so the caller can apply the correct policy.
 	for _, h := range filtered {
-		if !h.Blocking {
+		if !h.Blocking || !event.SupportsBlocking() {
 			continue
 		}
 		res, runErr := runHandler(ctx, db, h, ec)
@@ -147,7 +142,7 @@ func Dispatch(ctx context.Context, db *sql.DB, emitter journal.Emitter, event Ev
 	// returns immediately and the handlers land their records in the
 	// journal on their own schedule.
 	for _, h := range filtered {
-		if h.Blocking {
+		if h.Blocking && event.SupportsBlocking() {
 			continue
 		}
 		h := h
@@ -255,7 +250,7 @@ func emitFired(ctx context.Context, emitter journal.Emitter, h Hook, ec EventCon
 		"outcome":      string(res.Outcome),
 		"message":      res.Message,
 		"latency_ms":   res.Latency.Milliseconds(),
-		"blocking":     h.Blocking,
+		"blocking":     h.Blocking && h.Event.SupportsBlocking(),
 	}
 	if res.Payload != nil {
 		payload["handler_payload"] = res.Payload
@@ -299,7 +294,7 @@ func emitBlocked(ctx context.Context, emitter journal.Emitter, h Hook, ec EventC
 			"event":        string(ec.Event),
 			"handler_kind": string(h.HandlerKind),
 			"message":      res.Message,
-			"blocking":     h.Blocking,
+			"blocking":     h.Blocking && h.Event.SupportsBlocking(),
 		},
 	})
 }
