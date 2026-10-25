@@ -84,8 +84,8 @@ func TestMooringFixtureIsolationAndEveryConnectionFull(t *testing.T) {
 			t.Fatal("production WAL lost", journal, err)
 		}
 	}
-	// A file-backed schema at head includes the common owner and delivery contracts.
-	for _, table := range []string{"mooring_session_owners", "mooring_delivery_gates"} {
+	// A file-backed schema at head includes both owner and provenance contracts.
+	for _, table := range []string{"mooring_session_owners", "mooring_collab_target_effects"} {
 		if err = right.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&count); err != nil || count != 1 {
 			t.Fatal("incomplete migrated fixture", table, count, err)
 		}

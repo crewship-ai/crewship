@@ -36,7 +36,7 @@ func validateRuntimeReady(raw []byte, expected RuntimeVersions, profile string) 
 		case "request_id":
 			want = "host-start"
 		case "selected_control_profile":
-			if profile != PrivatePrepareProfile {
+			if !privatePrepareProfile(profile) {
 				return false
 			}
 			want = profile

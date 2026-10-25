@@ -322,6 +322,14 @@ var BackupTables = []string{
 	"documents",
 	"mooring_documents", // after Pages; owns receipts
 	"mooring_receipts",
+	"mooring_collab_documents",
+	"mooring_collab_tasks",
+	"mooring_collab_changes",
+	"mooring_collab_operations",
+	"mooring_collab_target_versions",
+	"mooring_collab_target_effects",
+	"mooring_collab_checkpoints",
+	"mooring_collab_audit",
 	"document_creations",
 	"slides_heads",
 	"slides_revisions",
@@ -1099,6 +1107,9 @@ type RestoreDumpHooks struct {
 // with the supplied lifecycle hooks. See RestoreDumpHooks for the
 // contract of each hook.
 func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *RestoreDumpHooks) (RestoreStats, error) {
+	if err := rejectMooringCollaborationCollision(ctx, db, dump); err != nil {
+		return RestoreStats{}, err
+	}
 	for table, rows := range dump.Tables {
 		if strings.HasPrefix(table, "gridcraft_") && len(rows) > 0 {
 			return RestoreStats{}, fmt.Errorf("backup: portable restore of experimental workbooks is unavailable")
@@ -1131,6 +1142,10 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return stats, fmt.Errorf("backup: begin restore tx: %w", err)
+	}
+	if err := rejectMooringCollaborationCollision(ctx, tx, dump); err != nil {
+		_ = tx.Rollback()
+		return stats, err
 	}
 	// Defer FK checks until commit. Without this, the tombstone purge
 	// pass walks tables in BackupTables order (parents first), so

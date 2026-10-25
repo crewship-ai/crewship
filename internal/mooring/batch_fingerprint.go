@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"strings"
 	"unicode/utf8"
 
 	"github.com/gowebpki/jcs"
@@ -25,7 +24,10 @@ var ErrCanonicalInput = errors.New("invalid or oversized canonical JSON input")
 // canonicalPreflight bounds untrusted input before recursive parsing. It is
 // deliberately not a JSON validator; the canonicalizer validates syntax next.
 func canonicalPreflight(raw []byte) error {
-	if len(raw) == 0 || len(raw) > MaxCanonicalBytes || !utf8.Valid(raw) {
+	return canonicalPreflightLimit(raw, MaxCanonicalBytes)
+}
+func canonicalPreflightLimit(raw []byte, maxBytes int) error {
+	if len(raw) == 0 || len(raw) > maxBytes || !utf8.Valid(raw) {
 		return ErrCanonicalInput
 	}
 	depth, structure := 0, 0
@@ -121,7 +123,7 @@ func FingerprintAtomicJSON(raw []byte) (AtomicFingerprints, error) {
 	}
 	result := AtomicFingerprints{CanonicalInput: canonical, MembershipHash: canonicalDigest(canonical), Operations: make(map[string]string, len(shape.Operations))}
 	for _, op := range shape.Operations {
-		if len(op.ID) == 0 || len(op.ID) > 200 || strings.ContainsRune(op.ID, 0) {
+		if !ValidWireIdentifier(op.ID) {
 			return AtomicFingerprints{}, ErrCanonicalInput
 		}
 		if _, duplicate := result.Operations[op.ID]; duplicate {

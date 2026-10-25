@@ -1075,10 +1075,11 @@ func (h *PageHandler) publishFolderMembership(ctx context.Context, wsID string, 
 		// HasDocument flag. Missing identity or failed classification hides even ID.
 		if err := h.db.QueryRowContext(ctx, `SELECT p.private_audience,COALESCE(p.owner_user_id,''),
  EXISTS(SELECT 1 FROM documents WHERE page_id=p.id),
+ EXISTS(SELECT 1 FROM mooring_collab_documents WHERE page_id=p.id),
  EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=p.id),
  EXISTS(SELECT 1 FROM page_project_live WHERE page_id=p.id AND published=1),
  EXISTS(SELECT 1 FROM page_panels WHERE page_id=p.id)
- FROM pages p WHERE p.id=? AND p.workspace_id=?`, rec.ID, wsID).Scan(&current.PrivateAudience, &current.OwnerUserID, &current.HasDocument, &current.HasProject, &current.HasApplication, &hasPanels); err == nil {
+ FROM pages p WHERE p.id=? AND p.workspace_id=?`, rec.ID, wsID).Scan(&current.PrivateAudience, &current.OwnerUserID, &current.HasDocument, &current.HasCollaboration, &current.HasProject, &current.HasApplication, &hasPanels); err == nil {
 			public = pageWorkspaceInvalidation(&current, hasPanels)
 		}
 	}

@@ -54,9 +54,9 @@ COPY public/ ./public/
 COPY config/*.json ./config/
 COPY schemas/*.json ./schemas/
 COPY internal/pages/content_types.json ./internal/pages/
-COPY e2e/ ./e2e/
-COPY mooring/protocol/generated/ts/ ./mooring/protocol/generated/ts/
 COPY mooring/client/ ./mooring/client/
+COPY mooring/protocol/generated/ts/ ./mooring/protocol/generated/ts/
+COPY e2e/ ./e2e/
 # Reference editors are TypeScript inputs checked by the production build.
 COPY examples/ ./examples/
 COPY scripts/prepare-pdf-assets.mjs scripts/prepare-chat-workers.mjs scripts/check-control-accessibility.tsx ./scripts/
@@ -109,6 +109,8 @@ RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \
     go mod download
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
+# Public schema and generated Go wire types; no Rust compiler or vendor tree.
+COPY mooring/protocol/ ./mooring/protocol/
 # CLI embeds the supported Pages dependency lock and source starter.
 COPY tools/ ./tools/
 COPY examples/ ./examples/

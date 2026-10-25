@@ -18,6 +18,12 @@ const MaxRPCFrame = 256 * 1024
 // PrivatePrepareProfile is an explicit inherited-channel capability. Its
 // transport ceiling never changes the public participant/batch wire profile.
 const PrivatePrepareProfile = "mooring.prepare.v1"
+const PrivateCausalPrepareProfile = "mooring.prepare-causal.v1"
+
+func privatePrepareProfile(profile string) bool {
+	return profile == PrivatePrepareProfile || profile == PrivateCausalPrepareProfile
+}
+
 const MaxPrivatePrepareRPCFrame = 2 * 1024 * 1024
 
 var ErrRuntimeDisabled = errors.New("mooring runtime disabled")
@@ -113,13 +119,15 @@ func (r *RPC) Read() ([]byte, error) {
 func (r *RPC) Close() error { return r.conn.Close() }
 
 type Runtime struct {
-	RPC          *RPC
-	cmd          *exec.Cmd
-	done         chan struct{}
-	mu           sync.Mutex
-	err          error
-	exchangeOnce sync.Once
-	exchangeSlot chan struct{}
+	RPC                    *RPC
+	cmd                    *exec.Cmd
+	done                   chan struct{}
+	mu                     sync.Mutex
+	err                    error
+	exchangeOnce           sync.Once
+	exchangeSlot           chan struct{}
+	selectedVersions       RuntimeVersions
+	selectedControlProfile string
 }
 
 func (r *Runtime) Done() <-chan struct{} { return r.done }
@@ -140,15 +148,21 @@ func StartRuntime(ctx context.Context, c RuntimeConfig) (*Runtime, error) {
 	if !c.Enabled {
 		return nil, ErrRuntimeDisabled
 	}
-	if c.Binary == "" || c.Versions.Protocol == "" || c.Versions.Model == "" || c.Versions.Engine == "" || (c.ControlProfile != "" && c.ControlProfile != PrivatePrepareProfile) {
+	if c.Binary == "" || c.Versions.Protocol == "" || c.Versions.Model == "" || c.Versions.Engine == "" || (c.ControlProfile != "" && !privatePrepareProfile(c.ControlProfile)) {
 		return nil, ErrRuntimeHandshake
 	}
 	return startRuntime(ctx, c, exec.CommandContext(ctx, c.Binary, "--rpc-fd", "3"))
 }
 func runtimeHandshake(rpc *RPC, versions RuntimeVersions, profile string) error {
-	if profile != "" && profile != PrivatePrepareProfile {
+	if profile != "" && !privatePrepareProfile(profile) {
 		return ErrRuntimeHandshake
 	}
+	return runtimeHandshakeSelected(rpc, versions, profile, validateRuntimeReady)
+}
+
+// Private construction seam. The session constructor never publishes *Runtime
+// or permits legacy Exchange to read its stream.
+func runtimeHandshakeSelected(rpc *RPC, versions RuntimeVersions, profile string, validate func([]byte, RuntimeVersions, string) bool) error {
 	if err := rpc.conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		return err
 	}
@@ -169,13 +183,13 @@ func runtimeHandshake(rpc *RPC, versions RuntimeVersions, profile string) error 
 	if err != nil {
 		return err
 	}
-	if !validateRuntimeReady(frame, versions, profile) {
+	if !validate(frame, versions, profile) {
 		return ErrRuntimeHandshake
 	}
 	if err := rpc.conn.SetDeadline(time.Time{}); err != nil {
 		return err
 	}
-	if profile == PrivatePrepareProfile {
+	if profile != "" {
 		rpc.maxFrame = MaxPrivatePrepareRPCFrame
 	}
 	return nil

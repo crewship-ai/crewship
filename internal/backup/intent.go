@@ -36,12 +36,21 @@ import "sort"
 // table. Drift detection catches the omission in tests so an oversight
 // surfaces before a bundle ships missing rows.
 var BackupTableIntent = map[string]ScopedTableIntent{
-	"mooring_delivery_gates":    IntentExcludeRuntime,
-	"mooring_delivery_barriers": IntentExcludeRuntime,
-	"mooring_session_owners":    IntentExcludeRuntime, // process-bound owner capability requires fresh admission after restore
-	"mooring_documents":         IntentInclude,        // durable generic application state
-	"mooring_receipts":          IntentInclude,        // immutable history and idempotence evidence
-	"mooring_intents":           IntentExcludeRuntime, // live human/run mandates never survive restore
+	"mooring_authority_generations":  IntentExcludeRuntime, // target-local non-ABA tombstones never travel or reset in portable restore
+	"mooring_delivery_gates":         IntentExcludeRuntime,
+	"mooring_delivery_barriers":      IntentExcludeRuntime,
+	"mooring_collab_documents":       IntentInclude, // durable collaboration state; no runtime capabilities
+	"mooring_collab_tasks":           IntentInclude, // durable collaboration state; no runtime capabilities
+	"mooring_collab_changes":         IntentInclude, // durable collaboration state; no runtime capabilities
+	"mooring_collab_target_versions": IntentInclude,
+	"mooring_collab_target_effects":  IntentInclude,
+	"mooring_collab_operations":      IntentInclude,        // durable collaboration state; no runtime capabilities
+	"mooring_collab_checkpoints":     IntentInclude,        // durable collaboration state; no runtime capabilities
+	"mooring_collab_audit":           IntentInclude,        // durable collaboration state; no runtime capabilities
+	"mooring_session_owners":         IntentExcludeRuntime, // process-bound owner capability requires fresh admission after restore
+	"mooring_documents":              IntentInclude,        // durable generic application state
+	"mooring_receipts":               IntentInclude,        // immutable history and idempotence evidence
+	"mooring_intents":                IntentExcludeRuntime, // live human/run mandates never survive restore
 
 	// Portable workbook backup is unavailable in the experimental pilot. Dump
 	// refuses a workspace containing workbooks instead of silently omitting them.
