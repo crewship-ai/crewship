@@ -122,6 +122,7 @@ pub struct RunningDriver {
     wake: mooring_core::schedule::native::ReadyWake,
     issuer: String,
     participants: crate::session_participants::Participants,
+    reads: crate::session_reads::Reads,
     input: VecDeque<Queued>,
     input_bytes: usize,
     gate_bytes: BTreeMap<String, usize>,
@@ -271,6 +272,21 @@ impl RunningDriver {
         request: &str,
         message: serde_json::Value,
     ) -> io::Result<()> {
+        let raw = self.output_frame(connection, request, message)?;
+        self.driver
+            .lane
+            .output()
+            .send_participant_checked(&raw, || {
+                self.participants
+                    .may_send(connection, &self.owner, (self.driver.clock)()?)
+            })
+    }
+    fn output_frame(
+        &self,
+        connection: &str,
+        request: &str,
+        message: serde_json::Value,
+    ) -> io::Result<Vec<u8>> {
         let participant = self
             .participants
             .live
@@ -281,14 +297,7 @@ impl RunningDriver {
             "runtime_ref":self.owner.runtime_ref(),"fence":self.owner.initial_owner().fence,
             "connection_ref":connection,"participant_ref":participant.participant,"gate_id":participant.gate,
             "permission_version":participant.permission,"message":message});
-        let raw = serde_json::to_vec(&value).map_err(|_| invalid("participant output encoding"))?;
-        self.driver
-            .lane
-            .output()
-            .send_participant_checked(&raw, || {
-                self.participants
-                    .may_send(connection, &self.owner, (self.driver.clock)()?)
-            })
+        serde_json::to_vec(&value).map_err(|_| invalid("participant output encoding"))
     }
     fn joined(&mut self, opening: &SessionParticipantOpen, connection: &str) -> io::Result<()> {
         let p = self
@@ -317,13 +326,68 @@ impl RunningDriver {
             if leave.scope != *self.owner.scope() || leave.session_id != self.owner.session_id() {
                 return Err(invalid("leave binding"));
             }
-            return self
+            let result = self
                 .participants
                 .leave(&input, &self.owner, (self.driver.clock)()?);
+            if result.is_ok() {
+                self.reads.forget(&input.connection_ref);
+            }
+            return result;
         }
         let participant = self
             .participants
             .input(&input, &self.owner, (self.driver.clock)()?)?;
+        if let SessionParticipantInputMessage::ReadRequest(request) = &input.message {
+            if participant.granted.read != Some(true)
+                || request.scope != *self.owner.scope()
+                || request.session_id != self.owner.session_id()
+            {
+                return Err(invalid("read participant binding"));
+            }
+            let overhead = self
+                .output_frame(
+                    &input.connection_ref,
+                    &input.request_id,
+                    serde_json::Value::Null,
+                )?
+                .len()
+                .checked_sub(4)
+                .ok_or_else(|| invalid("read envelope accounting"))?;
+            let budget = session_control::MAX_BATCH_BYTES
+                .checked_sub(overhead)
+                .ok_or_else(|| invalid("read envelope capacity"))?;
+            let response = self.reads.respond(
+                &input.connection_ref,
+                &input.request_id,
+                request,
+                self.actor.confirmed().0,
+                budget,
+            );
+            let message = match response {
+                Ok(message) => message,
+                Err(crate::session_reads::Failure::State) => {
+                    return Err(invalid("invalid native read projection"))
+                }
+                Err(error) => {
+                    let (code, message) = match error {
+                        crate::session_reads::Failure::Invalid => {
+                            ("invalid_request", "Invalid document read request.")
+                        }
+                        crate::session_reads::Failure::Unavailable => (
+                            "precondition_failed",
+                            "Read snapshot is unavailable. Start a new read.",
+                        ),
+                        _ => (
+                            "capacity_exhausted",
+                            "Document read exceeds the available byte budget.",
+                        ),
+                    };
+                    serde_json::json!({"type":"protocol_error","request_id":request.request_id,"scope":self.owner.scope(),
+                        "reason":{"code":code,"message":message,"retry":"new_operation_after_refresh"}})
+                }
+            };
+            return self.output(&input.connection_ref, &input.request_id, message);
+        }
         if participant.granted.write != Some(true) {
             return Err(invalid("participant lacks write grant"));
         }
@@ -978,6 +1042,7 @@ impl RunningDriver {
             wake,
             issuer,
             participants: crate::session_participants::Participants::new(),
+            reads: crate::session_reads::Reads::default(),
             input: VecDeque::new(),
             input_bytes: 0,
             gate_bytes: BTreeMap::new(),
@@ -1063,6 +1128,7 @@ impl RunningDriver {
         self.check_owner()
     }
     pub fn close(&mut self) {
+        self.reads.clear();
         self.participants.close();
         self.owner.close();
         self.actor.close();

@@ -134,6 +134,10 @@ func runMooringHTTPActualSDK(t *testing.T, peerDelete bool, grantChange ...strin
 
 	if len(grantChange) != 0 {
 		grant("write")
+		if grantChange[0] == "bounded-reader" {
+			// Establish independent READ BEFORE writer admission and its actual positive Saved baseline.
+			grant("read")
+		}
 	}
 	cp, e := os.ReadFile(os.Getenv("MOORING_SESSION_CHECKPOINT"))
 	if e != nil || fmt.Sprintf("%x", sha256.Sum256(cp)) != mooringActualFixtureSHA(t, "MOORING_SESSION_CHECKPOINT_SHA256") {
@@ -380,7 +384,7 @@ process.stdout.write(JSON.stringify(changes));`
 				_ = b.SetWriteDeadline(time.Now().Add(8 * time.Second))
 				return websocket.Message.Send(b, string(raw))
 			},
-			changeGrant: func(mode string) {
+			changeGrant: func(mode string) time.Time {
 				if mode == "late-ticket" {
 					hook := func(q protocol.TicketValidationRequest) {
 						document.mu.Lock()
@@ -411,12 +415,14 @@ process.stdout.write(JSON.stringify(changes));`
 					case <-time.After(8 * time.Second):
 						t.Fatal("actual late Ticket barrier absent")
 					}
-					return
+					return time.Now()
 				}
-				if mode == "reader" {
+				if mode == "reader" && grantChange[0] != "bounded-reader" {
 					grant("read")
 				}
+				changedAt := time.Now() // Conservative: immediately BEFORE canonical DELETE and its SQL commit.
 				grant("")
+				return changedAt
 			},
 			ownerContinue: func() { send(a, first, "owner-after-grant", own[:1]) },
 			oldTicket: func() error {

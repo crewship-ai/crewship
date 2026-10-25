@@ -17,6 +17,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Mooring collaboration storage and its Go session runtime retain checkpoint identities, original batch outcomes and independent delivery notifications behind the existing disabled route boundary.
 
+- Qualify Mooring startup metadata and complete targets from one checked owned WordCraft document, preserving checkpoint integrity and final owner checks without changing runtime deadlines.
+
 - **Mooring Rust and protocol sources receive native and WASM CI coverage.** This consolidation keeps the reviewed runtime, SDK, generated wire types and locked third-party sources together; the required CI lane executes the current shared vectors through the actual WASM ABI. Document routes remain disabled by default.
 
 - **Queued Mooring admission retains its original human authority.** Authenticated chat and WebSocket provenance preserves the original credential and revocation fence through run admission and retries; legacy receipts remain unfenced. This foundation does not enable document routes or editing.

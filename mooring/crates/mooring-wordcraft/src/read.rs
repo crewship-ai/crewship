@@ -12,7 +12,7 @@ pub enum ReadError {
     InvalidState,
     ItemTooLarge,
 }
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Paragraph {
     pub target_id: String,
     pub native: Value,
@@ -21,6 +21,63 @@ pub struct Paragraph {
 pub struct Page {
     pub paragraphs: Vec<Paragraph>,
     pub next_after: Option<String>,
+}
+
+/// An immutable native projection of one confirmed document. The caller owns
+/// revision/scope authentication and accounts for this snapshot's retained
+/// size. Advancing the live CRDT cannot change any continuation of this read.
+/// No CRDT restore, mutation or document identity allocation is performed.
+pub struct Snapshot {
+    header: Value,
+    ids: Vec<String>,
+    body: Vec<Value>,
+    encoded_bytes: usize,
+}
+
+impl Snapshot {
+    pub fn capture(document: &Document) -> Result<Self, ReadError> {
+        let ids = document.block_ids().map_err(|_| ReadError::InvalidState)?;
+        let mut header = document.native().map_err(|_| ReadError::InvalidState)?;
+        let body = header
+            .as_object_mut()
+            .ok_or(ReadError::InvalidState)?
+            .remove("body")
+            .ok_or(ReadError::InvalidState)?;
+        let Value::Array(body) = body else {
+            return Err(ReadError::InvalidState);
+        };
+        if body.len() != ids.len() {
+            return Err(ReadError::InvalidState);
+        }
+        // Serialized retention accounting, not an assertion about RSS. Hosts
+        // must additionally cap snapshot count and the complete wire envelope.
+        let encoded_bytes = serde_json::to_vec(&(&header, &ids, &body))
+            .map_err(|_| ReadError::InvalidState)?
+            .len();
+        Ok(Self {
+            header,
+            ids,
+            body,
+            encoded_bytes,
+        })
+    }
+
+    pub fn encoded_bytes(&self) -> usize {
+        self.encoded_bytes
+    }
+
+    pub fn header(&self, max_bytes: usize) -> Result<Value, ReadError> {
+        bounded_header(&self.header, max_bytes)
+    }
+
+    pub fn page(
+        &self,
+        after: Option<&str>,
+        max_paragraphs: usize,
+        max_bytes: usize,
+    ) -> Result<Page, ReadError> {
+        page_from_parts(&self.ids, &self.body, after, max_paragraphs, max_bytes)
+    }
 }
 
 /// The byte budget covers this complete serialized page, including stable IDs
@@ -36,6 +93,29 @@ pub fn page(
         return Err(ReadError::InvalidLimit);
     }
     let ids = document.block_ids().map_err(|_| ReadError::InvalidState)?;
+    let mut native = document.native().map_err(|_| ReadError::InvalidState)?;
+    let body = native
+        .as_object_mut()
+        .ok_or(ReadError::InvalidState)?
+        .remove("body")
+        .ok_or(ReadError::InvalidState)?;
+    let body = body.as_array().ok_or(ReadError::InvalidState)?;
+    page_from_parts(&ids, body, after, max_paragraphs, max_bytes)
+}
+
+fn page_from_parts(
+    ids: &[String],
+    body: &[Value],
+    after: Option<&str>,
+    max_paragraphs: usize,
+    max_bytes: usize,
+) -> Result<Page, ReadError> {
+    if max_paragraphs == 0 || max_paragraphs > 256 || max_bytes == 0 || max_bytes > 262144 {
+        return Err(ReadError::InvalidLimit);
+    }
+    if body.len() != ids.len() {
+        return Err(ReadError::InvalidState);
+    }
     let start = match after {
         None => 0,
         Some(id) => {
@@ -45,16 +125,6 @@ pub fn page(
                 + 1
         }
     };
-    let mut native = document.native().map_err(|_| ReadError::InvalidState)?;
-    let body = native
-        .as_object_mut()
-        .ok_or(ReadError::InvalidState)?
-        .remove("body")
-        .ok_or(ReadError::InvalidState)?;
-    let body = body.as_array().ok_or(ReadError::InvalidState)?;
-    if body.len() != ids.len() {
-        return Err(ReadError::InvalidState);
-    }
     let mut result = Page {
         paragraphs: Vec::new(),
         next_after: None,
@@ -99,14 +169,21 @@ pub fn header(document: &Document, max_bytes: usize) -> Result<Value, ReadError>
         .as_object_mut()
         .ok_or(ReadError::InvalidState)?
         .remove("body");
-    if serde_json::to_vec(&native)
+    bounded_header(&native, max_bytes)
+}
+
+fn bounded_header(native: &Value, max_bytes: usize) -> Result<Value, ReadError> {
+    if max_bytes == 0 || max_bytes > 262144 {
+        return Err(ReadError::InvalidLimit);
+    }
+    if serde_json::to_vec(native)
         .map_err(|_| ReadError::InvalidState)?
         .len()
         > max_bytes
     {
         return Err(ReadError::ItemTooLarge);
     }
-    Ok(native)
+    Ok(native.clone())
 }
 
 #[cfg(test)]

@@ -67,6 +67,14 @@ fn inventory(document: &Document) -> Result<Vec<TargetIdentity>, PrepareError> {
     Ok(identities)
 }
 impl WordCraftAdapter {
+    /// Complete target DATA from an application-owned document; no read/write
+    /// authority is inferred and no writable-subset projection is substituted.
+    pub fn validate_document(
+        &self,
+        document: &Document,
+    ) -> Result<Vec<TargetIdentity>, PrepareError> {
+        inventory(document)
+    }
     /// Session-only human preparation. Authority is a borrowed host live-store
     /// input, not a client wire claim. A whole immutable atomic is never split.
     pub fn prepare_human_atomic(
@@ -161,7 +169,7 @@ impl PrepareAdapter for WordCraftAdapter {
     type Candidate = Candidate;
     type Error = PrepareError;
     fn validate_checkpoint(&self, checkpoint: &[u8]) -> Result<Vec<TargetIdentity>, Self::Error> {
-        inventory(&Document::restore(checkpoint).map_err(PrepareError::State)?)
+        self.validate_document(&Document::restore(checkpoint).map_err(PrepareError::State)?)
     }
     fn prepare_atomic(
         &self,
