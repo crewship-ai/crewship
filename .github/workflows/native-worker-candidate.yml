@@ -67,7 +67,7 @@ jobs:
           sudo findmnt -T /var/lib/docker/containers
       - name: Freeze the original application source for differential controls
         run: |
-          git fetch --no-tags origin 6b39cadb8906fa797eb1503b351cc1ef07bb2501
+          git fetch --depth=1 --no-tags origin 6b39cadb8906fa797eb1503b351cc1ef07bb2501
           git worktree add --detach "$RUNNER_TEMP/native-baseline-source" 6b39cadb8906fa797eb1503b351cc1ef07bb2501
       - name: Reproduce the released image failure with the production canary
         run: |
@@ -77,20 +77,22 @@ jobs:
           cd "$RUNNER_TEMP/native-baseline-source"
           sudo env "PATH=$PATH" GOTOOLCHAIN=local bash "$GITHUB_WORKSPACE/scripts/ci/native-noatime-fixture.sh" \
             "$image" "$RUNNER_TEMP/native-red" red
-      - name: Prove the original image passes when only the fixture atime flag changes
-        run: |
-          sudo mount -o remount,bind,relatime /var/lib/docker/containers
-          sudo findmnt -T /var/lib/docker/containers
-          image=$(docker image inspect --format '{{.Id}}' ghcr.io/crewship-ai/crewship-restricted-native@sha256:4acc8f2c982ae3d178b04509ab778c6960b8121f1b948d02d9bacc8d2982d5a9)
-          cd "$RUNNER_TEMP/native-baseline-source"
-          sudo env "PATH=$PATH" GOTOOLCHAIN=local bash "$GITHUB_WORKSPACE/scripts/ci/native-noatime-fixture.sh" \
-            "$image" "$RUNNER_TEMP/native-relatime-control" green
       - name: Require the production canary and negative sandbox checks on the candidate
         run: |
           sudo mount -o remount,bind,noatime /var/lib/docker/containers
           sudo findmnt -T /var/lib/docker/containers
           sudo env "PATH=$PATH" GOTOOLCHAIN=local bash scripts/ci/native-noatime-fixture.sh "$(docker image inspect --format '{{.Id}}' crewship-native-candidate:verify)" \
             "$RUNNER_TEMP/native-green" green
+      - name: Prove the original image passes when only the fixture atime flag changes
+        run: |
+          sudo mount -o remount,bind,atime,relatime /var/lib/docker/containers
+          sudo findmnt -T /var/lib/docker/containers
+          options=$(sudo findmnt -n -o VFS-OPTIONS -T /var/lib/docker/containers)
+          [[ ",$options," == *,relatime,* && ",$options," != *,noatime,* ]]
+          image=$(docker image inspect --format '{{.Id}}' ghcr.io/crewship-ai/crewship-restricted-native@sha256:4acc8f2c982ae3d178b04509ab778c6960b8121f1b948d02d9bacc8d2982d5a9)
+          cd "$RUNNER_TEMP/native-baseline-source"
+          sudo env "PATH=$PATH" GOTOOLCHAIN=local bash "$GITHUB_WORKSPACE/scripts/ci/native-noatime-fixture.sh" \
+            "$image" "$RUNNER_TEMP/native-relatime-control" green
       - name: Release only the owned fixture mount
         if: always()
         run: |
