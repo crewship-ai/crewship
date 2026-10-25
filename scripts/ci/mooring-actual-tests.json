@@ -2,6 +2,13 @@
   "format": "mooring.actual-tests.v1",
   "files": [
     {
+      "path": "internal/api/mooring_collab_agent_tool_actual_linux_test.go",
+      "tests": [
+        "TestMooringAgentToolActualHandlerOwnsAdmissionAndPhysicalFlush",
+        "TestMooringAgentToolActualHandlerSealsOriginalBeforeNativeDispatch"
+      ]
+    },
+    {
       "path": "internal/api/mooring_collab_actor_commit_actual_linux_test.go",
       "tests": [
         "TestCollaborationActualActorBPrecedesAAckAndCommitsOriginalSQL",
