@@ -93,7 +93,26 @@ jobs:
             "$RUNNER_TEMP/native-green" green
       - name: Prove the original image passes when only the fixture atime flag changes
         run: |
-          sudo mount --options-mode=replace -o remount,bind,atime,relatime /var/lib/docker/containers
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -e "$RUNNER_TEMP/native-docker-fixture-mounted"
+          # Use the legacy bind-remount syscall explicitly: util-linux may route
+          # this control through the new mount API instead of changing VFS flags.
+          sudo python3 - <<'PYCONTROL'
+          import ctypes, os
+          target = '/var/lib/docker/containers'
+          entries = [line.split() for line in open('/proc/self/mountinfo')]
+          current = next(entry[5].split(',') for entry in reversed(entries) if entry[4] == target)
+          bits = {'rw': 0, 'ro': 1, 'nosuid': 2, 'nodev': 4, 'noexec': 8,
+                  'noatime': 0, 'nodiratime': 0, 'relatime': 0}
+          assert all(flag in bits for flag in current), current
+          flags = 32 | 4096 | (1 << 21)  # MS_REMOUNT | MS_BIND | MS_RELATIME
+          for flag in current:
+              flags |= bits[flag]
+          libc = ctypes.CDLL(None, use_errno=True)
+          if libc.mount(b'none', os.fsencode(target), None, ctypes.c_ulong(flags), None):
+              error = ctypes.get_errno()
+              raise OSError(error, os.strerror(error), target)
+          PYCONTROL
           sudo findmnt -T /var/lib/docker/containers
           options=$(sudo findmnt -n -o VFS-OPTIONS -T /var/lib/docker/containers)
           [[ ",$options," == *,relatime,* && ",$options," != *,noatime,* ]]
