@@ -200,3 +200,36 @@ func TestDedicatedEditorOriginOverridesSameHost(t *testing.T) {
 		t.Fatalf("same-host prefix served alongside a dedicated origin: %d", w.Code)
 	}
 }
+
+// Mooring serves its verified application editor with GridCraft entirely off.
+func TestMooringOnlyEditorPreservesSandboxAndStudioFramePolicy(t *testing.T) {
+	cfg := config.Default()
+	dir := t.TempDir()
+	digest := writeEditorBundle(t, dir)
+	cfg.GridCraft.EditorBundleDir = dir
+	cfg.GridCraft.EditorBundles = []string{digest}
+	cfg.Mooring.Enabled = true
+	if cfg.GridCraft.Enabled || cfg.GridCraft.EditorEnabled {
+		t.Fatal("GridCraft must remain disabled")
+	}
+	editor := newEditorOrigin(cfg, slog.Default())
+	if !editor.HasBundle(digest) {
+		t.Fatal("Mooring editor bundle not loaded")
+	}
+	main := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(299) })
+	handler := editororigin.Gate(editor, securityHeadersMiddlewareWith(main, editorHeaderOptions(cfg, editor)))
+	r := httptest.NewRequest("GET", "https://studio.example.test/_editor/b/"+digest+"/index.html", nil)
+	r.Header.Set("Sec-Fetch-Dest", "iframe")
+	r.Header.Set("Sec-Fetch-Site", "same-origin")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+	if w.Code != 200 || !strings.HasSuffix(w.Header().Get("Content-Security-Policy"), "sandbox allow-scripts") {
+		t.Fatalf("editor document: %d %v", w.Code, w.Header())
+	}
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, httptest.NewRequest("GET", "https://studio.example.test/chat", nil))
+	policy := w.Header().Get("Content-Security-Policy")
+	if w.Code != 299 || frameSrcOf(policy) != "frame-src https://studio.example.test/_editor/b/" || strings.Contains(policy, "wasm-unsafe-eval") {
+		t.Fatalf("Studio policy: %d %s", w.Code, policy)
+	}
+}

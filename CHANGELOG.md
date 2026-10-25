@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Package the optional Mooring runtime and isolated WordCraft editor from pinned public sources, with embedded asset integrity checks and disabled-by-default runtime configuration.
+
 - Bound Mooring session admission request and response I/O, flush buffered responses under the original ingress lease, and retain the read deadline through HTTP body cleanup.
 
 - Mooring document sessions retain original author checks and SQL-backed Saved receipts over the disabled-by-default HTTP/WebSocket boundary; the actual native integration cases run in CI.

@@ -38,6 +38,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/appengine"
 	"github.com/crewship-ai/crewship/internal/memory"
+	"github.com/crewship-ai/crewship/internal/mooringassets"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
 	appleprovider "github.com/crewship-ai/crewship/internal/provider/apple"
@@ -56,6 +57,8 @@ import (
 
 type Server struct {
 	documentsStartupErr error
+	mooringStartupErr   error
+	mooringAssets       *mooringassets.Prepared
 	containerCleanup    *resourcelifecycle.Controller
 
 	recoveredStopsMu        sync.Mutex
@@ -412,7 +415,7 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	// the API can report it to administrators and, in same-host mode, show
 	// it the public origin of signed-in browser requests.
 	editor := newEditorOrigin(cfg, logger)
-	if cfg.GridCraft.Enabled && cfg.GridCraft.EditorEnabled {
+	if (cfg.GridCraft.Enabled && cfg.GridCraft.EditorEnabled) || cfg.Mooring.Enabled {
 		s.editor = editor
 	}
 
@@ -1076,9 +1079,14 @@ func (s *Server) mountAPIRouter(
 	if cfg.Documents.Enabled {
 		opts = append(opts, goapi.WithDocumentAuthority(cfg.Documents.AuthoritySocket, cfg.Documents.ServiceTokenFile), goapi.WithDocumentService(cfg.Documents.ServiceSocket), goapi.WithDocumentLimits(cfg.Documents))
 	}
+	opts = s.configureMooringHTTP(opts)
 	apiRouter, err := goapi.NewRouter(deps.DB, cfg.Auth.JWTSecret, logger, opts...)
 	if err != nil {
 		logger.Error("failed to create API router", "error", err)
+		if cfg.Mooring.Enabled {
+			s.mooringStartupErr = err
+			s.closeMooringAssets()
+		}
 		if cfg.Documents.Enabled {
 			s.documentsStartupErr = err
 		}

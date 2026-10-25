@@ -101,6 +101,9 @@ func (s *Server) Start(ctx context.Context) error {
 	if s.cfg != nil && s.cfg.Audit.Keys != nil {
 		ctx = journal.WithSigningKeys(ctx, s.cfg.Audit.Keys)
 	}
+	if s.mooringStartupErr != nil {
+		return fmt.Errorf("Mooring runtime startup: %w", s.mooringStartupErr)
+	}
 	if s.documentsStartupErr != nil {
 		return fmt.Errorf("Docs authority startup: %w", s.documentsStartupErr)
 	}
@@ -727,6 +730,9 @@ func (s *Server) Shutdown() error {
 	if s.apiRouter != nil {
 		s.apiRouter.Shutdown()
 	}
+	// The router has stopped and joined all private Rust/WS workers.
+	// Only then may the exact extracted executable be removed.
+	s.closeMooringAssets()
 
 	if s.state != nil {
 		if err := s.state.Close(); err != nil {
