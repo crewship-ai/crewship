@@ -51,7 +51,7 @@ var ErrDetachedStillRunning = errors.New("orchestrator: exec detached and still 
 // ErrDetachedExecStopped is terminal: the process was stopped, but its exit result is unknown.
 var ErrDetachedExecStopped = errors.New("orchestrator: detached exec stopped after the monitoring budget")
 
-// awaitExecTerminal inspects an exec whose stream has ended and, when the
+// awaitExecTerminalWithLogger inspects an exec whose stream has ended and, when the
 // process is still alive, keeps inspecting until it terminates (#2626).
 //
 // The synchronous path already trusted ExecInspect's answer for exit codes;
@@ -61,10 +61,6 @@ var ErrDetachedExecStopped = errors.New("orchestrator: detached exec stopped aft
 // exit code and no duplicate execution. Only when the budget or the context
 // runs out first does this give up and leave `running` true for the caller
 // to handle as ErrDetachedStillRunning.
-func (o *Orchestrator) awaitExecTerminal(ctx context.Context, execID string) (running bool, exitCode int, inspErr error) {
-	return o.awaitExecTerminalWithLogger(ctx, execID, o.logger)
-}
-
 func (o *Orchestrator) awaitExecTerminalWithLogger(ctx context.Context, execID string, logger *slog.Logger) (running bool, exitCode int, inspErr error) {
 	running, exitCode, inspErr = o.container.ExecInspect(ctx, execID)
 	if inspErr != nil || !running {
