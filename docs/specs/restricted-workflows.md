@@ -188,3 +188,24 @@ shared agent capacity without retrying the graph or asserting that no paid
 request or external effect occurred. Failure before graph execution is likewise
 terminal. Failed physical cleanup and recovered start intents retain
 `needs_reconciliation` and their capacity hold until explicitly resolved.
+
+### Native worker filesystem profile
+
+The native worker selects its fixed `crewship_native` Codex permission profile,
+which inherits workspace write protections and denies root reads except for
+`/usr`, `/bin`, `/lib` and `/lib64`. Workspace and temporary writes keep the
+built-in protected metadata rules. It does not combine permission profiles with
+`--sandbox`, which would override the profile. Command network access remains
+restricted. The agent CLI and Debian bubblewrap executable pins, container
+capabilities and seccomp/AppArmor bytes are unchanged.
+
+This avoids recursively importing Docker's synthetic network files into the
+inner filesystem. On a noatime-backed Docker data filesystem, those mounts can
+carry `ro,noatime`; the closed seccomp mount-flag allowlist does not authorize
+the additional noatime remount combination. A dedicated disposable-runner test
+uses the original signed image as an expected RED control and requires the
+production native canary to execute and PASS on the candidate. Its three owned
+read-only synthetic network-file binds reproduce that filesystem condition;
+they are test fixtures, not production mounts or runtime qualification.
+Neither candidate checks nor publication release an infrastructure activation
+hold or establish provider-backed Guest acceptance.

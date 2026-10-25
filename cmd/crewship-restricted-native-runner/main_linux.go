@@ -94,7 +94,7 @@ func run() error {
 }
 
 func nativeArgs(model string) []string {
-	args := []string{"exec", "--json", "--skip-git-repo-check", "--ephemeral", "--sandbox", "workspace-write", "--model", model, "-C", "/home/agent/work"}
+	args := []string{"exec", "--json", "--skip-git-repo-check", "--ephemeral", "--model", model, "-C", "/home/agent/work"}
 	config := map[string]any{"model_provider": "crewship_native", "model_providers.crewship_native.name": "Crewship restricted native", "model_providers.crewship_native.base_url": "http://127.0.0.1:9121/v1", "model_providers.crewship_native.env_key": "CREWSHIP_BROKER_TOKEN", "model_providers.crewship_native.wire_api": "responses", "model_providers.crewship_native.requires_openai_auth": false, "model_providers.crewship_native.supports_websockets": false, "model_providers.crewship_native.request_max_retries": 0, "model_providers.crewship_native.stream_max_retries": 0, "approval_policy": "never", "analytics.enabled": false, "features.shell_tool": true, "web_search": "disabled", "features.goals": false, "features.hooks": false, "features.memories": false, "features.code_mode.enabled": false, "features.skill_mcp_dependency_install": false, "features.multi_agent": false, "features.apps": false, "project_root_markers": []string{}}
 	// Stable order makes the pinned bootstrap's actual command inspectable.
 	keys := []string{"model_provider", "model_providers.crewship_native.name", "model_providers.crewship_native.base_url", "model_providers.crewship_native.env_key", "model_providers.crewship_native.wire_api", "model_providers.crewship_native.requires_openai_auth", "model_providers.crewship_native.supports_websockets", "model_providers.crewship_native.request_max_retries", "model_providers.crewship_native.stream_max_retries", "approval_policy", "analytics.enabled", "features.shell_tool", "web_search", "features.goals", "features.hooks", "features.memories", "features.code_mode.enabled", "features.skill_mcp_dependency_install", "features.multi_agent", "features.apps", "project_root_markers"}
@@ -102,6 +102,19 @@ func nativeArgs(model string) []string {
 		v, _ := json.Marshal(config[key])
 		args = append(args, "-c", key+"="+string(v))
 	}
+	// A closed readable filesystem avoids recursively importing Docker's DNS
+	// file mounts (which can carry host noatime flags). Keep the workspace
+	// safeguards and writable scratch roots, without exposing /etc or /secrets.
+	// Permission profiles replace --sandbox; mixing them selects the old policy.
+	args = append(args,
+		"-c", `default_permissions="crewship_native"`,
+		"-c", `permissions.crewship_native.extends=":workspace"`,
+		"-c", `permissions.crewship_native.filesystem.":root"="deny"`,
+		"-c", `permissions.crewship_native.filesystem."/usr"="read"`,
+		"-c", `permissions.crewship_native.filesystem."/bin"="read"`,
+		"-c", `permissions.crewship_native.filesystem."/lib"="read"`,
+		"-c", `permissions.crewship_native.filesystem."/lib64"="read"`,
+	)
 	return append(args, "Complete the scoped task provided by the host.")
 }
 

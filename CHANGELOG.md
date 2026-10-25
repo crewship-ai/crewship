@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Restricted native scratch tools can fail on noatime-backed Docker storage.** The native worker uses a fixed, narrower filesystem permission profile that omits Docker network-file mounts while retaining workspace protections and the container sandbox.
+
 - **Administrative security operations explicitly opt in to emergency audit fallback.** Only single/all-session revocation can use this fallback in the session handler; unlock remains chained-only, and unknown internal operations are rejected before any account or audit mutation. Web password changes and resets continue to fail closed on a broken audit chain.
 
 - **CLI object sharing accepts routine Publish.** `crewship share` and `unshare` now accept `--operation publish`, matching the Share dialog. The server still requires Edit in the resulting policy; unrelated grants and issuer provenance are preserved, and conflicts are never retried.

@@ -6,6 +6,8 @@ on:
       - .github/workflows/native-worker-candidate.yml
       - cmd/crewship-restricted-native-runner/**
       - scripts/ci/prepare-native-release.sh
+      - scripts/ci/native-noatime-fixture.sh
+      - internal/restricteddispatch/**
       - internal/restrictedruntime/**
       - go.mod
       - go.sum
@@ -44,6 +46,35 @@ jobs:
           fail-build: true
           severity-cutoff: critical
           output-format: sarif
+      - name: Install the unchanged policy on this disposable runner only
+        run: |
+          sha256sum internal/restrictedruntime/nativepolicy/{apparmor.profile,seccomp.json}
+          sudo bash scripts/install-restricted-native-policy.sh
+      - name: Create owned network-file fixtures with the failing host mount flags
+        run: |
+          mkdir "$RUNNER_TEMP/noatime-network-files"
+          sudo mount -t tmpfs -o size=1m,noatime tmpfs "$RUNNER_TEMP/noatime-network-files"
+          printf '\n' | sudo tee "$RUNNER_TEMP/noatime-network-files/resolv.conf" >/dev/null
+          printf '127.0.0.1 localhost\n' | sudo tee "$RUNNER_TEMP/noatime-network-files/hosts" >/dev/null
+          printf 'native-fixture\n' | sudo tee "$RUNNER_TEMP/noatime-network-files/hostname" >/dev/null
+          sudo chmod 0644 "$RUNNER_TEMP/noatime-network-files/"*
+          findmnt -T "$RUNNER_TEMP/noatime-network-files/resolv.conf"
+      - name: Reproduce the released image failure with the production canary
+        run: |
+          image='ghcr.io/crewship-ai/crewship-restricted-native@sha256:4acc8f2c982ae3d178b04509ab778c6960b8121f1b948d02d9bacc8d2982d5a9'
+          docker pull "$image"
+          image=$(docker image inspect --format '{{.Id}}' "$image")
+          bash scripts/ci/native-noatime-fixture.sh "$image" "$RUNNER_TEMP/noatime-network-files" "$RUNNER_TEMP/native-red" red
+      - name: Require the unchanged production canary to pass on the candidate
+        run: |
+          bash scripts/ci/native-noatime-fixture.sh "$(docker image inspect --format '{{.Id}}' crewship-native-candidate:verify)" \
+            "$RUNNER_TEMP/noatime-network-files" "$RUNNER_TEMP/native-green" green
+      - name: Release only the owned fixture mount
+        if: always()
+        run: |
+          if mountpoint -q "$RUNNER_TEMP/noatime-network-files"; then
+            sudo umount "$RUNNER_TEMP/noatime-network-files"
+          fi
       - name: Record the tested source and local image identity
         env:
           SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
@@ -59,5 +90,7 @@ jobs:
             ${{ runner.temp }}/native-context/image-inspect.json
             ${{ runner.temp }}/native-context/tested-source.txt
             ${{ steps.scan.outputs.sarif }}
+            ${{ runner.temp }}/native-red/
+            ${{ runner.temp }}/native-green/
           if-no-files-found: warn
           retention-days: 14
