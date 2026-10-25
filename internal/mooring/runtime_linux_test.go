@@ -27,6 +27,10 @@ func TestMooringRuntimeHelper(t *testing.T) {
 	if mode == "" {
 		return
 	}
+	if mode == "stderr-before-ready" {
+		_, _ = os.Stderr.WriteString("mooring runtime stopped: kind=InvalidData\nprivate-document-not-for-logs\n")
+		os.Exit(23)
+	}
 	if _, present := os.LookupEnv("MOORING_PARENT_SECRET"); present {
 		t.Fatal("backend secret inherited")
 	}
@@ -76,6 +80,9 @@ func TestMooringRuntimeHelper(t *testing.T) {
 	ready, _ := json.Marshal(readyValue)
 	if err = rpc.Write(ready); err != nil {
 		t.Fatal(err)
+	}
+	if mode == "stderr-live" {
+		_, _ = os.Stderr.WriteString("mooring session lane: frame-read-error kind=Some(UnexpectedEof)\nprivate-document-not-for-logs\n")
 	}
 	if privatePrepareProfile(selected) {
 		rpc.maxFrame = MaxPrivatePrepareRPCFrame

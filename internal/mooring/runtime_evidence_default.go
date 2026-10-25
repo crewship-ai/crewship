@@ -4,4 +4,4 @@ package mooring
 
 import "os/exec"
 
-func actualRuntimeEvidence(_ *exec.Cmd) (func(), error) { return func() {}, nil }
+func actualRuntimeEvidence(cmd *exec.Cmd) (func(), error) { return runtimeStderrEvidence(cmd) }

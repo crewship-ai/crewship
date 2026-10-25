@@ -134,7 +134,7 @@ participant authority. No content operation or Saved receipt is dispatched
 by this primitive. Child death/cancellation closes the channel; a later
 integration must close all associated delivery gates and preserve pending drafts.
 The child receives only LANG=C.UTF-8 and TZ=UTC; backend credentials and loader
-environment are not inherited. Diagnostics are discarded. Tests use an actual helper child and inherited FD,
+environment are not inherited. Only bounded, allowlisted static Rust stderr errors enter backend logs; unknown bytes are suppressed. Tests use an actual helper child and inherited FD,
 not a running Rust service or live collaboration acceptance.
 
 For actual Go/Rust bootstrap acceptance, build the pinned child using

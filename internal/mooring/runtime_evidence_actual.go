@@ -15,7 +15,7 @@ import (
 func actualRuntimeEvidence(cmd *exec.Cmd) (func(), error) {
 	root := os.Getenv("MOORING_SESSION_OUTPUT_DIR")
 	if root == "" {
-		return func() {}, nil
+		return runtimeStderrEvidence(cmd)
 	}
 	info, err := os.Lstat(root)
 	if err != nil {

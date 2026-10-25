@@ -141,8 +141,8 @@ func (r *Runtime) Close() error {
 	return r.Err()
 }
 
-// StartRuntime starts only a packaged, operator-selected child. Diagnostics are
-// discarded: protocol bytes never use stdout/stderr and cannot enter logs here.
+// StartRuntime starts only a packaged, operator-selected child. Only bounded,
+// allowlisted static stderr diagnostics enter logs; unknown bytes are suppressed.
 // Binary authenticity and release asset pinning belong to the release caller.
 func StartRuntime(ctx context.Context, c RuntimeConfig) (*Runtime, error) {
 	if !c.Enabled {
