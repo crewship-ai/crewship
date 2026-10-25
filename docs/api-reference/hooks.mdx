@@ -13,7 +13,7 @@ tag: Experimental
 The lifecycle hook registry. Hooks fire shell commands, HTTP webhooks, or subagents on lifecycle events; this API registers them, edits them, removes them, and toggles them on or off. See the [Hooks guide](/guides/hooks).
 
 <Note>
-  All endpoints require authentication and are workspace-scoped. Every write (create / update / delete / enable / disable) requires `OWNER` or `ADMIN`. Creating or editing a `shell` handler additionally requires `OWNER` — see [the shell gate](#the-shell-gate).
+  All endpoints require authentication and are workspace-scoped. Non-host writes and hook deletion require workspace `OWNER` or `ADMIN`. Creating, editing or enabling a host `shell` handler requires an instance administrator with `instance:admin` token scope — see [the shell gate](#the-shell-gate).
 </Note>
 
 ## Endpoints
@@ -100,7 +100,7 @@ GET /api/v1/hooks?crew_id=<optional>
 POST /api/v1/hooks
 ```
 
-**Auth:** `OWNER` or `ADMIN`. `handler_kind: "shell"` requires `OWNER`.
+**Auth:** `OWNER` or `ADMIN`. `handler_kind: "shell"` requires an instance administrator with `instance:admin` token scope.
 
 **Body:**
 
@@ -132,7 +132,7 @@ POST /api/v1/hooks
 |---|---|
 | 400 | Unknown `event` (message lists the 14 valid names); `blocking: true` on an observation event; unknown `handler_kind`; missing `handler_config.url` / `.command`; malformed JSON. |
 | 401 | Not authenticated / no workspace. |
-| 403 | Not `OWNER`/`ADMIN`; or `shell` requested by a non-`OWNER`. |
+| 403 | Missing workspace management authority, or missing instance administrator authority/scope for a host hook. |
 | 404 | `crew_id` names a crew outside your workspace. |
 
 Writes an `audit_logs` row with action `hook.create`.
@@ -149,7 +149,7 @@ Writes an `audit_logs` row with action `hook.create`.
 PATCH /api/v1/hooks/{id}
 ```
 
-**Auth:** `OWNER` or `ADMIN`. `OWNER` is required to set `handler_kind: "shell"` **or** to edit a hook that is already `shell`.
+**Auth:** `OWNER` or `ADMIN`. An instance administrator is required to set `handler_kind: "shell"`, edit an existing host hook, or enable it.
 
 Semantics are **patch, not put**: only the fields present in the body change. An omitted field keeps its current value, so `{"event": "pre_agent_start"}` does not clear the matcher, the blocking flag, or the enabled flag. In particular, a body that never mentions `event` at all leaves it untouched — including on a legacy row whose `event` is `pre_tool_call`, which stays editable for every other field. Consequently, changing a blocking `pre_*` hook to a `post_*` or `on_*` event must also send `"blocking": false`; otherwise the merged observation hook is rejected with `400`.
 
@@ -185,9 +185,9 @@ Deletion is permanent. To stop a hook firing while keeping its definition, use [
 
 ### The shell gate
 
-`handler_kind: "shell"` runs a command on the crewshipd **host**, outside container isolation, with the privileges of the `crewship` process. That is a strictly larger grant than the rest of the ADMIN surface, so it needs `OWNER` — on create and on update alike. An `http` hook PATCHed into a `shell` hook is the same grant by a longer road, and is refused for the same reason.
+`handler_kind: "shell"` runs a command on the crewshipd **host**, outside container isolation, with the privileges of the `crewship` process. That is a strictly larger grant than the rest of the ADMIN surface, so it needs an instance administrator — on create, update and enable. An `http` hook PATCHed into a `shell` hook is the same grant by a longer road, and is refused for the same reason.
 
-The gate is enforced twice on purpose: in the handler (which knows the caller's role) and again in `hooks.Register` / `hooks.Update` (which is the only write path into `hooks_config`). Either alone would be sufficient; both means a future call site that forgets the check still cannot land a shell hook.
+The handler verifies instance authority and token scope. `hooks.Register`, `hooks.Update` and `hooks.SetEnabledAuthorized` also require the caller to supply verified authority; they cannot infer identity themselves. Runtime dispatch additionally checks approval of the exact stored configuration. Restore paths clear imported approval.
 
 ---
 
@@ -196,7 +196,7 @@ The gate is enforced twice on purpose: in the handler (which knows the caller's 
 Flip a hook on or off. Both transitions emit `system.hook_toggled` into the journal with the actor's user ID.
 
 <Warning>
-  Enabling a hook can invoke shell commands, hit third-party webhooks, or dispatch subagents -- which is why both endpoints require `OWNER` or `ADMIN`.
+  Enabling a hook can invoke shell commands, hit third-party webhooks, or dispatch subagents -- enabling a host shell hook requires an instance administrator. Workspace `OWNER` or `ADMIN` can disable it to stop execution. Non-host toggles retain the workspace role gate.
 </Warning>
 
 ### Enable
@@ -207,7 +207,7 @@ POST /api/v1/hooks/{id}/enable
 
 **Path parameters:** `id` is the hook ID. The request has no body.
 
-**Auth:** `OWNER` or `ADMIN` only (403 otherwise). Enabling a hook can invoke shell commands, hit third-party webhooks, or dispatch subagents -- the role bar matches that risk.
+**Auth:** Enabling a host shell hook requires an instance administrator and `instance:admin` token scope. Non-host hooks require workspace `OWNER` or `ADMIN`. Disabling host hooks is allowed for either workspace management authority or an instance administrator.
 
 **Response:** `200 OK`
 
@@ -247,7 +247,7 @@ Same auth rules, same response shape with `"enabled": false`.
 In-process provisioning code can skip HTTP and call the store directly. This is the same function the endpoints above call — there is one write path, not two:
 
 ```go
-const allowedShell = false // flip to true only when the caller has confirmed OWNER
+const allowedShell = false // flip to true only after verifying instance administrator authority
 _, err := hooks.Register(ctx, db, hooks.Hook{
     WorkspaceID: ws,
     Event:       hooks.EventOnApprovalRequested,
@@ -259,7 +259,7 @@ _, err := hooks.Register(ctx, db, hooks.Hook{
 }, allowedShell)
 ```
 
-The trailing `allowedShell bool` argument is the gate on `HandlerKindShell`: pass `false` for any non-OWNER context — the function returns `hooks.ErrShellHookNotAllowed` if the hook is a shell kind and this flag is `false`. HTTP / subagent hooks are unaffected by the flag. `Register` also returns `hooks.ErrUnknownEvent` for an event outside the declared fifteen.
+The trailing `allowedShell bool` argument is the gate on `HandlerKindShell`: pass `false` without verified instance administrator authority — the function returns `hooks.ErrShellHookNotAllowed` if the hook is a shell kind and this flag is `false`. HTTP / subagent hooks are unaffected by the flag. `Register` also returns `hooks.ErrUnknownEvent` for an event outside the declared fifteen.
 
 `hooks.Update(ctx, db, workspaceID, hook, allowedShell)` is the equivalent for edits. It takes the **full** desired hook (not a patch — merging is the HTTP layer's job), pins `id` + `workspace_id` from its arguments so a struct naming another workspace cannot move the row, and never rewrites `created_at` / `created_by`.
 
@@ -267,3 +267,20 @@ The trailing `allowedShell bool` argument is the gate on `HandlerKindShell`: pas
 
 - [Hooks guide](/guides/hooks).
 - [`crewship hooks`](/cli/hooks).
+
+
+## Host hook review after upgrade or restore
+
+Host shell hooks require instance administrator authority, not workspace ownership.
+Existing host hook definitions are preserved but disabled on upgrade because prior
+versions did not record historical instance authority. The audit log records
+`hook.host_review_required` without recording command contents. A restored host
+hook also loses imported approval and stays disabled until local review.
+
+An instance administrator must inspect the current command and configuration,
+then use **Enable** in Lifecycle hooks or `crewship hooks enable ID` with the
+appropriate workspace and an instance-admin session/token (`instance:admin`).
+`host_review_required` in list/detail responses identifies pending review.
+Creating or editing a host hook requires the same authority. The default global
+lifecycle pause still prevents execution; it is not an authorization bypass.
+Container startup hooks are a separate feature and are unchanged.

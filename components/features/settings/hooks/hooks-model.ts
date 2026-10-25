@@ -122,6 +122,7 @@ export interface HookMatcher {
 }
 
 export interface HookRow {
+  host_review_required?: boolean
   id: string
   workspace_id: string
   crew_id?: string

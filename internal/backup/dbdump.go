@@ -1242,6 +1242,19 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			// copies whatever row is current — has to come after it or its
 			// CANCELLED status would be thrown away.
 			row := safeConversationRestoreRow(table, originalRow, conversationAssignments)
+			if table == "hooks_config" {
+				copy := make(map[string]any, len(row)+1)
+				for k, v := range row {
+					copy[k] = v
+				}
+				if allowed["host_authorization"] {
+					copy["host_authorization"] = ""
+				}
+				if copy["handler_kind"] == "shell" {
+					copy["enabled"] = int64(0)
+				}
+				row = copy
+			}
 			row, err = safeDocumentRestoreRow(table, row)
 			if err != nil {
 				return stats, err
@@ -1384,6 +1397,14 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 				stats.RowsInserted += int(n)
 				tableInserted += int(n)
 				landed = n > 0
+			}
+			if landed && table == "hooks_config" && row["handler_kind"] == "shell" {
+				_, err := tx.ExecContext(ctx, `INSERT INTO audit_logs(id,workspace_id,user_id,action,entity_type,entity_id,metadata,created_at)
+					VALUES(lower(hex(randomblob(16))),?,NULL,'hook.host_review_required','hook',?,
+					'{"reason":"restored host authority requires local review"}',strftime('%Y-%m-%dT%H:%M:%fZ','now'))`, row["workspace_id"], row["id"])
+				if err != nil {
+					return stats, fmt.Errorf("backup: record restored host hook review: %w", err)
+				}
 			}
 			if replaceWork && !landed {
 				return stats, fmt.Errorf("backup: replacement issue work did not insert")

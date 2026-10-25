@@ -95,6 +95,9 @@ func Dispatch(ctx context.Context, db *sql.DB, emitter journal.Emitter, event Ev
 	// filtered set twice (blocking pass + non-blocking spawn).
 	filtered := make([]Hook, 0, len(hooks))
 	for _, h := range hooks {
+		if h.HandlerKind == HandlerKindShell && !HostAuthorized(h) {
+			continue
+		}
 		if Matches(h.Matcher, ec) {
 			// Rows created before observation events were made explicitly
 			// non-blocking may still carry blocking=1. Preserve their configured
@@ -218,6 +221,9 @@ func dispatchLookupFailed(ctx context.Context, emitter journal.Emitter, event Ev
 func runHandler(ctx context.Context, db *sql.DB, h Hook, ec EventContext) (Result, error) {
 	switch h.HandlerKind {
 	case HandlerKindShell:
+		if !HostAuthorized(h) {
+			return Result{Outcome: OutcomeError, Message: "host hook requires instance administrator review"}, ErrShellHookNotAllowed
+		}
 		return shellHandler(ctx, h, ec)
 	case HandlerKindHTTP:
 		return httpHandler(ctx, db, h, ec)

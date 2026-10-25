@@ -188,18 +188,20 @@ const (
 // HandlerConfig are stored as JSON in SQLite; Register marshals Matcher
 // from the struct and HandlerConfig from a map[string]any.
 type Hook struct {
-	ID            string
-	WorkspaceID   string
-	CrewID        string // empty means workspace-wide (applies to every crew)
-	Event         Event
-	Matcher       Matcher
-	HandlerKind   HandlerKind
-	HandlerConfig map[string]any
-	Blocking      bool
-	Enabled       bool
-	CreatedBy     string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	storedRevision    string // exact database timestamp for conditional writes
+	HostAuthorization string // server-created approval for this exact configuration
+	ID                string
+	WorkspaceID       string
+	CrewID            string // empty means workspace-wide (applies to every crew)
+	Event             Event
+	Matcher           Matcher
+	HandlerKind       HandlerKind
+	HandlerConfig     map[string]any
+	Blocking          bool
+	Enabled           bool
+	CreatedBy         string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // Matcher is a JSON predicate on the event context. All fields are optional
@@ -245,7 +247,7 @@ type Result struct {
 // ErrUnknownEvent is returned by ValidateEvent (and therefore by Register /
 // Update) for an event name outside AllEvents.
 var (
-	ErrShellHookNotAllowed          = errors.New("hooks: shell handlers require OWNER role")
+	ErrShellHookNotAllowed          = errors.New("hooks: host shell handlers require an instance administrator")
 	ErrSubagentHandlerNotConfigured = errors.New("hooks: subagent handler not configured")
 	ErrUnknownHandlerKind           = errors.New("hooks: unknown handler kind")
 	ErrUnknownEvent                 = errors.New("hooks: unknown event")

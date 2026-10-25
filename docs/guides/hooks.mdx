@@ -152,15 +152,15 @@ Every variable below is always set, empty when the event carries no value for it
   warning, but it does not refuse the command.
 </Warning>
 
-Shell hooks require `OWNER` role at registration time -- an ADMIN cannot create a shell hook because arbitrary code execution on the host is a privilege escalation vector. The store enforces this via a register-time argument, not a row property:
+Host shell hooks require instance administrator authority on creation, modification and enable. Workspace ownership alone does not grant host execution. API tokens additionally need `instance:admin`. The store checks the caller’s verified authority and binds approval to the stored configuration:
 
 ```go
-const allowedShell = true // pass true only when the caller is confirmed OWNER
+const allowedShell = true // pass true only after verifying instance administrator authority
 _, err := hooks.Register(ctx, db, h, allowedShell)
 // returns hooks.ErrShellHookNotAllowed if h.HandlerKind == "shell" && !allowedShell
 ```
 
-`allowedShell` is the trailing boolean argument to `hooks.Register` (`internal/hooks/store.go:22`); the `hooks_config` table has no `allowed_shell` column. Callers that resolve role lazily (HTTP handlers, admin CLI) pass `true` only after confirming the request originated from an OWNER session.
+`allowedShell` is the trailing boolean argument to `hooks.Register`. Pass `true` only after verifying instance administrator authority. The stored `host_authorization` digest binds approval to the exact configuration; it is provenance, not a secret or a signature. Portable imports and instance-bundle recovery clear this approval.
 
 The same gate applies on **update**: `PATCH /api/v1/hooks/{id}` refuses an ADMIN who converts an existing `http` hook into a `shell` hook, and refuses an ADMIN editing a hook that is *already* `shell` — editing the command is editing what runs on the host, whether or not the `handler_kind` field is in the request body.
 
@@ -204,7 +204,7 @@ All fields optional and AND-combined. Empty matcher matches every event.
 
 ## Registration
 
-Register a hook with `crewship hooks create` (or `POST /api/v1/hooks`). Registration requires `OWNER` or `ADMIN`; `--handler shell` requires `OWNER`.
+Register a hook with `crewship hooks create` (or `POST /api/v1/hooks`). Registration requires `OWNER` or `ADMIN`; `--handler shell` requires an instance administrator.
 
 ```bash
 crewship hooks create --event on_approval_requested --handler http \
@@ -234,7 +234,7 @@ _, err := hooks.Register(ctx, db, hooks.Hook{
     Blocking: false,
     Enabled:  true,
     CreatedBy: userID,
-}, true /* allowedShell — only true for confirmed OWNER */)
+}, true /* allowedShell — only true after verifying instance administrator authority */)
 ```
 
 ### Event names are validated on write
@@ -252,11 +252,11 @@ Because that read and the `UPDATE` are two statements, the `UPDATE` also carries
 ## Endpoints
 
 - `GET /api/v1/hooks[?crew_id=...]` -- list registered hooks (workspace-scoped).
-- `POST /api/v1/hooks` -- register a hook. OWNER/ADMIN; shell handlers OWNER only.
+- `POST /api/v1/hooks` -- register a hook. OWNER/ADMIN; host shell handlers require an instance administrator.
 - `PATCH /api/v1/hooks/{id}` -- partial update. Same roles.
 - `DELETE /api/v1/hooks/{id}` -- remove a hook. Same roles.
-- `POST /api/v1/hooks/{id}/enable` -- OWNER/ADMIN only.
-- `POST /api/v1/hooks/{id}/disable` -- OWNER/ADMIN only.
+- `POST /api/v1/hooks/{id}/enable` -- instance administrator for host shell hooks; workspace OWNER/ADMIN otherwise.
+- `POST /api/v1/hooks/{id}/disable` -- workspace OWNER/ADMIN, or instance administrator for host hooks.
 
 Toggling emits `system.hook_toggled` with the actor's user ID. Create / update / delete write an `audit_logs` row (`hook.create`, `hook.update`, `hook.delete`) carrying the event, handler kind, and crew scope, so the audit trail captures who registered or removed which hook — the record that matters most for a shell hook, which is unrecoverable after deletion.
 
@@ -299,12 +299,11 @@ opens one hook directly.
 
 - **Every workspace member sees the list.** `GET /api/v1/hooks` is open to any
   authenticated member, and a member asking "why was my agent's memory write
-  refused" needs exactly this list. Every write is `roleManage`, so the switch,
-  **New hook**, **Edit** and **Delete hook** are available to OWNER and ADMIN only.
+  refused" needs exactly this list. Non-host writes and deletion require workspace OWNER or ADMIN. Creating, editing and enabling host shell hooks require an instance administrator. Workspace admins can disable host hooks.
 - **New hook / Edit** walk three steps: when (one of the 14 events, marked
   where it can block), what to do, and details. *Send a webhook* takes a URL and
-  an optional signing secret. *Run a command on the server* is OWNER-only, as the
-  API enforces, and an ADMIN cannot edit an existing shell hook. *Hand to an
+  an optional signing secret. *Run a command on the server* is restricted to instance administrators, as the
+  API enforces. Workspace ownership does not grant this authority. *Hand to an
   agent* is shown as "Coming later": the subagent handler is not wired in this
   build. The **Block the action** switch appears only for events that can block;
   severities only for `on_guardrail_triggered`, tool names only for
@@ -336,7 +335,7 @@ Payload includes `hook_id`, `handler_kind`, `outcome`, `latency_ms`, `blocking`,
 ## Gotchas
 
 <Warning>
-  **Shell hooks bypass container isolation.** They run on the host with the privileges of the `crewship` process. Restrict to OWNER role and audit `handler_config.command` carefully.
+  **Shell hooks bypass container isolation.** They run on the host with the privileges of the `crewship` process. Restrict to instance administrators and audit `handler_config.command` carefully.
 </Warning>
 
 <Accordion title="More edge cases">
@@ -353,3 +352,22 @@ Payload includes `hook_id`, `handler_kind`, `outcome`, `latency_ms`, `blocking`,
 - [Crew Journal](/guides/crew-journal) -- `hook.fired`, `hook.blocked`, `system.hook_toggled`.
 - [`crewship hooks`](/cli/hooks), [Hooks API](/api-reference/hooks).
 - Settings → Lifecycle hooks (`/settings/hooks`) -- the registry in the browser.
+
+
+## Host hook review after upgrade or restore
+
+Host shell hooks require instance administrator authority, not workspace ownership.
+Existing host hook definitions are preserved but disabled on upgrade because prior
+versions did not record historical instance authority. The audit log records
+`hook.host_review_required` without recording command contents. A restored host
+hook also loses imported approval and stays disabled until local review.
+
+An instance administrator must inspect the current command and configuration,
+then use **Enable** in Lifecycle hooks or `crewship hooks enable ID` with the
+appropriate workspace and an instance-admin session/token (`instance:admin`).
+`host_review_required` in list/detail responses identifies pending review.
+Creating or editing a host hook requires the same authority. The default global
+lifecycle pause still prevents execution; it is not an authorization bypass.
+Container startup hooks are a separate feature and are unchanged.
+
+Instance-bundle recovery (`crewship recover`, including drills) also disables host hooks and clears imported approval even when the snapshot already has the current schema. The recovery report records the required review. Explicit local `crewship db restore-snapshot` is a full-state downgrade rollback: it preserves the snapshot and its historical security properties, so booting an older binary can restore older authorization behavior. It is not a portable import or a sanitization operation.

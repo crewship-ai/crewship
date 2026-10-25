@@ -730,6 +730,16 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 		}
 		rep.MigrationsApplied = len(AppliedMigrationVersions(ctx, db.DB)) - before
 
+		// A physical snapshot carries source-instance execution approvals too.
+		// Recovery must require local review even when no migration is pending.
+		count, err := resetRecoveredHostHooks(ctx, db.DB)
+		if err != nil {
+			return err
+		}
+		if count > 0 {
+			rep.Warnings = append(rep.Warnings, fmt.Sprintf("%d restored host shell hook(s) require instance administrator review; configurations are preserved and disabled. Review in Settings > Lifecycle hooks, then use crewship hooks enable <id>.", count))
+		}
+
 		if len(serviceArgs) != 0 && serviceArgs[0].count > 0 {
 			services := serviceArgs[0].payload
 			count := serviceArgs[0].count

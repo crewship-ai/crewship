@@ -15,7 +15,7 @@ import (
 )
 
 // Register inserts a new hook row. The caller passes allowedShell=true only
-// if the user creating the hook has OWNER role; non-OWNER callers trying to
+// if the caller has verified instance administrator authority; other callers trying to
 // register a shell hook get ErrShellHookNotAllowed back. The validation is
 // duplicated here (vs. at the handler) so a misconfigured call path can't
 // bypass the guard.
@@ -35,6 +35,10 @@ func Register(ctx context.Context, db *sql.DB, h Hook, allowedShell bool) (strin
 		h.UpdatedAt = h.CreatedAt
 	}
 
+	h.HostAuthorization = ""
+	if h.HandlerKind == HandlerKindShell && allowedShell {
+		h.HostAuthorization = hostAuthorization(h)
+	}
 	matcherJSON, err := json.Marshal(h.Matcher)
 	if err != nil {
 		return "", fmt.Errorf("hooks: marshal matcher: %w", err)
@@ -50,8 +54,8 @@ func Register(ctx context.Context, db *sql.DB, h Hook, allowedShell bool) (strin
 
 	_, err = db.ExecContext(ctx, `INSERT INTO hooks_config
 		(id, workspace_id, crew_id, event, matcher, handler_kind, handler_config,
-		 blocking, enabled, created_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 blocking, enabled, created_by, created_at, updated_at, host_authorization)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		h.ID,
 		h.WorkspaceID,
 		nullableStr(h.CrewID),
@@ -64,12 +68,13 @@ func Register(ctx context.Context, db *sql.DB, h Hook, allowedShell bool) (strin
 		nullableStr(h.CreatedBy),
 		tsformat.Format(h.CreatedAt),
 		tsformat.Format(h.UpdatedAt),
+		h.HostAuthorization,
 	)
 	if err != nil {
 		return "", fmt.Errorf("hooks: insert: %w", err)
 	}
 
-	// Lint shell hooks after successful insert so OWNER authors get a
+	// Lint shell hooks after successful insert so instance administrators get a
 	// loud heads-up on the common $CREWSHIP_PAYLOAD-without-quotes
 	// gotcha. Non-blocking — the row is already persisted and a real UI
 	// path is expected to call LintShellCommand up front so the operator
@@ -186,7 +191,7 @@ func validateWorkspaceAndHandler(h Hook, allowedShell bool) error {
 //
 // allowedShell carries the same meaning as in Register and is checked by
 // the same guard: converting an http hook into a shell hook is exactly
-// the escalation the OWNER gate exists to stop, so Update must not be a
+// the escalation the instance authority gate exists to stop, so Update must not be a
 // way around it.
 //
 // Returns sql.ErrNoRows when no row in workspaceID has that id, matching
@@ -223,6 +228,16 @@ func Update(ctx context.Context, db *sql.DB, workspaceID string, h Hook, allowed
 	// body, but a future call site could get that wrong) — it re-derives
 	// "changing" from the database, so the guard holds regardless of who
 	// calls Update.
+	current, err := Get(ctx, db, workspaceID, h.ID)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return sql.ErrNoRows
+	}
+	if current.HandlerKind == HandlerKindShell && !allowedShell {
+		return ErrShellHookNotAllowed
+	}
 	currentEvent, err := currentEventFor(ctx, db, workspaceID, h.ID)
 	if err != nil {
 		return fmt.Errorf("hooks: update: look up current event: %w", err)
@@ -247,6 +262,11 @@ func Update(ctx context.Context, db *sql.DB, workspaceID string, h Hook, allowed
 		updateEventRaceHookForTest()
 	}
 
+	h.UpdatedAt = time.Now().UTC()
+	h.HostAuthorization = ""
+	if h.HandlerKind == HandlerKindShell && allowedShell {
+		h.HostAuthorization = hostAuthorization(h)
+	}
 	matcherJSON, err := json.Marshal(h.Matcher)
 	if err != nil {
 		return fmt.Errorf("hooks: marshal matcher: %w", err)
@@ -262,8 +282,8 @@ func Update(ctx context.Context, db *sql.DB, workspaceID string, h Hook, allowed
 
 	res, err := db.ExecContext(ctx, `UPDATE hooks_config SET
 		crew_id = ?, event = ?, matcher = ?, handler_kind = ?, handler_config = ?,
-		blocking = ?, enabled = ?, updated_at = ?
-		WHERE id = ? AND workspace_id = ? AND event = ?`,
+		blocking = ?, enabled = ?, updated_at = ?, host_authorization = ?
+		WHERE id = ? AND workspace_id = ? AND event = ? AND handler_kind = ? AND updated_at = ?`,
 		nullableStr(h.CrewID),
 		string(h.Event),
 		string(matcherJSON),
@@ -271,7 +291,8 @@ func Update(ctx context.Context, db *sql.DB, workspaceID string, h Hook, allowed
 		string(handlerJSON),
 		boolToInt(h.Blocking),
 		boolToInt(h.Enabled),
-		tsformat.Format(time.Now()),
+		tsformat.Format(h.UpdatedAt),
+		h.HostAuthorization,
 		h.ID,
 		workspaceID,
 		// The event we validated against, not the one we are writing:
@@ -281,6 +302,8 @@ func Update(ctx context.Context, db *sql.DB, workspaceID string, h Hook, allowed
 		// by this (now stale) update, putting the retired event back
 		// without ever passing validateEventForWrite.
 		string(currentEvent),
+		string(current.HandlerKind),
+		current.storedRevision,
 	)
 	if err != nil {
 		return fmt.Errorf("hooks: update: %w", err)
@@ -387,24 +410,42 @@ func Delete(ctx context.Context, db *sql.DB, workspaceID, id string) error {
 // so a cross-tenant ID surfaces identically to a missing one (no
 // existence leak).
 func SetEnabled(ctx context.Context, db *sql.DB, workspaceID, id string, enabled bool) error {
-	res, err := db.ExecContext(ctx,
-		`UPDATE hooks_config SET enabled = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`,
-		boolToInt(enabled), tsformat.Format(time.Now()), id, workspaceID)
+	return SetEnabledAuthorized(ctx, db, workspaceID, id, enabled, false)
+}
+
+// SetEnabledAuthorized pins the mutation to the configuration that was reviewed.
+// allowedHost must be obtained from instance authority, never workspace ownership.
+func SetEnabledAuthorized(ctx context.Context, db *sql.DB, workspaceID, id string, enabled, allowedHost bool) error {
+	h, err := Get(ctx, db, workspaceID, id)
+	if err != nil {
+		return err
+	}
+	if h == nil {
+		return sql.ErrNoRows
+	}
+	if enabled && h.HandlerKind == HandlerKindShell && !allowedHost {
+		return ErrShellHookNotAllowed
+	}
+	oldTime := h.storedRevision
+	h.Enabled = enabled
+	h.UpdatedAt = time.Now().UTC()
+	h.HostAuthorization = ""
+	if enabled && h.HandlerKind == HandlerKindShell {
+		h.HostAuthorization = hostAuthorization(*h)
+	}
+	res, err := db.ExecContext(ctx, `UPDATE hooks_config SET enabled=?,updated_at=?,host_authorization=?
+		WHERE id=? AND workspace_id=? AND handler_kind=? AND updated_at=?`,
+		boolToInt(enabled), tsformat.Format(h.UpdatedAt), h.HostAuthorization, id, workspaceID, string(h.HandlerKind), oldTime)
 	if err != nil {
 		return fmt.Errorf("hooks: set enabled: %w", err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("hooks: rows affected: %w", err)
+		return err
 	}
 	if n == 0 {
 		return sql.ErrNoRows
 	}
-	// #2154: enabling a previously-disabled row can turn a cached negative
-	// for its (crew_id, event) stale; disabling the last enabled row for a
-	// triple leaves a stale positive lookup no longer cached anyway (only
-	// negatives are cached), so this call is a no-op cache-wise in that
-	// direction but still cheap and always correct to make.
 	InvalidateCache(workspaceID)
 	return nil
 }
@@ -436,14 +477,14 @@ func ListByEvent(ctx context.Context, db *sql.DB, workspaceID, crewID string, ev
 	)
 	if crewID == "" {
 		query = `SELECT id, workspace_id, crew_id, event, matcher, handler_kind, handler_config,
-			blocking, enabled, created_by, created_at, updated_at
+			blocking, enabled, created_by, created_at, updated_at, host_authorization
 			FROM hooks_config
 			WHERE workspace_id = ? AND event = ? AND enabled = 1 AND crew_id IS NULL
 			ORDER BY created_at ASC, id ASC`
 		args = []any{workspaceID, string(event)}
 	} else {
 		query = `SELECT id, workspace_id, crew_id, event, matcher, handler_kind, handler_config,
-			blocking, enabled, created_by, created_at, updated_at
+			blocking, enabled, created_by, created_at, updated_at, host_authorization
 			FROM hooks_config
 			WHERE workspace_id = ? AND event = ? AND enabled = 1
 			  AND (crew_id IS NULL OR crew_id = ?)
@@ -475,7 +516,7 @@ func ListByEvent(ctx context.Context, db *sql.DB, workspaceID, crewID string, ev
 // the row does not exist so callers can distinguish "missing" from "error".
 func Get(ctx context.Context, db *sql.DB, workspaceID, id string) (*Hook, error) {
 	row := db.QueryRowContext(ctx, `SELECT id, workspace_id, crew_id, event, matcher,
-		handler_kind, handler_config, blocking, enabled, created_by, created_at, updated_at
+		handler_kind, handler_config, blocking, enabled, created_by, created_at, updated_at, host_authorization
 		FROM hooks_config WHERE workspace_id = ? AND id = ?`, workspaceID, id)
 	h, err := scanHook(row)
 	if err != nil {
@@ -514,9 +555,11 @@ func scanHook(r rowScanner) (Hook, error) {
 		&createdBy,
 		&createdAt,
 		&upd,
+		&h.HostAuthorization,
 	); err != nil {
 		return Hook{}, err
 	}
+	h.storedRevision = upd
 	h.CrewID = crewID.String
 	h.CreatedBy = createdBy.String
 	h.Event = Event(eventStr)
