@@ -105,6 +105,7 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 					return
 				}
 				if p.mutation(ctx, next.token, next.kind) != nil {
+					mooringDiagFailure(diagPumpMutationFailure)
 					return
 				}
 			}
@@ -129,6 +130,7 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 				case next := <-outputQueue:
 					raw, e := next.token.Frame()
 					if e != nil || p.control(ctx, next.token, next.kind, raw) != nil {
+						mooringDiagFailure(diagPumpOutputFailure)
 						return
 					}
 				}
@@ -149,10 +151,12 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 	for {
 		token, e := p.runtime.NextControl(ctx)
 		if e != nil {
+			mooringDiagFailure(diagPumpNextFailure)
 			return errCollaborationSessionPump
 		}
 		raw, e := token.Frame()
 		if e != nil {
+			mooringDiagFailure(diagPumpFrameFailure)
 			return errCollaborationSessionPump
 		}
 		var header struct {
@@ -191,6 +195,7 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 			}
 		}
 		if e = p.control(ctx, token, header.Type, raw); e != nil {
+			mooringDiagFailure(diagPumpManagementFailure)
 			return errCollaborationSessionPump
 		}
 	}

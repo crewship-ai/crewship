@@ -42,6 +42,7 @@ func TestMooringHTTPActualSDKUnobservedPeerDeletePreservesOriginal(t *testing.T)
 }
 func runMooringHTTPActualSDK(t *testing.T, peerDelete bool, grantChange ...string) {
 	started := time.Now()
+	mooringDiagStart(started)
 	phase := func(name string) { t.Logf("phase %s elapsed=%s", name, time.Since(started)) }
 	copy := testutil.MigratedDB(t)
 	path := copy.Path()
@@ -98,6 +99,7 @@ func runMooringHTTPActualSDK(t *testing.T, peerDelete bool, grantChange ...strin
 	defer r.mooringHTTP.Close()
 	server := httptest.NewServer(r.mux)
 	defer server.Close()
+	defer func() { t.Logf("mooring_stage_trace=%s", mooringDiagDump()) }()
 	setGrant := func(level string) error {
 		subject := rig.userID
 		if level == "unrelated-read" {
@@ -223,7 +225,10 @@ func runMooringHTTPActualSDK(t *testing.T, peerDelete bool, grantChange ...strin
 	}
 	document.mu.Lock()
 	original := document.connections[first.Ref]
+	diagnosticPeerConnection := document.connections[second.Ref]
 	document.mu.Unlock()
+	mooringDiagBind(original, "own")
+	mooringDiagBind(diagnosticPeerConnection, "peer")
 	allocated := 0
 	e = document.humans.runHumanOperation(original.request, original.admission.participant, func(ctx context.Context) error {
 		snapshot, err := document.cell.store.ReadFullCheckpoint(ctx, document.owner)
@@ -592,4 +597,54 @@ if(replay.peer_delete)assert.ok(!actual.body[0].text.includes('Český zkušebn�
 		t.Fatal("actual SQL missing changes", operations, err)
 	}
 	t.Log("actual SDK original two-atomic group + independent human Saved and three correlated native peer cuts per recipient")
+}
+
+func mooringDiagStart(start time.Time) {
+	mooringDiagState.Lock()
+	defer mooringDiagState.Unlock()
+	mooringDiagState.active = true
+	mooringDiagState.start = start
+	mooringDiagState.sources = make(map[*collaborationHTTPConnection]string)
+	mooringDiagState.participants = make(map[string]string)
+	mooringDiagState.events = make([]mooringDiagEvent, 0, 512)
+	mooringDiagState.dropped = 0
+	mooringDiagState.firstFailure = nil
+}
+
+func mooringDiagBind(c *collaborationHTTPConnection, source string) {
+	if c == nil || (source != "own" && source != "peer") {
+		return
+	}
+	c.mu.Lock()
+	participant := c.admission.participant
+	c.mu.Unlock()
+	mooringDiagState.Lock()
+	defer mooringDiagState.Unlock()
+	if !mooringDiagState.active || len(mooringDiagState.sources) >= 2 {
+		return
+	}
+	mooringDiagState.sources[c] = source
+	mooringDiagState.participants[participant] = source
+}
+
+func mooringDiagDump() []byte {
+	mooringDiagState.Lock()
+	defer mooringDiagState.Unlock()
+	mooringDiagState.active = false
+	raw, err := json.Marshal(struct {
+		Diagnostic   bool               `json:"diagnostic"`
+		SourceCommit string             `json:"source_base_commit"`
+		Dropped      uint64             `json:"dropped"`
+		Events       []mooringDiagEvent `json:"events"`
+		FirstFailure *mooringDiagEvent  `json:"first_failure"`
+	}{true, "860f765f889a0d190b1d755e8da9a4cdb1654bc0", mooringDiagState.dropped, mooringDiagState.events, mooringDiagState.firstFailure})
+	clear(mooringDiagState.sources)
+	clear(mooringDiagState.participants)
+	mooringDiagState.sources = nil
+	mooringDiagState.participants = nil
+	mooringDiagState.events = nil
+	if err != nil {
+		return []byte(`{"diagnostic":true,"trace_error":"encode"}`)
+	}
+	return raw
 }

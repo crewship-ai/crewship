@@ -135,16 +135,18 @@ func (s *SessionRuntime) Done() <-chan struct{} { return s.done }
 func (s *SessionRuntime) RuntimeRef() string    { return s.runtimeRef }
 func (s *SessionRuntime) Err() error            { s.mu.Lock(); defer s.mu.Unlock(); return s.err }
 func (s *SessionRuntime) Close() error {
-	s.fail(ErrSessionRuntime)
+	s.diagFail(ErrSessionRuntime, "close")
 	<-s.done
 	return s.Err()
 }
-func (s *SessionRuntime) fail(err error) {
+func (s *SessionRuntime) fail(err error) { s.diagFail(err, "other") }
+func (s *SessionRuntime) diagFail(err error, stage string) {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
 		return
 	}
+	println("mooring_diag_runtime_first_failure", time.Since(mooringDiagRuntimeStart).Nanoseconds(), stage)
 	s.closed = true
 	s.releaseAllParticipantStatesLocked()
 	if err == nil {
@@ -293,12 +295,12 @@ func (s *SessionRuntime) readLoop() {
 	for {
 		raw, err := s.process.RPC.Read()
 		if err != nil {
-			s.fail(err)
+			s.diagFail(err, "rpc-read")
 			return
 		}
 		normalized, header, err := s.validate(raw, true)
 		if err != nil {
-			s.fail(err)
+			s.diagFail(err, "validate")
 			return
 		}
 		s.mu.Lock()
@@ -310,7 +312,7 @@ func (s *SessionRuntime) readLoop() {
 			p := s.pending[header.id]
 			if p == nil || !p.sent || p.expected != header.kind || p.responseBytes != 0 || len(normalized) > sessionControlBytes-s.bytes {
 				s.mu.Unlock()
-				s.fail(ErrSessionRuntime)
+				s.diagFail(ErrSessionRuntime, "reply-correlation")
 				return
 			}
 			s.observeResponseLocked(header.kind, normalized)
@@ -337,14 +339,15 @@ func (s *SessionRuntime) readLoop() {
 			paired := len(previous) == 1 && entry != nil && entry.kind == header.kind &&
 				correlatedParticipantOutputPhases(entry.bytes, normalized)
 			if !paired {
+				mooringDiagPairFailure(entry, normalized, s.next+1, len(previous))
 				s.mu.Unlock()
-				s.fail(ErrSessionRuntime)
+				s.diagFail(ErrSessionRuntime, "notification-reuse")
 				return
 			}
 		}
 		if s.next == ^uint64(0) || !s.reserveLocked(len(normalized)) {
 			s.mu.Unlock()
-			s.fail(ErrSessionRuntime)
+			s.diagFail(ErrSessionRuntime, "capacity")
 			return
 		}
 		s.next++
@@ -640,4 +643,50 @@ func (s *SessionRuntime) validate(raw []byte, fromRuntime bool) ([]byte, session
 		}
 	}
 	return normalized, sessionHeader{kind, id, session}, nil
+}
+
+var mooringDiagRuntimeStart = time.Now()
+
+// No raw request IDs/gates are emitted. Ordinals are local transport token aliases.
+func mooringDiagPairFailure(old *sessionControlEntry, raw []byte, next uint64, count int) {
+	phase := func(raw []byte) string {
+		var x struct {
+			Message struct {
+				Type string `json:"type"`
+			} `json:"message"`
+		}
+		if json.Unmarshal(raw, &x) != nil {
+			return "unknown"
+		}
+		switch x.Message.Type {
+		case "changes_received":
+			return "pending"
+		case "commit_result":
+			return "terminal"
+		case "document_update":
+			return "peer"
+		default:
+			return "other"
+		}
+	}
+	relation := "unknown"
+	permission := "unknown"
+	var alias uint64
+	oldPhase := "unknown"
+	if old != nil {
+		alias = old.id
+		oldPhase = phase(old.bytes)
+		var a, b protocol.SessionParticipantOutput
+		if json.Unmarshal(old.bytes, &a) == nil && json.Unmarshal(raw, &b) == nil && a.Type == "session_participant_output" && b.Type == a.Type {
+			relation = "not_equal"
+			if a.GateID == b.GateID {
+				relation = "equal"
+			}
+			permission = "not_equal"
+			if a.PermissionVersion == b.PermissionVersion {
+				permission = "equal"
+			}
+		}
+	}
+	println("mooring_diag_notification_reuse", time.Since(mooringDiagRuntimeStart).Nanoseconds(), "old-token", alias, "new-token", next, "retained", count, "old-phase", oldPhase, "new-phase", phase(raw), "gate", relation, "permission", permission)
 }

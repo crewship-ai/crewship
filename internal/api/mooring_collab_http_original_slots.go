@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"reflect"
 	"strconv"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/mooring"
 )
@@ -234,10 +236,13 @@ func (l *collaborationLiveOriginals) capture(ctx context.Context, c *collaborati
 	if originErr != nil || !collaborationHumanOrigin(c.origin) || !mooring.ValidWireIdentifier(c.ref) || !allocated || !issuedDocument || !issuedConnection {
 		return nil, errCollaborationHTTP
 	}
+	mooringDiagRecord(diagCaptureReserveBegin, c)
 	all, fresh, err := l.reserve(c, changes)
 	if err != nil {
+		mooringDiagRecord(diagCaptureReserveReject, c)
 		return nil, err
 	}
+	mooringDiagRecord(diagCaptureReserved, c)
 	sealed := make([]mooring.BatchChange, len(all))
 	for i, slot := range all {
 		sealed[i] = slot.change
@@ -245,33 +250,46 @@ func (l *collaborationLiveOriginals) capture(ctx context.Context, c *collaborati
 	finished := false
 	defer func() {
 		if !finished {
+			mooringDiagRecord(diagCaptureAborted, c)
 			l.finishCapture(fresh, errCollaborationHTTP)
 		}
 	}()
+	mooringDiagRecord(diagCaptureBindingBegin, c)
 	binding, err := d.humans.storeBinding()
 	if err != nil {
+		mooringDiagRecord(diagCaptureBindingReject, c)
 		return nil, err
 	}
+	mooringDiagRecord(diagCaptureBindingReady, c)
 	operationCtx, cancel := context.WithCancel(request.Context())
 	stop := context.AfterFunc(ctx, cancel)
 	defer stop()
 	defer cancel()
+	mooringDiagRecord(diagCaptureHumanBegin, c)
 	err = d.humans.runHumanOperation(request.Clone(operationCtx), c.admission.participant, func(bound context.Context) error {
+		mooringDiagRecord(diagCaptureHumanBound, c)
 		return d.submissions.run(bound, binding, func(bound context.Context) error {
+			mooringDiagRecord(diagCaptureSubmissionBound, c)
 			if e := d.submissions.sealHuman(bound, sealed); e != nil {
+				mooringDiagRecord(diagCaptureSealReject, c)
 				return e
 			}
+			mooringDiagRecord(diagCaptureSealReturned, c)
 			l.finishCapture(fresh, nil)
 			finished = true
+			mooringDiagRecord(diagCapturePublished, c)
 			return nil
 		})
 	})
 	if err != nil {
+		mooringDiagRecord(diagCaptureOperationReject, c)
 		return nil, err
 	}
 	if err = l.waitCaptured(ctx, all); err != nil {
+		mooringDiagRecord(diagCaptureWaitReject, c)
 		return nil, err
 	}
+	mooringDiagRecord(diagCaptureDone, c)
 	return all, nil
 }
 
@@ -328,4 +346,189 @@ func (l *collaborationLiveOriginals) waitCaptured(ctx context.Context, all []*co
 		}
 	}
 	return nil
+}
+
+// TEST-ONLY OVERLAY: bounded passive stage observation, never application authority.
+type mooringDiagStage string
+
+const (
+	diagCaptureAborted         mooringDiagStage = "capture.aborted"
+	diagCaptureBindingBegin    mooringDiagStage = "capture.binding.begin"
+	diagCaptureBindingReady    mooringDiagStage = "capture.binding.ready"
+	diagCaptureBindingReject   mooringDiagStage = "capture.binding.reject"
+	diagCaptureDone            mooringDiagStage = "capture.done"
+	diagCaptureHumanBegin      mooringDiagStage = "capture.human.begin"
+	diagCaptureHumanBound      mooringDiagStage = "capture.human.bound"
+	diagCaptureOperationReject mooringDiagStage = "capture.operation.reject"
+	diagCapturePublished       mooringDiagStage = "capture.published"
+	diagCaptureReserveBegin    mooringDiagStage = "capture.reserve.begin"
+	diagCaptureReserveReject   mooringDiagStage = "capture.reserve.reject"
+	diagCaptureReserved        mooringDiagStage = "capture.reserved"
+	diagCaptureSealReject      mooringDiagStage = "capture.seal.reject"
+	diagCaptureSealReturned    mooringDiagStage = "capture.seal.returned"
+	diagCaptureSubmissionBound mooringDiagStage = "capture.submission.bound"
+	diagCaptureWaitReject      mooringDiagStage = "capture.wait.reject"
+	diagOutputEnvelopeReject   mooringDiagStage = "output.envelope.reject"
+	diagPendingEntered         mooringDiagStage = "pending.entered"
+	diagPendingObserved        mooringDiagStage = "pending.observed"
+	diagPendingQualified       mooringDiagStage = "pending.qualified"
+	diagPendingReject          mooringDiagStage = "pending.reject"
+	diagPendingSuppressed      mooringDiagStage = "pending.suppressed"
+	diagSQLReceiptPublished    mooringDiagStage = "s.q.l.receipt.published"
+	diagSealAuthorityBegin     mooringDiagStage = "seal.authority.begin"
+	diagSealAuthorityOK        mooringDiagStage = "seal.authority.o.k"
+	diagSealAuthorityReject    mooringDiagStage = "seal.authority.reject"
+	diagSealRetainBegin        mooringDiagStage = "seal.retain.begin"
+	diagSealRetainOK           mooringDiagStage = "seal.retain.o.k"
+	diagSealRetainReject       mooringDiagStage = "seal.retain.reject"
+	diagSendAuthorityBegin     mooringDiagStage = "send.authority.begin"
+	diagSendAuthorityOK        mooringDiagStage = "send.authority.o.k"
+	diagSendAuthorityReject    mooringDiagStage = "send.authority.reject"
+	diagSendCellReject         mooringDiagStage = "send.cell.reject"
+	diagSendDeadlineReject     mooringDiagStage = "send.deadline.reject"
+	diagSendEntered            mooringDiagStage = "send.entered"
+	diagSendGateBootReject     mooringDiagStage = "send.gate.boot.reject"
+	diagSendGateBudgetReject   mooringDiagStage = "send.gate.budget.reject"
+	diagSendGateClockReject    mooringDiagStage = "send.gate.clock.reject"
+	diagSendGateClosedReject   mooringDiagStage = "send.gate.closed.reject"
+	diagSendGateExpiryReject   mooringDiagStage = "send.gate.expiry.reject"
+	diagSendGateQueryReject    mooringDiagStage = "send.gate.query.reject"
+	diagSendHumanBound         mooringDiagStage = "send.human.bound"
+	diagSendInitialReject      mooringDiagStage = "send.initial.reject"
+	diagSendOperationOK        mooringDiagStage = "send.operation.o.k"
+	diagSendOperationReject    mooringDiagStage = "send.operation.reject"
+	diagSendOwnerBootReject    mooringDiagStage = "send.owner.boot.reject"
+	diagSendOwnerBudgetReject  mooringDiagStage = "send.owner.budget.reject"
+	diagSendOwnerCheckReject   mooringDiagStage = "send.owner.check.reject"
+	diagSendOwnerExpiryReject  mooringDiagStage = "send.owner.expiry.reject"
+	diagSendOwnerQueryReject   mooringDiagStage = "send.owner.query.reject"
+	diagSocketWriteBegin       mooringDiagStage = "socket.write.begin"
+	diagSocketWriteOK          mooringDiagStage = "socket.write.o.k"
+	diagSocketWriteReject      mooringDiagStage = "socket.write.reject"
+	diagTerminalEntered        mooringDiagStage = "terminal.entered"
+	diagTerminalObserved       mooringDiagStage = "terminal.observed"
+	diagTerminalQualified      mooringDiagStage = "terminal.qualified"
+	diagTerminalReject         mooringDiagStage = "terminal.reject"
+	diagTerminalSuppressed     mooringDiagStage = "terminal.suppressed"
+	diagUnknown                mooringDiagStage = "unknown"
+	diagWriterBegin            mooringDiagStage = "writer.begin"
+	diagWriterBeginReject      mooringDiagStage = "writer.begin.reject"
+	diagWriterCallbackOK       mooringDiagStage = "writer.callback.o.k"
+	diagWriterCallbackReject   mooringDiagStage = "writer.callback.reject"
+	diagWriterCommitBegin      mooringDiagStage = "writer.commit.begin"
+	diagWriterCommitOK         mooringDiagStage = "writer.commit.o.k"
+	diagWriterCommitReject     mooringDiagStage = "writer.commit.reject"
+	diagWriterFenceBegin       mooringDiagStage = "writer.fence.begin"
+	diagWriterFenceOK          mooringDiagStage = "writer.fence.o.k"
+	diagWriterFenceReject      mooringDiagStage = "writer.fence.reject"
+	diagWriterOpened           mooringDiagStage = "writer.opened"
+)
+
+type mooringDiagEvent struct {
+	Seq    uint64           `json:"seq"`
+	NS     int64            `json:"ns"`
+	Stage  mooringDiagStage `json:"stage"`
+	Source string           `json:"source"`
+}
+
+var mooringDiagState struct {
+	sync.Mutex
+	active       bool
+	start        time.Time
+	sources      map[*collaborationHTTPConnection]string
+	participants map[string]string
+	events       []mooringDiagEvent
+	dropped      uint64
+	firstFailure *mooringDiagEvent
+}
+
+func mooringDiagRecord(stage mooringDiagStage, c *collaborationHTTPConnection) {
+	mooringDiagState.Lock()
+	defer mooringDiagState.Unlock()
+	mooringDiagPush(stage, mooringDiagState.sources[c])
+}
+func mooringDiagGroup(stage mooringDiagStage, group *collaborationOriginalGroup) {
+	if group == nil || group.source == nil {
+		mooringDiagRecord(stage, nil)
+		return
+	}
+	mooringDiagRecord(stage, group.source.connection)
+}
+func mooringDiagContext(stage mooringDiagStage, ctx context.Context) {
+	if ctx == nil {
+		mooringDiagRecord(stage, nil)
+		return
+	}
+	binding, _ := ctx.Value(collaborationHumanBindingKey{}).(collaborationHumanBinding)
+	mooringDiagState.Lock()
+	defer mooringDiagState.Unlock()
+	mooringDiagPush(stage, mooringDiagState.participants[binding.participant])
+}
+func mooringDiagPush(stage mooringDiagStage, source string) {
+	if !mooringDiagState.active {
+		return
+	}
+
+	// Keep only phase/lifecycle boundaries and failures; omit generic writer/send-success flood.
+	switch stage {
+	case diagCaptureReserveBegin, diagCaptureReserved, diagCaptureBindingBegin, diagCaptureBindingReady,
+		diagCaptureHumanBegin, diagCaptureHumanBound, diagCaptureSubmissionBound, diagCaptureSealReturned,
+		diagCapturePublished, diagCaptureDone, diagPendingObserved, diagPendingEntered, diagPendingQualified,
+		diagTerminalObserved, diagTerminalEntered, diagTerminalQualified, diagSQLReceiptPublished:
+	default:
+		text := string(stage)
+		if !strings.Contains(text, "reject") && !strings.Contains(text, "aborted") && !strings.HasPrefix(text, "phase.") {
+			return
+		}
+	}
+	if len(mooringDiagState.events) >= 509 {
+		if mooringDiagState.dropped < ^uint64(0) {
+			mooringDiagState.dropped++
+		}
+		return
+	}
+	if source != "own" && source != "peer" {
+		source = "unmapped"
+	}
+	switch stage {
+	case diagCaptureAborted, diagCaptureBindingBegin, diagCaptureBindingReady, diagCaptureBindingReject, diagCaptureDone, diagCaptureHumanBegin, diagCaptureHumanBound, diagCaptureOperationReject, diagCapturePublished, diagCaptureReserveBegin, diagCaptureReserveReject, diagCaptureReserved, diagCaptureSealReject, diagCaptureSealReturned, diagCaptureSubmissionBound, diagCaptureWaitReject, diagOutputEnvelopeReject, diagPendingEntered, diagPendingObserved, diagPendingQualified, diagPendingReject, diagPendingSuppressed, diagSQLReceiptPublished, diagSealAuthorityBegin, diagSealAuthorityOK, diagSealAuthorityReject, diagSealRetainBegin, diagSealRetainOK, diagSealRetainReject, diagSendAuthorityBegin, diagSendAuthorityOK, diagSendAuthorityReject, diagSendCellReject, diagSendDeadlineReject, diagSendEntered, diagSendGateBootReject, diagSendGateBudgetReject, diagSendGateClockReject, diagSendGateClosedReject, diagSendGateExpiryReject, diagSendGateQueryReject, diagSendHumanBound, diagSendInitialReject, diagSendOperationOK, diagSendOperationReject, diagSendOwnerBootReject, diagSendOwnerBudgetReject, diagSendOwnerCheckReject, diagSendOwnerExpiryReject, diagSendOwnerQueryReject, diagSocketWriteBegin, diagSocketWriteOK, diagSocketWriteReject, diagTerminalEntered, diagTerminalObserved, diagTerminalQualified, diagTerminalReject, diagTerminalSuppressed, diagUnknown, diagWriterBegin, diagWriterBeginReject, diagWriterCallbackOK, diagWriterCallbackReject, diagWriterCommitBegin, diagWriterCommitOK, diagWriterCommitReject, diagWriterFenceBegin, diagWriterFenceOK, diagWriterFenceReject, diagWriterOpened:
+	case diagPumpMutationFailure, diagPumpOutputFailure, diagPumpManagementFailure, diagPumpNextFailure, diagPumpFrameFailure, diagOutputControlEntered, diagOutputGateWait, diagOutputGateFailure, diagOutputRetiredValidateFailure, diagGateTransitionEntered, diagGateObsolete, diagGateRetireFailure, diagGateRetired, diagGateReopenSent, diagGateJoined:
+	default:
+		stage = diagUnknown
+	}
+	mooringDiagState.events = append(mooringDiagState.events, mooringDiagEvent{uint64(len(mooringDiagState.events) + 1), time.Since(mooringDiagState.start).Nanoseconds(), stage, source})
+}
+
+const (
+	diagPumpMutationFailure          mooringDiagStage = "phase.pumpmutationfailure"
+	diagPumpOutputFailure            mooringDiagStage = "phase.pumpoutputfailure"
+	diagPumpManagementFailure        mooringDiagStage = "phase.pumpmanagementfailure"
+	diagPumpNextFailure              mooringDiagStage = "phase.pumpnextfailure"
+	diagPumpFrameFailure             mooringDiagStage = "phase.pumpframefailure"
+	diagOutputControlEntered         mooringDiagStage = "phase.outputcontrolentered"
+	diagOutputGateWait               mooringDiagStage = "phase.outputgatewait"
+	diagOutputGateFailure            mooringDiagStage = "phase.outputgatefailure"
+	diagOutputRetiredValidateFailure mooringDiagStage = "phase.outputretiredvalidatefailure"
+	diagGateTransitionEntered        mooringDiagStage = "phase.gatetransitionentered"
+	diagGateObsolete                 mooringDiagStage = "phase.gateobsolete"
+	diagGateRetireFailure            mooringDiagStage = "phase.gateretirefailure"
+	diagGateRetired                  mooringDiagStage = "phase.gateretired"
+	diagGateReopenSent               mooringDiagStage = "phase.gatereopensent"
+	diagGateJoined                   mooringDiagStage = "phase.gatejoined"
+)
+
+// Failure slot is reserved independently of phase events. Same existing observer mutex only.
+func mooringDiagFailure(stage mooringDiagStage) {
+	switch stage {
+	case diagPumpMutationFailure, diagPumpOutputFailure, diagPumpManagementFailure, diagPumpNextFailure, diagPumpFrameFailure:
+	default:
+		return
+	}
+	mooringDiagState.Lock()
+	defer mooringDiagState.Unlock()
+	if !mooringDiagState.active || mooringDiagState.firstFailure != nil {
+		return
+	}
+	event := mooringDiagEvent{0, time.Since(mooringDiagState.start).Nanoseconds(), stage, "unmapped"}
+	mooringDiagState.firstFailure = &event
 }

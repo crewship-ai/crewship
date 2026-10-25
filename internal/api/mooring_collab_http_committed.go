@@ -180,5 +180,6 @@ func (l *collaborationLiveOriginals) publishCommitted(group *collaborationOrigin
 		}
 	}
 	group.privateReceipt, group.receipt = &private, &public
+	mooringDiagGroup(diagSQLReceiptPublished, group)
 	return nil
 }

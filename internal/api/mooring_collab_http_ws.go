@@ -372,48 +372,94 @@ func (c *collaborationHTTPConnection) checkedSend(raw []byte) error {
 
 // Caller holds c.mu through the SQL writer and physical send.
 func (c *collaborationHTTPConnection) checkedSendLocked(raw []byte) error {
+	mooringDiagRecord(diagSendEntered, c)
 	if len(raw) > collaborationHTTPFrameLimit || c.closed || c.socket == nil || c.joined.delivery == nil {
+		mooringDiagRecord(diagSendInitialReject, c)
 		return errCollaborationHTTP
 	}
 	d := c.document
-	return d.humans.runHumanOperation(c.request, c.admission.participant, func(ctx context.Context) error {
+	err := d.humans.runHumanOperation(c.request, c.admission.participant, func(ctx context.Context) error {
+		mooringDiagRecord(diagSendHumanBound, c)
 		return d.submissions.withWriter(ctx, func(tx *sql.Tx) error {
 			if e := d.cell.check(ctx, tx); e != nil {
+				mooringDiagRecord(diagSendCellReject, c)
 				return e
 			}
+			mooringDiagRecord(diagSendAuthorityBegin, c)
 			permission, e := d.humans.checkCaptured(ctx, tx, c.admission, false, collaborationHTTPSendDeadline)
 			if e != nil {
+				mooringDiagRecord(diagSendAuthorityReject, c)
 				return e
 			}
+			mooringDiagRecord(diagSendAuthorityOK, c)
 			tokenHash := sha256.Sum256([]byte(d.owner.Token))
 			var boot string
 			var expires int64
 			var closed bool
 			e = tx.QueryRowContext(ctx, `SELECT boot_id,expires_ns,closed FROM mooring_delivery_gates WHERE id=? AND page_id=? AND workspace_id=? AND application_id=? AND participant_ref=? AND owner_id=? AND owner_generation=? AND owner_token_hash=? AND permission_version=?`, c.joined.gate.GateID, d.key.ArtifactID, d.key.WorkspaceID, d.key.ApplicationID, c.admission.participant, d.owner.OwnerID, d.owner.Generation, tokenHash[:], permission).Scan(&boot, &expires, &closed)
 			if e != nil {
+				mooringDiagRecord(diagSendGateQueryReject, c)
 				return e
 			}
 			currentBoot, now, e := d.manager.clock.Now()
 			if e != nil || boot != currentBoot || closed || now < 0 || int64(now) >= expires || expires-int64(now) < int64(collaborationHTTPSendDeadline) {
+				switch {
+				case e != nil:
+					mooringDiagRecord(diagSendGateClockReject, c)
+				case boot != currentBoot:
+					mooringDiagRecord(diagSendGateBootReject, c)
+				case closed:
+					mooringDiagRecord(diagSendGateClosedReject, c)
+				case now < 0:
+					mooringDiagRecord(diagSendGateClockReject, c)
+				case int64(now) >= expires:
+					mooringDiagRecord(diagSendGateExpiryReject, c)
+				default:
+					mooringDiagRecord(diagSendGateBudgetReject, c)
+				}
 				return errCollaborationHTTP
 			}
 			var ownerBoot string
 			var ownerExpires int64
 			if e = tx.QueryRowContext(ctx, `SELECT boot_id,expires_ns FROM mooring_session_owners WHERE page_id=? AND workspace_id=? AND application_id=? AND owner_id=? AND generation=?`, d.key.ArtifactID, d.key.WorkspaceID, d.key.ApplicationID, d.owner.OwnerID, d.owner.Generation).Scan(&ownerBoot, &ownerExpires); e != nil {
+				mooringDiagRecord(diagSendOwnerQueryReject, c)
 				return e
 			}
 			if ownerBoot != currentBoot || int64(now) >= ownerExpires || ownerExpires-int64(now) < int64(collaborationHTTPSendDeadline) {
+				switch {
+				case ownerBoot != currentBoot:
+					mooringDiagRecord(diagSendOwnerBootReject, c)
+				case int64(now) >= ownerExpires:
+					mooringDiagRecord(diagSendOwnerExpiryReject, c)
+				default:
+					mooringDiagRecord(diagSendOwnerBudgetReject, c)
+				}
 				return errCollaborationHTTP
 			}
 			if e = d.cell.owners.Check(ctx, tx, d.owner); e != nil {
+				mooringDiagRecord(diagSendOwnerCheckReject, c)
 				return e
 			}
 			if e = c.socket.SetWriteDeadline(time.Now().Add(collaborationHTTPSendDeadline)); e != nil {
+				mooringDiagRecord(diagSendDeadlineReject, c)
 				return e
 			}
-			return websocket.Message.Send(c.socket, string(raw))
+			mooringDiagRecord(diagSocketWriteBegin, c)
+			e = websocket.Message.Send(c.socket, string(raw))
+			if e != nil {
+				mooringDiagRecord(diagSocketWriteReject, c)
+			} else {
+				mooringDiagRecord(diagSocketWriteOK, c)
+			}
+			return e
 		})
 	})
+	if err != nil {
+		mooringDiagRecord(diagSendOperationReject, c)
+	} else {
+		mooringDiagRecord(diagSendOperationOK, c)
+	}
+	return err
 }
 func (d *collaborationHTTPDocument) output(_ context.Context, q protocol.SessionParticipantOutput) error {
 	if q.Scope != d.wireScope() || q.SessionID != protocol.Identifier(d.activation.SessionID()) || q.RuntimeRef != protocol.Identifier(d.cell.runtime.RuntimeRef()) || q.Fence != d.wireFence() {

@@ -32,15 +32,24 @@ func (c *collaborationHTTPConnection) committedOutputRecipient(q protocol.Sessio
 	if d.originals == nil {
 		return errCollaborationHTTP
 	}
+	switch kind {
+	case "commit_result":
+		mooringDiagRecord(diagTerminalObserved, c)
+	case "changes_received":
+		mooringDiagRecord(diagPendingObserved, c)
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !c.joinedDelivered || (c.closed && !denied) || q.ParticipantRef != protocol.Identifier(c.admission.participant) || q.GateID != protocol.Identifier(originalGate.GateID) || q.PermissionVersion != protocol.Counter(originalGate.PermissionVersion) {
+		mooringDiagRecord(diagOutputEnvelopeReject, c)
 		return errCollaborationHTTP
 	}
 	switch kind {
 	case "changes_received":
+		mooringDiagRecord(diagPendingEntered, c)
 		var pending protocol.ChangesReceived
 		if json.Unmarshal(raw, &pending) != nil || pending.State != "pending" || pending.Scope != d.wireScope() || pending.SessionID != protocol.Identifier(d.activation.SessionID()) {
+			mooringDiagRecord(diagPendingReject, c)
 			return errCollaborationHTTP
 		}
 		d.originals.mu.Lock()
@@ -56,16 +65,21 @@ func (c *collaborationHTTPConnection) committedOutputRecipient(q protocol.Sessio
 		}
 		d.originals.mu.Unlock()
 		if !valid {
+			mooringDiagRecord(diagPendingReject, c)
 			return errCollaborationHTTP
 		}
 		// Queue admission only; this neither publishes history nor marks Saved.
+		mooringDiagRecord(diagPendingQualified, c)
 		if denied {
+			mooringDiagRecord(diagPendingSuppressed, c)
 			return nil
 		}
 		return c.checkedSendLocked(raw)
 	case "commit_result":
+		mooringDiagRecord(diagTerminalEntered, c)
 		var receipt protocol.CommitResult
 		if json.Unmarshal(raw, &receipt) != nil {
+			mooringDiagRecord(diagTerminalReject, c)
 			return errCollaborationHTTP
 		}
 		d.originals.mu.Lock()
@@ -73,9 +87,12 @@ func (c *collaborationHTTPConnection) committedOutputRecipient(q protocol.Sessio
 		valid := group != nil && group.source != nil && group.source.connection == c && group.captured && group.sent && group.receipt != nil && q.RequestID == group.outerID && collaborationEqualJSON(raw, group.receipt)
 		d.originals.mu.Unlock()
 		if !valid {
+			mooringDiagRecord(diagTerminalReject, c)
 			return errCollaborationHTTP
 		}
+		mooringDiagRecord(diagTerminalQualified, c)
 		if denied {
+			mooringDiagRecord(diagTerminalSuppressed, c)
 			return nil
 		}
 		return c.checkedSendLocked(raw)

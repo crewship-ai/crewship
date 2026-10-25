@@ -94,18 +94,33 @@ func (s *collaborationSubmissionRegistry) active(ctx context.Context) (*collabor
 // withWriter owns the admission transaction. Publication happens only AFTER its
 // COMMIT; a caller cannot roll back a provisional grant and retain its seal.
 func (s *collaborationSubmissionRegistry) withWriter(ctx context.Context, fn func(*sql.Tx) error) error {
+	mooringDiagContext(diagWriterBegin, ctx)
 	tx, err := s.humans.pages.db.BeginTx(ctx, nil)
 	if err != nil {
+		mooringDiagContext(diagWriterBeginReject, ctx)
 		return err
 	}
 	defer tx.Rollback()
+	mooringDiagContext(diagWriterOpened, ctx)
+	mooringDiagContext(diagWriterFenceBegin, ctx)
 	if _, err = tx.ExecContext(ctx, `UPDATE mooring_session_writer_fence SET seq=seq WHERE id=1`); err != nil {
+		mooringDiagContext(diagWriterFenceReject, ctx)
 		return err
 	}
+	mooringDiagContext(diagWriterFenceOK, ctx)
 	if err = fn(tx); err != nil {
+		mooringDiagContext(diagWriterCallbackReject, ctx)
 		return err
 	}
-	return tx.Commit()
+	mooringDiagContext(diagWriterCallbackOK, ctx)
+	mooringDiagContext(diagWriterCommitBegin, ctx)
+	err = tx.Commit()
+	if err != nil {
+		mooringDiagContext(diagWriterCommitReject, ctx)
+	} else {
+		mooringDiagContext(diagWriterCommitOK, ctx)
+	}
+	return err
 }
 
 // sealHuman requires the complete authenticated human operation and submission
@@ -133,10 +148,26 @@ func (s *collaborationSubmissionRegistry) sealHuman(ctx context.Context, changes
 	if _, err := mooring.NormalizeSessionIngress(s.humans.scope, changes); err != nil {
 		return err
 	}
-	if err := s.withWriter(ctx, func(tx *sql.Tx) error { _, err := s.humans.checkCaptured(ctx, tx, admission, true, 0); return err }); err != nil {
+	if err := s.withWriter(ctx, func(tx *sql.Tx) error {
+		mooringDiagContext(diagSealAuthorityBegin, ctx)
+		_, err := s.humans.checkCaptured(ctx, tx, admission, true, 0)
+		if err != nil {
+			mooringDiagContext(diagSealAuthorityReject, ctx)
+		} else {
+			mooringDiagContext(diagSealAuthorityOK, ctx)
+		}
+		return err
+	}); err != nil {
 		return err
 	}
-	return s.seal(changes, admission.participant, collaborationSubmissionAuthor{human: &admission})
+	mooringDiagContext(diagSealRetainBegin, ctx)
+	err := s.seal(changes, admission.participant, collaborationSubmissionAuthor{human: &admission})
+	if err != nil {
+		mooringDiagContext(diagSealRetainReject, ctx)
+	} else {
+		mooringDiagContext(diagSealRetainOK, ctx)
+	}
+	return err
 }
 
 type collaborationAgentSubmissionParticipant struct {

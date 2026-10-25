@@ -100,6 +100,7 @@ func (c *collaborationHTTPConnection) closeObsoleteGate(ctx context.Context, gat
 // startGateTransition owns deliveryMu only through exact Leave/Open writes.
 // It NEVER waits for Ticket or Joined while holding connection/delivery locks.
 func (c *collaborationHTTPConnection) startGateTransition(ctx context.Context) (*collaborationGateTransition, error) {
+	mooringDiagRecord(diagGateTransitionEntered, c)
 	d := c.document
 	c.mu.Lock()
 	c.pruneRetirementsLocked()
@@ -118,10 +119,13 @@ func (c *collaborationHTTPConnection) startGateTransition(ctx context.Context) (
 	if err != nil || !obsolete {
 		return nil, err
 	}
+	mooringDiagRecord(diagGateObsolete, c)
 	proof, err := d.cell.runtime.RetireParticipant(ctx, d.activation, binding)
 	if err != nil {
+		mooringDiagRecord(diagGateRetireFailure, c)
 		return nil, err
 	}
+	mooringDiagRecord(diagGateRetired, c)
 	retired := &collaborationRetiredGate{gate: gate, proof: proof}
 	t := &collaborationGateTransition{ready: make(chan struct{})}
 	c.mu.Lock()
@@ -170,6 +174,7 @@ func (c *collaborationHTTPConnection) startGateTransition(ctx context.Context) (
 	if err = d.cell.runtime.SendPreparedParticipantOpen(ctx, d.activation, pending); err != nil {
 		return nil, err
 	}
+	mooringDiagRecord(diagGateReopenSent, c)
 	return t, nil
 }
 func (c *collaborationHTTPConnection) ensureCurrentGate(ctx context.Context) error {
@@ -267,6 +272,7 @@ func (d *collaborationHTTPDocument) deliveryControl(ctx context.Context, token m
 // Ticket and Joined remain on ONE serial management dispatcher. Only DATA
 // enters the separate opaque-token FIFO, preserving the physical Ticket observer.
 func (d *collaborationHTTPDocument) outputControl(ctx context.Context, token mooring.SessionControl, q protocol.SessionParticipantOutput) error {
+	mooringDiagRecord(diagOutputControlEntered, nil)
 	if q.Scope != d.wireScope() || q.SessionID != protocol.Identifier(d.activation.SessionID()) || q.RuntimeRef != protocol.Identifier(d.cell.runtime.RuntimeRef()) || q.Fence != d.wireFence() {
 		return errCollaborationHTTP
 	}
@@ -298,6 +304,7 @@ func (d *collaborationHTTPDocument) outputControl(ctx context.Context, token moo
 		}
 		c.participantBinding = binding
 		c.participantPending = nil
+		mooringDiagRecord(diagGateJoined, c)
 		transition := c.transition
 		if transition != nil {
 			if !c.joinedDelivered {
@@ -321,8 +328,10 @@ func (d *collaborationHTTPDocument) outputControl(ctx context.Context, token moo
 		return errCollaborationHTTP
 	}
 	if !closed {
+		mooringDiagRecord(diagOutputGateWait, c)
 		err = c.ensureCurrentGate(ctx)
 		if err != nil && !errors.Is(err, errCollaborationRecipientDenied) {
+			mooringDiagRecord(diagOutputGateFailure, c)
 			return err
 		}
 	}
@@ -332,6 +341,7 @@ func (d *collaborationHTTPDocument) outputControl(ctx context.Context, token moo
 	c.mu.Unlock()
 	if retired != nil {
 		if err = d.cell.runtime.ValidateRetiredOutput(token, retired.proof); err != nil {
+			mooringDiagRecord(diagOutputRetiredValidateFailure, c)
 			return err
 		}
 		return c.committedOutputRecipient(q, raw, header.Type, retired.gate, denied)
