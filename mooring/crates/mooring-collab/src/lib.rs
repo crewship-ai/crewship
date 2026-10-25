@@ -13,6 +13,8 @@ mod session_origins;
 #[cfg(unix)]
 mod session_participants;
 #[cfg(unix)]
+mod session_reads;
+#[cfg(unix)]
 pub mod session_startup;
 
 pub const MAX_FRAME: usize = 262_144;
