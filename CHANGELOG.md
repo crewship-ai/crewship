@@ -9,7 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- ⚠️ **Behaviour change: Host lifecycle hooks require instance administration.** Creating, editing or enabling host commands now requires an instance administrator and appropriate token scope. Existing host hooks are retained but disabled for explicit review after upgrade; restored hooks also require local review. UI and CLI explain how an administrator can review and re-enable them. Container hooks and the default lifecycle pause are unchanged.
+- ⚠️ **Behaviour change: Host lifecycle hooks require instance administration.** Creating, editing or enabling host commands now requires an instance administrator and appropriate token scope. Existing host hooks are retained but disabled for explicit review after upgrade; restored hooks also require local review. UI and CLI explain how an administrator can review and re-enable them. Shell output capture is bounded while retaining the existing truncation and exit-result behavior. Container hooks and the default lifecycle pause are unchanged.
 
 
 - **Administrative security operations explicitly opt in to emergency audit fallback.** Only single/all-session revocation can use this fallback in the session handler; unlock remains chained-only, and unknown internal operations are rejected before any account or audit mutation. Web password changes and resets continue to fail closed on a broken audit chain.

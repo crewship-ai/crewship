@@ -162,7 +162,7 @@ _, err := hooks.Register(ctx, db, h, allowedShell)
 
 `allowedShell` is the trailing boolean argument to `hooks.Register`. Pass `true` only after verifying instance administrator authority. The stored `host_authorization` digest binds approval to the exact configuration; it is provenance, not a secret or a signature. Portable imports and instance-bundle recovery clear this approval.
 
-The same gate applies on **update**: `PATCH /api/v1/hooks/{id}` refuses an ADMIN who converts an existing `http` hook into a `shell` hook, and refuses an ADMIN editing a hook that is *already* `shell` — editing the command is editing what runs on the host, whether or not the `handler_kind` field is in the request body.
+The same gate applies on **update**: `PATCH /api/v1/hooks/{id}` refuses a caller without instance administrator authority who converts an existing `http` hook into a `shell` hook, and refuses a caller without that authority editing a hook that is *already* `shell` — editing the command is editing what runs on the host, whether or not the `handler_kind` field is in the request body.
 
 ### http
 
@@ -371,3 +371,5 @@ lifecycle pause still prevents execution; it is not an authorization bypass.
 Container startup hooks are a separate feature and are unchanged.
 
 Instance-bundle recovery (`crewship recover`, including drills) also disables host hooks and clears imported approval even when the snapshot already has the current schema. The recovery report records the required review. Explicit local `crewship db restore-snapshot` is a full-state downgrade rollback: it preserves the snapshot and its historical security properties, so booting an older binary can restore older authorization behavior. It is not a portable import or a sanitization operation.
+
+Shell stdout and stderr are drained with bounded retention. Each result keeps the first 4 KiB and an explicit truncation marker; the existing timeout and process-group cancellation still apply. Output truncation does not change the script exit outcome.

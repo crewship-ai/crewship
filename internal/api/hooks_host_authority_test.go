@@ -55,3 +55,24 @@ func TestHostHookAuthorityAcrossMutations(t *testing.T) {
 	wantCode(t, f.do(token, http.MethodPost, base+"/"+row.ID+"/enable?workspace_id=ws-new", `{}`), http.StatusForbidden, "stopping execution does not grant re-enable authority")
 	wantCode(t, f.do(f.boss, http.MethodPatch, base+"/"+row.ID+"?workspace_id=ws-old", `{"enabled":true}`), http.StatusNotFound, "workspace isolation")
 }
+
+func TestHostHookInlineRoutesRetainNonHostMemberDenial(t *testing.T) {
+	f := newInstanceFixture(t)
+	token := seedRoleMemberToken(t, f.db, "ws-old", "hook-member", "MEMBER", "hookmember00000000000000000")
+	created := f.do(f.boss, http.MethodPost, "/api/v1/hooks?workspace_id=ws-old", `{"event":"post_tool_call","handler_kind":"http","handler_config":{"url":"https://example.test"},"enabled":false}`)
+	wantCode(t, created, http.StatusCreated, "HTTP control")
+	var row struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &row); err != nil || row.ID == "" {
+		t.Fatal(created.Body.String())
+	}
+	for _, req := range []struct{ method, path, body string }{
+		{http.MethodPost, "/api/v1/hooks", `{"event":"post_tool_call","handler_kind":"http","handler_config":{"url":"https://example.test"}}`},
+		{http.MethodPatch, "/api/v1/hooks/" + row.ID, `{"enabled":true}`},
+		{http.MethodPost, "/api/v1/hooks/" + row.ID + "/enable", `{}`},
+		{http.MethodPost, "/api/v1/hooks/" + row.ID + "/disable", `{}`},
+	} {
+		wantCode(t, f.do(token, req.method, req.path+"?workspace_id=ws-old", req.body), http.StatusForbidden, "ordinary MEMBER non-host mutation")
+	}
+}

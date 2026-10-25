@@ -100,7 +100,7 @@ GET /api/v1/hooks?crew_id=<optional>
 POST /api/v1/hooks
 ```
 
-**Auth:** `OWNER` or `ADMIN`. `handler_kind: "shell"` requires an instance administrator with `instance:admin` token scope.
+**Auth:** Non-host hooks require workspace `OWNER` or `ADMIN`. Host `shell` hooks require an instance administrator, including when that administrator is a workspace MEMBER. Scoped tokens also need the route’s `workspace:admin` scope and, for host operations, `instance:admin`.
 
 **Body:**
 
