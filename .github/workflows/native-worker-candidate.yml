@@ -93,7 +93,7 @@ jobs:
             "$RUNNER_TEMP/native-green" green
       - name: Prove the original image passes when only the fixture atime flag changes
         run: |
-          sudo mount -o remount,bind,atime,relatime /var/lib/docker/containers
+          sudo mount --options-mode=replace -o remount,bind,atime,relatime /var/lib/docker/containers
           sudo findmnt -T /var/lib/docker/containers
           options=$(sudo findmnt -n -o VFS-OPTIONS -T /var/lib/docker/containers)
           [[ ",$options," == *,relatime,* && ",$options," != *,noatime,* ]]

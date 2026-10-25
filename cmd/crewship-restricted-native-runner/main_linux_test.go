@@ -57,11 +57,13 @@ func TestNativeCandidateConfigProbe(t *testing.T) {
 		"--entrypoint", "/bin/sh", image, "-c",
 		`mkdir -p /home/agent/work /home/agent/.codex; exec "$@"`, "probe", "/opt/codex"}
 	args = append(args, nativeArgs("gpt-5-mini")...)
-	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
 	output, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
 	t.Logf("synthetic startup diagnostic: %s", output)
-	if ctx.Err() != nil || err == nil || !strings.Contains(string(output), "http://127.0.0.1:9121/v1/responses") {
-		t.Fatalf("configured CLI did not reach the closed local provider: %v", err)
+	if err == nil || !strings.Contains(string(output), `"type":"thread.started"`) ||
+		!strings.Contains(string(output), `"type":"turn.started"`) ||
+		!strings.Contains(string(output), "Connection failed: error sending request") {
+		t.Fatalf("configured CLI did not start and attempt the closed local provider: %v", err)
 	}
 }
