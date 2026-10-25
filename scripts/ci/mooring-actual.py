@@ -114,6 +114,8 @@ def main():
             "MOORING_SESSION_RUST_SOURCE": source,
             "MOORING_SESSION_CHECKPOINT": checkpoints[document],
             "MOORING_SESSION_CHECKPOINT_SHA256": fixture["checkpoints"][document]["sha256"],
+            "MOORING_D3_CHECKPOINT": checkpoints["d3"],
+            "MOORING_D3_CHECKPOINT_SHA256": fixture["checkpoints"]["d3"]["sha256"],
             "MOORING_SESSION_OUTPUT_DIR": str(case_dir),
             "MOORING_TEST_RUST_BINARY": binary,
             "MOORING_TEST_RUST_SHA256": fixture["binary"]["sha256"],

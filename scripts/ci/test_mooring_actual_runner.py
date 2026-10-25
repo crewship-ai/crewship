@@ -1,5 +1,7 @@
 """Qualify source/build identity and actual-test discovery, not product outcomes."""
 import importlib.util
+from importlib.machinery import ModuleSpec
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -49,6 +51,60 @@ class ActualRunnerTests(unittest.TestCase):
                 self.assertIn(diagnostic.strip(), events.with_name("go-test.stderr.log").read_text())
                 with self.assertRaises(ValueError):
                     runner.results.verify(events.read_text().splitlines(), "example.invalid/channels", ["TestActual"])
+
+    def test_each_case_gets_verified_d3_pins_without_changing_primary_fixture(self):
+        # Exercise main's fixture verification and environment construction.
+        # Discovery, source identity, process execution and result verification
+        # are controlled fixtures; this does not execute native integration.
+        class IdentityLoader:
+            def create_module(self, spec):
+                return None
+
+            def exec_module(self, module):
+                module.source_identity = lambda: {"commit": "a" * 40, "tree": "b" * 40}
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+
+            def pin(name):
+                path = root / name
+                path.write_bytes(name.encode())
+                return {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+
+            js = pin("mooring_wordcraft_client.js")
+            wasm = pin("mooring_wordcraft_client_bg.wasm")
+            fixture = {
+                "format": "mooring.actual-fixtures.v1", "source": "a" * 40, "source_tree": "b" * 40,
+                "binary": pin("session"),
+                "sdk": {"directory": str(root), "assets": {
+                    "mooring_wordcraft_client.js": js["sha256"],
+                    "mooring_wordcraft_client_bg.wasm": wasm["sha256"]}},
+                "checkpoints": {"d1": pin("d1"), "d3": pin("d3")},
+                "payload": pin("payload"), "reads": pin("reads"),
+            }
+            manifest = root / "fixtures.json"
+            manifest.write_text(json.dumps(fixture))
+            seen = []
+
+            def capture(command, env, events):
+                expected = "d3" if command[command.index("-run") + 1] == "^" + runner.READONLY + "$" else "d1"
+                self.assertEqual(env["MOORING_SESSION_CHECKPOINT"], fixture["checkpoints"][expected]["path"])
+                self.assertEqual(env["MOORING_D3_CHECKPOINT"], fixture["checkpoints"]["d3"]["path"])
+                self.assertEqual(env["MOORING_D3_CHECKPOINT_SHA256"], fixture["checkpoints"]["d3"]["sha256"])
+                self.assertNotIn("MOORING_PRIVATE_FIXTURE", env)
+                events.write_text("")
+                seen.append(expected)
+                return 0
+
+            declared = {"TestAgentD1": "internal/api/agent_test.go", runner.READONLY: "internal/api/readonly_test.go"}
+            with patch.object(runner, "cases", return_value=declared), \
+                    patch.object(runner.importlib.util, "spec_from_file_location", return_value=ModuleSpec("actual_fixtures", IdentityLoader())), \
+                    patch.object(runner, "capture_go_test", side_effect=capture), \
+                    patch.object(runner.results, "verify", return_value={"executed": []}), \
+                    patch.object(sys, "argv", ["runner", "--fixtures", str(manifest), "--results", str(root / "results")]), \
+                    patch.dict(os.environ, {"MOORING_D3_CHECKPOINT": "/untrusted", "MOORING_D3_CHECKPOINT_SHA256": "0" * 64, "MOORING_PRIVATE_FIXTURE": "stale"}):
+                runner.main()
+            self.assertEqual(seen, ["d1", "d3"])
 
     def test_relative_cargo_target_uses_build_root_not_callers_directory(self):
         with tempfile.TemporaryDirectory() as directory:
