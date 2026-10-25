@@ -67,3 +67,27 @@ The generic `mooring_command` MCP tool and `crewship mooring agent` CLI forward
 signed live-run authority through protected host IPC. No browser or editor
 receives the host or agent credential. Every commit rechecks current authority
 and retained mandate before issuing its receipt.
+
+
+## `GET /api/v1/pages/{slug}/mooring/provenance`
+
+Authentication: current original human session or CLI credential with `pages:read`.
+The native route is default-off with Mooring sessions. Request: path `slug` or
+`@PageID`, query `workspace_id`; no request body. Current Page/native read access
+and each source chat audience are checked independently. References grant no rights.
+
+Response: JSON `{artifacts:[{page_id,title,application_id,provenance,chat_id,message_id,agent_slug,last_revision,edited_at}],artifacts_partial:true}`.
+Only immutable agent-edit records are projected, never inferred creation. At most
+64 recent candidates are checked; inaccessible rows are omitted without returning
+their title or source-chat references. The constant partial marker is not a hidden
+row count. `last_revision` is a native saved cut, not a legacy checkpoint ID.
+Headers: `Cache-Control: no-store`. The original credential expiry or three-second
+request-send horizon, whichever is earlier, bounds physical delivery.
+
+Statuses: 200 (bounded authorized metadata), 401 (no original human), 403 (current
+credential/read scope refused), 404 (Page/native read unavailable), 503 (current
+metadata/transport verification unavailable). Errors are JSON `{error}`.
+
+The existing `GET /api/v1/chats/{chatId}/document-access` response also carries
+separate `artifacts` and `artifacts_partial` fields under the same independent
+current checks; these fields do not change document-grant or live-task authority.

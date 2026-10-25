@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { useSessionSafe } from "@/hooks/use-auth"
 import { useLeaveGuard } from "@/lib/editor-lifecycle/use-leave-guard"
 import { createCapabilityChannel, decodeMessage, transferEditorPort, verifyEditorHello, type CapabilityPort } from "@/lib/mooring/channel"
 import { connectWordCraftHost, loadWordCraftReceiptSDK, openWordCraftSession, WORDCRAFT_BOOTSTRAP_BYTES, WORDCRAFT_FRAME_BYTES, type WordCraftBootstrap, type WordCraftHostState } from "@/lib/mooring/wordcraft-host-session"
@@ -14,12 +15,17 @@ const labels: Record<WordCraftHostState, string> = {
 const exact = (message: Record<string, unknown>, keys: string[]) => Object.keys(message).length === keys.length && keys.every(key => key in message)
 
 /** Actual WordCraft protocol host; the legacy JSON pilot uses a separate host. */
-export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange, onUnavailable }: { workspaceId: string; pageId: string; name?: string; onDirtyChange?: (dirty: boolean) => void; onUnavailable?: () => void }) {
+export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange, onUnavailable, unavailable = false }: { unavailable?: boolean; workspaceId: string; pageId: string; name?: string; onDirtyChange?: (dirty: boolean) => void; onUnavailable?: () => void }) {
+  const session = useSessionSafe()
+  const humanId = session.status === "authenticated" ? session.data?.user?.id ?? null : null
   const mount = React.useRef<HTMLDivElement>(null)
+  const stopCurrent = React.useRef<((reason: string) => void) | null>(null)
+  const pageUnavailable = React.useRef(unavailable)
+  pageUnavailable.current = unavailable
   const [state, setState] = React.useState<WordCraftHostState>("connecting")
   const [error, setError] = React.useState<string>()
-  const unavailable = React.useRef(onUnavailable)
-  React.useEffect(() => { unavailable.current = onUnavailable }, [onUnavailable])
+  const unavailableCallback = React.useRef(onUnavailable)
+  React.useEffect(() => { unavailableCallback.current = onUnavailable }, [onUnavailable])
   const dirty = ["draft", "pending", "unknown", "unsaved-draft"].includes(state)
   useLeaveGuard(dirty)
   React.useEffect(() => { onDirtyChange?.(dirty) }, [dirty, onDirtyChange])
@@ -36,7 +42,7 @@ export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange, 
     const close = (reason: string) => {
       if (dead) return
       dead = true
-      unavailable.current?.()
+      unavailableCallback.current?.()
       setState(previous => ["draft", "pending", "unknown", "unsaved-draft"].includes(previous) ? "unsaved-draft" : "stopped")
       host?.stop(reason)
       // Preserve the original producer's memory on a live failure, but end
@@ -83,10 +89,12 @@ export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange, 
       port = transferEditorPort(frame.contentWindow, createCapabilityChannel(), "wordcraft", { bundle }, receive)
       try { deliverBootstrap() } catch { close("invalid_bootstrap") }
     }
+    stopCurrent.current = close
     window.addEventListener("message", onWindowMessage)
     setError(undefined); setState("connecting")
     void (async () => {
       try {
+        if (!humanId || pageUnavailable.current) { close("page_unavailable"); return }
         if (!editorFrameSupported()) throw new Error("isolation_unavailable")
         let write = true
         // A refused writer admission grants nothing. Reader admission is a
@@ -124,10 +132,14 @@ export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange, 
       }
     })()
     return () => {
+      stopCurrent.current = null
       dead = true; abort.abort(); window.removeEventListener("message", onWindowMessage)
       host?.close(); if (port) { port.onmessage = null; port.close() }; frame?.remove()
     }
-  }, [workspaceId, pageId])
+  }, [workspaceId, pageId, humanId])
+  // Metadata denial is stop-only: retaining the original producer never grants
+  // fresh admission, and a later metadata recovery cannot restart this source.
+  React.useEffect(() => { if (unavailable) stopCurrent.current?.("page_unavailable") }, [unavailable])
   return <section className="flex h-full min-h-0 flex-col" aria-label={`${name ?? "WordCraft"} editor`}>
     <div className="px-4 py-2 text-sm" role="status">{labels[state]}</div>
     {error && <p className="px-4 py-2 text-sm" role="alert">{error}</p>}

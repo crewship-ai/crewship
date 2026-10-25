@@ -13,6 +13,11 @@ interface TaskView {
   can_read: boolean
   can_write: boolean
 }
+export interface NativeArtifactEdit {
+  page_id: string; title: string; application_id: "wordcraft"; provenance: "agent_edited"
+  chat_id: string; message_id: string; agent_slug: string; last_revision: string; edited_at: string
+}
+
 interface DocumentAccess {
   page_id: string
   title: string
@@ -27,11 +32,13 @@ interface DocumentAccess {
 const freshnessMs = 3000
 
 export const chatDocumentAccessKeys = {
+  page: (workspaceId: string, pageId: string, viewerId: string) => ["native-document-provenance", workspaceId, pageId, viewerId] as const,
   view: (workspaceId: string, chatId: string, viewerId: string) => ["chat-document-access", workspaceId, chatId, viewerId] as const,
 }
 
 interface AccessProps {
   workspaceId: string; chatId: string; viewerId: string
+  pageId?: string
   /** An explicit action consumes existing delegation; this view grants none. */
   chooseDocument?: (pageId: string) => void
   choicePending?: boolean
@@ -45,16 +52,30 @@ function AccessScope(props: AccessProps) {
 
 /** Display metadata only. Opening a document still uses its ordinary ACL. */
 export function ChatDocumentAccess(props: AccessProps) {
-  return <AccessScope key={JSON.stringify([props.workspaceId, props.chatId, props.viewerId])} {...props} />
+  return <AccessScope key={JSON.stringify([props.workspaceId, props.chatId, props.viewerId, props.pageId])} {...props} />
 }
 
-function AccessView({ workspaceId, chatId, viewerId, chooseDocument, choicePending }: AccessProps) {
+export function NativeDocumentProvenance({ workspaceId, pageId, viewerId }: { workspaceId: string; pageId: string; viewerId: string }) {
+  return <AccessScope key={JSON.stringify([workspaceId, pageId, viewerId])} workspaceId={workspaceId} pageId={pageId} viewerId={viewerId} chatId="" />
+}
+
+function EditRows({ artifacts, pageView = false }: { artifacts: NativeArtifactEdit[]; pageView?: boolean }) {
+  return <ul className="space-y-2">{artifacts.map(edit => <li key={JSON.stringify([edit.page_id, edit.chat_id])} className="rounded-xl border border-border p-2.5">
+    {!pageView && <a className="font-medium text-primary underline" href={`/pages/${encodeURIComponent("@" + edit.page_id)}`}>{edit.title}</a>}
+    <p>Edited by agent in this chat</p>
+    <a className="text-primary underline" href={`/chat/${encodeURIComponent(edit.agent_slug)}?session=${encodeURIComponent(edit.chat_id)}&message=${encodeURIComponent(edit.message_id)}`}>Open source message</a>
+    <p className="text-muted-foreground">Saved revision {edit.last_revision} · <time dateTime={edit.edited_at}>{new Date(edit.edited_at).toLocaleString()}</time></p>
+  </li>)}</ul>
+}
+
+function AccessView({ workspaceId, chatId, viewerId, pageId, chooseDocument, choicePending }: AccessProps) {
   const client = useQueryClient()
   const [visible, setVisible] = useState(() => typeof document === "undefined" || document.visibilityState !== "hidden")
   const [expired, setExpired] = useState(false)
+  const key = pageId ? chatDocumentAccessKeys.page(workspaceId, pageId, viewerId) : chatDocumentAccessKeys.view(workspaceId, chatId, viewerId)
   const query = useQuery({
-    queryKey: chatDocumentAccessKeys.view(workspaceId, chatId, viewerId),
-    enabled: visible,
+    queryKey: key,
+    enabled: visible && Boolean(viewerId),
     retry: false,
     gcTime: 0,
     staleTime: 0,
@@ -71,11 +92,12 @@ function AccessView({ workspaceId, chatId, viewerId, chooseDocument, choicePendi
       if (signal.aborted) controller.abort()
       const timeout = setTimeout(abort, freshnessMs)
       try {
-        const response = await apiFetch(`/api/v1/chats/${encodeURIComponent(chatId)}/document-access?workspace_id=${encodeURIComponent(workspaceId)}`, { signal: controller.signal, cache: "no-store" })
+        const endpoint = pageId ? `/api/v1/pages/${encodeURIComponent("@" + pageId)}/mooring/provenance` : `/api/v1/chats/${encodeURIComponent(chatId)}/document-access`
+        const response = await apiFetch(`${endpoint}?workspace_id=${encodeURIComponent(workspaceId)}`, { signal: controller.signal, cache: "no-store" })
         if (!response.ok) throw new Error("Access unavailable")
-        const data = await response.json() as { documents: DocumentAccess[] }
-        if (controller.signal.aborted || performance.now() - started >= freshnessMs || !Array.isArray(data.documents)) throw new Error("Access unavailable")
-        return { documents: data.documents, expiresAt: started + freshnessMs }
+        const data = await response.json() as { documents?: DocumentAccess[]; artifacts?: NativeArtifactEdit[]; artifacts_partial?: boolean }
+        if (controller.signal.aborted || performance.now() - started >= freshnessMs || (!pageId && !Array.isArray(data.documents)) || (data.artifacts !== undefined && (!Array.isArray(data.artifacts) || data.artifacts.length > 64))) throw new Error("Access unavailable")
+        return { documents: data.documents ?? [], artifacts: (data.artifacts ?? []).filter(edit => edit.provenance === "agent_edited" && edit.application_id === "wordcraft" && (!pageId || edit.page_id === pageId)), truncated: data.artifacts_partial === true, expiresAt: started + freshnessMs }
       } finally {
         clearTimeout(timeout)
         signal.removeEventListener("abort", abort)
@@ -83,8 +105,8 @@ function AccessView({ workspaceId, chatId, viewerId, chooseDocument, choicePendi
     },
   })
   const invalidate = useCallback(() => {
-    void client.invalidateQueries({ queryKey: chatDocumentAccessKeys.view(workspaceId, chatId, viewerId) })
-  }, [client, workspaceId, chatId, viewerId])
+    void client.invalidateQueries({ queryKey: pageId ? chatDocumentAccessKeys.page(workspaceId, pageId, viewerId) : chatDocumentAccessKeys.view(workspaceId, chatId, viewerId) })
+  }, [client, workspaceId, chatId, viewerId, pageId])
   useRealtimeEventSafe("conversation.updated", invalidate)
   useRealtimeEventSafe("run.started", invalidate)
   useRealtimeEventSafe("run.completed", invalidate)
@@ -96,11 +118,11 @@ function AccessView({ workspaceId, chatId, viewerId, chooseDocument, choicePendi
   useEffect(() => {
     const visibility = () => {
       setVisible(document.visibilityState !== "hidden")
-      void client.resetQueries({ queryKey: chatDocumentAccessKeys.view(workspaceId, chatId, viewerId) })
+      void client.resetQueries({ queryKey: pageId ? chatDocumentAccessKeys.page(workspaceId, pageId, viewerId) : chatDocumentAccessKeys.view(workspaceId, chatId, viewerId) })
     }
     document.addEventListener("visibilitychange", visibility)
     return () => document.removeEventListener("visibilitychange", visibility)
-  }, [client, workspaceId, chatId, viewerId])
+  }, [client, workspaceId, chatId, viewerId, pageId])
   useEffect(() => {
     setExpired(false)
     if (!query.data) return
@@ -109,7 +131,13 @@ function AccessView({ workspaceId, chatId, viewerId, chooseDocument, choicePendi
   }, [query.data])
 
   const documents = visible && !expired && !query.isError && query.data && performance.now() < query.data.expiresAt ? query.data.documents : null
+  const artifacts = documents ? query.data!.artifacts : null
   const unavailable = query.isError || expired
+  if (pageId) return <section aria-label="Document edit provenance" className="shrink-0 border-b p-2 text-xs">
+    {!artifacts ? <p role="status">{unavailable ? "Current provenance access could not be verified." : "Checking edit provenance…"}</p>
+      : artifacts.length === 0 ? <p>Origin: unknown. No authorized recorded agent edit is available.</p> : <EditRows artifacts={artifacts} pageView />}
+    {artifacts && query.data?.truncated && <p>Only recent recorded edits are shown.</p>}
+  </section>
   if (chooseDocument) {
     const eligible = documents?.filter(doc => doc.application_id === "wordcraft" && doc.document_grant === "write" && doc.policy_allows)
     return <section aria-label="Choose document">
@@ -120,7 +148,12 @@ function AccessView({ workspaceId, chatId, viewerId, chooseDocument, choicePendi
         }}>{doc.title}</button></li>)}</ul>}
     </section>
   }
-  return <section aria-label="Agent document access" className="mb-4 space-y-2 border-b pb-3">
+  return <><section aria-label="Recorded document edits" className="mb-4 space-y-2 border-b pb-3">
+    <h3 className="eyebrow">Documents edited in this chat</h3>
+    {!artifacts ? <p role="status">{unavailable ? "Current edit access could not be verified." : "Checking recorded edits…"}</p>
+      : artifacts.length === 0 ? <p>No authorized recorded agent edits.</p> : <EditRows artifacts={artifacts} />}
+    {artifacts && query.data?.truncated && <p>Only recent recorded edits are shown.</p>}
+  </section><section aria-label="Agent document access" className="mb-4 space-y-2 border-b pb-3">
     <h3 className="eyebrow">Agent document access</h3>
     <p className="text-muted-foreground">Document grants and this chat’s active tasks are shown separately. Change access in the document’s Share menu.</p>
     {!documents ? <p role="status" className="text-muted-foreground">{unavailable ? "Current access could not be verified." : "Checking current access…"}</p>
@@ -137,5 +170,5 @@ function AccessView({ workspaceId, chatId, viewerId, chooseDocument, choicePendi
           : <p className="text-muted-foreground">{doc.task_status === "unavailable" ? "Current task permissions are unavailable." : "No verified active task in this chat."}</p>}
         <p className="text-muted-foreground">Origin: unknown</p>
       </li>)}</ul>}
-  </section>
+  </section></>
 }

@@ -52,13 +52,14 @@ func TestMooringHTTPAuthenticatesAndChecksPageBeforeBody(t *testing.T) {
 	defer r.mooringHTTP.Close()
 	registered := registeredPublicRoutes(r)
 	spec := loadGeneratedSpec(t)
-	if len(registered) != 3 {
-		t.Fatalf("enabled transport registered %d paths, want exactly three", len(registered))
+	if len(registered) != 4 {
+		t.Fatalf("enabled transport registered %d paths, want exactly four", len(registered))
 	}
 	for path, method := range map[string]string{
-		"/api/v1/pages/{slug}/mooring/session": "POST",
-		"/api/v1/pages/{slug}/mooring/ws":      "GET",
-		"/api/v1/pages/{slug}/mooring/tasks":   "POST",
+		"/api/v1/pages/{slug}/mooring/session":    "POST",
+		"/api/v1/pages/{slug}/mooring/ws":         "GET",
+		"/api/v1/pages/{slug}/mooring/provenance": "GET",
+		"/api/v1/pages/{slug}/mooring/tasks":      "POST",
 	} {
 		if len(registered[path]) != 1 || !registered[path][method] || !spec[path][method] {
 			t.Fatalf("enabled transport %s: registered=%v spec=%v", path, registered[path], spec[path])

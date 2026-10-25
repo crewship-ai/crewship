@@ -134,3 +134,29 @@ A build or local ready event is not rendering, HTTP/WebSocket, permission,
 multiplayer, undo-overlap or durable Saved qualification. Those require actual
 end-to-end acceptance with the final packaged bytes. No native file save or
 child status callback grants Saved.
+
+### Native dependency notices
+
+`license-inventory.json` binds the patched native source, native Cargo lock,
+WASM target and resolved normal/build dependency closure. It includes proc-macro
+dependencies conservatively and excludes dev-only edges. It records the exact
+resolved features; it is not a claim that every dependency or source asset is
+linked into the final WASM binary. Mooring's separate vendored inventory does
+not cover these native dependencies.
+
+`licenses/` contains deduplicated full source license texts and notices. Each
+inventory record preserves its source package/checksum or immutable upstream
+revision, original filename, byte count and text hash. Root notices, AccessKit's
+Chromium notice and the native/craft-libs supplemental attributions accompany
+the corpus. Preserving multiple offered license texts does not select a license
+or assert legal compatibility.
+
+The release recipe runs offline locked Cargo metadata after the native build,
+compares the complete resolved closure with this inventory, verifies every text,
+and packages the inventory and texts into the immutable editor bundle. A changed
+lock, feature set, dependency, missing text or changed text fails the build.
+To update inputs, regenerate the normal/build closure with
+`native_package_closure` in `scripts/build-mooring-runtime.py`, review every
+changed identity and preserve the applicable source texts with pinned
+provenance. Review notices and asset inclusion as well as SPDX declarations;
+do not fill absent texts from a generic license template.

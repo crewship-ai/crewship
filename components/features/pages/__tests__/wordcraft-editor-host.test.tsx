@@ -3,6 +3,8 @@ import React from "react"
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { WordCraftEditorHost } from "../wordcraft-editor-host"
+const identity = vi.hoisted(() => ({ id: "human-one", status: "authenticated" }))
+vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: identity.id } }, status: identity.status }) }))
 const mocks = vi.hoisted(() => ({ open: vi.fn(), connect: vi.fn(), sdk: vi.fn(), ready: vi.fn(), draft: vi.fn(), submit: vi.fn(), stop: vi.fn(), close: vi.fn() }))
 vi.mock("@/lib/mooring/wordcraft-host-session", () => ({ openWordCraftSession: mocks.open, connectWordCraftHost: mocks.connect, loadWordCraftReceiptSDK: mocks.sdk, WORDCRAFT_FRAME_BYTES: 262144, WORDCRAFT_BOOTSTRAP_BYTES: 2097152 }))
 vi.mock("@/lib/editor-lifecycle/use-leave-guard", () => ({ useLeaveGuard: vi.fn() }))
@@ -13,6 +15,7 @@ const contentWindow = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototyp
 const ports: MessagePort[] = []
 beforeEach(() => {
   vi.clearAllMocks()
+  identity.id = "human-one"; identity.status = "authenticated"
   Object.defineProperty(HTMLIFrameElement.prototype, "credentialless", { configurable: true, get() { return (this as HTMLIFrameElement).hasAttribute("credentialless") } })
   Object.defineProperty(HTMLIFrameElement.prototype, "contentWindow", { configurable: true, get: () => windowMock })
   mocks.open.mockResolvedValue({ editor: { url: `https://editor.example.test/b/${digest}/index.html`, bundle_digest: digest }, sdk_prefix: `/mooring-sdk/generated/${"a".repeat(64)}` })
@@ -112,4 +115,33 @@ it("rejects an unrecognized history refusal without displaying its untrusted rea
   expect(mocks.stop).toHaveBeenCalledWith("invalid_editor_sequence")
   expect(frame.hidden).toBe(true)
   expect(screen.queryByText("untrusted-child-text")).toBeNull()
+})
+
+
+it("ends the old human socket and producer before reusing an already warm native host for another human", async () => {
+  const { frame, view } = await open()
+  identity.id = "human-two"
+  view.rerender(<WordCraftEditorHost workspaceId="workspace" pageId="page" name="Original title" />)
+  await waitFor(() => expect(mocks.open).toHaveBeenCalledTimes(2))
+  expect(mocks.close).toHaveBeenCalledOnce()
+  expect(frame.isConnected).toBe(false)
+  expect(document.querySelector("iframe")).not.toBe(frame)
+})
+
+it("stops and retains the original dirty frame on metadata denial without reopening it on recovery", async () => {
+  const { frame, view } = await open()
+  const callbacks = mocks.connect.mock.calls[0][5]
+  await act(async () => { callbacks.state("draft") })
+  view.rerender(<WordCraftEditorHost workspaceId="workspace" pageId="page" unavailable />)
+  expect(mocks.stop).toHaveBeenCalledWith("page_unavailable")
+  expect(mocks.close).not.toHaveBeenCalled()
+  expect(frame.hidden).toBe(true)
+  expect(frame.isConnected).toBe(true)
+  expect(screen.getByRole("status")).toHaveTextContent("Not saved · local draft retained")
+  await act(async () => { callbacks.hostFrame("old-authority-frame") })
+  view.rerender(<WordCraftEditorHost workspaceId="workspace" pageId="page" />)
+  expect(mocks.open).toHaveBeenCalledTimes(1)
+  expect(document.querySelector("iframe")).toBe(frame)
+  expect(frame.hidden).toBe(true)
+  expect(screen.queryByText("Saved")).toBeNull()
 })

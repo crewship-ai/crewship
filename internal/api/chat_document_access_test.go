@@ -25,6 +25,7 @@ func documentAccessFixture(t *testing.T) (*collaborationAgentTestFixture, *Route
 type documentAccessDeadlineRecorder struct{ *httptest.ResponseRecorder }
 
 func (*documentAccessDeadlineRecorder) SetWriteDeadline(time.Time) error { return nil }
+func (*documentAccessDeadlineRecorder) SetReadDeadline(time.Time) error  { return nil }
 
 func documentAccessCall(router *Router, req *http.Request) *httptest.ResponseRecorder {
 	w := httptest.NewRecorder()
@@ -117,6 +118,8 @@ type documentAccessStalledWriter struct {
 	started  chan struct{}
 	once     sync.Once
 }
+
+func (*documentAccessStalledWriter) SetReadDeadline(time.Time) error { return nil }
 
 func (w *documentAccessStalledWriter) Header() http.Header { return w.header }
 func (*documentAccessStalledWriter) WriteHeader(int)       {}

@@ -1,12 +1,11 @@
 /** Bundled child entry, compiled by the packaging step. No parent credentials. */
-import { startWordCraftChild, type WordCraftChildSDK, type WordCraftNativeWeb } from "./wordcraft-child"
+import { startWordCraftChild, wordCraftBundleFromPath, type WordCraftChildSDK, type WordCraftNativeWeb } from "./wordcraft-child"
 
 type InitializedModule = { default(input?: { module_or_path: URL }): Promise<unknown> }
 
 async function boot() {
   if (window.parent === window || new URLSearchParams(location.search).get("mooring") !== "1") throw new Error("isolated startup required")
-  const match = /^\/_editor\/b\/([0-9a-f]{64})\/index\.html$/.exec(location.pathname)
-  if (!match) throw new Error("invalid bundle identity")
+  const bundle = wordCraftBundleFromPath(location.pathname)
   // These URLs are constant relative paths INSIDE our own approved bundle.
   // No bootstrap/server/child message may choose a module or script URL.
   const sdkURL = new URL("./mooring_wordcraft_client.js", import.meta.url)
@@ -17,7 +16,7 @@ async function boot() {
   await native.default({ module_or_path: new URL("./wordcraft_web_bg.wasm", import.meta.url) })
   if (typeof sdk.validate_host_bootstrap !== "function" || typeof sdk.validate_host_peer_document_update !== "function"
     || typeof native.start_collaborative !== "function") throw new Error("unqualified bundle API")
-  const controller = startWordCraftChild(sdk, native, match[1], () => new Promise<void>((resolve, reject) => {
+  const controller = startWordCraftChild(sdk, native, bundle, () => new Promise<void>((resolve, reject) => {
     const deadline = performance.now() + 30000
     const inspect = () => {
       if (!document.getElementById("wordcraft_loading")) { resolve(); return }

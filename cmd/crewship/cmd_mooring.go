@@ -9,6 +9,7 @@ package main
 // POST /api/v1/internal/mooring mooring agent
 // POST /api/v1/pages/{slug}/mooring/session mooring session
 // GET /api/v1/pages/{slug}/mooring/ws mooring connect
+// GET /api/v1/pages/{slug}/mooring/provenance mooring provenance
 
 import (
 	"bytes"
@@ -28,7 +29,7 @@ import (
 
 func newMooringCommand() *cobra.Command {
 	root := &cobra.Command{Use: "mooring", Short: "Manifest-driven experimental application documents"}
-	for _, op := range []string{"apps", "create", "read", "command", "admit", "revoke", "session"} {
+	for _, op := range []string{"apps", "create", "read", "command", "admit", "revoke", "session", "provenance"} {
 		operation := op
 		cmd := &cobra.Command{Use: op, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 			client, e := humanWorkbookClient()
@@ -47,6 +48,8 @@ func newMooringCommand() *cobra.Command {
 			switch operation {
 			case "apps":
 				response, e = client.Get("/api/v1/mooring/apps")
+			case "provenance":
+				response, e = client.Get("/api/v1/pages/" + pagePathEscape(args[0]) + "/mooring/provenance")
 			case "read":
 				response, e = client.Get("/api/v1/pages/" + pagePathEscape(args[0]) + "/mooring")
 			case "create":

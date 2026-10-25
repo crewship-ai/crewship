@@ -1,5 +1,26 @@
 import { describe, expect, it, vi } from "vitest"
-import { startWordCraftChild, type WordCraftChildSDK, type WordCraftNativeWeb } from "../wordcraft-child"
+import { startWordCraftChild, wordCraftBundleFromPath, type WordCraftChildSDK, type WordCraftNativeWeb } from "../wordcraft-child"
+
+describe("pinned bundle routes", () => {
+  const digest = "a".repeat(64)
+  it("accepts the host's same-origin editor route", () => {
+    expect(wordCraftBundleFromPath(`/_editor/b/${digest}/index.html`)).toBe(digest)
+  })
+  it("accepts the host's dedicated-origin editor route", () => {
+    expect(wordCraftBundleFromPath(`/b/${digest}/index.html`)).toBe(digest)
+  })
+  it.each([
+    `/unknown/b/${digest}/index.html`,
+    `//b/${digest}/index.html`,
+    `/b/${digest.slice(1)}/index.html`,
+    `/b/${digest.toUpperCase()}/index.html`,
+    `/b/${digest}/index.html/extra`,
+    `/b/${digest}/index.html?module=other`,
+    `/b/${digest}/%69ndex.html`,
+  ])("rejects an unapproved path %s", (path) => {
+    expect(() => wordCraftBundleFromPath(path)).toThrow("invalid bundle identity")
+  })
+})
 
 // Transport/controller fixtures only. Rust validates actual native/protocol data
 // in separate native+Chromium proofs; these fakes grant no authority.

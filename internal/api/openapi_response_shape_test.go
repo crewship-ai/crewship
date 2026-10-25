@@ -51,6 +51,8 @@ var responseShapeContracts = []struct {
 	value any
 }{
 	{name: "MooringSession", pointer: "/components/schemas/MooringSession", value: collaborationHTTPSessionResponse{}},
+	{name: "NativeArtifactEdit", pointer: "/components/schemas/NativeArtifactEdit", value: nativeArtifactEdit{}},
+	{name: "NativeDocumentProvenance", pointer: "/components/schemas/NativeDocumentProvenance", value: nativeProvenanceResponse{}},
 	{name: "ChatDocumentAccessList", pointer: "/components/schemas/ChatDocumentAccessList", value: chatDocumentAccessResponse{}},
 	{name: "ChatDocumentAccess", pointer: "/components/schemas/ChatDocumentAccess", value: chatDocumentAccess{}},
 	{name: "ChatDocumentTaskView", pointer: "/components/schemas/ChatDocumentTaskView", value: collaborationAgentTaskView{}},

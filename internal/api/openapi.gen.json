@@ -2164,6 +2164,20 @@
       },
       "ChatDocumentAccessList": {
         "properties": {
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/NativeArtifactEdit"
+            },
+            "maxItems": 64,
+            "type": "array"
+          },
+          "artifacts_partial": {
+            "description": "Bounded recent projection; never a complete history/count of inaccessible edits.",
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          },
           "documents": {
             "items": {
               "$ref": "#/components/schemas/ChatDocumentAccess"
@@ -2172,7 +2186,9 @@
           }
         },
         "required": [
-          "documents"
+          "documents",
+          "artifacts",
+          "artifacts_partial"
         ],
         "type": "object"
       },
@@ -12023,6 +12039,79 @@
         "required": [
           "chat_id",
           "message_id"
+        ],
+        "type": "object"
+      },
+      "NativeArtifactEdit": {
+        "properties": {
+          "agent_slug": {
+            "type": "string"
+          },
+          "application_id": {
+            "enum": [
+              "wordcraft"
+            ],
+            "type": "string"
+          },
+          "chat_id": {
+            "type": "string"
+          },
+          "edited_at": {
+            "type": "string"
+          },
+          "last_revision": {
+            "pattern": "^[1-9][0-9]*$",
+            "type": "string"
+          },
+          "message_id": {
+            "type": "string"
+          },
+          "page_id": {
+            "type": "string"
+          },
+          "provenance": {
+            "enum": [
+              "agent_edited"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "page_id",
+          "title",
+          "application_id",
+          "provenance",
+          "chat_id",
+          "message_id",
+          "agent_slug",
+          "last_revision",
+          "edited_at"
+        ],
+        "type": "object"
+      },
+      "NativeDocumentProvenance": {
+        "properties": {
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/NativeArtifactEdit"
+            },
+            "maxItems": 64,
+            "type": "array"
+          },
+          "artifacts_partial": {
+            "description": "Bounded recent projection; never a complete history/count of inaccessible edits.",
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "artifacts",
+          "artifacts_partial"
         ],
         "type": "object"
       },
@@ -131160,6 +131249,157 @@
           "pages"
         ],
         "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/mooring/provenance": {
+      "get": {
+        "description": "Get page mooring provenance (GET /api/v1/pages/{slug}/mooring/provenance).",
+        "operationId": "get_api_v1_pages_slug_mooring_provenance",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeDocumentProvenance"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "description": "Authorization-sensitive projection; never store in shared caches.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get page mooring provenance",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
       }
     },
     "/api/v1/pages/{slug}/mooring/session": {

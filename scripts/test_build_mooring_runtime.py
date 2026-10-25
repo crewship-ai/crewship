@@ -139,3 +139,80 @@ class PinnedSourceIsolation(unittest.TestCase):
             self.assertTrue((destination / '.git/FETCH_HEAD').is_file())
             self.assertEqual(pin, git('-C', destination, 'rev-parse', 'FETCH_HEAD'))
             self.assertEqual('commit', git('-C', destination, 'cat-file', '-t', pin))
+
+
+class NativeLicenseTests(unittest.TestCase):
+    def fixture(self, root):
+        native, recipe, destination = root/'native', root/'tools/wordcraft-mooring-native', root/'licenses'
+        (native/'apps/wordcraft-web').mkdir(parents=True)
+        (native/'apps/wordcraft-web/Cargo.toml').write_text('[package]\nname="wordcraft-web"\nversion="1.0.0"\n')
+        lock = 'version=4\n[[package]]\nname="wordcraft-web"\nversion="1.0.0"\n'
+        packages, nodes = [], []
+        for name, kind in [('wordcraft-web', None), ('runtime', None), ('macro', 'build'), ('dev-only', 'dev')]:
+            source = None if name == 'wordcraft-web' else 'registry+https://example.invalid/index'
+            if source:
+                lock += f'[[package]]\nname="{name}"\nversion="1.0.0"\nsource="{source}"\nchecksum="'+'a'*64+'"\n'
+            packages.append({'id':name, 'name':name, 'version':'1.0.0', 'source':source,
+                             'license':'MIT', 'manifest_path':str(native/'apps/wordcraft-web/Cargo.toml') if source is None else '/unused/cache/'+name+'/Cargo.toml'})
+            nodes.append({'id':name, 'features':[], 'deps':[]})
+            if kind is not None or name == 'runtime':
+                nodes[0]['deps'].append({'pkg':name, 'dep_kinds':[{'kind':kind}]})
+        (native/'Cargo.lock').write_text(lock)
+        metadata = {'packages':packages, 'resolve':{'root':'wordcraft-web', 'nodes':nodes}}
+        recipe.mkdir(parents=True)
+        text = b'Copyright fixture author\nPermission fixture text\n'
+        sha = hashlib.sha256(text).hexdigest()
+        (recipe/'licenses').mkdir()
+        (recipe/'licenses'/f'{sha}.txt').write_bytes(text)
+        inventory = {'native_base':'b'*40, 'native_patch_sha256':'c'*64,
+                     'cargo_lock_sha256':build.digest(native/'Cargo.lock'), 'filter_platform':'wasm32-unknown-unknown',
+                     'packages':[{'package':p, 'texts':[{'path':f'licenses/{sha}.txt', 'sha256':sha, 'kind':'license'}]}
+                                 for p in build.native_package_closure(metadata, native)], 'supplemental_texts':[]}
+        destination.mkdir()
+        (destination/'manifest.json').write_text('[]')
+        return native, recipe, destination, metadata, inventory
+
+    def test_native_normal_build_closure_excludes_dev_and_checks_resolved_features(self):
+        with tempfile.TemporaryDirectory() as temp:
+            native, recipe, destination, metadata, inventory = self.fixture(Path(temp))
+            self.assertEqual([p['package']['name'] for p in inventory['packages']], ['macro','runtime','wordcraft-web'])
+            (recipe/'license-inventory.json').write_text(json.dumps(inventory))
+            with patch.object(build, 'ROOT', Path(temp)):
+                build.collect_native_licenses(destination, native, {'base':'b'*40,'patch_sha256':'c'*64}, metadata)
+                manifest = json.loads((destination/'manifest.json').read_text())
+                self.assertEqual(len(manifest), 3)
+                self.assertEqual(len(list((destination/'native').iterdir())), 1)
+                self.assertEqual(json.loads((destination/'wordcraft-native-inventory.json').read_text()), inventory)
+                metadata['resolve']['nodes'][1]['features'].append('new-unreviewed-feature')
+                with self.assertRaisesRegex(ValueError, 'inventory changed'):
+                    build.collect_native_licenses(destination, native, {'base':'b'*40,'patch_sha256':'c'*64}, metadata)
+
+    def test_native_source_lock_inventory_and_text_changes_fail_closed(self):
+        for problem in ('lock', 'pin', 'missing-package', 'missing-license', 'text', 'path', 'link', 'unknown-kind'):
+            with self.subTest(problem=problem), tempfile.TemporaryDirectory() as temp:
+                native, recipe, destination, metadata, inventory = self.fixture(Path(temp))
+                text = inventory['packages'][0]['texts'][0]
+                if problem == 'lock':
+                    (native/'Cargo.lock').write_text((native/'Cargo.lock').read_text()+'\n# changed\n')
+                elif problem == 'pin':
+                    inventory['native_base'] = 'd'*40
+                elif problem == 'missing-package':
+                    inventory['packages'].pop()
+                elif problem == 'missing-license':
+                    text['kind'] = 'notice'
+                elif problem == 'text':
+                    (recipe/text['path']).write_bytes(b'changed license')
+                elif problem == 'path':
+                    text['path'] = '../outside'
+                elif problem == 'link':
+                    source = recipe/text['path']
+                    outside = Path(temp)/'outside'
+                    outside.write_bytes(source.read_bytes())
+                    source.unlink()
+                    source.symlink_to(outside)
+                elif problem == 'unknown-kind':
+                    metadata['resolve']['nodes'][0]['deps'][0]['dep_kinds'][0]['kind'] = 'unknown'
+                (recipe/'license-inventory.json').write_text(json.dumps(inventory))
+                with patch.object(build, 'ROOT', Path(temp)):
+                    with self.assertRaises(ValueError):
+                        build.collect_native_licenses(destination, native, {'base':'b'*40,'patch_sha256':'c'*64}, metadata)

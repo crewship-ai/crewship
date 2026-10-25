@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import tomllib
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -153,6 +154,104 @@ def collect_licenses(destination):
     (destination / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
 
 
+def native_package_closure(metadata, native):
+    """Conservative normal/build closure, including proc macros; never dev-only edges.
+
+    Cargo package IDs are opaque lookup keys. Public identities come from the
+    lock, not local registry/cache paths. This is not a binary linkage analysis.
+    """
+    packages = {item['id']: item for item in metadata['packages']}
+    nodes = {item['id']: item for item in metadata['resolve']['nodes']}
+    if len(packages) != len(metadata['packages']) or len(nodes) != len(metadata['resolve']['nodes']):
+        raise ValueError('duplicate native metadata identity')
+    root = metadata['resolve']['root']
+    package = packages[root]
+    if package['name'] != 'wordcraft-web' or Path(package['manifest_path']).resolve() != (native / 'apps/wordcraft-web/Cargo.toml').resolve():
+        raise ValueError('native metadata root mismatch')
+    lock = tomllib.loads((native / 'Cargo.lock').read_text())
+    locked = {(p['name'], p['version'], p.get('source')): p for p in lock['package']}
+    pending, visited, result = [root], set(), []
+    while pending:
+        identity = pending.pop()
+        if identity in visited:
+            continue
+        visited.add(identity)
+        package, node = packages[identity], nodes[identity]
+        source = package.get('source')
+        if source is not None and not source.startswith(('registry+https://', 'sparse+https://', 'git+https://')):
+            raise ValueError('unsupported native dependency source')
+        package_path = None
+        if source is None:
+            package_path = str(Path(package['manifest_path']).resolve().parent.relative_to(native.resolve()))
+        entry = locked[(package['name'], package['version'], source)]
+        result.append({'name': package['name'], 'version': package['version'], 'source': source,
+                       'checksum': entry.get('checksum'), 'package_path': package_path,
+                       'spdx': package.get('license'), 'features': sorted(node['features'])})
+        for dependency in node['deps']:
+            kinds = dependency['dep_kinds']
+            if not kinds or any(kind['kind'] not in (None, 'build', 'dev') for kind in kinds):
+                raise ValueError('unknown native dependency kind')
+            if any(kind['kind'] != 'dev' for kind in kinds):
+                pending.append(dependency['pkg'])
+    return sorted(result, key=lambda p: (p['name'], p['version'], p['source'] or ''))
+
+
+def verified_native_text(recipe, text):
+    name, expected = text['path'], text['sha256']
+    if not re.fullmatch(r'licenses/[a-f0-9]{64}\.txt', name) or not re.fullmatch(r'[a-f0-9]{64}', expected):
+        raise ValueError('unsafe native license path/hash')
+    source = recipe
+    for part in Path(name).parts:
+        source = source / part
+        if source.is_symlink():
+            raise ValueError('linked native license source')
+    if not source.is_file() or not 0 < source.stat().st_size <= 2 * 1024 * 1024 or digest(source) != expected:
+        raise ValueError('native license text missing or changed')
+    return source
+
+
+def collect_native_licenses(destination, native, source_metadata, resolved):
+    recipe = ROOT / 'tools/wordcraft-mooring-native'
+    inventory_path = recipe / 'license-inventory.json'
+    inventory = json.loads(inventory_path.read_text())
+    if (inventory['native_base'] != source_metadata['base'] or
+            inventory['native_patch_sha256'] != source_metadata['patch_sha256'] or
+            inventory['cargo_lock_sha256'] != digest(native / 'Cargo.lock') or
+            inventory['filter_platform'] != 'wasm32-unknown-unknown'):
+        raise ValueError('native license input pin mismatch')
+    expected = [entry['package'] for entry in inventory['packages']]
+    if not expected or expected != native_package_closure(resolved, native):
+        raise ValueError('native dependency inventory changed; review required')
+    manifest = json.loads((destination / 'manifest.json').read_text())
+    copied = set()
+    for entry in inventory['packages']:
+        if not entry['texts'] or not any(text['kind'] == 'license' for text in entry['texts']):
+            raise ValueError('native package license text absent')
+        for text in entry['texts']:
+            source = verified_native_text(recipe, text)
+            relative = 'native/' + source.name
+            target = destination / relative
+            if relative not in copied:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, target)
+                copied.add(relative)
+            manifest.append({'crate': entry['package']['name'], 'version': entry['package']['version'],
+                             'spdx': entry['package']['spdx'], 'component': 'wordcraft-native',
+                             'path': relative, 'sha256': text['sha256']})
+    for text in inventory['supplemental_texts']:
+        source = verified_native_text(recipe, text)
+        relative = 'native/' + source.name
+        if relative not in copied:
+            (destination / relative).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination / relative)
+            copied.add(relative)
+        manifest.append({'crate': 'wordcraft-native-supplemental', 'version': inventory['native_base'],
+                         'spdx': None, 'component': 'wordcraft-native',
+                         'path': relative, 'sha256': text['sha256']})
+    shutil.copyfile(inventory_path, destination / 'wordcraft-native-inventory.json')
+    (destination / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+
+
 def pinned_git(url, sha, destination):
     # Fresh, build-owned metadata only; no caller checkout, branch or hooks.
     if not re.fullmatch(r'[a-f0-9]{40}', sha) or destination.exists():
@@ -228,12 +327,16 @@ def assemble_editor(sha, native, fonts, metadata, native_output, sdk, child, lic
     copy(ROOT / 'LICENSE', 'mooring-LICENSE-APACHE.txt')
     copy(ROOT / 'NOTICE', 'mooring-NOTICE.txt')
     copy(ROOT / 'mooring/licenses/inventory.json', 'mooring-license-inventory.json')
+    copy(licenses / 'wordcraft-native-inventory.json', 'wordcraft-native-license-inventory.json')
     license_text = []
+    included_licenses = set()
     for item in json.loads((licenses / 'manifest.json').read_text()):
         source = licenses / item['path']
         if source.is_symlink() or not source.resolve().is_relative_to(licenses.resolve()) or digest(source) != item['sha256']:
             raise ValueError('editor dependency license mismatch')
-        license_text.append(b'\n===== ' + item['path'].encode() + b' =====\n' + source.read_bytes())
+        if item['path'] not in included_licenses:
+            license_text.append(b'\n===== ' + item['path'].encode() + b' =====\n' + source.read_bytes())
+            included_licenses.add(item['path'])
     (output / 'mooring-third-party-licenses.txt').write_bytes(b''.join(license_text))
     provenance = json.loads((fonts / 'provenance.json').read_text())
     for item in provenance['files']:
@@ -268,6 +371,12 @@ def build_editor(sha, temp, build_root, cargo, env, bindgen, binaryen, sdk, embe
     native_env['CARGO_NET_OFFLINE'] = 'false'
     native_env['RUSTFLAGS'] = f'--remap-path-prefix={ROOT}=/crewship --remap-path-prefix={native}=/wordcraft'
     command([cargo, 'build', '--release', '--locked', '--target', 'wasm32-unknown-unknown', '-p', 'wordcraft-web'], cwd=native, env=native_env)
+    # Resolve after the locked build fetched its public dependencies. Inventory
+    # verification itself is offline and cannot float the lock or add packages.
+    resolved = json.loads(subprocess.check_output([str(cargo), 'metadata', '--locked', '--offline',
+        '--filter-platform', 'wasm32-unknown-unknown', '--format-version', '1',
+        '--manifest-path', str(native / 'apps/wordcraft-web/Cargo.toml')], cwd=native, env=native_env))
+    collect_native_licenses(embedded / 'licenses', native, metadata, resolved)
     native_output = temp / 'native-web'
     command([bindgen / 'wasm-bindgen', build_root / 'wordcraft-target/wasm32-unknown-unknown/release/wordcraft-web.wasm',
              '--target', 'web', '--out-name', 'wordcraft_web', '--out-dir', native_output])

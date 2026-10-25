@@ -58,6 +58,13 @@ function parsed(raw: string): Record<string, unknown> {
 const id = () => `human_${crypto.randomUUID()}`
 const emptyHash = `sha256:${"0".repeat(64)}`
 
+/** Exact immutable bundle routes emitted by the host, never a module URL. */
+export function wordCraftBundleFromPath(pathname: string): string {
+  const match = /^\/(?:_editor\/)?b\/([0-9a-f]{64})\/index\.html$/.exec(pathname)
+  if (!match) throw new Error("invalid bundle identity")
+  return match[1]
+}
+
 /** Loader supplies already pinned SDK and native WASM modules from THIS bundle.
  * waitForNativeReady observes actual WebRunner initialization (loading element
  * removed), never a document mutation or a Saved condition. */
