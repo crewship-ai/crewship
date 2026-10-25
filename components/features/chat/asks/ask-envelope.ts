@@ -72,6 +72,8 @@ export interface AskSubmissionEnvelope {
    *  this shape does not, which is why the field is named for identity rather
    *  than for paths. */
   field_attachment_ids?: Record<string, string[]>
+  /** Finished uploads appended to the message beside the form fields. */
+  message_attachment_ids?: string[]
   /** The message this envelope belongs to, as the form rendered it. The
    *  tie-break for a reader holding both. */
   rendered_text: string
@@ -95,6 +97,7 @@ export interface BuildAskEnvelopeArgs {
   /** Per-field upload handles, keyed by field name. */
   attachmentsByField: Record<string, string[]>
   renderedText: string
+  messageAttachmentIds?: string[]
 }
 
 /**
@@ -111,6 +114,7 @@ export function buildAskEnvelope({
   values,
   attachmentsByField,
   renderedText,
+  messageAttachmentIds,
 }: BuildAskEnvelopeArgs): AskSubmissionEnvelope {
   const envelope: AskSubmissionEnvelope = {
     submission_id: submissionId,
@@ -120,6 +124,8 @@ export function buildAskEnvelope({
     values: {},
     rendered_text: renderedText,
   }
+
+  if (messageAttachmentIds?.length) envelope.message_attachment_ids = [...messageAttachmentIds]
 
   for (const field of form.fields ?? []) {
     if (isAskAttachmentType(field.type) || !isSafeAskFieldType(field.type)) continue
@@ -186,6 +192,9 @@ export function askEnvelopeFromMetadata(metadata: unknown): AskSubmissionEnvelop
       candidate.field_attachment_ids && typeof candidate.field_attachment_ids === "object"
         ? (candidate.field_attachment_ids as Record<string, string[]>)
         : undefined,
+    message_attachment_ids: Array.isArray(candidate.message_attachment_ids)
+      ? candidate.message_attachment_ids.filter((id): id is string => typeof id === "string")
+      : undefined,
     rendered_text: typeof candidate.rendered_text === "string" ? candidate.rendered_text : "",
   }
 }

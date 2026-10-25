@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/httpsafe"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"gopkg.in/yaml.v3"
 )
@@ -45,20 +46,22 @@ func envBool(name string) (val, ok bool) {
 type Config struct {
 	pathSources map[string]string // effective explicit path origins, populated while loading
 
-	Server    ServerConfig    `yaml:"server"`
-	IPC       IPCConfig       `yaml:"ipc"`
-	Container ContainerConfig `yaml:"container"`
-	Storage   StorageConfig   `yaml:"storage"`
-	State     StateConfig     `yaml:"state"`
-	Logging   LoggingConfig   `yaml:"logging"`
-	Auth      AuthConfig      `yaml:"auth"`
-	LLMProxy  LLMProxyConfig  `yaml:"llm_proxy"`
-	Keeper    KeeperConfig    `yaml:"keeper"`
-	License   LicenseConfig   `yaml:"license"`
-	Composio  ComposioConfig  `yaml:"composio"`
-	Documents DocumentsConfig `yaml:"documents"`
-	Slides    SlidesConfig    `yaml:"slides"`
-	Audit     AuditConfig     `yaml:"audit"`
+	Skills    httpsafe.GitImportPolicy `yaml:"skills"`
+	Server    ServerConfig             `yaml:"server"`
+	IPC       IPCConfig                `yaml:"ipc"`
+	Container ContainerConfig          `yaml:"container"`
+	Storage   StorageConfig            `yaml:"storage"`
+	State     StateConfig              `yaml:"state"`
+	Logging   LoggingConfig            `yaml:"logging"`
+	Auth      AuthConfig               `yaml:"auth"`
+	LLMProxy  LLMProxyConfig           `yaml:"llm_proxy"`
+	Keeper    KeeperConfig             `yaml:"keeper"`
+	License   LicenseConfig            `yaml:"license"`
+	Composio  ComposioConfig           `yaml:"composio"`
+	Documents DocumentsConfig          `yaml:"documents"`
+	Diff      DiffConfig               `yaml:"diff"`
+	Slides    SlidesConfig             `yaml:"slides"`
+	Audit     AuditConfig              `yaml:"audit"`
 
 	LocalModels  LocalModelsConfig  `yaml:"local_models"`
 	Orchestrator OrchestratorConfig `yaml:"orchestrator"`
@@ -204,13 +207,14 @@ type LoggingConfig struct {
 // AuthConfig holds authentication settings including JWT secrets, WebSocket
 // token expiry, internal token for IPC auth, and signup policy.
 type AuthConfig struct {
-	JWTSecret      string        `yaml:"jwt_secret"`
-	WSTokenExpiry  time.Duration `yaml:"ws_token_expiry"`
-	NextjsURL      string        `yaml:"nextjs_url"`
-	InternalToken  string        `yaml:"internal_token"`
-	AllowSignup    bool          `yaml:"allow_signup"`
-	GoogleClientID string        `yaml:"google_client_id"`
-	GoogleSecret   string        `yaml:"google_client_secret"`
+	PublicPagePasswords PublicPagePasswordsConfig `yaml:"public_page_passwords"`
+	JWTSecret           string                    `yaml:"jwt_secret"`
+	WSTokenExpiry       time.Duration             `yaml:"ws_token_expiry"`
+	NextjsURL           string                    `yaml:"nextjs_url"`
+	InternalToken       string                    `yaml:"internal_token"`
+	AllowSignup         bool                      `yaml:"allow_signup"`
+	GoogleClientID      string                    `yaml:"google_client_id"`
+	GoogleSecret        string                    `yaml:"google_client_secret"`
 
 	// BootstrapWindow controls the first-run /bootstrap window. Zero (the
 	// default) keeps bootstrap open until the first admin exists — the empty
@@ -428,7 +432,16 @@ var (
 // Validate checks that all configuration values are within acceptable ranges
 // and required fields are set. Returns an error describing the first invalid value.
 func (c *Config) Validate() error {
+	if err := httpsafe.ValidateGitImportPolicy(c.Skills); err != nil {
+		return err
+	}
+	if _, err := c.Auth.PublicPagePasswords.Resolve(); err != nil {
+		return err
+	}
 	if err := c.Documents.validate(); err != nil {
+		return err
+	}
+	if _, err := c.Diff.Resolve(); err != nil {
 		return err
 	}
 	if value := c.Storage.RunOutputPath; value != "" && (!filepath.IsAbs(value) || filepath.Clean(value) != value || strings.ContainsRune(value, 0)) {
@@ -539,7 +552,18 @@ func loadFromFile(cfg *Config, path string) error {
 }
 
 func applyEnvOverrides(cfg *Config) {
+	if raw, ok := os.LookupEnv("CREWSHIP_SKILLS_PRIVATE_HOSTS"); ok {
+		cfg.Skills.PrivateHosts = nil
+		if raw != "" {
+			for _, entry := range strings.Split(raw, ",") {
+				cfg.Skills.PrivateHosts = append(cfg.Skills.PrivateHosts, strings.TrimSpace(entry))
+			}
+		}
+	}
 	for name, target := range map[string]*int{
+		"CREWSHIP_DIFF_MAX_INPUT_BYTES":                  &cfg.Diff.MaxInputBytes,
+		"CREWSHIP_DIFF_MAX_LINES":                        &cfg.Diff.MaxLines,
+		"CREWSHIP_DIFF_MAX_CONCURRENT":                   &cfg.Diff.MaxConcurrent,
 		"CREWSHIP_DOCUMENTS_MAX_DOCUMENTS_PER_WORKSPACE": &cfg.Documents.MaxDocumentsPerWorkspace,
 		"CREWSHIP_DOCUMENTS_MAX_OPERATIONS_PER_WINDOW":   &cfg.Documents.MaxOperationsPerWindow,
 		"CREWSHIP_DOCUMENTS_OPERATION_WINDOW_SECONDS":    &cfg.Documents.OperationWindowSeconds,
@@ -714,6 +738,22 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if val, ok := envBool("CREWSHIP_ALLOW_SIGNUP"); ok {
 		cfg.Auth.AllowSignup = val
+	}
+	for _, setting := range []struct {
+		name string
+		dst  *int
+	}{
+		{"CREWSHIP_PUBLIC_PAGE_PASSWORD_MAX_CONCURRENT", &cfg.Auth.PublicPagePasswords.MaxConcurrent},
+		{"CREWSHIP_PUBLIC_PAGE_PASSWORD_MAX_CONCURRENT_PER_TARGET", &cfg.Auth.PublicPagePasswords.MaxConcurrentPerTarget},
+	} {
+		if raw := os.Getenv(setting.name); raw != "" {
+			value, err := strconv.Atoi(raw)
+			if err != nil {
+				slog.Warn("ignoring invalid public page password limit", "name", setting.name)
+			} else {
+				*setting.dst = value
+			}
+		}
 	}
 	if v := os.Getenv("CREWSHIP_BOOTSTRAP_WINDOW"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil && d > 0 {

@@ -25,10 +25,8 @@ import (
 // and field access. It is the general agentless-logic primitive that
 // `expr` (one comparison) could not express.
 //
-// The step body is rendered (so {{ inputs.x }} substitutes) BEFORE it
-// reaches the runner, but CEL authors typically reference the typed
-// `inputs` variable directly (inputs.spend_usd > inputs.threshold_usd)
-// so numbers stay numbers for arithmetic.
+// Source is author-owned. Inputs and prior outputs enter as typed variables;
+// legacy simple references are translated to selectors without rendering data.
 //
 // Output: a bool result emits "true"/"false"; numeric and string
 // results emit their canonical string form. This mirrors the expr
@@ -39,13 +37,8 @@ type CelCodeRunner struct{}
 // gate expressions, but a hard ceiling against a pathological one.
 const celCostLimit = 1_000_000
 
-// maxCELSourceBytes caps the rendered CEL source length BEFORE it reaches
-// env.Compile. This is the compile-bomb guard (finding M5): the step body is
-// Render()'d — so a webhook-controlled `{{ inputs.payload }}` is substituted
-// straight into the CEL source — and cel.Program's CostLimit bounds Eval
-// only, leaving Compile open. A genuine probe/gate expression is tens to a
-// few hundred bytes; 4 KB is generous headroom while denying an attacker the
-// ability to drive unbounded parse/type-check CPU through a routine input.
+// maxCELSourceBytes bounds author source and its normalized form before
+// compilation. Evaluation cost limits do not bound compilation cost.
 const maxCELSourceBytes = 4096
 
 // celProgramCacheMax bounds the compiled-program cache so a stream of
@@ -57,8 +50,8 @@ const celProgramCacheMax = 256
 
 var _ CodeRunner = CelCodeRunner{}
 
-// celEnv is the single CEL environment shared across all evaluations — it
-// only declares the typed `inputs` variable and never changes, so there is
+// celEnv is the single CEL environment shared across all evaluations — its
+// fixed, scoped namespace declarations never change, so there is
 // no reason to rebuild it per call. Built once via celEnvOnce.
 var (
 	celEnvOnce sync.Once
@@ -69,9 +62,11 @@ var (
 // getCELEnv lazily constructs (once) and returns the shared CEL environment.
 func getCELEnv() (*cel.Env, error) {
 	celEnvOnce.Do(func() {
-		celEnv, celEnvErr = cel.NewEnv(
-			cel.Variable("inputs", cel.MapType(cel.StringType, cel.DynType)),
-		)
+		options := make([]cel.EnvOption, 0, len(codeNamespaces))
+		for _, name := range codeNamespaces {
+			options = append(options, cel.Variable(name, cel.MapType(cel.StringType, cel.DynType)))
+		}
+		celEnv, celEnvErr = cel.NewEnv(options...)
 	})
 	return celEnv, celEnvErr
 }
@@ -136,12 +131,17 @@ func (CelCodeRunner) RunCode(ctx context.Context, req CodeRunRequest) (CodeRunRe
 		err := fmt.Errorf("cel: empty expression")
 		return CodeRunResult{Stderr: err.Error(), ExitCode: 1}, err
 	}
-	// Compile-bomb guard (M5): the body was Render()'d before reaching us,
-	// so an attacker-controlled input can inflate the source. Reject an
-	// oversized rendered expression BEFORE env.Compile — cel.Program's
-	// CostLimit bounds Eval only, not the parse/type-check workload.
+	// Reject oversized source before parsing or compatibility translation.
 	if len(code) > maxCELSourceBytes {
 		err := fmt.Errorf("cel: expression too large: %d bytes (max %d)", len(code), maxCELSourceBytes)
+		return CodeRunResult{Stderr: err.Error(), ExitCode: 1}, err
+	}
+	code, err := normalizeCodeSource(code)
+	if err != nil {
+		return CodeRunResult{Stderr: err.Error(), ExitCode: 1}, err
+	}
+	if len(code) > maxCELSourceBytes {
+		err := fmt.Errorf("cel: normalized expression too large: %d bytes (max %d)", len(code), maxCELSourceBytes)
 		return CodeRunResult{Stderr: err.Error(), ExitCode: 1}, err
 	}
 
@@ -153,7 +153,7 @@ func (CelCodeRunner) RunCode(ctx context.Context, req CodeRunRequest) (CodeRunRe
 		return CodeRunResult{Stderr: err.Error(), ExitCode: 1}, err
 	}
 
-	out, _, err := prg.Eval(map[string]any{"inputs": celInputs(req.Inputs)})
+	out, _, err := prg.Eval(codeVariables(req))
 	if err != nil {
 		return CodeRunResult{Stderr: err.Error(), ExitCode: 1}, fmt.Errorf("cel: eval: %w", err)
 	}

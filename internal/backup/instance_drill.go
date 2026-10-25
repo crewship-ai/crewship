@@ -96,6 +96,12 @@ func (r *DrillReport) Failures() []string {
 // complete even when the result is failed; the error is reserved for
 // problems before a restore could start (bad options, unreadable bundle).
 func DrillInstance(ctx context.Context, opts DrillOptions) (*DrillReport, error) {
+	ctx, release, limitErr := BeginRestoreRead(ctx)
+	if limitErr != nil {
+		return nil, limitErr
+	}
+	defer release()
+
 	rep := &DrillReport{
 		Result: RestoreResultFailed, BundlePath: opts.BundlePath, StartedAt: time.Now().UTC(),
 		Isolation: "throwaway data directory; no server, scheduler, container or network client started",

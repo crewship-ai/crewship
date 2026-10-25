@@ -94,7 +94,14 @@ func (imp *Importer) BulkImport(ctx context.Context, req BulkImportRequest) (*Bu
 		if _, err := exec.LookPath("git"); err != nil {
 			return nil, fmt.Errorf("bulk import via git_url requires `git` in PATH: %w", err)
 		}
-		if err := validateGitURL(req.GitURL); err != nil {
+
+		if req.GitRef != "" {
+			if err := validateGitRef(req.GitRef); err != nil {
+				return nil, err
+			}
+		}
+		plan, err := planGitClone(ctx, req.GitURL, imp.gitPolicy, nil)
+		if err != nil {
 			return nil, err
 		}
 		dir, err := os.MkdirTemp("", "crewship-skills-import-*")
@@ -102,47 +109,37 @@ func (imp *Importer) BulkImport(ctx context.Context, req BulkImportRequest) (*Bu
 			return nil, fmt.Errorf("create temp dir: %w", err)
 		}
 		defer func() { _ = os.RemoveAll(dir) }()
-
-		args := []string{
-			"clone", "--depth", "1",
-			"--filter=blob:none",
-			"--single-branch",
+		home, err := os.MkdirTemp("", "crewship-skills-git-*")
+		if err != nil {
+			return nil, fmt.Errorf("create git isolation dir: %w", err)
 		}
-		if req.GitRef != "" {
-			// Ref name is operator-supplied. validateGitRef enforces the
-			// safe subset of git-check-ref-format(1) — refuses ".." /
-			// leading "-" / control chars so a crafted branch like
-			// "--upload-pack=…" can't reach git as another option flag.
-			if err := validateGitRef(req.GitRef); err != nil {
-				return nil, err
-			}
-			args = append(args, "--branch", req.GitRef)
+		defer func() { _ = os.RemoveAll(home) }()
+		template := filepath.Join(home, "empty-template")
+		if err := os.Mkdir(template, 0700); err != nil {
+			return nil, fmt.Errorf("create git template: %w", err)
 		}
-		// "--" terminates option parsing. validateGitURL already
-		// guarantees the URL begins with "https://", but the explicit
-		// separator means a future relaxation of that check (or a
-		// future caller bypassing it) can't translate into option
-		// injection.
-		args = append(args, "--", req.GitURL, dir)
+		gitPath, err := exec.LookPath("git")
+		if err != nil {
+			return nil, fmt.Errorf("bulk import via git_url requires git")
+		}
+		gitPath, err = filepath.Abs(gitPath)
+		if err != nil {
+			return nil, fmt.Errorf("bulk import via git_url requires absolute git path")
+		}
 		cloneCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 		defer cancel()
-		cmd := exec.CommandContext(cloneCtx, "git", args...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			// Don't echo git's stdout/stderr verbatim — it can include
-			// the full URL (with any embedded credentials we just
-			// rejected, but also Authorization: headers that the user
-			// configured via .gitconfig insteadOf rules) and absolute
-			// paths from the server's tempdir. The exit signal alone
-			// is enough for the API client to know "clone failed";
-			// operators who need the detail can read the server log,
-			// which gets the unredacted output.
-			imp.logger.Error("git clone failed",
-				"git_url", redactGitURL(req.GitURL),
-				"error", err,
-				"output", strings.TrimSpace(string(out)))
-			return nil, fmt.Errorf("git clone failed for %q (see server logs for detail)",
-				redactGitURL(req.GitURL))
+		if err := qualifyPinnedGit(cloneCtx, gitPath, home); err != nil {
+			return nil, err
 		}
+		args, err := pinnedGitCloneArgs(plan, template, dir, req.GitRef)
+		if err != nil {
+			return nil, err
+		}
+		if output, err := runIsolatedGit(cloneCtx, gitPath, home, args...); err != nil {
+			imp.logger.Error("git clone failed", "git_url", redactGitURL(req.GitURL), "error", err, "output", output)
+			return nil, fmt.Errorf("git clone failed for %q (see server logs for detail)", redactGitURL(req.GitURL))
+		}
+
 		root = dir
 		source = redactGitURL(req.GitURL)
 	}
@@ -158,7 +155,12 @@ func (imp *Importer) BulkImport(ctx context.Context, req BulkImportRequest) (*Bu
 
 	out := &BulkImportResult{Source: source}
 
-	walkErr := fs.WalkDir(os.DirFS(root), ".", func(p string, d fs.DirEntry, err error) error {
+	openedRoot, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, fmt.Errorf("open skills root: %w", err)
+	}
+	defer openedRoot.Close()
+	walkErr := fs.WalkDir(openedRoot.FS(), ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // skip entries we can't stat — non-fatal
 		}
@@ -191,26 +193,7 @@ func (imp *Importer) BulkImport(ctx context.Context, req BulkImportRequest) (*Bu
 			return fs.SkipAll
 		}
 
-		fullPath := filepath.Join(root, p)
-		// Per-file size cap: SKILL.md is meant to be a few hundred lines
-		// of markdown. A 10MB+ "SKILL.md" is either a binary-blob attack
-		// or a packaging mistake; reading it would balloon the importer's
-		// memory and the eventual content column. Keep this aligned with
-		// the URL-fetch limit (512 KB) so single and bulk paths share the
-		// same envelope.
-		stat, statErr := os.Stat(fullPath)
-		if statErr != nil {
-			out.Skipped = append(out.Skipped, SkippedSkill{Path: p, Reason: "stat: " + statErr.Error()})
-			return nil
-		}
-		if stat.Size() > maxSkillFileBytes {
-			out.Skipped = append(out.Skipped, SkippedSkill{
-				Path:   p,
-				Reason: fmt.Sprintf("file %d bytes exceeds %d-byte SKILL.md limit", stat.Size(), maxSkillFileBytes),
-			})
-			return nil
-		}
-		body, readErr := os.ReadFile(fullPath)
+		body, readErr := readSkillWithinRoot(openedRoot, p)
 		if readErr != nil {
 			out.Skipped = append(out.Skipped, SkippedSkill{Path: p, Reason: "read: " + readErr.Error()})
 			return nil
@@ -305,11 +288,8 @@ func validateGitRef(ref string) error {
 // resolves to localhost / private / link-local space is rejected so a
 // malicious operator can't use the bulk-import endpoint to clone from
 // 169.254.169.254 (cloud metadata) or 10.0.0.0/8 (internal git servers).
-// Hostnames are not pre-resolved here — git itself does the DNS lookup
-// at clone time; a DNS rebinding attack against git is theoretically
-// possible but git's HTTP transport doesn't follow Host-overriding
-// redirects, so the practical exposure mirrors ValidateImportURL's
-// known limitation.
+// This is a syntax-level helper; production BulkImport additionally resolves,
+// validates and pins the connection through planGitClone and qualified Git.
 func validateGitURL(raw string) error {
 	if strings.HasPrefix(raw, "file://") || strings.HasPrefix(raw, "git@") {
 		return fmt.Errorf("bulk import only supports https git URLs; got %q", raw)

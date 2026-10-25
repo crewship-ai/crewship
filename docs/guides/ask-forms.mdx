@@ -122,13 +122,18 @@ deliberate: a rule the submit path would not check must not be storable, or the
 author is told a lie about what their form guarantees. So is `min` above `max`,
 and a `pattern` that does not compile.
 
-`pattern` is anchored at both ends, exactly like an HTML `pattern` attribute —
-`CZ[0-9]{8}` does not accept `xxCZ25788001xx`. It is compiled by Go's RE2 when
-the form is saved, which is what makes it safe to run in a browser: no
-backreferences, no lookaround, nothing that can backtrack pathologically.
+`pattern` is anchored at both ends: `CZ[0-9]{8}` does not accept
+`xxCZ25788001xx`. Go's regular-expression engine checks it when the form is
+saved and when an answer is submitted. The browser never executes an author's
+pattern, including while showing the message preview. A pattern accepted by
+Go can still cause pathological backtracking in a browser's native engine.
 
-Every constraint is checked where the user answers, and every refusal names the
-field by its label:
+The browser checks inexpensive constraints such as required fields and bounds.
+The server checks the answers with the same validator as CLI preview before
+saving a form submission. It uses the current form definition of the chat's
+agent, rather than a definition supplied by the browser. Pattern errors come
+back from the server; the sheet stays open with its answers and attachments.
+Every field refusal names the field by its label:
 
 ```
 Amount must be at least 1.
@@ -140,6 +145,13 @@ Tags takes at most 1 option.
 `crewship agent ask-preview` applies the same rules to `--var` answers and
 prints the same sentences, because a preview that renders a message the chat
 would refuse is not a preview.
+
+Go-only syntax such as `(?i)` is enforced on submission, including for forms
+whose patterns an older browser silently skipped. A legacy stored pattern
+that Go cannot compile is still not enforced; new or updated definitions with
+such a pattern are rejected when saved. A missing, changed or stale form and
+malformed submission metadata are refused before the message is saved. Plain
+chat messages without form submission metadata remain ordinary messages.
 
 An empty **optional** answer is never a violation — only `required` speaks to
 emptiness — so `min: 3` does not make a field mandatory.
@@ -162,15 +174,25 @@ change what the form asks for; the definition moves, the answers do not.
 | `required`, `min`, `max`, `pattern`, `multiple`, option membership | — | ✅ |
 | Attachment policy (`attachment: required`) | — | ✅ |
 
-There is no server-side *submit* endpoint to enforce answers at, because a
-submit **is** an ordinary chat message and that is not being reopened for a
-validator. What the server owns instead is the definition — which is why the
-rows above that could produce an unsafe or unenforceable form are all refused
-on the way in.
+The existing chat submission path recognizes the `ask_submission` metadata and
+validates it before saving. A form submission is still an ordinary user message
+for the agent; no separate validation endpoint is needed. The envelope must name
+a current form/version, its values must pass `internal/askforms.ValidateAnswers`,
+and its rendered text and attachment block must agree with those values. The
+server rebuilds the stored envelope from the trusted definition.
 
-The rules themselves live in one place per language, `internal/askforms` and
-`lib/ask-validate.ts`, pinned to each other by `testdata/ask-field-types.json`.
-A rule added on one side and not the other is a red test run in both suites.
+The browser keeps the inexpensive checks in `lib/ask-validate.ts`; it never runs
+an author's pattern. Pattern errors are delivered privately to the sender as
+`ask_submission_error`, with `submission_id` and `ask_errors` (field, code,
+message). Successful persistence is acknowledged by `user_message` with the
+matching `ask_submission_id`. The form stays open until that acknowledgement.
+A disconnect or timeout is an unconfirmed delivery: check the conversation before
+sending again; it does not automatically retry. Restricted text-only chats do not
+support ask envelopes and refuse them before sending.
+
+`testdata/ask-field-types.json` pins the common inexpensive checks across the two
+languages. `testdata/ask-patterns.json` pins Go/CLI and server submission matching,
+including legacy patterns; browser tests check safe deferral to the server.
 
 ## Troubleshooting
 

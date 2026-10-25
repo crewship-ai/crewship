@@ -184,6 +184,7 @@ func printBackupInspectHuman(raw json.RawMessage) error {
 		return nil
 	}
 	pairs := [][]string{
+		{"Integrity verified", "no — metadata only; run backup verify"},
 		{"Format version", fmt.Sprintf("v%d", m.FormatVersion)},
 		{"Crewship version", m.CrewshipVersionAtBackup},
 		{"Scope", string(m.Scope)},

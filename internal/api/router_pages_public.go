@@ -46,6 +46,8 @@ import "net/http"
 func (r *Router) registerPagePublicRoutes() {
 	base := NewPageHandler(r.db, r.hub, r.logger).SetJournal(r.Journal())
 	pub := NewPagePublicHandler(base)
+	pub.passwordWork = newPagePasswordAdmission(r.publicPagePasswords)
+	r.pagePublicHandler = pub
 
 	authed := r.authMw.RequireAuth
 	wsCtx := r.authMw.RequireWorkspace

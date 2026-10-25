@@ -506,21 +506,11 @@ type CredentialRef struct {
 	QueryName  string `json:"query_name,omitempty"`  // when InjectAs == query
 }
 
-// CodeStep runs a script in a sandbox container. Runtime is one of
-// "python" | "go" | "bash"; the container image is workspace-
-// configurable (defaults to debian-slim with the named runtime).
-//
-// Inputs are passed as environment variables (one per declared
-// input) so the script can read them without bespoke parsing. The
-// script's stdout becomes the step output; stderr lands in the
-// journal entry's error_message preview.
-//
-// Security: --cap-drop=ALL, no host mounts, network constrained by
-// the same egress allowlist as agent_run + http. Timeout enforced
-// at container level (runtime hard-kills at TimeoutSec; default
-// 300 s).
+// CodeStep evaluates author-written CEL or expr with typed runtime data.
+// These wired runtimes perform no I/O. Python, Go and bash are reserved;
+// author validation rejects them until a sandbox runner is wired.
 type CodeStep struct {
-	Runtime string `json:"runtime"` // python | go | bash
+	Runtime string `json:"runtime"` // expr | cel; shell runtimes are reserved and unwired
 	Version string `json:"version,omitempty"`
 	Code    string `json:"code"`
 	// Env is additional environment variables passed to the

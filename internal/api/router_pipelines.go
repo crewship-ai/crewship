@@ -28,6 +28,7 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// draft with a workspace-scoped save proof; the internal test_run route
 	// serves agent authoring. Neither dispatches a real run; /run does.
 	pipes := NewPipelineHandler(r.db, r.logger, nil, nil)
+	pipes.diffs = r.diffs
 	pipes.runTokenSecret = r.internalToken
 	pipes.policyJournal = r.journal
 	pipes.restrictedWorkflow = func() *restrictedworkflow.Service { return r.restrictedWorkflow }
@@ -145,6 +146,7 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/versions/{n}", authed(wsCtx(http.HandlerFunc(pipes.GetVersion))))
 	// #1422 item 5: native version diff (`?from=N&to=M`) — unified diff of
 	// two versions' definitions, no external round-trip needed.
+	// openapi: responses 413,429
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/diff", authed(wsCtx(http.HandlerFunc(pipes.DiffVersions))))
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/rollback", roleManage, pipes.Rollback)
 	// Marketplace prep: portable JSON bundles for cross-workspace

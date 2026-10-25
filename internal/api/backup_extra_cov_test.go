@@ -220,6 +220,12 @@ func TestCovBk2_Inspect_RealBundle_Returns200WithManifest(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
 	}
+	var metadata struct {
+		IntegrityVerified *bool `json:"integrity_verified"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &metadata); err != nil || metadata.IntegrityVerified == nil || *metadata.IntegrityVerified {
+		t.Fatalf("inspection must explicitly deny integrity verification: %s (%v)", rr.Body.String(), err)
+	}
 	var m backup.Manifest
 	if err := json.Unmarshal(rr.Body.Bytes(), &m); err != nil {
 		t.Fatalf("decode manifest: %v", err)

@@ -1855,7 +1855,26 @@ bounds.
 | 200 | Correct password; the page follows. |
 | 400 | Malformed JSON body. |
 | 401 | Wrong password, unknown token, or a link that carries no password — deliberately one answer through one code path, so the cases the design requires to be indistinguishable literally are. |
-| 429 | Rate limited. The limit is applied *before* the password is checked, and keyed on the token hash for an unknown token, so guessing is the case that is limited rather than the one that is not. |
+| 429 | Per-link rate limit or password-work capacity exhausted. Global and per-link concurrency admission runs before a real or dummy password check; capacity refusal is immediate with `Retry-After: 1`. Unknown links use a token hash too. |
+
+Password-work capacity is process-wide for public Pages, not a cluster-wide CPU
+quota and not a limit on other authentication endpoints. The automatic global
+limit uses `max(1, min(4, GOMAXPROCS / 2))`, with one check per link. An existing
+one-time background authentication hash warmup can overlap; a request holds its
+slot through any lazy dummy-hash lookup and synchronous comparison, including
+when its context is cancelled. The slot is released before serving the page.
+Set `auth.public_page_passwords` in YAML or the corresponding
+`CREWSHIP_PUBLIC_PAGE_PASSWORD_*` environment variables and restart to override.
+
+For an anonymous CLI request, put the JSON password body in an owner-only file
+or explicit stdin, then use the existing API command:
+
+```bash
+crewship api request POST /api/v1/public/pages/TOKEN/unlock --anonymous --input unlock.json --yes
+```
+
+The CLI reports capacity refusal as a rate-limited failure (exit 6), does not
+retry automatically, and does not attach configured credentials or workspace.
 
 ---
 

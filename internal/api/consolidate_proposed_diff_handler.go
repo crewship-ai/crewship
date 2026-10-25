@@ -46,56 +46,17 @@ package api
 import (
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/pmezard/go-difflib/difflib"
-
 	"github.com/crewship-ai/crewship/internal/consolidate"
 )
 
-// proposalDiffMaxBytes caps the per-file read size for both
-// the proposal markdown and the current canonical learned-*.md.
-// 8 MB sits well above any legitimate single-day rule corpus
-// (a real workspace's day-rotated canonical tops out around
-// 50 KB) but stops a pathological LLM extraction or an
-// append-loop bug from forcing a multi-GB read into RAM and
-// turning the diff handler into a memory-exhaustion vector.
-//
-// 4× peak memory at request time = current + merged + two
-// string-of-bytes conversions for difflib.SplitLines. With
-// the 8 MB cap and 100 concurrent diffs the worst case is
-// ~3.2 GB RSS, which is loud enough to alert on without
-// crashing a typical 8 GB box.
+// proposalDiffMaxBytes retains the existing absolute per-file read ceiling.
+// The configured shared budget may impose a smaller input/line ceiling.
 const proposalDiffMaxBytes = 8 * 1024 * 1024
-
-// readWithCap is os.ReadFile + an 8 MB safety cap. Returns the
-// bytes, an "exceeded" flag (true iff the file was larger than
-// proposalDiffMaxBytes), and any other read error.
-//
-// We deliberately read up to cap+1 so we can distinguish
-// "exactly cap bytes" (still fine) from "larger than cap"
-// (413). os.ReadFile + io.LimitReader is the standard
-// idiom; the +1 byte is the canonical way to surface
-// truncation when the source size is unknown a priori.
-func readWithCap(path string) ([]byte, bool, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, false, err
-	}
-	defer f.Close()
-	buf, err := io.ReadAll(io.LimitReader(f, proposalDiffMaxBytes+1))
-	if err != nil {
-		return nil, false, err
-	}
-	if int64(len(buf)) > proposalDiffMaxBytes {
-		return nil, true, nil
-	}
-	return buf, false, nil
-}
 
 type proposalDiffStats struct {
 	Additions     int `json:"additions"`
@@ -136,126 +97,96 @@ func (h *ProposedHandler) Diff(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "proposal id required")
 		return
 	}
-
 	exp, err := consolidate.ExplainProposal(r.Context(), h.db, proposalID)
 	if err != nil {
 		h.mapDecisionError(w, err, "diff")
 		return
 	}
 	if exp.WorkspaceID != wsID {
-		// Cross-workspace probe: same 404 as a missing id, no
-		// existence leak.
 		replyError(w, http.StatusNotFound, "memory proposal not found")
 		return
 	}
-
-	body, oversize, err := readWithCap(exp.ProposalPath)
+	// Check the source artifact's existence before admission, preserving 410.
+	// Reading and formatting wait until after the nonblocking shared gate.
+	proposalFile, err := os.Open(exp.ProposalPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			// Proposal row outlived its markdown file (deleted
-			// out-of-band, container rebuild, restore from
-			// backup, etc.). Distinct from a missing proposal
-			// id (404) — the row exists but the artefact is
-			// gone, so 410 Gone is the precise signal.
 			replyError(w, http.StatusGone, "proposal markdown is missing on disk")
 			return
 		}
+		h.logger.Error("proposal diff: open body", "proposal_id", proposalID, "error", err)
+		replyError(w, http.StatusInternalServerError, "diff failed")
+		return
+	}
+	defer proposalFile.Close()
+	release, admitted := h.diffs.acquire()
+	if !admitted {
+		replyDiffBusy(w)
+		return
+	}
+	defer release()
+	body, oversize, err := h.diffs.readFile(r.Context(), proposalFile)
+	if err != nil {
 		h.logger.Error("proposal diff: read body", "proposal_id", proposalID, "error", err)
 		replyError(w, http.StatusInternalServerError, "diff failed")
 		return
 	}
 	if oversize {
-		h.logger.Error("proposal diff: proposal markdown exceeds cap",
-			"proposal_id", proposalID, "path", exp.ProposalPath, "cap_bytes", proposalDiffMaxBytes)
-		replyError(w, http.StatusRequestEntityTooLarge,
-			fmt.Sprintf("proposal markdown exceeds %d bytes; refusing to diff", proposalDiffMaxBytes))
+		replyError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("diff is too large: proposal markdown exceeds %d bytes", h.diffs.limits.MaxInputBytes))
 		return
 	}
 	rulesBlock := consolidate.ExtractProposalRulesBody(string(body))
-
-	// `now` is captured here so the diff matches what an approve
-	// in the immediate next second would produce. The header date
-	// + "Approved at" timestamp use this exact value; a stale
-	// preview from a tab opened minutes ago is acceptable because
-	// the date granularity is whole-day for the canonical filename
-	// (learned-YYYY-MM-DD.md).
 	now := time.Now().UTC()
 	canonicalPath := consolidate.CanonicalPathForProposal(exp.ProposalPath, now)
-
 	var current []byte
 	canonicalExists := true
-	c, canonOversize, rerr := readWithCap(canonicalPath)
+	canonicalFile, err := os.Open(canonicalPath)
 	switch {
-	case rerr == nil && !canonOversize:
-		current = c
-	case rerr == nil && canonOversize:
-		h.logger.Error("proposal diff: canonical exceeds cap",
-			"path", canonicalPath, "cap_bytes", proposalDiffMaxBytes)
-		replyError(w, http.StatusRequestEntityTooLarge,
-			fmt.Sprintf("canonical learned-*.md exceeds %d bytes; refusing to diff", proposalDiffMaxBytes))
-		return
-	case errors.Is(rerr, os.ErrNotExist):
+	case errors.Is(err, os.ErrNotExist):
 		canonicalExists = false
-	default:
-		h.logger.Error("proposal diff: read canonical", "path", canonicalPath, "error", rerr)
+	case err != nil:
+		h.logger.Error("proposal diff: open canonical", "path", canonicalPath, "error", err)
 		replyError(w, http.StatusInternalServerError, "diff failed")
 		return
+	default:
+		defer canonicalFile.Close()
+		var over bool
+		current, over, err = h.diffs.readFile(r.Context(), canonicalFile)
+		if err != nil {
+			h.logger.Error("proposal diff: read canonical", "path", canonicalPath, "error", err)
+			replyError(w, http.StatusInternalServerError, "diff failed")
+			return
+		}
+		if over {
+			replyError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("diff is too large: canonical learned-*.md exceeds %d bytes", h.diffs.limits.MaxInputBytes))
+			return
+		}
 	}
-
 	appendBlock := consolidate.BuildCanonicalAppendBlock(canonicalExists, now, rulesBlock)
+	// Account for both sides before allocating the merged side; subtraction
+	// checks in checkLengths avoid integer overflow as well as excess memory.
+	if err := h.diffs.checkLengths(len(current), len(current), len(appendBlock)); err != nil {
+		replyDiffTooLarge(w)
+		return
+	}
 	merged := append([]byte{}, current...)
-	merged = append(merged, []byte(appendBlock)...)
-
-	diffText, additions, deletions, err := buildUnifiedDiff(current, merged)
+	merged = append(merged, appendBlock...)
+	diffText, err := h.diffs.render(string(current), string(merged), "canonical (current)", "canonical (post-merge)")
+	if errors.Is(err, errDiffTooLarge) {
+		replyDiffTooLarge(w)
+		return
+	}
 	if err != nil {
 		h.logger.Error("proposal diff: build diff", "proposal_id", proposalID, "error", err)
 		replyError(w, http.StatusInternalServerError, "diff failed")
 		return
 	}
-
+	additions, deletions := countDiffEdits(diffText)
 	writeJSON(w, http.StatusOK, proposalDiffResponse{
-		ProposalID:      exp.ProposalID,
-		WorkspaceID:     exp.WorkspaceID,
-		CrewID:          exp.CrewID,
-		Status:          exp.Status,
-		CanonicalPath:   canonicalPath,
-		CanonicalExists: canonicalExists,
-		ProposalPath:    exp.ProposalPath,
-		RulesCount:      exp.RulesCount,
-		Diff:            diffText,
-		Stats: proposalDiffStats{
-			Additions:     additions,
-			Deletions:     deletions,
-			RulesAppended: exp.RulesCount,
-		},
+		ProposalID: exp.ProposalID, WorkspaceID: exp.WorkspaceID, CrewID: exp.CrewID, Status: exp.Status,
+		CanonicalPath: canonicalPath, CanonicalExists: canonicalExists, ProposalPath: exp.ProposalPath, RulesCount: exp.RulesCount, Diff: diffText,
+		Stats: proposalDiffStats{Additions: additions, Deletions: deletions, RulesAppended: exp.RulesCount},
 	})
-}
-
-// buildUnifiedDiff renders a 3-line-context unified diff between
-// `before` and `after` and counts +/- lines. Counts deliberately
-// exclude the diff header lines ("---", "+++", "@@") — the UI
-// renders those as chrome, not content, so the numeric badge
-// should reflect actual content lines added or removed.
-//
-// The append-only nature of the merge (current bytes are a
-// strict prefix of merged bytes) means deletions are always 0
-// today; the function still computes both so a future change
-// to the append shape (e.g. dedup against a prior rule block)
-// would surface in the stats without re-plumbing.
-func buildUnifiedDiff(before, after []byte) (string, int, int, error) {
-	diff := difflib.UnifiedDiff{
-		A:        difflib.SplitLines(string(before)),
-		B:        difflib.SplitLines(string(after)),
-		FromFile: "canonical (current)",
-		ToFile:   "canonical (post-merge)",
-		Context:  3,
-	}
-	out, err := difflib.GetUnifiedDiffString(diff)
-	if err != nil {
-		return "", 0, 0, err
-	}
-	additions, deletions := countDiffEdits(out)
-	return out, additions, deletions, nil
 }
 
 // countDiffEdits walks the unified-diff output and tallies lines

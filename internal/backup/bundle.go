@@ -2,6 +2,7 @@ package backup
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"time"
@@ -187,8 +188,8 @@ func WriteBundleStream(sink io.Writer, manifest *Manifest, sealed io.Reader, sea
 //
 // Unlike ReadBundle this never buffers the full payload in memory;
 // consuming a multi-GB bundle stays within a few MB of heap.
-func ReadBundleStream(src io.Reader) (*Manifest, io.Reader, func() error, error) {
-	tr, err := NewTarZstReader(src)
+func ReadBundleStream(src io.Reader, contexts ...context.Context) (*Manifest, io.Reader, func() error, error) {
+	tr, err := NewTarZstReader(src, contexts...)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -206,10 +207,14 @@ func ReadBundleStream(src io.Reader) (*Manifest, io.Reader, func() error, error)
 		}
 		switch hdr.Name {
 		case manifestFileName:
+			if hdr.Size < 0 || hdr.Size > maxBackupManifestBytes {
+				_ = tr.Close()
+				return nil, nil, nil, fmt.Errorf("%w: manifest size", ErrRestoreLimit)
+			}
 			// Bound the read: a malicious bundle can claim hdr.Size = 10 GB
 			// and io.ReadAll would allocate it before we ever validate the
 			// manifest shape. PR #493 follow-up: backup-side tar-bomb cap.
-			data, err := io.ReadAll(io.LimitReader(tr, maxBackupManifestBytes))
+			data, err := io.ReadAll(io.LimitReader(RestoreBufferedReader(tr.restoreContext(), tr), maxBackupManifestBytes))
 			if err != nil {
 				_ = tr.Close()
 				return nil, nil, nil, fmt.Errorf("backup: read manifest: %w", err)
@@ -359,8 +364,8 @@ func WriteBundle(sink io.Writer, manifest *Manifest, payload io.Reader, opts Wri
 // Checksum verification (HashingReader + VerifyChecksum) happens on
 // the caller side so that the same reader can tee bytes into the
 // decryption pipeline without re-reading the bundle.
-func ReadBundle(src io.Reader) (*Manifest, io.Reader, error) {
-	tr, err := NewTarZstReader(src)
+func ReadBundle(src io.Reader, contexts ...context.Context) (*Manifest, io.Reader, error) {
+	tr, err := NewTarZstReader(src, contexts...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -378,9 +383,12 @@ func ReadBundle(src io.Reader) (*Manifest, io.Reader, error) {
 		}
 		switch hdr.Name {
 		case manifestFileName:
+			if hdr.Size < 0 || hdr.Size > maxBackupManifestBytes {
+				return nil, nil, fmt.Errorf("%w: manifest size", ErrRestoreLimit)
+			}
 			// PR #493 follow-up: bound manifest read so a 10 GB hdr.Size
 			// can't OOM the inspector before we validate shape.
-			data, err := io.ReadAll(io.LimitReader(tr, maxBackupManifestBytes))
+			data, err := io.ReadAll(io.LimitReader(RestoreBufferedReader(tr.restoreContext(), tr), maxBackupManifestBytes))
 			if err != nil {
 				return nil, nil, fmt.Errorf("backup: read manifest: %w", err)
 			}
@@ -395,6 +403,9 @@ func ReadBundle(src io.Reader) (*Manifest, io.Reader, error) {
 				return nil, nil, fmt.Errorf("backup: skip RESTORE.md: %w", err)
 			}
 		case payloadFileName:
+			if hdr.Size > 64<<20 || int64(payloadBuf.Len()) > (64<<20)-hdr.Size {
+				return nil, nil, fmt.Errorf("%w: buffered ReadBundle payload exceeds 64MiB; use ReadBundleStream", ErrRestoreLimit)
+			}
 			if _, err := io.Copy(&payloadBuf, tr); err != nil {
 				return nil, nil, fmt.Errorf("backup: read payload: %w", err)
 			}

@@ -149,7 +149,8 @@ crew's journal instead.
 |---|---|
 | `3` | No such proposal in this workspace. A proposal in another workspace answers the same way, so existence never leaks. |
 | `5` | Already approved or rejected. Decisions are not reversible from here. |
-| `1` | `410` — the row outlived its `.proposed` markdown; `413` — the markdown or the canonical file exceeds the 8 MiB diff cap. |
+| `6` | `429` — shared comparison capacity is busy. Retry later; the CLI does not retry automatically. With `approve --diff`, a refused preview prevents the approval request. |
+| `1` | `410` — the row outlived its `.proposed` markdown; `413` — the preview exceeds configured input byte/line or output limits, subject to the absolute 8 MiB per-file ceiling. View inputs separately or ask an administrator to adjust [diff limits](/configuration/environment#diff-preview-computation). |
 
 ---
 
