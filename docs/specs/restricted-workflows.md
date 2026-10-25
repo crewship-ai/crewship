@@ -202,7 +202,9 @@ Publication is off by default. An explicitly authorized `publish=true` dispatch
 builds a unique `responses-text-v1-<SHA>-<run>-<attempt>` candidate under
 `ghcr.io/<owner>/crewship-restricted-text`, with provenance and SBOM. It checks
 the distributed binary checksum and legal contents and refuses critical scan
-findings before keyless signing. The candidate artifact records its digest,
+findings and requires the actual published-digest worker accounting canary to
+execute and pass before keyless signing. The retained JSON test report refuses
+missing, skipped or failed execution. The candidate artifact records its digest,
 source, profile, runner checksum and publisher run. No mutable latest tag is
 promoted. The separate PR candidate workflow builds without publication or
 signing permissions and requires the production text-worker accounting canary

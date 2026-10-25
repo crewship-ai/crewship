@@ -33,6 +33,9 @@ class TextReleaseTests(unittest.TestCase):
         self.assertIn('needs: prepare', publish)
         self.assertLess(publish.index('severity-cutoff: critical'), publish.index('cosign sign --yes'))
         self.assertIn('cosign sign --yes "$IMAGE"', publish)
+        self.assertLess(publish.index('go test -tags restrictedruntime_live'), publish.index('cosign sign --yes'))
+        self.assertIn('docker pull "$IMAGE"', publish)
+        self.assertIn('CREWSHIP_RESTRICTED_PRODUCTION_IMAGE="$image"', publish)
         self.assertIn('runner.sha256', publish)
         self.assertIn('provenance: mode=max', publish)
         self.assertIn('sbom: true', publish)
@@ -44,7 +47,10 @@ class TextReleaseTests(unittest.TestCase):
         self.assertNotIn('secrets.', text)
         self.assertNotIn('cosign sign', text)
         self.assertIn('ref: ${{ github.event.pull_request.head.sha }}', text)
-        code = re.search(r"<<'PYTEST'\n(.*?)\n          PYTEST", text, re.S).group(1)
+        release = (ROOT / '.github/workflows/text-worker-release.yml').read_text()
+        pattern = r"<<'PYTEST'\n(.*?)\n          PYTEST"
+        code = re.search(pattern, text, re.S).group(1)
+        self.assertEqual(re.search(pattern, release, re.S).group(1), code)
         code = '\n'.join(line.removeprefix('          ') for line in code.splitlines())
         name = 'TestLiveProductionWorkerDurableAccounting'
         with tempfile.TemporaryDirectory() as folder:
