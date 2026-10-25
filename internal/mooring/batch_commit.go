@@ -500,6 +500,9 @@ func (s *BatchStore) commit(ctx context.Context, request BatchRequest, session *
 				if e = session.stagePreparedCandidate(c, stored.LastRevision, targetCandidate); e != nil {
 					return e
 				}
+				if e = session.recordFreshSaved(ctx, tx, c, stored); e != nil {
+					return e
+				}
 			}
 			eventChanges = append(eventChanges, stored)
 			accepted[next] = stored

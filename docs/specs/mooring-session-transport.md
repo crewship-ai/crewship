@@ -65,6 +65,19 @@ Delivery authorization expires after the configured lease (default five seconds,
 never longer), measured from request send time. Revoked writers cannot acquire
 fresh write authority through a reader connection.
 
+Each newly saved atomic change also records immutable historical attribution in
+the same SQL transaction. The original sealed submission supplies the human or
+agent actor; an agent record retains its represented human, crew, chat/message,
+work, exact run/attempt and host session. Request/model identity fields and logs
+cannot manufacture this record. Original Page creation attribution is unchanged.
+Rejected changes, failed transactions and identical known retries do not create
+another record. Metadata insertion precedes the final current-author and owner
+checks, and a failure rolls back both the document change and its attribution.
+The output serializer remains pure. These rows are historical data, never a
+restored task or permission; existing collaboration backup remapping/collision
+refusals apply. This storage boundary alone does not establish chat result UI,
+artifact creation, task-version history or deployed agent acceptance.
+
 The current UI restricts undo/redo for deletions or changes overlapping another
 participant's deletion and displays a refusal message without claiming a new
 save. Complete two-browser-plus-agent behavior, unaffected-participant continuity

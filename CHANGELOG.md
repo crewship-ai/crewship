@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Rust-backed Mooring saves retain immutable original human/agent task attribution in the same transaction as each new saved atomic change. Rejections, failed commits and known retries do not create another edit record; this does not yet provide artifact creation, version browsing or live chat acceptance.
+
 - **Document access in chat:** distinguish the agent's current document grants from verified active task permissions. Hide inaccessible document metadata, expire unverified views, and identify unknown output provenance explicitly.
 
 - WordCraft documents expose existing authorized sharing from their header and list menu without replacing the running editor. Opening access rechecks the current viewer and keeps document sharing separate from agent task permissions.
