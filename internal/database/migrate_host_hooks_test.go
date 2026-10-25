@@ -9,7 +9,7 @@ import (
 )
 
 func TestHostHookUpgradeRequiresAuditedReview(t *testing.T) {
-	for _, fault := range []string{"", "ABORT", "IGNORE"} {
+	for _, fault := range []string{"", "ABORT", "IGNORE", "UPDATE_IGNORE"} {
 		auditFailure := fault != ""
 		t.Run("upgrade/"+fault, func(t *testing.T) {
 			db, err := Open(filepath.Join(t.TempDir(), "upgrade.db"))
@@ -29,6 +29,9 @@ func TestHostHookUpgradeRequiresAuditedReview(t *testing.T) {
     ('http','ws-hook','pre_agent_start','http','{"url":"https://example.test"}',1,NULL,'2026-01-01')`)
 			if auditFailure {
 				statement := `CREATE TRIGGER fail_hook_audit BEFORE INSERT ON audit_logs BEGIN SELECT RAISE(IGNORE); END`
+				if fault == "UPDATE_IGNORE" {
+					statement = `CREATE TRIGGER reject_quarantine BEFORE UPDATE OF enabled ON hooks_config BEGIN SELECT RAISE(IGNORE); END`
+				}
 				if fault == "ABORT" {
 					statement = `CREATE TRIGGER fail_hook_audit BEFORE INSERT ON audit_logs BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`
 				}

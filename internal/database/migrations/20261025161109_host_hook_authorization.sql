@@ -13,5 +13,7 @@ SELECT lower(hex(randomblob(16))),workspace_id,NULL,'hook.host_review_required',
 FROM hooks_config WHERE handler_kind='shell';
 INSERT INTO host_hook_audit_receipt_guard(actual,expected)
 SELECT changes(), count(*) FROM hooks_config WHERE handler_kind='shell';
-DROP TABLE host_hook_audit_receipt_guard;
 UPDATE hooks_config SET enabled=0 WHERE handler_kind='shell';
+INSERT INTO host_hook_audit_receipt_guard(actual,expected)
+SELECT changes(), expected FROM host_hook_audit_receipt_guard LIMIT 1;
+DROP TABLE host_hook_audit_receipt_guard;

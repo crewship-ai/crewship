@@ -52,6 +52,9 @@ func resetRecoveredHostHooks(ctx context.Context, db *sql.DB) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	if count != expected {
+		return 0, fmt.Errorf("backup: recovered host hook quarantine incomplete: changed %d want %d", count, expected)
+	}
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}

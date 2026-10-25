@@ -83,6 +83,7 @@ var legacyAuditInsertSites = map[string]string{
 // recording a permission change outside its transaction.
 var privilegeFieldsByEntity = map[string][]string{
 	"HOOK":              {"host_authorization", "before_authorization", "after_authorization"},
+	"hook":              {"host_authorization", "before_authorization", "after_authorization"},
 	"AGENT":             {"tool_profile", "mcp_config_json", "crew_id", "agent_role"},
 	"CREDENTIAL_FOLDER": {"reveal_policy", "min_security_level", "default_security_level", "parent_id"},
 }

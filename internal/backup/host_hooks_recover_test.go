@@ -11,7 +11,7 @@ import (
 // Recovery can run before migrations and without the source journal keys.
 func TestRecoveredHostHooksQuarantineReceipt(t *testing.T) {
 	for _, approvalColumn := range []bool{false, true} {
-		for _, fault := range []string{"", "ABORT", "IGNORE"} {
+		for _, fault := range []string{"", "ABORT", "IGNORE", "UPDATE_IGNORE"} {
 			t.Run(fmt.Sprintf("approval=%t/%s", approvalColumn, fault), func(t *testing.T) {
 				db, err := database.Open(filepath.Join(t.TempDir(), "recovered.db"))
 				if err != nil {
@@ -33,6 +33,9 @@ func TestRecoveredHostHooksQuarantineReceipt(t *testing.T) {
 				}
 				if fault != "" {
 					stmt := `CREATE TRIGGER reject_receipt BEFORE INSERT ON audit_logs BEGIN SELECT RAISE(IGNORE); END`
+					if fault == "UPDATE_IGNORE" {
+						stmt = `CREATE TRIGGER reject_quarantine BEFORE UPDATE OF enabled ON hooks_config BEGIN SELECT RAISE(IGNORE); END`
+					}
 					if fault == "ABORT" {
 						stmt = `CREATE TRIGGER reject_receipt BEFORE INSERT ON audit_logs BEGIN SELECT RAISE(ABORT,'receipt unavailable'); END`
 					}
