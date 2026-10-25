@@ -260,7 +260,11 @@ func (h *HooksHandler) setEnabled(w http.ResponseWriter, r *http.Request, enable
 		replyError(w, http.StatusForbidden, "disabling hooks requires workspace management or instance authority")
 		return
 	}
-	if err := hooks.SetEnabledAuthorized(r.Context(), h.db, workspaceID, id, enabled, h.hostHookAuthority(r)); err != nil {
+	hostAllowed := h.hostHookAuthority(r)
+	_, _, err = h.mutateHook(r, workspaceID, id, "hook.toggle", func(db hooks.StoreDB) (string, error) {
+		return id, hooks.SetEnabledAuthorized(r.Context(), db, workspaceID, id, enabled, hostAllowed)
+	})
+	if err != nil {
 		if errors.Is(err, hooks.ErrShellHookNotAllowed) {
 			h.writeStoreError(w, r, err, "enable")
 			return

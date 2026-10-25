@@ -9,8 +9,9 @@ import (
 )
 
 func TestHostHookUpgradeRequiresAuditedReview(t *testing.T) {
-	for _, auditFailure := range []bool{false, true} {
-		t.Run(map[bool]string{false: "upgrade", true: "audit failure rolls back"}[auditFailure], func(t *testing.T) {
+	for _, fault := range []string{"", "ABORT", "IGNORE"} {
+		auditFailure := fault != ""
+		t.Run("upgrade/"+fault, func(t *testing.T) {
 			db, err := Open(filepath.Join(t.TempDir(), "upgrade.db"))
 			if err != nil {
 				t.Fatal(err)
@@ -27,7 +28,11 @@ func TestHostHookUpgradeRequiresAuditedReview(t *testing.T) {
     ('disabled','ws-hook','pre_agent_start','shell','{"command":"disabled"}',0,NULL,'2026-01-01'),
     ('http','ws-hook','pre_agent_start','http','{"url":"https://example.test"}',1,NULL,'2026-01-01')`)
 			if auditFailure {
-				execMigrationFixture(t, db, `CREATE TRIGGER fail_hook_audit BEFORE INSERT ON audit_logs BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
+				statement := `CREATE TRIGGER fail_hook_audit BEFORE INSERT ON audit_logs BEGIN SELECT RAISE(IGNORE); END`
+				if fault == "ABORT" {
+					statement = `CREATE TRIGGER fail_hook_audit BEFORE INSERT ON audit_logs BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`
+				}
+				execMigrationFixture(t, db, statement)
 			}
 			err = Migrate(ctx, db.DB, logger)
 			if auditFailure {

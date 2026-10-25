@@ -160,7 +160,7 @@ _, err := hooks.Register(ctx, db, h, allowedShell)
 // returns hooks.ErrShellHookNotAllowed if h.HandlerKind == "shell" && !allowedShell
 ```
 
-`allowedShell` is the trailing boolean argument to `hooks.Register`. Pass `true` only after verifying instance administrator authority. The stored `host_authorization` digest binds approval to the exact configuration; it is provenance, not a secret or a signature. Portable imports and instance-bundle recovery clear this approval.
+`allowedShell` is the trailing boolean argument to `hooks.Register`. Pass `true` only after verifying instance administrator authority. The stored `host_authorization` digest binds approval to the exact configuration; it is provenance, not a secret or a signature. Portable imports and instance-bundle recovery clear this approval. Live host-hook changes and their actor/configuration audit commit in the same transaction; if the audit cannot be recorded, the change is refused. Offline migration, import and recovery instead retain an atomic quarantine receipt in `audit_logs` before the destination can execute the hook. These receipts do not rewrite the imported journal chain or require historical signing keys. A caller passing a transaction to the Go store must invalidate the hook cache after its outer commit.
 
 The same gate applies on **update**: `PATCH /api/v1/hooks/{id}` refuses a caller without instance administrator authority who converts an existing `http` hook into a `shell` hook, and refuses a caller without that authority editing a hook that is *already* `shell` — editing the command is editing what runs on the host, whether or not the `handler_kind` field is in the request body.
 

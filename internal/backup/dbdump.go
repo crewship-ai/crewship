@@ -1399,11 +1399,14 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 				landed = n > 0
 			}
 			if landed && table == "hooks_config" && row["handler_kind"] == "shell" {
-				_, err := tx.ExecContext(ctx, `INSERT INTO audit_logs(id,workspace_id,user_id,action,entity_type,entity_id,metadata,created_at)
+				receipt, err := tx.ExecContext(ctx, `INSERT INTO audit_logs(id,workspace_id,user_id,action,entity_type,entity_id,metadata,created_at)
 					VALUES(lower(hex(randomblob(16))),?,NULL,'hook.host_review_required','hook',?,
 					'{"reason":"restored host authority requires local review"}',strftime('%Y-%m-%dT%H:%M:%fZ','now'))`, row["workspace_id"], row["id"])
 				if err != nil {
 					return stats, fmt.Errorf("backup: record restored host hook review: %w", err)
+				}
+				if n, err := receipt.RowsAffected(); err != nil || n != 1 {
+					return stats, fmt.Errorf("backup: restored host hook audit not inserted: rows=%d error=%v", n, err)
 				}
 			}
 			if replaceWork && !landed {

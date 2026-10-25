@@ -68,6 +68,9 @@ import (
 //
 // Adding an entry is a deliberate act that has to be justified in review.
 var legacyAuditInsertSites = map[string]string{
+	"internal/backup/dbdump.go:RestoreDumpTxHooks":                  "quarantine receipt for newly imported host rows before destination authority is admitted; copied approvals are stripped before INSERT, ignored existing rows are unchanged; atomic legacy recovery record, not a live grant",
+	"internal/backup/host_hooks_recover.go:resetRecoveredHostHooks": "offline recovery normalization before server start; source signing keys or current migrations may be unavailable, so preserve source chain and atomically record legacy quarantine receipt without granting destination authority",
+
 	"internal/api/internal_handler.go:WriteAuditLog":                             "the best-effort writer this guard polices at its call sites",
 	"internal/api/pages_private_metadata_read.go:appendPrivateReadAudit":         "read-access record (OWNER reading a private Page); fail-closed in the read transaction, no access changes",
 	"internal/api/pages_private_audience.go:recordPrivateOwnerAccess":            "read-access record (OWNER reading a private Page); written on the read transaction, no access changes",
@@ -79,6 +82,7 @@ var legacyAuditInsertSites = map[string]string{
 // A best-effort audit of such an entity that records one of these fields is
 // recording a permission change outside its transaction.
 var privilegeFieldsByEntity = map[string][]string{
+	"HOOK":              {"host_authorization", "before_authorization", "after_authorization"},
 	"AGENT":             {"tool_profile", "mcp_config_json", "crew_id", "agent_role"},
 	"CREDENTIAL_FOLDER": {"reveal_policy", "min_security_level", "default_security_level", "parent_id"},
 }
@@ -355,6 +359,8 @@ func TestAuditGuardJudgesEachCallSite(t *testing.T) {
 		{"second unchained insert in a chained file", `func a(tx T) { tx.Exec("INSERT INTO audit_logs(id) VALUES(?)"); appendAgentAudit(tx) }
 func b(db D) { db.Exec("INSERT INTO audit_logs(id) VALUES(?)") }`, 1},
 		{"package-level insert", "const q = `INSERT INTO audit_logs(id) VALUES(?)`", 1},
+		{"host approval field under a neutral action", `func a() { WriteAuditLog(c, db, j, "update", "hook", id, u, w, map[string]any{"after_authorization": p}) }`, 1},
+		{"non-host hook operational metadata", `func a() { WriteAuditLog(c, db, j, "hook.update", "hook", id, u, w, map[string]any{"handler_kind": "http"}) }`, 0},
 		{"agent rename", `func a() { WriteAuditLog(c, db, j, "update", "AGENT", id, u, w, map[string]any{"name": n}) }`, 0},
 		{"agent privilege field under a neutral action", `func a() { WriteAuditLog(c, db, j, "update", "AGENT", id, u, w, map[string]any{"tool_profile": p}) }`, 1},
 		{"agent metadata the guard cannot read", `func a() { WriteAuditLog(c, db, j, "update", "AGENT", id, u, w, changes) }`, 1},

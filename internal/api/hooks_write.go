@@ -189,21 +189,26 @@ func (h *HooksHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// allowedShell mirrors the gate above rather than re-deriving it: the
 	// store validates independently (store.go's comment explains why), and
 	// passing the verified instance authority keeps the two answers aligned.
-	id, err := hooks.Register(r.Context(), h.db, hk, h.hostHookAuthority(r))
+	hostAllowed := h.hostHookAuthority(r)
+	id, hostAudited, err := h.mutateHook(r, workspaceID, "", "hook.create", func(db hooks.StoreDB) (string, error) {
+		return hooks.Register(r.Context(), db, hk, hostAllowed)
+	})
 	if err != nil {
 		h.writeStoreError(w, r, err, "create")
 		return
 	}
 
-	WriteAuditLog(r.Context(), h.db, h.journal, "hook.create", "hook", id,
-		actorIDFromContext(r), workspaceID, map[string]interface{}{
-			"event":        *in.Event,
-			"handler_kind": *in.HandlerKind,
-			"crew_id":      crewID,
-			"blocking":     hk.Blocking,
-			"enabled":      hk.Enabled,
-		})
+	if !hostAudited {
+		WriteAuditLog(r.Context(), h.db, h.journal, "hook.create", "hook", id,
+			actorIDFromContext(r), workspaceID, map[string]interface{}{
+				"event":        *in.Event,
+				"handler_kind": *in.HandlerKind,
+				"crew_id":      crewID,
+				"blocking":     hk.Blocking,
+				"enabled":      hk.Enabled,
+			})
 
+	}
 	h.replyHook(w, r, workspaceID, id, http.StatusCreated)
 }
 
@@ -281,20 +286,26 @@ func (h *HooksHandler) Update(w http.ResponseWriter, r *http.Request) {
 		merged.Enabled = *in.Enabled
 	}
 
-	if err := hooks.Update(r.Context(), h.db, workspaceID, merged, h.hostHookAuthority(r)); err != nil {
+	hostAllowed := h.hostHookAuthority(r)
+	_, hostAudited, err := h.mutateHook(r, workspaceID, id, "hook.update", func(db hooks.StoreDB) (string, error) {
+		return id, hooks.Update(r.Context(), db, workspaceID, merged, hostAllowed)
+	})
+	if err != nil {
 		h.writeStoreError(w, r, err, "update")
 		return
 	}
 
-	WriteAuditLog(r.Context(), h.db, h.journal, "hook.update", "hook", id,
-		actorIDFromContext(r), workspaceID, map[string]interface{}{
-			"event":        string(merged.Event),
-			"handler_kind": string(merged.HandlerKind),
-			"crew_id":      merged.CrewID,
-			"blocking":     merged.Blocking,
-			"enabled":      merged.Enabled,
-		})
+	if !hostAudited {
+		WriteAuditLog(r.Context(), h.db, h.journal, "hook.update", "hook", id,
+			actorIDFromContext(r), workspaceID, map[string]interface{}{
+				"event":        string(merged.Event),
+				"handler_kind": string(merged.HandlerKind),
+				"crew_id":      merged.CrewID,
+				"blocking":     merged.Blocking,
+				"enabled":      merged.Enabled,
+			})
 
+	}
 	h.replyHook(w, r, workspaceID, id, http.StatusOK)
 }
 
@@ -326,7 +337,10 @@ func (h *HooksHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := hooks.Delete(r.Context(), h.db, workspaceID, id); err != nil {
+	_, hostAudited, err := h.mutateHook(r, workspaceID, id, "hook.delete", func(db hooks.StoreDB) (string, error) {
+		return id, hooks.Delete(r.Context(), db, workspaceID, id)
+	})
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, "hook not found")
 			return
@@ -336,13 +350,15 @@ func (h *HooksHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	WriteAuditLog(r.Context(), h.db, h.journal, "hook.delete", "hook", id,
-		actorIDFromContext(r), workspaceID, map[string]interface{}{
-			"event":        string(existing.Event),
-			"handler_kind": string(existing.HandlerKind),
-			"crew_id":      existing.CrewID,
-		})
+	if !hostAudited {
+		WriteAuditLog(r.Context(), h.db, h.journal, "hook.delete", "hook", id,
+			actorIDFromContext(r), workspaceID, map[string]interface{}{
+				"event":        string(existing.Event),
+				"handler_kind": string(existing.HandlerKind),
+				"crew_id":      existing.CrewID,
+			})
 
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"id": id, "deleted": true})
 }
 
