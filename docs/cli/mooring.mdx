@@ -91,3 +91,15 @@ workspace policy must allow the task; this command cannot add or expand a grant.
 The server checks the original stored instruction and current document rights.
 A queued response is not a Saved receipt. Agent execution additionally requires
 the enabled native session runtime and qualified private sidecar environment.
+
+
+## crewship mooring provenance
+
+`crewship mooring provenance <page-slug|@ID>`
+
+Read a bounded recent projection of immutable native agent edits. Page access
+and each original source chat are checked independently for the current human.
+Rows provide stable Page IDs, original source message references and saved native
+revision cuts; references grant no rights. `artifacts_partial` is always true:
+this is not a complete history, creation receipt or historical content reader.
+The native provenance route remains unavailable when Mooring sessions are disabled.

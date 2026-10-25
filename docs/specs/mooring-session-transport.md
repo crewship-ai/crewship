@@ -115,3 +115,22 @@ explicit typed commands and their original read preconditions against a retained
 returned original submission must be retried unchanged. Actual native preparation,
 SQL COMMIT and correlated receipts remain the Saved boundary. A test fixture or
 an accepted task does not qualify an actual private agent environment.
+
+
+## Recorded edit metadata
+
+The existing chat document-access response includes separate `artifacts` metadata
+from immutable Saved edit attribution. This historical projection does not alter
+`documents`, standing grants or live task capability. The default-off native
+`GET /api/v1/pages/{slug}/mooring/provenance` route provides the same read projection
+for a document's source-chat backlinks; CLI: `crewship mooring provenance`.
+Every row requires current independent original-human Page/native and source-chat
+read authority. No title, chat/message reference or link is returned for a denied
+row. Both paths hold the original ingress lifetime and SQL writer through bounded
+physical response flush. Recent candidates are capped at 64 and collapsed per
+Page/chat; `artifacts_partial` is constant true, revealing no hidden-row count.
+The UI labels only recorded edits, clears viewer-scoped metadata on errors,
+visibility changes and a three-second send-time horizon, and retains the native
+editor while metadata refreshes. First edit is not creation. Native creation,
+crew/agent artifact listing and exact historical content/version browsing are
+not established by this projection; legacy files retain unknown origin.

@@ -6,6 +6,7 @@ import { PageApplicationView } from "./page-application"
 import { PageDocument } from "./page-document"
 import { PageSlides } from "./page-slides"
 import { MooringEditorHost } from "./mooring-editor-host"
+import { NativeDocumentProvenance } from "../chat/right-panel-tabs/chat-document-access"
 import { WordCraftEditorHost } from "./wordcraft-editor-host"
 import { PageWorkbookSurface } from "./workbook-editor-host"
 import { slidesEditorMount } from "@/lib/feature-flags"
@@ -550,7 +551,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                     : <><PageSlides workspaceId={workspaceId} pageId={nativePageId} name={detail.page?.name} onDirtyChange={nav.setDirty} /><UnsentEditsLeaveDialog pending={nav.pending} onReturnFocus={focusNativeView} /></>
                 ) : nativeCollaboration ? (
                   detail.accessDenied || !nativePageId ? <p role="alert" className="p-6">Document access is unavailable.</p>
-                    : <><WordCraftEditorHost key={`${workspaceId}:${nativePageId}`} workspaceId={workspaceId} pageId={nativePageId} name={detail.page?.name} onDirtyChange={nav.setDirty} onUnavailable={closeNativeAccess} /><UnsentEditsLeaveDialog pending={nav.pending} onReturnFocus={focusNativeView} /></>
+                    : <>{currentUserId && <NativeDocumentProvenance workspaceId={workspaceId} pageId={nativePageId} viewerId={currentUserId} />}<WordCraftEditorHost key={`${workspaceId}:${nativePageId}`} workspaceId={workspaceId} pageId={nativePageId} name={detail.page?.name} onDirtyChange={nav.setDirty} onUnavailable={closeNativeAccess} /><UnsentEditsLeaveDialog pending={nav.pending} onReturnFocus={focusNativeView} /></>
                 ) : nativeMooring ? (
                   detail.accessDenied || !nativePageId ? <p role="alert" className="p-6">Application unavailable</p>
                     : <><MooringEditorHost key={`${workspaceId}:${nativePageId}`} workspaceId={workspaceId} pageId={nativePageId} name={detail.page?.name} onDirtyChange={nav.setDirty} /><UnsentEditsLeaveDialog pending={nav.pending} onReturnFocus={focusNativeView} /></>

@@ -69,7 +69,7 @@ export function AgentArtifactsTab({ agentId, workspaceId, crewId, agentSlug, cha
   return <div className="p-3 text-xs">
     {workspaceId && chatId && viewerId && <ChatDocumentAccess workspaceId={workspaceId} chatId={chatId} viewerId={viewerId} />}
     <div className="mb-2 flex items-center justify-between gap-2">
-      <span className="eyebrow">Documents and outputs <span className="text-muted-foreground-soft">· {artifacts.length}</span></span>
+      <span className="eyebrow">Output files <span className="text-muted-foreground-soft">· {artifacts.length}</span></span>
       <button type="button" onClick={() => setRevision((n) => n + 1)} aria-label="Refresh artifacts" className="rounded p-1 hover:bg-accent"><RefreshCw className="size-3" /></button>
     </div>
     {loading ? <p role="status" className="py-3 text-muted-foreground">Loading artifacts…</p>
