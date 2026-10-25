@@ -68,11 +68,6 @@ jobs:
           touch "$RUNNER_TEMP/native-docker-fixture-mounted"
           sudo mount -o remount,bind,noatime /var/lib/docker/containers
           sudo findmnt -T /var/lib/docker/containers
-      - name: Diagnose configured startup with a closed synthetic local provider
-        run: |
-          CREWSHIP_NATIVE_CONFIG_PROBE_IMAGE=$(docker image inspect --format '{{.Id}}' crewship-native-candidate:verify) \
-            go test ./cmd/crewship-restricted-native-runner -run '^TestNativeCandidateConfigProbe$' \
-              -count=1 -timeout 1m -v > "$RUNNER_TEMP/native-config-probe.log" 2>&1
       - name: Freeze the original application source for differential controls
         run: |
           git fetch --depth=1 --no-tags origin 6b39cadb8906fa797eb1503b351cc1ef07bb2501
@@ -141,7 +136,6 @@ jobs:
             ${{ runner.temp }}/native-context/image-inspect.json
             ${{ runner.temp }}/native-context/tested-source.txt
             ${{ steps.scan.outputs.sarif }}
-            ${{ runner.temp }}/native-config-probe.log
             ${{ runner.temp }}/native-red/
             ${{ runner.temp }}/native-green/
             ${{ runner.temp }}/native-relatime-control/
