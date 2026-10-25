@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/hex"
 	"encoding/pem"
 	"fmt"
@@ -18,6 +19,18 @@ import (
 	"sync/atomic"
 	"time"
 )
+
+// Diagnostics only describe the owned qualification endpoints, never a real
+// repository request. API callers continue to receive the generic Error text.
+type gitProbeFailure struct {
+	output           string
+	processErr       error
+	positiveContacts int64
+}
+
+func (*gitProbeFailure) Error() string {
+	return "git import transport cannot prove pinned HTTPS support; import refused"
+}
 
 // A version/config listing cannot prove that the actual HTTPS helper's
 // runtime libcurl honored CURLOPT_RESOLVE: Git ignores its setopt return.
@@ -115,7 +128,7 @@ func qualifyPinnedGit(ctx context.Context, gitPath, home string) error {
 	}
 	positiveCtx, stopPositive := context.WithTimeout(ctx, 5*time.Second)
 	defer stopPositive()
-	_, _ = runIsolatedGit(positiveCtx, gitPath, home, args...)
+	positiveOutput, positiveErr := runIsolatedGit(positiveCtx, gitPath, home, args...)
 	if positiveCtx.Err() != nil {
 		return fmt.Errorf("git import transport qualification timed out")
 	}
@@ -125,26 +138,42 @@ func qualifyPinnedGit(ctx context.Context, gitPath, home string) error {
 	case <-seen:
 		return nil
 	default:
-		return fmt.Errorf("git import transport cannot prove pinned HTTPS support; import refused")
+		return &gitProbeFailure{output: positiveOutput, processErr: positiveErr, positiveContacts: positiveContacts.Load()}
 	}
 
 }
 
-func gitProbeCertificate() (tls.Certificate, []byte, error) {
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+// The CA is a private per-invocation trust anchor, not the TLS server leaf.
+// Serve a conventional leaf-first chain for native TLS implementations.
+func gitProbeCertificate(ips ...net.IP) (tls.Certificate, []byte, error) {
+	rootKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return tls.Certificate{}, nil, err
 	}
-	template := &x509.Certificate{SerialNumber: big.NewInt(1), DNSNames: []string{"localhost"}, NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(5 * time.Minute), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
-	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	now := time.Now()
+	root := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Owned Git qualification root"}, NotBefore: now.Add(-time.Minute), NotAfter: now.Add(5 * time.Minute), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign}
+	rootDER, err := x509.CreateCertificate(rand.Reader, root, root, &rootKey.PublicKey, rootKey)
 	if err != nil {
 		return tls.Certificate{}, nil, err
 	}
-	private, err := x509.MarshalPKCS8PrivateKey(key)
+	serverKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return tls.Certificate{}, nil, err
 	}
-	public := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
-	certificate, err := tls.X509KeyPair(public, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: private}))
-	return certificate, public, err
+	server := &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "localhost"}, DNSNames: []string{"localhost"}, IPAddresses: ips, NotBefore: root.NotBefore, NotAfter: root.NotAfter, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	serverDER, err := x509.CreateCertificate(rand.Reader, server, root, &serverKey.PublicKey, rootKey)
+	if err != nil {
+		return tls.Certificate{}, nil, err
+	}
+	private, err := x509.MarshalPKCS8PrivateKey(serverKey)
+	if err != nil {
+		return tls.Certificate{}, nil, err
+	}
+	publicCA := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: rootDER})
+	chain := append(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: serverDER}), publicCA...)
+	certificate, err := tls.X509KeyPair(chain, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: private}))
+	if err != nil {
+		return tls.Certificate{}, nil, err
+	}
+	return certificate, publicCA, nil
 }
