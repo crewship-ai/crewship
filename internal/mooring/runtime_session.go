@@ -57,7 +57,7 @@ type SessionRuntime struct {
 	mu                         sync.Mutex
 	pending                    map[string]*sessionPending
 	child                      map[uint64]*sessionControlEntry
-	childIDs                   map[string]uint64
+	childIDs                   map[string][]uint64
 	queue                      []uint64
 	next                       uint64
 	count, bytes               int
@@ -93,7 +93,7 @@ func newSessionRuntime(process *Runtime, c SessionRuntimeConfig) (*SessionRuntim
 	if err != nil {
 		return nil, err
 	}
-	s := &SessionRuntime{process: process, scope: c.Scope, versions: c.Runtime.Versions, runtimeRef: string(ref), validator: v, pending: make(map[string]*sessionPending), child: make(map[uint64]*sessionControlEntry), childIDs: make(map[string]uint64), done: make(chan struct{}), closedCh: make(chan struct{}), readerDone: make(chan struct{}), notify: make(chan struct{}), writer: make(chan struct{}, 1)}
+	s := &SessionRuntime{process: process, scope: c.Scope, versions: c.Runtime.Versions, runtimeRef: string(ref), validator: v, pending: make(map[string]*sessionPending), child: make(map[uint64]*sessionControlEntry), childIDs: make(map[string][]uint64), done: make(chan struct{}), closedCh: make(chan struct{}), readerDone: make(chan struct{}), notify: make(chan struct{}), writer: make(chan struct{}, 1)}
 	s.writer <- struct{}{}
 	go s.readLoop()
 	go func() { <-process.Done(); s.fail(process.Err()); <-s.readerDone; close(s.done) }()
@@ -320,15 +320,27 @@ func (s *SessionRuntime) readLoop() {
 			s.mu.Unlock()
 			continue
 		}
-		if previous, ok := s.childIDs[header.id]; ok {
-			entry := s.child[previous]
-			same := entry != nil && bytes.Equal(entry.bytes, normalized)
-			s.mu.Unlock()
+		if previous := s.childIDs[header.id]; len(previous) != 0 {
+			same := false
+			for _, id := range previous {
+				if entry := s.child[id]; entry != nil && bytes.Equal(entry.bytes, normalized) {
+					same = true
+				}
+			}
 			if same {
+				s.mu.Unlock()
 				continue
 			}
-			s.fail(ErrSessionRuntime)
-			return
+			// One original output may retain Pending and its terminal receipt
+			// concurrently. All other global-ID reuse stays a protocol error.
+			entry := s.child[previous[0]]
+			paired := len(previous) == 1 && entry != nil && entry.kind == header.kind &&
+				correlatedParticipantOutputPhases(entry.bytes, normalized)
+			if !paired {
+				s.mu.Unlock()
+				s.fail(ErrSessionRuntime)
+				return
+			}
 		}
 		if s.next == ^uint64(0) || !s.reserveLocked(len(normalized)) {
 			s.mu.Unlock()
@@ -338,7 +350,7 @@ func (s *SessionRuntime) readLoop() {
 		s.next++
 		entry := &sessionControlEntry{id: s.next, requestID: header.id, kind: header.kind, bytes: normalized}
 		s.child[entry.id] = entry
-		s.childIDs[entry.requestID] = entry.id
+		s.childIDs[entry.requestID] = append(s.childIDs[entry.requestID], entry.id)
 		s.queue = append(s.queue, entry.id)
 		s.signalLocked()
 		s.mu.Unlock()
@@ -449,7 +461,7 @@ func (s *SessionRuntime) complete(c SessionControl, replied bool) error {
 		return ErrSessionRuntime
 	}
 	delete(s.child, c.id)
-	delete(s.childIDs, entry.requestID)
+	s.removeChildIDLocked(entry)
 	s.count--
 	s.bytes -= len(entry.bytes)
 	s.drainParticipantRetirementsLocked()
