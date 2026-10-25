@@ -29,7 +29,6 @@ CREATE TABLE mooring_collab_artifact_edits (
   CHECK ((actor_kind='human' AND agent_id IS NULL AND crew_id IS NULL AND chat_id IS NULL AND message_id IS NULL AND work_id IS NULL AND run_id IS NULL AND attempt_number IS NULL AND attempt_generation IS NULL)
     OR (actor_kind='agent' AND length(COALESCE(agent_id,''))>0 AND length(COALESCE(crew_id,''))>0 AND length(COALESCE(chat_id,''))>0 AND length(COALESCE(message_id,''))>0 AND length(COALESCE(work_id,''))>0 AND length(COALESCE(run_id,''))>0 AND COALESCE(attempt_number,0)>0 AND COALESCE(attempt_generation,0)>0))
 );
-CREATE INDEX mooring_collab_artifact_edits_workspace ON mooring_collab_artifact_edits(workspace_id);
 CREATE INDEX mooring_collab_artifact_edits_chat ON mooring_collab_artifact_edits(workspace_id,chat_id,created_at);
 CREATE INDEX mooring_collab_artifact_edits_agent ON mooring_collab_artifact_edits(workspace_id,agent_id,created_at);
 CREATE INDEX mooring_collab_artifact_edits_crew ON mooring_collab_artifact_edits(workspace_id,crew_id,created_at);
