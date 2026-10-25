@@ -30,17 +30,26 @@ func startRuntimeSelected(_ context.Context, c RuntimeConfig, cmd *exec.Cmd, ses
 	// Never inherit backend encryption/provider credentials or loader options.
 	cmd.Env = []string{"LANG=C.UTF-8", "TZ=UTC"}
 	cmd.ExtraFiles = []*os.File{child}
+	// PRIVATE diagnostic overlay: stdout remains discarded, no raw stderr log.
+	var diagnostic *privateDiagnosticSink
+	if session {
+		diagnostic = newPrivateDiagnosticSink()
+		cmd.Stderr = diagnostic
+	}
 	if err = cmd.Start(); err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
-	r := &Runtime{RPC: &RPC{conn: conn}, cmd: cmd, done: make(chan struct{})}
+	r := &Runtime{privateDiagnostic: diagnostic, RPC: &RPC{conn: conn}, cmd: cmd, done: make(chan struct{})}
 	go func() {
 		err := cmd.Wait()
 		_ = r.RPC.Close()
 		r.mu.Lock()
 		r.err = err
 		r.mu.Unlock()
+		if diagnostic != nil {
+			diagnostic.finish() // Wait above has already drained cmd.Stderr.
+		}
 		close(r.done)
 	}()
 	if session {

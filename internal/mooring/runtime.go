@@ -119,6 +119,7 @@ func (r *RPC) Read() ([]byte, error) {
 func (r *RPC) Close() error { return r.conn.Close() }
 
 type Runtime struct {
+	privateDiagnostic      *privateDiagnosticSink // PRIVATE diagnostic overlay only.
 	RPC                    *RPC
 	cmd                    *exec.Cmd
 	done                   chan struct{}

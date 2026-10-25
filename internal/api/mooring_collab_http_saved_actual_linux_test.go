@@ -95,6 +95,15 @@ func runMooringHTTPActualSDK(t *testing.T, peerDelete bool, grantChange ...strin
 	if r.mooringHTTP == nil {
 		t.Fatal("actual controller missing pinned runtime")
 	}
+	// PRIVATE diagnostic overlay: logger runs AFTER the existing manager Close.
+	// No extra wait, forced cleanup or delay of the original failure diagnostics.
+	var diagnosticRuntime *mooring.SessionRuntime
+	defer func() {
+		if diagnosticRuntime != nil {
+			stages, truncated, captured := diagnosticRuntime.PrivateDiagnosticStages()
+			t.Logf("private diagnostic stages=%v truncated=%t captured=%t", stages, truncated, captured)
+		}
+	}()
 	defer r.mooringHTTP.Close()
 	server := httptest.NewServer(r.mux)
 	defer server.Close()
@@ -501,6 +510,7 @@ process.stdout.write(JSON.stringify(changes));`
 			if err := websocket.Message.Receive(recipient.ws, &raw); err != nil {
 				phase("receive-failed")
 				t.Logf("runtime error=%v", document.cell.runtime.Err())
+				diagnosticRuntime = document.cell.runtime
 				_, now, clockErr := document.manager.clock.Now()
 				rows, queryErr := rig.db.QueryContext(t.Context(), `SELECT expires_ns,closed FROM mooring_delivery_gates WHERE page_id='http-native-page'`)
 				if queryErr == nil {

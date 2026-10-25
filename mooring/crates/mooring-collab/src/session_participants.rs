@@ -1,6 +1,10 @@
 //! Actor-local gates obtained only from correlated host ticket validation.
 //! This does not authenticate a browser or replace host sealed-op admission.
-use crate::{dispatch::invalid, session_confirmed::OwnerController};
+use crate::{
+    dispatch::invalid,
+    session_actor::{diagnostic_failure, DiagnosticStage},
+    session_confirmed::OwnerController,
+};
 use mooring_core::{batch::Tick, delivery::ReadLease};
 use mooring_protocol::{
     boundary::Transport, grant::PendingGrant, Capabilities, Counter, SessionParticipantInput,
@@ -303,22 +307,40 @@ impl Participants {
             .live
             .values_mut()
             .find(|p| p.gate == response.gate_id && p.participant == response.participant_ref)
-            .ok_or_else(|| invalid("unrelated delivery grant"))?;
-        if !owner.may_own(now)
-            || p.permission < owner.known_permission()
-            || !p.lease.may_deliver(now)
-        {
+            .ok_or_else(|| {
+                diagnostic_failure(
+                    DiagnosticStage::DeliveryUnrelated,
+                    invalid("unrelated delivery grant"),
+                )
+            })?;
+        // Same predicate order and exactly one stateful may_deliver call.
+        let rejection = if !owner.may_own(now) {
+            Some(DiagnosticStage::DeliveryOwnerClosed)
+        } else if p.permission < owner.known_permission() {
+            Some(DiagnosticStage::DeliveryPermissionFloor)
+        } else if !p.lease.may_deliver(now) {
+            Some(DiagnosticStage::DeliveryExpired)
+        } else {
+            None
+        };
+        if let Some(stage) = rejection {
             p.lease.revoke();
-            return Err(invalid("delivery grant cannot revive closed gate"));
+            return Err(diagnostic_failure(
+                stage,
+                invalid("delivery grant cannot revive closed gate"),
+            ));
         }
         // One exact completed canonical response is harmless. It neither
         // changes deadline nor suppresses a different current pending nonce.
         if p.maintenance.completed == raw {
             return Ok(());
         }
-        p.lease
-            .accept(raw, host, now)
-            .map_err(|_| invalid("delivery grant binding"))?;
+        p.lease.accept(raw, host, now).map_err(|_| {
+            diagnostic_failure(
+                DiagnosticStage::DeliveryBinding,
+                invalid("delivery grant binding"),
+            )
+        })?;
         update_charge(&mut self.bytes, p, raw.len())?;
         p.maintenance
             .completed(Duration::from_millis(response.duration_ms.0), raw.to_vec())

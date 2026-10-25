@@ -19,6 +19,59 @@ use std::{
     time::Duration,
 };
 
+// PRIVATE DIAGNOSTIC OVERLAY ONLY: never include this branch in a release.
+// Every emitted byte is a finite source literal; the original error is returned.
+#[derive(Clone, Copy)]
+pub(crate) enum DiagnosticStage {
+    OwnerCheck,
+    RenewalSend,
+    DeliveryFlush,
+    InputFlush,
+    BatchDispatch,
+    ActorReceive,
+    OwnerGrant,
+    DeliveryGrant,
+    ParticipantOpen,
+    Ticket,
+    ParticipantInput,
+    Commit,
+    UnsupportedControl,
+    DeliveryOwnerClosed,
+    DeliveryPermissionFloor,
+    DeliveryExpired,
+    DeliveryBinding,
+    DeliveryUnrelated,
+}
+impl DiagnosticStage {
+    fn line(self) -> &'static [u8] {
+        match self {
+            Self::OwnerCheck => b"mooring-diag-v1:owner_check\n",
+            Self::RenewalSend => b"mooring-diag-v1:renewal_send\n",
+            Self::DeliveryFlush => b"mooring-diag-v1:delivery_flush\n",
+            Self::InputFlush => b"mooring-diag-v1:input_flush\n",
+            Self::BatchDispatch => b"mooring-diag-v1:batch_dispatch\n",
+            Self::ActorReceive => b"mooring-diag-v1:actor_receive\n",
+            Self::OwnerGrant => b"mooring-diag-v1:owner_grant\n",
+            Self::DeliveryGrant => b"mooring-diag-v1:delivery_grant\n",
+            Self::ParticipantOpen => b"mooring-diag-v1:participant_open\n",
+            Self::Ticket => b"mooring-diag-v1:ticket\n",
+            Self::ParticipantInput => b"mooring-diag-v1:participant_input\n",
+            Self::Commit => b"mooring-diag-v1:commit\n",
+            Self::UnsupportedControl => b"mooring-diag-v1:unsupported_control\n",
+            Self::DeliveryOwnerClosed => b"mooring-diag-v1:delivery_owner_closed\n",
+            Self::DeliveryPermissionFloor => b"mooring-diag-v1:delivery_permission_floor\n",
+            Self::DeliveryExpired => b"mooring-diag-v1:delivery_expired\n",
+            Self::DeliveryBinding => b"mooring-diag-v1:delivery_binding\n",
+            Self::DeliveryUnrelated => b"mooring-diag-v1:delivery_unrelated\n",
+        }
+    }
+}
+pub(crate) fn diagnostic_failure(stage: DiagnosticStage, error: io::Error) -> io::Error {
+    // Ignore diagnostic write failure; never format the supplied error/payload.
+    let _ = std::io::Write::write_all(&mut std::io::stderr().lock(), stage.line());
+    error
+}
+
 type OwnedActor = Actor<ConfirmedDocument, Arc<AtomicChange>>;
 pub type Recovery = (ConfirmedDocument, u64, Vec<Change<Arc<AtomicChange>>>);
 type GroupKey = (String, String);
@@ -141,6 +194,11 @@ impl RunningDriver {
     pub fn step(&mut self, host: &Transport<'_>, wait: Duration) -> io::Result<()> {
         let result = self.step_inner(host, wait);
         if result.is_err() {
+            // Precise inner marker, when present, precedes this finite fallback.
+            let _ = std::io::Write::write_all(
+                &mut std::io::stderr().lock(),
+                b"mooring-diag-v1:actor_fatal\n",
+            );
             self.close();
         }
         result
@@ -150,12 +208,18 @@ impl RunningDriver {
         if !matches!(host, Transport::AuthenticatedHost { issuer, .. } if *issuer == self.issuer) {
             return Err(invalid("actor needs original authenticated host"));
         }
-        self.check_owner()?;
-        self.renew_due()?;
-        self.renew_participants()?;
-        self.flush_deliveries()?;
-        self.flush_input()?;
-        self.dispatch_due()?;
+        self.check_owner()
+            .map_err(|e| diagnostic_failure(DiagnosticStage::OwnerCheck, e))?;
+        self.renew_due()
+            .map_err(|e| diagnostic_failure(DiagnosticStage::RenewalSend, e))?;
+        self.renew_participants()
+            .map_err(|e| diagnostic_failure(DiagnosticStage::RenewalSend, e))?;
+        self.flush_deliveries()
+            .map_err(|e| diagnostic_failure(DiagnosticStage::DeliveryFlush, e))?;
+        self.flush_input()
+            .map_err(|e| diagnostic_failure(DiagnosticStage::InputFlush, e))?;
+        self.dispatch_due()
+            .map_err(|e| diagnostic_failure(DiagnosticStage::BatchDispatch, e))?;
         let now = (self.driver.clock)()?;
         let wait = self.driver.maintenance.wait(now, wait);
         let wait = self.participants.wait(&self.owner, now, wait);
@@ -163,26 +227,29 @@ impl RunningDriver {
             .driver
             .lane
             .inbox(Route::Actor)
-            .receive_parked(wait, &self.wake)?
+            .receive_parked(wait, &self.wake)
+            .map_err(|e| diagnostic_failure(DiagnosticStage::ActorReceive, e))?
         {
-            self.check_owner()?;
+            self.check_owner()
+                .map_err(|e| diagnostic_failure(DiagnosticStage::OwnerCheck, e))?;
             let value: serde_json::Value =
                 serde_json::from_slice(&raw).map_err(|_| invalid("actor control"))?;
             match value["type"].as_str() {
-                Some("owner_grant") => self.accept_owner(&raw, host)?,
-                Some("delivery_grant") => self.participants.accept_renewal(
-                    &raw,
-                    host,
-                    &self.owner,
-                    (self.driver.clock)()?,
-                )?,
+                Some("owner_grant") => self
+                    .accept_owner(&raw, host)
+                    .map_err(|e| diagnostic_failure(DiagnosticStage::OwnerGrant, e))?,
+                Some("delivery_grant") => self
+                    .participants
+                    .accept_renewal(&raw, host, &self.owner, (self.driver.clock)()?)
+                    .map_err(|e| diagnostic_failure(DiagnosticStage::DeliveryGrant, e))?,
                 Some("session_participant_open") => {
                     let opening: SessionParticipantOpen =
                         serde_json::from_slice(&raw).map_err(|_| invalid("participant opening"))?;
                     let request =
                         self.participants
                             .begin(opening, &self.owner, (self.driver.clock)()?)?;
-                    self.send_control(&request)?;
+                    self.send_control(&request)
+                        .map_err(|e| diagnostic_failure(DiagnosticStage::ParticipantOpen, e))?;
                 }
                 Some("protocol_error") => {
                     self.participants
@@ -195,24 +262,38 @@ impl RunningDriver {
                         &self.owner,
                         (self.driver.clock)()?,
                     )?;
-                    self.joined(&opening, &connection)?;
+                    self.joined(&opening, &connection)
+                        .map_err(|e| diagnostic_failure(DiagnosticStage::Ticket, e))?;
                 }
                 Some("session_participant_input") => {
                     let input: SessionParticipantInput =
                         serde_json::from_slice(&raw).map_err(|_| invalid("participant input"))?;
-                    self.accept_input(input)?;
+                    self.accept_input(input)
+                        .map_err(|e| diagnostic_failure(DiagnosticStage::ParticipantInput, e))?;
                 }
-                Some("session_commit_result") => self.committed(&raw, host)?,
+                Some("session_commit_result") => self
+                    .committed(&raw, host)
+                    .map_err(|e| diagnostic_failure(DiagnosticStage::Commit, e))?,
                 // No unqualified ACK or rights refresh is inferred. Existing
                 // host send fences remain decisive while recovery closes gates.
-                _ => return Err(invalid("unsupported live actor control")),
+                _ => {
+                    return Err(diagnostic_failure(
+                        DiagnosticStage::UnsupportedControl,
+                        invalid("unsupported live actor control"),
+                    ))
+                }
             }
         }
-        self.renew_participants()?;
-        self.flush_deliveries()?;
-        self.flush_input()?;
-        self.dispatch_due()?;
+        self.renew_participants()
+            .map_err(|e| diagnostic_failure(DiagnosticStage::RenewalSend, e))?;
+        self.flush_deliveries()
+            .map_err(|e| diagnostic_failure(DiagnosticStage::DeliveryFlush, e))?;
+        self.flush_input()
+            .map_err(|e| diagnostic_failure(DiagnosticStage::InputFlush, e))?;
+        self.dispatch_due()
+            .map_err(|e| diagnostic_failure(DiagnosticStage::BatchDispatch, e))?;
         self.check_owner()
+            .map_err(|e| diagnostic_failure(DiagnosticStage::OwnerCheck, e))
     }
     fn renew_participants(&mut self) -> io::Result<()> {
         let requests = self
@@ -1082,6 +1163,17 @@ impl RunningDriver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn private_diagnostic_preserves_original_error_payload() {
+        let original = io::Error::other("synthetic opaque error");
+        let payload = original.get_ref().unwrap() as *const _;
+        let returned = diagnostic_failure(DiagnosticStage::DeliveryExpired, original);
+        assert_eq!(returned.kind(), io::ErrorKind::Other);
+        assert!(std::ptr::eq(
+            payload,
+            returned.get_ref().unwrap() as *const _
+        ));
+    }
     fn change(id: &str, dependencies: &[&str]) -> Arc<AtomicChange> {
         Arc::new(serde_json::from_value(serde_json::json!({"change_id":id,"membership_hash":"test-only",
             "operations":[{"op_id":id,"fingerprint":"test-only","participant_ref":"participant","base_revision":"0",
