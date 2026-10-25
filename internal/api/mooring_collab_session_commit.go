@@ -135,7 +135,7 @@ func (s *collaborationSessionCommitter) submitWithCuts(ctx context.Context, requ
 			}
 			return nil
 		}
-		committer, err := mooring.NewSessionCommitter(s.cell.store, s.owner, authority, func(ctx context.Context, tx *sql.Tx, pending mooring.SessionPendingOutput) ([]byte, error) {
+		committer, err := mooring.NewSessionCommitterWithSavedRecorder(s.cell.store, s.owner, authority, func(ctx context.Context, tx *sql.Tx, pending mooring.SessionPendingOutput) ([]byte, error) {
 			if pending.Lease != s.owner || pending.FullCheckpoint == nil || pending.Targets == nil {
 				return nil, errCollaborationSubmission
 			}
@@ -172,6 +172,8 @@ func (s *collaborationSessionCommitter) submitWithCuts(ctx context.Context, requ
 				}
 			}
 			return json.Marshal(candidate)
+		}, func(ctx context.Context, tx *sql.Tx, change mooring.BatchChange, saved mooring.BatchChangeResult) error {
+			return s.submissions.recordSavedAttribution(ctx, tx, s.owner.Key, string(s.session), change, saved)
 		})
 		if err != nil {
 			return err

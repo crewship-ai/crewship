@@ -32,6 +32,7 @@ func TestMooringCollaborationBackupPreservesLedgerCheckpointTaskAudit(t *testing
 			}()}},
 			{`INSERT INTO mooring_collab_checkpoints(page_id,workspace_id,revision,checkpoint_base64,decoded_bytes) VALUES(?,?,'18446744073709551615','AP9h',3)`, []any{page, ws}},
 			{`INSERT INTO mooring_collab_audit(id,page_id,workspace_id,kind,detail_json) VALUES(?,?,?,'change_saved',?)`, []any{"audit-" + page, page, ws, marker}},
+			{`INSERT INTO mooring_collab_artifact_edits(page_id,workspace_id,application_id,change_id,membership_hash,first_revision,last_revision,host_session_id,actor_kind,human_user_id,agent_id,crew_id,chat_id,message_id,work_id,run_id,attempt_number,attempt_generation) VALUES(?,?,'editor','change','sha256:immutable','18446744073709551615','18446744073709551615','historical-session','agent',?,'historical-agent','historical-crew','historical-chat','historical-message','historical-work','historical-run',1,1)`, []any{page, ws, actor}},
 			{`INSERT INTO mooring_session_owners(page_id,workspace_id,application_id,owner_id,generation,token_hash,boot_id,expires_ns) VALUES(?,?,'editor','live-owner',1,?,'source-boot',999999)`, []any{page, ws, bytes.Repeat([]byte{1}, 32)}},
 		}
 		for _, query := range queries {
@@ -46,7 +47,7 @@ func TestMooringCollaborationBackupPreservesLedgerCheckpointTaskAudit(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	tables := []string{"mooring_collab_documents", "mooring_collab_tasks", "mooring_collab_changes", "mooring_collab_operations", "mooring_collab_target_versions", "mooring_collab_target_effects", "mooring_collab_checkpoints", "mooring_collab_audit"}
+	tables := []string{"mooring_collab_documents", "mooring_collab_tasks", "mooring_collab_changes", "mooring_collab_operations", "mooring_collab_target_versions", "mooring_collab_target_effects", "mooring_collab_checkpoints", "mooring_collab_audit", "mooring_collab_artifact_edits"}
 	for _, table := range tables {
 		if len(dump.Tables[table]) != 1 {
 			t.Fatal("durable table missing", table)
@@ -74,6 +75,9 @@ func TestMooringCollaborationBackupPreservesLedgerCheckpointTaskAudit(t *testing
 	var owners int
 	if err = destination.QueryRow(`SELECT count(*) FROM mooring_session_owners`).Scan(&owners); err != nil || owners != 0 {
 		t.Fatal("runtime owner survived portability", owners, err)
+	}
+	if err = destination.QueryRow(`SELECT count(*) FROM artifact_run_principals WHERE run_id='historical-run'`).Scan(&owners); err != nil || owners != 0 {
+		t.Fatal("historical edit attribution reconstructed a run principal", owners, err)
 	}
 }
 
