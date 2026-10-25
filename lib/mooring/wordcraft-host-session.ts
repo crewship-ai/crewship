@@ -37,12 +37,12 @@ export interface WordCraftOpening {
   editor: { url: string; bundle_digest: string }
 }
 /** The path is chosen from original host scope, never a server/iframe URL. */
-export async function openWordCraftSession(workspaceId: string, pageId: string, write: boolean, signal: AbortSignal): Promise<WordCraftOpening> {
+export async function openWordCraftSession(workspaceId: string, pageId: string, write: boolean, signal: AbortSignal, checkpointBase64?: string): Promise<WordCraftOpening> {
   if (!identifier(workspaceId) || !identifier(pageId) || getAuthMode() !== "cookie") throw new Error("session_unavailable")
   const query = new URLSearchParams({ workspace_id: workspaceId })
   const response = await apiFetch(`/api/v1/pages/${encodeURIComponent("@" + pageId)}/mooring/session?${query}`, {
     method: "POST", cache: "no-store", skipRefresh: true, signal,
-    headers: { "content-type": "application/json" }, body: JSON.stringify({ write }),
+    headers: { "content-type": "application/json" }, body: JSON.stringify({ write, ...(checkpointBase64 ? { checkpoint_base64: checkpointBase64 } : {}) }),
   })
   if (!response.ok) throw new Error([401, 403, 404].includes(response.status) ? "access_unavailable" : "session_unavailable")
   const body = parse(await response.text())

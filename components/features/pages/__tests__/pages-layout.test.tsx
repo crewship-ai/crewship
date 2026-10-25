@@ -113,10 +113,11 @@ function newQueryClient(): QueryClient {
   return new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
 }
 
-function renderLayout(list: WirePage[], slug?: string) {
+function renderLayout(list: WirePage[], slug?: string, documentStatus: object = {enabled:false}) {
   const qc = newQueryClient()
   const mockFetch = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input)
+    if (url.includes("/api/v1/documents/status")) return okJSON(documentStatus)
     // The folders route has its own prefix (`/page-folders`, because
     // `/pages/folders/{slug}` collides with `/pages/{slug}/grants` in the Go
     // mux); this layout has no folders, so the rail groups by owner.
@@ -433,4 +434,14 @@ it("explains an empty filtered Docs-only list and restores the card when cleared
  fireEvent.change(screen.getByLabelText("Search pages"),{target:{value:""}})
  expect(await screen.findByRole("button",{name:"Notes Doc"})).toBeInTheDocument()
  expect(screen.queryByText("No documents match these filters.")).toBeNull()
+})
+
+it("offers New Doc and WordCraft when native collaboration is available without legacy Docs",async()=>{
+ cleanup();window.history.replaceState(null,"","/pages")
+ Object.assign(access,{role:"OWNER",capabilities:[],loading:false,error:false})
+ const view=renderLayout([],undefined,{enabled:false,wordcraft_sdk_prefix:"/mooring-sdk/generated/"+"a".repeat(64)})
+ fireEvent.click(await screen.findByRole("button",{name:"New Doc"}))
+ expect(await screen.findByLabelText("Format")).toHaveValue("wordcraft")
+ expect(screen.queryByText("Document creation is unavailable.")).not.toBeInTheDocument()
+ view.qc.clear()
 })

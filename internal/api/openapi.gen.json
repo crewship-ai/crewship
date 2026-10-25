@@ -6216,6 +6216,10 @@
         "properties": {
           "enabled": {
             "type": "boolean"
+          },
+          "wordcraft_sdk_prefix": {
+            "pattern": "^/mooring-sdk/generated/[0-9a-f]{64}$",
+            "type": "string"
           }
         },
         "required": [

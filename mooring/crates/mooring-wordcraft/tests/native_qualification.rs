@@ -105,3 +105,23 @@ fn actual_native_open_normalization_never_silently_changes_writable_input() {
         assert_eq!(restored.checkpoint().unwrap(), cp);
     }
 }
+
+#[test]
+fn new_wordcraft_ui_document_uses_the_canonical_editable_blank() {
+    let source = include_str!("../../../../lib/mooring/wordcraft-empty.ts");
+    let literal = source
+        .lines()
+        .find_map(|line| line.strip_prefix("export const WORDCRAFT_EMPTY_NATIVE = "))
+        .unwrap();
+    let raw: String = serde_json::from_str(literal).unwrap();
+    let native: Value = serde_json::from_str(&raw).unwrap();
+    let mut blank = wordcraft_doc::Document::new();
+    blank.normalize_runs();
+    blank.ensure_nonempty();
+    assert_eq!(native, serde_json::to_value(blank).unwrap());
+    let document = Document::import(native.clone(), vec!["new-paragraph".into()]).unwrap();
+    assert!(!document.is_read_only());
+    let restored = Document::restore(&document.checkpoint().unwrap()).unwrap();
+    assert!(!restored.is_read_only());
+    assert_eq!(restored.native().unwrap(), native);
+}

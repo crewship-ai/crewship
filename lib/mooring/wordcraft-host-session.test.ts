@@ -193,3 +193,10 @@ it("refuses extra scope fields in a Pending diagnostic", () => {
   expect(Pending.check).not.toHaveBeenCalled()
   host.close()
 })
+
+it("initializes the stable Page through the existing scoped native session path",async()=>{
+ fetch.mockResolvedValue({ok:true,text:async()=>JSON.stringify(opening)})
+ await openWordCraftSession("workspace","page",true,new AbortController().signal,"exact-checkpoint")
+ expect(fetch.mock.calls[0][0]).toBe("/api/v1/pages/%40page/mooring/session?workspace_id=workspace")
+ expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({write:true,checkpoint_base64:"exact-checkpoint"})
+})

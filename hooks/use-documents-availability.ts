@@ -13,10 +13,14 @@ export function useDocumentsAvailability(workspaceId: string) {
       const response = await apiFetch(`/api/v1/documents/status?workspace_id=${encodeURIComponent(workspaceId)}`,{signal})
       if (!response.ok) throw new Error("Document availability could not be confirmed.")
       const value = await response.json()
-      return value?.enabled === true
+      return {
+        enabled: value?.enabled === true,
+        wordcraftSDKPrefix: typeof value?.wordcraft_sdk_prefix === "string" && /^\/mooring-sdk\/generated\/[0-9a-f]{64}$/.test(value.wordcraft_sdk_prefix)
+          ? value.wordcraft_sdk_prefix as string : undefined,
+      }
     },
   })
   // Failed refreshes must withdraw cached admission, while preserving the
   // query error for callers and the editor's separately retained local draft.
-  return {...query, data: query.isError ? false : query.data}
+  return {...query, data: query.isError ? false : query.data?.enabled, wordcraftSDKPrefix: query.isError ? undefined : query.data?.wordcraftSDKPrefix}
 }
