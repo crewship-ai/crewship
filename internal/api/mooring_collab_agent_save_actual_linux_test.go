@@ -32,6 +32,7 @@ func testMooringAgentActualProductionSave(t *testing.T) {
 type mooringAgentSavedFixtureOptions struct {
 	allowPartial bool
 	readerGrant  bool
+	beforeTask   func(*collaborationAgentTestFixture, *collaborationHTTPManager, *collaborationHTTPDocument)
 }
 
 // The callback runs only after an actual production Save and its exact retry.
@@ -84,6 +85,9 @@ func withMooringAgentActualProductionSaved(t *testing.T, check func(*collaborati
 	d, err := m.document(httptest.NewRequest(http.MethodPost, "/host-initialize", nil).WithContext(x.human), x.key, checkpoint)
 	if err != nil {
 		t.Fatalf("production bootstrap: %v", err)
+	}
+	if policy.beforeTask != nil {
+		policy.beforeTask(x, m, d)
 	}
 	mustExec(t, x.f.rig.db, `UPDATE page_grants SET level='write' WHERE page_id=? AND subject_type='agent'`, x.key.ArtifactID)
 	if policy.readerGrant {

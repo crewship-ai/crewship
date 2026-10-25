@@ -22,7 +22,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/mooring"
 	protocolschema "github.com/crewship-ai/crewship/mooring/protocol"
 	protocol "github.com/crewship-ai/crewship/mooring/protocol/generated/go"
-	"golang.org/x/net/websocket"
+	"github.com/gorilla/websocket"
 )
 
 // MooringHTTPConfig is trusted startup configuration. Production wiring must

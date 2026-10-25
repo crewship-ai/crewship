@@ -12,7 +12,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/mooring"
 	protocol "github.com/crewship-ai/crewship/mooring/protocol/generated/go"
-	"golang.org/x/net/websocket"
+	"github.com/gorilla/websocket"
 )
 
 const collaborationHTTPSendDeadline = 250 * time.Millisecond
@@ -110,7 +110,13 @@ func (m *collaborationHTTPManager) websocket(w http.ResponseWriter, r *http.Requ
 	m.mu.Unlock()
 	defer m.workers.Done()
 	defer c.close()
-	server := websocket.Server{Handshake: func(*websocket.Config, *http.Request) error { return nil }, Handler: func(ws *websocket.Conn) {
+	// The authenticated exact-origin check above owns origin policy.
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	ws, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return
+	}
+	func() {
 		c.mu.Lock()
 		if c.closed {
 			c.mu.Unlock()
@@ -119,12 +125,12 @@ func (m *collaborationHTTPManager) websocket(w http.ResponseWriter, r *http.Requ
 		}
 		c.socket = ws
 		c.mu.Unlock()
-		ws.MaxPayloadBytes = collaborationHTTPFrameLimit
+		ws.SetReadLimit(collaborationHTTPFrameLimit)
 		stop := context.AfterFunc(d.ctx, func() { _ = ws.Close() })
 		defer stop()
 		_ = ws.SetReadDeadline(time.Now().Add(5 * time.Second))
-		var raw []byte
-		if websocket.Message.Receive(ws, &raw) != nil {
+		_, raw, err := ws.ReadMessage()
+		if err != nil {
 			return
 		}
 		normalized, err := m.schema.ValidateE3(raw)
@@ -160,10 +166,12 @@ func (m *collaborationHTTPManager) websocket(w http.ResponseWriter, r *http.Requ
 		}); err != nil {
 			return
 		}
+		stopLiveness := collaborationSocketLiveness(operationContext, ws, time.Minute, 30*time.Second)
+		defer stopLiveness()
 		for {
 			_ = ws.SetReadDeadline(time.Now().Add(time.Minute))
-			raw = nil
-			if websocket.Message.Receive(ws, &raw) != nil {
+			_, raw, err = ws.ReadMessage()
+			if err != nil {
 				return
 			}
 			normalized, err = m.schema.ValidateE3(raw)
@@ -207,8 +215,40 @@ func (m *collaborationHTTPManager) websocket(w http.ResponseWriter, r *http.Requ
 			return
 
 		}
-	}}
-	server.ServeHTTP(w, r)
+	}()
+}
+
+// Transport pongs prove only that this original socket is responsive. They
+// never refresh an admission, delivery gate, lease, or application authority.
+// Keep the existing idle bound while allowing a browser with no authored data
+// to remain connected; browsers answer RFC 6455 pings without application code.
+func collaborationSocketLiveness(parent context.Context, ws *websocket.Conn, idle, interval time.Duration) func() {
+	ctx, cancel := context.WithCancel(parent)
+	done := make(chan struct{})
+	_ = ws.SetReadDeadline(time.Now().Add(idle))
+	ws.SetPongHandler(func(payload string) error {
+		if payload != "mooring" {
+			return nil
+		}
+		return ws.SetReadDeadline(time.Now().Add(idle))
+	})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if ws.WriteControl(websocket.PingMessage, []byte("mooring"), time.Now().Add(collaborationHTTPSendDeadline)) != nil {
+					_ = ws.Close()
+					return
+				}
+			}
+		}
+	}()
+	return func() { cancel(); <-done }
 }
 
 func (c *collaborationHTTPConnection) close() {
@@ -417,7 +457,7 @@ func (c *collaborationHTTPConnection) checkedSendRequestLocked(request *http.Req
 			if e = c.socket.SetWriteDeadline(time.Now().Add(collaborationHTTPSendDeadline)); e != nil {
 				return e
 			}
-			return websocket.Message.Send(c.socket, string(raw))
+			return c.socket.WriteMessage(websocket.TextMessage, raw)
 		})
 	})
 }

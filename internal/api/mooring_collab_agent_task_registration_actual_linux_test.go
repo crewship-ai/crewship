@@ -18,6 +18,7 @@ import (
 func TestMooringAgentToolActualOriginalTaskRegistration(t *testing.T) {
 	t.Run("proof-isolation", testMooringAgentToolActualTaskRegistrationProofIsolation)
 	t.Run("production-save", testMooringAgentActualProductionSave)
+	t.Run("idle-human-then-agent-save", testMooringIdleHumanThenAgentSave)
 	t.Run("bounded-agent-revocation", testMooringAgentActualBoundedRevocation)
 	t.Run("current-authority", testMooringAgentActualTaskRegistrationCurrentAuthority)
 	t.Run("writer-original-task", func(t *testing.T) {

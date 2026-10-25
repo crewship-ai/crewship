@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Keep idle WordCraft editors connected through standard WebSocket ping/pong while preserving the existing response and inactivity limits.
+
 - Open document links in their accessible workspace before requesting document content, preserving unsaved-work navigation guards.
 
 - **WordCraft documents can be created from Pages.** When native collaboration is enabled, choose WordCraft in New Doc to open a blank document in the editor without setup scripts.
