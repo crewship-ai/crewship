@@ -14,8 +14,9 @@ an unaffected participant; continuity through that event is not qualified.
 |---|---|
 | `POST /api/v1/pages/{slug}/mooring/session` | Admit a human connection against current Page authority |
 | `GET /api/v1/pages/{slug}/mooring/ws` | Upgrade the admitted connection to a WebSocket |
+| `POST /api/v1/pages/{slug}/mooring/tasks` | Request the original human-authored chat message as a task in this document |
 
-Both operations require current human authentication, workspace context and Page
+These operations require current human authentication, workspace context and Page
 access. A slug or `@ID` selects the Page in that workspace. The restore fence runs
 before authentication/body handling. Read access cannot authorize a writer.
 Agent/internal credentials cannot substitute for the human session admission.
@@ -74,3 +75,30 @@ work. This contract does not declare those scenarios complete.
 The matching CLI commands and their input/output behavior are documented in
 [the Mooring CLI reference](../cli/mooring.mdx). Runtime configuration is listed
 in [environment variables](../configuration/environment.mdx).
+
+
+## Explicit original-message task action
+
+`Run in this Doc` is available only for a persisted message whose original
+stored author matches the current human. Its picker reuses the chat document
+access query and selects an existing WordCraft document with a current agent
+write grant and allowed policy. The picker is metadata, not a runtime capability
+or a new grant. Existing document sharing remains the only grant-management path.
+
+`POST /api/v1/pages/{slug}/mooring/tasks` accepts only `chat_id` and `message_id`
+strings in a closed JSON body of at most 4096 bytes. The host reads the original
+stored instruction, checks the original human, current chat audience, existing
+human/agent write rights and workspace policy, and qualifies the actual native
+D1 runtime. It cannot add or widen an agent grant. Reusing an accepted original
+message is refused; an uncertain response does not authorize a new instruction.
+HTTP 202 returns `work_id` and `status: "queued"`. It is task acceptance, not a
+committed document mutation or a Saved receipt. The CLI equivalent is
+`crewship mooring task <page-slug|@ID> --chat <chat-id> --message <message-id>`.
+
+The supported private execution path exposes only `doc_read` and `doc_submit`
+through the existing authenticated run sidecar. `doc_submit` canonicalizes
+explicit typed commands and their original read preconditions against a retained
+`doc_read` view without rereading or creating authority. On uncertainty, the
+returned original submission must be retried unchanged. Actual native preparation,
+SQL COMMIT and correlated receipts remain the Saved boundary. A test fixture or
+an accepted task does not qualify an actual private agent environment.

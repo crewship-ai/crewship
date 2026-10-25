@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/crewship-ai/crewship/internal/mooring"
+	protocol "github.com/crewship-ai/crewship/mooring/protocol/generated/go"
 )
 
 const collaborationOriginalRecordLimit = 256
@@ -23,6 +24,7 @@ type collaborationObservedCut struct {
 
 type collaborationOriginalSource struct {
 	connection *collaborationHTTPConnection
+	agent      *collaborationLiveAgent
 	order      uint64
 	retired    bool
 	observed   map[string]collaborationObservedCut
@@ -42,6 +44,7 @@ type collaborationLiveOriginal struct {
 	saved      *collaborationSavedOriginal
 	rejected   bool
 	group      *collaborationOriginalGroup
+	native     *protocol.SessionNativeDelta // Actual app candidate DATA, never Saved.
 }
 
 type collaborationLiveOriginals struct {
@@ -51,12 +54,13 @@ type collaborationLiveOriginals struct {
 	changes      map[string]*collaborationLiveOriginal
 	operations   map[string]*collaborationLiveOriginal
 	groups       map[string]*collaborationOriginalGroup
+	agents       map[*collaborationLiveAgent]*collaborationOriginalSource
 	bytes        int
 	receiptBytes int
 }
 
 func newCollaborationLiveOriginals(d *collaborationHTTPDocument) *collaborationLiveOriginals {
-	return &collaborationLiveOriginals{document: d, sources: make(map[*collaborationHTTPConnection]*collaborationOriginalSource), changes: make(map[string]*collaborationLiveOriginal), operations: make(map[string]*collaborationLiveOriginal), groups: make(map[string]*collaborationOriginalGroup)}
+	return &collaborationLiveOriginals{document: d, sources: make(map[*collaborationHTTPConnection]*collaborationOriginalSource), agents: make(map[*collaborationLiveAgent]*collaborationOriginalSource), changes: make(map[string]*collaborationLiveOriginal), operations: make(map[string]*collaborationLiveOriginal), groups: make(map[string]*collaborationOriginalGroup)}
 }
 
 // observe is called only after actual current-reader checked physical delivery.
@@ -69,7 +73,7 @@ func (l *collaborationLiveOriginals) observe(c *collaborationHTTPConnection, cut
 	defer l.mu.Unlock()
 	source := l.sources[c]
 	if source == nil {
-		if len(l.sources) >= collaborationHTTPParticipantLimit {
+		if len(l.sources)+len(l.agents) >= collaborationHTTPParticipantLimit {
 			return mooring.ErrBatchCapacity
 		}
 		source = &collaborationOriginalSource{connection: c, observed: make(map[string]collaborationObservedCut)}
@@ -282,12 +286,20 @@ func (l *collaborationLiveOriginals) authorizeOriginal(access mooring.SessionBat
 	if l == nil || l.document == nil || l.document.cell == nil || access.Purpose != mooring.SessionProcessSealedOutcome || access.Access.Intent != "outcome" || access.Access.Operation == nil || access.Lease != l.document.owner || access.Access.Scope != l.document.key || !access.Access.FromStore(l.document.cell.store) {
 		return errCollaborationHTTP
 	}
-	if access.Access.TaskID != "" {
-		return errCollaborationHTTP
-	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	slot := l.changes[access.ChangeID]
+	if access.Access.TaskID != "" {
+		if slot == nil || !slot.captured || slot.captureErr != nil || slot.source == nil || slot.source.agent == nil || slot.source.agent.document != l.document || slot.source.agent.participant == nil || slot.source.agent.participant.id != access.Access.Participant || slot.source.agent.confirmed.workID != access.Access.TaskID || slot.change.TaskID != access.Access.TaskID || slot.change.MembershipHash != access.MembershipHash {
+			return errCollaborationHTTP
+		}
+		for _, operation := range slot.change.Operations {
+			if reflect.DeepEqual(operation, *access.Access.Operation) {
+				return nil
+			}
+		}
+		return errCollaborationHTTP
+	}
 	if slot == nil || !slot.captured || slot.captureErr != nil || slot.source == nil || slot.source.connection == nil || slot.source.connection.document != l.document || slot.source.connection.admission.participant != access.Access.Participant || slot.source.connection.origin != slot.payload.Origin || slot.change.MembershipHash != access.MembershipHash || len(slot.change.Operations) != 1 || !reflect.DeepEqual(slot.change.Operations[0], *access.Access.Operation) {
 		return errCollaborationHTTP
 	}

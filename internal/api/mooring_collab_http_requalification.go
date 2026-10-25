@@ -219,6 +219,9 @@ func (d *collaborationHTTPDocument) deliveryControl(ctx context.Context, token m
 	if q.Scope != d.wireScope() || q.SessionID != protocol.Identifier(d.activation.SessionID()) || q.Fence != d.wireFence() {
 		return errCollaborationHTTP
 	}
+	if a := d.agentParticipant("", string(q.ParticipantRef), ""); a != nil {
+		return a.renew(ctx, token, q)
+	}
 	c := d.participantConnection("", string(q.ParticipantRef))
 	if c == nil {
 		return errCollaborationHTTP
@@ -269,6 +272,9 @@ func (d *collaborationHTTPDocument) deliveryControl(ctx context.Context, token m
 func (d *collaborationHTTPDocument) outputControl(ctx context.Context, token mooring.SessionControl, q protocol.SessionParticipantOutput) error {
 	if q.Scope != d.wireScope() || q.SessionID != protocol.Identifier(d.activation.SessionID()) || q.RuntimeRef != protocol.Identifier(d.cell.runtime.RuntimeRef()) || q.Fence != d.wireFence() {
 		return errCollaborationHTTP
+	}
+	if a := d.agentParticipant(string(q.ConnectionRef), string(q.ParticipantRef), ""); a != nil {
+		return a.output(ctx, token, q)
 	}
 	c := d.participantConnection(string(q.ConnectionRef), string(q.ParticipantRef))
 	if c == nil {
@@ -345,6 +351,9 @@ func (d *collaborationHTTPDocument) outputControl(ctx context.Context, token moo
 // Serial management callback: a successful original-vector denial after Open
 // consumes only that pending ticket through the fixed physical negative reply.
 func (d *collaborationHTTPDocument) ticketControl(ctx context.Context, token mooring.SessionControl, q protocol.TicketValidationRequest) error {
+	if a := d.agentParticipant("", "", q.Ticket); a != nil {
+		return a.ticketReply(ctx, token, q)
+	}
 	d.mu.Lock()
 	var c *collaborationHTTPConnection
 	for _, candidate := range d.connections {

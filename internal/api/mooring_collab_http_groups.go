@@ -13,15 +13,17 @@ import (
 // One complete original public emission, including its original request ID.
 // Private scheduling envelopes cannot split, merge, reorder or relabel it.
 type collaborationOriginalGroup struct {
-	source             *collaborationOriginalSource
-	requestID, outerID protocol.Identifier
-	packet             []byte
-	changes            []string
-	captured, sent     bool
-	receipt            *protocol.CommitResult
-	privateReceipt     *protocol.CommitResult
-	pendingPublic      []byte
-	pendingPrivate     []byte
+	source                *collaborationOriginalSource
+	requestID, outerID    protocol.Identifier
+	packet                []byte
+	changes               []string
+	captured, sent        bool
+	receipt               *protocol.CommitResult
+	privateReceipt        *protocol.CommitResult
+	pendingPublic         []byte
+	pendingPrivate        []byte
+	agentReceiptReady     chan struct{}
+	agentReceiptDelivered bool
 }
 
 func (l *collaborationLiveOriginals) capturePublic(ctx context.Context, c *collaborationHTTPConnection, raw []byte) (*collaborationOriginalGroup, error) {

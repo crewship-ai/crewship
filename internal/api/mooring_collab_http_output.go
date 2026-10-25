@@ -102,7 +102,7 @@ func (c *collaborationHTTPConnection) committedOutputRecipient(q protocol.Sessio
 					break
 				}
 			}
-			if outcome == nil || outcome.FirstRevision == nil || outcome.LastRevision == nil || *outcome.FirstRevision != *outcome.LastRevision {
+			if outcome == nil || outcome.FirstRevision == nil || outcome.LastRevision == nil || string(*outcome.LastRevision) != slot.saved.cut.Revision {
 				break
 			}
 			first, err := strconv.ParseUint(string(*outcome.FirstRevision), 10, 64)

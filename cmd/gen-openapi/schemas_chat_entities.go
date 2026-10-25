@@ -18,11 +18,22 @@ func chatEntitySchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	page := obj(map[string]any{"contract_version": map[string]any{"type": "integer", "enum": []int{1}}, "reset": boolean(), "next_cursor": str(), "snapshot_id": str(), "snapshot_complete": boolean(), "has_more": boolean(), "refs": map[string]any{"type": "array", "items": ref("ChatEntityReference")}}, "contract_version", "reset", "next_cursor", "snapshot_id", "snapshot_complete", "has_more", "refs")
 	operation := obj(map[string]any{"id": str(), "status": str(), "kind": str(), "verb": str(), "entity": ref("ChatEntityIdentity"), "provenance": ref("ChatEntityProvenance"), "revision_at_action": ref("IssueEntityRevision")}, "id", "status", "kind", "verb", "entity", "provenance", "revision_at_action")
 	components := map[string]any{"ChatEntityIdentity": entity, "ChatEntityProvenance": provenance, "IssueEntityRevision": revision, "ChatEntityReference": item, "ChatEntityReferencePage": page, "ChatEntityOperation": operation}
+	taskView := obj(map[string]any{"work_id": str(), "run_id": str(), "scope": str(), "expires_at": map[string]any{"type": "string", "format": "date-time"}, "can_read": boolean(), "can_write": boolean()}, "work_id", "run_id", "scope", "expires_at", "can_read", "can_write")
+	documentAccess := obj(map[string]any{
+		"page_id": str(), "title": str(), "document_type": map[string]any{"type": "string", "enum": []string{"document", "spreadsheet"}}, "application_id": str(),
+		"document_grant": map[string]any{"type": "string", "enum": []string{"read", "write"}}, "policy_allows": boolean(),
+		"task_status": map[string]any{"type": "string", "enum": []string{"unavailable", "no_active_task", "active"}},
+		"tasks":       map[string]any{"type": "array", "items": ref("ChatDocumentTaskView")}, "provenance": map[string]any{"type": "string", "enum": []string{"unknown"}},
+	}, "page_id", "title", "document_type", "application_id", "document_grant", "policy_allows", "task_status", "tasks", "provenance")
+	components["ChatDocumentTaskView"] = taskView
+	components["ChatDocumentAccess"] = documentAccess
+	components["ChatDocumentAccessList"] = obj(map[string]any{"documents": map[string]any{"type": "array", "items": ref("ChatDocumentAccess")}}, "documents")
 	path := func(name string) map[string]any {
 		return map[string]any{"name": name, "in": "path", "required": true, "schema": str()}
 	}
 	noStore := map[string]any{"Cache-Control": map[string]any{"description": "Authorization-sensitive projection; never store in shared caches.", "schema": str()}}
 	routes := map[string]DomainSchema{}
+	routes["GET /api/v1/chats/{chatId}/document-access"] = DomainSchema{Response: ref("ChatDocumentAccessList"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"401", "403", "404", "503"}, SuccessHeaders: noStore, Parameters: []map[string]any{path("chatId")}}
 	for route, schema := range map[string]string{
 		"GET /api/v1/chats/{chatId}/entity-refs":                            "ChatEntityReferencePage",
 		"GET /api/v1/operations/{operationId}":                              "ChatEntityOperation",

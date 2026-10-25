@@ -26,6 +26,7 @@ type collaborationOriginalView struct {
 	basis             collaborationObservedCut
 	saved             *collaborationSavedOriginal
 	rejected          bool
+	native            *protocol.SessionNativeDelta
 }
 
 // Snapshot only immutable original DATA under the RAM lock. Historical loads
@@ -40,10 +41,16 @@ func (l *collaborationLiveOriginals) prepareViews(change mooring.BatchChange) (c
 	}
 	views := make(map[string]collaborationOriginalView, len(l.changes))
 	for id, slot := range l.changes {
-		if !slot.captured || slot.captureErr != nil || slot.source == nil || slot.source.connection == nil {
+		if !slot.captured || slot.captureErr != nil || slot.source == nil || slot.source.connection == nil && slot.source.agent == nil {
 			continue
 		}
-		view := collaborationOriginalView{reference: slot.reference, source: slot.source.connection.ref, order: slot.order, change: slot.change, payload: slot.payload, basis: slot.basis, saved: slot.saved, rejected: slot.rejected}
+		source := ""
+		if slot.source.connection != nil {
+			source = slot.source.connection.ref
+		} else {
+			source = slot.source.agent.ref
+		}
+		view := collaborationOriginalView{reference: slot.reference, source: source, order: slot.order, change: slot.change, payload: slot.payload, basis: slot.basis, saved: slot.saved, rejected: slot.rejected, native: slot.native}
 		views[id] = view
 	}
 	return views[change.ID], views, nil
@@ -183,6 +190,9 @@ func collaborationWireOriginal(change mooring.BatchChange) (protocol.AtomicChang
 }
 
 func collaborationMatchesHumanDelta(view collaborationOriginalView, delta protocol.SessionNativeDelta) bool {
+	if view.change.TaskID != "" {
+		return view.native != nil && reflect.DeepEqual(*view.native, delta)
+	}
 	if string(delta.WriterOrigin) != view.payload.Origin || delta.Update != view.payload.Update || len(delta.Targets) != len(view.payload.Targets) {
 		return false
 	}
@@ -239,10 +249,11 @@ func (l *collaborationLiveOriginals) validateNative(ctx context.Context, tx *sql
 		return errCollaborationHTTP
 	}
 	candidate, err := access.Candidate()
-	if err != nil || candidate.Change.TaskID != "" {
-		// Agent live source/ref/order must come from the actual fixed-task
-		// handoff. A native number or child task label cannot create it.
+	if err != nil {
 		return errCollaborationHTTP
+	}
+	if candidate.Change.TaskID != "" {
+		return l.validateAgentNative(tx, access, candidate)
 	}
 	view, _, err := l.prepareViews(candidate.Change)
 	if err != nil || !collaborationMatchesHumanDelta(view, candidate.NativeDelta) {

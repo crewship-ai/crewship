@@ -145,7 +145,7 @@ func (l *collaborationLiveOriginals) publishCommitted(group *collaborationOrigin
 				continue
 			}
 			delete(deltaByID, change.ID)
-			view := collaborationOriginalView{payload: slot.payload}
+			view := collaborationOriginalView{payload: slot.payload, change: slot.change, native: slot.native}
 			if !collaborationMatchesHumanDelta(view, delta.NativeDelta) {
 				return errCollaborationHTTP
 			}

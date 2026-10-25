@@ -43,7 +43,7 @@ func newCollaborationAgentTaskDispatcher(s *collaborationAgentMandateStore) (*co
 // on mu until publication. No accepted response or dispatcher hint precedes it.
 func (d *collaborationAgentTaskDispatcher) Produce(ctx context.Context, key mooring.SessionKey, intent, message string, original *chataudience.Receipt) (work.Receipt, error) {
 	var result work.Receipt
-	if d == nil || d.mandates == nil {
+	if d == nil || d.mandates == nil || original == nil {
 		return result, errCollaborationAgentAccess
 	}
 	s := d.mandates
@@ -67,6 +67,14 @@ func (d *collaborationAgentTaskDispatcher) Produce(ctx context.Context, key moor
 		return result, err
 	}
 	defer tx.Rollback()
+	// The explicit action belongs to one original message and one Doc. SQL is
+	// used only to refuse a duplicate launch; a row never reconstructs the
+	// original pending mandate after a controller restart or retirement.
+	var duplicate bool
+	err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM work_items WHERE workspace_id=? AND source='chat' AND source_ref=? AND domain_kind='mooring_wordcraft_task' AND domain_id=? AND agent_id=?)`, key.WorkspaceID, message, key.ArtifactID, original.AgentID).Scan(&duplicate)
+	if err != nil || duplicate {
+		return result, errCollaborationAgentAccess
+	}
 	pending, accepted, err := s.StartTask(ctx, tx, key, intent, message, original)
 	if err != nil {
 		return result, err

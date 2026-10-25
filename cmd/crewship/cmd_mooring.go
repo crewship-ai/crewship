@@ -80,7 +80,7 @@ func newMooringCommand() *cobra.Command {
 		}
 		root.AddCommand(cmd)
 	}
-	root.AddCommand(newMooringConnectCommand())
+	root.AddCommand(newMooringConnectCommand(), newMooringTaskCommand())
 	agent := &cobra.Command{Use: "agent", Args: cobra.NoArgs, Short: "Run an explicitly admitted generic application command", RunE: func(cmd *cobra.Command, _ []string) error {
 		token := os.Getenv("CREWSHIP_AGENT_TOKEN")
 		if token == "" {

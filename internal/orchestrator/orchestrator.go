@@ -157,6 +157,7 @@ type AgentRunRequest struct {
 	// construction, which is the point of #1823.
 	SuppressSessionStream bool
 	strictContentPrivacy  bool              // Host-only; JSON cannot create or clear this policy.
+	mooringDocumentTools  bool              // Host-only actual D1 task: fixed MCP surface, no builtin tools.
 	NetworkMode           string            // "free" (default) or "restricted" — crew-level network policy
 	AllowedDomains        []string          // Extra allowed domains for restricted mode
 	AllowPrivateEndpoints bool              // #961: crew opted in to reach a private/LAN model endpoint (RFC1918/loopback). Link-local/metadata stay blocked regardless.

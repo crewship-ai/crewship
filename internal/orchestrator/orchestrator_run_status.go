@@ -122,10 +122,6 @@ func (o *Orchestrator) wrapScrubHandler(handler EventHandler, secretValues []str
 	return wrapped, flush
 }
 
-func (o *Orchestrator) updateRunStatus(ctx context.Context, runID, status string) {
-	o.updateRunStatusWithLogger(ctx, runID, status, o.logger)
-}
-
 func (o *Orchestrator) updateRunStatusForRun(ctx context.Context, req AgentRunRequest, runID, status string) {
 	o.updateRunStatusWithLogger(ctx, runID, status, o.loggerForRun(req))
 }

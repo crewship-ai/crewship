@@ -49,20 +49,22 @@ const collaborationHTTPParticipantLimit = 128
 var errCollaborationHTTP = errors.New("Mooring session unavailable")
 
 type collaborationHTTPManager struct {
-	workers     sync.WaitGroup
-	stopped     chan struct{}
-	mu          sync.Mutex
-	pages       *PageHandler
-	config      MooringHTTPConfig
-	fence       *collaborationIngressFence
-	clock       mooring.OwnerClock
-	owners      *mooring.OwnerStore
-	schema      *mooring.WireSchema
-	ctx         context.Context
-	cancel      context.CancelFunc
-	closed      bool
-	docs        map[mooring.SessionKey]*collaborationHTTPDocument
-	usedOrigins map[mooring.SessionKey]map[uint64]struct{}
+	workers       sync.WaitGroup
+	stopped       chan struct{}
+	mu            sync.Mutex
+	pages         *PageHandler
+	config        MooringHTTPConfig
+	fence         *collaborationIngressFence
+	clock         mooring.OwnerClock
+	owners        *mooring.OwnerStore
+	schema        *mooring.WireSchema
+	ctx           context.Context
+	cancel        context.CancelFunc
+	closed        bool
+	docs          map[mooring.SessionKey]*collaborationHTTPDocument
+	usedOrigins   map[mooring.SessionKey]map[uint64]struct{}
+	agentMandates *collaborationAgentMandateStore
+	agentTasks    *collaborationAgentTaskController
 }
 type collaborationHTTPDocument struct {
 	manager     *collaborationHTTPManager
@@ -82,6 +84,7 @@ type collaborationHTTPDocument struct {
 	mu          sync.Mutex
 	closed      bool
 	connections map[string]*collaborationHTTPConnection
+	agents      map[string]*collaborationLiveAgent
 }
 type collaborationHTTPConnection struct {
 	document                 *collaborationHTTPDocument
@@ -369,7 +372,7 @@ func (m *collaborationHTTPManager) session(w http.ResponseWriter, r *http.Reques
 	original.Header.Del("Cookie")
 	c := &collaborationHTTPConnection{document: d, request: original, admission: admission, ticket: ticket, ref: ref, origin: origin, auditedOwner: rec.OwnerUserID}
 	d.mu.Lock()
-	if d.closed || len(d.connections) >= collaborationHTTPParticipantLimit {
+	if d.closed || len(d.connections)+len(d.agents) >= collaborationHTTPParticipantLimit {
 		d.mu.Unlock()
 		replyError(w, 503, "Mooring participant capacity exhausted")
 		return

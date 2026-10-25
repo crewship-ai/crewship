@@ -21,9 +21,9 @@ import (
 )
 
 // Neither callback is a request field or a client-controlled role assertion.
-// No production constructor supplies them. The environment callback is a
-// separate enablement gate: host output suppression cannot qualify native CLI
-// histories, shared container files, mounts, tools or existing log readouts.
+// The concrete document controller supplies the supported execution path. Its
+// late exec guard must qualify the actual run HOME, tools and sidecar; host
+// output suppression alone does not qualify a private execution environment.
 type collaborationAgentPrivateEnvironment interface {
 	BeforeStart(context.Context) error
 	Qualify(context.Context, chatbridge.ChatInfo, *provider.RuntimeUse) error
@@ -44,6 +44,8 @@ type collaborationAgentTaskRuntime struct {
 	tasks           *collaborationAgentTaskDispatcher
 	environment     collaborationAgentPrivateEnvironment
 	onConfirmed     func(context.Context, collaborationAgentConfirmed) error
+	onRetired       func(context.Context, string, string) error
+	documentTools   bool // Set only by the concrete D1 controller, not request data.
 }
 
 func newCollaborationAgentTaskRuntime(tasks *collaborationAgentTaskDispatcher, h *WebhookHandler, environment collaborationAgentPrivateEnvironment, onConfirmed func(context.Context, collaborationAgentConfirmed) error) (*collaborationAgentTaskRuntime, error) {
@@ -154,6 +156,12 @@ func (rt *collaborationAgentTaskRuntime) Run(ctx context.Context, a dispatch.Ass
 	req := info.ToAgentRunRequest(chatbridge.AgentRunOverrides{ChatID: w.chatID, ContainerID: use.ContainerID(), UserMessage: input.Instruction, LLMModel: info.LLMModel, TimeoutSecs: info.TimeoutSecs, MemoryMB: info.MemoryMB, CPUs: info.CPUs, MaxTurns: orchestrator.RoutineMaxTurns}).WithStrictContentPrivacy()
 	req.RunID = a.RunID
 	req.RuntimeUse = use
+	if rt.documentTools {
+		req, err = req.WithMooringDocumentTools()
+		if err != nil {
+			return orchestrator.ErrPrivateRunUnqualified
+		}
+	}
 	location := orchestrator.RunLocation{ContainerID: req.ContainerID, AgentSlug: req.AgentSlug, RunID: a.RunID}
 	if err = launch.Launch(location); err != nil {
 		return orchestrator.ErrPrivateRunUnqualified
@@ -194,6 +202,19 @@ func (rt *collaborationAgentTaskRuntime) Run(ctx context.Context, a dispatch.Ass
 	confirmMu.Lock()
 	confirmedOK := confirmed && confirmation == nil
 	confirmMu.Unlock()
+	if confirmedOK && rt.onRetired != nil {
+		// A Run return alone is not termination. Only the original ExecID probe
+		// may retire this process's retained task handle; uncertainty keeps it.
+		alive, inspectErr := rt.Alive(runCtx, a.RunID)
+		if inspectErr == nil && !alive {
+			launch.mu.Lock()
+			execID := launch.nativeExecID
+			launch.mu.Unlock()
+			if err := rt.onRetired(runCtx, a.RunID, execID); err != nil {
+				return orchestrator.ErrPrivateRunUnqualified
+			}
+		}
+	}
 	if !confirmedOK || runErr != nil {
 		return orchestrator.ErrPrivateRunUnqualified
 	}

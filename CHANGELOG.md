@@ -9,7 +9,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Document access in chat:** distinguish the agent's current document grants from verified active task permissions. Hide inaccessible document metadata, expire unverified views, and identify unknown output provenance explicitly.
+
 - Preserve original task authority and private-run ownership through the existing Mooring agent dispatcher and confirmed-attempt chain. This prerequisite does not enable an agent route or qualify a private execution environment.
+- Mooring sessions retain a Pending notification and its matching terminal receipt separately while delivery is blocked, preserving each until its own completion.
 
 - WordCraft documents expose existing authorized sharing from their header and list menu without replacing the running editor. Opening access rechecks the current viewer and keeps document sharing separate from agent task permissions.
 

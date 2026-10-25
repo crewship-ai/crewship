@@ -15,10 +15,14 @@ func (r *Router) registerMooringRoutes() {
 		return
 	}
 	r.mooringHTTP = manager
+	// A missing supported private runtime leaves the task endpoint unavailable;
+	// it must not turn a human session or SQL work row into agent authority.
+	_ = manager.startAgentTasks(r.webhookHandler)
 	authed := r.authMw.RequireAuth
 	wsCtx := r.authMw.RequireWorkspace
 	// Literal registrations keep the CLI and documentation route inventories
 	// able to verify these paths and their workspace requirement.
 	r.authedMut("POST", "/api/v1/pages/{slug}/mooring/session", roleSelf, manager.session, manager.fence.Wrap)
+	r.authedMut("POST", "/api/v1/pages/{slug}/mooring/tasks", roleSelf, manager.task, manager.fence.Wrap)
 	r.mux.Handle("GET /api/v1/pages/{slug}/mooring/ws", manager.fence.Wrap(authed(wsCtx(r.providerAccountPolicy(http.HandlerFunc(manager.websocket))))))
 }

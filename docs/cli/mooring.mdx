@@ -80,3 +80,14 @@ JSON and NDJSON formats print server frames as JSON lines; YAML prints separate
 YAML documents. Quiet output is rejected before input or network activity. A
 pending frame is not confirmation of storage; only the host's committed response
 can confirm a saved change.
+
+## crewship mooring task
+
+`crewship mooring task <page-slug|@ID> --chat CHAT_ID --message MESSAGE_ID`
+requests an agent task in the selected existing document. `--chat` identifies the
+original chat and `--message` identifies an already stored message authored by
+the current human. The agent must already have document write delegation and
+workspace policy must allow the task; this command cannot add or expand a grant.
+The server checks the original stored instruction and current document rights.
+A queued response is not a Saved receipt. Agent execution additionally requires
+the enabled native session runtime and qualified private sidecar environment.
