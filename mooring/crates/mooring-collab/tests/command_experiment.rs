@@ -760,3 +760,236 @@ fn restart_fences_rejected_and_denied_operations_without_reexecuting_them() {
         assert_eq!(text(&h, 0), "NEWCONFIRMED");
     }
 }
+
+/// Technical preflight only: these are simulated participants, not people or a
+/// model. Successful host invariants do not establish a usable live C2 path.
+#[test]
+fn simulated_c2_same_base_style_delete_undo_and_new_helper_preflight() {
+    let started = Instant::now();
+    let mut h = host();
+    commit(
+        &mut h,
+        "lead",
+        "Setup",
+        "text.insert",
+        Some((0, 0, 0)),
+        json!({"text":"LEAD"}),
+    );
+    commit(
+        &mut h,
+        "paragraph",
+        "Setup",
+        "text.newParagraph",
+        Some((0, 4, 4)),
+        json!({}),
+    );
+    let paragraph_id = h.ids()[1].clone();
+    let a = Admission::new(
+        "SimulatedHumanA",
+        "simulated person A",
+        "2001-02-03T04:05:06Z",
+        1,
+        true,
+    )
+    .unwrap();
+    let b = Admission::new(
+        "SimulatedHumanB",
+        "simulated person B",
+        "2001-02-03T04:05:07Z",
+        1,
+        true,
+    )
+    .unwrap();
+    let agent = Admission::new(
+        "SimulatedAgent",
+        "simulated agent",
+        "2001-02-03T04:05:08Z",
+        1,
+        true,
+    )
+    .unwrap();
+    let proposal_a = packet(
+        &h,
+        "text-a",
+        "SimulatedHumanA",
+        "text.insert",
+        Some((1, 0, 0)),
+        json!({"text":"JANA"}),
+    );
+    let proposal_b = packet(
+        &h,
+        "text-b",
+        "SimulatedHumanB",
+        "text.insert",
+        Some((1, 0, 0)),
+        json!({"text":"PETR"}),
+    );
+    let base = h.revision();
+    let confirmed = unchanged(&h);
+    let mut timings = Vec::new();
+    let command_started = Instant::now();
+    h.prepare(&proposal_a, &a).unwrap();
+    assert_eq!(h.prepare(&proposal_b, &b).unwrap_err(), "pending_limit");
+    assert_eq!(unchanged(&h), confirmed);
+    let receipt_a = resolve(&mut h, "text-a", Decision::Committed, Some(&a)).unwrap();
+    timings.push(command_started.elapsed().as_micros());
+    assert_eq!(receipt_a["actor"], "SimulatedHumanA");
+    assert_eq!(receipt_a["author"], "simulated person A");
+    assert_eq!(receipt_a["command_time"], "2001-02-03T04:05:06Z");
+    let after_a = unchanged(&h);
+    assert_eq!(h.prepare(&proposal_b, &b).unwrap_err(), "stale_revision");
+    assert_eq!(unchanged(&h), after_a);
+    assert_eq!(h.counts().1, 0);
+    assert_eq!(text(&h, 1), "JANA");
+    // The rejected proposal is retained only by this caller's test memory.
+    // There is no claim that Host or a UI preserves a pending text draft.
+    let proposal_b_fingerprint = mooring_protocol::wire::normalize_bounded(&proposal_b)
+        .unwrap()
+        .digest();
+
+    let style = packet(
+        &h,
+        "style",
+        "SimulatedAgent",
+        "format.bold",
+        Some((1, 0, 4)),
+        json!({"value":true}),
+    );
+    let command_started = Instant::now();
+    h.prepare(&style, &agent).unwrap();
+    let style_receipt = resolve(&mut h, "style", Decision::Committed, Some(&agent)).unwrap();
+    timings.push(command_started.elapsed().as_micros());
+    assert_eq!(style_receipt["actor"], "SimulatedAgent");
+    assert_eq!(style_receipt["author"], "simulated agent");
+    assert_eq!(style_receipt["command_time"], "2001-02-03T04:05:08Z");
+    assert_eq!(h.ids()[1], paragraph_id);
+    assert_ne!(h.native(), &after_a.0);
+    // Pinned native schema: Paragraph.runs are UTF8-byte lengths and
+    // Run.props is CharProps, whose optional bold field is serialized as bool.
+    assert_eq!(text(&h, 1), "JANA");
+    let runs = h.native()["body"][1]["runs"].as_array().unwrap();
+    assert_eq!(
+        runs.iter().map(|r| r["len"].as_u64().unwrap()).sum::<u64>(),
+        4
+    );
+    assert!(
+        runs.iter()
+            .filter(|r| r["len"].as_u64().unwrap() > 0)
+            .all(|r| r["props"]["bold"] == json!(true)),
+        "all four native UTF8 bytes of JANA must have explicit bold=true"
+    );
+    assert_eq!(
+        h.native()["body"][0],
+        after_a.0["body"][0],
+        "unrelated LEAD paragraph unchanged"
+    );
+    assert_eq!(
+        h.native()["styles"],
+        after_a.0["styles"],
+        "no default/global style change"
+    );
+    let styled_native = h.native().clone();
+    let styled_ids = h.ids().to_vec();
+
+    // The existing catalog can remove this addressable paragraph in two steps:
+    // delete its contents, then backspace the empty paragraph into its left peer.
+    let delete = packet(
+        &h,
+        "delete-text",
+        "SimulatedHumanA",
+        "text.delete",
+        Some((1, 0, 4)),
+        json!({}),
+    );
+    let command_started = Instant::now();
+    h.prepare(&delete, &a).unwrap();
+    resolve(&mut h, "delete-text", Decision::Committed, Some(&a)).unwrap();
+    assert_eq!(text(&h, 1), "");
+    let join = packet(
+        &h,
+        "delete-paragraph",
+        "SimulatedHumanA",
+        "text.backspace",
+        Some((1, 0, 0)),
+        json!({}),
+    );
+    h.prepare(&join, &a).unwrap();
+    resolve(&mut h, "delete-paragraph", Decision::Committed, Some(&a)).unwrap();
+    timings.push(command_started.elapsed().as_micros());
+    assert_eq!(h.ids().len(), 1);
+    assert!(!h.ids().contains(&paragraph_id));
+    assert_eq!(text(&h, 0), "LEAD");
+    for (op, target) in [
+        ("undo-paragraph", "delete-paragraph"),
+        ("undo-text", "delete-text"),
+    ] {
+        let undo = packet(
+            &h,
+            op,
+            "SimulatedHumanA",
+            "participant.undo",
+            None,
+            json!({"op_id":target}),
+        );
+        h.prepare(&undo, &a).unwrap();
+        resolve(&mut h, op, Decision::Committed, Some(&a)).unwrap();
+    }
+    assert_eq!(h.ids(), styled_ids);
+    assert_eq!(h.native(), &styled_native);
+    let before_conflict = unchanged(&h);
+    let undo = packet(
+        &h,
+        "undo-over-agent-style",
+        "SimulatedHumanA",
+        "participant.undo",
+        None,
+        json!({"op_id":"text-a"}),
+    );
+    assert_eq!(h.prepare(&undo, &a).unwrap_err(), "undo_overlap");
+    let foreign = packet(
+        &h,
+        "foreign-undo",
+        "SimulatedHumanB",
+        "participant.undo",
+        None,
+        json!({"op_id":"text-a"}),
+    );
+    assert_eq!(h.prepare(&foreign, &b).unwrap_err(), "foreign_undo_denied");
+    assert_eq!(unchanged(&h), before_conflict);
+
+    let checkpoint = h.checkpoint().unwrap();
+    let native = h.native().clone();
+    let ids = h.ids().to_vec();
+    drop(h);
+    let reload_started = Instant::now();
+    let h = Host::restore(engine(), &checkpoint, "preflight-reload").unwrap();
+    let reload_us = reload_started.elapsed().as_micros();
+    assert_eq!(h.native(), &native);
+    assert_eq!(h.ids(), ids);
+    let mut expected: Value = serde_json::from_slice(&checkpoint).unwrap();
+    expected["generation"] = json!("preflight-reload");
+    expected["generations"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!("preflight-reload"));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&h.checkpoint().unwrap()).unwrap(),
+        expected,
+        "new trusted generation is the sole checkpoint metadata transition"
+    );
+    eprintln!(
+        "C2_SIMULATED_PREFLIGHT {}",
+        json!({
+            "acceptance":"LIVE_C2_UNVERIFIED","actors":"two simulated human participants and one simulated agent; no people/model",
+            "same_base_revision":base,"simultaneous_text_proposals":2,"initial_conflicts":1,
+            "initial_conflict_ratio":0.5,"stale_retry_rejections":1,"accepted_text_commits":1,
+            "rejected_proposal_fingerprint":proposal_b_fingerprint,"rejected_proposal_retention":"caller test memory only; Host/UI unsupported",
+            "paragraph_removal":"existing delete-content then backspace; atomic paragraph-delete unsupported",
+            "style_author_envelope":"trusted simulated agent identity/time asserted; no SQLSaved claim",
+            "participant_undo_restores_id_and_style":true,"overlapping_undo":"refused without changing P",
+            "new_helper_checkpoint_payload_match":true,"new_generation_only_metadata_change":true,
+            "supported_stage_timings_us":timings,"reload_us":reload_us,"total_us":started.elapsed().as_micros(),
+            "cursor_ime_live_typing":"unsupported/unverified","product_pending_draft_preservation":"unsupported"
+        })
+    );
+}
