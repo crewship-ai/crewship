@@ -38,6 +38,10 @@ type collaborationSessionPumpHandlers struct {
 	// correlated reply or typed retirement completion; DATA remains queued opaque.
 	DeliveryControl func(context.Context, mooring.SessionControl, protocol.DeliveryRenew) error
 	OutputControl   func(context.Context, mooring.SessionControl, protocol.SessionParticipantOutput) error
+	// Joined is captured once on the serial management reader. A nonnil owned
+	// continuation moves the SAME charged token to the DATA FIFO; only that
+	// worker completes it after the continuation. It grants no recipient rights.
+	JoinedControl func(context.Context, mooring.SessionControl, protocol.SessionParticipantOutput) (func(context.Context) error, error)
 }
 
 type collaborationSessionPump struct {
@@ -50,7 +54,7 @@ type collaborationSessionPump struct {
 }
 
 func newCollaborationSessionPump(runtime *mooring.SessionRuntime, handlers collaborationSessionPumpHandlers) (*collaborationSessionPump, error) {
-	if runtime == nil || runtime.RuntimeRef() == "" || runtime.Done() == nil || handlers.Submit == nil || handlers.Status == nil {
+	if runtime == nil || runtime.RuntimeRef() == "" || runtime.Done() == nil || handlers.Submit == nil || handlers.Status == nil || (handlers.JoinedControl != nil && handlers.OutputControl == nil) {
 		return nil, errCollaborationSessionPump
 	}
 	select {
@@ -85,8 +89,9 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 		}
 	}()
 	type pending struct {
-		token mooring.SessionControl
-		kind  string
+		token       mooring.SessionControl
+		kind        string
+		afterJoined func(context.Context) error
 	}
 	queue := make(chan pending, 128)
 	workerDone := make(chan struct{})
@@ -127,8 +132,18 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 				case <-ctx.Done():
 					return
 				case next := <-outputQueue:
+					if ctx.Err() != nil {
+						return
+					}
 					raw, e := next.token.Frame()
-					if e != nil || p.control(ctx, next.token, next.kind, raw) != nil {
+					if e != nil {
+						return
+					}
+					if next.afterJoined != nil {
+						if next.afterJoined(ctx) != nil || ctx.Err() != nil || p.runtime.CompleteControl(next.token) != nil {
+							return
+						}
+					} else if p.control(ctx, next.token, next.kind, raw) != nil {
 						return
 					}
 				}
@@ -165,7 +180,7 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 			select {
 			case <-ctx.Done():
 				return errCollaborationSessionPump
-			case queue <- pending{token, header.Type}:
+			case queue <- pending{token: token, kind: header.Type}:
 				p.queuedMutations.Add(1)
 			default:
 				return errCollaborationSessionPump
@@ -181,9 +196,31 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 			if json.Unmarshal(raw, &envelope) != nil {
 				return errCollaborationSessionPump
 			}
+			if envelope.Message.Type == "session_joined" && p.handlers.JoinedControl != nil {
+				output, e := pumpRequest[protocol.SessionParticipantOutput](ctx, raw)
+				if e != nil {
+					return errCollaborationSessionPump
+				}
+				after, e := p.handlers.JoinedControl(ctx, token, output)
+				if e != nil || ctx.Err() != nil {
+					return errCollaborationSessionPump
+				}
+				if after == nil {
+					if p.runtime.CompleteControl(token) != nil {
+						return errCollaborationSessionPump
+					}
+				} else {
+					select {
+					case outputQueue <- pending{token: token, kind: header.Type, afterJoined: after}:
+					default:
+						return errCollaborationSessionPump
+					}
+				}
+				continue
+			}
 			if envelope.Message.Type != "session_joined" {
 				select {
-				case outputQueue <- pending{token, header.Type}:
+				case outputQueue <- pending{token: token, kind: header.Type}:
 				default:
 					return errCollaborationSessionPump
 				}
