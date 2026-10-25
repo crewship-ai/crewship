@@ -20,7 +20,12 @@ const maxShellPayloadBytes = 64 * 1024
 // marker behavior. Drain excess bytes without retaining unbounded output.
 const maxShellCapturedBytes = 4097
 
-type shellOutput struct{ bytes.Buffer }
+// Do not embed bytes.Buffer: its promoted ReadFrom would let io.Copy bypass
+// Write and grow retention without a bound.
+type shellOutput struct{ buf bytes.Buffer }
+
+func (b *shellOutput) Len() int       { return b.buf.Len() }
+func (b *shellOutput) String() string { return b.buf.String() }
 
 func (b *shellOutput) Write(p []byte) (int, error) {
 	n := len(p)
@@ -29,7 +34,7 @@ func (b *shellOutput) Write(p []byte) (int, error) {
 		if remaining > len(p) {
 			remaining = len(p)
 		}
-		_, _ = b.Buffer.Write(p[:remaining])
+		_, _ = b.buf.Write(p[:remaining])
 	}
 	return n, nil
 }

@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"io"
 	"runtime"
 	"strings"
 	"testing"
@@ -30,6 +31,17 @@ func TestShellOutputPreservesPresentationWithBoundedRetention(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestShellOutputIOCopyCannotBypassCaptureLimit(t *testing.T) {
+	var out shellOutput
+	// exec's pipe copy uses io.Copy; prevent optional fast-path interfaces
+	// from bypassing the writer limit.
+	source := struct{ io.Reader }{strings.NewReader(strings.Repeat("x", 1024*1024))}
+	n, err := io.Copy(&out, source)
+	if err != nil || n != 1024*1024 || out.Len() != maxShellCapturedBytes {
+		t.Fatalf("io.Copy bypassed capture: n=%d retained=%d err=%v", n, out.Len(), err)
 	}
 }
 
