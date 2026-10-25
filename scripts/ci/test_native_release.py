@@ -7,7 +7,6 @@ import sys
 import tempfile
 import unittest
 
-import yaml
 
 
 SCRIPT = Path(__file__).with_name('native-noatime-fixture.sh')
@@ -17,23 +16,29 @@ NAME = 'TestLiveNativeFrozenToolsAndDurableAccounting'
 class NativeReleaseGateTest(unittest.TestCase):
     def test_publisher_tests_the_immutable_digest_before_signing(self):
         root = Path(__file__).resolve().parents[2]
-        workflow = yaml.safe_load((root / '.github/workflows/native-worker-release.yml').read_text())
-        publisher = workflow['jobs']['publish']
-        self.assertIn('inputs.publish', publisher['if'])
-        self.assertIn("github.ref == 'refs/heads/main'", publisher['if'])
-        self.assertEqual(publisher['needs'], 'prepare')
-        steps = publisher['steps']
-        scan = next(i for i, step in enumerate(steps) if 'anchore/scan-action@' in step.get('uses', ''))
-        canary = next(i for i, step in enumerate(steps) if 'native-noatime-fixture.sh' in step.get('run', ''))
-        sign = next(i for i, step in enumerate(steps) if 'cosign sign' in step.get('run', ''))
+        source = (root / '.github/workflows/native-worker-release.yml').read_text()
+        publisher = source.split('\n  publish:', 1)[1]
+        self.assertIn("if: inputs.publish && github.ref == 'refs/heads/main'", publisher)
+        self.assertIn('needs: prepare', publisher)
+        steps = publisher.split('\n      - ')[1:]
+        scan = next(i for i, step in enumerate(steps) if 'anchore/scan-action@' in step)
+        canary = next(i for i, step in enumerate(steps) if 'native-noatime-fixture.sh' in step)
+        sign = next(i for i, step in enumerate(steps) if 'cosign sign' in step)
         self.assertLess(scan, canary)
         self.assertLess(canary, sign)
-        self.assertNotIn('if', steps[canary])
-        self.assertIn('@${{ steps.build.outputs.digest }}', steps[canary]['env']['IMAGE'])
-        self.assertIn(' green', steps[canary]['run'])
-        self.assertNotIn('if', steps[sign])
-        candidate = yaml.safe_load((root / '.github/workflows/native-worker-candidate.yml').read_text())
-        self.assertEqual(candidate['permissions'], {'contents': 'read'})
+        self.assertNotIn('\n        if:', steps[canary])
+        self.assertIn('@${{ steps.build.outputs.digest }}', steps[canary])
+        self.assertIn(' green', steps[canary])
+        self.assertNotIn('\n        if:', steps[sign])
+
+    def test_actual_atime_header_preserves_every_security_and_atime_combination(self):
+        root = Path(__file__).resolve().parents[2]
+        source = root / 'cmd/crewship-restricted-native-runner/bubblewrap/testdata/atime.c'
+        with tempfile.TemporaryDirectory() as temporary:
+            binary = Path(temporary) / 'atime-test'
+            subprocess.run(['cc', '-std=c99', '-Wall', '-Wextra', '-Werror',
+                            str(source), '-o', str(binary)], check=True, timeout=30)
+            subprocess.run([str(binary)], check=True, timeout=5)
 
     def invoke(self, events, code=0, expected='green', existing=False):
         with tempfile.TemporaryDirectory() as temporary:

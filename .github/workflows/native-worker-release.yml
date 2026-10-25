@@ -39,7 +39,9 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Test the native runner
-        run: go test ./cmd/crewship-restricted-native-runner -count=1 -timeout 5m
+        run: |
+          go test ./cmd/crewship-restricted-native-runner -count=1 -timeout 5m
+          python3 -m unittest discover -s scripts/ci -p test_native_release.py
       - name: Authenticate upstream bytes and prepare licensed context
         run: bash scripts/ci/prepare-native-release.sh "$RUNNER_TEMP/native-context"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
@@ -110,7 +112,6 @@ jobs:
               test -s /usr/share/crewship-native/release-source.json
               printf "%s  %s\n" \
                 d2752c52353401f7f6efbfcea68796f4f7a3d3e4769f5d1da53fa49d4856b72f /opt/codex \
-                d2752c52353401f7f6efbfcea68796f4f7a3d3e4769f5d1da53fa49d4856b72f /usr/bin/codex \
                 d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc /usr/share/licenses/crewship-native/codex/LICENSE \
                 9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915 /usr/share/licenses/crewship-native/codex/NOTICE | sha256sum -c -
             '

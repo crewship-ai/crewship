@@ -42,6 +42,7 @@ jobs:
       - name: Test runner and authenticate upstream release context
         run: |
           go test ./cmd/crewship-restricted-native-runner -count=1 -timeout 5m
+          python3 -m unittest discover -s scripts/ci -p test_native_release.py
           bash scripts/ci/prepare-native-release.sh "$RUNNER_TEMP/native-context"
       - name: Build the candidate without publication
         run: docker build --pull --tag crewship-native-candidate:verify "$RUNNER_TEMP/native-context"

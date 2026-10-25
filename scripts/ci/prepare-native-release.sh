@@ -36,6 +36,7 @@ bash scripts/gen-license-bundle.sh go
 cp -R -- build/licenses/go "$context_dir/licenses/go"
 cp -- LICENSE NOTICE THIRD-PARTY-NOTICES.md "$context_dir/licenses/project/"
 cp -- cmd/crewship-restricted-native-runner/Dockerfile "$context_dir/Dockerfile"
+cp -- cmd/crewship-restricted-native-runner/bubblewrap/{atime-remount.patch,crewship-atime.h} "$context_dir/"
 # Keep the reviewed runtime recipe and pinned base/bwrap/Codex checks intact.
 printf '\nCOPY --chown=0:0 licenses /usr/share/licenses/crewship-native/\nCOPY --chown=0:0 release-source.json /usr/share/crewship-native/release-source.json\n' >> "$context_dir/Dockerfile"
 SOURCE_SHA=$(git rev-parse HEAD) CONTEXT_DIR="$context_dir" UPSTREAM_SHA="$upstream" CODEX_SHA="$binary_sha" ARCHIVE_SHA="$archive_sha" python3 - <<'PY'

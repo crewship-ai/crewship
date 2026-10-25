@@ -9,7 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Restricted native scratch tools can fail on noatime-backed Docker storage.** The native worker uses a fixed, narrower filesystem permission profile that omits Docker network-file mounts while retaining workspace protections and the container sandbox.
+- **Restricted native scratch tools can fail on noatime-backed Docker storage.** The native image rebuilds bubblewrap with an atime-preserving remount fix while retaining the inner workspace sandbox and unchanged container security policies.
 
 - **Administrative security operations explicitly opt in to emergency audit fallback.** Only single/all-session revocation can use this fallback in the session handler; unlock remains chained-only, and unknown internal operations are rejected before any account or audit mutation. Web password changes and resets continue to fail closed on a broken audit chain.
 
