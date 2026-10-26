@@ -32,7 +32,7 @@ export function WordCraftCatalogRibbon({ catalog = defaultWordCraftCatalog, part
         return <span key={command.id} title={availability.reason}>
           <button type="button" data-wordcraft-command={command.id} disabled={!availability.enabled}
             aria-describedby={!availability.enabled ? reasonId : undefined}
-            className="rounded border px-2 py-1 disabled:opacity-50 coarse:min-h-12"
+            className="rounded border px-2 py-1 disabled:opacity-50 coarse:min-h-[44px]"
             onMouseDown={event => event.preventDefault()}
             onClick={() => gate.execute(command.id, parameters[command.id] ?? {})}>
             {command.label}
