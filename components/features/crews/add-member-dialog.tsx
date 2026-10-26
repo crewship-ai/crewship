@@ -28,6 +28,7 @@ interface WorkspaceUser {
 
 interface AddMemberDialogProps {
   open: boolean
+  canAdd?: boolean
   onOpenChange: (open: boolean) => void
   crewId: string
   workspaceId: string
@@ -37,6 +38,7 @@ interface AddMemberDialogProps {
 
 export function AddMemberDialog({
   open,
+  canAdd = true,
   onOpenChange,
   crewId,
   workspaceId,
@@ -48,32 +50,38 @@ export function AddMemberDialog({
   const [submitting, setSubmitting] = useState(false)
   const [selectedUserId, setSelectedUserId] = useState<string>("")
 
+  const existingMemberKey = JSON.stringify(existingMemberIds)
   useEffect(() => {
-    if (!open) return
+    if (!open || !canAdd) { setSelectedUserId(""); setUsers([]); setLoading(false); return }
+    const controller = new AbortController()
+    const excluded = new Set<string>(JSON.parse(existingMemberKey))
 
     setLoading(true)
     setSelectedUserId("")
 
-    apiFetch(`/api/v1/workspaces/${workspaceId}/members`)
+    apiFetch(`/api/v1/workspaces/${workspaceId}/members`, { signal: controller.signal })
       .then((res) => {
         if (!res.ok) throw new Error("Failed to fetch members")
         return res.json()
       })
       .then((members: { user: WorkspaceUser }[]) => {
+        if (controller.signal.aborted) return
         const available = members
           .map((m) => m.user)
-          .filter((u) => !existingMemberIds.includes(u.id))
+          .filter((u) => !excluded.has(u.id))
         setUsers(available)
       })
       .catch(() => {
+        if (controller.signal.aborted) return
         toast.error("Failed to load workspace members")
         setUsers([])
       })
-      .finally(() => setLoading(false))
-  }, [open, workspaceId, existingMemberIds])
+      .finally(() => { if (!controller.signal.aborted) setLoading(false) })
+    return () => controller.abort()
+  }, [open, canAdd, workspaceId, existingMemberKey])
 
   async function handleSubmit() {
-    if (!selectedUserId) return
+    if (!open || !canAdd || !selectedUserId || !users.some(user => user.id === selectedUserId)) return
 
     setSubmitting(true)
     try {
@@ -102,11 +110,11 @@ export function AddMemberDialog({
     }
   }
 
-  const canSubmit = !!selectedUserId && !submitting && !loading
+  const canSubmit = open && canAdd && !!selectedUserId && users.some(user => user.id === selectedUserId) && !submitting && !loading
 
   return (
     <CreateSurface
-      open={open}
+      open={open && canAdd}
       onOpenChange={onOpenChange}
       size="sm"
       onSubmit={() => { if (canSubmit) void handleSubmit() }}
@@ -145,7 +153,7 @@ export function AddMemberDialog({
         onCancel={() => onOpenChange(false)}
         primaryLabel={submitting ? "Adding..." : "Add Member"}
         onPrimary={() => void handleSubmit()}
-        primaryDisabled={!selectedUserId || loading}
+        primaryDisabled={!canSubmit}
         busy={submitting}
       />
     </CreateSurface>

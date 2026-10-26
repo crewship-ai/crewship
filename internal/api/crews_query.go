@@ -11,6 +11,9 @@ import (
 )
 
 func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
+	if h.restrictedCrewDirectory(w, r, false) {
+		return
+	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
 		replyError(w, http.StatusBadRequest, "workspace_id is required")
@@ -121,6 +124,9 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 // POST /api/v1/crews
 
 func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
+	if h.restrictedCrewDirectory(w, r, false) {
+		return
+	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	crewID := r.PathValue("crewId")
 

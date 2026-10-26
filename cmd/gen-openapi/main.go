@@ -883,7 +883,7 @@ func auditedResponseName(path string) string {
 		"/api/v1/workspaces":               "WorkspaceList",
 		"/api/v1/workspaces/{workspaceId}": "Workspace",
 		"/api/v1/crews":                    "CrewList",
-		"/api/v1/crews/{crewId}":           "Crew",
+		"/api/v1/crews/{crewId}":           "CrewRead",
 		"/api/v1/agents":                   "AgentList",
 		"/api/v1/agents/{agentId}":         "Agent",
 		"/api/v1/projects":                 "ProjectList",

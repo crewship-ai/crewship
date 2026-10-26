@@ -9,7 +9,14 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Explicit crew managers can use ordinary member controls.** A live trusted Manage share enables adding and removing ordinary crew members in Settings. Role editing and removal of explicit crew roles remain administrator controls. Failed access checks and context switches withdraw grant-based controls.
+
+- **Crew sharing can create explicit trusted Manage grants.** The crew Share dialog and person Access editor offer Manage to trusted MEMBER/MANAGER recipients, preserves account mode and other grants, and keeps inactive shares visible for revocation after role changes. Guest shares remain View/Use; Manage does not assign roles or expose credentials.
+
+- **The opt-in WordCraft command editor can show silent connection loss without losing its draft.** A separate connection indicator stops claiming “Uloženo” after its configured server-silence limit and waits for authoritative server state on recovery, without replaying commands. The command host must explicitly wire this component before it affects an editor.
+
 - **Idle work polling avoids unnecessary writer transactions.** Empty or not-yet-eligible queues use a fresh read hint; capacity, deadlines and attempt ownership remain checked in the claiming transaction when work is present.
+- **Trusted members can receive explicit crew management shares.** Administrators can grant crew Manage to trusted MEMBER/MANAGER recipients through the member-policy API and CLI, permitting crew profile/configuration and membership changes without explicit crew role overrides. Role assignment, crew deletion, private-network opt-in, budgets and workspace administration retain their existing guards. Account conversion requires deliberate revocation of trusted-only shares first; writes and audit remain atomic. Existing Access editors preserve and display these shares.
 - ⚠️ **Behaviour change: Host lifecycle hooks require instance administration.** Creating, editing or enabling host commands now requires an instance administrator and appropriate token scope. Existing host hooks are retained but disabled for explicit review after upgrade; restored hooks also require local review. UI and CLI explain how an administrator can review and re-enable them. Live host-hook changes commit atomically with their authorization audit. Shell output capture is bounded while retaining the existing truncation and exit-result behavior. Container hooks and the default lifecycle pause are unchanged.
 - **Guest agent access can inherit from an explicit crew share.** Administrators can share a crew with View or Use through the member-policy API and CLI. View discovers current crew agents; Use also permits Chat and Run, without Delegate or credential access. Revocation, crew retirement and agent moves fence existing attempts. Access screens preserve and display saved crew shares.
 
@@ -18,6 +25,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Restricted text workers have an independent release producer.** A main-only manual workflow can publish scanned, signed immutable `responses_text` candidates with source, binary and license provenance. Pull requests and publication test the real production worker against synthetic data; signing requires the exact candidate digest to pass. Image approval, host qualification and Guest runtime acceptance remain separate steps.
 
 - **Restricted native scratch tools can fail on noatime-backed Docker storage.** The native image rebuilds bubblewrap with an atime-preserving remount fix while retaining the inner workspace sandbox and unchanged container security policies.
+
+- **Guests can read explicitly shared crews.** Crew View/Use now opens filtered crew list/detail with identities, agent counts and current agent statuses, while configuration, credentials, membership and activity stay hidden. `crewship crew access` explains the actor’s current Guest share; Use remains conditional on agent authority and runtime preflight. Revocation, crew retirement and issuer authority apply immediately to subsequent requests.
 
 - **Administrative security operations explicitly opt in to emergency audit fallback.** Only single/all-session revocation can use this fallback in the session handler; unlock remains chained-only, and unknown internal operations are rejected before any account or audit mutation. Web password changes and resets continue to fail closed on a broken audit chain.
 

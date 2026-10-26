@@ -1,0 +1,450 @@
+[
+  {
+    "path": "crates/doc/src/bidi.rs",
+    "sha256": "2f9cf02ce21ba89b83fa56aed6852e989fc0eff8995f99f69a5cab3de093d683"
+  },
+  {
+    "path": "crates/doc/src/byte_store.rs",
+    "sha256": "813a8852e5da77bb9aa6ac14b36a7e2c1c0d8c06d477f81a7cf6e678162820d5"
+  },
+  {
+    "path": "crates/doc/src/chart.rs",
+    "sha256": "0bab7e216a0826719ad241f62ef0f88055c5bd412d442193bc023f3f1cf59f45"
+  },
+  {
+    "path": "crates/doc/src/cjk_numbers.rs",
+    "sha256": "f54af4718a51433bc51140a11664f517e3519ebaf6a647c8c2e545f629569221"
+  },
+  {
+    "path": "crates/doc/src/cluster.rs",
+    "sha256": "7071620f11d1ba3179dfcfdf6133220229d75341c752488ea3129a6229fd5c23"
+  },
+  {
+    "path": "crates/doc/src/collate.rs",
+    "sha256": "7d1ff27b6f9dfc68cf06f667542ac1877c78c08a1304c12d09c17448d1b36995"
+  },
+  {
+    "path": "crates/doc/src/connector.rs",
+    "sha256": "8ad15e525ead82793d86fad0679c794f584b651d68fa38652cee0bd1a648cb30"
+  },
+  {
+    "path": "crates/doc/src/control.rs",
+    "sha256": "c9005f451a8451bf812e2f4e5cba0430c717667fa097df47ae19f6b8be2c3f77"
+  },
+  {
+    "path": "crates/doc/src/edit.rs",
+    "sha256": "4b14c166a73c1d494781ff82018ac1697c870e192774e680fa8a5d850ed785d4"
+  },
+  {
+    "path": "crates/doc/src/effects.rs",
+    "sha256": "402ee7c406e456bae05067da7cfe75fef8780be007f2b9cde097ae860b817db5"
+  },
+  {
+    "path": "crates/doc/src/encoding.rs",
+    "sha256": "192675f51b5140e5596a6f63f72a64b2bb0b2a84e245277e528c767ec70e6fc4"
+  },
+  {
+    "path": "crates/doc/src/eq.rs",
+    "sha256": "1ca1ebeae28346145a3b779257ed60517955dc15b6979c3e37293b7ba79174c7"
+  },
+  {
+    "path": "crates/doc/src/fields.rs",
+    "sha256": "301c2499f2fe513ef6d9c073216b329428f757e3e4430a149d918b8229dbc084"
+  },
+  {
+    "path": "crates/doc/src/fill.rs",
+    "sha256": "870438caca5e57e593b073555860f8a288af51e1b721939b86bf08092afd931f"
+  },
+  {
+    "path": "crates/doc/src/freeform.rs",
+    "sha256": "ecce8c8a2914de6232bd561c09329300143f58375c8371dfe5cb9a0ee0ac6682"
+  },
+  {
+    "path": "crates/doc/src/graphic.rs",
+    "sha256": "8a99bc1682b87cc419ad6ece5325cb508aeb28e5fd328c607ec757622b5eb1ce"
+  },
+  {
+    "path": "crates/doc/src/ime_text.rs",
+    "sha256": "1543e17cac0c3947c389970434f38dcfafbe96b5a9c7758cfd0b6f113ba0e358"
+  },
+  {
+    "path": "crates/doc/src/legacy_form.rs",
+    "sha256": "8f603ae0ef5901cc95e988ede8d5cafb6ca242de14ff2aaf8e48a3f14a101df9"
+  },
+  {
+    "path": "crates/doc/src/lib.rs",
+    "sha256": "e3701d8d58fcacc35bce249f25434f155e3e997aeb559fbd07f0a593f5b608f6"
+  },
+  {
+    "path": "crates/doc/src/line_dash.rs",
+    "sha256": "5581f48ad2c73d6d0fa8655384bd600a8e78a78fda1f8514454d3fda237c524c"
+  },
+  {
+    "path": "crates/doc/src/link.rs",
+    "sha256": "541b36548a14033db46a92c37b3d7c2364477d9c44d7aade5f28ad9a16ba5eb6"
+  },
+  {
+    "path": "crates/doc/src/locale_number.rs",
+    "sha256": "d38bb719a22c2f761c5ae30263db6ef2ac215e9ba3e943e1a615e3f47d77387b"
+  },
+  {
+    "path": "crates/doc/src/math.rs",
+    "sha256": "f5cae2cdd0eb12d50c70a5fe22d8a3886056a235e6fb3673c277d88d339c8248"
+  },
+  {
+    "path": "crates/doc/src/math_edit.rs",
+    "sha256": "0d8f543f623471193d594b2dfb5562290081c573cacb5cdfcc9a51e136a221cf"
+  },
+  {
+    "path": "crates/doc/src/math_latex.rs",
+    "sha256": "7035701692ec52e9f6d63cd6bbb8b1225228879e43d3cceba9541d4076e940ae"
+  },
+  {
+    "path": "crates/doc/src/math_linear.rs",
+    "sha256": "7e2f98e5af6071507f6d184c644d62881c57bb7e8e8642cc370db8567b86d194"
+  },
+  {
+    "path": "crates/doc/src/math_symbols.rs",
+    "sha256": "5b1bd47fbc20dce911ccccb4620423ed048023482fe20c705e3ae542f375c553"
+  },
+  {
+    "path": "crates/doc/src/numbering.rs",
+    "sha256": "a3e77b376c0c6d6eff4969812cc16bc4198cc7547977d29c8e1a0602bb8dcc61"
+  },
+  {
+    "path": "crates/doc/src/para.rs",
+    "sha256": "9c8ae91e1b9bf51c69a0a45afbc606f1b8611bbaf7b9706a74a4048ee45664e2"
+  },
+  {
+    "path": "crates/doc/src/props.rs",
+    "sha256": "cfd6ee7ec91bd8b736c3b4c632d41ea19055662fc77acbc5325cd89a08c1287b"
+  },
+  {
+    "path": "crates/doc/src/resolve.rs",
+    "sha256": "3b368a4fb03d6584178d50f6f173b55882d75936af906a4670cac82da2d249c2"
+  },
+  {
+    "path": "crates/doc/src/section.rs",
+    "sha256": "bb404748462268932e01b325f22606eb4432627830e8040fab463ba8a401e12a"
+  },
+  {
+    "path": "crates/doc/src/smart_art.rs",
+    "sha256": "33f5af2c57a12570eb2a6341202d8ca67e636c7a57ca488cc0b599d8a27072d9"
+  },
+  {
+    "path": "crates/doc/src/styles.rs",
+    "sha256": "18928a308d1ec0b7081d89cf3e15fe20b8649fdd166d5081ffd93614c2ead9d8"
+  },
+  {
+    "path": "crates/doc/src/symbol_fonts.rs",
+    "sha256": "b9299bb3c55f71f0474621009cfda7dafd4b76af4e099ff4497ebf3568fff6dd"
+  },
+  {
+    "path": "crates/doc/src/table.rs",
+    "sha256": "c4ef75eab8ffa11ff546773197cc93f2bceeb5e5ffe7f6619d75a2cdcbf16e80"
+  },
+  {
+    "path": "crates/doc/src/tests.rs",
+    "sha256": "edb17c9e1ef94d1b693e3994d3ecba794b88983cde456ed68020d48cc7e8f85b"
+  },
+  {
+    "path": "crates/doc/src/wordart.rs",
+    "sha256": "a72d55fae26bfae204657f65f8549672cc19005dda5c28ebfde22170ececb181"
+  },
+  {
+    "path": "crates/doc/src/wrap.rs",
+    "sha256": "e365ca6068e79e4c0441f4f6a944a31815d0f2b26ce5a5d844f11f2696d13631"
+  },
+  {
+    "path": "crates/engine/src/catalog.rs",
+    "sha256": "9f128e4d482f99fcffe0d662857b79ee8a3974669915116056e4f1ec6030c7ee"
+  },
+  {
+    "path": "crates/engine/src/cmd/accessibility.rs",
+    "sha256": "0c71d0f6343f0aaa9c911d7860f06d709576151714da70cb76b818e7c36a97c2"
+  },
+  {
+    "path": "crates/engine/src/cmd/canvas.rs",
+    "sha256": "693517fa2e7be273be067df5ce4ed21aad21c09d78d7382883574c90d37e2026"
+  },
+  {
+    "path": "crates/engine/src/cmd/caret.rs",
+    "sha256": "005a0f731ce96ad707aa9e64d707b6c32e85b5f440bc3dc9a5177ac3240ecce3"
+  },
+  {
+    "path": "crates/engine/src/cmd/chart.rs",
+    "sha256": "f47967d2bf11958ab046b19aa50a84a04545b9755da26d9628fd34d2943774c2"
+  },
+  {
+    "path": "crates/engine/src/cmd/citations.rs",
+    "sha256": "d28a5110b0a701fb35bd17c2987537887ab7fc0799670c69adaf9978811fdada"
+  },
+  {
+    "path": "crates/engine/src/cmd/column.rs",
+    "sha256": "0211b692c79de1dbeb40d895f5afed20cac0252d1819543d2287dd048a7fd4a9"
+  },
+  {
+    "path": "crates/engine/src/cmd/connectors.rs",
+    "sha256": "472e8b37817cd2cef3b2de379b56e8ca60fe231818c0bc3e4b83c98372ee480c"
+  },
+  {
+    "path": "crates/engine/src/cmd/controls.rs",
+    "sha256": "ae850a3dcc619352456af9e432d0b86e26030e7f664e77c8a4d5cd3ee4f4862e"
+  },
+  {
+    "path": "crates/engine/src/cmd/design.rs",
+    "sha256": "858f8733e6bc44a58e4684594a4a109421cce912be49bda2910d95760465117a"
+  },
+  {
+    "path": "crates/engine/src/cmd/draw.rs",
+    "sha256": "a5268c8764254800a9e5588daff0704707e50316ebf8be05e16f1143640938ee"
+  },
+  {
+    "path": "crates/engine/src/cmd/edit.rs",
+    "sha256": "d292d9e316b5fe2e99afd30598eaade95a7dd0626f5e95a8798ab89fe8013747"
+  },
+  {
+    "path": "crates/engine/src/cmd/equation.rs",
+    "sha256": "f56d001dea34133bf9d40b22f08888bbeddd68bec988f8f3c425ade1ad7b4f41"
+  },
+  {
+    "path": "crates/engine/src/cmd/fields.rs",
+    "sha256": "c2a055b1d9b22c06b95765ee292db8c0807537d46ea03b960a2e1e9af1bf914e"
+  },
+  {
+    "path": "crates/engine/src/cmd/file.rs",
+    "sha256": "86b83746fcdac6571d143f73c36666c0e493444d725caf54e9bb4767df4b7a6a"
+  },
+  {
+    "path": "crates/engine/src/cmd/find_pattern.rs",
+    "sha256": "ce55d50c8d811bb4cc09bbd3bbf50b7d52e3df3be33daeac7a53dc1cf827f26e"
+  },
+  {
+    "path": "crates/engine/src/cmd/fmt_revisions.rs",
+    "sha256": "7799e3712776f0950e6baf6decb721f77b211b0d7e16da14f14467701b0cd7f2"
+  },
+  {
+    "path": "crates/engine/src/cmd/font.rs",
+    "sha256": "57954e5bdf79ef36f03500b26ed3dd0c75c1014e26dc27f12db00203f4096cd3"
+  },
+  {
+    "path": "crates/engine/src/cmd/format.rs",
+    "sha256": "4ddcf5ed1b5b3b7007ce5d470cb87e5c44723930c3d4534659fb16275e9eb392"
+  },
+  {
+    "path": "crates/engine/src/cmd/index.rs",
+    "sha256": "a88011bdf8a1107e31ec5e58a280c04d15a53b429693d237aa494296d482ef65"
+  },
+  {
+    "path": "crates/engine/src/cmd/ink_shape.rs",
+    "sha256": "6cff0cbe2dadc52ab3e2fd6a9cbcc0ecd7e1e37834cc79fea003f0c49569f326"
+  },
+  {
+    "path": "crates/engine/src/cmd/insert.rs",
+    "sha256": "16aa6ffc66f690e472e663e4a1c8727480f60f705d52993b6e85474f8c7ee16c"
+  },
+  {
+    "path": "crates/engine/src/cmd/inspector.rs",
+    "sha256": "5fb7277112cfcaa2a68ea4c4a21e83ab334e8860e6d8bfa8e0835080f034eb21"
+  },
+  {
+    "path": "crates/engine/src/cmd/lists.rs",
+    "sha256": "1d13f6c42a219967bf482f80d6a5898ab2c488e965b3d576dd3b217fe5b9a4ae"
+  },
+  {
+    "path": "crates/engine/src/cmd/mailings.rs",
+    "sha256": "72d0baa5dbdc928f0924d1131ecf7f25951cf20bf6ac7aa3aab9de01228ce49e"
+  },
+  {
+    "path": "crates/engine/src/cmd/mod.rs",
+    "sha256": "7f54c999b329ad504829f40c1591cbb598893faff51c18f329438e6828b75552"
+  },
+  {
+    "path": "crates/engine/src/cmd/moves.rs",
+    "sha256": "3fb13df91e8fb009a97769a821170d86b729514d9a052f83c2c2de8bcc058d6f"
+  },
+  {
+    "path": "crates/engine/src/cmd/objects.rs",
+    "sha256": "700862261d2fe1ff0be17b638a855c94d1d838a23e0a3888dbd48ee736085005"
+  },
+  {
+    "path": "crates/engine/src/cmd/options.rs",
+    "sha256": "2066cd7305b796f09f82980b0afa6e25ed0a80e81f49e0e2af0324defcf6ddbf"
+  },
+  {
+    "path": "crates/engine/src/cmd/outline.rs",
+    "sha256": "3bb8c20f2732f3a92a114e8d43282870efdf32bf5108db90dbdb878292e413eb"
+  },
+  {
+    "path": "crates/engine/src/cmd/page.rs",
+    "sha256": "ac834be4921d2107bea71aeabfb2e94d80b7d82d7d230dedb202d51461c72216"
+  },
+  {
+    "path": "crates/engine/src/cmd/para.rs",
+    "sha256": "d7805f023406fc66830c7d0695c0a591797470ca5079e4d5ccc9b86b5fbaf3fd"
+  },
+  {
+    "path": "crates/engine/src/cmd/paste.rs",
+    "sha256": "a0463edf431253aab537d35425c099a1c8a0cdb6e49bef39fbe5ab2294d8138f"
+  },
+  {
+    "path": "crates/engine/src/cmd/phonetic.rs",
+    "sha256": "db439172085c4c716ff17a460172f45621c451b5d52ef942b84bf8c06b87e1df"
+  },
+  {
+    "path": "crates/engine/src/cmd/protect.rs",
+    "sha256": "0eee37a474bc133df17eb64b741d9fe1b0898bb56f5bf43ccde54c04e124f575"
+  },
+  {
+    "path": "crates/engine/src/cmd/references.rs",
+    "sha256": "dbb011b6033933a1d6c64bfedce3ec81b87ccde9f1881aeb3900bd489d9aca7a"
+  },
+  {
+    "path": "crates/engine/src/cmd/review.rs",
+    "sha256": "f3a04cbdf3bd8c01a2b0e32797788e439164494a8261e65d33e06c814696f631"
+  },
+  {
+    "path": "crates/engine/src/cmd/shape_fill.rs",
+    "sha256": "3f46f7a8f4c424d426fe0cdd2b5c337760a8b21fa45064eb336f268fd1b53d08"
+  },
+  {
+    "path": "crates/engine/src/cmd/smart_art.rs",
+    "sha256": "0077b3e581b15841a6f74fea522e81da7df76a2913a60582ae37e5880610b7d9"
+  },
+  {
+    "path": "crates/engine/src/cmd/speech.rs",
+    "sha256": "01f1d7cba963cc5a61a6df574ead318582151fa0db3549a858d48a4b6fa66f21"
+  },
+  {
+    "path": "crates/engine/src/cmd/table.rs",
+    "sha256": "9f0e476516c9cb73c7ee458682c4904fc3f46a64843ca8cbd4f00f43a59d402a"
+  },
+  {
+    "path": "crates/engine/src/cmd/table_draw.rs",
+    "sha256": "6133dd5028e74ff29c5e21dab519ac60896065f12aeb07a3bb3111ec76e1daf6"
+  },
+  {
+    "path": "crates/engine/src/cmd/table_formula.rs",
+    "sha256": "faed4abd184bd7600c6112e9d77a615cf05620c3fd2f1d0cd8ac7b1bb055e790"
+  },
+  {
+    "path": "crates/engine/src/cmd/table_mouse.rs",
+    "sha256": "642dcc490afdd265763548d4c9c6895a320ac3642a56d9d9a7c205d827bfe97b"
+  },
+  {
+    "path": "crates/engine/src/cmd/table_resize.rs",
+    "sha256": "d76c7f2601018704088c34e125b2a148ddb894e7ca16d509bf11b084c0031d86"
+  },
+  {
+    "path": "crates/engine/src/cmd/table_style.rs",
+    "sha256": "91ae1102ce18fca5cb2c0dbdcfc753f04606889dffe37aef11327709b557aa02"
+  },
+  {
+    "path": "crates/engine/src/cmd/templates.rs",
+    "sha256": "c03dc931f25864f57c6ae94dd741eb81dd1302ff571215815d5ccbc8b16f5869"
+  },
+  {
+    "path": "crates/engine/src/cmd/text.rs",
+    "sha256": "de444de5e83abd421f2ff52fb34682397232424414a8475578acbb2a8b97b038"
+  },
+  {
+    "path": "crates/engine/src/cmd/tools.rs",
+    "sha256": "d15cbb9c8dfe62b4d5a0b838fdabcb8aa20c9fe52c50d9d814541584e445ec1a"
+  },
+  {
+    "path": "crates/engine/src/cmd/user_templates.rs",
+    "sha256": "b7290afaa4dd3a0a14b95afd891ab0f0620b436a678ff5bb59f841621fa56158"
+  },
+  {
+    "path": "crates/engine/src/cmd/view.rs",
+    "sha256": "bf064dd33a4eb5fa3325c35af8aed9928d7c509e40c27832376b26e27bf095a6"
+  },
+  {
+    "path": "crates/engine/src/cmd/wordart.rs",
+    "sha256": "ff16a12a7c4bee7e8f2daf6a653076fb0201ea885aaff726dc51fbb95c44c3e2"
+  },
+  {
+    "path": "crates/engine/src/file_access.rs",
+    "sha256": "8c6498769f6be670fa818562951dd185caa42d421ec75c1d56ce7b05f3c32561"
+  },
+  {
+    "path": "crates/engine/src/io.rs",
+    "sha256": "91272dcb173e0d15cf537cf39e7de2821ef6e1f98e3c8000b7aef354a1163b7e"
+  },
+  {
+    "path": "crates/engine/src/io/safe_save.rs",
+    "sha256": "2aa22c7191019a9bb14ce4e8e850355eb148c1778bfd61903c83641f48400353"
+  },
+  {
+    "path": "crates/engine/src/io_ext.rs",
+    "sha256": "c62374135bd74027349ecaf5a7ee5cd4824bee04ecef1421b633d9b5e9c9f33d"
+  },
+  {
+    "path": "crates/engine/src/keymap.rs",
+    "sha256": "7b6a36259cd081d3309ed2b6a6d692aa513e74eb7779dd95759212d3e50e542a"
+  },
+  {
+    "path": "crates/engine/src/lib.rs",
+    "sha256": "e653dbecf56d9b8f85c98f33cafcaa77ed16f386b5387cc66a96d35c0fa78ad3"
+  },
+  {
+    "path": "crates/engine/src/math_gallery.rs",
+    "sha256": "c7b75056714581b19dd0867f31db679813ec25a237fc9af8dff8581b90dcab4c"
+  },
+  {
+    "path": "crates/engine/src/print.rs",
+    "sha256": "f5813c8037d43f9248424fa8d58557f0568f1dd613e86dc2aa5016584e4a1443"
+  },
+  {
+    "path": "crates/engine/src/recovery.rs",
+    "sha256": "4130e76c3336827a5226afd7288da52c2ee3462b8086cb90c9b4b132deaa422b"
+  },
+  {
+    "path": "crates/engine/src/recovery/desktop.rs",
+    "sha256": "df8a2016a4a494204826bfb7f9f9566e1af8188d67b10f56451fb5c93cc1f753"
+  },
+  {
+    "path": "crates/engine/src/ribbon.rs",
+    "sha256": "2c307ca095a217536abc4a03fa2213fe742b3c470d9af1187e72cc6947c12893"
+  },
+  {
+    "path": "crates/engine/src/sample.rs",
+    "sha256": "a68c08d1bfa34cba4b4263021114d7e28187caae8bab4791085989023c02d75a"
+  },
+  {
+    "path": "crates/engine/src/session.rs",
+    "sha256": "e5c3b7ac619f6ae89bae47e643b4cf090e045349d535453ba94a38836e7b6fab"
+  },
+  {
+    "path": "crates/engine/src/speech.rs",
+    "sha256": "87ef05742012cba8250fa3997b1146993c6d6629eda15390b1675d04a7572dfd"
+  },
+  {
+    "path": "crates/engine/src/tests.rs",
+    "sha256": "edd041febfab5d24fc581d47addd29583549224c6e1a42c9d2d8d5852ca388eb"
+  },
+  {
+    "path": "crates/engine/src/tests_bidi.rs",
+    "sha256": "be1108f1876e84c74dc3dae370d5571c9dfb8e6c950839d0015b409c0d442a56"
+  },
+  {
+    "path": "crates/engine/src/tests_fonts.rs",
+    "sha256": "548cf113467e72876bd30efa36654f857b204002e0d04d8a9a6a510dc0b79130"
+  },
+  {
+    "path": "crates/engine/src/tests_ime_noop.rs",
+    "sha256": "68bd94c6542d80e83b507e669f5800bfd9ede5a27f592de3e5eb4cdb7ac7cb6e"
+  },
+  {
+    "path": "crates/engine/src/tests_revision_checks.rs",
+    "sha256": "1f7fdf87a1a28e4c803796885eb81fde7a67727dd64675488b256903a4afc4a7"
+  },
+  {
+    "path": "crates/engine/src/tests_typing.rs",
+    "sha256": "d2e3aa4b7e2956e0afd7c96ac8e8ea2e4eac7d2630fdd0350b05b26a6508a2c8"
+  },
+  {
+    "path": "crates/engine/src/tests_wordart.rs",
+    "sha256": "a9b5a687fb46be876528306ef00ac391d1553ca6902ab3188c4a0813d3be0d30"
+  }
+]

@@ -234,3 +234,35 @@ Saved grants keep their issuer. An inactive share requires an explicit
 **Reissue as me** choice; a revision conflict requires reloading and reviewing
 the current policy. A Guest can see the crew source and an explanation of inherited agent capabilities in
 **Settings → Your access**, without receiving access to another person's policy.
+
+## Explicit trusted crew Manage shares
+
+The crew **Share** dialog also displays trusted recipients. OWNER/ADMIN can
+select **Manage crew** for a trusted MEMBER or MANAGER. The person Access
+editor also offers Crew / Manage for these trusted recipients, using the same versioned
+member-policy API and `crewship share crew --operation manage` CLI. The control
+preserves trusted mode and shares for other resources. It does not grant a crew
+role, agent Delegate, credential visibility or additional reveal scope.
+
+Manage permits that crew's profile/configuration and ordinary membership,
+without assigning/removing explicit crew roles, deleting the crew, changing
+budgets/policy or administering the workspace. Saved inactive shares remain
+visible after a recipient becomes VIEWER, ADMIN or OWNER: they can be removed,
+but a new or reissued Manage share requires a trusted MEMBER/MANAGER. The API
+rechecks current recipient and issuer authority on every save. Conflicts require
+an explicit reload, and account mode is never changed by the Share dialog.
+
+A trusted recipient with a currently allowed Manage share sees **Add Member**
+and **Remove** for ordinary crew members in Crew Settings. Memberships with
+an explicit crew role can be removed or edited only by the existing
+administrator controls. The UI checks the signed-in actor's own effective
+access and hides grant-based controls while checking, after a failed refresh,
+or after an account, crew or workspace switch. The API remains authoritative
+and rechecks every mutation; an earlier successful display never authorizes a
+later request. Budgets, deletion and workspace administration keep their guards.
+The corresponding CLI commands remain `crewship crew member add` and
+`crewship crew member remove` under the same server policy.
+
+Losing management authority closes and discards an open Add Member draft.
+Losing the administrator floor also discards an open role editor, even if an
+ordinary Manage share remains. Restoring access never reopens those drafts.

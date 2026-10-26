@@ -2123,8 +2123,11 @@ the operator from authentication, never the request body.
 current version read from GET. `mode` is `trusted` or `restricted`; `rights`
 contains at most 256 distinct `{kind,id,operation}` objects belonging to this
 workspace. Null/omitted rights and unknown fields are rejected. Empty restricted
-rights revoke all resource grants. Trusted mode requires empty rights and
-restores ordinary workspace access. OWNER/ADMIN targets cannot be restricted.
+rights revoke all resource grants. Trusted mode restores ordinary workspace access
+and accepts only explicit crew `manage` shares for trusted MEMBER/MANAGER targets.
+Any account with a trusted-only share must explicitly revoke and save it before
+changing to Guest (422), including shares in other workspaces. OWNER/ADMIN targets
+cannot be restricted.
 
 **Response:** `200 OK`, `Cache-Control: no-store`, the same complete policy shape
 as GET with the new revision. Revisions are opaque versions and may advance by

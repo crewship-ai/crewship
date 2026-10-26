@@ -24,6 +24,7 @@ function mockApi(writeStatus = 200) {
 	if (url.includes("/guest-intake")) return response({project_id:"routine-1",crew_id:"",crew_name:"",revision:0})
 	if (url.includes("/crews?")) return response([])
     if (init?.method === "PUT") return response({ ...JSON.parse(String(init.body)), revision: 8 }, writeStatus)
+    if (url.includes("/members/owner-member/access?")) return response({...policy,membership_id:"owner-member",mode:"trusted",rights:[],grant_details:[]})
     return response(url.includes("/access?") ? policy : roster)
   })
 }
@@ -43,7 +44,7 @@ describe("resource Share", () => {
   it("opens from the object, shows inactive provenance and never loads trusted member policies", async () => {
     mockApi(); show(); expect(h.fetch).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole("button", { name: "Share" }))
-    expect(await screen.findByText(/Inactive — issuer no longer has authority/)).toHaveTextContent("Alice")
+    expect(await screen.findByText(/Inactive — current share authority is unavailable/)).toHaveTextContent("Alice")
     expect(screen.getByRole("dialog")).toHaveAccessibleName("Share Invoice intake")
     expect(screen.getByText(/also requires access to every agent/)).toBeTruthy()
     expect(h.fetch.mock.calls.some(([url]) => url.includes("/members/owner-member/access"))).toBe(false)
@@ -177,3 +178,44 @@ describe("explicit crew Share", () => {
     expect(h.fetch.mock.calls.some(([url])=>url.includes("guest-intake"))).toBe(false)
   })
 })
+
+
+describe("trusted crew Manage sharing", () => {
+  function trustedApi(role = "MEMBER", saved = false) {
+    const person = {...roster[1], role, access_mode:"trusted"};
+    const trusted:ResourcePolicy = {...policy, mode:"trusted", rights:[{kind:"crew",id:"other-crew",operation:"manage"}, ...(saved ? [{kind:"crew" as const,id:"routine-1",operation:"manage"}] : [])], grant_details:saved ? [{kind:"crew",id:"routine-1",operation:"manage",issuer_id:"old-admin",created_at:"old-time",live:false}] : []};
+    h.fetch.mockImplementation(async (url:string,init?:RequestInit) => {
+      if(init?.method === "PUT") return response({...JSON.parse(String(init.body)),revision:8});
+      return response(url.includes("/access?") ? {...trusted,membership_id:url.includes("owner-member")?"owner-member":"member-1",rights:url.includes("owner-member")?[]:trusted.rights} : [roster[0],person]);
+    });
+    return trusted;
+  }
+  it("creates only trusted crew Manage and preserves mode and other shares",async()=>{
+    trustedApi();show("crew");fireEvent.click(screen.getByRole("button",{name:"Share"}));
+    const field=await screen.findByRole("group",{name:"Client One"});
+    const {within}=await import("@testing-library/react");
+    expect(within(field).queryByLabelText("Use")).toBeNull();
+    fireEvent.click(within(field).getByLabelText("Manage crew"));
+    fireEvent.click(within(field).getByRole("button",{name:"Save access for Client One"}));
+    await waitFor(()=>expect(writes()).toHaveLength(1));
+    expect(JSON.parse(String(writes()[0][1].body))).toEqual({membership_id:"member-1",revision:7,mode:"trusted",rights:[{kind:"crew",id:"other-crew",operation:"manage"},{kind:"crew",id:"routine-1",operation:"manage"}]});
+  });
+  it.each(["VIEWER","ADMIN","OWNER"])("shows retained inactive shares for %s, permits revoke and denies new/reissue",async(role)=>{
+    trustedApi(role,true);show("crew");fireEvent.click(screen.getByRole("button",{name:"Share"}));
+    const field=await screen.findByRole("group",{name:"Client One"});
+    const {within}=await import("@testing-library/react");
+    expect(within(field).getByText(/old-admin/)).toBeTruthy();
+    expect(within(field).queryByLabelText("Reissue manage as me")).toBeNull();
+    fireEvent.click(within(field).getByLabelText("Manage crew"));
+    expect(within(field).getByLabelText("Manage crew")).toBeDisabled();
+    fireEvent.click(within(field).getByRole("button",{name:"Save access for Client One"}));
+    await waitFor(()=>expect(writes()).toHaveLength(1));
+    expect(JSON.parse(String(writes()[0][1].body)).rights).toEqual([{kind:"crew",id:"other-crew",operation:"manage"}]);
+  });
+  it("rejects trusted View/Use and keeps Guest Manage invalid in the replacement helper",()=>{
+    const crew={kind:"crew" as const,id:"crew-1",name:"Crew"};
+    expect(resourceShareReplacement({...policy,mode:"trusted"},crew,["manage"],[]).mode).toBe("trusted");
+    expect(()=>resourceShareReplacement({...policy,mode:"trusted"},crew,["use"],[])).toThrow("Invalid resource operation");
+    expect(()=>resourceShareReplacement(policy,crew,["manage"],[])).toThrow("Invalid resource operation");
+  });
+});

@@ -434,7 +434,9 @@ To deliberately take over a saved share, use `workspace member access set MEMBER
 Replace the complete policy using its original membership ID and revision.
 Edit the `mode` and `rights` fields from `access get`; do not invent a revision.
 An explicit empty `rights` array in restricted mode denies all resource grants.
-Trusted mode requires empty rights and restores ordinary workspace access.
+Trusted mode restores ordinary workspace access and permits only explicit crew
+Manage shares for trusted MEMBER/MANAGER recipients. Revoke and save trusted-only
+shares before changing the account to Guest; otherwise the server returns422.
 
 | Flag | Required | Description |
 | --- | --- | --- |
