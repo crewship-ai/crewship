@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux && wordcraft_c1_integration
 
 package api
 

@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux && wordcraft_c1_integration
 
 package api
 
@@ -15,14 +15,14 @@ import (
 	"testing"
 )
 
-// Optional explicit actual binaries, never a private build dependency. Ordinary
-// Go tests skip this suite; qualification requires running it with BOTH pinned
-// public-source build outputs supplied by the integration job.
+// Explicit native integration suite: selecting its build tag requires BOTH
+// pinned public-source build outputs. Missing artifacts are a failure, never
+// a successful ordinary test run or a runtime skip.
 func actualCommandNativeConfig(t *testing.T, runtime string) commandNativeConfig {
 	t.Helper()
 	host, engine := os.Getenv("CREWSHIP_C1_HOST_BINARY"), os.Getenv("CREWSHIP_C1_ENGINE_BINARY")
 	if host == "" || engine == "" {
-		t.Skip("actual C1 host/engine binaries not supplied; fake-process tests are not native qualification")
+		t.Fatal("wordcraft_c1_integration requires actual C1 host AND engine binaries; fake-process tests are not native qualification")
 	}
 	hash, e := commandNativeFileDigest(engine)
 	if e != nil {

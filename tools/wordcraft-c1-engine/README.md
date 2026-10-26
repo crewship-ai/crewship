@@ -162,3 +162,18 @@ crewship-heavy python3 tools/wordcraft-c1-engine/catalog_snapshot.py --check
 The wire catalog remains a string, now `wordcraft-c1-qualified72-v5:9f1cb61f8ffb8e4890001aab1a9a222e327a8e98f4531ef50a7b66e28cc0f0cb`.
 The full generated catalog digest binds engine fixtures and parameter metadata.
 Old checkpoint identities are refused; there is no conversion or fallback.
+
+
+### Explicit actual Go/native integration
+
+The Go/SQL/HTTP/agent tests using actual C1 executables are selected explicitly:
+
+```sh
+crewship-heavy env CREWSHIP_C1_HOST_BINARY=/absolute/command-host CREWSHIP_C1_ENGINE_BINARY=/absolute/wordcraft-c1-engine go test -race -tags wordcraft_c1_integration ./internal/api -run 'TestCommand(NativeActual|ProductActual|AgentActual)' -count=1 -timeout=10m
+```
+
+Both public-source built artifacts are required. Selecting this tag without
+either artifact fails; it never skips or counts synthetic protocol peers as
+native evidence. Ordinary CI still runs the default-off, SQL, authorization,
+projection and synthetic transport regressions. An ordinary green CI run alone
+does not establish execution of this separate actual native integration suite.
