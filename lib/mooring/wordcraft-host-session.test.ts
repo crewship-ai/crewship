@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { connectWordCraftHost, openWordCraftSession, type WordCraftOpening } from "./wordcraft-host-session"
+import { connectWordCraftHost, openWordCraftSession, type WordCraftHostCallbacks, type WordCraftOpening } from "./wordcraft-host-session"
 
 const fetch = vi.hoisted(() => vi.fn())
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: fetch }))
@@ -33,7 +33,7 @@ class Pending {
   check_host_receipt(raw: string) { Pending.check(raw); return raw }
   free() {}
 }
-function rig(health?: ReturnType<typeof vi.fn>) {
+function rig(health?: WordCraftHostCallbacks["health"]) {
   const callbacks = { bootstrap: vi.fn(), hostFrame: vi.fn(), state: vi.fn(), stopped: vi.fn(), ...(health ? { health } : {}) }
   const host = connectWordCraftHost("workspace", "page", opening, true, { WordCraftPendingCommit: Pending }, callbacks)
   const socket = Socket.current
