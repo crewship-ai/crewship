@@ -356,7 +356,7 @@ func (s *collaborationSubmissionRegistry) bind(owner mooring.OwnerLease, binding
 		}
 		admission := *entry.author.human
 		boot, tick, err := s.humans.clock.Now()
-		expiry, expiryErr := admission.source.Expiry()
+		expiry, expiryErr := admission.currentCredential().Expiry()
 		if err != nil || expiryErr != nil || boot != admission.boot || tick < 0 || tick >= admission.currentDeadline() || !admission.write || (!expiry.IsZero() && !time.Now().Before(expiry)) {
 			return errCollaborationSubmission
 		}

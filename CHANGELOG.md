@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Long WordCraft sessions stopped when their opening access token expired.** Reauthorization now accepts freshly authenticated tokens for the same session while rechecking current identity and document rights and preserving revocation fences and pending edits.
+
 - Create vendored WordCraft numeric test fixtures exclusively so a competing output file cannot be truncated.
 
 - Execute a flat WordCraft editor package with a real WASM snippet import in the packaging regression, checking the original ABI identity and manifest hashes.

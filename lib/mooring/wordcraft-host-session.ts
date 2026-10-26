@@ -1,6 +1,6 @@
 /** Parent-only WordCraft connection. No credential or socket is transferred to
  * the opaque editor. Receipt checks use the release's Rust/WASM boundary. */
-import { apiFetch } from "@/lib/api-fetch"
+import { apiFetch, tryRefresh } from "@/lib/api-fetch"
 import { getAuthMode, resolveWsBase } from "@/lib/server-base"
 import { record } from "./channel"
 
@@ -39,6 +39,8 @@ export interface WordCraftOpening {
 /** The path is chosen from original host scope, never a server/iframe URL. */
 export async function openWordCraftSession(workspaceId: string, pageId: string, write: boolean, signal: AbortSignal, checkpointBase64?: string): Promise<WordCraftOpening> {
   if (!identifier(workspaceId) || !identifier(pageId) || getAuthMode() !== "cookie") throw new Error("session_unavailable")
+  await tryRefresh()
+  if (signal.aborted) throw new Error("access_unavailable")
   const query = new URLSearchParams({ workspace_id: workspaceId })
   const response = await apiFetch(`/api/v1/pages/${encodeURIComponent("@" + pageId)}/mooring/session?${query}`, {
     method: "POST", cache: "no-store", skipRefresh: true, signal,
@@ -102,6 +104,10 @@ export function connectWordCraftHost(workspaceId: string, pageId: string, openin
     renewalAbort = abort
     const timeout = setTimeout(() => { abort.abort(); stop("access_unavailable") }, 12_000)
     try {
+      // Renew only authentication first. Pending mutations keep their exact
+      // original packets and identity while the server rechecks live rights.
+      await tryRefresh()
+      if (stopped || abort.signal.aborted) return
       const response = await apiFetch(`/api/v1/pages/${encodeURIComponent("@" + pageId)}/mooring/session/reauthorize?${new URLSearchParams({ workspace_id: workspaceId })}`, {
         method: "POST", cache: "no-store", skipRefresh: true, redirect: "error", signal: abort.signal,
         headers: { "content-type": "application/json" }, body: JSON.stringify({ connection_ref: opening.connection_ref }),

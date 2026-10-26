@@ -244,9 +244,8 @@ func (s *collaborationHumanRegistry) issue(ctx context.Context, owner mooring.Ow
 	// The same opaque identity is scoped by this registry; never a user-supplied
 	// name or a guessed stable user ID. A new admission gets a new participant.
 	admission := collaborationHumanAdmission{authorVector: vector, ingress: ingress, source: *source, member: proof.memberID, memberRevision: proof.memberRevision, permission: proof.permissionVersion, session: s.sessionID, participant: participant, write: write, boot: boot, deadline: now + ttl}
-	// Capture the original credential's monotonic cap ONCE. Reauthorizing may
-	// refresh current SQL policy, never translate an old wall expiry into a
-	// later BOOTTIME deadline or adopt a renewed credential.
+	// Capture each authenticated horizon once. Only explicit same-session
+	// reauthorization may replace this cap with a freshly authenticated horizon.
 	capDeadline := time.Duration(0)
 	if !proof.credentialExpiry.IsZero() {
 		remaining := time.Until(proof.credentialExpiry)
@@ -258,8 +257,8 @@ func (s *collaborationHumanRegistry) issue(ctx context.Context, owner mooring.Ow
 			admission.deadline = capDeadline
 		}
 	}
-	admission.freshness = &collaborationHumanFreshness{credentialCap: capDeadline}
-	admission.freshness.deadline.Store(int64(admission.deadline))
+	admission.freshness = &collaborationHumanFreshness{}
+	admission.freshness.authorization.Store(&collaborationHumanAuthorization{source: *source, deadline: admission.deadline, credentialCap: capDeadline})
 	if err = s.owners.Check(ctx, tx, owner); err != nil {
 		return "", empty, err
 	}
@@ -290,8 +289,9 @@ func (s *collaborationHumanRegistry) issue(ctx context.Context, owner mooring.Ow
 
 func (s *collaborationHumanRegistry) capturedContext(ctx context.Context, admission collaborationHumanAdmission) context.Context {
 	// Called only after this registry has resolved a host-issued capability.
-	// Do not adopt a fresh source from a later HTTP request or runtime message.
-	u := &AuthUser{ID: admission.source.UserID, OriginalCredential: &admission.source}
+	// Only the private, authenticated renewal publication updates this snapshot.
+	source := admission.currentCredential()
+	u := &AuthUser{ID: source.UserID, OriginalCredential: &source}
 	if admission.source.Kind == AuthKindSession {
 		u.SessionID = admission.source.ID
 	} else {
@@ -299,7 +299,7 @@ func (s *collaborationHumanRegistry) capturedContext(ctx context.Context, admiss
 	}
 	ctx = context.WithValue(ctx, ctxUser, u)
 	ctx = context.WithValue(ctx, ctxAuthKind, admission.source.Kind)
-	return auth.WithOriginalCredential(ctx, admission.source)
+	return auth.WithOriginalCredential(ctx, source)
 }
 
 func (s *collaborationHumanRegistry) checkCaptured(ctx context.Context, tx *sql.Tx, admission collaborationHumanAdmission, write bool, requiredRemaining time.Duration) (string, error) {
@@ -366,7 +366,7 @@ func (s *collaborationHumanRegistry) checkCaptured(ctx context.Context, tx *sql.
 }
 
 // bindHumanRequest uses authenticated transport identity, never a request-body
-// user ID. A refreshed HTTP credential cannot extend the original admission.
+// user ID. Only explicit continuity validation may advance credential expiry.
 func (s *collaborationHumanRegistry) bindHumanRequest(r *http.Request, participant string) (context.Context, error) {
 	if r == nil {
 		return nil, errCollaborationAdmission

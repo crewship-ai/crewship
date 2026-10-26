@@ -50,14 +50,21 @@ exact same-origin `Origin`. A successful **204** has no document content or Save
 receipt. It creates no connection, ticket, participant, origin, gate or mutation.
 
 Both preparation and publication validate current canonical SQL rights and the
-same original credential and authority epochs. Expired, closed or retired
-connections cannot revive. The original credential's wall expiry and monotonic
-cap remain fixed; delivery and owner lease durations are unchanged. Publication
+same original credential identity and authority epochs. A freshly authenticated
+JWT for the same SQL session may advance the accepted credential expiry; the
+new expiry and monotonic cap are published together. Reusing an identical JWT
+never recalculates its cap. Expired, closed or retired connections cannot
+revive; delivery and owner lease durations are unchanged. Publication
 performs no SQL or network I/O under connection locks, and the response remains
 inside its bounded original ingress operation.
 
 The browser retains its one WebSocket, editor, draft, pending originals and undo.
-It never resubmits a write or adopts a new credential during reauthorization.
+It attempts authentication refresh before opening and reauthorizing, while retaining
+the original participant and immutable attribution. It never resubmits a write
+during reauthorization. A different session or changed revocation epoch cannot
+renew the original admission. A still-valid access cookie remains usable if
+the refresh cookie is unavailable; the unchanged credential cap still applies.
+Agent task credentials and mandates remain fixed.
 Failure or an unanswered request stops the connection while retaining the local
 draft and treating unobserved write results as unknown. Later HTTP responses
 cannot revive it. This source contract does not assert deployed acceptance.

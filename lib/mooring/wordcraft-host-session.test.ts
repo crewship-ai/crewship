@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { connectWordCraftHost, openWordCraftSession, type WordCraftOpening } from "./wordcraft-host-session"
 
 const fetch = vi.hoisted(() => vi.fn())
-vi.mock("@/lib/api-fetch", () => ({ apiFetch: fetch }))
+const refresh = vi.hoisted(() => vi.fn())
+vi.mock("@/lib/api-fetch", () => ({ apiFetch: fetch, tryRefresh: refresh }))
 vi.mock("@/lib/server-base", () => ({ getAuthMode: () => "cookie", resolveWsBase: () => "wss://studio.example" }))
 const scope = { workspace_id: "workspace", artifact_id: "page", application_id: "wordcraft" }
 const versions = { protocol_version: "0.4.0", model_version: "0.2.0", engine_version: "0.10.0" }
@@ -47,7 +48,7 @@ function rig() {
 }
 const submit = (id: string) => ` {"type":"submit_changes","request_id":"${id}","scope":${JSON.stringify(scope)},"session_id":"session","versions":${JSON.stringify(versions)},"changes":[{"change_id":"${id}","operations":[{"op_id":"${id}"}]}]} \n`
 const receipt = (id: string) => ({ type: "commit_result", request_id: id, scope, generation: "2", revision: "1", changes: [{ change_id: id, status: "saved" }] })
-beforeEach(() => { vi.stubGlobal("WebSocket", Socket); Pending.check.mockReset(); fetch.mockReset() })
+beforeEach(() => { vi.stubGlobal("WebSocket", Socket); Pending.check.mockReset(); fetch.mockReset(); refresh.mockReset(); refresh.mockResolvedValue("ok") })
 afterEach(() => vi.unstubAllGlobals())
 describe("original parent-only WordCraft connection", () => {
   it("retains exact bytes and does not clear later B when A is confirmed", () => {
@@ -107,6 +108,60 @@ describe("original parent-only WordCraft connection", () => {
 describe("authenticated authorization continuity", () => {
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
+
+  it("refreshes authentication before reauthorizing the same connection", async () => {
+    fetch.mockResolvedValue(new Response(null, { status: 204 }))
+    const { host, callbacks } = rig()
+    try {
+      await vi.advanceTimersByTimeAsync(240_000)
+      expect(refresh).toHaveBeenCalledTimes(1)
+      expect(refresh.mock.invocationCallOrder[0]).toBeLessThan(fetch.mock.invocationCallOrder[0])
+      expect(callbacks.stopped).not.toHaveBeenCalled()
+    } finally { host.close() }
+  })
+
+  it("refuses renewal when refreshed authentication is denied by the server", async () => {
+    refresh.mockResolvedValue("auth_failed")
+    fetch.mockResolvedValue(new Response(null, { status: 403 }))
+    const { host, socket, callbacks } = rig()
+    try {
+      host.draft(); host.submit(submit("refresh-revoked"))
+      const frames = [...socket.sent]
+      await vi.advanceTimersByTimeAsync(240_000)
+      expect(fetch).toHaveBeenCalledTimes(1)
+      expect(callbacks.stopped).toHaveBeenCalledTimes(1)
+      expect(callbacks.state).toHaveBeenLastCalledWith("unsaved-draft")
+      expect(socket.sent).toEqual(frames)
+    } finally { host.close() }
+  })
+
+  it("cannot authorize after a timed-out authentication refresh finishes", async () => {
+    let resolve!: (result: string) => void
+    refresh.mockImplementation(() => new Promise<string>(done => { resolve = done }))
+    const { host, callbacks } = rig()
+    try {
+      host.draft()
+      await vi.advanceTimersByTimeAsync(252_000)
+      expect(callbacks.stopped).toHaveBeenCalledTimes(1)
+      resolve("ok")
+      await vi.advanceTimersByTimeAsync(1)
+      expect(fetch).not.toHaveBeenCalled()
+      expect(callbacks.state).toHaveBeenLastCalledWith("unsaved-draft")
+    } finally { host.close() }
+  })
+
+  it("keeps a valid access cookie usable when no refresh cookie is available", async () => {
+    refresh.mockResolvedValue("auth_failed")
+    fetch.mockResolvedValue(new Response(null, { status: 204 }))
+    const { host, callbacks } = rig()
+    try {
+      await vi.advanceTimersByTimeAsync(240_000)
+      expect(fetch).toHaveBeenCalledTimes(1)
+      expect(callbacks.stopped).not.toHaveBeenCalled()
+    } finally { host.close() }
+    fetch.mockResolvedValue(new Response(JSON.stringify(opening), { status: 200 }))
+    await expect(openWordCraftSession("workspace", "page", true, new AbortController().signal)).resolves.toEqual(opening)
+  })
 
   it("bounds an unanswered authorization request and preserves unknown originals", async () => {
     fetch.mockImplementation(() => new Promise(() => {}))
