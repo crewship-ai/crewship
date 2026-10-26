@@ -21,7 +21,10 @@ func (s *BatchStore) authorize(ctx context.Context, tx *sql.Tx, k SessionKey, in
 		isolated := cloneBatchOperation(*op)
 		op = &isolated
 	}
-	return s.config.Authority(ctx, tx, BatchAccess{store: s, Intent: intent, Scope: k, Operation: op, TaskID: task, Participant: participant})
+	if err := s.config.Authority(ctx, tx, BatchAccess{store: s, Intent: intent, Scope: k, Operation: op, TaskID: task, Participant: participant}); err != nil {
+		return err
+	}
+	return requireLegacyCollaborationProfile(ctx, tx, k)
 }
 func (s *BatchStore) transaction(ctx context.Context, fn func(*sql.Tx) error) error {
 	if err := s.ready(); err != nil {
@@ -48,6 +51,9 @@ func (s *BatchStore) transaction(ctx context.Context, fn func(*sql.Tx) error) er
 	return tx.Commit()
 }
 func batchScopeMatches(ctx context.Context, tx *sql.Tx, k SessionKey) (string, []byte, error) {
+	if err := requireLegacyCollaborationProfile(ctx, tx, k); err != nil {
+		return "", nil, err
+	}
 	if err := ownerScopeExists(ctx, tx, k); err != nil {
 		return "", nil, err
 	}
