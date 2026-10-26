@@ -177,3 +177,9 @@ either artifact fails; it never skips or counts synthetic protocol peers as
 native evidence. Ordinary CI still runs the default-off, SQL, authorization,
 projection and synthetic transport regressions. An ordinary green CI run alone
 does not establish execution of this separate actual native integration suite.
+
+## Capacity and recovery repair tests
+
+[Capacity regressions](capacity-regressions.md) documents the individual local
+RED tests, native/CLI requirements and precise fixture limitations. These
+tests are a repair handoff and must not be merged before the failures are fixed.
