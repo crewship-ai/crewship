@@ -1108,3 +1108,58 @@ fn restored_generation_keeps_exact_sql_base_digest_for_next_commit() {
     assert_eq!(restored.checkpoint().unwrap(), staged.checkpoint());
     assert_eq!(text(&restored, 0), "one two");
 }
+
+#[test]
+fn malformed_actual_engine_selection_never_prepares_or_publishes_candidate() {
+    struct CorruptSelection {
+        inner: ProcessEngine,
+        mode: u8,
+    }
+    impl Engine for CorruptSelection {
+        fn call(&mut self, request: Value) -> Result<Value, &'static str> {
+            let mutation = request["command"] == "text.insert";
+            let mut value = self.inner.call(request)?;
+            if mutation {
+                match self.mode {
+                    0 => {
+                        value.as_object_mut().unwrap().remove("result");
+                    }
+                    1 => value["result"] = json!({}),
+                    2 => {
+                        value["result"] = json!({"anchor":{"story":"body","path":[0],"off":1},"focus":{"story":"body","path":[0],"off":1}})
+                    }
+                    _ => {
+                        value["result"] = json!({"anchor":{"story":"body","path":[999],"off":0},"focus":{"story":"body","path":[999],"off":0}})
+                    }
+                }
+            }
+            Ok(value)
+        }
+    }
+    for mode in 0..4 {
+        let mut h = Host::new(
+            CorruptSelection {
+                inner: engine(),
+                mode,
+            },
+            "document",
+            "generation1",
+            None,
+        )
+        .unwrap();
+        let before = unchanged(&h);
+        let input = packet(
+            &h,
+            "bad-selection",
+            "Alice",
+            "text.insert",
+            Some((0, 0, 0)),
+            json!({"text":"č"}),
+        );
+        assert!(h.prepare(&input, &actor("Alice", 1, true)).is_err());
+        assert_eq!(unchanged(&h), before);
+        assert!(h
+            .stage_commit(&key(&h, "bad-selection"), &actor("Alice", 1, true))
+            .is_err());
+    }
+}

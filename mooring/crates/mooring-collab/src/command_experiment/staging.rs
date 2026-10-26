@@ -107,9 +107,12 @@ impl<E: Engine> Host<E> {
             }
         }
         next.p = k.snapshot.clone();
-        let receipt = json!({"state":"host_committed","op_id":op_id,"revision":next.revision,
+        let mut receipt = json!({"state":"host_committed","op_id":op_id,"revision":next.revision,
             "actor":k.envelope.participant,"author":k.author,"command_time":k.time,
             "fingerprint":String::from_utf8_lossy(&k.input)});
+        if let Some(selection) = &k.selection {
+            receipt["selection"] = selection.clone();
+        }
         next.seen.insert(
             op_id.into(),
             Seen {
@@ -182,6 +185,7 @@ impl<E: Engine> Host<E> {
             || k.time != staged.command_time
             || k.envelope.participant != staged.participant
             || k.snapshot != staged.next.p
+            || k.selection.as_ref() != staged.receipt.get("selection")
         {
             return Err("commit_binding_mismatch");
         }

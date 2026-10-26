@@ -118,6 +118,7 @@ struct Candidate {
     time: String,
     snapshot: Snapshot,
     undo: Option<usize>,
+    selection: Option<Value>,
 }
 /// The actual child implementation speaks only an inherited private FD.
 /// Test doubles alone cannot establish engine qualification.
@@ -336,7 +337,7 @@ impl<E: Engine> Host<E> {
             return Err("operation_limit");
         }
         let before = self.state.p.clone();
-        let (snapshot, undo) = if env.command == "participant.undo" {
+        let (snapshot, undo, selection) = if env.command == "participant.undo" {
             if env.target.is_some() {
                 return Err("invalid_target");
             }
@@ -363,7 +364,7 @@ impl<E: Engine> Host<E> {
             if reply.get("native") != Some(&snapshot.native) {
                 return Err("undo_projection_changed");
             }
-            (snapshot, Some(index))
+            (snapshot, Some(index), None)
         } else {
             let target = env.target.as_ref().ok_or("missing_target")?;
             if target.start > target.end {
@@ -376,6 +377,7 @@ impl<E: Engine> Host<E> {
                 .ok_or("target_gone")?;
             let reply=self.engine.call(json!({"command":env.command,"params":env.params,"native":before.native,"target":{"block":index,"start":target.start,"end":target.end,"unit":"utf8_bytes"},"author":admission.author,"time":admission.time}))?;
             let native = reply.get("native").cloned().ok_or("engine_reply")?;
+            let selection = process::validated_selection(reply.get("result").ok_or("engine_reply")?, &native)?;
             let count = body(&native)?.len();
             let mut ids = before.ids.clone();
             match (env.command.as_str(), count.cmp(&ids.len())) {
@@ -398,7 +400,7 @@ impl<E: Engine> Host<E> {
                 (_, std::cmp::Ordering::Equal) => {}
                 _ => return Err("unexpected_structure"),
             }
-            (Snapshot { native, ids }, None)
+            (Snapshot { native, ids }, None, Some(selection))
         };
         snapshot_valid(&snapshot)?;
         if snapshot == before {
@@ -418,6 +420,7 @@ impl<E: Engine> Host<E> {
             time: admission.time.clone(),
             snapshot,
             undo,
+            selection,
         });
         Ok(Prepared::Pending { op_id })
     }

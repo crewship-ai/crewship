@@ -90,7 +90,7 @@ func TestCommandNativeFixtureChild(t *testing.T) {
 			a.Participant = admission.Participant
 			a.Author = admission.Author
 			a.Time = admission.Time
-			receiptRaw, _ := json.Marshal(map[string]any{"state": "host_committed", "op_id": envelope.OpID, "revision": revision + 1, "actor": a.Participant, "author": a.Author, "command_time": a.Time, "fingerprint": commandDigest([]byte(input))})
+			receiptRaw, _ := json.Marshal(map[string]any{"selection": map[string]any{"anchor": map[string]any{"story": "body", "path": []int{0}, "off": 0}, "focus": map[string]any{"story": "body", "path": []int{0}, "off": 0}}, "state": "host_committed", "op_id": envelope.OpID, "revision": revision + 1, "actor": a.Participant, "author": a.Author, "command_time": a.Time, "fingerprint": commandDigest([]byte(input))})
 			receipt := string(receiptRaw)
 			staged = map[string]any{"state": "staged", "stage_ref": "opaque-stage", "op_id": envelope.OpID, "document": doc, "generation": gen, "format": commandFormat, "engine_revision": commandEngineRevision, "engine_sha256": os.Getenv("C1_FAKE_ENGINE_SHA"), "base_revision": revision, "revision": revision + 1, "base_digest": stringFromRaw(req["base_digest"]), "digest": commandDigest(cp), "fingerprint": commandDigest([]byte(input)), "checkpoint_json": string(cp), "receipt_json": receipt}
 			value = staged
@@ -164,7 +164,7 @@ func TestCommandNativeFixtureChild(t *testing.T) {
 }
 func stringFromRaw(raw []byte) string { var s string; _ = json.Unmarshal(raw, &s); return s }
 func fakeNativeCheckpoint(doc, gen string, revision uint64) []byte {
-	raw, _ := json.Marshal(map[string]any{"format": commandFormat, "document": doc, "generation": gen, "revision": revision, "p": map[string]any{"ids": []string{"block-one"}, "native": map[string]any{"body": []any{map[string]any{"type": "paragraph"}}}}, "engine_identity": map[string]any{"revision": commandEngineRevision, "patch_sha256": commandClockPatch, "catalog": "wordcraft-c1-10-v1"}})
+	raw, _ := json.Marshal(map[string]any{"format": commandFormat, "document": doc, "generation": gen, "revision": revision, "p": map[string]any{"ids": []string{"block-one"}, "native": map[string]any{"body": []any{map[string]any{"type": "paragraph", "text": ""}}}}, "engine_identity": map[string]any{"revision": commandEngineRevision, "patch_sha256": commandClockPatch, "catalog": "wordcraft-c1-10-v1"}})
 	return raw
 }
 func fakeNativeMetadata(cp []byte, gen string, revision uint64) map[string]any {

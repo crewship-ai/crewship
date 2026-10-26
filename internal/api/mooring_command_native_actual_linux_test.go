@@ -10,6 +10,8 @@ import (
 	"errors"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -93,6 +95,27 @@ func newActualCommandNativeRig(t *testing.T) *actualCommandNativeRig {
 	a, e := s.Admit(f.ctx, true)
 	if e != nil {
 		t.Fatal(e)
+	}
+	// Opt-in local qualification artifacts only; synthetic fixture DB, never
+	// user data. Register after fixture cleanup so failure snapshot runs first.
+	if dir := os.Getenv("CREWSHIP_C1_FAILURE_ARTIFACT_DIR"); dir != "" {
+		t.Cleanup(func() {
+			if !t.Failed() {
+				return
+			}
+			if os.MkdirAll(dir, 0700) != nil {
+				t.Log("fixture preservation directory failed")
+				return
+			}
+			target := filepath.Join(dir, strings.ReplaceAll(t.Name(), "/", "-")+".sqlite")
+			if _, err := f.r.db.Exec(`VACUUM INTO ?`, target); err != nil {
+				t.Log("fixture DB preservation failed")
+				return
+			}
+			if os.Chmod(target, 0600) != nil {
+				t.Log("fixture DB preservation mode failed")
+			}
+		})
 	}
 	return &actualCommandNativeRig{f: f, s: s, p: observed, a: a, actor: commandEngineActorBinding{transportParticipant: a.participant, sourceUser: a.source.UserID, actor: "logical-native-human"}, generation: projection.Generation, block: projection.IDs[0], initial: initial, config: config}
 }
@@ -242,5 +265,112 @@ func TestCommandNativeActualSQLCommitErrorReconcileCanonicalP(t *testing.T) {
 	projection, e = r.p.Projection(context.Background())
 	if e != nil || actualNativeText(t, projection) != "" {
 		t.Fatal("recovery failed", e)
+	}
+}
+
+// Actual helper -> Rust candidate -> native RPC -> atomic SQL operation receipt.
+// This is not a rendered browser/keyboard/Saved qualification.
+func TestCommandNativeActualSQLSelectionInsertEnterRestore(t *testing.T) {
+	r := newActualCommandNativeRig(t)
+	req := httptest.NewRequest("POST", "/native-test-only", nil).WithContext(r.f.ctx)
+	block, off := r.block, uint64(0)
+	var last commandSQLOutcome
+	for i, item := range []struct {
+		command string
+		params  map[string]any
+	}{{"text.insert", map[string]any{"text": "a"}}, {"text.insert", map[string]any{"text": "b"}}, {"text.insert", map[string]any{"text": "č"}}, {"text.newParagraph", map[string]any{}}, {"text.insert", map[string]any{"text": "Ž"}}, {"text.backspace", map[string]any{}}} {
+		raw, _ := json.Marshal(map[string]any{"op_id": r.generation + ":" + stringUint(uint64(i+1)), "generation": r.generation, "participant": r.actor.actor, "base_revision": uint64(i), "command": item.command, "params": item.params, "target": map[string]any{"block_id": block, "unit": "utf8_bytes", "start": off, "end": off}})
+		out, e := r.s.Submit(req, r.a, r.actor, raw)
+		if e != nil {
+			t.Fatal("actual command SQL selection", i, e)
+		}
+		cp := r.sqlSnapshot(t)
+		selection, e := commandReceiptSelection(out.Receipt, cp.Checkpoint, item.command)
+		if e != nil {
+			t.Fatal("missing actual selection", e)
+		}
+		var value struct {
+			Anchor, Focus struct {
+				Story string   `json:"story"`
+				Path  []uint64 `json:"path"`
+				Off   uint64   `json:"off"`
+			}
+		}
+		if json.Unmarshal(selection, &value) != nil {
+			t.Fatal("selection")
+		}
+		projection, e := r.p.Projection(context.Background())
+		if e != nil {
+			t.Fatal(e)
+		}
+		off = value.Focus.Off
+		block = projection.IDs[value.Focus.Path[0]]
+		expectedOff := []uint64{1, 2, 4, 0, 2, 0}[i]
+		expectedBlock := uint64(0)
+		if i >= 3 {
+			expectedBlock = 1
+		}
+		if off != expectedOff || value.Focus.Path[0] != expectedBlock {
+			t.Fatalf("actual selection step%d off%d block%d", i, off, value.Focus.Path[0])
+		}
+		var stored string
+		if e = r.f.r.db.QueryRow(`SELECT result_json FROM mooring_collab_operations WHERE page_id='admission-page' AND op_id=?`, out.OpID).Scan(&stored); e != nil {
+			t.Fatal(e)
+		}
+		var sqlOut commandSQLOutcome
+		if json.Unmarshal([]byte(stored), &sqlOut) != nil || !bytes.Equal(sqlOut.Receipt, out.Receipt) {
+			t.Fatal("SQL receipt lost exact selection")
+		}
+		duplicate, e := r.s.Submit(req, r.a, r.actor, raw)
+		if e != nil || !bytes.Equal(duplicate.Receipt, out.Receipt) {
+			t.Fatal("known op changed selection", e)
+		}
+		last = out
+	}
+	cp := r.sqlSnapshot(t)
+	q, e := startCommandNativePort(context.Background(), r.config)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer q.Close()
+	if e = q.RestoreConfirmed(context.Background(), cp); e != nil {
+		t.Fatal(e)
+	}
+	projection, e := q.Projection(context.Background())
+	if e != nil {
+		t.Fatal(e)
+	}
+	// Peer data remains pure document/IDs; own selection is in the bound receipt.
+	raw, _ := json.Marshal(projection)
+	var peer map[string]json.RawMessage
+	_ = json.Unmarshal(raw, &peer)
+	if peer["selection"] != nil {
+		t.Fatal("own caret leaked into peer projection")
+	}
+	var saved struct {
+		Seen map[string]struct {
+			Result json.RawMessage `json:"result"`
+		} `json:"seen"`
+	}
+	if json.Unmarshal(cp.Checkpoint, &saved) != nil || !bytes.Equal(saved.Seen[last.OpID].Result, last.Receipt) {
+		t.Fatal("restart checkpoint lost known selection")
+	}
+	if r.p.stages != 6 {
+		t.Fatal("known operations reexecuted engine stage")
+	}
+	if e = q.exchange(context.Background(), "status", map[string]any{"op_id": last.OpID, "expected_fingerprint": last.Fingerprint}, func(raw json.RawMessage) error {
+		var known struct {
+			State       string `json:"state"`
+			ReceiptJSON string `json:"receipt_json"`
+		}
+		if commandNativeDecode(raw, &known, "state", "receipt_json") != nil || known.State != "committed" || !bytes.Equal([]byte(known.ReceiptJSON), last.Receipt) {
+			return errCommandStore
+		}
+		return nil
+	}); e != nil {
+		t.Fatal("restored known receipt lost actual selection", e)
+	}
+	if actualNativeText(t, projection) != "abč" {
+		t.Fatal("sequential own offsets reversed text")
 	}
 }

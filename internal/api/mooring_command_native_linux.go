@@ -396,9 +396,13 @@ func (p *commandNativePort) Stage(ctx context.Context, a commandHostAdmission, b
 			return errCommandStore
 		}
 		var in struct {
-			OpID string `json:"op_id"`
+			OpID    string `json:"op_id"`
+			Command string `json:"command"`
 		}
 		if json.Unmarshal(input, &in) != nil || in.OpID != wire.OpID || commandNativeReceipt([]byte(wire.ReceiptJSON), wire.OpID, wire.Revision, wire.Fingerprint, a) != nil {
+			return errCommandStore
+		}
+		if _, err := commandReceiptSelection([]byte(wire.ReceiptJSON), []byte(wire.CheckpointJSON), in.Command); err != nil {
 			return errCommandStore
 		}
 		h := &commandNativeHandle{port: p, ref: wire.StageRef, op: wire.OpID, digest: wire.Digest, receipt: []byte(wire.ReceiptJSON)}
@@ -575,15 +579,24 @@ func commandNativeID(s string) bool { return len(s) <= 200 && mooring.ValidWireI
 
 func commandNativeReceipt(raw []byte, op string, revision uint64, fingerprint string, a commandHostAdmission) error {
 	var r struct {
-		State       string `json:"state"`
-		OpID        string `json:"op_id"`
-		Revision    uint64 `json:"revision"`
-		Actor       string `json:"actor"`
-		Author      string `json:"author"`
-		Time        string `json:"command_time"`
-		Fingerprint string `json:"fingerprint"`
+		State       string          `json:"state"`
+		OpID        string          `json:"op_id"`
+		Revision    uint64          `json:"revision"`
+		Actor       string          `json:"actor"`
+		Author      string          `json:"author"`
+		Time        string          `json:"command_time"`
+		Fingerprint string          `json:"fingerprint"`
+		Selection   json.RawMessage `json:"selection"`
 	}
-	if commandNativeDecode(raw, &r, "state", "op_id", "revision", "actor", "author", "command_time", "fingerprint") != nil || r.State != "host_committed" || r.OpID != op || r.Revision != revision || r.Actor != a.Participant || r.Author != a.Author || r.Time != a.Time || r.Fingerprint != fingerprint {
+	keys := []string{"state", "op_id", "revision", "actor", "author", "command_time", "fingerprint"}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil {
+		return errCommandStore
+	}
+	if _, found := fields["selection"]; found {
+		keys = append(keys, "selection")
+	}
+	if commandNativeDecode(raw, &r, keys...) != nil || r.State != "host_committed" || r.OpID != op || r.Revision != revision || r.Actor != a.Participant || r.Author != a.Author || r.Time != a.Time || r.Fingerprint != fingerprint {
 		return errCommandStore
 	}
 	return nil

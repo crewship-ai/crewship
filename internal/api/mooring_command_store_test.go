@@ -51,7 +51,7 @@ func (p *commandSQLFixturePort) Stage(_ context.Context, a commandHostAdmission,
 	if err := json.Unmarshal(raw, &input); err != nil {
 		return commandSQLCandidate{}, err
 	}
-	receipt, _ := json.Marshal(map[string]any{"state": "host_committed", "op_id": input.OpID, "revision": base.Revision + 1, "actor": a.Participant, "author": a.Author, "command_time": a.Time, "fingerprint": commandDigest(raw)})
+	receipt, _ := json.Marshal(map[string]any{"selection": map[string]any{"anchor": map[string]any{"story": "body", "path": []int{0}, "off": 0}, "focus": map[string]any{"story": "body", "path": []int{0}, "off": 0}}, "state": "host_committed", "op_id": input.OpID, "revision": base.Revision + 1, "actor": a.Participant, "author": a.Author, "command_time": a.Time, "fingerprint": commandDigest(raw)})
 	var cp map[string]any
 	if err := json.Unmarshal(base.Checkpoint, &cp); err != nil {
 		return commandSQLCandidate{}, err
@@ -59,7 +59,7 @@ func (p *commandSQLFixturePort) Stage(_ context.Context, a commandHostAdmission,
 	cp["revision"] = base.Revision + 1
 	seen := cp["seen"].(map[string]any)
 	seen[input.OpID] = map[string]any{"input": []byte(raw), "result": json.RawMessage(receipt)}
-	cp["p"] = map[string]any{"fixture_revision": base.Revision + 1}
+	cp["p"] = map[string]any{"fixture_revision": base.Revision + 1, "ids": []string{"fixture-block"}, "native": map[string]any{"body": []any{map[string]any{"text": ""}}}}
 	next, _ := json.Marshal(cp)
 	candidate := commandSQLCandidate{OpID: input.OpID, Document: "admission-page", Generation: input.Generation, Format: commandFormat, EngineRevision: commandEngineRevision, EngineSHA256: p.EngineSHA256(), BaseRevision: base.Revision, Revision: base.Revision + 1, BaseDigest: commandDigest(base.Checkpoint), Digest: commandDigest(next), Fingerprint: commandDigest(raw), Checkpoint: next, Receipt: receipt}
 	if p.afterStage != nil {
@@ -477,5 +477,43 @@ func TestCommandSQLFormatGuardsApplyWhileCommandFeatureDisabled(t *testing.T) {
 	rev, cp, n := r.state(t)
 	if rev != "0" || n != 0 || !bytes.Equal(cp, before) {
 		t.Fatal("disabled feature lost command data")
+	}
+}
+
+func TestCommandSQLMalformedSelectionNeverPublishesOrAcknowledges(t *testing.T) {
+	for _, mode := range []string{"missing", "interior", "foreign_block"} {
+		t.Run(mode, func(t *testing.T) {
+			r := newCommandSQLRig(t, true)
+			_, before, _ := r.state(t)
+			r.p.mutateCandidate = func(c *commandSQLCandidate) {
+				var receipt map[string]any
+				_ = json.Unmarshal(c.Receipt, &receipt)
+				if mode == "missing" {
+					delete(receipt, "selection")
+				} else {
+					off, block := 1, 0
+					if mode == "foreign_block" {
+						off, block = 0, 99
+					}
+					p := map[string]any{"story": "body", "path": []int{block}, "off": off}
+					receipt["selection"] = map[string]any{"anchor": p, "focus": p}
+				}
+				c.Receipt, _ = json.Marshal(receipt)
+				var cp map[string]any
+				_ = json.Unmarshal(c.Checkpoint, &cp)
+				cp["p"] = map[string]any{"ids": []string{"fixture-block"}, "native": map[string]any{"body": []any{map[string]any{"text": "č"}}}}
+				cp["seen"].(map[string]any)[c.OpID].(map[string]any)["result"] = json.RawMessage(c.Receipt)
+				c.Checkpoint, _ = json.Marshal(cp)
+				c.Digest = commandDigest(c.Checkpoint)
+			}
+			req := httptest.NewRequest("POST", "/command-test-only", nil).WithContext(r.f.ctx)
+			if _, err := r.s.Submit(req, r.a, r.actor(), r.input("selection-bad", 0, "č")); err == nil {
+				t.Fatal("invalid selection committed")
+			}
+			rev, after, n := r.state(t)
+			if rev != "0" || n != 0 || !bytes.Equal(before, after) || r.p.acks != 0 || !r.p.k {
+				t.Fatal("selection failure changed P, ACK or pending")
+			}
+		})
 	}
 }

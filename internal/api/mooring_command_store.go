@@ -575,10 +575,15 @@ func (s *collaborationCommandStore) validateCandidate(c commandSQLCandidate, bas
 	}
 	var input, checkpoint struct {
 		Generation string `json:"generation"`
+		Command    string `json:"command"`
 	}
 	if json.Unmarshal(original, &input) != nil || json.Unmarshal(c.Checkpoint, &checkpoint) != nil || c.Generation != input.Generation || c.Generation != checkpoint.Generation {
 		return errCommandStore
 	}
+	if _, err := commandReceiptSelection(c.Receipt, c.Checkpoint, input.Command); err != nil {
+		return errCommandStore
+	}
+
 	var receipt struct {
 		State, OpID, Actor, Author, Time, Fingerprint string
 		Revision                                      uint64

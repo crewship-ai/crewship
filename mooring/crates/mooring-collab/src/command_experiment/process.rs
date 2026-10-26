@@ -153,6 +153,43 @@ impl ProcessEngine {
         Ok(reply)
     }
 }
+/// Actual native engine selection readout, never a guessed caret or peer state.
+/// Bound into the same immutable candidate/operation receipt by Host::prepare.
+pub(super) fn validated_selection(value: &Value, native: &Value) -> Result<Value> {
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Position {
+        story: String,
+        path: Vec<usize>,
+        off: usize,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Selection {
+        anchor: Position,
+        focus: Position,
+    }
+    let raw = serde_json::to_vec(value).map_err(|_| "engine_selection")?;
+    if raw.len() > 2048 {
+        return Err("engine_selection");
+    }
+    let selected: Selection = serde_json::from_slice(&raw).map_err(|_| "engine_selection")?;
+    for pos in [&selected.anchor, &selected.focus] {
+        if pos.story != "body" || pos.path.len() != 1 {
+            return Err("engine_selection");
+        }
+        let text = body(native)?
+            .get(pos.path[0])
+            .and_then(|p| p.get("text"))
+            .and_then(Value::as_str)
+            .ok_or("engine_selection")?;
+        if !text.is_char_boundary(pos.off) {
+            return Err("engine_selection");
+        }
+    }
+    Ok(value.clone())
+}
+
 impl Engine for ProcessEngine {
     fn call(&mut self, request: Value) -> Result<Value> {
         if self.failed {
@@ -180,7 +217,7 @@ impl Engine for ProcessEngine {
         let valid = serde_json::from_value::<Success>(value.clone())
             .ok()
             .is_some_and(|out| {
-                let _ = &out.result; // Command-dependent result remains opaque in this scoped experiment.
+                let _ = &out.result; // Preserved intact; Host binds write selection into its candidate.
                 out.engine_identity == expected_engine() && body(&out.native).is_ok()
             });
         if !valid {
@@ -267,6 +304,30 @@ mod tests {
             assert_eq!(e.call(serde_json::json!({})), Err("engine_failed"));
             assert!(!Path::new(&format!("/proc/{pid}")).exists());
             fs::remove_file(path).unwrap();
+        }
+    }
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn selection_is_exact_bounded_native_utf8_not_a_caret_guess() {
+        let native = json!({"body":[{"text":"čA"},{"text":""}]});
+        let pos = |block, off| json!({"story":"body","path":[block],"off":off});
+        let valid = json!({"anchor":pos(0,2),"focus":pos(1,0)});
+        assert_eq!(validated_selection(&valid, &native).unwrap(), valid);
+        for bad in [
+            Value::Null,
+            json!({}),
+            json!({"anchor":pos(0,1),"focus":pos(0,1)}),
+            json!({"anchor":pos(2,0),"focus":pos(0,0)}),
+            json!({"anchor":{"story":"body","path":[0,0],"off":0},"focus":pos(0,0)}),
+            json!({"anchor":pos(0,4),"focus":pos(0,0)}),
+            json!({"anchor":pos(0,0),"focus":pos(0,0),"padding":"é".repeat(1024)}),
+        ] {
+            assert!(validated_selection(&bad, &native).is_err());
         }
     }
 }
