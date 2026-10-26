@@ -74,7 +74,7 @@ const { chromium } = require('@playwright/test');
         eq(h.document_identity(), identity, `native_identity_preserved_${i}`);
       }
       eq(JSON.parse(h.captured_json()).length, commands.items.length, 'pending_rejections_capture_nothing');
-      for (const command of ['file.open', 'format.italic', 'edit.redo', 'list.bullet']) {
+      for (const command of ['file.open', 'format.italic', 'edit.redo', 'list.bullet', 'edit.undo']) {
         refused(() => h.run_registry(command, '{}'), `closed_catalog_${command}`);
       }
       const denied = new C1Harness(initial, ids(1));
@@ -91,7 +91,7 @@ const { chromium } = require('@playwright/test');
       eq(JSON.parse(failed.captured_json()).length, 1, 'capture_error_only_one_original');
       eq(JSON.parse(failed.native_json()), commands.initial, 'capture_error_no_native_mutation');
       failed.free();
-      for (const [command, params] of [['format.bold', {}], ['format.font', {name:'Arial'}], ['format.size', {size:14}], ['para.align', {value:'center'}], ['edit.undo', {}]]) {
+      for (const [command, params] of [['format.bold', {}], ['format.font', {name:'Arial'}], ['format.size', {size:14}], ['para.align', {value:'center'}]]) {
         const f = new C1Harness(initial, ids(1));
         f.run_registry(command, JSON.stringify(params));
         const proposal = JSON.parse(JSON.parse(f.captured_json())[0]);

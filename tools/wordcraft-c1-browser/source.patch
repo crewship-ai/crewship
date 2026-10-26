@@ -110,10 +110,10 @@ index bedb555..44c9468 100644
  chrono = { version = "0.4.45", default-features = false, features = ["std"] }
 diff --git a/apps/wordcraft-web/src/c1.rs b/apps/wordcraft-web/src/c1.rs
 new file mode 100644
-index 0000000..62c6fd3
+index 0000000..df5be4e
 --- /dev/null
 +++ b/apps/wordcraft-web/src/c1.rs
-@@ -0,0 +1,109 @@
+@@ -0,0 +1,113 @@
 +//! LOCAL C1 display/command adapter only. The authenticated parent validates
 +//! actual SQL receipts; callbacks are never credentials or Saved authority.
 +use js_sys::Function;
@@ -175,6 +175,10 @@ index 0000000..62c6fd3
 +    }
 +    pub fn command_pending(&self) -> bool {
 +        self.state.bridge.pending()
++    }
++    /// Read-only queue observation, never a SQL receipt or paint acknowledgement.
++    pub fn projection_pending(&self) -> bool {
++        self.state.pending.borrow().is_some()
 +    }
 +}
 +impl State {
@@ -383,10 +387,10 @@ index 7fa947f..0f2185a 100644
                  wasm_bindgen_futures::spawn_local(async move {
 diff --git a/crates/ui-egui/src/c1_commands.rs b/crates/ui-egui/src/c1_commands.rs
 new file mode 100644
-index 0000000..7919f44
+index 0000000..5a0d054
 --- /dev/null
 +++ b/crates/ui-egui/src/c1_commands.rs
-@@ -0,0 +1,261 @@
+@@ -0,0 +1,264 @@
 +//! Default-off C1 LOCAL command/render seam. Callers own SQL receipts, transport,
 +//! current permissions, operation identity and reconciliation. No local Saved.
 +use crate::WordApp;
@@ -467,6 +471,9 @@ index 0000000..7919f44
 +    fn forward(&self, session: &Session, registry_id: &str, params: &Value) -> Result<Value, String> {
 +        if self.stopped.get() || self.pending.get() || !(self.can_edit)() {
 +            return Err("C1 command unavailable".into());
++        }
++        if matches!(registry_id, "edit.undo" | "participant.undo") {
++            return Err("Undo is not available in this test editor".into());
 +        }
 +        let command = if registry_id == "edit.undo" { "participant.undo" } else { registry_id };
 +        if !matches!(

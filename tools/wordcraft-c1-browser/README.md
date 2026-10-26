@@ -12,7 +12,8 @@ and reserializing it through JavaScript changes numeric representation. Stable
 colon block IDs are replaced with each confirmed projection, including Enter.
 The actual native registry forwards command, original params and UTF8 byte
 selection without optimistic document mutation. Unsupported registry commands
-show a refusal. `edit.undo` maps to existing `participant.undo`, never local undo.
+show a refusal. Undo is explicitly refused before reserving pending input until
+its own receipt can supply a qualified native selection; it never runs local undo.
 
 The separate bundle starts attached mode only with `?mooring=1` and a single
 `start_c1_commands(native_json, ids_json, callbacks)` call. Callbacks are
@@ -21,7 +22,9 @@ The separate bundle starts attached mode only with `?mooring=1` and a single
 or a host Saved receipt**. Host transport/SQL integration is not supplied here.
 The handle accepts confirmed native JSON, IDs, an own-receipt flag and actual
 committed engine selection JSON (at most 2 KiB UTF8 before copy/parse). Peer
-projections require an empty selection string. Missing/invalid own selection is refused; it
+projections require an empty selection string. `projection_pending()` observes
+the actual native projection queue so the product can wait before another peer
+projection. It is neither a SQL receipt nor evidence of a completed GPU paint. Missing/invalid own selection is refused; it
 is never inferred from text length. Peer projections cannot clear own pending.
 
 One pending command blocks further mutating registry input with a visible
