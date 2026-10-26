@@ -1002,10 +1002,10 @@ from the current crew share without persisting individual agent grants.
 
 Saved policy/provenance lists only explicit crew grants. Access explanations
 read all granted crew names in one query; snapshots for private context/files
-contain the distinct effective leaf grants. Crew detail/management routes,
-crew Share dialogs/presets and trusted additive crew rights are subsequent
-slices. Existing resource editors preserve saved crew grants and can remove
-them. Credential grants and Pages migration are not added by this slice.
+contain the distinct effective leaf grants. Crew Share and person Access
+editors can add and remove Guest crew shares, including explicit crew-levels
+v1 presets. Trusted additive crew management remains a subsequent slice.
+Credential grants and Pages migration are not added by this slice.
 
 ```sh
 crewship share crew CREW_ID --with MEMBER_ID --operation use
