@@ -243,8 +243,11 @@ func (s *collaborationHumanRegistry) reconnect(ctx context.Context, binding coll
 		return "", err
 	}
 	boot, now, err := s.clock.Now()
-	if err != nil || boot != admission.boot || now < 0 || now >= admission.deadline {
+	if err != nil || boot != admission.boot || now < 0 {
 		return "", errCollaborationAdmission
+	}
+	if now >= admission.currentDeadline() {
+		return "", errCollaborationAdmissionHorizon
 	}
 	ticket, err := collaborationOpaqueID()
 	if err != nil {
@@ -257,7 +260,7 @@ func (s *collaborationHumanRegistry) reconnect(ctx context.Context, binding coll
 		return "", errCollaborationAdmission
 	}
 	ttl := 15 * time.Second
-	if remaining := admission.deadline - now; remaining < ttl {
+	if remaining := admission.currentDeadline() - now; remaining < ttl {
 		ttl = remaining
 	}
 	s.tickets[ticket] = collaborationHumanJoinTicket{participant: participant, owner: owner, boot: boot, deadline: now + ttl}

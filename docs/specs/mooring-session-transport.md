@@ -1,7 +1,7 @@
 # Mooring human session transport
 
 This experimental Rust-backed session profile is separately disabled by default.
-The server registers neither route unless trusted configuration enables it and
+The server registers these routes only when trusted configuration enables it and
 verified runtime assets pass startup checks. Invalid enabled configuration fails
 closed. The [pilot JSON profile](mooring-pilot.md) remains a separate contract.
 This reference describes implemented handlers, not deployed multiuser or agent
@@ -13,6 +13,7 @@ an unaffected participant; continuity through that event is not qualified.
 | Operation | Purpose |
 |---|---|
 | `POST /api/v1/pages/{slug}/mooring/session` | Admit a human connection against current Page authority |
+| `POST /api/v1/pages/{slug}/mooring/session/reauthorize` | Revalidate the same still-live original human admission |
 | `GET /api/v1/pages/{slug}/mooring/ws` | Upgrade the admitted connection to a WebSocket |
 | `POST /api/v1/pages/{slug}/mooring/tasks` | Request the original human-authored chat message as a task in this document |
 
@@ -39,6 +40,27 @@ host-reserved positive safe integer. The version tuple is protocol `0.4.0`, mode
 `0.2.0`, engine `0.10.0`. An optional `editor` contains `url` and `bundle_digest`
 only when a verified editor provider supplies both. Responses use `Cache-Control:
 no-store`. This admission response is not a committed mutation or a Saved receipt.
+
+### Reauthorize an existing connection
+
+The parent browser revalidates its original admission before its five-minute
+freshness horizon. The POST accepts only the exact `connection_ref` key (1 KiB
+maximum body), normal human authentication, the original workspace/Page and an
+exact same-origin `Origin`. A successful **204** has no document content or Saved
+receipt. It creates no connection, ticket, participant, origin, gate or mutation.
+
+Both preparation and publication validate current canonical SQL rights and the
+same original credential and authority epochs. Expired, closed or retired
+connections cannot revive. The original credential's wall expiry and monotonic
+cap remain fixed; delivery and owner lease durations are unchanged. Publication
+performs no SQL or network I/O under connection locks, and the response remains
+inside its bounded original ingress operation.
+
+The browser retains its one WebSocket, editor, draft, pending originals and undo.
+It never resubmits a write or adopts a new credential during reauthorization.
+Failure or an unanswered request stops the connection while retaining the local
+draft and treating unobserved write results as unknown. Later HTTP responses
+cannot revive it. This source contract does not assert deployed acceptance.
 
 ### WebSocket upgrade
 

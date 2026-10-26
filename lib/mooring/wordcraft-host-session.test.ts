@@ -104,6 +104,120 @@ describe("original parent-only WordCraft connection", () => {
   })
 })
 
+describe("authenticated authorization continuity", () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  it("bounds an unanswered authorization request and preserves unknown originals", async () => {
+    fetch.mockImplementation(() => new Promise(() => {}))
+    const { host, socket, callbacks } = rig()
+    try {
+      host.draft(); host.submit(submit("pending-timeout"))
+      const sent = [...socket.sent]
+      await vi.advanceTimersByTimeAsync(240_000 + 12_000)
+      expect(fetch).toHaveBeenCalledTimes(1)
+      expect(callbacks.stopped).toHaveBeenCalledTimes(1)
+      expect(callbacks.state).toHaveBeenLastCalledWith("unsaved-draft")
+      expect(callbacks.state).not.toHaveBeenCalledWith("saved")
+      expect(socket.sent).toEqual(sent)
+      await vi.advanceTimersByTimeAsync(10 * 60_000)
+      expect(fetch).toHaveBeenCalledTimes(1)
+    } finally { host.close() }
+  })
+
+  it("fails closed on a rejected request and cancels scheduled work on close", async () => {
+    fetch.mockRejectedValue(new Error("network unavailable"))
+    const { host, callbacks } = rig()
+    host.draft()
+    await vi.advanceTimersByTimeAsync(240_000)
+    expect(callbacks.stopped).toHaveBeenCalledTimes(1)
+    expect(callbacks.state).toHaveBeenLastCalledWith("unsaved-draft")
+    host.close()
+    await vi.advanceTimersByTimeAsync(10 * 60_000)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    fetch.mockReset()
+    const second = rig()
+    second.host.close()
+    await vi.advanceTimersByTimeAsync(10 * 60_000)
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it("crosses several original five-minute horizons without replacing the connection or producer", async () => {
+    fetch.mockResolvedValue(new Response(null, { status: 204 }))
+    const { host, socket, callbacks } = rig()
+    try {
+      host.draft()
+      const originalFrames = [...socket.sent]
+      await vi.advanceTimersByTimeAsync(16 * 60_000)
+      expect(fetch.mock.calls.length).toBeGreaterThanOrEqual(3)
+      for (const [url, init] of fetch.mock.calls) {
+        expect(url).toBe("/api/v1/pages/%40page/mooring/session/reauthorize?workspace_id=workspace")
+        expect(init).toMatchObject({ method: "POST", skipRefresh: true, cache: "no-store", redirect: "error" })
+        expect(JSON.parse(init.body)).toEqual({ connection_ref: opening.connection_ref })
+      }
+      expect(Socket.current).toBe(socket)
+      expect(socket.sent).toEqual(originalFrames)
+      expect(callbacks.bootstrap).toHaveBeenCalledTimes(1)
+      expect(callbacks.state).toHaveBeenLastCalledWith("draft")
+      expect(callbacks.stopped).not.toHaveBeenCalled()
+    } finally { host.close() }
+  })
+
+  it("retains an in-flight original with an unobserved result instead of replaying it or claiming Saved", async () => {
+    fetch.mockResolvedValue(new Response(null, { status: 204 }))
+    const { host, socket, callbacks } = rig()
+    try {
+      host.draft(); host.submit(submit("unobserved"))
+      const sent = [...socket.sent]
+      await vi.advanceTimersByTimeAsync(11 * 60_000)
+      expect(fetch.mock.calls.length).toBeGreaterThanOrEqual(2)
+      expect(socket.sent).toEqual(sent)
+      expect(callbacks.state).toHaveBeenLastCalledWith("pending")
+      expect(callbacks.state).not.toHaveBeenCalledWith("saved")
+      socket.receive(receipt("unobserved"))
+      expect(Pending.check).toHaveBeenCalledTimes(1)
+      expect(callbacks.state).toHaveBeenLastCalledWith("saved")
+    } finally { host.close() }
+  })
+
+  it("does not restore revoked access or consume a newer draft while refreshing", async () => {
+    fetch.mockResolvedValueOnce(new Response(null, { status: 204 })).mockResolvedValue(new Response(null, { status: 403 }))
+    const { host, socket, callbacks } = rig()
+    try {
+      host.draft(); host.submit(submit("in-flight")); host.draft()
+      const sent = [...socket.sent]
+      await vi.advanceTimersByTimeAsync(11 * 60_000)
+      expect(fetch).toHaveBeenCalledTimes(2)
+      expect(callbacks.stopped).toHaveBeenCalledTimes(1)
+      expect(callbacks.state).toHaveBeenLastCalledWith("unsaved-draft")
+      expect(callbacks.state).not.toHaveBeenCalledWith("saved")
+      expect(socket.sent).toEqual(sent)
+      expect(callbacks.bootstrap).toHaveBeenCalledTimes(1)
+      expect(Socket.current).toBe(socket)
+    } finally { host.close() }
+  })
+
+  it("cannot revive a stopped original when a refresh response arrives late", async () => {
+    let resolve!: (value: Response) => void
+    fetch.mockImplementation(() => new Promise<Response>(done => { resolve = done }))
+    const { host, socket, callbacks } = rig()
+    try {
+      host.draft(); host.submit(submit("unknown"))
+      await vi.advanceTimersByTimeAsync(295_000)
+      expect(fetch).toHaveBeenCalledTimes(1)
+      socket.onclose?.()
+      const states = callbacks.state.mock.calls.length, frames = [...socket.sent]
+      resolve(new Response(null, { status: 204 }))
+      await vi.advanceTimersByTimeAsync(10 * 60_000)
+      expect(fetch).toHaveBeenCalledTimes(1)
+      expect(callbacks.state.mock.calls).toHaveLength(states)
+      expect(callbacks.state).toHaveBeenLastCalledWith("unsaved-draft")
+      expect(socket.sent).toEqual(frames)
+      expect(callbacks.bootstrap).toHaveBeenCalledTimes(1)
+    } finally { host.close() }
+  })
+})
+
 it("does not let a known Saved operation under a new request clear a later draft", () => {
   const { host, socket, callbacks } = rig()
   host.draft(); host.submit(submit("A")); socket.receive(receipt("A"))

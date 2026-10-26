@@ -79,6 +79,8 @@ export function connectWordCraftHost(workspaceId: string, pageId: string, openin
   const socket = new WebSocket(`${resolveWsBase()}/api/v1/pages/${encodeURIComponent("@" + pageId)}/mooring/ws?${query}`)
   const joinRequest = crypto.randomUUID(), checkpointRequest = crypto.randomUUID()
   let joined = "", checkpoint = "", generation = "", stopped = false, bootstrapped = false, childReady = false, draftEpoch = 0, confirmedEpoch = 0, pendingBytes = 0
+  let renewalTimer: ReturnType<typeof setTimeout> | undefined
+  let renewalAbort: AbortController | undefined
   const pending = new Map<string, { receipt: WordCraftPendingReceipt; raw: string; epoch: number; changeIds: readonly string[] }>()
   const settled = new Map<string, string>()
   let settledBytes = 0
@@ -88,8 +90,29 @@ export function connectWordCraftHost(workspaceId: string, pageId: string, openin
   const state = (value: WordCraftHostState) => { if (!stopped) callbacks.state(value) }
   const stop = (reason: string) => {
     if (stopped) return
-    stopped = true; socket.close(); callbacks.state(pending.size || draftEpoch > confirmedEpoch ? "unsaved-draft" : "stopped"); callbacks.stopped(reason)
+    stopped = true
+    clearTimeout(renewalTimer); renewalAbort?.abort()
+    socket.close(); callbacks.state(pending.size || draftEpoch > confirmedEpoch ? "unsaved-draft" : "stopped"); callbacks.stopped(reason)
   }
+  // Revalidate this same original admission before its five-minute horizon.
+  // No new WebSocket, bootstrap, producer, command or Saved acknowledgement.
+  const renew = async () => {
+    if (stopped) return
+    const abort = new AbortController()
+    renewalAbort = abort
+    const timeout = setTimeout(() => { abort.abort(); stop("access_unavailable") }, 12_000)
+    try {
+      const response = await apiFetch(`/api/v1/pages/${encodeURIComponent("@" + pageId)}/mooring/session/reauthorize?${new URLSearchParams({ workspace_id: workspaceId })}`, {
+        method: "POST", cache: "no-store", skipRefresh: true, redirect: "error", signal: abort.signal,
+        headers: { "content-type": "application/json" }, body: JSON.stringify({ connection_ref: opening.connection_ref }),
+      })
+      if (stopped) return
+      if (response.status !== 204) { stop("access_unavailable"); return }
+      renewalTimer = setTimeout(() => { void renew() }, 240_000)
+    } catch { if (!stopped) stop("access_unavailable") }
+    finally { clearTimeout(timeout); if (renewalAbort === abort) renewalAbort = undefined }
+  }
+  renewalTimer = setTimeout(() => { void renew() }, 240_000)
   const send = (raw: string) => {
     if (stopped || socket.readyState !== WebSocket.OPEN || encoder.encode(raw).length > WORDCRAFT_FRAME_BYTES) throw new Error("connection_unavailable")
     socket.send(raw)

@@ -19,6 +19,10 @@ import (
 
 var errCollaborationAdmission = errors.New("collaboration admission unavailable")
 
+// Proven local horizon exhaustion is a participant denial, not an unknown
+// storage/runtime failure. It never acknowledges or reopens a delivery gate.
+var errCollaborationAdmissionHorizon = errors.Join(errCollaborationAdmission, errors.New("original admission horizon exhausted"))
+
 type collaborationHumanBindingKey struct{}
 type collaborationHumanBinding struct {
 	registry    *collaborationHumanRegistry
@@ -46,6 +50,7 @@ type collaborationHumanAdmission struct {
 	write                bool
 	boot                 string
 	deadline             time.Duration
+	freshness            *collaborationHumanFreshness
 }
 
 type collaborationHumanJoinTicket struct {
@@ -136,7 +141,7 @@ func collaborationOpaqueID() (string, error) {
 
 func (s *collaborationHumanRegistry) sweepLocked(boot string, now time.Duration) {
 	for key, value := range s.admissions {
-		if value.boot != boot || now >= value.deadline {
+		if value.boot != boot || now >= value.currentDeadline() {
 			delete(s.admissions, key)
 		}
 	}
@@ -239,6 +244,22 @@ func (s *collaborationHumanRegistry) issue(ctx context.Context, owner mooring.Ow
 	// The same opaque identity is scoped by this registry; never a user-supplied
 	// name or a guessed stable user ID. A new admission gets a new participant.
 	admission := collaborationHumanAdmission{authorVector: vector, ingress: ingress, source: *source, member: proof.memberID, memberRevision: proof.memberRevision, permission: proof.permissionVersion, session: s.sessionID, participant: participant, write: write, boot: boot, deadline: now + ttl}
+	// Capture the original credential's monotonic cap ONCE. Reauthorizing may
+	// refresh current SQL policy, never translate an old wall expiry into a
+	// later BOOTTIME deadline or adopt a renewed credential.
+	capDeadline := time.Duration(0)
+	if !proof.credentialExpiry.IsZero() {
+		remaining := time.Until(proof.credentialExpiry)
+		if remaining < time.Millisecond || remaining > time.Duration(math.MaxInt64)-now {
+			return "", empty, errCollaborationAdmission
+		}
+		capDeadline = now + remaining
+		if capDeadline < admission.deadline {
+			admission.deadline = capDeadline
+		}
+	}
+	admission.freshness = &collaborationHumanFreshness{credentialCap: capDeadline}
+	admission.freshness.deadline.Store(int64(admission.deadline))
 	if err = s.owners.Check(ctx, tx, owner); err != nil {
 		return "", empty, err
 	}
@@ -246,7 +267,7 @@ func (s *collaborationHumanRegistry) issue(ctx context.Context, owner mooring.Ow
 		return "", empty, err
 	}
 	currentBoot, currentNow, err := s.clock.Now()
-	if err != nil || currentBoot != boot || currentNow < now || currentNow >= admission.deadline || (!proof.credentialExpiry.IsZero() && !time.Now().Before(proof.credentialExpiry)) {
+	if err != nil || currentBoot != boot || currentNow < now || currentNow >= admission.currentDeadline() || (!proof.credentialExpiry.IsZero() && !time.Now().Before(proof.credentialExpiry)) {
 		return "", empty, errCollaborationAdmission
 	}
 	s.mu.Lock()
@@ -260,7 +281,7 @@ func (s *collaborationHumanRegistry) issue(ctx context.Context, owner mooring.Ow
 	s.admissions[participant] = admission
 	s.ownerGeneration = owner.Generation
 	ticketTTL := 15 * time.Second
-	if remaining := admission.deadline - currentNow; remaining < ticketTTL {
+	if remaining := admission.currentDeadline() - currentNow; remaining < ticketTTL {
 		ticketTTL = remaining
 	}
 	s.tickets[ticket] = collaborationHumanJoinTicket{participant: participant, owner: owner, boot: boot, deadline: currentNow + ticketTTL}
@@ -301,8 +322,8 @@ func (s *collaborationHumanRegistry) checkCaptured(ctx context.Context, tx *sql.
 	if boot != admission.boot || now < 0 {
 		return "", s.logAdmissionDenial(admission, "clock_epoch", errCollaborationAdmission)
 	}
-	if now >= admission.deadline {
-		return "", s.logAdmissionDenial(admission, "admission_expired", errCollaborationAdmission)
+	if now >= admission.currentDeadline() {
+		return "", s.logAdmissionDenial(admission, "admission_expired", errCollaborationAdmissionHorizon)
 	}
 	if write && !admission.write {
 		return "", s.logAdmissionDenial(admission, "write_capability", errCollaborationAdmission)
@@ -332,11 +353,11 @@ func (s *collaborationHumanRegistry) checkCaptured(ctx context.Context, tx *sql.
 	if err != nil || boot != admission.boot || now < 0 {
 		return "", s.logAdmissionDenial(admission, "final_clock_epoch", errCollaborationAdmission)
 	}
-	if now >= admission.deadline {
-		return "", s.logAdmissionDenial(admission, "final_admission_expired", errCollaborationAdmission)
+	if now >= admission.currentDeadline() {
+		return "", s.logAdmissionDenial(admission, "final_admission_expired", errCollaborationAdmissionHorizon)
 	}
-	if admission.deadline-now < requiredRemaining {
-		return "", s.logAdmissionDenial(admission, "admission_remaining_horizon", errCollaborationAdmission)
+	if admission.currentDeadline()-now < requiredRemaining {
+		return "", s.logAdmissionDenial(admission, "admission_remaining_horizon", errCollaborationAdmissionHorizon)
 	}
 	if !proof.credentialExpiry.IsZero() && time.Until(proof.credentialExpiry) < requiredRemaining {
 		return "", s.logAdmissionDenial(admission, "credential_remaining_horizon", errCollaborationAdmission)

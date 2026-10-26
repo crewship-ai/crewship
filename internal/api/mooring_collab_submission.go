@@ -357,7 +357,7 @@ func (s *collaborationSubmissionRegistry) bind(owner mooring.OwnerLease, binding
 		admission := *entry.author.human
 		boot, tick, err := s.humans.clock.Now()
 		expiry, expiryErr := admission.source.Expiry()
-		if err != nil || expiryErr != nil || boot != admission.boot || tick < 0 || tick >= admission.deadline || !admission.write || (!expiry.IsZero() && !time.Now().Before(expiry)) {
+		if err != nil || expiryErr != nil || boot != admission.boot || tick < 0 || tick >= admission.currentDeadline() || !admission.write || (!expiry.IsZero() && !time.Now().Before(expiry)) {
 			return errCollaborationSubmission
 		}
 		changed, err := collaborationHumanCapturedFenceChanged(ctx, tx, owner.Key, admission)
@@ -365,7 +365,7 @@ func (s *collaborationSubmissionRegistry) bind(owner mooring.OwnerLease, binding
 			return err
 		}
 		boot, tick, err = s.humans.clock.Now()
-		if err != nil || boot != admission.boot || tick < 0 || tick >= admission.deadline || (!expiry.IsZero() && !time.Now().Before(expiry)) {
+		if err != nil || boot != admission.boot || tick < 0 || tick >= admission.currentDeadline() || (!expiry.IsZero() && !time.Now().Before(expiry)) {
 			return errCollaborationSubmission
 		}
 		if changed {

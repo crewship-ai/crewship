@@ -23,6 +23,7 @@ func (r *Router) registerMooringRoutes() {
 	// Literal registrations keep the CLI and documentation route inventories
 	// able to verify these paths and their workspace requirement.
 	r.authedMut("POST", "/api/v1/pages/{slug}/mooring/session", roleSelf, manager.session, manager.fence.Wrap)
+	r.authedMut("POST", "/api/v1/pages/{slug}/mooring/session/reauthorize", roleSelf, manager.reauthorize, manager.fence.Wrap)
 	r.authedMut("POST", "/api/v1/pages/{slug}/mooring/tasks", roleSelf, manager.task, manager.fence.Wrap)
 	r.mux.Handle("GET /api/v1/pages/{slug}/mooring/provenance", manager.fence.Wrap(authed(wsCtx(r.providerAccountPolicy(http.HandlerFunc(r.nativeDocumentProvenance))))))
 	r.mux.Handle("GET /api/v1/pages/{slug}/mooring/ws", manager.fence.Wrap(authed(wsCtx(r.providerAccountPolicy(http.HandlerFunc(manager.websocket))))))

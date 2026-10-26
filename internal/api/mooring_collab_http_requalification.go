@@ -134,7 +134,7 @@ func (c *collaborationHTTPConnection) startGateTransition(ctx context.Context) (
 	c.mu.Unlock()
 	ticket, err := d.humans.reconnect(ctx, d.committer.binding, d.owner, c.admission.participant)
 	if err != nil {
-		if errors.Is(err, errCollaborationAuthorChanged) {
+		if errors.Is(err, errCollaborationAuthorChanged) || errors.Is(err, errCollaborationAdmissionHorizon) {
 			c.mu.Lock()
 			t.err = errCollaborationRecipientDenied
 			close(t.ready)
@@ -365,7 +365,7 @@ func (d *collaborationHTTPDocument) ticketControl(ctx context.Context, token moo
 	if err == nil {
 		return collaborationPumpTicketReply(ctx, d.cell.runtime, token, q, result)
 	}
-	if !errors.Is(err, errCollaborationAuthorChanged) {
+	if !errors.Is(err, errCollaborationAuthorChanged) && !errors.Is(err, errCollaborationAdmissionHorizon) {
 		return err
 	}
 	if err = d.cell.runtime.DeclineParticipantTicket(ctx, d.activation, pending, token); err != nil {

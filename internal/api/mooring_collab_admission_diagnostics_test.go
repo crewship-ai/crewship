@@ -39,8 +39,12 @@ func TestCollaborationAdmissionDenialIdentifiesCheckWithoutChangingDecision(t *t
 			}
 			defer tx.Rollback()
 			_, err = s.checkCaptured(ctx, tx, admission, tc.write, tc.remaining)
-			if err != errCollaborationAdmission {
+			if !errors.Is(err, errCollaborationAdmission) {
 				t.Fatalf("denial changed: %v", err)
+			}
+			wantHorizon := tc.name == "expired" || tc.name == "horizon"
+			if errors.Is(err, errCollaborationAdmissionHorizon) != wantHorizon {
+				t.Fatal("wrong denial classification", err)
 			}
 			var event map[string]any
 			if err := json.Unmarshal(output.Bytes(), &event); err != nil {
