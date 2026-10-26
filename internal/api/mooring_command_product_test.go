@@ -22,6 +22,9 @@ type commandProductFixture struct {
 }
 
 func (p *commandProductFixture) RuntimeRef() string { return p.ref }
+func (p *commandProductFixture) Projection(context.Context) (commandProductProjection, error) {
+	return commandProductProjection{}, errCommandStore // lifecycle fixture has no native renderer
+}
 func (p *commandProductFixture) Close() {
 	p.closeOnce.Do(func() {
 		if p.closeBlock != nil {

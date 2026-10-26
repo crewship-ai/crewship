@@ -55,6 +55,12 @@ func TestCommandProductActualNativeCreateCommitReopen(t *testing.T) {
 	if err != nil || actualNativeText(t, confirmed) != "Factory proof" {
 		t.Fatal("native P not confirmed", err)
 	}
+	var delivered commandProductProjection
+	if err = document.DeliverProjection(request, admission, func(_ context.Context, raw []byte) error {
+		return json.Unmarshal(raw, &delivered)
+	}); err != nil || delivered.Revision != outcome.Revision || actualNativeText(t, delivered) != "Factory proof" {
+		t.Fatal("actual SQL-authorized projection", err)
+	}
 	var before string
 	if err = f.r.db.QueryRow(`SELECT checkpoint_base64 FROM mooring_collab_documents WHERE page_id='admission-page'`).Scan(&before); err != nil {
 		t.Fatal(err)

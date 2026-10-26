@@ -69,12 +69,7 @@ type commandNativeMetadata struct {
 	Generation     string `json:"generation"`
 }
 
-type commandNativeProjection struct {
-	Generation string   `json:"generation"`
-	Revision   uint64   `json:"revision"`
-	IDs        []string `json:"ids"`
-	NativeJSON string   `json:"native_json"`
-}
+type commandNativeProjection = commandProductProjection
 
 func commandNativeFileDigest(path string) (string, error) {
 	if !filepath.IsAbs(path) {

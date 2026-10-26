@@ -14,7 +14,15 @@ import (
 type commandProductPort interface {
 	collaborationCommandPort
 	InitialSnapshot(context.Context, string, string) (commandSQLSnapshot, error)
+	Projection(context.Context) (commandProductProjection, error)
 	Close()
+}
+
+type commandProductProjection struct {
+	Generation string   `json:"generation"`
+	Revision   uint64   `json:"revision"`
+	IDs        []string `json:"ids"`
+	NativeJSON string   `json:"native_json"`
 }
 
 // The context bounds startup, not process lifetime (Close owns that lifetime).
@@ -31,6 +39,7 @@ type commandProductFactory struct {
 	mu      sync.Mutex
 	closed  bool
 	docs    map[mooring.SessionKey]*commandProductDocument
+	views   map[string]commandProductView
 }
 type commandProductDocument struct {
 	ready  chan struct{}
@@ -47,7 +56,7 @@ func newCommandProductFactory(enabled bool, manager *collaborationHTTPManager, s
 		return nil, errCommandStore
 	}
 	ctx, cancel := context.WithCancel(manager.ctx)
-	return &commandProductFactory{manager: manager, enabled: true, start: start, ctx: ctx, cancel: cancel, docs: make(map[mooring.SessionKey]*commandProductDocument)}, nil
+	return &commandProductFactory{manager: manager, enabled: true, start: start, ctx: ctx, cancel: cancel, docs: make(map[mooring.SessionKey]*commandProductDocument), views: make(map[string]commandProductView)}, nil
 }
 
 // Open includes initialization AND canonical restore in one five-second budget.

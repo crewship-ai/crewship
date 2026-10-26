@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Add a disabled native WordCraft command HTTP controller with immutable viewer fences, confirmed SQL-only projections and bounded current-rights delivery; product startup registration remains separate.
+
 - Add a disabled command-document runtime lifecycle that initializes only new documents, restores confirmed SQL state, and retains existing owner fencing without falling back to the legacy adapter.
 - Bound the native C1 host's live generation history across repeated restores, preserving pending candidates and handles when replacement capacity is refused.
 - Add a separate opt-in C1 renderer source recipe and actual native WASM registry/codec harness, with confirmed selection checks and explicit pending-input refusal; it does not enable product UI, preserve rapid input or change the legacy SDK.
