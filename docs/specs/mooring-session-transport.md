@@ -224,3 +224,13 @@ the original participant and cannot replace an existing task's policy.
 A canonical cancellation request for the current work attempt withdraws document
 authority even while that attempt still reports running/confirmed. It cannot
 register, read or submit through its retained original proof after cancellation.
+
+## New command-profile storage boundary
+
+The separately default-off command store uses `wordcraft-c1-v2` only for new
+documents. The existing collaboration head records its immutable format,
+engine source revision and executable SHA-256. Existing custody constraints,
+checkpoints and operation receipts remain authoritative. Legacy payload
+adapters refuse this profile even when command support is disabled; they never
+convert or delete its bytes. The store interface alone registers no route and
+does not qualify a native engine, agent mandate or editor transport.
