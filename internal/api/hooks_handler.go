@@ -61,18 +61,19 @@ func (h *HooksHandler) SetJournal(j journal.Emitter) {
 // trip. Blocking is included because it materially changes how a hook
 // fire affects the triggering operation (block vs warn).
 type hookRow struct {
-	ID            string         `json:"id"`
-	WorkspaceID   string         `json:"workspace_id"`
-	CrewID        string         `json:"crew_id,omitempty"`
-	Event         string         `json:"event"`
-	HandlerKind   string         `json:"handler_kind"`
-	HandlerConfig map[string]any `json:"handler_config,omitempty"`
-	Matcher       hooks.Matcher  `json:"matcher"`
-	Enabled       bool           `json:"enabled"`
-	Blocking      bool           `json:"blocking"`
-	CreatedBy     string         `json:"created_by,omitempty"`
-	CreatedAt     time.Time      `json:"created_at"`
-	UpdatedAt     time.Time      `json:"updated_at"`
+	HostReviewRequired bool           `json:"host_review_required"`
+	ID                 string         `json:"id"`
+	WorkspaceID        string         `json:"workspace_id"`
+	CrewID             string         `json:"crew_id,omitempty"`
+	Event              string         `json:"event"`
+	HandlerKind        string         `json:"handler_kind"`
+	HandlerConfig      map[string]any `json:"handler_config,omitempty"`
+	Matcher            hooks.Matcher  `json:"matcher"`
+	Enabled            bool           `json:"enabled"`
+	Blocking           bool           `json:"blocking"`
+	CreatedBy          string         `json:"created_by,omitempty"`
+	CreatedAt          time.Time      `json:"created_at"`
+	UpdatedAt          time.Time      `json:"updated_at"`
 }
 
 // List serves GET /api/v1/hooks[?crew_id=...]. Workspace-scoped — the
@@ -110,7 +111,7 @@ func (h *HooksHandler) List(w http.ResponseWriter, r *http.Request) {
 	)
 	const baseSelect = `SELECT id, workspace_id, crew_id, event, matcher,
 		handler_kind, handler_config, blocking, enabled, created_by,
-		created_at, updated_at FROM hooks_config WHERE workspace_id = ?`
+		created_at, updated_at, host_authorization FROM hooks_config WHERE workspace_id = ?`
 	if crewID == "" {
 		rows, err = h.db.QueryContext(r.Context(),
 			baseSelect+` ORDER BY created_at DESC, id DESC`, workspaceID)
@@ -133,10 +134,10 @@ func (h *HooksHandler) List(w http.ResponseWriter, r *http.Request) {
 	out := make([]hookRow, 0, 16)
 	for rows.Next() {
 		var (
-			hk                                              hookRow
-			crewNS, createdBy                               sql.NullString
-			matcherStr, handlerCfgStr, createdAt, updatedAt string
-			blockingInt, enabledInt                         int
+			hk                                                                 hookRow
+			crewNS, createdBy                                                  sql.NullString
+			matcherStr, handlerCfgStr, createdAt, updatedAt, hostAuthorization string
+			blockingInt, enabledInt                                            int
 		)
 		if err := rows.Scan(
 			&hk.ID,
@@ -151,6 +152,7 @@ func (h *HooksHandler) List(w http.ResponseWriter, r *http.Request) {
 			&createdBy,
 			&createdAt,
 			&updatedAt,
+			&hostAuthorization,
 		); err != nil {
 			h.logger.Error("hooks list scan", "err", err)
 			replyError(w, http.StatusInternalServerError, "scan failed")
@@ -187,6 +189,11 @@ func (h *HooksHandler) List(w http.ResponseWriter, r *http.Request) {
 		} else if t, perr := time.Parse("2006-01-02 15:04:05", updatedAt); perr == nil {
 			hk.UpdatedAt = t
 		}
+		hk.HostReviewRequired = hk.HandlerKind == "shell" && !hooks.HostAuthorized(hooks.Hook{
+			ID: hk.ID, WorkspaceID: hk.WorkspaceID, CrewID: hk.CrewID, Event: hooks.Event(hk.Event),
+			HandlerKind: hooks.HandlerKind(hk.HandlerKind), HandlerConfig: hk.HandlerConfig, Matcher: hk.Matcher,
+			Blocking: hk.Blocking, Enabled: hk.Enabled, UpdatedAt: hk.UpdatedAt, HostAuthorization: hostAuthorization,
+		})
 		out = append(out, hk)
 	}
 	if err := rows.Err(); err != nil {
@@ -201,17 +208,15 @@ func (h *HooksHandler) List(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Enable serves POST /api/v1/hooks/{id}/enable. OWNER or ADMIN only —
-// enabling a hook is a control-plane mutation that can invoke shell
-// commands (for HandlerKindShell), route traffic to third-party HTTP
-// endpoints, or dispatch subagents. Non-privileged members shouldn't
-// flip those on.
+// Enable requires an instance administrator for host hooks and workspace
+// management authority for other hooks. Scoped tokens must satisfy both the
+// workspace route scope and, for host execution, instance:admin.
 func (h *HooksHandler) Enable(w http.ResponseWriter, r *http.Request) {
 	h.setEnabled(w, r, true)
 }
 
-// Disable serves POST /api/v1/hooks/{id}/disable. Same permission gate
-// as Enable.
+// Disable permits workspace management authority to stop any hook, and
+// instance administrators to stop host hooks even with a MEMBER workspace role.
 func (h *HooksHandler) Disable(w http.ResponseWriter, r *http.Request) {
 	h.setEnabled(w, r, false)
 }
@@ -220,11 +225,6 @@ func (h *HooksHandler) setEnabled(w http.ResponseWriter, r *http.Request, enable
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
 		replyError(w, http.StatusUnauthorized, "workspace required")
-		return
-	}
-	role := RoleFromContext(r.Context())
-	if role != "OWNER" && role != "ADMIN" {
-		replyError(w, http.StatusForbidden, "toggling hooks requires OWNER or ADMIN role")
 		return
 	}
 	user := UserFromContext(r.Context())
@@ -252,7 +252,24 @@ func (h *HooksHandler) setEnabled(w http.ResponseWriter, r *http.Request, enable
 		return
 	}
 
-	if err := hooks.SetEnabled(r.Context(), h.db, workspaceID, id, enabled); err != nil {
+	host := existing.HandlerKind == hooks.HandlerKindShell
+	if enabled && !h.authorizeHookWrite(w, r, host) {
+		return
+	}
+	if !enabled && !canRole(RoleFromContext(r.Context()), "manage") && !(host && h.hostHookAuthority(r)) {
+		replyError(w, http.StatusForbidden, "disabling hooks requires workspace management or instance authority")
+		return
+	}
+	hostAllowed := h.hostHookAuthority(r)
+	_, _, err = h.mutateHook(r, workspaceID, id, "hook.toggle", func(db hooks.StoreDB) (string, error) {
+		return id, hooks.SetEnabledAuthorized(r.Context(), db, workspaceID, id, enabled, hostAllowed)
+	})
+	if err != nil {
+		if errors.Is(err, hooks.ErrShellHookNotAllowed) {
+			h.writeStoreError(w, r, err, "enable")
+			return
+		}
+
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, "hook not found")
 			return
