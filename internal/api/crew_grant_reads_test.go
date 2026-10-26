@@ -113,6 +113,14 @@ func TestCrewGrantHTTPReadsAreFilteredAndBounded(t *testing.T) {
 	if err = json.Unmarshal(rr.Body.Bytes(), &explanation); err != nil || explanation.Actions["use"].State != "denied" {
 		t.Fatal("View widened Use", err, rr.Body.String())
 	}
+	rr = call("crew-reader", "GET", "/api/v1/crews/crew-more-00", 200)
+	var empty struct {
+		AgentCount int               `json:"agent_count"`
+		Agents     []json.RawMessage `json:"agents"`
+	}
+	if err = json.Unmarshal(rr.Body.Bytes(), &empty); err != nil || empty.AgentCount != 0 || len(empty.Agents) != 0 {
+		t.Fatal("visible empty crew was lost", err, rr.Body.String())
+	}
 	call("crew-reader", "GET", "/api/v1/crews/crew-hidden", 404)
 	call("crew-reader", "GET", "/api/v1/crews/crew-foreign", 404)
 	call("crew-reader", "GET", "/api/v1/crews/crew-hidden/access/me", 404)

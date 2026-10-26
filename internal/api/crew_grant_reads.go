@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"net/http"
 
 	"github.com/crewship-ai/crewship/internal/access"
@@ -111,18 +112,25 @@ func (h *CrewHandler) restrictedCrewDirectory(w http.ResponseWriter, r *http.Req
 		}})
 		return true
 	}
-	agents, err := h.db.QueryContext(r.Context(), `SELECT id,name,slug,agent_role,status FROM agents WHERE crew_id=? AND workspace_id=? AND deleted_at IS NULL ORDER BY slug,id`, id, workspace)
+	// Couple new agent data to the live root in this same SQLite snapshot.
+	// LEFT JOIN preserves a visible empty crew; zero roots means authority loss.
+	agents, err := h.db.QueryContext(r.Context(), `SELECT visible.id,a.id,a.name,a.slug,a.agent_role,a.status FROM (SELECT c.id`+sharedCrewFrom+` AND c.id=?) visible LEFT JOIN agents a ON a.crew_id=visible.id AND a.workspace_id=? AND a.deleted_at IS NULL ORDER BY a.slug,a.id`, user.ID, workspace, id, workspace)
 	if err != nil {
 		replyError(w, 500, "Crew unavailable")
 		return true
 	}
 	defer agents.Close()
+	rootFound := false
 	for agents.Next() {
-		var a sharedCrewAgent
-		if err = agents.Scan(&a.ID, &a.Name, &a.Slug, &a.Role, &a.Status); err != nil {
+		var root string
+		var aid, name, slug, role, status sql.NullString
+		if err = agents.Scan(&root, &aid, &name, &slug, &role, &status); err != nil {
 			break
 		}
-		result[0].Agents = append(result[0].Agents, a)
+		rootFound = true
+		if aid.Valid {
+			result[0].Agents = append(result[0].Agents, sharedCrewAgent{ID: aid.String, Name: name.String, Slug: slug.String, Role: role.String, Status: status.String})
+		}
 	}
 	if err == nil {
 		err = agents.Err()
@@ -131,6 +139,11 @@ func (h *CrewHandler) restrictedCrewDirectory(w http.ResponseWriter, r *http.Req
 		replyError(w, 500, "Crew unavailable")
 		return true
 	}
+	if !rootFound {
+		replyError(w, http.StatusNotFound, "Crew not found")
+		return true
+	}
+	result[0].AgentCount = len(result[0].Agents)
 	writeJSON(w, http.StatusOK, result[0])
 	return true
 }

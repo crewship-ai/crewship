@@ -9,9 +9,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Guests can read explicitly shared crews.** Crew View/Use now opens filtered crew list/detail with identities, agent counts and current agent statuses, while configuration, credentials, membership and activity stay hidden. `crewship crew access` explains the actor’s current Guest share; Use remains conditional on agent authority and runtime preflight. Revocation, crew retirement and issuer authority apply immediately to subsequent requests.
-
 - **Guest agent access can inherit from an explicit crew share.** Administrators can share a crew with View or Use through the member-policy API and CLI. View discovers current crew agents; Use also permits Chat and Run, without Delegate or credential access. Revocation, crew retirement and agent moves fence existing attempts. Access screens preserve and display saved crew shares.
+
+- **Guests can read explicitly shared crews.** Crew View/Use now opens filtered crew list/detail with identities, agent counts and current agent statuses, while configuration, credentials, membership and activity stay hidden. `crewship crew access` explains the actor’s current Guest share; Use remains conditional on agent authority and runtime preflight. Revocation, crew retirement and issuer authority apply immediately to subsequent requests.
 
 - **Restricted text workers have an independent release producer.** A main-only manual workflow can publish scanned, signed immutable `responses_text` candidates with source, binary and license provenance. Pull requests and publication test the real production worker against synthetic data; signing requires the exact candidate digest to pass. Image approval, host qualification and Guest runtime acceptance remain separate steps.
 
