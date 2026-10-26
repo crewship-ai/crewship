@@ -43,12 +43,46 @@ func mooringSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	}, "session_id", "checkpoint_revision", "sdk_prefix", "participant_ref", "ticket", "connection_ref", "origin", "versions", "websocket_path")
 	schemas["MooringTaskRequest"] = obj(map[string]any{"chat_id": text, "message_id": text, "access": map[string]any{"type": "string", "enum": []string{"read"}}, "allow_partial": map[string]any{"type": "boolean"}}, "chat_id", "message_id")
 	schemas["MooringTaskAccepted"] = obj(map[string]any{"work_id": text, "status": map[string]any{"type": "string", "enum": []string{"queued"}}}, "work_id", "status")
+
+	// Separately enabled native command test profile; these describe the existing
+	// closed product HTTP envelopes, not arbitrary engine command authorization.
+	nonnegative := map[string]any{"type": "integer", "minimum": 0}
+	digest := map[string]any{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+	schemas["MooringCommandSessionRequest"] = obj(map[string]any{
+		"action": map[string]any{"type": "string", "enum": []string{"open", "read", "submit", "outcome"}},
+		"view":   text, "create": map[string]any{"type": "boolean"}, "write": map[string]any{"type": "boolean"},
+		"raw": map[string]any{"type": "string", "maxLength": 65536, "description": "Exact original command JSON string, bounded to 64 KiB UTF-8. Required for submit/outcome; never automatically replayed. Entire HTTP body at most 64 KiB plus 4096 bytes."},
+	}, "action")
+	schemas["MooringCommandProjection"] = obj(map[string]any{
+		"generation": text, "revision": nonnegative, "ids": map[string]any{"type": "array", "items": text, "maxItems": 4096},
+		"native_json": map[string]any{"type": "string", "description": "Opaque confirmed native JSON; no client conversion. Bounded to 4 MiB UTF-8."},
+	}, "generation", "revision", "ids", "native_json")
+	position := obj(map[string]any{"story": text, "path": map[string]any{"type": "array", "items": nonnegative}, "off": nonnegative}, "story", "path", "off")
+	schemas["MooringCommandSQLReceipt"] = obj(map[string]any{
+		"state": map[string]any{"type": "string", "enum": []string{"host_committed"}}, "op_id": text, "revision": nonnegative, "actor": text, "author": text, "command_time": text, "fingerprint": digest,
+		"selection": obj(map[string]any{"anchor": position, "focus": position}, "anchor", "focus"),
+	}, "state", "op_id", "revision", "actor", "author", "command_time", "fingerprint")
+	schemas["MooringCommandOutcome"] = obj(map[string]any{"op_id": text, "fingerprint": digest, "input_digest": digest, "revision": nonnegative, "receipt": ref("MooringCommandSQLReceipt")}, "op_id", "fingerprint", "input_digest", "revision", "receipt")
+	schemas["MooringCommandOutcome"].(map[string]any)["nullable"] = true
+	schemas["MooringCommandSession"] = obj(map[string]any{
+		"view": text, "actor": text, "format": map[string]any{"type": "string", "enum": []string{"wordcraft-c1-v2"}},
+		"engine":     map[string]any{"type": "string", "enum": []string{"7ef2633a7e84956522d1ca47b99fe6feef16c1db"}},
+		"projection": ref("MooringCommandProjection"), "outcome": ref("MooringCommandOutcome"),
+		"editor": obj(map[string]any{"url": text, "bundle_digest": text}, "url", "bundle_digest"),
+	}, "view", "actor", "format", "engine", "projection", "outcome", "editor")
 	base := "/api/v1/pages/{slug}/mooring"
 	routes := map[string]DomainSchema{"GET /api/v1/mooring/apps": {Response: ref("MooringApplications")}, "POST /api/v1/mooring/documents": {Request: ref("MooringCreate"), RequestRequired: true, Response: ref("MooringCreated"), SuccessStatuses: []string{"200", "201"}}, "GET " + base: {Response: ref("MooringRead")}, "POST " + base + "/commands": {Request: ref("MooringCommand"), RequestRequired: true, Response: ref("MooringReceipt")}, "POST " + base + "/mandates": {Request: ref("MooringMandate"), RequestRequired: true, Response: ref("MooringMandate")}, "DELETE " + base + "/mandates/{mandate}": {Response: ref("MooringRevoked")}}
 	routes["POST "+base+"/tasks"] = DomainSchema{Request: ref("MooringTaskRequest"), RequestRequired: true, Response: ref("MooringTaskAccepted"), SuccessStatuses: []string{"202"}, ErrorStatuses: []string{"400", "401", "403", "409", "413", "500", "503"}}
 	routes["POST "+base+"/session"] = DomainSchema{
 		Request: ref("MooringSessionRequest"), RequestRequired: true, Response: ref("MooringSession"),
 		ErrorStatuses: []string{"400", "401", "403", "413", "500", "503"},
+	}
+
+	routes["POST "+base+"/command-session"] = DomainSchema{
+		Request: ref("MooringCommandSessionRequest"), RequestRequired: true, Response: ref("MooringCommandSession"),
+		ErrorStatuses:  []string{"400", "401", "403", "409", "413", "500", "503"},
+		Parameters:     []map[string]any{{"name": "Origin", "in": "header", "required": true, "schema": text, "description": "Exact trusted frontend origin; normal authentication and current Page rights are independently required."}},
+		SuccessHeaders: map[string]any{"Cache-Control": map[string]any{"schema": map[string]any{"type": "string", "enum": []string{"no-store"}}}},
 	}
 	routes["POST "+base+"/session/reauthorize"] = DomainSchema{
 		Request: ref("MooringReauthorizeRequest"), RequestRequired: true, SuccessStatuses: []string{"204"},

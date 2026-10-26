@@ -111,3 +111,40 @@ func TestMooringReauthorizeIsOriginalConnectionAndNoContent(t *testing.T) {
 		t.Fatal("original reference not required", required)
 	}
 }
+
+func TestMooringCommandSessionKeepsNativeStateOpaqueAndAuthorityOutOfInput(t *testing.T) {
+	const path = "/api/v1/pages/{slug}/mooring/command-session"
+	doc := buildDocument([]route{{method: "POST", path: path, auth: true, ws: true}})
+	post := doc["paths"].(map[string]any)[path].(map[string]any)["post"].(map[string]any)
+	body := post["requestBody"].(map[string]any)
+	if body["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)["$ref"] != "#/components/schemas/MooringCommandSessionRequest" {
+		t.Fatal("command session lost named request")
+	}
+	schema := doc["components"].(map[string]any)["schemas"].(map[string]any)
+	input := schema["MooringCommandSessionRequest"].(map[string]any)
+	fields := input["properties"].(map[string]any)
+	if input["additionalProperties"] != false || len(fields) != 5 {
+		t.Fatal("command request is no longer closed", input)
+	}
+	for _, name := range []string{"role", "actor", "participant", "engine", "checkpoint_base64", "token", "origin"} {
+		if fields[name] != nil {
+			t.Fatal("authority or replacement state advertised as caller input", name)
+		}
+	}
+	projection := schema["MooringCommandProjection"].(map[string]any)["properties"].(map[string]any)
+	if projection["native_json"].(map[string]any)["type"] != "string" {
+		t.Fatal("native state must remain opaque")
+	}
+	response := post["responses"].(map[string]any)["200"].(map[string]any)["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)
+	if response["$ref"] != "#/components/schemas/MooringCommandSession" {
+		t.Fatal("command session lost named response")
+	}
+	output := schema["MooringCommandSession"].(map[string]any)
+	if output["additionalProperties"] != false || len(output["required"].([]string)) != 7 || output["properties"].(map[string]any)["outcome"].(map[string]any)["$ref"] != "#/components/schemas/MooringCommandOutcome" {
+		t.Fatal("read or unknown outcome must not imply a saved receipt", output)
+	}
+	outcome := schema["MooringCommandOutcome"].(map[string]any)
+	if outcome["type"] != "object" || outcome["nullable"] != true {
+		t.Fatal("resolved OAS3 outcome must accept actual null read responses", outcome)
+	}
+}

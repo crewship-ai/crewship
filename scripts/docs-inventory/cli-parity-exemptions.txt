@@ -32,3 +32,5 @@
 /api/v1/templates                                  no command as of 2026-09-15 (`crewship template` drives /crew-templates, not /templates)
 /api/v1/templates/{templateId}                     no command as of 2026-09-15 (`crewship template` drives /crew-templates, not /templates)
 /api/v1/workspaces/{workspaceId}/members/capabilities   no command as of 2026-09-15 (bulk variant; `workspace member capabilities` drives the per-member route)
+
+/api/v1/pages/{slug}/mooring/command-session     default-off native browser session transport with opaque identity-fenced views and exact-origin HTTP; no dedicated CLI command or MCP surface is registered

@@ -11665,6 +11665,256 @@
         ],
         "type": "object"
       },
+      "MooringCommandOutcome": {
+        "additionalProperties": false,
+        "nullable": true,
+        "properties": {
+          "fingerprint": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "input_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "op_id": {
+            "type": "string"
+          },
+          "receipt": {
+            "$ref": "#/components/schemas/MooringCommandSQLReceipt"
+          },
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "op_id",
+          "fingerprint",
+          "input_digest",
+          "revision",
+          "receipt"
+        ],
+        "type": "object"
+      },
+      "MooringCommandProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "generation": {
+            "type": "string"
+          },
+          "ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 4096,
+            "type": "array"
+          },
+          "native_json": {
+            "description": "Opaque confirmed native JSON; no client conversion. Bounded to 4 MiB UTF-8.",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "generation",
+          "revision",
+          "ids",
+          "native_json"
+        ],
+        "type": "object"
+      },
+      "MooringCommandSQLReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "author": {
+            "type": "string"
+          },
+          "command_time": {
+            "type": "string"
+          },
+          "fingerprint": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "op_id": {
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "selection": {
+            "additionalProperties": false,
+            "properties": {
+              "anchor": {
+                "additionalProperties": false,
+                "properties": {
+                  "off": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "path": {
+                    "items": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "type": "array"
+                  },
+                  "story": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "story",
+                  "path",
+                  "off"
+                ],
+                "type": "object"
+              },
+              "focus": {
+                "additionalProperties": false,
+                "properties": {
+                  "off": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "path": {
+                    "items": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "type": "array"
+                  },
+                  "story": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "story",
+                  "path",
+                  "off"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "anchor",
+              "focus"
+            ],
+            "type": "object"
+          },
+          "state": {
+            "enum": [
+              "host_committed"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "op_id",
+          "revision",
+          "actor",
+          "author",
+          "command_time",
+          "fingerprint"
+        ],
+        "type": "object"
+      },
+      "MooringCommandSession": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "editor": {
+            "additionalProperties": false,
+            "properties": {
+              "bundle_digest": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "url",
+              "bundle_digest"
+            ],
+            "type": "object"
+          },
+          "engine": {
+            "enum": [
+              "7ef2633a7e84956522d1ca47b99fe6feef16c1db"
+            ],
+            "type": "string"
+          },
+          "format": {
+            "enum": [
+              "wordcraft-c1-v2"
+            ],
+            "type": "string"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/MooringCommandOutcome"
+          },
+          "projection": {
+            "$ref": "#/components/schemas/MooringCommandProjection"
+          },
+          "view": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "view",
+          "actor",
+          "format",
+          "engine",
+          "projection",
+          "outcome",
+          "editor"
+        ],
+        "type": "object"
+      },
+      "MooringCommandSessionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "open",
+              "read",
+              "submit",
+              "outcome"
+            ],
+            "type": "string"
+          },
+          "create": {
+            "type": "boolean"
+          },
+          "raw": {
+            "description": "Exact original command JSON string, bounded to 64 KiB UTF-8. Required for submit/outcome; never automatically replayed. Entire HTTP body at most 64 KiB plus 4096 bytes.",
+            "maxLength": 65536,
+            "type": "string"
+          },
+          "view": {
+            "type": "string"
+          },
+          "write": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
       "MooringCreate": {
         "additionalProperties": false,
         "properties": {
@@ -130758,27 +131008,47 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Exact trusted frontend origin; normal authentication and current Page rights are independently required.",
+            "in": "header",
+            "name": "Origin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/MooringCommandSessionRequest"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/MooringCommandSession"
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {

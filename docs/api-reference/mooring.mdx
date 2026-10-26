@@ -91,3 +91,37 @@ metadata/transport verification unavailable). Errors are JSON `{error}`.
 The existing `GET /api/v1/chats/{chatId}/document-access` response also carries
 separate `artifacts` and `artifacts_partial` fields under the same independent
 current checks; these fields do not change document-grant or live-task authority.
+
+
+## `POST /api/v1/pages/{slug}/mooring/command-session`
+
+**Auth:** normal current human authentication, workspace membership, current Page
+read/write rights, the original identity fence and exact same-origin `Origin`.
+The native command test profile is separately disabled by default. Verified
+runtime assets and explicit operator activation are required.
+
+**Request:** path `slug` or `@ID`, workspace query `workspace_id` or header
+`X-Workspace-ID`, and the closed `MooringCommandSessionRequest` JSON body.
+`open` accepts optional `create` and `write` booleans. Creation initializes only
+an empty new Page as `wordcraft-c1-v2`; existing documents are never converted.
+`read`, `submit` and `outcome` require the returned `view`. Submit/outcome also
+require `raw`, the exact original command string. Unknown keys, duplicate keys,
+case aliases, null fields and oversized bodies are refused. A view is an identity
+fence, never an authentication credential or a grant.
+
+**Response:** `MooringCommandSession` with `view`, stable `actor`, fixed `format`
+and `engine`, confirmed `projection`, nullable `outcome`, and pinned `editor` URL
+and digest. Projection contains `generation`, SQL `revision`, stable `ids` and
+opaque `native_json`. Saved requires a matching original operation's durable SQL
+receipt. Unknown outcomes support lookup and confirmed-state recovery without
+blind replay. The generated server catalog rejects unqualified/global commands;
+engine fixture qualification alone does not establish browser acceptance.
+
+**Statuses:** 200 confirmed read or original durable outcome, 400 malformed input,
+401 invalid authentication before admission, 403 denied identity/Page/profile or
+unavailable open, 409 unconfirmed/conflicting operation, 413 oversized request,
+500 persistence failure, 503 disabled or unavailable bounded transport.
+
+This is the browser command-session transport. It does not register a dedicated
+CLI command or a native command MCP/chat route. Turning off new editing retains
+the native data and never opens it with the legacy adapter.
