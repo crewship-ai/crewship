@@ -154,3 +154,17 @@ it("stops and retains the original dirty frame on metadata denial without reopen
   expect(frame.hidden).toBe(true)
   expect(screen.queryByText("Saved")).toBeNull()
 })
+
+
+it("shows interrupted delivery and pauses the same frame while retaining the draft",async()=>{
+ const {frame}=await open()
+ await act(async()=>{
+  const callbacks=mocks.connect.mock.calls[0][5]
+  callbacks.state("pending")
+  callbacks.health?.("checking")
+ })
+ expect(screen.getByText("Connection interrupted · local draft retained")).toBeInTheDocument()
+ expect(document.querySelector("iframe")).toBe(frame)
+ expect(frame.hidden).toBe(false)
+ expect(mocks.stop).not.toHaveBeenCalled()
+})

@@ -5,6 +5,7 @@ import { useSessionSafe } from "@/hooks/use-auth"
 import { useLeaveGuard } from "@/lib/editor-lifecycle/use-leave-guard"
 import { createCapabilityChannel, decodeMessage, transferEditorPort, verifyEditorHello, type CapabilityPort } from "@/lib/mooring/channel"
 import { connectWordCraftHost, loadWordCraftReceiptSDK, openWordCraftSession, WORDCRAFT_BOOTSTRAP_BYTES, WORDCRAFT_FRAME_BYTES, type WordCraftBootstrap, type WordCraftHostState } from "@/lib/mooring/wordcraft-host-session"
+import type { DeliveryHealth } from "@/lib/mooring/delivery-health"
 import { editorFrameSrc } from "@/lib/workbooks/editor-client"
 import { createEditorFrame, editorFrameSupported } from "./workbook-editor-host"
 
@@ -25,6 +26,7 @@ export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange, 
   const pageUnavailable = React.useRef(unavailable)
   pageUnavailable.current = unavailable
   const [state, setState] = React.useState<WordCraftHostState>("connecting")
+  const [health, setHealth] = React.useState<DeliveryHealth>("connected")
   const [error, setError] = React.useState<string>()
   const unavailableCallback = React.useRef(onUnavailable)
   React.useEffect(() => { unavailableCallback.current = onUnavailable }, [onUnavailable])
@@ -93,7 +95,7 @@ export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange, 
     }
     stopCurrent.current = close
     window.addEventListener("message", onWindowMessage)
-    setError(undefined); setState("connecting")
+    setError(undefined); setState("connecting"); setHealth("connected")
     void (async () => {
       try {
         if (!humanId || pageUnavailable.current) { close("page_unavailable"); return }
@@ -127,6 +129,11 @@ export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange, 
           hostFrame(raw) { if (!dead) send({ type: "wordcraft:host-frame", raw }) },
           state(value) { if (!dead) setState(value) },
           stopped(reason) { close(reason) },
+          health(value) {
+            if (dead) return
+            setHealth(value)
+            if (port) { try { send({ type: "wordcraft:transport-health", state: value }) } catch { close("invalid_port_frame") } }
+          },
         })
         mount.current?.append(frame)
       } catch {
@@ -143,7 +150,7 @@ export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange, 
   // fresh admission, and a later metadata recovery cannot restart this source.
   React.useEffect(() => { if (unavailable) stopCurrent.current?.("page_unavailable") }, [unavailable])
   return <section className="flex h-full min-h-0 flex-col" aria-label={`${name ?? "WordCraft"} editor`}>
-    <div className="px-4 py-2 text-sm" role="status">{labels[state]}</div>
+    <div className="px-4 py-2 text-sm" role="status">{health === "connected" || ["stopped", "unsaved-draft"].includes(state) ? labels[state] : "Connection interrupted · local draft retained"}</div>
     {error && <p className="px-4 py-2 text-sm" role="alert">{error}</p>}
     <div className="relative min-h-0 flex-1" ref={mount} />
   </section>

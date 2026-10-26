@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Warn when WordCraft originals stop receiving confirmed delivery and pause input while retaining the same draft and editor; a late qualified receipt can resume the original connection.
+
 - Distinguish bounded WordCraft WebSocket ingress checks, original-record capacity predicates and submission deadlines without logging packet contents or raw errors.
 
 - Correlate bounded WordCraft runtime failure diagnostics across host callbacks, RPC replies, Rust actor shutdown and browser connections without logging document contents or raw errors.

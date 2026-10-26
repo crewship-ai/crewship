@@ -33,8 +33,8 @@ class Pending {
   check_host_receipt(raw: string) { Pending.check(raw); return raw }
   free() {}
 }
-function rig() {
-  const callbacks = { bootstrap: vi.fn(), hostFrame: vi.fn(), state: vi.fn(), stopped: vi.fn() }
+function rig(health?: ReturnType<typeof vi.fn>) {
+  const callbacks = { bootstrap: vi.fn(), hostFrame: vi.fn(), state: vi.fn(), stopped: vi.fn(), ...(health ? { health } : {}) }
   const host = connectWordCraftHost("workspace", "page", opening, true, { WordCraftPendingCommit: Pending }, callbacks)
   const socket = Socket.current
   socket.onopen?.()
@@ -313,4 +313,49 @@ it("initializes the stable Page through the existing scoped native session path"
  await openWordCraftSession("workspace","page",true,new AbortController().signal,"exact-checkpoint")
  expect(fetch.mock.calls[0][0]).toBe("/api/v1/pages/%40page/mooring/session?workspace_id=workspace")
  expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({write:true,checkpoint_base64:"exact-checkpoint"})
+})
+
+// Mock receipt SDK only; these tests qualify transport/UI lifecycle, not Saved
+// semantics or native SQL. The production callback still requires Rust proof.
+describe("visible interrupted delivery",()=>{
+ beforeEach(()=>vi.useFakeTimers())
+ afterEach(()=>vi.useRealTimers())
+ it("warns when an original stops progressing and retains producer and newer draft",async()=>{
+  const health=vi.fn();const {host,socket,callbacks}=rig(health)
+  try{
+   host.draft();host.submit(submit("stalled-A"));host.draft()
+   const sent=[...socket.sent]
+   await vi.advanceTimersByTimeAsync(2_100)
+   expect(health).toHaveBeenLastCalledWith("checking")
+   expect(callbacks.state).not.toHaveBeenCalledWith("saved")
+   expect(socket.sent).toEqual(sent)
+   expect(callbacks.stopped).not.toHaveBeenCalled()
+   socket.receive(receipt("stalled-A"))
+   expect(health).toHaveBeenLastCalledWith("connected")
+   expect(callbacks.state).toHaveBeenLastCalledWith("draft")
+   expect(callbacks.bootstrap).toHaveBeenCalledTimes(1)
+  }finally{host.close()}
+ })
+ it("does not label a healthy idle connection offline or treat reauth as progress",async()=>{
+  fetch.mockResolvedValue(new Response(null,{status:204}))
+  const health=vi.fn();const {host}=rig(health)
+  try{
+   await vi.advanceTimersByTimeAsync(16_000)
+   expect(health).not.toHaveBeenCalledWith("checking")
+   host.draft();host.submit(submit("still-unobserved"))
+   await vi.advanceTimersByTimeAsync(240_000)
+   expect(health).toHaveBeenLastCalledWith("checking")
+  }finally{host.close()}
+ })
+ it("does not clear another unknown original when only one receipt arrives",async()=>{
+  const health=vi.fn();const {host,socket}=rig(health)
+  try{
+   host.draft();host.submit(submit("A"));host.draft();host.submit(submit("B"))
+   await vi.advanceTimersByTimeAsync(2_100)
+   socket.receive(receipt("A"))
+   expect(health).toHaveBeenLastCalledWith("checking")
+   socket.receive(receipt("B"))
+   expect(health).toHaveBeenLastCalledWith("connected")
+  }finally{host.close()}
+ })
 })

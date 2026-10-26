@@ -209,3 +209,42 @@ describe("isolated WordApp child original transport", () => {
     expect(s.sent.map(raw => JSON.parse(raw).state)).not.toContain("saved")
   })
 })
+
+
+it("pauses native input on interrupted delivery without replacing draft or undo",async()=>{
+ const r=setup();r.receive(r.bootstrap);await Promise.resolve()
+ expect(r.callbacks().can_edit()).toBe(true)
+ r.receive({protocol:1,type:"wordcraft:transport-health",state:"checking"})
+ expect(r.callbacks().can_edit()).toBe(false)
+ expect(r.handle.stop).not.toHaveBeenCalled()
+ expect(r.handle.project_native).not.toHaveBeenCalled()
+ r.receive({protocol:1,type:"wordcraft:transport-health",state:"connected"})
+ expect(r.callbacks().can_edit()).toBe(true)
+ expect(r.native.start_collaborative).toHaveBeenCalledTimes(1)
+ r.close.close()
+})
+
+it("transport recovery cannot upgrade a reader or revive a terminal producer", () => {
+  const s = setup(); s.receive({ ...s.bootstrap, access: "reader" })
+  const health = (state: string) => s.receive({ protocol: 1, type: "wordcraft:transport-health", state })
+  health("checking"); health("connected")
+  expect(s.callbacks().can_edit()).toBe(false)
+  expect(() => s.callbacks().before("native", "p_one", "0", "0", "text.insert")).toThrow()
+  s.receive({ protocol: 1, type: "wordcraft:stop", reason: "revoked" })
+  health("connected")
+  expect(s.callbacks().can_edit()).toBe(false)
+  expect(s.native.start_collaborative).toHaveBeenCalledTimes(1)
+  expect(s.handle.stop).toHaveBeenCalledTimes(1)
+})
+it("transport pause refuses capture, validation and history without altering originals", () => {
+  const s = setup(); s.receive(s.bootstrap); s.emit("native A")
+  const originals = [...s.requests]
+  s.receive({ protocol: 1, type: "wordcraft:transport-health", state: "checking" })
+  expect(() => s.callbacks().before("native A", "p_one", "0", "0", "text.insert")).toThrow()
+  expect(s.callbacks().validate("native A", "new")).toBe(false)
+  expect(s.callbacks().authored("native A", "new")).toBe(false)
+  expect(() => s.callbacks().history("native A", "edit.undo")).toThrow()
+  expect(s.requests).toEqual(originals)
+  expect(s.handle.stop).not.toHaveBeenCalled()
+  expect(s.handle.project_native).not.toHaveBeenCalled()
+})

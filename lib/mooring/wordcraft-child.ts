@@ -79,6 +79,7 @@ export function startWordCraftChild(
   let connected = false
   let booted = false
   let stopped = false
+  let transportPaused = false
   let access = "reader"
   let writableModel = false
   let draft: Draft | undefined
@@ -110,7 +111,7 @@ export function startWordCraftChild(
     if (port) { port.onmessage = null; port.close() }
   }
   const emit = (proposal: Proposal) => {
-    if (!draft || stopped || access !== "writer") throw new Error("forbidden")
+    if (!draft || stopped || transportPaused || access !== "writer") throw new Error("forbidden")
     // Capture the exact immutable authored cut SYNCHRONOUSLY before any await,
     // peer delivery or next local command. Rust computes the existing digest.
     const authoredCut = draft.optimistic_checkpoint()
@@ -142,28 +143,28 @@ export function startWordCraftChild(
   const begin = () => { operationId = id(); operationBase = observed }
   const callbacks = {
     failed: () => stop("native-projection-failed"),
-    can_edit: () => !stopped && writableModel && access === "writer" && !!draft,
+    can_edit: () => !stopped && !transportPaused && writableModel && access === "writer" && !!draft,
     before: (before: string, target: string, start: string, end: string, _command: string) => {
-      if (!draft || stopped || access !== "writer") throw "forbidden"
+      if (!draft || stopped || transportPaused || access !== "writer") throw "forbidden"
       if (draft.native_json() !== before) throw "mismatched_native"
       selection?.free?.()
       selection = draft.observe_native_selection(before, target, start, end)
       begin()
     },
     validate: (before: string, after: string) => {
-      if (!draft || stopped || !selection) return false
+      if (!draft || stopped || transportPaused || !selection) return false
       draft.validate_native_transition_selected(before, after, selection)
       return true
     },
     authored: (before: string, after: string) => {
       try {
-        if (!draft || !selection || stopped) return false
+        if (!draft || !selection || stopped || transportPaused) return false
         emit(draft.native_transition_selected(operationId, before, after, selection))
         return true
       } catch { stop("capture-failed"); return false }
     },
     history: (before: string, command: string) => {
-      if (!draft || stopped || access !== "writer") throw "forbidden"
+      if (!draft || stopped || transportPaused || access !== "writer") throw "forbidden"
       if (draft.native_json() !== before || !["edit.undo", "edit.redo"].includes(command)) throw "mismatched_native"
       begin()
       // SDK refusal happens BEFORE history mutation/pop. Ordinary deletion is
@@ -246,6 +247,11 @@ export function startWordCraftChild(
         void waitForNativeReady().then(() => { if (!stopped) send("wordcraft:ready") }).catch(() => stop("native-start-failed"))
       } else if (value.type === "wordcraft:host-frame" && booted && keys(value, ["protocol", "type", "raw"]) && typeof value.raw === "string") {
         hostFrame(value.raw)
+      } else if (value.type === "wordcraft:transport-health" && booted && keys(value, ["protocol", "type", "state"])
+        && ["connected", "checking", "disconnected"].includes(String(value.state))) {
+        // No projection, restart, identity change or draft/history mutation.
+        // Resuming transport cannot upgrade the original reader/model access.
+        transportPaused = value.state !== "connected"
       } else if (value.type === "wordcraft:stop" && keys(value, ["protocol", "type", "reason"]) && typeof value.reason === "string") {
         stop("host-closed")
       } else throw new Error("invalid_port_message")

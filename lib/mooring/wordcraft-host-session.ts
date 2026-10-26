@@ -3,6 +3,7 @@
 import { apiFetch } from "@/lib/api-fetch"
 import { getAuthMode, resolveWsBase } from "@/lib/server-base"
 import { record } from "./channel"
+import { observeDeliveryHealth, type DeliveryHealth } from "./delivery-health"
 
 export const WORDCRAFT_FRAME_BYTES = 262144
 export const WORDCRAFT_BOOTSTRAP_BYTES = 2097152
@@ -69,6 +70,7 @@ export interface WordCraftHostCallbacks {
   hostFrame(raw: string): void
   state(value: WordCraftHostState): void
   stopped(reason: string): void
+  health?(value: DeliveryHealth): void
 }
 /** Exactly one original browser connection, bounded original packets, no
  * automatic reconnect that could relabel old mutations with a new authority. */
@@ -87,10 +89,12 @@ export function connectWordCraftHost(workspaceId: string, pageId: string, openin
   // Semantic identities live for this ORIGINAL source, including after Saved.
   // A new transport request cannot assign an old operation a later draft epoch.
   const operationIds = new Set<string>(), changeIds = new Set<string>()
+  const delivery = callbacks.health ? observeDeliveryHealth(callbacks.health) : undefined
   const state = (value: WordCraftHostState) => { if (!stopped) callbacks.state(value) }
   const stop = (reason: string) => {
     if (stopped) return
     stopped = true
+    delivery?.close()
     clearTimeout(renewalTimer); renewalAbort?.abort()
     socket.close(); callbacks.state(pending.size || draftEpoch > confirmedEpoch ? "unsaved-draft" : "stopped"); callbacks.stopped(reason)
   }
@@ -171,6 +175,7 @@ export function connectWordCraftHost(workspaceId: string, pageId: string, openin
           settledBytes -= encoder.encode(settled.get(oldest)!).length; settled.delete(oldest)
         }
         confirmedEpoch = Math.max(confirmedEpoch, original.epoch)
+        delivery?.confirmed(frame.request_id)
         state(pending.size ? "pending" : draftEpoch > confirmedEpoch ? "draft" : "saved"); return
       }
       if (frame.type === "document_update" && sameScope(frame.scope) && frame.session_id === opening.session_id && frame.generation === generation && counter(frame.from_revision) && counter(frame.to_revision) && BigInt(frame.from_revision) <= BigInt(frame.to_revision)) {
@@ -212,7 +217,7 @@ export function connectWordCraftHost(workspaceId: string, pageId: string, openin
         for (const id of nextChanges) changeIds.add(id)
         for (const id of nextOperations) operationIds.add(id)
         pending.set(request.request_id, { receipt, raw, epoch: draftEpoch, changeIds: Object.freeze(nextChanges) }); pendingBytes += encoder.encode(raw).length
-        state("pending"); send(raw)
+        state("pending"); delivery?.sent(request.request_id); send(raw)
       } catch { stop("unqualified_original") }
     },
     stop,
