@@ -11,6 +11,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Guest agent access can inherit from an explicit crew share.** Administrators can share a crew with View or Use through the member-policy API and CLI. View discovers current crew agents; Use also permits Chat and Run, without Delegate or credential access. Revocation, crew retirement and agent moves fence existing attempts. Access screens preserve and display saved crew shares.
 
+- **Restricted text workers have an independent release producer.** A main-only manual workflow can publish scanned, signed immutable `responses_text` candidates with source, binary and license provenance. Pull requests and publication test the real production worker against synthetic data; signing requires the exact candidate digest to pass. Image approval, host qualification and Guest runtime acceptance remain separate steps.
+
 - **Restricted native scratch tools can fail on noatime-backed Docker storage.** The native image rebuilds bubblewrap with an atime-preserving remount fix while retaining the inner workspace sandbox and unchanged container security policies.
 
 - **Administrative security operations explicitly opt in to emergency audit fallback.** Only single/all-session revocation can use this fallback in the session handler; unlock remains chained-only, and unknown internal operations are rejected before any account or audit mutation. Web password changes and resets continue to fail closed on a broken audit chain.
