@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -228,7 +229,7 @@ class EditorAssemblyTests(unittest.TestCase):
         files = {
             'native/apps/wordcraft-web/index.html': '<body></body>',
             'native/LICENSE-MIT': 'MIT', 'native/NOTICE': 'notice', 'native/ATTRIBUTION.md': 'authors',
-            'compiled/wordcraft_web.js': 'import * as a from "./snippets/eframe-pin/inline0.js";\nconst imports={"./snippets/eframe-pin/inline0.js":a};\n',
+            'compiled/wordcraft_web.js': 'import * as a from "./snippets/eframe-pin/inline0.js";\nexport const imports={"./snippets/eframe-pin/inline0.js":a};\n',
             'compiled/wordcraft_web_bg.wasm': 'wasm',
             'compiled/snippets/eframe-pin/inline0.js': 'export function activate() {}\n',
             'sdk/mooring_wordcraft_client.js': 'sdk', 'sdk/mooring_wordcraft_client_bg.wasm': 'wasm',
@@ -263,13 +264,30 @@ class EditorAssemblyTests(unittest.TestCase):
             manifest = json.loads((bundle/'manifest.json').read_text())
             self.assertEqual(build.digest(bundle/'manifest.json'), digest)
             module = (bundle/'wordcraft_web.js').read_text()
-            self.assertNotIn('./snippets/', module)
-            imports = set(re.findall(r'["\']\./([^"\']+\.js)["\']', module))
+            self.assertIn('"./snippets/eframe-pin/inline0.js":a', module)
+            imports = set(re.findall(r'(?m)^import[^\n]+from ["\']\./([^"\']+\.js)["\']', module))
             self.assertEqual(len(imports), 1)
             for name in imports:
                 self.assertNotIn('/', name)
                 self.assertEqual(manifest['files'][name], build.digest(bundle/name))
                 self.assertEqual((bundle/name).read_text(), 'export function activate() {}\n')
+            # Execute the packaged ES module graph and instantiate a real WASM
+            # import using its original ABI name, independently of fetch URLs.
+            runtime = Path(temp)/'runtime'
+            runtime.mkdir()
+            (runtime/'package.json').write_text('{"type":"module"}')
+            for name in manifest['files']:
+                if name.endswith('.js'):
+                    shutil.copyfile(bundle/name, runtime/name)
+            namespace = b'./snippets/eframe-pin/inline0.js'
+            imports = b'\x01' + bytes([len(namespace)]) + namespace + b'\x08activate\x00\x00'
+            wasm = b'\x00asm\x01\x00\x00\x00\x01\x04\x01\x60\x00\x00\x02' + bytes([len(imports)]) + imports
+            script = ('import {pathToFileURL} from "node:url"; '
+                'const {imports}=await import(pathToFileURL(process.argv[1]).href); '
+                'new WebAssembly.Instance(new WebAssembly.Module(Buffer.from(process.argv[2],"hex")),imports);')
+            result = subprocess.run(['node','--input-type=module','-e',script,
+                str(runtime/'wordcraft_web.js'),wasm.hex()], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_incomplete_or_escaping_module_graph_is_not_released(self):
         for problem in ('missing', 'link', 'traversal', 'dependency'):
