@@ -2,9 +2,11 @@
 /** Generate from the actual compiled registry, never from a hand-written command list. */
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+import { applyEngineQualifications } from './engine-qualification.mjs'
 
 export const ENGINE_SHA = '7ef2633a7e84956522d1ca47b99fe6feef16c1db'
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -77,8 +79,10 @@ export function generate(registry, identity) {
       ...(profile ? { schemaCoverage: profile.coverage, schemaEvidence: profile.sourceFiles } : {}),
       ...classify(command), qualification: 'unqualified' }
   }).sort((a, b) => a.id.localeCompare(b.id, 'en'))
-  return { schemaVersion: 1, engine: { repository: 'https://github.com/storytold/wordcraft', sha: ENGINE_SHA },
+  const catalog = { schemaVersion: 1, engine: { repository: 'https://github.com/storytold/wordcraft', sha: ENGINE_SHA },
     version: `wordcraft:${ENGINE_SHA}:${profiles.profileVersion}`, sourceIdentity: identity, registryDigest: digest(JSON.stringify(registry)), commands }
+  const policyPath = resolve(root, 'tools/wordcraft-capabilities/engine-qualification-policy.json')
+  return existsSync(policyPath) ? applyEngineQualifications(catalog, JSON.parse(readFileSync(policyPath, 'utf8')), readFileSync(resolve(root, 'tools/wordcraft-capabilities/parameter-profiles.json')), path => readFileSync(resolve(root, path))) : catalog
 }
 
 export function main(args) {

@@ -1,0 +1,52 @@
+{
+  "text.insert": {
+    "params": {
+      "text": "Z"
+    },
+    "start": 1,
+    "end": 3
+  },
+  "text.delete": {
+    "params": {},
+    "start": 1,
+    "end": 3
+  },
+  "text.backspace": {
+    "params": {},
+    "start": 1,
+    "end": 3
+  },
+  "text.newParagraph": {
+    "params": {},
+    "start": 2,
+    "end": 2
+  },
+  "format.bold": {
+    "params": {
+      "value": true
+    },
+    "start": 1,
+    "end": 3
+  },
+  "format.font": {
+    "params": {
+      "name": "Arial"
+    },
+    "start": 1,
+    "end": 3
+  },
+  "format.size": {
+    "params": {
+      "size": 18
+    },
+    "start": 1,
+    "end": 3
+  },
+  "para.align": {
+    "params": {
+      "value": "center"
+    },
+    "start": 0,
+    "end": 5
+  }
+}

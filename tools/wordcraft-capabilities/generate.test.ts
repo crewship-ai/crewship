@@ -13,8 +13,8 @@ describe('pinned WordCraft registry catalog', () => {
     execFileSync(process.execPath, ['tools/wordcraft-capabilities/generate.mjs', '--check'])
   })
   it('detects added commands and parameter changes instead of silently qualifying them', () => {
-    expect(generate([...registry, { id: 'new.command', label: '', location: '', params: '{}', shortcut: '', mutates: true }], catalog.sourceIdentity)).not.toEqual(catalog)
-    expect(generate(registry.map((c: {id: string}) => c.id === 'text.insert' ? { ...c, params: '{"different": string}' } : c), catalog.sourceIdentity)).not.toEqual(catalog)
+    expect(() => generate([...registry, { id: 'new.command', label: '', location: '', params: '{}', shortcut: '', mutates: true }], catalog.sourceIdentity)).toThrow('qualification policy drift')
+    expect(() => generate(registry.map((c: {id: string}) => c.id === 'text.insert' ? { ...c, params: '{"different": string}' } : c), catalog.sourceIdentity)).toThrow('qualification policy drift')
     expect(() => generate([...registry, registry[0]], catalog.sourceIdentity)).toThrow('duplicate')
   })
   it('qualifies nothing, and never treats a pure flag as permission', () => {

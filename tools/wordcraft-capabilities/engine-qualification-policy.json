@@ -1,0 +1,267 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": 4,
+  "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+  "c1HostSha": "96f3ca3a5c21e480ff6fbc01f289e317e285ed13",
+  "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+  "registryDigest": "c249aa763dee6435b72e0ef1c8889bd5ba3d8d0b6573658d188d5979dedc6d5a",
+  "profileSha256": "7276f698b0a55ae474ee461bec6a1076187d9b77088fe6dda1e62a87fa82a1ae",
+  "scope": "isolated-c1-fixture",
+  "fixturesSource": {
+    "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+    "sha256": "2a3ab30a2b8e537f16de9e52d68d4dfca19f1dc06ab822f6e623a0b1a96a8ba3"
+  },
+  "testSource": {
+    "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+    "sha256": "d86a609313fa6a449fc320b3b38dd3cba57e70ed8a90758ad92d6f299ac3d3a6"
+  },
+  "commands": {
+    "format.bold": {
+      "test": "ce_format_bold",
+      "testedParameters": {
+        "value": true
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "format.font": {
+      "test": "ce_format_font",
+      "testedParameters": {
+        "name": "Arial"
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": [
+              "Arial"
+            ]
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "format.size": {
+      "test": "ce_format_size",
+      "testedParameters": {
+        "size": 18
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "size": {
+            "type": "number",
+            "enum": [
+              18
+            ]
+          }
+        },
+        "required": [
+          "size"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "para.align": {
+      "test": "ce_para_align",
+      "testedParameters": {
+        "value": "center"
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 0,
+        "end": 5
+      },
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string",
+            "enum": [
+              "center"
+            ]
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "text.backspace": {
+      "test": "ce_text_backspace",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "text.delete": {
+      "test": "ce_text_delete",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "text.insert": {
+      "test": "ce_text_insert",
+      "testedParameters": {
+        "text": "Z"
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "enum": [
+              "Z"
+            ]
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "text.newParagraph": {
+      "test": "ce_text_newparagraph",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 2,
+        "end": 2
+      },
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    }
+  }
+}

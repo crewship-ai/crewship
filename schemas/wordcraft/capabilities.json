@@ -4,7 +4,7 @@
     "repository": "https://github.com/storytold/wordcraft",
     "sha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db"
   },
-  "version": "wordcraft:7ef2633a7e84956522d1ca47b99fe6feef16c1db:3",
+  "version": "wordcraft:7ef2633a7e84956522d1ca47b99fe6feef16c1db:4",
   "sourceIdentity": [
     {
       "path": "crates/doc/src/bidi.rs",
@@ -3990,7 +3990,55 @@
       "group": "character-format",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "96f3ca3a5c21e480ff6fbc01f289e317e285ed13",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "d86a609313fa6a449fc320b3b38dd3cba57e70ed8a90758ad92d6f299ac3d3a6"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "2a3ab30a2b8e537f16de9e52d68d4dfca19f1dc06ab822f6e623a0b1a96a8ba3"
+        },
+        "test": "ce_format_bold",
+        "testedParameters": {
+          "value": true
+        },
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "boolean",
+              "enum": [
+                true
+              ]
+            }
+          },
+          "required": [
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "format.border",
@@ -4279,7 +4327,55 @@
       "group": "character-format",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "96f3ca3a5c21e480ff6fbc01f289e317e285ed13",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "d86a609313fa6a449fc320b3b38dd3cba57e70ed8a90758ad92d6f299ac3d3a6"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "2a3ab30a2b8e537f16de9e52d68d4dfca19f1dc06ab822f6e623a0b1a96a8ba3"
+        },
+        "test": "ce_format_font",
+        "testedParameters": {
+          "name": "Arial"
+        },
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "enum": [
+                "Arial"
+              ]
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "format.fontDialog",
@@ -4974,7 +5070,55 @@
       "group": "character-format",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "96f3ca3a5c21e480ff6fbc01f289e317e285ed13",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "d86a609313fa6a449fc320b3b38dd3cba57e70ed8a90758ad92d6f299ac3d3a6"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "2a3ab30a2b8e537f16de9e52d68d4dfca19f1dc06ab822f6e623a0b1a96a8ba3"
+        },
+        "test": "ce_format_size",
+        "testedParameters": {
+          "size": 18
+        },
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {
+            "size": {
+              "type": "number",
+              "enum": [
+                18
+              ]
+            }
+          },
+          "required": [
+            "size"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "format.smallCaps",
@@ -7598,7 +7742,55 @@
       "group": "paragraphs",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "96f3ca3a5c21e480ff6fbc01f289e317e285ed13",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "d86a609313fa6a449fc320b3b38dd3cba57e70ed8a90758ad92d6f299ac3d3a6"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "2a3ab30a2b8e537f16de9e52d68d4dfca19f1dc06ab822f6e623a0b1a96a8ba3"
+        },
+        "test": "ce_para_align",
+        "testedParameters": {
+          "value": "center"
+        },
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 0,
+          "end": 5
+        },
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "string",
+              "enum": [
+                "center"
+              ]
+            }
+          },
+          "required": [
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "para.alignCenter",
@@ -12142,7 +12334,44 @@
       "group": "text-enter",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "96f3ca3a5c21e480ff6fbc01f289e317e285ed13",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "d86a609313fa6a449fc320b3b38dd3cba57e70ed8a90758ad92d6f299ac3d3a6"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "2a3ab30a2b8e537f16de9e52d68d4dfca19f1dc06ab822f6e623a0b1a96a8ba3"
+        },
+        "test": "ce_text_backspace",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "text.backTab",
@@ -12210,7 +12439,44 @@
       "group": "text-enter",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "96f3ca3a5c21e480ff6fbc01f289e317e285ed13",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "d86a609313fa6a449fc320b3b38dd3cba57e70ed8a90758ad92d6f299ac3d3a6"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "2a3ab30a2b8e537f16de9e52d68d4dfca19f1dc06ab822f6e623a0b1a96a8ba3"
+        },
+        "test": "ce_text_delete",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "text.deleteWordBack",
@@ -12302,7 +12568,55 @@
       "group": "text-enter",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "96f3ca3a5c21e480ff6fbc01f289e317e285ed13",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "d86a609313fa6a449fc320b3b38dd3cba57e70ed8a90758ad92d6f299ac3d3a6"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "2a3ab30a2b8e537f16de9e52d68d4dfca19f1dc06ab822f6e623a0b1a96a8ba3"
+        },
+        "test": "ce_text_insert",
+        "testedParameters": {
+          "text": "Z"
+        },
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "enum": [
+                "Z"
+              ]
+            }
+          },
+          "required": [
+            "text"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "text.insertTab",
@@ -12387,7 +12701,44 @@
       "group": "text-enter",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "96f3ca3a5c21e480ff6fbc01f289e317e285ed13",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "d86a609313fa6a449fc320b3b38dd3cba57e70ed8a90758ad92d6f299ac3d3a6"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "2a3ab30a2b8e537f16de9e52d68d4dfca19f1dc06ab822f6e623a0b1a96a8ba3"
+        },
+        "test": "ce_text_newparagraph",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 2,
+          "end": 2
+        },
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "text.optionalHyphen",

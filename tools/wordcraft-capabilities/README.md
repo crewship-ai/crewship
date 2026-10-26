@@ -78,3 +78,50 @@ feature groups. `format.set` and `para.set` expose explicit bounded subsets of
 Line spacing `exactly` starts at 0.7pt to avoid silent clamping. These restrictions
 must remain visible in integration documentation and must not be confused with
 qualification or full upstream parameter coverage.
+
+Engine evidence is deliberately a separate `engineQualification` object. An
+engine-qualified fixture keeps the top-level product `qualification: unqualified`
+until the integration owner proves the full P-48 path. The engine declaration
+covers only the listed parameters, selection and exact revision at the pinned C1
+host; it grants no role authority and says nothing about SQL or browsers.
+
+To reproduce the complete first-group matrix, use a clean checkout of C1 at
+`96f3ca3a5c21e480ff6fbc01f289e317e285ed13` and its unchanged helper preparation/build
+tools. Set the variables below to owned source/output locations; keep raw evidence
+outside the public repository. All builds and tests use the host build queue.
+
+```sh
+crewship-heavy python3 tools/wordcraft-capabilities/c1-qualification/prepare.py \
+  --c1-source "$C1_SOURCE" --engine-binary "$C1_ENGINE_BINARY" \
+  --catalog schemas/wordcraft/capabilities.json \
+  --profiles tools/wordcraft-capabilities/parameter-profiles.json --output "$C1_PREPARED"
+crewship-heavy python3 tools/wordcraft-capabilities/c1-qualification/run.py \
+  --prepared "$C1_PREPARED" --engine-binary "$C1_ENGINE_BINARY" --output "$C1_EVIDENCE"
+crewship-heavy python3 tools/wordcraft-capabilities/c1-qualification/promote.py \
+  --prepared "$C1_PREPARED" --c1-source "$C1_SOURCE" --engine-binary "$C1_ENGINE_BINARY" \
+  --rows "$C1_EVIDENCE/rows" --execution "$C1_EVIDENCE/execution.json" \
+  --profiles tools/wordcraft-capabilities/parameter-profiles.json \
+  --receipt "$C1_EVIDENCE/receipt.json" \
+  --output tools/wordcraft-capabilities/engine-qualification-policy.json
+crewship-heavy node tools/wordcraft-capabilities/generate.mjs --source "$WORDCRAFT_SOURCE"
+```
+
+`run.py` always runs all 163 actual tests without filtering or skipping. At this
+C1 pin, 155 commands are denied; the process remains red and preserves Cargo's
+exit status. Eight semantic fixtures exercise prepare at a current stable target,
+stale revision/removed-block rejection, rejected K restoration to P compared with
+a fresh actual engine, and participant undo preserving the other actor's change.
+The registry's `edit.undo` is not qualified by the host's `participant.undo`.
+Unsupported commands fail at actual host admission and cannot reach later checks;
+their effect oracles must be added when the owner extends the runtime.
+
+Promotion requires the complete matrix and binds every row to its compiled test
+sources, preparation, invocation and actual helper binary. It verifies original
+runtime files against the pinned Git blobs and does not edit them. The committed
+policy is declarative fixture evidence; captured logs, binary hashes and receipts
+stay external. Registry, profile, fixture or test changes stop catalog generation
+until evidence is regenerated. Run the Python promotion guard regressions with:
+
+```sh
+crewship-heavy python3 -m unittest discover -s tools/wordcraft-capabilities/c1-qualification -p '*_test.py'
+```
