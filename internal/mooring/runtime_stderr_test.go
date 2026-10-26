@@ -93,3 +93,20 @@ func TestRuntimeStderrLifetimeBudgetsAndPartialLines(t *testing.T) {
 		t.Fatal("unterminated stderr was logged")
 	}
 }
+
+func TestRuntimeStderrActorErrorsAreRuntimeCorrelatedAndRedacted(t *testing.T) {
+	var output bytes.Buffer
+	sink := newRuntimeStderr(slog.New(slog.NewJSONHandler(&output, nil)))
+	ref := "host-generated-runtime-ref"
+	sink.runtimeRef.Store(&ref)
+	_, _ = sink.Write([]byte("mooring session actor: step-error kind=InvalidData\nmooring session actor: owner-check-error kind=TimedOut\nmooring session actor: maintenance-error kind=BrokenPipe\nmooring session actor: step-error kind=InvalidData private-checkpoint\n"))
+	rows := stderrTestRecords(t, output.String())
+	if len(rows) != 4 || rows[0]["stage"] != "actor-step-error" || rows[1]["stage"] != "actor-owner-check-error" || rows[2]["stage"] != "actor-maintenance-error" || rows[3]["stage"] != "unrecognized-stderr-suppressed" || strings.Contains(output.String(), "private-checkpoint") {
+		t.Fatal(output.String())
+	}
+	for _, row := range rows {
+		if row["runtime_ref"] != ref {
+			t.Fatal(row)
+		}
+	}
+}

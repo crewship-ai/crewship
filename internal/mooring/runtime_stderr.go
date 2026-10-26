@@ -3,6 +3,7 @@ package mooring
 import (
 	"log/slog"
 	"os/exec"
+	"sync/atomic"
 )
 
 const runtimeStderrBytes = 8 << 10
@@ -13,13 +14,14 @@ const runtimeStderrEvents = 16
 // log attribute. Only the existing Rust entrypoint/lane's closed static vocabulary
 // is recognized. The fixed line buffer and lifetime input/event budgets bound work.
 type runtimeStderr struct {
-	logger    *slog.Logger
-	remaining int
-	events    int
-	line      [160]byte
-	length    int
-	overlong  bool
-	unknown   bool
+	logger     *slog.Logger
+	runtimeRef atomic.Pointer[string]
+	remaining  int
+	events     int
+	line       [160]byte
+	length     int
+	overlong   bool
+	unknown    bool
 }
 
 func runtimeStderrEvidence(cmd *exec.Cmd) (func(), error) {
@@ -78,7 +80,11 @@ func (s *runtimeStderr) Write(p []byte) (int, error) {
 
 func (s *runtimeStderr) emit(stage, kind string) {
 	s.events++
-	s.logger.Warn("Mooring Rust stderr", "stage", stage, "kind", kind)
+	if ref := s.runtimeRef.Load(); ref != nil {
+		s.logger.Warn("Mooring Rust stderr", "runtime_ref", *ref, "stage", stage, "kind", kind)
+	} else {
+		s.logger.Warn("Mooring Rust stderr", "stage", stage, "kind", kind)
+	}
 }
 
 func runtimeStderrLiteral(line string) (string, string, bool) {
@@ -95,6 +101,12 @@ func runtimeStderrLiteral(line string) (string, string, bool) {
 		"OutOfMemory", "Other",
 	} {
 		switch {
+		case line == "mooring session actor: step-error kind="+kind:
+			return "actor-step-error", kind, true
+		case line == "mooring session actor: owner-check-error kind="+kind:
+			return "actor-owner-check-error", kind, true
+		case line == "mooring session actor: maintenance-error kind="+kind:
+			return "actor-maintenance-error", kind, true
 		case line == "mooring runtime stopped: kind="+kind:
 			return "runtime-stopped", kind, true
 		case line == "mooring session lane: output-error kind="+kind:

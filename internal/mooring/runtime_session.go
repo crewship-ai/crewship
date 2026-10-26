@@ -53,6 +53,7 @@ type SessionRuntime struct {
 	scope                      SessionKey
 	versions                   RuntimeVersions
 	runtimeRef                 string
+	failureOnce                sync.Once
 	validator                  *privateControlValidator
 	mu                         sync.Mutex
 	pending                    map[string]*sessionPending
@@ -95,8 +96,11 @@ func newSessionRuntime(process *Runtime, c SessionRuntimeConfig) (*SessionRuntim
 	}
 	s := &SessionRuntime{process: process, scope: c.Scope, versions: c.Runtime.Versions, runtimeRef: string(ref), validator: v, pending: make(map[string]*sessionPending), child: make(map[uint64]*sessionControlEntry), childIDs: make(map[string][]uint64), done: make(chan struct{}), closedCh: make(chan struct{}), readerDone: make(chan struct{}), notify: make(chan struct{}), writer: make(chan struct{}, 1)}
 	s.writer <- struct{}{}
+	if sink, ok := process.cmd.Stderr.(*runtimeStderr); ok {
+		sink.runtimeRef.Store(&s.runtimeRef)
+	}
 	go s.readLoop()
-	go func() { <-process.Done(); s.fail(process.Err()); <-s.readerDone; close(s.done) }()
+	go func() { <-process.Done(); s.failAt("process-exit", process.Err()); <-s.readerDone; close(s.done) }()
 	return s, nil
 }
 
@@ -135,16 +139,18 @@ func (s *SessionRuntime) Done() <-chan struct{} { return s.done }
 func (s *SessionRuntime) RuntimeRef() string    { return s.runtimeRef }
 func (s *SessionRuntime) Err() error            { s.mu.Lock(); defer s.mu.Unlock(); return s.err }
 func (s *SessionRuntime) Close() error {
-	s.fail(ErrSessionRuntime)
+	s.failAt("runtime-close", ErrSessionRuntime)
 	<-s.done
 	return s.Err()
 }
-func (s *SessionRuntime) fail(err error) {
+func (s *SessionRuntime) fail(err error) { s.failAt("runtime-failure", err) }
+func (s *SessionRuntime) failAt(stage string, err error) {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
 		return
 	}
+	emitFailure := s.claimFailure(stage, "", err)
 	s.closed = true
 	s.releaseAllParticipantStatesLocked()
 	if err == nil {
@@ -154,6 +160,9 @@ func (s *SessionRuntime) fail(err error) {
 	close(s.closedCh)
 	s.signalLocked()
 	s.mu.Unlock()
+	if emitFailure != nil {
+		emitFailure()
+	}
 	_ = s.process.RPC.Close()
 	_ = s.process.cmd.Process.Kill()
 }
@@ -233,7 +242,7 @@ func (s *SessionRuntime) request(ctx context.Context, raw []byte, maximum time.D
 		sent := s.pending[header.id] == p && p.sent
 		s.mu.Unlock()
 		if sent {
-			s.fail(ctx.Err())
+			s.failAt("request-deadline", ctx.Err())
 		}
 		close(stopped)
 	})
@@ -275,12 +284,12 @@ func (s *SessionRuntime) request(ctx context.Context, raw []byte, maximum time.D
 	}
 	s.writer <- struct{}{}
 	if err != nil {
-		s.fail(err)
+		s.failAt("request-write", err)
 		return nil, err
 	}
 	select {
 	case <-ctx.Done():
-		s.fail(ctx.Err())
+		s.failAt("request-wait", ctx.Err())
 		return nil, ctx.Err()
 	case <-s.closedCh:
 		return nil, s.Err()
@@ -293,12 +302,12 @@ func (s *SessionRuntime) readLoop() {
 	for {
 		raw, err := s.process.RPC.Read()
 		if err != nil {
-			s.fail(err)
+			s.failAt("rpc-read", err)
 			return
 		}
 		normalized, header, err := s.validate(raw, true)
 		if err != nil {
-			s.fail(err)
+			s.failAt("rpc-validate", err)
 			return
 		}
 		s.mu.Lock()
@@ -310,7 +319,7 @@ func (s *SessionRuntime) readLoop() {
 			p := s.pending[header.id]
 			if p == nil || !p.sent || p.expected != header.kind || p.responseBytes != 0 || len(normalized) > sessionControlBytes-s.bytes {
 				s.mu.Unlock()
-				s.fail(ErrSessionRuntime)
+				s.failAt("reply-correlation", ErrSessionRuntime)
 				return
 			}
 			s.observeResponseLocked(header.kind, normalized)
@@ -338,13 +347,13 @@ func (s *SessionRuntime) readLoop() {
 				correlatedParticipantOutputPhases(entry.bytes, normalized)
 			if !paired {
 				s.mu.Unlock()
-				s.fail(ErrSessionRuntime)
+				s.failAt("child-id-correlation", ErrSessionRuntime)
 				return
 			}
 		}
 		if s.next == ^uint64(0) || !s.reserveLocked(len(normalized)) {
 			s.mu.Unlock()
-			s.fail(ErrSessionRuntime)
+			s.failAt("control-capacity", ErrSessionRuntime)
 			return
 		}
 		s.next++
@@ -438,7 +447,7 @@ func (s *SessionRuntime) ReplyControl(ctx context.Context, c SessionControl, raw
 	entry.replying = true
 	s.mu.Unlock()
 	if err = s.write(ctx, normalized); err != nil {
-		s.fail(err)
+		s.failAt("reply-write", err)
 		return err
 	}
 	s.mu.Lock()
@@ -483,7 +492,7 @@ func (s *SessionRuntime) write(ctx context.Context, raw []byte) error {
 		return err
 	}
 	cancelled := make(chan struct{})
-	stop := context.AfterFunc(ctx, func() { s.fail(ctx.Err()); close(cancelled) })
+	stop := context.AfterFunc(ctx, func() { s.failAt("write-deadline", ctx.Err()); close(cancelled) })
 	defer func() {
 		if !stop() {
 			<-cancelled
@@ -498,7 +507,7 @@ func (s *SessionRuntime) write(ctx context.Context, raw []byte) error {
 		err = s.process.RPC.conn.SetWriteDeadline(time.Time{})
 	}
 	if err != nil {
-		s.fail(err)
+		s.failAt("rpc-write", err)
 	}
 	return err
 }

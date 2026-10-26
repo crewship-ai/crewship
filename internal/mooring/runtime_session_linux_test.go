@@ -3,12 +3,15 @@
 package mooring
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 )
@@ -308,5 +311,38 @@ func TestSessionRuntimeWrongDescriptorDigestPoisonsBeforeInitialization(t *testi
 	case <-s.Done():
 	case <-ctx.Done():
 		t.Fatal("uncertain descriptor process stayed alive")
+	}
+}
+
+func TestSessionRuntimeFirstFailureIdentifiesActualPeerBoundary(t *testing.T) {
+	for _, item := range []struct{ mode, stage string }{{"wrong-scope", "rpc-validate"}, {"flood", "control-capacity"}, {"unsolicited", "reply-correlation"}} {
+		t.Run(item.mode, func(t *testing.T) {
+			var output bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewJSONHandler(&output, nil)))
+			t.Cleanup(func() { slog.SetDefault(previous) })
+			s := sessionPeer(t, item.mode)
+			requestDone := make(chan struct{})
+			go func() { defer close(requestDone); _, _ = s.request(t.Context(), sessionTestOpen(s), 3*time.Second) }()
+			select {
+			case <-s.Done():
+			case <-time.After(3 * time.Second):
+				t.Fatal("bad peer remained live")
+			}
+			<-requestDone
+			count := 0
+			for _, row := range stderrTestRecords(t, output.String()) {
+				if row["msg"] != "Mooring session first failure" || row["runtime_ref"] != s.RuntimeRef() {
+					continue
+				}
+				count++
+				if row["stage"] != item.stage {
+					t.Fatal(row)
+				}
+			}
+			if count != 1 || strings.Contains(output.String(), "host-session") {
+				t.Fatal(output.String())
+			}
+		})
 	}
 }

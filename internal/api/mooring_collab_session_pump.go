@@ -100,7 +100,11 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 		defer finishWorker()
 		defer close(workerDone)
 		defer cancel()
-		defer func() { _ = recover() }() // opaque failure; never publish panic data
+		defer func() {
+			if recover() != nil {
+				p.runtime.ObserveFailure("pump-mutation-panic", "", nil)
+			}
+		}() // never publish panic data
 		for {
 			select {
 			case <-ctx.Done():
@@ -109,7 +113,8 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 				if ctx.Err() != nil {
 					return
 				}
-				if p.mutation(ctx, next.token, next.kind) != nil {
+				if e := p.mutation(ctx, next.token, next.kind); e != nil {
+					p.runtime.ObserveFailure("pump-mutation", next.kind, e)
 					return
 				}
 			}
@@ -126,7 +131,11 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 			defer finishOutput()
 			defer close(outputDone)
 			defer cancel()
-			defer func() { _ = recover() }()
+			defer func() {
+				if recover() != nil {
+					p.runtime.ObserveFailure("pump-output-panic", "", nil)
+				}
+			}()
 			for {
 				select {
 				case <-ctx.Done():
@@ -137,13 +146,24 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 					}
 					raw, e := next.token.Frame()
 					if e != nil {
+						p.runtime.ObserveFailure("pump-frame", next.kind, e)
 						return
 					}
 					if next.afterJoined != nil {
-						if next.afterJoined(ctx) != nil || ctx.Err() != nil || p.runtime.CompleteControl(next.token) != nil {
+						if e := next.afterJoined(ctx); e != nil {
+							p.runtime.ObserveFailure("pump-joined-continuation", next.kind, e)
 							return
 						}
-					} else if p.control(ctx, next.token, next.kind, raw) != nil {
+						if ctx.Err() != nil {
+							p.runtime.ObserveFailure("pump-callback-context", next.kind, ctx.Err())
+							return
+						}
+						if e := p.runtime.CompleteControl(next.token); e != nil {
+							p.runtime.ObserveFailure("pump-complete-control", next.kind, e)
+							return
+						}
+					} else if e := p.control(ctx, next.token, next.kind, raw); e != nil {
+						p.runtime.ObserveFailure("pump-output", next.kind, e)
 						return
 					}
 				}
@@ -158,22 +178,29 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 	}()
 	defer func() {
 		if recover() != nil {
+			p.runtime.ObserveFailure("pump-management-panic", "", nil)
 			err = errCollaborationSessionPump
+		}
+		if err != nil {
+			p.runtime.ObserveFailure("pump-management", "", err)
 		}
 	}()
 	for {
 		token, e := p.runtime.NextControl(ctx)
 		if e != nil {
+			p.runtime.ObserveFailure("pump-next-control", "", e)
 			return errCollaborationSessionPump
 		}
 		raw, e := token.Frame()
 		if e != nil {
+			p.runtime.ObserveFailure("pump-frame", "", e)
 			return errCollaborationSessionPump
 		}
 		var header struct {
 			Type string `json:"type"`
 		}
 		if json.Unmarshal(raw, &header) != nil {
+			p.runtime.ObserveFailure("pump-decode", "", errCollaborationSessionPump)
 			return errCollaborationSessionPump
 		}
 		if header.Type == "session_submit_batch" || header.Type == "session_status_request" {
@@ -183,6 +210,7 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 			case queue <- pending{token: token, kind: header.Type}:
 				p.queuedMutations.Add(1)
 			default:
+				p.runtime.ObserveFailure("pump-queue-capacity", header.Type, errCollaborationSessionPump)
 				return errCollaborationSessionPump
 			}
 			continue
@@ -203,16 +231,22 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 				}
 				after, e := p.handlers.JoinedControl(ctx, token, output)
 				if e != nil || ctx.Err() != nil {
+					if e == nil {
+						e = ctx.Err()
+					}
+					p.runtime.ObserveFailure("pump-joined-callback", header.Type, e)
 					return errCollaborationSessionPump
 				}
 				if after == nil {
-					if p.runtime.CompleteControl(token) != nil {
+					if e := p.runtime.CompleteControl(token); e != nil {
+						p.runtime.ObserveFailure("pump-complete-control", header.Type, e)
 						return errCollaborationSessionPump
 					}
 				} else {
 					select {
 					case outputQueue <- pending{token: token, kind: header.Type, afterJoined: after}:
 					default:
+						p.runtime.ObserveFailure("pump-queue-capacity", header.Type, errCollaborationSessionPump)
 						return errCollaborationSessionPump
 					}
 				}
@@ -254,18 +288,33 @@ func pumpCounterAtLeast(got, original protocol.Counter) bool {
 		strconv.FormatUint(b, 10) == string(original) && a >= b
 }
 
-func (p *collaborationSessionPump) reply(ctx context.Context, token mooring.SessionControl, response any, err error) error {
-	if err != nil || ctx.Err() != nil {
+func (p *collaborationSessionPump) reply(ctx context.Context, token mooring.SessionControl, response any, err error, kind string) error {
+	if err != nil {
+		p.runtime.ObserveFailure("pump-callback", kind, err)
+		return errCollaborationSessionPump
+	}
+	if ctx.Err() != nil {
+		p.runtime.ObserveFailure("pump-callback-context", kind, ctx.Err())
 		return errCollaborationSessionPump
 	}
 	raw, err := json.Marshal(response)
 	if err != nil {
+		p.runtime.ObserveFailure("pump-response-marshal", kind, err)
 		return errCollaborationSessionPump
 	}
-	return p.runtime.ReplyControl(ctx, token, raw)
+	err = p.runtime.ReplyControl(ctx, token, raw)
+	if err != nil {
+		p.runtime.ObserveFailure("pump-reply-control", kind, err)
+	}
+	return err
 }
 
-func (p *collaborationSessionPump) mutation(ctx context.Context, token mooring.SessionControl, kind string) error {
+func (p *collaborationSessionPump) mutation(ctx context.Context, token mooring.SessionControl, kind string) (failure error) {
+	defer func() {
+		if failure != nil {
+			p.runtime.ObserveFailure("pump-mutation", kind, failure)
+		}
+	}()
 	raw, err := token.Frame()
 	if err != nil {
 		return errCollaborationSessionPump
@@ -305,7 +354,7 @@ func (p *collaborationSessionPump) mutation(ctx context.Context, token mooring.S
 				}
 			}
 		}
-		return p.reply(ctx, token, result, err)
+		return p.reply(ctx, token, result, err, kind)
 	case "session_status_request":
 		request, err := pumpRequest[protocol.SessionStatusRequest](ctx, raw)
 		if err != nil || p.handlers.Status == nil || request.Message.Scope != request.Scope {
@@ -331,13 +380,18 @@ func (p *collaborationSessionPump) mutation(ctx context.Context, token mooring.S
 				return errCollaborationSessionPump
 			}
 		}
-		return p.reply(ctx, token, result, err)
+		return p.reply(ctx, token, result, err, kind)
 	default:
 		return errCollaborationSessionPump
 	}
 }
 
-func (p *collaborationSessionPump) control(ctx context.Context, token mooring.SessionControl, kind string, raw []byte) error {
+func (p *collaborationSessionPump) control(ctx context.Context, token mooring.SessionControl, kind string, raw []byte) (failure error) {
+	defer func() {
+		if failure != nil {
+			p.runtime.ObserveFailure("pump-management", kind, failure)
+		}
+	}()
 	switch kind {
 	case "owner_acquire":
 		request, err := pumpRequest[protocol.OwnerAcquire](ctx, raw)
@@ -350,7 +404,7 @@ func (p *collaborationSessionPump) control(ctx context.Context, token mooring.Se
 			result.RenewalNonce != request.RenewalNonce) {
 			return errCollaborationSessionPump
 		}
-		return p.reply(ctx, token, result, err)
+		return p.reply(ctx, token, result, err, kind)
 	case "owner_renew":
 		request, err := pumpRequest[protocol.OwnerRenew](ctx, raw)
 		if err != nil || p.handlers.Renew == nil {
@@ -364,14 +418,18 @@ func (p *collaborationSessionPump) control(ctx context.Context, token mooring.Se
 			!pumpCounterAtLeast(result.PermissionVersion, request.PermissionVersion)) {
 			return errCollaborationSessionPump
 		}
-		return p.reply(ctx, token, result, err)
+		return p.reply(ctx, token, result, err, kind)
 	case "ticket_validate":
 		request, err := pumpRequest[protocol.TicketValidationRequest](ctx, raw)
 		if err != nil || (p.handlers.Ticket == nil && p.handlers.TicketControl == nil) {
 			return errCollaborationSessionPump
 		}
 		if p.handlers.TicketControl != nil {
-			return p.handlers.TicketControl(ctx, token, request)
+			e := p.handlers.TicketControl(ctx, token, request)
+			if e != nil {
+				p.runtime.ObserveFailure("pump-callback", kind, e)
+			}
+			return e
 		}
 		result, err := p.handlers.Ticket(ctx, request)
 		if err == nil && (result.RequestID != request.RequestID ||
@@ -380,14 +438,18 @@ func (p *collaborationSessionPump) control(ctx context.Context, token mooring.Se
 			result.ValidationNonce != request.ValidationNonce) {
 			return errCollaborationSessionPump
 		}
-		return p.reply(ctx, token, result, err)
+		return p.reply(ctx, token, result, err, kind)
 	case "delivery_renew":
 		request, err := pumpRequest[protocol.DeliveryRenew](ctx, raw)
 		if err != nil || (p.handlers.Delivery == nil && p.handlers.DeliveryControl == nil) {
 			return errCollaborationSessionPump
 		}
 		if p.handlers.DeliveryControl != nil {
-			return p.handlers.DeliveryControl(ctx, token, request)
+			e := p.handlers.DeliveryControl(ctx, token, request)
+			if e != nil {
+				p.runtime.ObserveFailure("pump-callback", kind, e)
+			}
+			return e
 		}
 		if p.handlers.DeliveryGuard != nil {
 			release, e := p.handlers.DeliveryGuard(ctx, request)
@@ -395,6 +457,7 @@ func (p *collaborationSessionPump) control(ctx context.Context, token mooring.Se
 				defer release()
 			}
 			if e != nil || release == nil {
+				p.runtime.ObserveFailure("pump-delivery-guard", kind, e)
 				return errCollaborationSessionPump
 			}
 		}
@@ -407,22 +470,40 @@ func (p *collaborationSessionPump) control(ctx context.Context, token mooring.Se
 			result.RenewalNonce != request.RenewalNonce || result.GateID != request.GateID) {
 			return errCollaborationSessionPump
 		}
-		return p.reply(ctx, token, result, err)
+		return p.reply(ctx, token, result, err, kind)
 	case "session_participant_output":
 		var output protocol.SessionParticipantOutput
 		if (p.handlers.Output == nil && p.handlers.OutputControl == nil) || ctx.Err() != nil || json.Unmarshal(raw, &output) != nil {
 			return errCollaborationSessionPump
 		}
 		if p.handlers.OutputControl != nil {
-			if p.handlers.OutputControl(ctx, token, output) != nil || ctx.Err() != nil {
+			if e := p.handlers.OutputControl(ctx, token, output); e != nil {
+				p.runtime.ObserveFailure("pump-callback", kind, e)
 				return errCollaborationSessionPump
 			}
-			return p.runtime.CompleteControl(token)
+			if ctx.Err() != nil {
+				p.runtime.ObserveFailure("pump-callback-context", kind, ctx.Err())
+				return errCollaborationSessionPump
+			}
+			e := p.runtime.CompleteControl(token)
+			if e != nil {
+				p.runtime.ObserveFailure("pump-complete-control", kind, e)
+			}
+			return e
 		}
-		if p.handlers.Output(ctx, output) != nil || ctx.Err() != nil {
+		if e := p.handlers.Output(ctx, output); e != nil {
+			p.runtime.ObserveFailure("pump-callback", kind, e)
 			return errCollaborationSessionPump
 		}
-		return p.runtime.CompleteControl(token)
+		if ctx.Err() != nil {
+			p.runtime.ObserveFailure("pump-callback-context", kind, ctx.Err())
+			return errCollaborationSessionPump
+		}
+		e := p.runtime.CompleteControl(token)
+		if e != nil {
+			p.runtime.ObserveFailure("pump-complete-control", kind, e)
+		}
+		return e
 	default:
 		return errCollaborationSessionPump
 	}
@@ -431,22 +512,34 @@ func (p *collaborationSessionPump) control(ctx context.Context, token mooring.Se
 // The same positive correlation applies to the exact-token host composition.
 func collaborationPumpDeliveryReply(ctx context.Context, runtime *mooring.SessionRuntime, token mooring.SessionControl, request protocol.DeliveryRenew, result protocol.DeliveryGrant) error {
 	if ctx.Err() != nil || result.RequestID != request.RequestID || result.Scope != request.Scope || result.SessionID != request.SessionID || result.ParticipantRef != request.ParticipantRef || result.Generation != request.Fence.Generation || result.PermissionVersion != request.PermissionVersion || result.RenewalNonce != request.RenewalNonce || result.GateID != request.GateID {
+		runtime.ObserveFailure("pump-response-correlation", "delivery_renew", ctx.Err())
 		return errCollaborationSessionPump
 	}
 	raw, err := json.Marshal(result)
 	if err != nil {
+		runtime.ObserveFailure("pump-response-marshal", "delivery_renew", err)
 		return errCollaborationSessionPump
 	}
-	return runtime.ReplyControl(ctx, token, raw)
+	err = runtime.ReplyControl(ctx, token, raw)
+	if err != nil {
+		runtime.ObserveFailure("pump-reply-control", "delivery_renew", err)
+	}
+	return err
 }
 
 func collaborationPumpTicketReply(ctx context.Context, runtime *mooring.SessionRuntime, token mooring.SessionControl, request protocol.TicketValidationRequest, result protocol.TicketValidationResult) error {
 	if ctx.Err() != nil || result.RequestID != request.RequestID || result.Scope != request.Scope || result.SessionID != request.SessionID || result.Generation != request.Fence.Generation || result.ValidationNonce != request.ValidationNonce {
+		runtime.ObserveFailure("pump-response-correlation", "ticket_validate", ctx.Err())
 		return errCollaborationSessionPump
 	}
 	raw, err := json.Marshal(result)
 	if err != nil {
+		runtime.ObserveFailure("pump-response-marshal", "ticket_validate", err)
 		return errCollaborationSessionPump
 	}
-	return runtime.ReplyControl(ctx, token, raw)
+	err = runtime.ReplyControl(ctx, token, raw)
+	if err != nil {
+		runtime.ObserveFailure("pump-reply-control", "ticket_validate", err)
+	}
+	return err
 }

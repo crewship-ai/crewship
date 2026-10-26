@@ -13,7 +13,7 @@ use mooring_protocol::{
 };
 use std::{
     collections::{BTreeMap, VecDeque},
-    io,
+    io::{self, Write},
     num::NonZeroUsize,
     sync::Arc,
     time::Duration,
@@ -141,7 +141,12 @@ impl RunningDriver {
     /// A nonterminal failure closes every lane and keeps original owned intents.
     pub fn step(&mut self, host: &Transport<'_>, wait: Duration) -> io::Result<()> {
         let result = self.step_inner(host, wait);
-        if result.is_err() {
+        if let Err(error) = &result {
+            let _ = writeln!(
+                io::stderr(),
+                "mooring session actor: step-error kind={:?}",
+                error.kind()
+            );
             self.close();
         }
         result
@@ -1070,7 +1075,12 @@ impl RunningDriver {
             }
             Ok(())
         })();
-        if result.is_err() {
+        if let Err(error) = &result {
+            let _ = writeln!(
+                io::stderr(),
+                "mooring session actor: owner-check-error kind={:?}",
+                error.kind()
+            );
             self.close();
         }
         result
@@ -1079,7 +1089,12 @@ impl RunningDriver {
     /// transition. Permission advancement still grants no participant rights.
     pub fn maintain_owner(&mut self, host: &Transport<'_>, wait: Duration) -> io::Result<()> {
         let result = self.maintain_inner(host, wait);
-        if result.is_err() {
+        if let Err(error) = &result {
+            let _ = writeln!(
+                io::stderr(),
+                "mooring session actor: maintenance-error kind={:?}",
+                error.kind()
+            );
             self.close();
         }
         result

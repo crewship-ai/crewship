@@ -118,7 +118,11 @@ func (m *collaborationHTTPManager) websocket(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if m.pages.logger != nil {
-		m.pages.logger.Info("mooring websocket bound", "connection_ref", c.ref, "admission_ref", collaborationAdmissionRef(c.admission))
+		runtimeRef := ""
+		if d.cell != nil && d.cell.runtime != nil {
+			runtimeRef = d.cell.runtime.RuntimeRef()
+		}
+		m.pages.logger.Info("mooring websocket bound", "connection_ref", c.ref, "admission_ref", collaborationAdmissionRef(c.admission), "runtime_ref", runtimeRef)
 	}
 	closedReason := "transport_error"
 	var stopLiveness func() bool
