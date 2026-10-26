@@ -77,6 +77,7 @@ type collaborationHumanRegistry struct {
 	sessionID       string
 	limit           int
 	reservations    int
+	denialLogs      uint8
 	deliveryTTL     time.Duration
 	admissions      map[string]collaborationHumanAdmission
 	tickets         map[string]collaborationHumanJoinTicket
@@ -283,29 +284,38 @@ func (s *collaborationHumanRegistry) capturedContext(ctx context.Context, admiss
 func (s *collaborationHumanRegistry) checkCaptured(ctx context.Context, tx *sql.Tx, admission collaborationHumanAdmission, write bool, requiredRemaining time.Duration) (string, error) {
 	if s.sessionStore != nil {
 		if err := s.sessionStore.check(ctx, tx); err != nil {
-			return "", err
+			return "", s.logAdmissionDenial(admission, "session_store", err)
 		}
 	}
 	// This local check is not a lease over the caller's later commit/send.
 	// Entrypoints must hold an outer ingress lease around the complete operation.
 	release, err := s.fence.acquireOriginal(admission.ingress)
 	if err != nil {
-		return "", err
+		return "", s.logAdmissionDenial(admission, "ingress_fence", err)
 	}
 	defer release()
 	boot, now, err := s.clock.Now()
-	if err != nil || boot != admission.boot || now < 0 || now >= admission.deadline || (write && !admission.write) {
-		return "", errCollaborationAdmission
+	if err != nil {
+		return "", s.logAdmissionDenial(admission, "clock", errCollaborationAdmission)
+	}
+	if boot != admission.boot || now < 0 {
+		return "", s.logAdmissionDenial(admission, "clock_epoch", errCollaborationAdmission)
+	}
+	if now >= admission.deadline {
+		return "", s.logAdmissionDenial(admission, "admission_expired", errCollaborationAdmission)
+	}
+	if write && !admission.write {
+		return "", s.logAdmissionDenial(admission, "write_capability", errCollaborationAdmission)
 	}
 	if !admission.authorVector.matches(s.scope, admission.source.UserID, "", "") {
-		return "", errCollaborationAuthorUnqualified
+		return "", s.logAdmissionDenial(admission, "author_binding", errCollaborationAuthorUnqualified)
 	}
 	changed, err := collaborationAuthorVectorChanged(ctx, tx, admission.authorVector)
 	if err != nil {
-		return "", errCollaborationAuthorUnqualified
+		return "", s.logAdmissionDenial(admission, "author_vector_check", errCollaborationAuthorUnqualified)
 	}
 	if changed {
-		return "", errCollaborationAuthorChanged
+		return "", s.logAdmissionDenial(admission, "author_vector_changed", errCollaborationAuthorChanged)
 	}
 	intent := "read"
 	if write {
@@ -313,17 +323,23 @@ func (s *collaborationHumanRegistry) checkCaptured(ctx context.Context, tx *sql.
 	}
 	proof, err := s.pages.authorizeCollaborationHumanPage(s.capturedContext(ctx, admission), tx, s.scope, intent)
 	if err != nil {
-		return "", err
+		return "", s.logAdmissionDenial(admission, "current_page_authority", err)
 	}
 	if proof.memberID != admission.member || proof.memberRevision != admission.memberRevision {
-		return "", errCollaborationAdmission
+		return "", s.logAdmissionDenial(admission, "membership_binding", errCollaborationAdmission)
 	}
 	boot, now, err = s.clock.Now()
-	if err != nil || boot != admission.boot || now < 0 || now >= admission.deadline || admission.deadline-now < requiredRemaining {
-		return "", errCollaborationAdmission
+	if err != nil || boot != admission.boot || now < 0 {
+		return "", s.logAdmissionDenial(admission, "final_clock_epoch", errCollaborationAdmission)
+	}
+	if now >= admission.deadline {
+		return "", s.logAdmissionDenial(admission, "final_admission_expired", errCollaborationAdmission)
+	}
+	if admission.deadline-now < requiredRemaining {
+		return "", s.logAdmissionDenial(admission, "admission_remaining_horizon", errCollaborationAdmission)
 	}
 	if !proof.credentialExpiry.IsZero() && time.Until(proof.credentialExpiry) < requiredRemaining {
-		return "", errCollaborationAdmission
+		return "", s.logAdmissionDenial(admission, "credential_remaining_horizon", errCollaborationAdmission)
 	}
 	return proof.permissionVersion, nil
 }
@@ -488,7 +504,7 @@ func (s *collaborationHumanRegistry) join(ctx context.Context, runtime collabora
 		}
 		currentBoot, now, err := s.clock.Now()
 		if err != nil || boot != currentBoot || now < 0 || int64(now) >= expires || expires-int64(now) < int64(ttl) {
-			return "", errCollaborationAdmission
+			return "", s.logAdmissionDenial(admission, "delivery_owner_horizon", errCollaborationAdmission)
 		}
 		return permission, nil
 	}

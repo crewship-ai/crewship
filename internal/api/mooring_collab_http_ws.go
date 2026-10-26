@@ -117,6 +117,9 @@ func (m *collaborationHTTPManager) websocket(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		return
 	}
+	if m.pages.logger != nil {
+		m.pages.logger.Info("mooring websocket bound", "connection_ref", c.ref, "admission_ref", collaborationAdmissionRef(c.admission))
+	}
 	closedReason := "transport_error"
 	var stopLiveness func() bool
 	defer func() {
@@ -451,7 +454,7 @@ func (c *collaborationHTTPConnection) checkedSendRequestLocked(request *http.Req
 	return d.humans.runHumanOperation(request, c.admission.participant, func(ctx context.Context) error {
 		return d.submissions.withWriter(ctx, func(tx *sql.Tx) error {
 			if e := d.cell.check(ctx, tx); e != nil {
-				return e
+				return d.humans.logAdmissionDenial(c.admission, "send_session_store", e)
 			}
 			permission, e := d.humans.checkCaptured(ctx, tx, c.admission, false, collaborationHTTPSendDeadline)
 			if e != nil {
@@ -463,27 +466,39 @@ func (c *collaborationHTTPConnection) checkedSendRequestLocked(request *http.Req
 			var closed bool
 			e = tx.QueryRowContext(ctx, `SELECT boot_id,expires_ns,closed FROM mooring_delivery_gates WHERE id=? AND page_id=? AND workspace_id=? AND application_id=? AND participant_ref=? AND owner_id=? AND owner_generation=? AND owner_token_hash=? AND permission_version=?`, c.joined.gate.GateID, d.key.ArtifactID, d.key.WorkspaceID, d.key.ApplicationID, c.admission.participant, d.owner.OwnerID, d.owner.Generation, tokenHash[:], permission).Scan(&boot, &expires, &closed)
 			if e != nil {
-				return e
+				return d.humans.logAdmissionDenial(c.admission, "send_gate_lookup", e)
 			}
 			currentBoot, now, e := d.manager.clock.Now()
-			if e != nil || boot != currentBoot || closed || now < 0 || int64(now) >= expires || expires-int64(now) < int64(collaborationHTTPSendDeadline) {
-				return errCollaborationHTTP
+			if e != nil || boot != currentBoot || now < 0 {
+				return d.humans.logAdmissionDenial(c.admission, "send_gate_clock", errCollaborationHTTP)
+			}
+			if closed {
+				return d.humans.logAdmissionDenial(c.admission, "send_gate_closed", errCollaborationHTTP)
+			}
+			if int64(now) >= expires {
+				return d.humans.logAdmissionDenial(c.admission, "send_gate_expired", errCollaborationHTTP)
+			}
+			if expires-int64(now) < int64(collaborationHTTPSendDeadline) {
+				return d.humans.logAdmissionDenial(c.admission, "send_gate_horizon", errCollaborationHTTP)
 			}
 			var ownerBoot string
 			var ownerExpires int64
 			if e = tx.QueryRowContext(ctx, `SELECT boot_id,expires_ns FROM mooring_session_owners WHERE page_id=? AND workspace_id=? AND application_id=? AND owner_id=? AND generation=?`, d.key.ArtifactID, d.key.WorkspaceID, d.key.ApplicationID, d.owner.OwnerID, d.owner.Generation).Scan(&ownerBoot, &ownerExpires); e != nil {
-				return e
+				return d.humans.logAdmissionDenial(c.admission, "send_owner_lookup", e)
 			}
 			if ownerBoot != currentBoot || int64(now) >= ownerExpires || ownerExpires-int64(now) < int64(collaborationHTTPSendDeadline) {
-				return errCollaborationHTTP
+				return d.humans.logAdmissionDenial(c.admission, "send_owner_horizon", errCollaborationHTTP)
 			}
 			if e = d.cell.owners.Check(ctx, tx, d.owner); e != nil {
-				return e
+				return d.humans.logAdmissionDenial(c.admission, "send_owner_check", e)
 			}
 			if e = c.socket.SetWriteDeadline(time.Now().Add(collaborationHTTPSendDeadline)); e != nil {
-				return e
+				return d.humans.logAdmissionDenial(c.admission, "send_write_deadline", e)
 			}
-			return c.socket.WriteMessage(websocket.TextMessage, raw)
+			if e = c.socket.WriteMessage(websocket.TextMessage, raw); e != nil {
+				return d.humans.logAdmissionDenial(c.admission, "send_transport", e)
+			}
+			return nil
 		})
 	})
 }
