@@ -13,8 +13,8 @@ export const resourcePolicySchema = z.object({
   })).optional(),
 })
 export type ResourcePolicy = z.infer<typeof resourcePolicySchema>
-export type SharedResource = { kind: "routine" | "project"; id: string; name: string }
-export const shareOperations = { routine: ["view", "results", "run", "edit", "publish"], project: ["list", "read", "contribute", "manage", "delete_issues"] } as const
+export type SharedResource = { kind: "routine" | "project" | "crew"; id: string; name: string }
+export const shareOperations = { crew: ["view", "use"], routine: ["view", "results", "run", "edit", "publish"], project: ["list", "read", "contribute", "manage", "delete_issues"] } as const
 export const isResourceRight = (right: z.infer<typeof resourceRightSchema>, resource: SharedResource) =>
   right.kind === resource.kind && right.id === resource.id
 

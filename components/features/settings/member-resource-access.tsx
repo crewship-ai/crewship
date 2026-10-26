@@ -18,7 +18,7 @@ const policySchema = resourcePolicySchema
 type Policy = z.infer<typeof policySchema>
 type Right = z.infer<typeof rightSchema>
 const directorySchema = z.array(z.object({ id: z.string(), name: z.string() }))
-const operations = { agent: ["discover", "chat", "run", "delegate"], project: ["list", "read", "contribute", "manage", "delete_issues", "write", "delete"], routine: ["view", "results", "run", "edit", "publish"] }
+const operations = { crew: ["view", "use"], agent: ["discover", "chat", "run", "delegate"], project: ["list", "read", "contribute", "manage", "delete_issues", "write", "delete"], routine: ["view", "results", "run", "edit", "publish"] }
 
 export function MemberResourceAccess({ workspaceId, memberId, label, role, onSaved }: {
   workspaceId: string; memberId: string; label: string; role: string
@@ -67,9 +67,10 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
   const [resourceId, setResourceId] = useState("")
   const [operation, setOperation] = useState("chat")
   const [conflict, setConflict] = useState(false)
-  // Both directories load so every grant resolves its name by its own kind,
+  // Each directory loads so every grant resolves its name by its own kind,
   // not by whichever kind the add-grant selector currently shows (#2863).
   const directories = {
+    crew: useResourceDirectory(workspaceId, "crew", mode === "restricted"),
     agent: useResourceDirectory(workspaceId, "agent", mode === "restricted"),
     project: useResourceDirectory(workspaceId, "project", mode === "restricted"),
     routine: useResourceDirectory(workspaceId, "routine", mode === "restricted"),
@@ -141,7 +142,7 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
       <div className="flex flex-wrap gap-2">
         <select aria-label="Resource kind" className={selectClass} value={kind} disabled={save.isPending || presetBusy || conflict} onChange={event => {
           const next = event.target.value as keyof typeof operations; setKind(next); setResourceId(""); setOperation(operations[next][0])
-        }}><option value="agent">Agent</option><option value="project">Project</option><option value="routine">Routine</option></select>
+        }}><option value="crew">Crew</option><option value="agent">Agent</option><option value="project">Project</option><option value="routine">Routine</option></select>
         <select aria-label="Resource" className={selectClass} value={resourceId} disabled={save.isPending || presetBusy || conflict || !directory.data} onChange={event => setResourceId(event.target.value)}>
           <option value="">Choose a resource</option>{directory.data?.map(resource => <option key={resource.id} value={resource.id}>{resource.name}</option>)}
         </select>
@@ -178,7 +179,7 @@ function useResourceDirectory(workspaceId: string, kind: keyof typeof operations
   return useQuery({
     queryKey: ["resource-access-directory", workspaceId, kind], enabled, retry: false,
     queryFn: async ({ signal }) => {
-      const path = kind === "routine" ? `workspaces/${requireApiPathSegment(workspaceId)}/pipelines` : kind === "agent" ? "agents" : "projects"
+      const path = kind === "routine" ? `workspaces/${requireApiPathSegment(workspaceId)}/pipelines` : kind === "agent" ? "agents" : kind === "crew" ? "crews" : "projects"
       const response = await apiFetch(`/api/v1/${path}?workspace_id=${encodeURIComponent(workspaceId)}`, { signal })
       if (!response.ok) throw new Error("Resources unavailable")
       return directorySchema.parse(await response.json())

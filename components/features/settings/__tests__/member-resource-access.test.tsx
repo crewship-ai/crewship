@@ -217,3 +217,25 @@ it("keeps crew shares visible and preserves them while editing another resource"
  const [,init]=fetchMock.mock.calls.find(([,init])=>init?.method==="PUT")!
  expect(JSON.parse(init.body).rights).toEqual([crew])
 })
+
+it("adds an explicit crew Use share from the person editor without widening other rights", async () => {
+ fetchMock.mockImplementation(async (url:string,init?:RequestInit) => {
+  if(init?.method==="PUT") return response({...JSON.parse(String(init.body)),revision:8})
+  if(url.includes("/access/effective")) return response({membership_id:policy.membership_id,revision:7,account_restricted:true,explanation:"Current shares",decisions:[]})
+  if(url.includes("/members/")) return response(policy)
+  if(url.includes("/crews?")) return response([{id:"crew-1",name:"Shared crew"}])
+  return response([{id:"agent-1",name:"Shared agent"}])
+ })
+ show(); fireEvent.click(screen.getByRole("button",{name:"Edit resource access"}))
+ fireEvent.change(await screen.findByLabelText("Resource kind"),{target:{value:"crew"}})
+ await screen.findByRole("option",{name:"Shared crew"})
+ const operations=screen.getByLabelText("Resource operation") as HTMLSelectElement
+ expect([...operations.options].map(option=>option.value)).toEqual(["view","use"])
+ fireEvent.change(screen.getByLabelText("Resource"),{target:{value:"crew-1"}})
+ fireEvent.change(operations,{target:{value:"use"}})
+ fireEvent.click(screen.getByRole("button",{name:"Add grant"}))
+ fireEvent.click(saveButton())
+ await waitFor(()=>expect(fetchMock.mock.calls.filter(([,init])=>init?.method==="PUT")).toHaveLength(1))
+ const [,init]=fetchMock.mock.calls.find(([,init])=>init?.method==="PUT")!
+ expect(JSON.parse(init.body)).toEqual({...policy,rights:[...policy.rights,{kind:"crew",id:"crew-1",operation:"use"}]})
+})

@@ -14,6 +14,10 @@ vi.mock("@/components/features/crews/crew-policy-controls", () => ({ CrewPolicyC
 vi.mock("../crew-members", () => ({ CrewMembers: () => <div>members</div> }))
 vi.mock("../crew-yaml", () => ({ CrewCommandLine: () => <div data-testid="cli">cli</div>, crewCommands: () => [] }))
 
+vi.mock("@/components/features/settings/resource-share-dialog", () => ({
+  ResourceShareDialog: ({workspaceId,resource}:{workspaceId:string;resource:{kind:string;id:string}}) => <span data-testid="crew-share" data-workspace-id={workspaceId} data-kind={resource.kind} data-resource-id={resource.id} />,
+}))
+
 import { CrewSettings } from "../crew-settings"
 
 afterEach(cleanup)
@@ -26,6 +30,9 @@ describe("Settings tab order", () => {
   it("puts the Danger zone after every other card", async () => {
     render(<CrewSettings workspaceId="ws" crew={crew} agents={[]} patch={vi.fn()} onApplyAvatarStyle={vi.fn()} onDelete={vi.fn()} />)
     const danger = await screen.findByRole("heading", { name: "Danger zone" })
+    expect(screen.getByTestId("crew-share")).toHaveAttribute("data-workspace-id", "ws")
+    expect(screen.getByTestId("crew-share")).toHaveAttribute("data-kind", "crew")
+    expect(screen.getByTestId("crew-share")).toHaveAttribute("data-resource-id", "c1")
     const cli = await screen.findByTestId("cli")
     const budget = await screen.findByRole("region", { name: "Budget" })
     const FOLLOWING = Node.DOCUMENT_POSITION_FOLLOWING
