@@ -195,3 +195,34 @@ environment and real static export; missing configuration fails rather than skip
 `tools/wordcraft-capabilities/generate.mjs` exports the pinned compiled WordCraft
 registry into the shared JSON capability catalog. Its [README](../tools/wordcraft-capabilities/README.md)
 documents canonical inputs, qualification scope and drift checks.
+
+`wordcraft-typing-endurance.mjs` creates a new test command document through the
+normal authenticated UI for each run, then offers real keyboard input. Set
+`WORDCRAFT_ENDURANCE_BASE_URL`, `WORDCRAFT_ENDURANCE_SHA` (the exact deployed
+commit), `WORDCRAFT_ENDURANCE_WORKSPACE`, `WORDCRAFT_ENDURANCE_AUTH` (an existing
+private regular 0600 Playwright storage-state file), and
+`WORDCRAFT_ENDURANCE_OUTPUT` (a **new** directory under an existing parent). Run:
+
+```sh
+crewship-heavy node scripts/wordcraft-typing-endurance.mjs
+crewship-heavy pnpm exec vitest run scripts/wordcraft-typing-endurance-helpers.test.ts
+```
+
+Defaults are three 900-second observation windows with 250ms input pacing; the
+optional `WORDCRAFT_ENDURANCE_RUNS`, `WORDCRAFT_ENDURANCE_SECONDS` and
+`WORDCRAFT_ENDURANCE_INTERVAL_MS` record any override in the report. Authentication
+is checked before the deployed SHA. Each run uses its own private state copy and
+carries legitimate refreshed cookies into a new private state for the next run;
+the supplied original file is never changed. Output includes authentication
+state and synthetic original command files: keep the whole directory private.
+
+Initialization must confirm the newly created Page identity, native host status
+and visible canvas before a timed window starts. Startup failures produce fixed
+phase codes and screenshot attempts, with zero completed windows. After the first
+input/observation failure, input stops and the remaining clock window is still
+observed. Commands are never replayed. Unknown or unapplied input skips reload
+and retains its available original data for explicit investigation. Conditional
+reload requires both confirmed server text and a ready visible renderer. Receipt
+and native-text checks establish data evidence; screenshots are review artifacts
+and **are not automatic glyph or GPU paint verification**. Passing this harness
+does not qualify the wider command catalog or collaborative editing.
