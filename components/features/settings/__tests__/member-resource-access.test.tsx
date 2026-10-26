@@ -229,6 +229,7 @@ it("adds an explicit crew Use share from the person editor without widening othe
  show(); fireEvent.click(screen.getByRole("button",{name:"Edit resource access"}))
  fireEvent.change(await screen.findByLabelText("Resource kind"),{target:{value:"crew"}})
  await screen.findByRole("option",{name:"Shared crew"})
+ expect(screen.getByText(/current and future agents/)).toHaveTextContent("execution preflight")
  const operations=screen.getByLabelText("Resource operation") as HTMLSelectElement
  expect([...operations.options].map(option=>option.value)).toEqual(["view","use"])
  fireEvent.change(screen.getByLabelText("Resource"),{target:{value:"crew-1"}})
