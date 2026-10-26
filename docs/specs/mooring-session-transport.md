@@ -254,3 +254,18 @@ self-skip, which supplies no native qualification evidence. Process-double
 fault tests are separate from these actual pinned-engine tests. A future
 factory must retain the per-document executable by its persisted digest, or
 refuse to open it; rebuilding the backend never upgrades a document's pin.
+
+The private command-store agent adapter reuses an already confirmed original
+chat mandate, independently of interactive human admission. Current original
+credential, chat/message, work/attempt, ingress, agent grant and Page policy
+checks surround native staging, SQL commit and native confirmation. Its stable
+logical actor is `agent:<agent-id>`; the original mandate remains a separate
+SQL operation binding. A different task cannot acknowledge a known operation
+merely by reusing the same logical actor and operation ID.
+
+The original task's default atomic-result policy permits one command commit;
+only its captured `allow_partial: true` permits additional independent command
+commits. Command JSON cannot change that policy. Read-only tasks cannot stage.
+Unknown outcome reconciliation reads canonical SQL and may restore confirmed
+state, never replaying a command. This adapter registers no HTTP or MCP surface
+and does not establish a live model run or sealed task-completion receipt.

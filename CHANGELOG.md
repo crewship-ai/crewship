@@ -13,6 +13,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Bound the native C1 host's live generation history across repeated restores, preserving pending candidates and handles when replacement capacity is refused.
 
 - Add a default-off private inherited-FD WordCraft command host that pins its native helper and stages immutable checkpoints for trusted SQL confirmation, without exposing a public commit endpoint.
+- Keep private native WordCraft agent commands and outcome lookups bound to their original confirmed chat mandate and current Page permissions.
+
 - Add an opt-in private native command port with pinned engine identity, bounded correlated process messages, opaque staged handles, and SQL-authoritative recovery without command replay.
 
 - Keep the opt-in WordCraft command host candidate separate from confirmed state until a trusted host SQL-success callback, retaining participant undo and committed operation receipts across checkpoint recovery.

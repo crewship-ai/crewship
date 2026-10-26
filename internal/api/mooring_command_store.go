@@ -82,6 +82,28 @@ type commandSQLOutcome struct {
 	Receipt     json.RawMessage `json:"receipt"`
 }
 
+// Private operation adapter shares durability/order without sharing human and
+// agent authority. Each source installs only its existing canonical checks.
+type commandOperationSource struct {
+	participant string
+	run         func(func(context.Context) error) error
+	admit       func(context.Context, *sql.Tx, bool) (commandHostAdmission, error)
+	lookup      func(context.Context, *sql.Tx, string) (*commandSQLOutcome, error)
+}
+
+func (s *collaborationCommandStore) humanOperation(r *http.Request, original collaborationHumanAdmission) commandOperationSource {
+	return commandOperationSource{
+		participant: original.participant,
+		run: func(call func(context.Context) error) error {
+			return s.humans.runHumanOperation(r, original.participant, call)
+		},
+		admit: func(ctx context.Context, tx *sql.Tx, writer bool) (commandHostAdmission, error) {
+			return s.admission(ctx, tx, original, writer)
+		},
+		lookup: s.lookup,
+	}
+}
+
 type collaborationCommandStore struct {
 	mu        sync.Mutex // only host busy/suspended flags; never held over I/O
 	busy      bool
@@ -237,10 +259,14 @@ func (s *collaborationCommandStore) Admit(ctx context.Context, writer bool) (col
 // runtime factory may restore these exact bytes through its trusted C1 port;
 // this is neither an acknowledgement of an operation nor permission to write.
 func (s *collaborationCommandStore) ReadCheckpoint(r *http.Request, original collaborationHumanAdmission) (commandSQLSnapshot, error) {
+	return s.readCheckpoint(s.humanOperation(r, original))
+}
+
+func (s *collaborationCommandStore) readCheckpoint(source commandOperationSource) (commandSQLSnapshot, error) {
 	var value commandSQLSnapshot
-	err := s.humans.runHumanOperation(r, original.participant, func(ctx context.Context) error {
+	err := source.run(func(ctx context.Context) error {
 		_, err := s.transaction(ctx, func(tx *sql.Tx) error {
-			if _, e := s.admission(ctx, tx, original, false); e != nil {
+			if _, e := source.admit(ctx, tx, false); e != nil {
 				return e
 			}
 			var e error
@@ -248,7 +274,7 @@ func (s *collaborationCommandStore) ReadCheckpoint(r *http.Request, original col
 			if e != nil {
 				return e
 			}
-			_, e = s.admission(ctx, tx, original, false)
+			_, e = source.admit(ctx, tx, false)
 			return e
 		})
 		return err
@@ -397,7 +423,12 @@ func (s *collaborationCommandStore) Submit(r *http.Request, original collaborati
 	if actor.transportParticipant != original.participant || actor.sourceUser != original.source.UserID || !mooring.ValidWireIdentifier(actor.actor) {
 		return outcome, errCommandStore
 	}
-	op, base, canonical, err := commandInput(raw, actor.actor)
+	return s.submit(s.humanOperation(r, original), actor.actor, raw)
+}
+
+func (s *collaborationCommandStore) submit(source commandOperationSource, actor string, raw []byte) (commandSQLOutcome, error) {
+	var outcome commandSQLOutcome
+	op, base, canonical, err := commandInput(raw, actor)
 	if err != nil {
 		return outcome, err
 	}
@@ -409,20 +440,20 @@ func (s *collaborationCommandStore) Submit(r *http.Request, original collaborati
 	s.busy = true
 	s.mu.Unlock()
 	defer func() { s.mu.Lock(); s.busy = false; s.mu.Unlock() }()
-	err = s.humans.runHumanOperation(r, original.participant, func(ctx context.Context) error {
+	err = source.run(func(ctx context.Context) error {
 		var snapshot commandSQLSnapshot
 		var trusted commandHostAdmission
 		var known *commandSQLOutcome
 		_, e := s.transaction(ctx, func(tx *sql.Tx) error {
 			var e error
-			trusted, e = s.admission(ctx, tx, original, true)
+			trusted, e = source.admit(ctx, tx, true)
 			if e != nil {
 				return e
 			}
 			if snapshot, e = s.snapshot(ctx, tx); e != nil {
 				return e
 			}
-			known, e = s.lookup(ctx, tx, op)
+			known, e = source.lookup(ctx, tx, op)
 			if e == nil && known != nil && known.InputDigest != commandDigest(canonical) {
 				return errCommandConflict
 			}
@@ -439,7 +470,7 @@ func (s *collaborationCommandStore) Submit(r *http.Request, original collaborati
 			return errCommandConflict
 		}
 		trusted.Time = time.Now().UTC().Format("2006-01-02T15:04:05Z")
-		trusted.Participant = actor.actor
+		trusted.Participant = actor
 		stageBase := snapshot
 		stageBase.Checkpoint = append([]byte(nil), snapshot.Checkpoint...)
 		candidate, e := s.port.Stage(ctx, trusted, stageBase, append([]byte(nil), canonical...))
@@ -470,7 +501,7 @@ func (s *collaborationCommandStore) Submit(r *http.Request, original collaborati
 		}
 		outcome = commandSQLOutcome{OpID: op, Fingerprint: candidate.Fingerprint, InputDigest: commandDigest(canonical), Revision: candidate.Revision, Receipt: append([]byte(nil), candidate.Receipt...)}
 		uncertain, commitErr := s.transaction(ctx, func(tx *sql.Tx) error {
-			fresh, e := s.admission(ctx, tx, original, true)
+			fresh, e := source.admit(ctx, tx, true)
 			if e != nil {
 				return e
 			}
@@ -484,16 +515,16 @@ func (s *collaborationCommandStore) Submit(r *http.Request, original collaborati
 			if current.Revision != snapshot.Revision || !bytes.Equal(current.Checkpoint, snapshot.Checkpoint) {
 				return errCommandConflict
 			}
-			if prior, e := s.lookup(ctx, tx, op); e != nil || prior != nil {
+			if prior, e := source.lookup(ctx, tx, op); e != nil || prior != nil {
 				if e != nil {
 					return e
 				}
 				return errCommandConflict
 			}
-			if e = s.persist(ctx, tx, original, snapshot, candidate, outcome); e != nil {
+			if e = s.persist(ctx, tx, source.participant, snapshot, candidate, outcome); e != nil {
 				return e
 			}
-			_, e = s.admission(ctx, tx, original, true)
+			_, e = source.admit(ctx, tx, true)
 			return e
 		})
 		if commitErr != nil {
@@ -510,12 +541,12 @@ func (s *collaborationCommandStore) Submit(r *http.Request, original collaborati
 		}
 		// SQL is durable. An ACK failure must NEVER reject K or resubmit.
 		_, e = s.transaction(ctx, func(tx *sql.Tx) error {
-			fresh, err := s.admission(ctx, tx, original, true)
+			fresh, err := source.admit(ctx, tx, true)
 			if err != nil {
 				return err
 			}
 			fresh.Time = trusted.Time // immutable clock installed before Stage
-			fresh.Participant = actor.actor
+			fresh.Participant = actor
 			if fresh != trusted {
 				return errCommandStore
 			}
@@ -567,7 +598,7 @@ func (s *collaborationCommandStore) validateCandidate(c commandSQLCandidate, bas
 	return nil
 }
 
-func (s *collaborationCommandStore) persist(ctx context.Context, tx *sql.Tx, a collaborationHumanAdmission, base commandSQLSnapshot, c commandSQLCandidate, out commandSQLOutcome) error {
+func (s *collaborationCommandStore) persist(ctx context.Context, tx *sql.Tx, participant string, base commandSQLSnapshot, c commandSQLCandidate, out commandSQLOutcome) error {
 	raw, err := json.Marshal(out)
 	if err != nil {
 		return err
@@ -583,7 +614,7 @@ func (s *collaborationCommandStore) persist(ctx context.Context, tx *sql.Tx, a c
 	if _, err = tx.ExecContext(ctx, `INSERT INTO mooring_collab_changes(page_id,workspace_id,change_id,membership_hash,result_json) VALUES(?,?,?,?,?)`, key.ArtifactID, key.WorkspaceID, c.OpID, out.InputDigest, string(raw)); err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO mooring_collab_operations(page_id,workspace_id,op_id,change_id,participant_ref,fingerprint,result_json) VALUES(?,?,?,?,?,?,?)`, key.ArtifactID, key.WorkspaceID, c.OpID, c.OpID, a.participant, out.Fingerprint, string(raw)); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO mooring_collab_operations(page_id,workspace_id,op_id,change_id,participant_ref,fingerprint,result_json) VALUES(?,?,?,?,?,?,?)`, key.ArtifactID, key.WorkspaceID, c.OpID, c.OpID, participant, out.Fingerprint, string(raw)); err != nil {
 		return err
 	}
 	if err = s.insertCheckpoint(ctx, tx, commandSQLSnapshot{c.Revision, c.Checkpoint}); err != nil {
@@ -601,7 +632,7 @@ func (s *collaborationCommandStore) persist(ctx context.Context, tx *sql.Tx, a c
 	// arguments. SQL P and the original immutable receipt must describe exactly
 	// the staged candidate before the final current-rights/owner fences commit.
 	var exact bool
-	err = tx.QueryRowContext(ctx, `SELECT d.revision=? AND d.checkpoint_base64=? AND o.participant_ref=? AND o.fingerprint=? AND o.result_json=? AND c.membership_hash=? AND c.result_json=? AND p.checkpoint_base64=? AND p.decoded_bytes=? FROM mooring_collab_documents d JOIN mooring_collab_operations o ON o.page_id=d.page_id JOIN mooring_collab_changes c ON c.page_id=d.page_id AND c.change_id=o.change_id JOIN mooring_collab_checkpoints p ON p.page_id=d.page_id WHERE d.page_id=? AND o.op_id=? AND c.change_id=? AND p.revision=?`, strconv.FormatUint(c.Revision, 10), base64.StdEncoding.EncodeToString(c.Checkpoint), a.participant, out.Fingerprint, string(raw), out.InputDigest, string(raw), base64.StdEncoding.EncodeToString(c.Checkpoint), len(c.Checkpoint), key.ArtifactID, c.OpID, c.OpID, strconv.FormatUint(c.Revision, 10)).Scan(&exact)
+	err = tx.QueryRowContext(ctx, `SELECT d.revision=? AND d.checkpoint_base64=? AND o.participant_ref=? AND o.fingerprint=? AND o.result_json=? AND c.membership_hash=? AND c.result_json=? AND p.checkpoint_base64=? AND p.decoded_bytes=? FROM mooring_collab_documents d JOIN mooring_collab_operations o ON o.page_id=d.page_id JOIN mooring_collab_changes c ON c.page_id=d.page_id AND c.change_id=o.change_id JOIN mooring_collab_checkpoints p ON p.page_id=d.page_id WHERE d.page_id=? AND o.op_id=? AND c.change_id=? AND p.revision=?`, strconv.FormatUint(c.Revision, 10), base64.StdEncoding.EncodeToString(c.Checkpoint), participant, out.Fingerprint, string(raw), out.InputDigest, string(raw), base64.StdEncoding.EncodeToString(c.Checkpoint), len(c.Checkpoint), key.ArtifactID, c.OpID, c.OpID, strconv.FormatUint(c.Revision, 10)).Scan(&exact)
 	if err != nil {
 		return err
 	}
@@ -615,7 +646,7 @@ func (s *collaborationCommandStore) persist(ctx context.Context, tx *sql.Tx, a c
 // never calls Stage/Confirm/Reject and never replays an operation. The caller
 // must retain op/fingerprint from the unknown result of Submit.
 func (s *collaborationCommandStore) Reconcile(r *http.Request, original collaborationHumanAdmission, op, fingerprint string) (*commandSQLOutcome, error) {
-	return s.reconcile(r, original, op, fingerprint, "")
+	return s.reconcile(s.humanOperation(r, original), op, fingerprint, "")
 }
 
 // If Stage's transport failed before returning a native fingerprint, the SQL
@@ -629,10 +660,10 @@ func (s *collaborationCommandStore) ReconcileOriginal(r *http.Request, original 
 	if err != nil {
 		return nil, err
 	}
-	return s.reconcile(r, original, op, "", commandDigest(canonical))
+	return s.reconcile(s.humanOperation(r, original), op, "", commandDigest(canonical))
 }
 
-func (s *collaborationCommandStore) reconcile(r *http.Request, original collaborationHumanAdmission, op, fingerprint, inputDigest string) (*commandSQLOutcome, error) {
+func (s *collaborationCommandStore) reconcile(source commandOperationSource, op, fingerprint, inputDigest string) (*commandSQLOutcome, error) {
 	if !mooring.ValidWireIdentifier(op) || (fingerprint == "" && inputDigest == "") || (fingerprint != "" && !commandDigestValid(fingerprint)) || (inputDigest != "" && !commandDigestValid(inputDigest)) {
 		return nil, errCommandStore
 	}
@@ -646,17 +677,17 @@ func (s *collaborationCommandStore) reconcile(r *http.Request, original collabor
 	s.mu.Unlock()
 	defer func() { s.mu.Lock(); s.busy = false; s.mu.Unlock() }()
 	var out *commandSQLOutcome
-	err := s.humans.runHumanOperation(r, original.participant, func(ctx context.Context) error {
+	err := source.run(func(ctx context.Context) error {
 		var snapshot commandSQLSnapshot
 		_, err := s.transaction(ctx, func(tx *sql.Tx) error {
-			if _, e := s.admission(ctx, tx, original, false); e != nil {
+			if _, e := source.admit(ctx, tx, false); e != nil {
 				return e
 			}
 			var e error
 			if snapshot, e = s.snapshot(ctx, tx); e != nil {
 				return e
 			}
-			if out, e = s.lookup(ctx, tx, op); e != nil {
+			if out, e = source.lookup(ctx, tx, op); e != nil {
 				return e
 			}
 			if out != nil && ((fingerprint != "" && out.Fingerprint != fingerprint) || (inputDigest != "" && out.InputDigest != inputDigest)) {
@@ -673,7 +704,7 @@ func (s *collaborationCommandStore) reconcile(r *http.Request, original collabor
 			}
 		}
 		_, err = s.transaction(ctx, func(tx *sql.Tx) error {
-			if _, e := s.admission(ctx, tx, original, false); e != nil {
+			if _, e := source.admit(ctx, tx, false); e != nil {
 				return e
 			}
 			current, e := s.snapshot(ctx, tx)
