@@ -232,10 +232,10 @@ class EditorAssemblyTests(unittest.TestCase):
             'compiled/wordcraft_web.js': 'import * as a from "./snippets/eframe-pin/inline0.js";\nexport const imports={"./snippets/eframe-pin/inline0.js":a};\n',
             'compiled/wordcraft_web_bg.wasm': 'wasm',
             'compiled/snippets/eframe-pin/inline0.js': 'export function activate() {}\n',
-            'sdk/mooring_wordcraft_client.js': 'sdk', 'sdk/mooring_wordcraft_client_bg.wasm': 'wasm',
+            'sdk/mooring_wordcraft_client.js': 'export {};\n', 'sdk/mooring_wordcraft_client_bg.wasm': 'wasm',
             'fonts/fonts/manifest.txt': 'fonts', 'fonts/provenance.json': '{"files":[]}',
             'licenses/manifest.json': '[]', 'licenses/wordcraft-native-inventory.json': '{}',
-            'LICENSE': 'Apache', 'NOTICE': 'notice', 'mooring/licenses/inventory.json': '{}', 'child.js': 'child',
+            'LICENSE': 'Apache', 'NOTICE': 'notice', 'mooring/licenses/inventory.json': '{}', 'child.js': 'export {imports} from "./wordcraft_web.js";\nimport "./mooring_wordcraft_client.js";\n',
         }
         for name, content in files.items():
             path = root/name
@@ -271,6 +271,21 @@ class EditorAssemblyTests(unittest.TestCase):
                 self.assertNotIn('/', name)
                 self.assertEqual(manifest['files'][name], build.digest(bundle/name))
                 self.assertEqual((bundle/name).read_text(), 'export function activate() {}\n')
+            # Walk the complete entrypoint graph, including side-effect imports
+            # and re-exports, so a successful child.js cannot hide a missing
+            # transitive wasm-bindgen module.
+            pending, seen = ['child.js'], set()
+            while pending:
+                name = pending.pop()
+                if name in seen:
+                    continue
+                seen.add(name)
+                self.assertTrue((bundle/name).is_file(), name)
+                self.assertEqual(manifest['files'][name], build.digest(bundle/name))
+                text = (bundle/name).read_text()
+                pending.extend(re.findall(
+                    r'''(?m)^(?:import\s+(?:[^\n]*?\bfrom\s+)?|export\s+[^\n]*?\bfrom\s+)["']\./([^"']+\.js)["']''', text))
+            self.assertEqual(len(seen), 4)
             # Execute the packaged ES module graph and instantiate a real WASM
             # import using its original ABI name, independently of fetch URLs.
             runtime = Path(temp)/'runtime'
@@ -286,7 +301,7 @@ class EditorAssemblyTests(unittest.TestCase):
                 'const {imports}=await import(pathToFileURL(process.argv[1]).href); '
                 'new WebAssembly.Instance(new WebAssembly.Module(Buffer.from(process.argv[2],"hex")),imports);')
             result = subprocess.run(['node','--input-type=module','-e',script,
-                str(runtime/'wordcraft_web.js'),wasm.hex()], capture_output=True, text=True)
+                str(runtime/'child.js'),wasm.hex()], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_incomplete_or_escaping_module_graph_is_not_released(self):
