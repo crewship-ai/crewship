@@ -25,8 +25,12 @@ WHEN NOT EXISTS(SELECT 1 FROM workspace_members WHERE id=NEW.member_id AND works
   OR NOT EXISTS(SELECT 1 FROM crews WHERE id=NEW.crew_id AND workspace_id=NEW.workspace_id AND deleted_at IS NULL AND kind<>'setup')
 BEGIN SELECT RAISE(ABORT,'crew preset selection workspace mismatch'); END;
 CREATE TRIGGER crew_access_preset_binding_update BEFORE UPDATE ON crew_access_preset_selections
-WHEN NOT EXISTS(SELECT 1 FROM workspace_members WHERE id=NEW.member_id AND workspace_id=NEW.workspace_id)
-  OR NOT EXISTS(SELECT 1 FROM crews WHERE id=NEW.crew_id AND workspace_id=NEW.workspace_id AND deleted_at IS NULL AND kind<>'setup')
+-- Historical actor cleanup (ON DELETE SET NULL) does not create a new share.
+-- Only an actual change of scope must establish a currently live binding.
+WHEN (OLD.workspace_id IS NOT NEW.workspace_id OR OLD.member_id IS NOT NEW.member_id
+  OR OLD.resource_kind IS NOT NEW.resource_kind OR OLD.crew_id IS NOT NEW.crew_id)
+  AND (NOT EXISTS(SELECT 1 FROM workspace_members WHERE id=NEW.member_id AND workspace_id=NEW.workspace_id)
+    OR NOT EXISTS(SELECT 1 FROM crews WHERE id=NEW.crew_id AND workspace_id=NEW.workspace_id AND deleted_at IS NULL AND kind<>'setup'))
 BEGIN SELECT RAISE(ABORT,'crew preset selection workspace mismatch'); END;
 
 CREATE TRIGGER crew_access_preset_grant_insert AFTER INSERT ON access_grants

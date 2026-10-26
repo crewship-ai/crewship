@@ -61,6 +61,60 @@ func TestCrewPresetKeepsLegacyMetadataReaderSafe(t *testing.T) {
 	}
 }
 
+func TestCrewPresetHistoricalSelectorCleanupAfterCrewLifecycle(t *testing.T) {
+	for name, mutation := range map[string]string{
+		"retire": `UPDATE crews SET deleted_at='retired' WHERE id='crew'`,
+		"move":   `UPDATE crews SET workspace_id='other' WHERE id='crew'`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := fixture(t)
+			member := policy(t, s, "h1", Right{"project", "p1", "read"})
+			insertPreset(t, s, "m1", "project", "p1", "owner")
+			req := presetRequest(t, s, "crew", "crew", "none")
+			tx, err := s.DB.BeginTx(t.Context(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback()
+			if err := s.RecordPresetSelectionIn(t.Context(), tx, "owner", "h1", "w", member, req); err != nil {
+				t.Fatal(err)
+			}
+			if err := tx.Commit(); err != nil {
+				t.Fatal(err)
+			}
+			for _, query := range []string{
+				`INSERT INTO users(id,email) VALUES('historical-selector','historical-selector@preset.test')`,
+				`UPDATE crew_access_preset_selections SET selected_by='historical-selector'`,
+				mutation,
+				`DELETE FROM users WHERE id='historical-selector'`,
+			} {
+				if _, err := s.DB.Exec(query); err != nil {
+					t.Fatalf("historical selector cleanup: %v", err)
+				}
+			}
+			var selector sql.NullString
+			if err := s.DB.QueryRow(`SELECT selected_by FROM crew_access_preset_selections WHERE member_id='m1' AND crew_id='crew'`).Scan(&selector); err != nil || selector.Valid {
+				t.Fatalf("retained historical choice actor: %+v, %v", selector, err)
+			}
+			if _, err := s.DB.Exec(`UPDATE crew_access_preset_selections SET member_id='m2'`); err == nil {
+				t.Fatal("retired or moved choice rebound without a live crew")
+			}
+			if err := s.Check(t.Context(), "h1", "w", Right{"project", "p1", "read"}); err != nil {
+				t.Fatalf("unrelated grant lost: %v", err)
+			}
+			for _, op := range []string{"view", "use"} {
+				if err := s.Check(t.Context(), "h1", "w", Right{"crew", "crew", op}); err == nil {
+					t.Fatal("historical metadata restored crew authority")
+				}
+			}
+			var count int
+			if err := s.DB.QueryRow(`SELECT count(*) FROM access_preset_selections WHERE member_id='m1' AND project_id='p1' AND selected_by='owner'`).Scan(&count); err != nil || count != 1 {
+				t.Fatalf("unrelated project choice changed: %d, %v", count, err)
+			}
+		})
+	}
+}
+
 func TestCrewPresetV1IsImmutableAndWithinGuestCeiling(t *testing.T) {
 	d, ok := ResolvePreset("crew-levels", 1)
 	const hash = "a9a300aa0eb9764a245650bee7348b6f21c1781a9b55d0fef024aeb02da7eb85"
