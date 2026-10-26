@@ -1,0 +1,105 @@
+---
+title: Mooring
+stability: experimental
+tag: Experimental
+---
+
+`crewship mooring` operates manifest-driven personal application documents.
+See the [pilot contract](/specs/mooring-pilot) for the supported JSON profile and
+native GridCraft adapter. These commands require the experimental server profile.
+
+## crewship mooring apps
+
+List the installed application manifests and their typed command schemas.
+
+## crewship mooring create
+
+Create a personal private application Page. Pass `--file packet.json` containing
+`{app_id,slug,name}`, or `--file -` to read the same JSON from stdin. Native
+GridCraft creation/import remains under `crewship workbook`.
+
+## crewship mooring read
+
+`crewship mooring read <slug|@ID>` reads the authorized manifest and confirmed
+state. The response includes revision, generation and available isolated editor.
+
+## crewship mooring command
+
+`crewship mooring command <slug|@ID> --file packet.json` executes a human command.
+Use `--file -` for stdin. The packet contains `mutation_id`, `base_rev`,
+`generation`, `command` and `arguments`. Preserve the packet unchanged after an
+uncertain response. A changed base is refused rather than overwriting content.
+
+## crewship mooring admit
+
+`crewship mooring admit <slug|@ID> --file packet.json` admits one declared command
+for a retained live human-chat run. Use `--file -` for stdin. The packet contains
+`mandate_id`, `run_id`, `base_rev`, `generation` and `command`. An agent cannot
+admit itself. Shared DIRECT documents are refused.
+
+## crewship mooring revoke
+
+`crewship mooring revoke <slug|@ID> <mandate>` revokes a retained mandate. New
+commands and exact receipt retries recheck revocation before returning content.
+
+## crewship mooring agent
+
+`crewship mooring agent --file packet.json` forwards a retained packet through
+the authenticated local sidecar. Use `--file -` for stdin. It requires the runtime
+`CREWSHIP_AGENT_TOKEN`; it cannot substitute a human CLI profile. The packet uses
+`action: read|command`, `artifact_id`, `mandate_id` and, for commands, `request`.
+Read returns the installed command manifest and current confirmed state.
+
+`CREWSHIP_SIDECAR_URL` optionally selects the protected loopback sidecar URL
+(default `http://127.0.0.1:9119`); remote hosts and redirects are refused. This is
+transport selection, not an authority override. The equivalent generic MCP tool
+is `mooring_command`; native `workbook_*` tools remain available.
+
+## crewship mooring session
+
+`crewship mooring session <slug|@ID> --file packet.json` requests a human
+collaboration session in the separately enabled Rust session profile. Use
+`--file -` for stdin. The original JSON object accepts `write` (default `false`)
+and an optional `checkpoint_base64` initialization checkpoint. The CLI forwards
+that object without reconstructing it. It does not accept caller-selected roles
+or authority. The response contains the one-use ticket, `connection_ref`,
+participant/origin identifiers and `websocket_path`; admission is not a save.
+See the [session transport contract](/specs/mooring-session-transport) for limits
+and the current qualification boundary.
+
+## crewship mooring connect
+
+`crewship mooring connect <slug|@ID> --connection CONNECTION_REF --file frames.ndjson`
+opens the authenticated WebSocket using the original session `connection_ref`.
+Use `--file -` for stdin. Supply one original JSON frame per line, starting with
+the original `session_join`; the command cannot mint a ticket, participant or
+change packet. Each frame is limited to 256 KiB. Keep original packets for retries.
+
+The current CLI profile supplies credentials and workspace context. The default,
+JSON and NDJSON formats print server frames as JSON lines; YAML prints separate
+YAML documents. Quiet output is rejected before input or network activity. A
+pending frame is not confirmation of storage; only the host's committed response
+can confirm a saved change.
+
+## crewship mooring task
+
+`crewship mooring task <page-slug|@ID> --chat CHAT_ID --message MESSAGE_ID`
+requests an agent task in the selected existing document. `--chat` identifies the
+original chat and `--message` identifies an already stored message authored by
+the current human. The agent must already have document write delegation and
+workspace policy must allow the task; this command cannot add or expand a grant.
+The server checks the original stored instruction and current document rights.
+A queued response is not a Saved receipt. Agent execution additionally requires
+the enabled native session runtime and qualified private sidecar environment.
+
+
+## crewship mooring provenance
+
+`crewship mooring provenance <page-slug|@ID>`
+
+Read a bounded recent projection of immutable native agent edits. Page access
+and each original source chat are checked independently for the current human.
+Rows provide stable Page IDs, original source message references and saved native
+revision cuts; references grant no rights. `artifacts_partial` is always true:
+this is not a complete history, creation receipt or historical content reader.
+The native provenance route remains unavailable when Mooring sessions are disabled.

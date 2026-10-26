@@ -1,5 +1,5 @@
 diff --git a/ROADMAP.md b/ROADMAP.md
-index a86a8aad..dfa54ef9 100644
+index a86a8aad..79372e99 100644
 --- a/ROADMAP.md
 +++ b/ROADMAP.md
 @@ -2,7 +2,7 @@
@@ -7,20 +7,22 @@ index a86a8aad..dfa54ef9 100644
  **Stage: alpha** · next: beta, ~15 points (60% → 75% ready for real work) and ~150–230 h away
  
 -> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-23 · **Change:** trivial (progress log: an empty paragraph with a hidden mark shows nothing, not even its list number, #3982; previously trivial: progress log: "NaN" in the Font dialog's Size box no longer closes the app, #3663; previously trivial: progress log: a table cell span from a `.json` file no longer overflows, #3637; previously trivial: progress log: a click in the footer while editing the header moves there; previously trivial: explicit documents keep the editor when recovery discovery finishes; readable recovery controls; previously trivial: Slovenian interface catalog, 2,614 entries; previously trivial: Insert Table of Figures dialog for any caption label, #3013; previously trivial: progress log: Home › Underline drop-down, #2738; previously trivial: personal templates in File › New and Save as Word Template, #2852; previously trivial: progress log: the scrollbar page tip stays on one line, #3341; previously trivial: progress log: forms protection greys out the control buttons; previously trivial: progress log: a document with many content controls saves in the time the controls take, #13; previously trivial: progress log: Word signature lines kept on save; previously trivial: a Thai run with Latin finds one installed font covering it all on Linux too, #1549; previously trivial: progress log: closing the header returns to the body selection, #3331; previously trivial: progress log: saving to a NAS share mounted by GVFS, #3003; previously trivial: progress log: a picture dragged near the bottom of a page lands there, #3169; previously trivial: centred list labels after leading page breaks, #2964; previously trivial: progress log: inline pictures drag to an insertion cursor and stay inline, #2233, #2234; previously trivial: progress log: a text file saved over itself closes without asking, #2376; previously trivial: progress log: a text frame in the paragraph defaults frames nothing, #2360; previously trivial: fixed font inputs in four layout controls; previously trivial: typing no longer starts render threads on every repaint, #3027; previously trivial: a right, centre or decimal tab whose text doesn't fit, or a left tab past the right indent, goes to the next line with its text, #1840; previously trivial: progress log: banded rows shade as in Word, #3415; previously trivial: progress log: the table handles show while the caret is in the table, #2428; previously trivial: progress log: a click below a floating table reaches the text after it, #2038; previously trivial: progress log: Delete on selected table cells leaves one empty paragraph in each, #2802; previously trivial: progress log: lam-alef in exported PDFs extracts whole with fonts that draw it as two glyphs, #2310; previously trivial: Bullets and Numbering toggle off style-inherited lists at their effective level, including basedOn chains and numbered ListParagraph styles; other paragraphs and list definitions stay unchanged (related to #3459); previously trivial: Russian sorting keeps ё with е and recognises decomposed ё/й; previously trivial: progress log: a text box that keeps the keyboard no longer resets the input method every frame, #2986; previously trivial: progress log: recovery copies and .json files store pictures as base64, #586 follow-up; previously trivial: progress log: legacy menu keys, #1697; previously trivial: progress log: shape gradients and transparency, #1500; previously trivial: progress log: Focus fills the screen, and Full Screen View shows the pages alone, #1678; previously trivial: progress log: text above a float's anchor wraps around it, #2048; previously trivial: progress log: File › Recover follows the app theme, #3243; previously trivial: progress log: formatting toolbar with the text context menu, #2959; previously trivial: progress log: caret inside ligatures, #1974; previously trivial: text typed into a content control takes the control's formatting; localized placeholder styles recognised; previously trivial: forms protection keeps its content controls: no inserting, Properties or Remove Content Control; previously trivial: long navigation headings wrap onto further lines within the pane, #3015; previously trivial: clearing a no-match font query keeps the recent heading visible, #2068; previously trivial: a word after a slash wraps whole, like Word, #2963; previously trivial: progress log: a header-cell picture watermark sits behind the text, #1775; previously trivial: symbols keep their font when the text font changes, #2036; previously trivial: opening a DOCX no longer copies its pictures; previously trivial: Add Font imports every selected font file, #1789); previously trivial (RTF export writes sections (gap 19); previously trivial: ODT export writes sections (gap 19); previously trivial: Read Aloud speaks each sentence in its own language, #1843; previously trivial: hint-reliant CJK outlines; previously trivial: Ctrl+wheel zoom no longer scrolls the document, #1743; previously trivial: progress log: Turkish case mapping in AutoCorrect, #1923; previously trivial: a mouse drag on a table leaves the view where it is, #1738; previously trivial: progress log: Hebrew field results and smart quotes, #1670; previously trivial: Backspace removes a selected table, rows or columns, #1844; previously trivial: progress log: mixed Hebrew/Latin text keeps its order in Word, #1543; previously trivial: progress log: web typing in non-Latin text no longer repeats, #1480; previously trivial: progress log: font family caches bounded and math font lookups follow font changes, #1354; previously trivial: `-->` AutoCorrect replacement, #2223; previously trivial: numbered headings, #1793; previously trivial: Navigation Find exposes Results, #2096; previously trivial: progress log: Columns on selected text, #2024; previously trivial: progress log: legacy outline, shadow, emboss and imprint text effects drawn, #2534; previously trivial: progress log: Indonesian proofing, #498; previously trivial: progress log: DOCX glossary documents (building blocks); previously trivial: progress log: Read Mode keeps the keyboard and shows whole, unobscured columns, #1772); previously trivial: progress log: font list entries of tall-ascent fonts no longer cut off, #2570); previously trivial: progress log: Split Cells and Convert Text to Table dialogs follow the Word check, #2592; previously trivial: a new source's Tag is made like Word's, three letters of the author and two digits of the year with a number added when taken, and an edit keeps the Tag, #2094; previously trivial: Web Layout fills the window width, #1876; previously trivial: progress log: Different First Page headers reachable from page 1, #2826; previously trivial: Language dialog keeps inherited proofing language and no-proof choices (#2717); previously trivial: progress log: web preferences kept between visits, #2132; previously trivial: progress log: undrawable private-use list bullets show the level's default bullet, #1683; previously trivial: progress log: `w:eastAsianLayout` kept on save; previously trivial: table style editor formats every part, #714); previously trivial: VML freeforms read and kept on save; previously trivial: progress log: consistent preferred cell widths; previously trivial: multi-paragraph field instructions no longer add blank lines; previously trivial: page-break-only list paragraphs hide their labels; previously trivial: progress log: grouped `flowChartOr` shapes draw their circle and crossing spokes; previously trivial: progress log: copies keep their formatting in other programs, #1523; previously trivial: progress log: privacy options on save, #1062; previously trivial: progress log: equation pictures in theme colours on Windows, #1002; previously trivial: symbol fonts, #776; previously trivial: the save prompt answers from the keyboard, #861; previously trivial: table column and row markers on the rulers, #700; previously trivial: table borders and the resize handle drag on the page, #217; previously trivial: formatting revisions landed, #41; previously trivial: Draw tab ink, #307, and Draw Table and Eraser, #303, landed: catalog 402/434; previously minor: readiness table with hours per audience; full number back to the additive weighted sum, 60%; mainstream and essentials numbers added; alpha gate checked; previously major: full re-measure against Word for Mac 16.113.4; restructured to the craftrules progress-docs standard) · **Target:** Microsoft Word (Microsoft 365) for Mac 16.113.4
-+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-24 · **Change:** minor (dormant host command seam); previous record: trivial (progress log: an empty paragraph with a hidden mark shows nothing, not even its list number, #3982; previously trivial: progress log: "NaN" in the Font dialog's Size box no longer closes the app, #3663; previously trivial: progress log: a table cell span from a `.json` file no longer overflows, #3637; previously trivial: progress log: a click in the footer while editing the header moves there; previously trivial: explicit documents keep the editor when recovery discovery finishes; readable recovery controls; previously trivial: Slovenian interface catalog, 2,614 entries; previously trivial: Insert Table of Figures dialog for any caption label, #3013; previously trivial: progress log: Home › Underline drop-down, #2738; previously trivial: personal templates in File › New and Save as Word Template, #2852; previously trivial: progress log: the scrollbar page tip stays on one line, #3341; previously trivial: progress log: forms protection greys out the control buttons; previously trivial: progress log: a document with many content controls saves in the time the controls take, #13; previously trivial: progress log: Word signature lines kept on save; previously trivial: a Thai run with Latin finds one installed font covering it all on Linux too, #1549; previously trivial: progress log: closing the header returns to the body selection, #3331; previously trivial: progress log: saving to a NAS share mounted by GVFS, #3003; previously trivial: progress log: a picture dragged near the bottom of a page lands there, #3169; previously trivial: centred list labels after leading page breaks, #2964; previously trivial: progress log: inline pictures drag to an insertion cursor and stay inline, #2233, #2234; previously trivial: progress log: a text file saved over itself closes without asking, #2376; previously trivial: progress log: a text frame in the paragraph defaults frames nothing, #2360; previously trivial: fixed font inputs in four layout controls; previously trivial: typing no longer starts render threads on every repaint, #3027; previously trivial: a right, centre or decimal tab whose text doesn't fit, or a left tab past the right indent, goes to the next line with its text, #1840; previously trivial: progress log: banded rows shade as in Word, #3415; previously trivial: progress log: the table handles show while the caret is in the table, #2428; previously trivial: progress log: a click below a floating table reaches the text after it, #2038; previously trivial: progress log: Delete on selected table cells leaves one empty paragraph in each, #2802; previously trivial: progress log: lam-alef in exported PDFs extracts whole with fonts that draw it as two glyphs, #2310; previously trivial: Bullets and Numbering toggle off style-inherited lists at their effective level, including basedOn chains and numbered ListParagraph styles; other paragraphs and list definitions stay unchanged (related to #3459); previously trivial: Russian sorting keeps ё with е and recognises decomposed ё/й; previously trivial: progress log: a text box that keeps the keyboard no longer resets the input method every frame, #2986; previously trivial: progress log: recovery copies and .json files store pictures as base64, #586 follow-up; previously trivial: progress log: legacy menu keys, #1697; previously trivial: progress log: shape gradients and transparency, #1500; previously trivial: progress log: Focus fills the screen, and Full Screen View shows the pages alone, #1678; previously trivial: progress log: text above a float's anchor wraps around it, #2048; previously trivial: progress log: File › Recover follows the app theme, #3243; previously trivial: progress log: formatting toolbar with the text context menu, #2959; previously trivial: progress log: caret inside ligatures, #1974; previously trivial: text typed into a content control takes the control's formatting; localized placeholder styles recognised; previously trivial: forms protection keeps its content controls: no inserting, Properties or Remove Content Control; previously trivial: long navigation headings wrap onto further lines within the pane, #3015; previously trivial: clearing a no-match font query keeps the recent heading visible, #2068; previously trivial: a word after a slash wraps whole, like Word, #2963; previously trivial: progress log: a header-cell picture watermark sits behind the text, #1775; previously trivial: symbols keep their font when the text font changes, #2036; previously trivial: opening a DOCX no longer copies its pictures; previously trivial: Add Font imports every selected font file, #1789); previously trivial (RTF export writes sections (gap 19); previously trivial: ODT export writes sections (gap 19); previously trivial: Read Aloud speaks each sentence in its own language, #1843; previously trivial: hint-reliant CJK outlines; previously trivial: Ctrl+wheel zoom no longer scrolls the document, #1743; previously trivial: progress log: Turkish case mapping in AutoCorrect, #1923; previously trivial: a mouse drag on a table leaves the view where it is, #1738; previously trivial: progress log: Hebrew field results and smart quotes, #1670; previously trivial: Backspace removes a selected table, rows or columns, #1844; previously trivial: progress log: mixed Hebrew/Latin text keeps its order in Word, #1543; previously trivial: progress log: web typing in non-Latin text no longer repeats, #1480; previously trivial: progress log: font family caches bounded and math font lookups follow font changes, #1354; previously trivial: `-->` AutoCorrect replacement, #2223; previously trivial: numbered headings, #1793; previously trivial: Navigation Find exposes Results, #2096; previously trivial: progress log: Columns on selected text, #2024; previously trivial: progress log: legacy outline, shadow, emboss and imprint text effects drawn, #2534; previously trivial: progress log: Indonesian proofing, #498; previously trivial: progress log: DOCX glossary documents (building blocks); previously trivial: progress log: Read Mode keeps the keyboard and shows whole, unobscured columns, #1772); previously trivial: progress log: font list entries of tall-ascent fonts no longer cut off, #2570); previously trivial: progress log: Split Cells and Convert Text to Table dialogs follow the Word check, #2592; previously trivial: a new source's Tag is made like Word's, three letters of the author and two digits of the year with a number added when taken, and an edit keeps the Tag, #2094; previously trivial: Web Layout fills the window width, #1876; previously trivial: progress log: Different First Page headers reachable from page 1, #2826; previously trivial: Language dialog keeps inherited proofing language and no-proof choices (#2717); previously trivial: progress log: web preferences kept between visits, #2132; previously trivial: progress log: undrawable private-use list bullets show the level's default bullet, #1683; previously trivial: progress log: `w:eastAsianLayout` kept on save; previously trivial: table style editor formats every part, #714); previously trivial: VML freeforms read and kept on save; previously trivial: progress log: consistent preferred cell widths; previously trivial: multi-paragraph field instructions no longer add blank lines; previously trivial: page-break-only list paragraphs hide their labels; previously trivial: progress log: grouped `flowChartOr` shapes draw their circle and crossing spokes; previously trivial: progress log: copies keep their formatting in other programs, #1523; previously trivial: progress log: privacy options on save, #1062; previously trivial: progress log: equation pictures in theme colours on Windows, #1002; previously trivial: symbol fonts, #776; previously trivial: the save prompt answers from the keyboard, #861; previously trivial: table column and row markers on the rulers, #700; previously trivial: table borders and the resize handle drag on the page, #217; previously trivial: formatting revisions landed, #41; previously trivial: Draw tab ink, #307, and Draw Table and Eraser, #303, landed: catalog 402/434; previously minor: readiness table with hours per audience; full number back to the additive weighted sum, 60%; mainstream and essentials numbers added; alpha gate checked; previously major: full re-measure against Word for Mac 16.113.4; restructured to the craftrules progress-docs standard) · **Target:** Microsoft Word (Microsoft 365) for Mac 16.113.4
++> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-24 · **Change:** minor (local web SDK adapter; no multiplayer credit); previous record: trivial (progress log: an empty paragraph with a hidden mark shows nothing, not even its list number, #3982; previously trivial: progress log: "NaN" in the Font dialog's Size box no longer closes the app, #3663; previously trivial: progress log: a table cell span from a `.json` file no longer overflows, #3637; previously trivial: progress log: a click in the footer while editing the header moves there; previously trivial: explicit documents keep the editor when recovery discovery finishes; readable recovery controls; previously trivial: Slovenian interface catalog, 2,614 entries; previously trivial: Insert Table of Figures dialog for any caption label, #3013; previously trivial: progress log: Home › Underline drop-down, #2738; previously trivial: personal templates in File › New and Save as Word Template, #2852; previously trivial: progress log: the scrollbar page tip stays on one line, #3341; previously trivial: progress log: forms protection greys out the control buttons; previously trivial: progress log: a document with many content controls saves in the time the controls take, #13; previously trivial: progress log: Word signature lines kept on save; previously trivial: a Thai run with Latin finds one installed font covering it all on Linux too, #1549; previously trivial: progress log: closing the header returns to the body selection, #3331; previously trivial: progress log: saving to a NAS share mounted by GVFS, #3003; previously trivial: progress log: a picture dragged near the bottom of a page lands there, #3169; previously trivial: centred list labels after leading page breaks, #2964; previously trivial: progress log: inline pictures drag to an insertion cursor and stay inline, #2233, #2234; previously trivial: progress log: a text file saved over itself closes without asking, #2376; previously trivial: progress log: a text frame in the paragraph defaults frames nothing, #2360; previously trivial: fixed font inputs in four layout controls; previously trivial: typing no longer starts render threads on every repaint, #3027; previously trivial: a right, centre or decimal tab whose text doesn't fit, or a left tab past the right indent, goes to the next line with its text, #1840; previously trivial: progress log: banded rows shade as in Word, #3415; previously trivial: progress log: the table handles show while the caret is in the table, #2428; previously trivial: progress log: a click below a floating table reaches the text after it, #2038; previously trivial: progress log: Delete on selected table cells leaves one empty paragraph in each, #2802; previously trivial: progress log: lam-alef in exported PDFs extracts whole with fonts that draw it as two glyphs, #2310; previously trivial: Bullets and Numbering toggle off style-inherited lists at their effective level, including basedOn chains and numbered ListParagraph styles; other paragraphs and list definitions stay unchanged (related to #3459); previously trivial: Russian sorting keeps ё with е and recognises decomposed ё/й; previously trivial: progress log: a text box that keeps the keyboard no longer resets the input method every frame, #2986; previously trivial: progress log: recovery copies and .json files store pictures as base64, #586 follow-up; previously trivial: progress log: legacy menu keys, #1697; previously trivial: progress log: shape gradients and transparency, #1500; previously trivial: progress log: Focus fills the screen, and Full Screen View shows the pages alone, #1678; previously trivial: progress log: text above a float's anchor wraps around it, #2048; previously trivial: progress log: File › Recover follows the app theme, #3243; previously trivial: progress log: formatting toolbar with the text context menu, #2959; previously trivial: progress log: caret inside ligatures, #1974; previously trivial: text typed into a content control takes the control's formatting; localized placeholder styles recognised; previously trivial: forms protection keeps its content controls: no inserting, Properties or Remove Content Control; previously trivial: long navigation headings wrap onto further lines within the pane, #3015; previously trivial: clearing a no-match font query keeps the recent heading visible, #2068; previously trivial: a word after a slash wraps whole, like Word, #2963; previously trivial: progress log: a header-cell picture watermark sits behind the text, #1775; previously trivial: symbols keep their font when the text font changes, #2036; previously trivial: opening a DOCX no longer copies its pictures; previously trivial: Add Font imports every selected font file, #1789); previously trivial (RTF export writes sections (gap 19); previously trivial: ODT export writes sections (gap 19); previously trivial: Read Aloud speaks each sentence in its own language, #1843; previously trivial: hint-reliant CJK outlines; previously trivial: Ctrl+wheel zoom no longer scrolls the document, #1743; previously trivial: progress log: Turkish case mapping in AutoCorrect, #1923; previously trivial: a mouse drag on a table leaves the view where it is, #1738; previously trivial: progress log: Hebrew field results and smart quotes, #1670; previously trivial: Backspace removes a selected table, rows or columns, #1844; previously trivial: progress log: mixed Hebrew/Latin text keeps its order in Word, #1543; previously trivial: progress log: web typing in non-Latin text no longer repeats, #1480; previously trivial: progress log: font family caches bounded and math font lookups follow font changes, #1354; previously trivial: `-->` AutoCorrect replacement, #2223; previously trivial: numbered headings, #1793; previously trivial: Navigation Find exposes Results, #2096; previously trivial: progress log: Columns on selected text, #2024; previously trivial: progress log: legacy outline, shadow, emboss and imprint text effects drawn, #2534; previously trivial: progress log: Indonesian proofing, #498; previously trivial: progress log: DOCX glossary documents (building blocks); previously trivial: progress log: Read Mode keeps the keyboard and shows whole, unobscured columns, #1772); previously trivial: progress log: font list entries of tall-ascent fonts no longer cut off, #2570); previously trivial: progress log: Split Cells and Convert Text to Table dialogs follow the Word check, #2592; previously trivial: a new source's Tag is made like Word's, three letters of the author and two digits of the year with a number added when taken, and an edit keeps the Tag, #2094; previously trivial: Web Layout fills the window width, #1876; previously trivial: progress log: Different First Page headers reachable from page 1, #2826; previously trivial: Language dialog keeps inherited proofing language and no-proof choices (#2717); previously trivial: progress log: web preferences kept between visits, #2132; previously trivial: progress log: undrawable private-use list bullets show the level's default bullet, #1683; previously trivial: progress log: `w:eastAsianLayout` kept on save; previously trivial: table style editor formats every part, #714); previously trivial: VML freeforms read and kept on save; previously trivial: progress log: consistent preferred cell widths; previously trivial: multi-paragraph field instructions no longer add blank lines; previously trivial: page-break-only list paragraphs hide their labels; previously trivial: progress log: grouped `flowChartOr` shapes draw their circle and crossing spokes; previously trivial: progress log: copies keep their formatting in other programs, #1523; previously trivial: progress log: privacy options on save, #1062; previously trivial: progress log: equation pictures in theme colours on Windows, #1002; previously trivial: symbol fonts, #776; previously trivial: the save prompt answers from the keyboard, #861; previously trivial: table column and row markers on the rulers, #700; previously trivial: table borders and the resize handle drag on the page, #217; previously trivial: formatting revisions landed, #41; previously trivial: Draw tab ink, #307, and Draw Table and Eraser, #303, landed: catalog 402/434; previously minor: readiness table with hours per audience; full number back to the additive weighted sum, 60%; mainstream and essentials numbers added; alpha gate checked; previously major: full re-measure against Word for Mac 16.113.4; restructured to the craftrules progress-docs standard) · **Target:** Microsoft Word (Microsoft 365) for Mac 16.113.4
  > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-18 · **Change:** trivial (English dialects in proofing, #1281; previously trivial: triple borders draw three lines, #1740; previously trivial: progress log: double-clicking a later page's footer no longer scrolls up, #2103; previously trivial: long navigation headings wrap onto further lines within the pane, #3015; previously trivial: clearing a no-match font query keeps the recent heading visible, #2068; previously trivial: a word after a slash wraps whole, like Word, #2963; previously trivial: RTF export writes sections (gap 19); previously trivial: ODT export writes sections (gap 19); previously trivial: progress log: pasted blockquotes are indented paragraphs, #1270; previously trivial: progress log: print-area strings translated in every catalog; previously trivial: progress log: comments readable in the dark theme, #2045; previously trivial: progress log: ODT sections, #1379; previously trivial: progress log: table deletes, Change Case and Unlink Fields respect Track Changes and locked content controls, #1329; previously trivial: progress log: rounded rectangle corners, #1476; previously trivial: progress log: Save As type list, #1399; previously trivial: progress log: privacy options on save, #1062; previously trivial: progress log: equation pictures in theme colours on Windows, #1002; previously trivial: symbol fonts, #776; previously trivial: the save prompt answers from the keyboard, #861; previously trivial: table column and row markers on the rulers, #700; previously trivial: table borders and the resize handle drag on the page, #217; previously trivial: formatting revisions landed, #41; previously trivial: Draw tab ink, #307, and Draw Table and Eraser, #303, landed: catalog 402/434; previously minor: readiness table with hours per audience; full number back to the additive weighted sum, 60%; mainstream and essentials numbers added; alpha gate checked; previously major: full re-measure against Word for Mac 16.113.4; restructured to the craftrules progress-docs standard) · **Target:** Microsoft Word (Microsoft 365) for Mac 16.113.4
  > **Printing update:** 2026-10-12 · direct desktop printing through craft-print; details below.
  
-@@ -136,6 +136,8 @@ Ranked, to beta (detail and remaining milestones in [docs/roadmap.md](docs/roadm
+@@ -136,6 +136,10 @@ Ranked, to beta (detail and remaining milestones in [docs/roadmap.md](docs/roadm
  
  ## Progress log
  
++- 2026-10-24: Mooring E3 local web adapter: explicit startup from untouched native JSON/stable IDs, existing paragraph text/runs projection and delegated SDK history. No authenticated browser collaboration, host Saved, overlapping-delete undo or readiness-score increase is claimed.
++
 +- 2026-10-24: Mooring E3 integration: dormant native pre/post command seam with complete local rollback, explicit read/navigation commands and recovery exclusion. Failed proposal capture retains a visible unsaved draft. No transport, browser collaboration, host Saved, collaborative undo or readiness-score increase is claimed.
 +
  - 2026-10-23: Lists: an empty paragraph whose mark is hidden takes no room and draws no list number, in the body and in table cells, as in Word; the number is still counted, so the next item keeps its place (#3982).
  - 2026-10-23: Font dialog: "NaN" or "inf" typed in the Size box previews the text at 12 pt. "NaN" reads as a number, and a font size that is not a number stopped the app while drawing the preview (#3663).
  - 2026-10-23: Tables: a cell span read from a `.json` document (any 32-bit number) no longer overflows when a column is inserted through the cell or the cell is merged: the span is counted from its clamped value and stays within 63 columns. It panicked in debug builds and wrapped to a small span in release (#3637).
-@@ -581,6 +583,7 @@ Footer page-table height and body wrapping are corrected. Other pagination gaps
+@@ -581,6 +585,7 @@ Footer page-table height and body wrapping are corrected. Other pagination gaps
  
  | Date | Change | Summary |
  |---|---|---|
@@ -28,6 +30,351 @@ index a86a8aad..dfa54ef9 100644
  | 2026-10-23 | trivial | Progress log: an empty paragraph with a hidden mark draws no list number (#3982) |
  | 2026-10-22 | minor | Compare's new and revised untitled results clear the previous document's version snapshots; a rejected protected comparison or mailing result preserves the snapshots and file identity. |
  | 2026-10-20 | minor | The Document Inspector's removals are refused while the document tracks changes (they delete straight from the document, so the text would go with no revision to show for it and the revision trail would be broken behind the user's back), and a version snapshot belongs to the document it was taken from |
+diff --git a/apps/wordcraft-web/src/main.rs b/apps/wordcraft-web/src/main.rs
+index 39c2f981..046d1ed1 100644
+--- a/apps/wordcraft-web/src/main.rs
++++ b/apps/wordcraft-web/src/main.rs
+@@ -15,6 +15,8 @@ mod prefs;
+ #[cfg(any(target_arch = "wasm32", test))]
+ mod save_fallback;
+ 
++#[cfg(target_arch = "wasm32")]
++mod mooring;
+ #[cfg(target_arch = "wasm32")]
+ mod web;
+ 
+diff --git a/apps/wordcraft-web/src/mooring.rs b/apps/wordcraft-web/src/mooring.rs
+new file mode 100644
+index 00000000..143d5b7d
+--- /dev/null
++++ b/apps/wordcraft-web/src/mooring.rs
+@@ -0,0 +1,210 @@
++//! Local browser adapter only. Parent owns authentication, WS and receipt trust.
++use js_sys::Function;
++use std::{
++    cell::{Cell, RefCell},
++    rc::Rc,
++};
++use wasm_bindgen::prelude::*;
++use wordcraft_doc::{Document, StoryRef};
++use wordcraft_engine::{CmdError, Session};
++use wordcraft_ui_egui::mooring_boundary::{NativeCommandBridge, NativeHistoryError};
++
++const MAX_NATIVE: usize = 16 * 1024 * 1024;
++fn captured(doc: &Document) -> Result<String, String> {
++    // NEW native capture boundary: preserve actual f32 expansion in a JSON STRING.
++    let value = serde_json::to_value(doc).map_err(|_| "native capture failed")?;
++    let raw = serde_json::to_string(&value).map_err(|_| "native capture failed")?;
++    if raw.len() > MAX_NATIVE {
++        return Err("native capture exceeds budget".into());
++    }
++    Ok(raw)
++}
++fn document(raw: &str) -> Result<Document, String> {
++    if raw.len() > MAX_NATIVE {
++        return Err("native input exceeds budget".into());
++    }
++    let value: serde_json::Value = serde_json::from_str(raw).map_err(|_| "invalid native input")?;
++    let doc: Document = serde_json::from_value(value.clone()).map_err(|_| "invalid native input")?;
++    if serde_json::to_value(&doc).map_err(|_| "invalid native input")? != value {
++        return Err("lossy native input refused".into());
++    }
++    Ok(doc)
++}
++fn callback(value: &JsValue, key: &str) -> Result<Function, JsValue> {
++    js_sys::Reflect::get(value, &JsValue::from_str(key))?.dyn_into::<Function>().map_err(|_| JsValue::from_str("missing local SDK callback"))
++}
++fn invoke(fun: &Function, args: &[JsValue]) -> Result<JsValue, JsValue> {
++    let array = js_sys::Array::new();
++    for arg in args {
++        array.push(arg);
++    }
++    fun.apply(&JsValue::NULL, &array)
++}
++pub(crate) struct Collaboration {
++    pub(crate) initial: Document,
++    display_title: String,
++    ids: Vec<String>,
++    stopped: Cell<bool>,
++    failure_reported: Cell<bool>,
++    pending: RefCell<Option<Document>>,
++    can_edit: Function,
++    before: Function,
++    validate: Function,
++    authored: Function,
++    history: Function,
++    failed: Function,
++}
++impl Collaboration {
++    pub(crate) fn take_projection(&self) -> Option<Document> {
++        self.pending.borrow_mut().take()
++    }
++    pub(crate) fn stopped(&self) -> bool {
++        self.stopped.get()
++    }
++    pub(crate) fn stop(&self) {
++        self.stopped.set(true);
++    }
++    pub(crate) fn fail(&self) {
++        self.stop();
++        if !self.failure_reported.replace(true) {
++            // Diagnostic only. Stop first and retain originals even if JS throws.
++            let _ = self.failed.call0(&JsValue::NULL);
++        }
++    }
++}
++/// A local handle, never a bearer/capability or a Saved checkpoint installer.
++#[wasm_bindgen]
++pub struct WordCraftCollaborativeHandle {
++    state: Rc<Collaboration>,
++}
++#[wasm_bindgen]
++impl WordCraftCollaborativeHandle {
++    /// Caller MUST first validate host frame/closed data in the SDK and project
++    /// the SAME producer. This native handle verifies only text/runs projection.
++    pub fn project_native(&self, raw: &str) -> Result<(), JsValue> {
++        if self.state.stopped.get() {
++            return Err(JsValue::from_str("projection unavailable"));
++        }
++        let doc = document(raw).map_err(|e| JsValue::from_str(&e))?;
++        // All original peer bytes have already been merged into the SAME SDK producer.
++        // Coalesce display-only projections; retain the complete latest native state.
++        *self.state.pending.borrow_mut() = Some(doc);
++        Ok(())
++    }
++    pub fn stop(&self) {
++        self.state.stop();
++    }
++}
++/// Called ONCE after the isolated child SDK validated authenticated-parent
++/// bootstrap. No token, URL, transport or permission proof is accepted here.
++#[wasm_bindgen]
++pub fn start_collaborative(native_json: &str, stable_ids_json: &str, callbacks: JsValue) -> Result<WordCraftCollaborativeHandle, JsValue> {
++    if !super::web::collaborative_mode() {
++        return Err(JsValue::from_str("collaborative startup not selected"));
++    }
++    if stable_ids_json.len() > 262144 {
++        return Err(JsValue::from_str("invalid stable IDs"));
++    }
++    let display_title = js_sys::Reflect::get(&callbacks, &JsValue::from_str("display_name"))?
++        .as_string().ok_or_else(|| JsValue::from_str("invalid display name"))?;
++    if display_title.is_empty() || display_title.len() > 512 || display_title.chars().any(char::is_control) {
++        return Err(JsValue::from_str("invalid display name"));
++    }
++    let initial = document(native_json).map_err(|e| JsValue::from_str(&e))?;
++    let ids: Vec<String> = serde_json::from_str(stable_ids_json).map_err(|_| JsValue::from_str("invalid stable IDs"))?;
++    if ids.len() != initial.body.len()
++        || ids.len() > 4096
++        || ids.is_empty()
++        || ids.iter().any(|id| id.is_empty() || id.len() > 128 || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'))
++        || ids.iter().collect::<std::collections::BTreeSet<_>>().len() != ids.len()
++    {
++        return Err(JsValue::from_str("invalid stable IDs"));
++    }
++    let state = Rc::new(Collaboration {
++        initial,
++        display_title,
++        ids,
++        stopped: Cell::new(false),
++        failure_reported: Cell::new(false),
++        pending: RefCell::new(None),
++        can_edit: callback(&callbacks, "can_edit")?,
++        before: callback(&callbacks, "before")?,
++        validate: callback(&callbacks, "validate")?,
++        authored: callback(&callbacks, "authored")?,
++        history: callback(&callbacks, "history")?,
++        failed: callback(&callbacks, "failed")?,
++    });
++    super::web::start_collaborative(state.clone())?;
++    Ok(WordCraftCollaborativeHandle { state })
++}
++impl NativeCommandBridge for Collaboration {
++    fn display_title(&self) -> Option<&str> { Some(&self.display_title) }
++    fn capture_failed(&self) {
++        self.fail();
++    }
++    fn can_edit(&self) -> bool {
++        !self.stopped.get() && self.pending.borrow().is_none() && self.can_edit.call0(&JsValue::NULL).ok().and_then(|v| v.as_bool()) == Some(true)
++    }
++    fn before(&self, session: &Session, id: &str, _params: &serde_json::Value) -> Result<(), CmdError> {
++        if !self.can_edit() {
++            return Err(CmdError::Disabled("collaborative reader".into()));
++        }
++        let (start, end) = session.sel.ordered();
++        if start.story != StoryRef::Body || end.story != StoryRef::Body || start.path.0.len() != 1 || start.path != end.path {
++            return Err(CmdError::Disabled("unsupported collaborative selection".into()));
++        }
++        let target = start
++            .path
++            .0
++            .first()
++            .and_then(|index| self.ids.get(*index as usize))
++            .ok_or_else(|| CmdError::Disabled("invalid collaborative selection".into()))?;
++        let raw = captured(&session.doc).map_err(CmdError::Disabled)?;
++        invoke(
++            &self.before,
++            &[
++                JsValue::from_str(&raw),
++                JsValue::from_str(target),
++                JsValue::from_str(&start.off.to_string()),
++                JsValue::from_str(&end.off.to_string()),
++                JsValue::from_str(id),
++            ],
++        )
++        .map_err(|_| CmdError::Disabled("local selection refused".into()))?;
++        Ok(())
++    }
++    fn validate(&self, before: &Document, after: &Document) -> Result<(), CmdError> {
++        let a = captured(before).map_err(CmdError::Disabled)?;
++        let b = captured(after).map_err(CmdError::Disabled)?;
++        if invoke(&self.validate, &[JsValue::from_str(&a), JsValue::from_str(&b)]).ok().and_then(|v| v.as_bool()) != Some(true) {
++            return Err(CmdError::Disabled("complete native postcondition refused".into()));
++        }
++        Ok(())
++    }
++    fn authored(&self, before: &Document, after: &Document) -> Result<(), String> {
++        let a = captured(before)?;
++        let b = captured(after)?;
++        if invoke(&self.authored, &[JsValue::from_str(&a), JsValue::from_str(&b)]).ok().and_then(|v| v.as_bool()) != Some(true) {
++            self.stop();
++            return Err("original capture failed".into());
++        }
++        Ok(())
++    }
++    fn history(&self, before: &Document, id: &str) -> Result<Document, NativeHistoryError> {
++        if !self.can_edit() {
++            return Err(NativeHistoryError::Refused("collaborative reader".into()));
++        }
++        let raw = captured(before).map_err(|_| NativeHistoryError::Draft)?;
++        let result = invoke(&self.history, &[JsValue::from_str(&raw), JsValue::from_str(id)]);
++        match result {
++            Ok(value) => document(&value.as_string().ok_or(NativeHistoryError::Draft)?).map_err(|_| NativeHistoryError::Draft),
++            Err(value) if matches!(value.as_string().as_deref(), Some("unsupported_delete_undo" | "no_change")) => {
++                Err(NativeHistoryError::Refused(value.as_string().unwrap_or_default()))
++            }
++            Err(_) => {
++                self.stop();
++                Err(NativeHistoryError::Draft)
++            }
++        }
++    }
++}
+diff --git a/apps/wordcraft-web/src/web.rs b/apps/wordcraft-web/src/web.rs
+index b2e698ca..1c6342e8 100644
+--- a/apps/wordcraft-web/src/web.rs
++++ b/apps/wordcraft-web/src/web.rs
+@@ -16,7 +16,27 @@ mod font_store;
+ const CANVAS_ID: &str = "wordcraft_canvas";
+ const LOADING_ID: &str = "wordcraft_loading";
+ 
++thread_local! { static STARTED:Cell<bool> = const { Cell::new(false) }; }
++pub(crate) fn collaborative_mode() -> bool {
++    query().trim_start_matches('?').split('&').any(|part| part == "mooring=1")
++}
+ pub fn start() {
++    if collaborative_mode() {
++        return;
++    }
++    if STARTED.with(|started| started.replace(true)) {
++        return;
++    }
++    start_inner(None);
++}
++pub(crate) fn start_collaborative(state: Rc<super::mooring::Collaboration>) -> Result<(), wasm_bindgen::JsValue> {
++    if STARTED.with(|started| started.replace(true)) {
++        return Err(wasm_bindgen::JsValue::from_str("existing original controller retained"));
++    }
++    start_inner(Some(state));
++    Ok(())
++}
++fn start_inner(collaboration: Option<Rc<super::mooring::Collaboration>>) {
+     eframe::WebLogger::init(log::LevelFilter::Info).ok();
+     wasm_bindgen_futures::spawn_local(async {
+         let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+@@ -50,14 +70,22 @@ pub fn start() {
+                     font_store::load_all(cc.egui_ctx.clone());
+                     let inbox: Inbox = Inbox::default();
+                     let pasted: Inbox = Inbox::default();
+-                    if let Err(e) = listen_for_pasted_pictures(pasted.clone(), cc.egui_ctx.clone()) {
+-                        log::error!("pasting pictures is unavailable: {e}");
++                    if collaboration.is_none() {
++                        if let Err(e) = listen_for_pasted_pictures(pasted.clone(), cc.egui_ctx.clone()) {
++                            log::error!("pasting pictures is unavailable: {e}");
++                        }
+                     }
+                     // The browser's locale picks the new document's paper, the units and the
+                     // decimal separator (#838).
+                     let region = wordcraft_ui_egui::i18n::system_region();
+                     let sample = query().contains("sample");
+-                    let doc = if sample { wordcraft_engine::sample::sample_document() } else { wordcraft_engine::blank_document(&region) };
++                    let doc = if let Some(state) = &collaboration {
++                        state.initial.clone()
++                    } else if sample {
++                        wordcraft_engine::sample::sample_document()
++                    } else {
++                        wordcraft_engine::blank_document(&region)
++                    };
+                     let mut session = Session::new(doc);
+                     session.system_region = region;
+                     let messages = Rc::new(RefCell::new(Vec::new()));
+@@ -67,19 +95,24 @@ pub fn start() {
+                     app.autosave = false;
+                     // Preferences from an earlier visit (#2132), as the desktop app reads `ui.json`.
+                     let stored = stored_prefs();
+-                    crate::prefs::restore(&mut app, stored.as_deref());
++                    if collaboration.is_none() {
++                        crate::prefs::restore(&mut app, stored.as_deref());
++                    }
+                     // A region chosen in File › Options replaces the browser's for the first blank
+                     // document too (#838).
+-                    if !sample && app.session.prefs.region.is_some() {
++                    if collaboration.is_none() && !sample && app.session.prefs.region.is_some() {
+                         let doc = app.session.blank_document();
+                         app.session.set_document(doc);
+                     }
+                     let prefs = crate::prefs::PrefsSync::new(stored);
+                     // No document to show: start on File › Home, as the desktop app does (#766).
+-                    if !sample {
++                    if collaboration.is_none() && !sample {
+                         app.start_screen();
+                     }
+-                    Ok(Box::new(WebShell { app, inbox, messages, prefs }))
++                    if let Some(state) = &collaboration {
++                        app.attach_mooring_bridge(state.clone()).map_err(|e| std::io::Error::other(e))?;
++                    }
++                    Ok(Box::new(WebShell { app, inbox, messages, prefs, collaboration }))
+                 }),
+             )
+             .await;
+@@ -103,6 +136,7 @@ struct WebShell {
+     inbox: Inbox,
+     messages: Rc<RefCell<Vec<String>>>,
+     prefs: crate::prefs::PrefsSync,
++    collaboration: Option<Rc<super::mooring::Collaboration>>,
+ }
+ 
+ fn local_storage() -> Option<web_sys::Storage> {
+@@ -116,8 +150,19 @@ fn stored_prefs() -> Option<String> {
+ 
+ impl eframe::App for WebShell {
+     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
++        if let Some(state) = &self.collaboration {
++            if state.stopped() {
++                self.app.stop_mooring_bridge();
++            }
++            if let Some(projected) = state.take_projection() {
++                if self.app.apply_mooring_text_projection(&projected).is_err() {
++                    state.fail();
++                    self.app.stop_mooring_bridge();
++                }
++            }
++        }
+         let dropped = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
+-        for f in dropped {
++        for f in dropped.into_iter().filter(|_| self.collaboration.is_none()) {
+             let inbox = self.inbox.clone();
+             let ctx = ctx.clone();
+             wasm_bindgen_futures::spawn_local(async move {
 diff --git a/crates/engine/src/recovery.rs b/crates/engine/src/recovery.rs
 index 3306a9d6..34ac4bdd 100644
 --- a/crates/engine/src/recovery.rs
@@ -524,14 +871,25 @@ index 00000000..9312a66a
 +    assert_eq!(snapshot(&s), before);
 +}
 diff --git a/crates/ui-egui/src/chrome.rs b/crates/ui-egui/src/chrome.rs
-index 3caafc90..1508f201 100644
+index 3caafc90..1f7e88f7 100644
 --- a/crates/ui-egui/src/chrome.rs
 +++ b/crates/ui-egui/src/chrome.rs
-@@ -365,7 +365,9 @@ pub fn title_bar(app: &mut WordApp, ui: &mut Ui) {
+@@ -337,7 +337,7 @@ pub fn title_bar(app: &mut WordApp, ui: &mut Ui) {
+                         let _ = app.run("ui.backstage", json!({"value": true, "page": "options", "pane": "general"}));
+                     }
+                     ui.add_space(8.0);
+-                    if app.ui.show_discord {
++                    if app.ui.show_discord && app.mooring_bridge.is_none() {
+                         let (r, resp) = ui.allocate_exact_size(vec2(84.0, 22.0), Sense::click());
+                         ui.painter().rect_filled(r, 11.0, if resp.hovered() { t.accent_text } else { t.accent });
+                         icons::paint(
+@@ -364,8 +364,10 @@ pub fn title_bar(app: &mut WordApp, ui: &mut Ui) {
+             } else {
                  format!(
                      "{} — {}",
-                     app.title_stem(),
+-                    app.title_stem(),
 -                    if app.session.dirty {
++                    app.mooring_display_title().map(str::to_owned).unwrap_or_else(|| app.title_stem()),
 +                    if let Some(state) = app.mooring_local_state() {
 +                        if state == "unsaved_draft" { tl!("Not saved") } else { tl!("Draft") }
 +                    } else if app.session.dirty {
@@ -658,25 +1016,39 @@ index 3a9a00fb..273d5a0a 100644
 +mod tests_mooring_recovery;
 diff --git a/crates/ui-egui/src/mooring_boundary.rs b/crates/ui-egui/src/mooring_boundary.rs
 new file mode 100644
-index 00000000..7bda7fdb
+index 00000000..ffc9bd3a
 --- /dev/null
 +++ b/crates/ui-egui/src/mooring_boundary.rs
-@@ -0,0 +1,72 @@
+@@ -0,0 +1,164 @@
 +//! EXPERIMENTAL inactive native command seam. A local UX gate, never authority.
 +use crate::WordApp;
 +use serde_json::Value;
-+use std::rc::Rc;
++use std::{rc::Rc, sync::Arc};
 +use wordcraft_doc::Document;
 +use wordcraft_engine::{CmdError, Session};
 +
 +/// Synchronous app-owned hooks. Pure before/validate may NEVER emit a proposal.
 +/// A successful outer command emits its original client update only afterwards.
 +/// There is no transport, host Saved or authentication contract in this trait.
++pub enum NativeHistoryError {
++    /// Pure local refusal, no new original was emitted; history stays intact.
++    Refused(String),
++    /// Original capture may have happened; retain Draft and block further edits.
++    Draft,
++}
 +pub trait NativeCommandBridge {
++    /// Display metadata only; never a document title, path or authority.
++    fn display_title(&self) -> Option<&str> { None }
 +    fn can_edit(&self) -> bool;
 +    fn before(&self, session: &Session, id: &str, params: &Value) -> Result<(), CmdError>;
 +    fn validate(&self, before: &Document, after: &Document) -> Result<(), CmdError>;
 +    fn authored(&self, before: &Document, after: &Document) -> Result<(), String>;
++    /// LOCAL failure diagnostic only. It may stop UI, never grant authority or Saved.
++    fn capture_failed(&self) {}
++    /// LOCAL SDK history only, never native file history or a host receipt.
++    fn history(&self, _before: &Document, _id: &str) -> Result<Document, NativeHistoryError> {
++        Err(NativeHistoryError::Refused("collaborative history unavailable".into()))
++    }
 +}
 +impl WordApp {
 +    /// Prototype attachment only; caller labels are not host authority.
@@ -691,7 +1063,7 @@ index 00000000..7bda7fdb
 +}
 +
 +fn text_command(id: &str) -> bool {
-+    matches!(id, "text.insert" | "text.backspace" | "text.delete" | "format.bold" | "format.italic")
++    matches!(id, "text.insert" | "text.backspace" | "text.delete" | "format.bold" | "format.italic" | "edit.undo" | "edit.redo")
 +}
 +impl WordApp {
 +    pub(crate) fn mooring_early_gate(&self, id: &str) -> Result<(), String> {
@@ -711,6 +1083,20 @@ index 00000000..7bda7fdb
 +        if self.session.mooring_read_command(id) {
 +            return self.session.run(id, params).map_err(|e| e.to_string());
 +        }
++        if matches!(id, "edit.undo" | "edit.redo") {
++            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| bridge.history(&self.session.doc, id)));
++            match result {
++                Ok(Err(NativeHistoryError::Refused(reason))) => return Err(reason),
++                Ok(Ok(projected)) if self.apply_mooring_text_projection(&projected).is_ok() => {
++                    return Ok(serde_json::json!({"localDraft":true}));
++                }
++                _ => {}
++            }
++            self.mooring_blocked = true;
++            self.status("Unsaved Draft: original history capture failed");
++            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| bridge.capture_failed()));
++            return Err("unsaved draft retained".into());
++        }
 +        let before = self.session.doc.clone();
 +        let result = self
 +            .session
@@ -722,6 +1108,7 @@ index 00000000..7bda7fdb
 +        if !matches!(emitted, Ok(Ok(()))) {
 +            self.mooring_blocked = true;
 +            self.status("Unsaved Draft: original proposal capture failed");
++            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| bridge.capture_failed()));
 +            return Err("unsaved draft retained".into());
 +        }
 +        Ok(result)
@@ -729,20 +1116,125 @@ index 00000000..7bda7fdb
 +}
 +
 +impl WordApp {
++    pub(crate) fn mooring_display_title(&self) -> Option<&str> {
++        self.mooring_bridge.as_ref().and_then(|bridge| bridge.display_title())
++    }
 +    /// No host receipt exists in this prototype; file saves cannot imply Saved.
 +    pub fn mooring_local_state(&self) -> Option<&'static str> {
 +        self.mooring_bridge.as_ref().map(|_| if self.mooring_blocked { "unsaved_draft" } else { "draft" })
 +    }
 +}
++
++impl WordApp {
++    /// LOCAL projection after the SDK validated actual host bytes or authored
++    /// its original undo/redo. This is not a host receipt or transport check.
++    /// Only existing paragraph text/runs may change. Session/document identity,
++    /// native history and every other native field remain owned by this app.
++    pub fn apply_mooring_text_projection(&mut self, expected: &Document) -> Result<(), String> {
++        if self.mooring_bridge.is_none() || self.mooring_blocked || expected.body.len() != self.session.doc.body.len() || expected.body.len() > 4096 {
++            return Err("invalid collaborative projection".into());
++        }
++        let mut projected = self.session.doc.clone();
++        for (old, new) in projected.body.iter_mut().zip(&expected.body) {
++            let (wordcraft_doc::Block::Para(old), wordcraft_doc::Block::Para(new)) = (Arc::make_mut(old), new.as_ref()) else {
++                return Err("unsupported collaborative projection".into());
++            };
++            old.text.clone_from(&new.text);
++            old.runs.clone_from(&new.runs);
++        }
++        if serde_json::to_value(&projected).map_err(|_| "invalid collaborative projection")?
++            != serde_json::to_value(expected).map_err(|_| "invalid collaborative projection")?
++        {
++            return Err("collaborative metadata changed".into());
++        }
++        // Complete precondition above BEFORE touching actual native objects.
++        for (old, new) in self.session.doc.body.iter_mut().zip(&expected.body) {
++            let (wordcraft_doc::Block::Para(old), wordcraft_doc::Block::Para(new)) = (Arc::make_mut(old), new.as_ref()) else {
++                return Err("unsupported collaborative projection".into());
++            };
++            old.text.clone_from(&new.text);
++            old.runs.clone_from(&new.runs);
++            old.touch();
++        }
++        for pos in [&mut self.session.sel.anchor, &mut self.session.sel.focus] {
++            if pos.story != wordcraft_doc::StoryRef::Body || pos.path.0.len() != 1 {
++                continue;
++            }
++            if let Some(text) =
++                pos.path.0.first().and_then(|i| self.session.doc.body.get(*i as usize)).and_then(|b| b.as_para()).map(|p| p.text.as_str())
++            {
++                pos.off = pos.off.min(text.len());
++                while !text.is_char_boundary(pos.off) {
++                    pos.off = pos.off.saturating_sub(1);
++                }
++            }
++        }
++        self.session.touch();
++        self.session.relayout();
++        Ok(())
++    }
++}
++
++impl WordApp {
++    /// Retain local original Draft while immediately denying further mutation.
++    pub fn stop_mooring_bridge(&mut self) {
++        if self.mooring_bridge.is_some() {
++            self.mooring_blocked = true;
++            self.status("Unsaved Draft: collaboration stopped");
++        }
++    }
++}
+diff --git a/crates/ui-egui/src/ribbon.rs b/crates/ui-egui/src/ribbon.rs
+index c741b856..9d66ece4 100644
+--- a/crates/ui-egui/src/ribbon.rs
++++ b/crates/ui-egui/src/ribbon.rs
+@@ -287,6 +287,9 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
+             tabs.push((ct.to_string(), false));
+         }
+     }
++    if app.mooring_bridge.is_some() {
++        tabs.retain(|(name, _)| name != "Zotero");
++    }
+     {
+         let names: Vec<&str> = tabs.iter().map(|(n, _)| n.as_str()).collect();
+         let next = resolve_tab(&app.ui.tab, &names);
+@@ -316,7 +319,7 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
+                     let editing = crate::widgets::icon_text_button_width(ui, editing_label, regular(12.0), true, labels);
+                     let comment = crate::widgets::icon_text_button_width(ui, comments, regular(12.0), false, labels);
+                     // The gaps (6 + 4 + 8) and the strip's margin.
+-                    spaced(share_button) + spaced(editing) + spaced(comment) + 18.0 + 12.0
++                    (if app.mooring_bridge.is_none() { spaced(share_button) + 6.0 } else { 0.0 }) + spaced(editing) + spaced(comment) + 12.0 + 12.0
+                 };
+                 let button_levels = [button_widths(0), button_widths(1), button_widths(2)];
+                 let labels: Vec<&str> = tabs.iter().map(|(tab, custom)| if *custom { tab.as_str() } else { tl!(tab) }).collect();
+@@ -337,6 +340,7 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
+                     // tabs took clicks that did nothing, so the empty window had no way back to
+                     // the Start screen (#3045).
+                     ui.add_enabled_ui(app.has_document(), |ui| {
++                        if app.mooring_bridge.is_none() {
+                         let (share_size, share_text) =
+                             if plan.buttons < 2 { (((share_w + 36.0).max(74.0), 24.0), true) } else { ((30.0, 24.0), false) };
+                         let (r, resp) = ui.allocate_exact_size(vec2(share_size.0, share_size.1), Sense::click());
+@@ -357,6 +361,7 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
+                             let _ = app.run("ui.backstage", json!({"value": true, "page": "export"}));
+                         }
+                         ui.add_space(6.0);
++                        }
+                         let track = app.session.doc.settings.track_changes;
+                         let mode = if plan.buttons == 0 {
+                             crate::widgets::icon_text_menu_button(ui, "pencil", editing_label, regular(12.0))
 diff --git a/crates/ui-egui/src/tests_mooring_boundary.rs b/crates/ui-egui/src/tests_mooring_boundary.rs
 new file mode 100644
-index 00000000..ee1502b8
+index 00000000..cd004849
 --- /dev/null
 +++ b/crates/ui-egui/src/tests_mooring_boundary.rs
-@@ -0,0 +1,198 @@
+@@ -0,0 +1,253 @@
 +#[cfg(test)]
 +mod tests {
-+    use crate::{Services, WordApp, mooring_boundary::NativeCommandBridge};
++    use crate::{
++        Services, WordApp,
++        mooring_boundary::{NativeCommandBridge, NativeHistoryError},
++    };
 +    use serde_json::{Value, json};
 +    use std::{cell::Cell, rc::Rc};
 +    use wordcraft_doc::Document;
@@ -751,8 +1243,10 @@ index 00000000..ee1502b8
 +        writer: bool,
 +        refuse: bool,
 +        proposals: Cell<usize>,
++        original: Document,
 +    }
 +    impl NativeCommandBridge for Bridge {
++        fn display_title(&self) -> Option<&str> { Some("Crewship page") }
 +        fn can_edit(&self) -> bool {
 +            self.writer
 +        }
@@ -762,6 +1256,9 @@ index 00000000..ee1502b8
 +        fn validate(&self, _: &Document, _: &Document) -> Result<(), CmdError> {
 +            if self.refuse { Err(CmdError::Disabled("native postcondition refused".into())) } else { Ok(()) }
 +        }
++        fn history(&self, _: &Document, _: &str) -> Result<Document, NativeHistoryError> {
++            Ok(self.original.clone())
++        }
 +        fn authored(&self, _: &Document, _: &Document) -> Result<(), String> {
 +            self.proposals.set(self.proposals.get() + 1);
 +            Ok(())
@@ -769,12 +1266,54 @@ index 00000000..ee1502b8
 +    }
 +    fn app(writer: bool, refuse: bool) -> (WordApp, Rc<Bridge>) {
 +        let mut app = WordApp::new(Session::new(Document::from_text("aa")), Services::default());
-+        let bridge = Rc::new(Bridge { writer, refuse, proposals: Cell::new(0) });
++        let bridge = Rc::new(Bridge { writer, refuse, proposals: Cell::new(0), original: app.session.doc.clone() });
 +        app.attach_mooring_bridge(bridge.clone()).unwrap();
 +        (app, bridge)
 +    }
 +    fn native(app: &WordApp) -> Value {
 +        serde_json::to_value(&app.session.doc).unwrap()
++    }
++    #[test]
++    fn attached_display_title_preserves_native_document_and_file_identity() {
++        let (app, _) = app(true, false);
++        let before = native(&app);
++        let title = app.title_stem();
++        assert_eq!(app.mooring_display_title(), Some("Crewship page"));
++        assert_eq!(app.title_stem(), title);
++        assert!(app.session.path.is_none());
++        assert_eq!(native(&app), before);
++        let unattached = WordApp::new(Session::new(Document::from_text("aa")), Services::default());
++        assert_eq!(unattached.mooring_display_title(), None);
++    }
++    #[test]
++    fn actual_wordapp_collaborative_undo_reaches_source_controller_without_native_history() {
++        let (mut app, bridge) = app(true, false);
++        let before = native(&app);
++        app.run("text.insert", json!({"text":"x","raw":true})).unwrap();
++        assert_eq!(bridge.proposals.get(), 1);
++        app.execute("edit.undo", json!({})).expect("outer collaborative own-insert undo must reach the original source controller");
++        assert_eq!(native(&app), before);
++        assert_eq!(app.mooring_local_state(), Some("draft"));
++    }
++    #[test]
++    fn actual_peer_projection_retains_identity_and_refuses_metadata_before_mutation() {
++        let (mut app, _) = app(true, false);
++        let identity = app.session.document_id();
++        let mut peer = Session::new(app.session.doc.clone());
++        peer.run("text.insert", &json!({"text":"PEER","raw":true})).unwrap();
++        let expected = serde_json::to_value(&peer.doc).unwrap();
++        app.apply_mooring_text_projection(&peer.doc).unwrap();
++        assert_eq!(native(&app), expected);
++        assert_eq!(app.session.document_id(), identity);
++        assert!(crate::widgets::enabled(&app, "edit.redo"));
++        let mut hostile = peer.doc.clone();
++        hostile.core.title = "changed metadata".into();
++        assert!(app.apply_mooring_text_projection(&hostile).is_err());
++        assert_eq!(native(&app), expected);
++        app.stop_mooring_bridge();
++        assert!(app.apply_mooring_text_projection(&peer.doc).is_err());
++        assert!(app.execute("edit.redo", json!({})).is_err());
++        assert_eq!(native(&app), expected);
 +    }
 +    #[test]
 +    fn actual_wordapp_reader_refuses_before_edit() {
@@ -827,8 +1366,11 @@ index 00000000..ee1502b8
 +    }
 +    #[test]
 +    fn actual_wordapp_authored_failure_retains_native_draft_and_blocks_replacement() {
-+        struct Failing;
++        struct Failing(Cell<usize>);
 +        impl NativeCommandBridge for Failing {
++            fn capture_failed(&self) {
++                self.0.set(self.0.get() + 1);
++            }
 +            fn can_edit(&self) -> bool {
 +                true
 +            }
@@ -843,14 +1385,16 @@ index 00000000..ee1502b8
 +            }
 +        }
 +        let mut app = WordApp::new(Session::new(Document::from_text("aa")), Services::default());
-+        app.attach_mooring_bridge(Rc::new(Failing)).unwrap();
++        let failure = Rc::new(Failing(Cell::new(0)));
++        app.attach_mooring_bridge(failure.clone()).unwrap();
 +        let before = native(&app);
 +        assert!(app.run("text.insert", json!({"text":"x","raw":true})).is_err());
 +        let draft = native(&app);
 +        assert_ne!(draft, before);
++        assert_eq!(failure.0.get(), 1, "actual native capture failure must notify the parent-facing local bridge");
 +        assert!(app.run("text.insert", json!({"text":"second","raw":true})).is_err());
 +        assert_eq!(native(&app), draft);
-+        assert!(app.attach_mooring_bridge(Rc::new(Failing)).is_err());
++        assert!(app.attach_mooring_bridge(Rc::new(Failing(Cell::new(0)))).is_err());
 +        assert_eq!(native(&app), draft);
 +    }
 +
@@ -1021,38 +1565,53 @@ index 00000000..22073942
 +    }
 +}
 diff --git a/crates/ui-egui/src/widgets.rs b/crates/ui-egui/src/widgets.rs
-index 26996c25..e97da4e0 100644
+index 26996c25..86cd6fd2 100644
 --- a/crates/ui-egui/src/widgets.rs
 +++ b/crates/ui-egui/src/widgets.rs
-@@ -173,6 +173,9 @@ fn keytip_badge(ui: &Ui, rect: Rect, id: &str, name: &str) {
+@@ -173,6 +173,14 @@ fn keytip_badge(ui: &Ui, rect: Rect, id: &str, name: &str) {
  
  /// Whether a command exists and is enabled.
  pub fn enabled(app: &WordApp, id: &str) -> bool {
 +    if app.mooring_early_gate(id).is_err() {
 +        return false;
 +    }
++    // The collaborative SDK owns undo/redo, not Session's file-history stack.
++    // Its current gate/refusal decides; never enable native redo by popping it.
++    if app.mooring_bridge.is_some() && matches!(id, "edit.undo" | "edit.redo") {
++        return true;
++    }
      // No document open (#1129): only what opens one, Help and the settings.
      if !app.has_document() && !crate::works_without_document(id) {
          return false;
 diff --git a/docs/architecture.md b/docs/architecture.md
-index f6f9e76c..ae4acf96 100644
+index f6f9e76c..2ac2f77d 100644
 --- a/docs/architecture.md
 +++ b/docs/architecture.md
 @@ -1,6 +1,6 @@
  # WordCraft architecture
  
 -> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** minor (`proof` is per language: English and Polish; previously major: first committed version; `plan/architecture.md` is local-only) · **Target:** Microsoft Word (Microsoft 365) for Mac 16.113.4
-+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-24 · **Change:** minor (dormant native command seam); previous record: minor (`proof` is per language: English and Polish; previously major: first committed version; `plan/architecture.md` is local-only) · **Target:** Microsoft Word (Microsoft 365) for Mac 16.113.4
++> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-24 · **Change:** minor (local web SDK bridge; not enabled collaboration); previous record: minor (`proof` is per language: English and Polish; previously major: first committed version; `plan/architecture.md` is local-only) · **Target:** Microsoft Word (Microsoft 365) for Mac 16.113.4
  
  How WordCraft is built today (origin/main `40c5d51`). The longer design notes in
  `plan/architecture.md` are gitignored and local to the original author's machine; this file is the
-@@ -60,9 +60,14 @@ winit or rfd.
+@@ -14,6 +14,7 @@ winit or rfd.
+ 
+ | Layer | Crate | Lines | Job |
+ |---|---|---|---|
++| 2026-10-24 | minor | Explicit local web SDK startup, bounded text/runs projection and delegated history; no multiplayer/readiness credit |
+ | L0 | `geom` | 0.2k | Units (points, twips, EMU, inches, cm), rectangles, measurement parsing |
+ | L1 | `doc` | 10.0k | Document model: stories, paragraphs, runs, tables, sections, styles, numbering, fields, notes, comments, revisions, equations (OMML-shaped math tree, linear/LaTeX input); edit primitives; bidi |
+ | L1 | `fonts` | 2.3k | Font database (bundled OFL + system fonts), metrics, outlines, shaping with HarfRust, Word font substitution (`word.rs`: Carlito ↔ Calibri, Caladea ↔ Cambria, Liberation ↔ Arial/Times/Courier), OpenType MATH |
+@@ -60,9 +61,16 @@ winit or rfd.
  - GitHub Actions on PRs: packaging lint, and FreeBSD / Windows ARM64 when build files change;
    release builds on pushes to `release`.
  
 +## Dormant host integration
 +
 +A dormant native command boundary can be attached through `NativeCommandBridge`. The UI pre-gate runs before keyboard/IME dispatch, and `Session` checks the complete native document after qualified text/inline commands, restoring all native session bookkeeping on a rejected local command. The exact read/navigation allowlist excludes external window/file actions. Attachment refuses existing native recovery without consuming pending copies; attached recovery ticks cannot adopt or persist an asynchronous document. Proposal capture follows validation; failed capture retains a visible unsaved draft and blocks further editing. The seam supplies no SDK implementation, transport, authority, receipt or collaborative undo policy.
++
++The explicit `?mooring=1` web entry waits for one local SDK bootstrap instead of opening a blank/sample document. Its caller supplies untouched native JSON and stable paragraph IDs; browser credentials, WebSockets and receipt authority remain outside WordApp. The local bridge can project only existing paragraph text/runs after a complete native equality check, retaining session/document identity, and can delegate outer undo/redo to the original SDK controller. It never runs native file-history undo in this mode. Unsupported structural changes, file replacement, drop/picture paste and native recovery remain excluded; failed capture preserves an unsaved Draft. Actual browser transport, authenticated multiplayer, host Saved and overlapping-delete undo are still unqualified.
 +
  ## Revision history
  
@@ -1062,24 +1621,34 @@ index f6f9e76c..ae4acf96 100644
  | 2026-10-10 | minor | `proof`: proofing languages (English, Polish), affix engine, Polish patterns; layout and engine route each run by its language |
  | 2026-10-10 | major | First committed architecture doc, from the crates' sources and `AGENTS.md` |
 diff --git a/docs/gaps.md b/docs/gaps.md
-index 54bcce8f..6662a7ea 100644
+index 54bcce8f..41fd990f 100644
 --- a/docs/gaps.md
 +++ b/docs/gaps.md
 @@ -1,6 +1,6 @@
  # Where WordCraft falls short of Word
  
 -> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-22 · **Change:** trivial (the file commands that change the document are checked on a protected document, the protection of a protected document needs an explicit stop, the session author can't change through `file.setAuthor` under protection (the CLI's `--author` uses the same protection check), and the post-check compares the settings and the metadata; previously trivial: explicit documents keep the editor when recovery discovery finishes; readable recovery controls; previously trivial: text mini toolbar available with the right-click menu, #2959; previously trivial: personal templates in File › New and Save as Word Template, #2852; previously trivial: tracked table/row/cell/section property changes record in WordCraft, narrowing gap 5; previously trivial: a document with many content controls saves in the time the controls take, #13; previously trivial: Format Page Numbers dialog carries Word's number formats and Continue from previous section / Start at, #1113; previously trivial: centred list labels after leading page breaks, #2964; previously trivial: fixed font inputs in four layout controls; previously trivial: a right, centre or decimal tab whose text doesn't fit, or a left tab past the right indent, goes to the next line with its text, #1840; previously trivial: Bullets and Numbering toggle off style-inherited lists at their effective level, including basedOn chains and numbered ListParagraph styles; other paragraphs and list definitions stay unchanged (related to #3459); previously trivial: Russian sorting keeps ё with е and recognises decomposed ё/й; previously trivial: #8: English dialects — en-GB, en-CA, en-AU… flag each other's spellings, #1281; previously trivial: #1: shape gradients and transparency, #1500; previously trivial: text typed into a content control takes the control's formatting; localized placeholder styles recognised; previously trivial: forms protection keeps its content controls: no inserting, Properties or Remove Content Control; previously trivial: clearing a no-match font query keeps the recent heading visible, #2068; previously trivial: line breaking: a slash opening a word travels whole to the next line, #2963; previously trivial: recipient list search and merged-only view, #1576; previously trivial: #2 impact restated: only ink rendering and OLE editing remain; previously trivial: #2 narrowed: native ink nested in groups and drawing canvases kept on save; previously trivial: opening a DOCX no longer copies its pictures; previously trivial: RTF export writes sections (gap 19); previously trivial: ODT export writes sections (gap 19); previously trivial: automatic Asian/Latin and Asian/number spacing laid out, #2358; previously trivial: hint-reliant CJK outlines; previously trivial: numbered headings, #1793; previously trivial: legacy outline, shadow, emboss and imprint text effects drawn, #2534; previously trivial: #8 narrowed: Indonesian proofing from the installed Hunspell dictionary, #498; previously trivial: glossary/building blocks closed; previously trivial: Split Cells and Convert Text to Table follow the Word check, #2592; previously trivial: Language dialog keeps inherited proofing language and no-proof choices (#2717); previously trivial: #29: a copied equation also goes in the MathML clipboard formats, #1297; previously trivial: #24: the Spike, Ctrl+F3 and Ctrl+Shift+F3; previously trivial: VML freeforms read and kept on save; previously trivial: consistent preferred cell widths; previously trivial: multi-paragraph field instructions no longer add blank lines; previously trivial: page-break-only list paragraphs hide their labels; previously trivial: floating-table overlap ignores empty line-break lines; previously trivial: copies keep their formatting on the clipboard as HTML, #1523; previously trivial: sample-text formulas on Enter, #1067; previously trivial: #29: copied equations as MathML, OMML open as #1297, #816; previously trivial: the Font list no longer keeps every previewed font in memory, #848; previously trivial: table column and row markers on the rulers, #700; previously trivial: table borders and the resize handle drag on the page, #217; previously trivial: formatting revisions landed, #41; previously trivial: Draw Table and Eraser landed, #303; previously minor: beta distance restated: ~15 points, ~150–230 h; previously: first version; every known shortfall from the 2026-10-10 re-measure, ranked) · **Target:** Microsoft Word (Microsoft 365) for Mac 16.113.4
-+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-24 · **Change:** minor (dormant native command seam); previous record: trivial (the file commands that change the document are checked on a protected document, the protection of a protected document needs an explicit stop, the session author can't change through `file.setAuthor` under protection (the CLI's `--author` uses the same protection check), and the post-check compares the settings and the metadata; previously trivial: explicit documents keep the editor when recovery discovery finishes; readable recovery controls; previously trivial: text mini toolbar available with the right-click menu, #2959; previously trivial: personal templates in File › New and Save as Word Template, #2852; previously trivial: tracked table/row/cell/section property changes record in WordCraft, narrowing gap 5; previously trivial: a document with many content controls saves in the time the controls take, #13; previously trivial: Format Page Numbers dialog carries Word's number formats and Continue from previous section / Start at, #1113; previously trivial: centred list labels after leading page breaks, #2964; previously trivial: fixed font inputs in four layout controls; previously trivial: a right, centre or decimal tab whose text doesn't fit, or a left tab past the right indent, goes to the next line with its text, #1840; previously trivial: Bullets and Numbering toggle off style-inherited lists at their effective level, including basedOn chains and numbered ListParagraph styles; other paragraphs and list definitions stay unchanged (related to #3459); previously trivial: Russian sorting keeps ё with е and recognises decomposed ё/й; previously trivial: #8: English dialects — en-GB, en-CA, en-AU… flag each other's spellings, #1281; previously trivial: #1: shape gradients and transparency, #1500; previously trivial: text typed into a content control takes the control's formatting; localized placeholder styles recognised; previously trivial: forms protection keeps its content controls: no inserting, Properties or Remove Content Control; previously trivial: clearing a no-match font query keeps the recent heading visible, #2068; previously trivial: line breaking: a slash opening a word travels whole to the next line, #2963; previously trivial: recipient list search and merged-only view, #1576; previously trivial: #2 impact restated: only ink rendering and OLE editing remain; previously trivial: #2 narrowed: native ink nested in groups and drawing canvases kept on save; previously trivial: opening a DOCX no longer copies its pictures; previously trivial: RTF export writes sections (gap 19); previously trivial: ODT export writes sections (gap 19); previously trivial: automatic Asian/Latin and Asian/number spacing laid out, #2358; previously trivial: hint-reliant CJK outlines; previously trivial: numbered headings, #1793; previously trivial: legacy outline, shadow, emboss and imprint text effects drawn, #2534; previously trivial: #8 narrowed: Indonesian proofing from the installed Hunspell dictionary, #498; previously trivial: glossary/building blocks closed; previously trivial: Split Cells and Convert Text to Table follow the Word check, #2592; previously trivial: Language dialog keeps inherited proofing language and no-proof choices (#2717); previously trivial: #29: a copied equation also goes in the MathML clipboard formats, #1297; previously trivial: #24: the Spike, Ctrl+F3 and Ctrl+Shift+F3; previously trivial: VML freeforms read and kept on save; previously trivial: consistent preferred cell widths; previously trivial: multi-paragraph field instructions no longer add blank lines; previously trivial: page-break-only list paragraphs hide their labels; previously trivial: floating-table overlap ignores empty line-break lines; previously trivial: copies keep their formatting on the clipboard as HTML, #1523; previously trivial: sample-text formulas on Enter, #1067; previously trivial: #29: copied equations as MathML, OMML open as #1297, #816; previously trivial: the Font list no longer keeps every previewed font in memory, #848; previously trivial: table column and row markers on the rulers, #700; previously trivial: table borders and the resize handle drag on the page, #217; previously trivial: formatting revisions landed, #41; previously trivial: Draw Table and Eraser landed, #303; previously minor: beta distance restated: ~15 points, ~150–230 h; previously: first version; every known shortfall from the 2026-10-10 re-measure, ranked) · **Target:** Microsoft Word (Microsoft 365) for Mac 16.113.4
++> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-24 · **Change:** minor (local web SDK bridge; not enabled collaboration); previous record: trivial (the file commands that change the document are checked on a protected document, the protection of a protected document needs an explicit stop, the session author can't change through `file.setAuthor` under protection (the CLI's `--author` uses the same protection check), and the post-check compares the settings and the metadata; previously trivial: explicit documents keep the editor when recovery discovery finishes; readable recovery controls; previously trivial: text mini toolbar available with the right-click menu, #2959; previously trivial: personal templates in File › New and Save as Word Template, #2852; previously trivial: tracked table/row/cell/section property changes record in WordCraft, narrowing gap 5; previously trivial: a document with many content controls saves in the time the controls take, #13; previously trivial: Format Page Numbers dialog carries Word's number formats and Continue from previous section / Start at, #1113; previously trivial: centred list labels after leading page breaks, #2964; previously trivial: fixed font inputs in four layout controls; previously trivial: a right, centre or decimal tab whose text doesn't fit, or a left tab past the right indent, goes to the next line with its text, #1840; previously trivial: Bullets and Numbering toggle off style-inherited lists at their effective level, including basedOn chains and numbered ListParagraph styles; other paragraphs and list definitions stay unchanged (related to #3459); previously trivial: Russian sorting keeps ё with е and recognises decomposed ё/й; previously trivial: #8: English dialects — en-GB, en-CA, en-AU… flag each other's spellings, #1281; previously trivial: #1: shape gradients and transparency, #1500; previously trivial: text typed into a content control takes the control's formatting; localized placeholder styles recognised; previously trivial: forms protection keeps its content controls: no inserting, Properties or Remove Content Control; previously trivial: clearing a no-match font query keeps the recent heading visible, #2068; previously trivial: line breaking: a slash opening a word travels whole to the next line, #2963; previously trivial: recipient list search and merged-only view, #1576; previously trivial: #2 impact restated: only ink rendering and OLE editing remain; previously trivial: #2 narrowed: native ink nested in groups and drawing canvases kept on save; previously trivial: opening a DOCX no longer copies its pictures; previously trivial: RTF export writes sections (gap 19); previously trivial: ODT export writes sections (gap 19); previously trivial: automatic Asian/Latin and Asian/number spacing laid out, #2358; previously trivial: hint-reliant CJK outlines; previously trivial: numbered headings, #1793; previously trivial: legacy outline, shadow, emboss and imprint text effects drawn, #2534; previously trivial: #8 narrowed: Indonesian proofing from the installed Hunspell dictionary, #498; previously trivial: glossary/building blocks closed; previously trivial: Split Cells and Convert Text to Table follow the Word check, #2592; previously trivial: Language dialog keeps inherited proofing language and no-proof choices (#2717); previously trivial: #29: a copied equation also goes in the MathML clipboard formats, #1297; previously trivial: #24: the Spike, Ctrl+F3 and Ctrl+Shift+F3; previously trivial: VML freeforms read and kept on save; previously trivial: consistent preferred cell widths; previously trivial: multi-paragraph field instructions no longer add blank lines; previously trivial: page-break-only list paragraphs hide their labels; previously trivial: floating-table overlap ignores empty line-break lines; previously trivial: copies keep their formatting on the clipboard as HTML, #1523; previously trivial: sample-text formulas on Enter, #1067; previously trivial: #29: copied equations as MathML, OMML open as #1297, #816; previously trivial: the Font list no longer keeps every previewed font in memory, #848; previously trivial: table column and row markers on the rulers, #700; previously trivial: table borders and the resize handle drag on the page, #217; previously trivial: formatting revisions landed, #41; previously trivial: Draw Table and Eraser landed, #303; previously minor: beta distance restated: ~15 points, ~150–230 h; previously: first version; every known shortfall from the 2026-10-10 re-measure, ranked) · **Target:** Microsoft Word (Microsoft 365) for Mac 16.113.4
  
  Recovery discovery no longer interrupts an explicitly created or opened document. Older copies remain in File › Recover, whose buttons use the interface palette. See [local recovery](recovery.md).
  
-@@ -121,10 +121,15 @@ The Language dialog reads effective character formatting, including document def
+@@ -52,6 +52,7 @@ Text context menus now include the existing formatting mini toolbar (#2959), inc
+ 
+ | # | Gap | B | Evidence | Impact | Hours | Doc |
+ |---|---|---|---|---|---|---|
++| 2026-10-24 | minor | Explicit local web SDK startup, bounded text/runs projection and delegated history; no multiplayer/readiness credit |
+ | 1 | **DOCX never tested on real-world files.** No corpus of files from Word, Google Docs, LibreOffice and Pages has been opened, rendered and round-tripped and compared with Word page by page | B | No corpus in the repo; `crates/docx/tests` are synthetic fixtures (including omitted/empty paragraph defaults and imported TOC range preservation); "DOCX fidelity corpus: not started" since 2026-10-06. Field reports fixed one by one: a cover page's theme-coloured shapes (#611), freeforms inside groups and text-box margins and Resize to fit (#743), shape gradients and transparency (#1500), cover-page positions relative to the page and freeforms drawn back to their start (#743), Word's text watermark in headers, read and written (#1290), VML freeform rule lines in headers, and `flowChartOr` drawn with its spokes (#1644); explicit DrawingML outline dashes preserved | Everyone: the files people receive are the files that break | 30–50 | [file-format-parity.md](file-format-parity.md) |
+ | 3 | **Crashes and freezes in the field**: startup crash on Intel UHD Graphics (#170, open), a crash on macOS 12.7.6 Intel (#979, open) (lag on GPUs without a DirectX 12 driver fixed, #316; 32-bit Windows exited at launch because DirectX 12 graphics pipeline creation failed, now OpenGL), freezes (#59 Thai fonts and #31 font selector, both open; #77 closed), broken shape tool (#142, open); the Windows 11 no-write-without-admin (#218) and unmovable images (#82) reports are closed (pictures and shapes in Behind Text drag through the text over them, #1313); memory growth on every font change fixed (#848: the font list no longer loads each family it previews) | B | 197 open issues (2026-10-12), among them the crash and freeze reports #170, #979, #59 and #31 | Anyone hit loses work or trust; the never-crash standard covers panics, not hangs or GPU driver faults | 20–30 | [target-app-parity.md](target-app-parity.md) (Stability) |
+ | 4 | **Pagination differs from Word**: Aptos has no metric-matched substitute; legacy compatibility options only partially covered; no page-by-page comparison harness | B | SECTIONPAGES now counts shared continuous-section pages in body and header/footer fields; legacy same-style cell spacing preserved for measured modes 11/12/14, with mode 15 and non-cell controls; Contextual spacing corrected in body/header probes and repeated table-cell runs; [layout-parity.md](layout-parity.md); [typing-parity.md](typing-parity.md) Known gaps; non-overlapping body floating tables clear header tables; stray labels on page-break-only list paragraphs fixed multi-paragraph field-code blank lines fixed; centred numbered heading labels after leading page breaks fixed (#2964); Arial Unicode MS no longer selects monospace substitutes; a slash opening a word travels whole to the next line (#2963) A right, centre or decimal tab whose text doesn't fit, or a left tab past the right indent, goes to the next line with its text, so a TOC entry's page number keeps its leader (#1840). | Page counts and line breaks differ, which matters for forms, legal and academic work | 30–50 + owner (font) | [layout-parity.md](layout-parity.md) |
+@@ -121,10 +122,17 @@ The Language dialog reads effective character formatting, including document def
  
  Footer page-table height and body wrapping are corrected. Other pagination gaps remain open.
  
 +## Dormant host integration
 +
 +A dormant host command seam is available for bounded integration work. It is not enabled collaboration and does not close a Word-parity gap: authenticated origins, original-operation transport, correlated durable receipts, peer projection and overlapping-delete undo remain unqualified. Native file Save never implies host Saved. Existing readiness estimates and gap scores are unchanged.
++
++The explicit `?mooring=1` web entry waits for one local SDK bootstrap instead of opening a blank/sample document. Its caller supplies untouched native JSON and stable paragraph IDs; browser credentials, WebSockets and receipt authority remain outside WordApp. The local bridge can project only existing paragraph text/runs after a complete native equality check, retaining session/document identity, and can delegate outer undo/redo to the original SDK controller. It never runs native file-history undo in this mode. Unsupported structural changes, file replacement, drop/picture paste and native recovery remain excluded; failed capture preserves an unsaved Draft. Actual browser transport, authenticated multiplayer, host Saved and overlapping-delete undo are still unqualified.
 +
  ## Revision history
  
@@ -1089,6 +1658,21 @@ index 54bcce8f..6662a7ea 100644
  | 2026-10-22 | minor | Compare's new and revised untitled results clear the previous document's version snapshots; a rejected protected comparison or mailing result preserves the snapshots and file identity. No gap row; estimates unchanged. |
  | 2026-10-20 | minor | The Document Inspector's removals are refused while the document tracks changes (they aren't tracked), and a version snapshot belongs to the document it was taken from. No gap row (enforcement fix); estimates unchanged |
  | 2026-10-18 | trivial | Explicit New/Open is not interrupted by startup recovery discovery; older copies stay available and Recover follows the interface theme. |
+diff --git a/docs/target-app-parity.md b/docs/target-app-parity.md
+index 2a747e69..efa6f3fa 100644
+--- a/docs/target-app-parity.md
++++ b/docs/target-app-parity.md
+@@ -247,6 +247,10 @@ review of translations, owner decisions (cloud/co-authoring scope, AI provider,
+ licensed or commissioned metric-compatible Aptos substitute, and a real-world DOCX corpus that
+ can be used without committing Word output.
+ 
++## Local collaboration adapter assessment
++
++The optional local web SDK bridge does not change the measured Word-parity or readiness scores. Transport, authenticated multiplayer, correlated host Saved and overlapping-delete undo remain unqualified. Its native-only regression tests demonstrate boundary routing and bounded projection, not a completed collaboration feature.
++
+ ## Revision history
+ 
+ | Date | Change | Summary |
 diff --git a/docs/ui-parity.md b/docs/ui-parity.md
 index 3156cee5..eb8ff03b 100644
 --- a/docs/ui-parity.md

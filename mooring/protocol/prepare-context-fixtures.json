@@ -1,0 +1,1885 @@
+{
+  "profile": "mooring.prepare.v1/agent_confirmed_current/core-v1",
+  "status": "Pure context/read/effect intersection; no host commit, wire origin, application permission or causal-stale qualification",
+  "rules": [
+    "Malformed or incomplete host context is nonterminal before read classification.",
+    "Confirmed entry reads and current working reads both must match; future host labels are never confirmed observations.",
+    "Missing ID invalid_request; retained tombstone target_deleted; live counter mismatch precondition_failed.",
+    "Host labels are prospective; target revision advances for ANY effect and structure_revision for structural effects.",
+    "Effects advance atomically in immutable op order; no-effect target entries and same-effect create+delete are invalid."
+  ],
+  "cases": [
+    {
+      "document_revision": "5",
+      "inventory": [
+        {
+          "target_id": "p1",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p1",
+          "revision": "3",
+          "structure_revision": "1",
+          "deleted": false
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "5",
+          "read_preconditions": [
+            {
+              "target_id": "p1",
+              "revision": "3",
+              "structure_revision": "1"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "6"
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "p1",
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ]
+        }
+      ],
+      "id": "current-confirmed-read",
+      "expected": {
+        "context_valid": true,
+        "final_targets": [
+          {
+            "target_id": "p1",
+            "revision": "6",
+            "structure_revision": "1",
+            "deleted": false
+          }
+        ]
+      }
+    },
+    {
+      "document_revision": "5",
+      "inventory": [
+        {
+          "target_id": "p1",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p1",
+          "revision": "3",
+          "structure_revision": "1",
+          "deleted": false
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "1",
+          "read_preconditions": [
+            {
+              "target_id": "p1",
+              "revision": "3",
+              "structure_revision": "1"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "6"
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "p1",
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ]
+        }
+      ],
+      "id": "old-document-basis-current-independent-target",
+      "expected": {
+        "context_valid": true,
+        "final_targets": [
+          {
+            "target_id": "p1",
+            "revision": "6",
+            "structure_revision": "1",
+            "deleted": false
+          }
+        ]
+      }
+    },
+    {
+      "document_revision": "5",
+      "inventory": [
+        {
+          "target_id": "p1",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p1",
+          "revision": "3",
+          "structure_revision": "1",
+          "deleted": false
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "5",
+          "read_preconditions": [
+            {
+              "target_id": "p1",
+              "revision": "2",
+              "structure_revision": "1"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "6"
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "p1",
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ]
+        }
+      ],
+      "id": "stale-content-observation",
+      "expected": {
+        "context_valid": true,
+        "entry_failure": {
+          "op_id": "a",
+          "code": "precondition_failed"
+        }
+      }
+    },
+    {
+      "document_revision": "5",
+      "inventory": [
+        {
+          "target_id": "p1",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p1",
+          "revision": "3",
+          "structure_revision": "1",
+          "deleted": false
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "5",
+          "read_preconditions": [
+            {
+              "target_id": "p1",
+              "revision": "3",
+              "structure_revision": "0"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "6"
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "p1",
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ]
+        }
+      ],
+      "id": "stale-structure-observation",
+      "expected": {
+        "context_valid": true,
+        "entry_failure": {
+          "op_id": "a",
+          "code": "precondition_failed"
+        }
+      }
+    },
+    {
+      "document_revision": "5",
+      "inventory": [
+        {
+          "target_id": "p1",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p1",
+          "revision": "3",
+          "structure_revision": "1",
+          "deleted": false
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "5",
+          "read_preconditions": [
+            {
+              "target_id": "new",
+              "revision": "3",
+              "structure_revision": "1"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "6"
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "p1",
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ]
+        }
+      ],
+      "id": "unknown-target-is-not-provisional",
+      "expected": {
+        "context_valid": true,
+        "entry_failure": {
+          "op_id": "a",
+          "code": "invalid_request"
+        }
+      }
+    },
+    {
+      "document_revision": "5",
+      "inventory": [
+        {
+          "target_id": "p1",
+          "deleted": true
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p1",
+          "revision": "3",
+          "structure_revision": "1",
+          "deleted": true
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "5",
+          "read_preconditions": [
+            {
+              "target_id": "p1",
+              "revision": "3",
+              "structure_revision": "1"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "6"
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "p1",
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ]
+        }
+      ],
+      "id": "retained-tombstone-read",
+      "expected": {
+        "context_valid": true,
+        "entry_failure": {
+          "op_id": "a",
+          "code": "target_deleted"
+        }
+      }
+    },
+    {
+      "document_revision": "5",
+      "inventory": [
+        {
+          "target_id": "p1",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p1",
+          "revision": "3",
+          "structure_revision": "1",
+          "deleted": false
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "5",
+          "read_preconditions": [
+            {
+              "target_id": "p1",
+              "revision": "3",
+              "structure_revision": "1"
+            },
+            {
+              "target_id": "p1",
+              "revision": "3",
+              "structure_revision": "1"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "6"
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "p1",
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ]
+        }
+      ],
+      "id": "duplicate-read-observation",
+      "expected": {
+        "context_valid": true,
+        "entry_failure": {
+          "op_id": "a",
+          "code": "invalid_request"
+        }
+      }
+    },
+    {
+      "document_revision": "5",
+      "inventory": [
+        {
+          "target_id": "p1",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p1",
+          "revision": "3",
+          "structure_revision": "1",
+          "deleted": false
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "5",
+          "read_preconditions": [
+            {
+              "target_id": "p1",
+              "revision": "6",
+              "structure_revision": "1"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "6"
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "p1",
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ]
+        }
+      ],
+      "id": "guessed-prospective-label-is-not-confirmed",
+      "expected": {
+        "context_valid": true,
+        "entry_failure": {
+          "op_id": "a",
+          "code": "precondition_failed"
+        }
+      }
+    },
+    {
+      "document_revision": "5",
+      "inventory": [
+        {
+          "target_id": "p1",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p1",
+          "revision": "3",
+          "structure_revision": "1",
+          "deleted": false
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "6",
+          "read_preconditions": [
+            {
+              "target_id": "p1",
+              "revision": "3",
+              "structure_revision": "1"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "6"
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "p1",
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ]
+        }
+      ],
+      "id": "future-document-basis",
+      "expected": {
+        "context_valid": true,
+        "entry_failure": {
+          "op_id": "a",
+          "code": "precondition_failed"
+        }
+      }
+    },
+    {
+      "document_revision": "5",
+      "inventory": [
+        {
+          "target_id": "p1",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p1",
+          "revision": "3",
+          "structure_revision": "1",
+          "deleted": false
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "5",
+          "read_preconditions": [
+            {
+              "target_id": "p1",
+              "revision": "3",
+              "structure_revision": "1"
+            }
+          ]
+        },
+        {
+          "op_id": "b",
+          "base_revision": "5",
+          "read_preconditions": [
+            {
+              "target_id": "p1",
+              "revision": "3",
+              "structure_revision": "1"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "6"
+        },
+        {
+          "op_id": "b",
+          "revision": "7"
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "p1",
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ]
+        },
+        {
+          "op_id": "b",
+          "effects": [
+            {
+              "target_id": "p1",
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ]
+        }
+      ],
+      "id": "within-change-working-target-becomes-stale",
+      "expected": {
+        "context_valid": true,
+        "working_failure": {
+          "op_id": "b",
+          "code": "precondition_failed"
+        }
+      }
+    },
+    {
+      "document_revision": "5",
+      "inventory": [
+        {
+          "target_id": "p1",
+          "deleted": false
+        },
+        {
+          "target_id": "p2",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p1",
+          "revision": "3",
+          "structure_revision": "1",
+          "deleted": false
+        },
+        {
+          "target_id": "p2",
+          "revision": "2",
+          "structure_revision": "2",
+          "deleted": false
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "5",
+          "read_preconditions": [
+            {
+              "target_id": "p1",
+              "revision": "3",
+              "structure_revision": "1"
+            }
+          ]
+        },
+        {
+          "op_id": "b",
+          "base_revision": "5",
+          "read_preconditions": [
+            {
+              "target_id": "p2",
+              "revision": "2",
+              "structure_revision": "2"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "6"
+        },
+        {
+          "op_id": "b",
+          "revision": "7"
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "p1",
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ]
+        },
+        {
+          "op_id": "b",
+          "effects": [
+            {
+              "target_id": "p2",
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ]
+        }
+      ],
+      "id": "independent-target-remains-current",
+      "expected": {
+        "context_valid": true,
+        "final_targets": [
+          {
+            "target_id": "p1",
+            "revision": "6",
+            "structure_revision": "1",
+            "deleted": false
+          },
+          {
+            "target_id": "p2",
+            "revision": "7",
+            "structure_revision": "2",
+            "deleted": false
+          }
+        ]
+      }
+    },
+    {
+      "document_revision": "5",
+      "inventory": [
+        {
+          "target_id": "p1",
+          "deleted": false
+        }
+      ],
+      "targets": [],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "5",
+          "read_preconditions": [
+            {
+              "target_id": "p1",
+              "revision": "3",
+              "structure_revision": "1"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "6"
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "p1",
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ]
+        }
+      ],
+      "id": "incomplete-host-target-context",
+      "expected": {
+        "context_valid": false
+      }
+    },
+    {
+      "document_revision": "5",
+      "inventory": [
+        {
+          "target_id": "p1",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p1",
+          "revision": "3",
+          "structure_revision": "1",
+          "deleted": false
+        },
+        {
+          "target_id": "extra",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "5",
+          "read_preconditions": [
+            {
+              "target_id": "p1",
+              "revision": "3",
+              "structure_revision": "1"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "6"
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "p1",
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ]
+        }
+      ],
+      "id": "extra-host-target-context",
+      "expected": {
+        "context_valid": false
+      }
+    },
+    {
+      "document_revision": "5",
+      "inventory": [
+        {
+          "target_id": "p1",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p1",
+          "revision": "3",
+          "structure_revision": "1",
+          "deleted": true
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "5",
+          "read_preconditions": [
+            {
+              "target_id": "p1",
+              "revision": "3",
+              "structure_revision": "1"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "6"
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "p1",
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ]
+        }
+      ],
+      "id": "host-tombstone-disagrees-with-checkpoint",
+      "expected": {
+        "context_valid": false
+      }
+    },
+    {
+      "document_revision": "5",
+      "inventory": [
+        {
+          "target_id": "p1",
+          "deleted": false
+        },
+        {
+          "target_id": "p1",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p1",
+          "revision": "3",
+          "structure_revision": "1",
+          "deleted": false
+        },
+        {
+          "target_id": "p1",
+          "revision": "3",
+          "structure_revision": "1",
+          "deleted": false
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "5",
+          "read_preconditions": [
+            {
+              "target_id": "p1",
+              "revision": "3",
+              "structure_revision": "1"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "6"
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "p1",
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ]
+        }
+      ],
+      "id": "duplicate-host-target-context",
+      "expected": {
+        "context_valid": false
+      }
+    },
+    {
+      "document_revision": "5",
+      "inventory": [
+        {
+          "target_id": "p1",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p1",
+          "revision": "3",
+          "structure_revision": "4",
+          "deleted": false
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "5",
+          "read_preconditions": [
+            {
+              "target_id": "p1",
+              "revision": "3",
+              "structure_revision": "1"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "6"
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "p1",
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ]
+        }
+      ],
+      "id": "structure-version-exceeds-target-version",
+      "expected": {
+        "context_valid": false
+      }
+    },
+    {
+      "document_revision": "5",
+      "inventory": [
+        {
+          "target_id": "p1",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p1",
+          "revision": "6",
+          "structure_revision": "1",
+          "deleted": false
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "5",
+          "read_preconditions": [
+            {
+              "target_id": "p1",
+              "revision": "3",
+              "structure_revision": "1"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "6"
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "p1",
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ]
+        }
+      ],
+      "id": "target-version-exceeds-host-head",
+      "expected": {
+        "context_valid": false
+      }
+    },
+    {
+      "document_revision": "5",
+      "inventory": [
+        {
+          "target_id": "p1",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p1",
+          "revision": "3",
+          "structure_revision": "1",
+          "deleted": false
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "5",
+          "read_preconditions": [
+            {
+              "target_id": "p1",
+              "revision": "3",
+              "structure_revision": "1"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "7"
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "p1",
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ]
+        }
+      ],
+      "id": "prospective-label-gap",
+      "expected": {
+        "context_valid": false
+      }
+    },
+    {
+      "document_revision": "5",
+      "inventory": [
+        {
+          "target_id": "p1",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p1",
+          "revision": "3",
+          "structure_revision": "1",
+          "deleted": false
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "5",
+          "read_preconditions": [
+            {
+              "target_id": "p1",
+              "revision": "3",
+              "structure_revision": "1"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "foreign",
+          "revision": "6"
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "p1",
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ]
+        }
+      ],
+      "id": "prospective-label-foreign-op",
+      "expected": {
+        "context_valid": false
+      }
+    },
+    {
+      "document_revision": "18446744073709551615",
+      "inventory": [
+        {
+          "target_id": "p1",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p1",
+          "revision": "3",
+          "structure_revision": "1",
+          "deleted": false
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "5",
+          "read_preconditions": [
+            {
+              "target_id": "p1",
+              "revision": "3",
+              "structure_revision": "1"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "1"
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "p1",
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ]
+        }
+      ],
+      "id": "prospective-label-overflow",
+      "expected": {
+        "context_valid": false
+      }
+    },
+    {
+      "document_revision": "5",
+      "inventory": [
+        {
+          "target_id": "p1",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p1",
+          "revision": "3",
+          "structure_revision": "1",
+          "deleted": false
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "5",
+          "read_preconditions": [
+            {
+              "target_id": "p1",
+              "revision": "3",
+              "structure_revision": "1"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "6"
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "p1",
+              "content_changed": false,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ]
+        }
+      ],
+      "id": "empty-effect-flags",
+      "expected": {
+        "context_valid": true,
+        "effects_valid": false
+      }
+    },
+    {
+      "document_revision": "5",
+      "inventory": [
+        {
+          "target_id": "p1",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p1",
+          "revision": "3",
+          "structure_revision": "1",
+          "deleted": false
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "5",
+          "read_preconditions": [
+            {
+              "target_id": "p1",
+              "revision": "3",
+              "structure_revision": "1"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "6"
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "p1",
+              "content_changed": true,
+              "structure_changed": true,
+              "created": true,
+              "deleted": true
+            }
+          ]
+        }
+      ],
+      "id": "created-and-deleted-one-effect",
+      "expected": {
+        "context_valid": true,
+        "effects_valid": false
+      }
+    },
+    {
+      "document_revision": "5",
+      "inventory": [
+        {
+          "target_id": "p1",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p1",
+          "revision": "3",
+          "structure_revision": "1",
+          "deleted": false
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "5",
+          "read_preconditions": [
+            {
+              "target_id": "p1",
+              "revision": "3",
+              "structure_revision": "1"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "6"
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "new",
+              "content_changed": true,
+              "structure_changed": false,
+              "created": true,
+              "deleted": false
+            }
+          ]
+        }
+      ],
+      "id": "creation-must-be-structural",
+      "expected": {
+        "context_valid": true,
+        "effects_valid": false
+      }
+    },
+    {
+      "document_revision": "5",
+      "inventory": [
+        {
+          "target_id": "p1",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p1",
+          "revision": "3",
+          "structure_revision": "1",
+          "deleted": false
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "5",
+          "read_preconditions": [
+            {
+              "target_id": "p1",
+              "revision": "3",
+              "structure_revision": "1"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "6"
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "p1",
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": true
+            }
+          ]
+        }
+      ],
+      "id": "deletion-must-be-structural",
+      "expected": {
+        "context_valid": true,
+        "effects_valid": false
+      }
+    },
+    {
+      "document_revision": "5",
+      "inventory": [
+        {
+          "target_id": "p1",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p1",
+          "revision": "3",
+          "structure_revision": "1",
+          "deleted": false
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "5",
+          "read_preconditions": [
+            {
+              "target_id": "p1",
+              "revision": "3",
+              "structure_revision": "1"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "6"
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "missing",
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ]
+        }
+      ],
+      "id": "unknown-existing-effect-target",
+      "expected": {
+        "context_valid": true,
+        "effects_valid": false
+      }
+    },
+    {
+      "document_revision": "5",
+      "inventory": [
+        {
+          "target_id": "p1",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p1",
+          "revision": "3",
+          "structure_revision": "1",
+          "deleted": false
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "5",
+          "read_preconditions": [
+            {
+              "target_id": "p1",
+              "revision": "3",
+              "structure_revision": "1"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "6"
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "p1",
+              "content_changed": true,
+              "structure_changed": true,
+              "created": true,
+              "deleted": false
+            }
+          ]
+        }
+      ],
+      "id": "create-cannot-reuse-existing-id",
+      "expected": {
+        "context_valid": true,
+        "effects_valid": false
+      }
+    },
+    {
+      "document_revision": "5",
+      "inventory": [
+        {
+          "target_id": "p1",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p1",
+          "revision": "3",
+          "structure_revision": "1",
+          "deleted": false
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "5",
+          "read_preconditions": [
+            {
+              "target_id": "p1",
+              "revision": "3",
+              "structure_revision": "1"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "6"
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "p1",
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            },
+            {
+              "target_id": "p1",
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ]
+        }
+      ],
+      "id": "duplicate-effects-cannot-partially-advance",
+      "expected": {
+        "context_valid": true,
+        "effects_valid": false
+      }
+    },
+    {
+      "document_revision": "5",
+      "inventory": [
+        {
+          "target_id": "p1",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p1",
+          "revision": "3",
+          "structure_revision": "1",
+          "deleted": false
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "5",
+          "read_preconditions": [
+            {
+              "target_id": "p1",
+              "revision": "3",
+              "structure_revision": "1"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "6"
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "foreign",
+          "effects": [
+            {
+              "target_id": "p1",
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ]
+        }
+      ],
+      "id": "out-of-order-effect-cannot-consume-label",
+      "expected": {
+        "context_valid": true,
+        "effects_valid": false
+      }
+    },
+    {
+      "document_revision": "5",
+      "inventory": [
+        {
+          "target_id": "p1",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p1",
+          "revision": "3",
+          "structure_revision": "1",
+          "deleted": false
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "5",
+          "read_preconditions": [
+            {
+              "target_id": "p1",
+              "revision": "3",
+              "structure_revision": "1"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "6"
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": []
+        }
+      ],
+      "id": "empty-effect-list-consumes-only-host-op-label",
+      "expected": {
+        "context_valid": true,
+        "final_targets": [
+          {
+            "target_id": "p1",
+            "revision": "3",
+            "structure_revision": "1",
+            "deleted": false
+          }
+        ]
+      }
+    },
+    {
+      "document_revision": "5",
+      "inventory": [
+        {
+          "target_id": "p1",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p1",
+          "revision": "3",
+          "structure_revision": "1",
+          "deleted": false
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "5",
+          "read_preconditions": [
+            {
+              "target_id": "p1",
+              "revision": "3",
+              "structure_revision": "1"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "6"
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "p1",
+              "content_changed": true,
+              "structure_changed": true,
+              "created": false,
+              "deleted": false
+            }
+          ]
+        }
+      ],
+      "id": "structural-effect-advances-both-host-counters",
+      "expected": {
+        "context_valid": true,
+        "final_targets": [
+          {
+            "target_id": "p1",
+            "revision": "6",
+            "structure_revision": "6",
+            "deleted": false
+          }
+        ]
+      }
+    },
+    {
+      "document_revision": "5",
+      "inventory": [
+        {
+          "target_id": "p1",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p1",
+          "revision": "3",
+          "structure_revision": "1",
+          "deleted": false
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "5",
+          "read_preconditions": [
+            {
+              "target_id": "p1",
+              "revision": "3",
+              "structure_revision": "1"
+            }
+          ]
+        },
+        {
+          "op_id": "b",
+          "base_revision": "5",
+          "read_preconditions": []
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "6"
+        },
+        {
+          "op_id": "b",
+          "revision": "7"
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "new",
+              "content_changed": true,
+              "structure_changed": true,
+              "created": true,
+              "deleted": false
+            }
+          ]
+        },
+        {
+          "op_id": "b",
+          "effects": [
+            {
+              "target_id": "new",
+              "content_changed": false,
+              "structure_changed": true,
+              "created": false,
+              "deleted": true
+            }
+          ]
+        }
+      ],
+      "id": "created-then-deleted-two-operations-retains-tombstone",
+      "expected": {
+        "context_valid": true,
+        "final_targets": [
+          {
+            "target_id": "new",
+            "revision": "7",
+            "structure_revision": "7",
+            "deleted": true
+          },
+          {
+            "target_id": "p1",
+            "revision": "3",
+            "structure_revision": "1",
+            "deleted": false
+          }
+        ]
+      }
+    }
+  ]
+}

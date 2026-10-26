@@ -1285,6 +1285,97 @@ jobs:
         timeout-minutes: 3
         run: pnpm exec vitest run hooks/__tests__/realtime-allowlist-docs-parity.test.ts lib/__tests__/telemetry-call-sites.test.ts
 
+  mooring:
+    name: Mooring native and actual WASM fixtures
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install pinned Rust and WASM target
+        timeout-minutes: 5
+        run: timeout --kill-after=15s 4m rustup toolchain install 1.99.1 --profile minimal --target wasm32-unknown-unknown
+      - name: Verify and extract pinned WASM binding tool
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/mooring-wasm-bindgen.tar.gz"
+          tools="$RUNNER_TEMP/mooring-tools"
+          mkdir -p "$tools"
+          curl --fail --location --proto '=https' --tlsv1.2 --retry 3 --max-time 60 --max-filesize 16777216 \
+            'https://github.com/wasm-bindgen/wasm-bindgen/releases/download/0.2.129/wasm-bindgen-0.2.129-x86_64-unknown-linux-musl.tar.gz' --output "$archive"
+          printf '%s  %s\n' '82d12bb940e2d4e72e0d5605387fc1b8ca179044e012b620f0ce4e7440e8320e' "$archive" | sha256sum --check --strict
+          tar -xzf "$archive" --directory "$tools" --strip-components=1 \
+            wasm-bindgen-0.2.129-x86_64-unknown-linux-musl/wasm-bindgen
+          echo "$tools" >> "$GITHUB_PATH"
+      - name: Run native tests and execute shared cases through WASM
+        timeout-minutes: 20
+        env:
+          RUSTUP_TOOLCHAIN: 1.99.1
+        run: timeout --kill-after=30s 18m bash scripts/ci/mooring.sh
+
+  mooring-actual:
+    name: Mooring ALL actual native SQL and HTTP/WS cases
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Install pinned Rust and WASM target
+        timeout-minutes: 5
+        run: timeout --kill-after=15s 4m rustup toolchain install 1.99.1 --profile minimal --target wasm32-unknown-unknown
+      - name: Verify and extract pinned WASM binding tool
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/mooring-wasm-bindgen.tar.gz"
+          tools="$RUNNER_TEMP/mooring-tools"
+          mkdir -p "$tools"
+          curl --fail --location --proto '=https' --tlsv1.2 --retry 3 --max-time 60 --max-filesize 16777216 \
+            'https://github.com/wasm-bindgen/wasm-bindgen/releases/download/0.2.129/wasm-bindgen-0.2.129-x86_64-unknown-linux-musl.tar.gz' --output "$archive"
+          printf '%s  %s\n' '82d12bb940e2d4e72e0d5605387fc1b8ca179044e012b620f0ce4e7440e8320e' "$archive" | sha256sum --check --strict
+          tar -xzf "$archive" --directory "$tools" --strip-components=1 \
+            wasm-bindgen-0.2.129-x86_64-unknown-linux-musl/wasm-bindgen
+          echo "$tools" >> "$GITHUB_PATH"
+      - name: Qualify actual runner evidence and discovery guards
+        timeout-minutes: 3
+        run: python3 -m unittest discover -s scripts/ci -p 'test_mooring_actual*.py' -v
+      - name: Build public-source native, SDK and D1/D3 fixtures
+        timeout-minutes: 15
+        env:
+          RUSTUP_TOOLCHAIN: 1.99.1
+        run: timeout --kill-after=30s 14m python3 scripts/ci/mooring-actual-fixtures.py --output "$RUNNER_TEMP/mooring-actual-fixtures"
+      - name: Execute every actual test with no skipped or missing cases
+        timeout-minutes: 40
+        run: timeout --kill-after=30s 39m python3 scripts/ci/mooring-actual.py --fixtures "$RUNNER_TEMP/mooring-actual-fixtures/fixtures.json" --results "$RUNNER_TEMP/mooring-actual-results"
+      - name: Preserve actual per-test execution evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: mooring-actual-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/mooring-actual-fixtures/
+            ${{ runner.temp }}/mooring-actual-results/
+          if-no-files-found: error
+          retention-days: 7
+
   docs-inventory:
     name: API and CLI documentation inventory
     needs: [merge-conflict-markers, changes]
@@ -2541,7 +2632,7 @@ jobs:
   result:
     name: CI Result
     if: always()
-    needs: [release-rehearsal, image, changes, docs-inventory, go-parity, frontend-parity, merge-conflict-markers, shell, frontend, frontend-test-types, frontend-test-shards, frontend-test, binary, go, go-test, go-race, go-race-cli-shards, go-race-cli, cli-subprocess-race, go-race-api-shards, go-race-api, go-platforms, go-lint, go-shuffle, managed-environments, harness-pr, cli-command-smoke, onboarding-default-boots, pages-apps, playwright-pr, onboarding-journey]
+    needs: [release-rehearsal, image, changes, mooring, mooring-actual, docs-inventory, go-parity, frontend-parity, merge-conflict-markers, shell, frontend, frontend-test-types, frontend-test-shards, frontend-test, binary, go, go-test, go-race, go-race-cli-shards, go-race-cli, cli-subprocess-race, go-race-api-shards, go-race-api, go-platforms, go-lint, go-shuffle, managed-environments, harness-pr, cli-command-smoke, onboarding-default-boots, pages-apps, playwright-pr, onboarding-journey]
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:

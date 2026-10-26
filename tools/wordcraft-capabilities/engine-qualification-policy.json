@@ -1,0 +1,2574 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": 5,
+  "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+  "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+  "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+  "registryDigest": "c249aa763dee6435b72e0ef1c8889bd5ba3d8d0b6573658d188d5979dedc6d5a",
+  "profileSha256": "7276f698b0a55ae474ee461bec6a1076187d9b77088fe6dda1e62a87fa82a1ae",
+  "scope": "isolated-c1-fixture",
+  "fixturesSource": {
+    "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+    "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+  },
+  "testSource": {
+    "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+    "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+  },
+  "commands": {
+    "format.allCaps": {
+      "test": "ce_format_allcaps",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "format.bold": {
+      "test": "ce_format_bold",
+      "testedParameters": {
+        "value": true
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "format.color": {
+      "test": "ce_format_color",
+      "testedParameters": {
+        "color": "FF0000"
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "color": {
+            "type": "string",
+            "enum": [
+              "FF0000"
+            ]
+          }
+        },
+        "required": [
+          "color"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "format.doubleStrikethrough": {
+      "test": "ce_format_doublestrikethrough",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "format.doubleUnderline": {
+      "test": "ce_format_doubleunderline",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "format.emboss": {
+      "test": "ce_format_emboss",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "format.engrave": {
+      "test": "ce_format_engrave",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "format.font": {
+      "test": "ce_format_font",
+      "testedParameters": {
+        "name": "Arial"
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": [
+              "Arial"
+            ]
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "format.hidden": {
+      "test": "ce_format_hidden",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "format.highlight": {
+      "test": "ce_format_highlight",
+      "testedParameters": {
+        "color": "yellow"
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "color": {
+            "type": "string",
+            "enum": [
+              "yellow"
+            ]
+          }
+        },
+        "required": [
+          "color"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "format.italic": {
+      "test": "ce_format_italic",
+      "testedParameters": {
+        "value": true
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "format.outline": {
+      "test": "ce_format_outline",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "format.position": {
+      "test": "ce_format_position",
+      "testedParameters": {
+        "points": 2
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "points": {
+            "type": "number",
+            "enum": [
+              2
+            ]
+          }
+        },
+        "required": [
+          "points"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "format.scale": {
+      "test": "ce_format_scale",
+      "testedParameters": {
+        "percent": 120
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "percent": {
+            "type": "number",
+            "enum": [
+              120
+            ]
+          }
+        },
+        "required": [
+          "percent"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "format.set": {
+      "test": "ce_format_set",
+      "testedParameters": {
+        "props": {
+          "italic": true,
+          "size": 18
+        }
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "props": {
+            "type": "object",
+            "enum": [
+              {
+                "italic": true,
+                "size": 18
+              }
+            ]
+          }
+        },
+        "required": [
+          "props"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "format.shading": {
+      "test": "ce_format_shading",
+      "testedParameters": {
+        "color": "FF0000"
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "color": {
+            "type": "string",
+            "enum": [
+              "FF0000"
+            ]
+          }
+        },
+        "required": [
+          "color"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "format.shadow": {
+      "test": "ce_format_shadow",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "format.size": {
+      "test": "ce_format_size",
+      "testedParameters": {
+        "size": 18
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "size": {
+            "type": "number",
+            "enum": [
+              18
+            ]
+          }
+        },
+        "required": [
+          "size"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "format.smallCaps": {
+      "test": "ce_format_smallcaps",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "format.spacing": {
+      "test": "ce_format_spacing",
+      "testedParameters": {
+        "points": 2
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "points": {
+            "type": "number",
+            "enum": [
+              2
+            ]
+          }
+        },
+        "required": [
+          "points"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "format.strikethrough": {
+      "test": "ce_format_strikethrough",
+      "testedParameters": {
+        "value": true
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "format.subscript": {
+      "test": "ce_format_subscript",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "format.superscript": {
+      "test": "ce_format_superscript",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "format.underline": {
+      "test": "ce_format_underline",
+      "testedParameters": {
+        "style": "single"
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "style": {
+            "type": "string",
+            "enum": [
+              "single"
+            ]
+          }
+        },
+        "required": [
+          "style"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "format.underlineColor": {
+      "test": "ce_format_underlinecolor",
+      "testedParameters": {
+        "color": "00FF00"
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "color": {
+            "type": "string",
+            "enum": [
+              "00FF00"
+            ]
+          }
+        },
+        "required": [
+          "color"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "format.wordUnderline": {
+      "test": "ce_format_wordunderline",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "list.define": {
+      "test": "ce_list_define",
+      "testedParameters": {
+        "levels": [
+          {
+            "format": "bullet",
+            "text": "\u2022"
+          }
+        ]
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "levels": {
+            "type": "array",
+            "enum": [
+              [
+                {
+                  "format": "bullet",
+                  "text": "\u2022"
+                }
+              ]
+            ]
+          }
+        },
+        "required": [
+          "levels"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "para.addSpaceBefore": {
+      "test": "ce_para_addspacebefore",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "para.align": {
+      "test": "ce_para_align",
+      "testedParameters": {
+        "value": "center"
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 0,
+        "end": 5
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string",
+            "enum": [
+              "center"
+            ]
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "para.alignCenter": {
+      "test": "ce_para_aligncenter",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "para.alignRight": {
+      "test": "ce_para_alignright",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "para.bullets": {
+      "test": "ce_para_bullets",
+      "testedParameters": {
+        "kind": "bullet"
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "bullet"
+            ]
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "para.distribute": {
+      "test": "ce_para_distribute",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "para.double": {
+      "test": "ce_para_double",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "para.hangingIndent": {
+      "test": "ce_para_hangingindent",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "para.heading1": {
+      "test": "ce_para_heading1",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "para.heading2": {
+      "test": "ce_para_heading2",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "para.heading3": {
+      "test": "ce_para_heading3",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "para.indent": {
+      "test": "ce_para_indent",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "para.indents": {
+      "test": "ce_para_indents",
+      "testedParameters": {
+        "firstLine": 12,
+        "left": 36,
+        "right": 18
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "firstLine": {
+            "type": "number",
+            "enum": [
+              12
+            ]
+          },
+          "left": {
+            "type": "number",
+            "enum": [
+              36
+            ]
+          },
+          "right": {
+            "type": "number",
+            "enum": [
+              18
+            ]
+          }
+        },
+        "required": [
+          "firstLine",
+          "left",
+          "right"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "para.justify": {
+      "test": "ce_para_justify",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "para.keepLines": {
+      "test": "ce_para_keeplines",
+      "testedParameters": {
+        "value": true
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "para.keepNext": {
+      "test": "ce_para_keepnext",
+      "testedParameters": {
+        "value": true
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "para.lineSpacing": {
+      "test": "ce_para_linespacing",
+      "testedParameters": {
+        "value": 1.5
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "number",
+            "enum": [
+              1.5
+            ]
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "para.listLevel": {
+      "test": "ce_para_listlevel",
+      "testedParameters": {
+        "level": 1
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [
+        {
+          "command": "para.numbering",
+          "params": {
+            "kind": "numbered"
+          }
+        }
+      ],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "level": {
+            "type": "number",
+            "enum": [
+              1
+            ]
+          }
+        },
+        "required": [
+          "level"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "para.normal": {
+      "test": "ce_para_normal",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "para.numbering": {
+      "test": "ce_para_numbering",
+      "testedParameters": {
+        "kind": "numbered"
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "numbered"
+            ]
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "para.oneAndHalf": {
+      "test": "ce_para_oneandhalf",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "para.pageBreakBefore": {
+      "test": "ce_para_pagebreakbefore",
+      "testedParameters": {
+        "value": true
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "para.rtl": {
+      "test": "ce_para_rtl",
+      "testedParameters": {
+        "value": true
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "para.set": {
+      "test": "ce_para_set",
+      "testedParameters": {
+        "props": {
+          "align": "center",
+          "keepNext": true
+        }
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "props": {
+            "type": "object",
+            "enum": [
+              {
+                "align": "center",
+                "keepNext": true
+              }
+            ]
+          }
+        },
+        "required": [
+          "props"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "para.shading": {
+      "test": "ce_para_shading",
+      "testedParameters": {
+        "color": "FF0000"
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "color": {
+            "type": "string",
+            "enum": [
+              "FF0000"
+            ]
+          }
+        },
+        "required": [
+          "color"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "para.single": {
+      "test": "ce_para_single",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "para.spacing": {
+      "test": "ce_para_spacing",
+      "testedParameters": {
+        "after": 6,
+        "before": 12
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "after": {
+            "type": "number",
+            "enum": [
+              6
+            ]
+          },
+          "before": {
+            "type": "number",
+            "enum": [
+              12
+            ]
+          }
+        },
+        "required": [
+          "after",
+          "before"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "para.style": {
+      "test": "ce_para_style",
+      "testedParameters": {
+        "style": "Heading 1"
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "style": {
+            "type": "string",
+            "enum": [
+              "Heading 1"
+            ]
+          }
+        },
+        "required": [
+          "style"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "para.widowControl": {
+      "test": "ce_para_widowcontrol",
+      "testedParameters": {
+        "value": true
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "text.backspace": {
+      "test": "ce_text_backspace",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "text.copyright": {
+      "test": "ce_text_copyright",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "text.delete": {
+      "test": "ce_text_delete",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "text.deleteWordBack": {
+      "test": "ce_text_deletewordback",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "text.deleteWordForward": {
+      "test": "ce_text_deletewordforward",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "text.ellipsis": {
+      "test": "ce_text_ellipsis",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "text.emDash": {
+      "test": "ce_text_emdash",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "text.insert": {
+      "test": "ce_text_insert",
+      "testedParameters": {
+        "text": "Z"
+      },
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "enum": [
+              "Z"
+            ]
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "text.insertTab": {
+      "test": "ce_text_inserttab",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "text.lineBreak": {
+      "test": "ce_text_linebreak",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "text.nbHyphen": {
+      "test": "ce_text_nbhyphen",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "text.nbsp": {
+      "test": "ce_text_nbsp",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "text.newParagraph": {
+      "test": "ce_text_newparagraph",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 2,
+        "end": 2
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "text.optionalHyphen": {
+      "test": "ce_text_optionalhyphen",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "text.registered": {
+      "test": "ce_text_registered",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    },
+    "text.trademark": {
+      "test": "ce_text_trademark",
+      "testedParameters": {},
+      "testedTarget": {
+        "unit": "utf8_bytes",
+        "start": 1,
+        "end": 3
+      },
+      "testedSetup": [],
+      "initialParagraphs": [
+        "Alpha",
+        "Peer"
+      ],
+      "coverage": "tested-fixture-only",
+      "invariants": [
+        "execution",
+        "oracleIntegrity",
+        "ownUndo",
+        "restoreP",
+        "staleTarget"
+      ],
+      "testedParameterSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+      "undoCommand": "participant.undo"
+    }
+  }
+}

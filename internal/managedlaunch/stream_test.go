@@ -80,9 +80,12 @@ func FuzzManagedStreamingMatchesLegacy(f *testing.F) {
 	for _, raw := range streamFixtureCorpus() {
 		f.Add(raw)
 	}
+	// A valid executable beyond the bounded prefix must not rescue that prefix.
+	f.Add(append(make([]byte, 64<<10), nativeFixture()...))
 	f.Fuzz(func(t *testing.T, raw []byte) {
 		if len(raw) > 64<<10 {
-			t.Skip()
+			// Compare this bounded prefix only, not the entire long input.
+			raw = raw[:64<<10]
 		}
 		want, we := legacyByteCapture("/opt/native/codex", raw)
 		got, ge := Capture("/opt/native/codex", raw)
@@ -95,6 +98,20 @@ func FuzzManagedStreamingMatchesLegacy(f *testing.F) {
 			t.Fatal("stream qualification differs")
 		}
 	})
+}
+
+func TestManagedBoundedFuzzPrefixRejectsExecutableTail(t *testing.T) {
+	raw := append(make([]byte, 64<<10), nativeFixture()...)
+	prefix := raw[:64<<10]
+	if _, err := legacyByteCapture("/opt/native/codex", prefix); err == nil {
+		t.Fatal("legacy capture accepted a non-executable bounded prefix")
+	}
+	if _, err := Capture("/opt/native/codex", prefix); err == nil {
+		t.Fatal("byte capture accepted an executable located after the bound")
+	}
+	if _, err := CaptureFile("/opt/native/codex", streamOwnedFile(t, prefix)); err == nil {
+		t.Fatal("stream capture accepted an executable located after the bound")
+	}
 }
 func BenchmarkManagedStreamingFile(b *testing.B) {
 	for _, n := range []int{1 << 20, 32 << 20, 128 << 20} {

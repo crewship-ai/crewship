@@ -2698,6 +2698,14 @@ An owner departure that would remove private content custody returns a conflict
 until the affected content has been transferred. Instance administration alone
 does not expose workspace-private names or successor contacts.
 
+Workbooks are stricter. Only a workspace OWNER sees or transfers a workbook
+here, and only once its owner is no longer an active member: removed,
+suspended or restricted, or with a removal or erasure refused because of the
+workbook within the last 7 days. Otherwise a workspace OWNER gets 403 and
+anyone else 404, and the listing omits the workbook. Each workbook transfer
+writes an `artifact.workbook_custody_transferred` audit log entry in the same
+transaction. See [When the owner leaves](/cli/workbook#when-the-owner-leaves).
+
 CLI: `crewship workspace page-ownership list` and
 `crewship workspace page-ownership transfer <page-id>`.
 

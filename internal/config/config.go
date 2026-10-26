@@ -61,6 +61,8 @@ type Config struct {
 	Documents DocumentsConfig          `yaml:"documents"`
 	Diff      DiffConfig               `yaml:"diff"`
 	Slides    SlidesConfig             `yaml:"slides"`
+	GridCraft GridCraftConfig          `yaml:"gridcraft"`
+	Mooring   MooringConfig            `yaml:"mooring"`
 	Audit     AuditConfig              `yaml:"audit"`
 
 	LocalModels  LocalModelsConfig  `yaml:"local_models"`
@@ -432,6 +434,15 @@ var (
 // Validate checks that all configuration values are within acceptable ranges
 // and required fields are set. Returns an error describing the first invalid value.
 func (c *Config) Validate() error {
+	if err := c.Mooring.validate(); err != nil {
+		return err
+	}
+	if err := c.GridCraft.validate(); err != nil {
+		return err
+	}
+	if err := validateGridCraftEditor(c, os.Getenv("CREWSHIP_ALLOWED_ORIGINS")); err != nil {
+		return err
+	}
 	if err := httpsafe.ValidateGitImportPolicy(c.Skills); err != nil {
 		return err
 	}
@@ -552,6 +563,12 @@ func loadFromFile(cfg *Config, path string) error {
 }
 
 func applyEnvOverrides(cfg *Config) {
+	if value, ok := os.LookupEnv("CREWSHIP_MOORING_ENABLED"); ok {
+		cfg.Mooring.Enabled = value == "true" || value == "1"
+	}
+	if value, ok := os.LookupEnv("CREWSHIP_MOORING_COMMANDS_ENABLED"); ok {
+		cfg.Mooring.CommandsEnabled = value == "true" || value == "1"
+	}
 	if raw, ok := os.LookupEnv("CREWSHIP_SKILLS_PRIVATE_HOSTS"); ok {
 		cfg.Skills.PrivateHosts = nil
 		if raw != "" {
@@ -561,6 +578,7 @@ func applyEnvOverrides(cfg *Config) {
 		}
 	}
 	for name, target := range map[string]*int{
+		"CREWSHIP_MOORING_DELIVERY_LEASE_MS":             &cfg.Mooring.DeliveryLeaseMilliseconds,
 		"CREWSHIP_DIFF_MAX_INPUT_BYTES":                  &cfg.Diff.MaxInputBytes,
 		"CREWSHIP_DIFF_MAX_LINES":                        &cfg.Diff.MaxLines,
 		"CREWSHIP_DIFF_MAX_CONCURRENT":                   &cfg.Diff.MaxConcurrent,
@@ -580,6 +598,16 @@ func applyEnvOverrides(cfg *Config) {
 	if v, ok := os.LookupEnv("CREWSHIP_DOCUMENTS_ENABLED"); ok {
 		cfg.Documents.Enabled = v == "true" || v == "1"
 	}
+	if v, ok := os.LookupEnv("CREWSHIP_GRIDCRAFT_ENABLED"); ok {
+		cfg.GridCraft.Enabled = v == "true" || v == "1"
+	}
+	if v, ok := os.LookupEnv("CREWSHIP_GRIDCRAFT_SERVICE_SOCKET"); ok {
+		cfg.GridCraft.ServiceSocket = v
+	}
+	if v, ok := os.LookupEnv("CREWSHIP_GRIDCRAFT_SERVICE_TOKEN_FILE"); ok {
+		cfg.GridCraft.ServiceTokenFile = v
+	}
+	applyGridCraftEditorEnv(&cfg.GridCraft)
 	if v, ok := os.LookupEnv("CREWSHIP_SLIDES_ENABLED"); ok {
 		cfg.Slides.Enabled = v == "true" || v == "1"
 	}

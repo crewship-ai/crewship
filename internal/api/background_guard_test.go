@@ -24,6 +24,14 @@ import (
 // request-scoped goroutine lands, nothing registers it, and six weeks
 // later a different test family starts failing intermittently (#1596).
 var unregisteredSpawnSites = map[string]string{
+	"mooring_collab_http_ws.go:collaborationSocketLiveness": "request-scoped WebSocket transport " +
+		"heartbeat: websocket defers stopLiveness, whose cancel plus receive from done joins " +
+		"the goroutine before the handler and its manager worker return. It touches no DB or " +
+		"storage and cannot outlive that socket request. TestCollaborationSocketLiveness " +
+		"requires the handler to finish after both responsive and silent peers, including " +
+		"the deferred heartbeat stop/join. Registering this long-lived request in the global " +
+		"detached-work counter would make unrelated fixtures wait for active sockets.",
+	"gridcraft_live.go:start":        "router-owned workbook outbox sweeper, started only by StartGridCraftOutbox from the server lifecycle: cancellation stops its ticker and bounded sweep; Router.Shutdown cancels and joins worker.wg before the DB closes. Most tests never start it (TestGridCraftCommittedPushOnPageChannel calls sweep directly); TestGridCraftOutboxSweeperOwnsThePush starts it and stops it through Router.Shutdown. A global fixture drain would wait indefinitely for this periodic worker.",
 	"provider_login_device.go:spawn": "device pollers are handler-owned: Stop cancels their context and joins h.wg; device fixtures register Stop before DB cleanup. A global drain would wait for human authorization in unrelated tests.",
 	// Daemons: started once, live for the process.
 	"issue_mutation_outbox.go:StartIssueMutationOutbox":          "router-owned boot daemon: cancellation stops its ticker and bounded drain; Router.Shutdown cancels and joins worker.wg before the DB closes. The explicit lifecycle is exercised by TestIssueOutboxWorkerRecoversJournalAndDeduplicatesLostACK, which replaces the handler, starts recovery and calls Shutdown before closing its journal writer. A global fixture drain would wait indefinitely for this periodic worker.",

@@ -91,15 +91,20 @@ func expectedSelfOrigin(r *http.Request) string {
 	if host == "" {
 		return ""
 	}
-	scheme := "http"
+	return RequestScheme(r) + "://" + host
+}
+
+// RequestScheme is the scheme the client used for r: "https" when the
+// connection is TLS or a trusted proxy (CREWSHIP_TRUSTED_PROXY_CIDRS,
+// loopback by default) says so in X-Forwarded-Proto, otherwise "http".
+func RequestScheme(r *http.Request) string {
 	if r.TLS != nil {
-		scheme = "https"
-	} else if isTrustedProxy(remoteHopIP(r)) {
-		if proto := r.Header.Get("X-Forwarded-Proto"); proto == "https" {
-			scheme = "https"
-		}
+		return "https"
 	}
-	return scheme + "://" + host
+	if isTrustedProxy(remoteHopIP(r)) && r.Header.Get("X-Forwarded-Proto") == "https" {
+		return "https"
+	}
+	return "http"
 }
 
 // EnforceOrigin returns middleware that rejects state-changing requests

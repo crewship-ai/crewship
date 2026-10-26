@@ -130,7 +130,7 @@ func (p *Provider) verifyUnusedCrewRuntime(ctx context.Context, crewID, containe
 		return fmt.Errorf("%w: runtime ownership or state is unconfirmed", provider.ErrRuntimeImageUpdatePending)
 	}
 	if p.cfg.OwnerActive != nil {
-		if err := p.cfg.OwnerActive(ctx, p.cfg.InstanceID); err != nil {
+		if err := p.cfg.OwnerActive(ctx, crewID); err != nil {
 			return err
 		}
 	}

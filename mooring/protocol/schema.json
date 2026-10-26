@@ -143,6 +143,87 @@
     },
     {
       "$ref": "#/$defs/RuntimeReady"
+    },
+    {
+      "$ref": "#/$defs/ValidateCheckpoint"
+    },
+    {
+      "$ref": "#/$defs/CheckpointValidated"
+    },
+    {
+      "$ref": "#/$defs/PrepareAtomic"
+    },
+    {
+      "$ref": "#/$defs/AtomicPrepared"
+    },
+    {
+      "$ref": "#/$defs/ValidateCheckpointCausal"
+    },
+    {
+      "$ref": "#/$defs/CheckpointValidatedCausal"
+    },
+    {
+      "$ref": "#/$defs/PrepareAtomicCausal"
+    },
+    {
+      "$ref": "#/$defs/AtomicPreparedCausal"
+    },
+    {
+      "$ref": "#/$defs/SessionOpen"
+    },
+    {
+      "$ref": "#/$defs/SessionRestore"
+    },
+    {
+      "$ref": "#/$defs/SessionOpened"
+    },
+    {
+      "$ref": "#/$defs/SessionSubmitBatch"
+    },
+    {
+      "$ref": "#/$defs/SessionCommitResult"
+    },
+    {
+      "$ref": "#/$defs/SessionParticipantOpen"
+    },
+    {
+      "$ref": "#/$defs/SessionParticipantInput"
+    },
+    {
+      "$ref": "#/$defs/BoundedTransferBegin"
+    },
+    {
+      "$ref": "#/$defs/BoundedTransferChunk"
+    },
+    {
+      "$ref": "#/$defs/SessionParticipantOutput"
+    },
+    {
+      "$ref": "#/$defs/SessionJoinBounded"
+    },
+    {
+      "$ref": "#/$defs/SessionJoinedBounded"
+    },
+    {
+      "$ref": "#/$defs/SessionRestored"
+    },
+    {
+      "$ref": "#/$defs/SessionStatusRequest"
+    },
+    {
+      "$ref": "#/$defs/SessionStatusResult"
+    },
+    {
+      "$ref": "#/$defs/SessionDescribeCheckpoint"
+    },
+    {
+      "$ref": "#/$defs/SessionCheckpointDescribed"
+    },
+    {
+      "$ref": "#/$defs/SessionInspectOrigins"
+    },
+    {
+      "$ref": "#/$defs/SessionOriginsInspected"
     }
   ],
   "$defs": {
@@ -159,19 +240,13 @@
       "type": "object",
       "properties": {
         "workspace_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "artifact_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "application_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -241,9 +316,7 @@
       "type": "object",
       "properties": {
         "target_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "revision": {
           "$ref": "#/$defs/Counter"
@@ -262,17 +335,13 @@
       "type": "object",
       "properties": {
         "op_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "fingerprint": {
           "$ref": "#/$defs/Digest"
         },
         "participant_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "base_revision": {
           "$ref": "#/$defs/Counter"
@@ -280,9 +349,7 @@
         "dependencies": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
+            "$ref": "#/$defs/Identifier"
           },
           "minItems": 0,
           "maxItems": 256,
@@ -316,9 +383,7 @@
       "type": "object",
       "properties": {
         "change_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "operations": {
           "type": "array",
@@ -332,9 +397,7 @@
           "$ref": "#/$defs/Digest"
         },
         "task_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -370,9 +433,7 @@
           "$ref": "#/$defs/ErrorCode"
         },
         "root_op_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "message": {
           "type": "string",
@@ -382,9 +443,7 @@
           "type": "object",
           "properties": {
             "op_id": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200
+              "$ref": "#/$defs/Identifier"
             },
             "code": {
               "enum": [
@@ -459,9 +518,7 @@
           "type": "object",
           "properties": {
             "op_id": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200
+              "$ref": "#/$defs/Identifier"
             },
             "status": {
               "const": "saved"
@@ -470,9 +527,7 @@
               "$ref": "#/$defs/Counter"
             },
             "issuer": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200
+              "$ref": "#/$defs/Identifier"
             },
             "durability": {
               "enum": [
@@ -494,9 +549,7 @@
           "type": "object",
           "properties": {
             "op_id": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200
+              "$ref": "#/$defs/Identifier"
             },
             "status": {
               "const": "rejected"
@@ -525,9 +578,7 @@
       "type": "object",
       "properties": {
         "change_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "status": {
           "enum": [
@@ -629,9 +680,7 @@
           "const": "hello"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "supported": {
           "type": "array",
@@ -640,6 +689,20 @@
           },
           "minItems": 1,
           "maxItems": 16
+        },
+        "control_profiles": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "mooring.prepare.v1",
+              "mooring.prepare-causal.v1",
+              "mooring.session-causal.v1"
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "description": "Optional inherited-FD private bootstrap offer only. Absent preserves existing bootstrap. Participant transports must reject this field semantically."
         }
       },
       "required": [
@@ -657,9 +720,7 @@
           "const": "welcome"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "selected": {
           "$ref": "#/$defs/Versions"
@@ -668,9 +729,7 @@
           "$ref": "#/$defs/Scope"
         },
         "participant_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "permission_version": {
           "$ref": "#/$defs/Counter"
@@ -679,9 +738,7 @@
           "$ref": "#/$defs/WireLimits"
         },
         "issuer": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -704,9 +761,7 @@
           "const": "commit_batch"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "versions": {
           "$ref": "#/$defs/Versions"
@@ -715,9 +770,7 @@
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "fence": {
           "$ref": "#/$defs/Fence"
@@ -754,9 +807,7 @@
           "const": "commit_result"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
@@ -768,9 +819,7 @@
           "$ref": "#/$defs/Counter"
         },
         "issuer": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "durability": {
           "enum": [
@@ -807,17 +856,13 @@
           "const": "operation_status"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "op_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "expected_fingerprint": {
           "$ref": "#/$defs/Digest"
@@ -841,9 +886,7 @@
           "const": "operation_status_result"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
@@ -857,9 +900,7 @@
               "type": "object",
               "properties": {
                 "op_id": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 200
+                  "$ref": "#/$defs/Identifier"
                 },
                 "status": {
                   "const": "unknown"
@@ -887,9 +928,7 @@
       "type": "object",
       "properties": {
         "asset_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "digest": {
           "$ref": "#/$defs/Digest"
@@ -918,9 +957,7 @@
           "$ref": "#/$defs/Counter"
         },
         "format_version": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "versions": {
           "$ref": "#/$defs/Versions"
@@ -1044,9 +1081,7 @@
           "const": "session_ticket_request"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
@@ -1071,22 +1106,16 @@
           "const": "session_ticket"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "participant_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "permission_version": {
           "$ref": "#/$defs/Counter"
@@ -1128,22 +1157,16 @@
           "const": "owner_acquire"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "runtime_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "renewal_nonce": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -1163,25 +1186,19 @@
           "const": "owner_renew"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "fence": {
           "$ref": "#/$defs/Fence"
         },
         "renewal_nonce": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "permission_version": {
           "$ref": "#/$defs/Counter"
@@ -1206,22 +1223,16 @@
           "const": "owner_grant"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "runtime_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "fence": {
           "$ref": "#/$defs/Fence"
@@ -1233,9 +1244,7 @@
           "$ref": "#/$defs/Counter"
         },
         "renewal_nonce": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "permission_version": {
           "$ref": "#/$defs/Counter"
@@ -1263,22 +1272,16 @@
           "const": "delivery_renew"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "participant_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "fence": {
           "$ref": "#/$defs/Fence"
@@ -1287,14 +1290,10 @@
           "$ref": "#/$defs/Counter"
         },
         "renewal_nonce": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "gate_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -1318,22 +1317,16 @@
           "const": "delivery_grant"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "participant_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "generation": {
           "$ref": "#/$defs/Counter"
@@ -1342,17 +1335,13 @@
           "$ref": "#/$defs/Counter"
         },
         "renewal_nonce": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "duration_ms": {
           "$ref": "#/$defs/PositiveCounter"
         },
         "gate_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -1377,22 +1366,16 @@
           "const": "session_closed"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "participant_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "generation": {
           "$ref": "#/$defs/Counter"
@@ -1401,17 +1384,13 @@
           "$ref": "#/$defs/Counter"
         },
         "barrier_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "reason": {
           "$ref": "#/$defs/Rejection"
         },
         "gate_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -1436,37 +1415,27 @@
           "const": "delivery_blocked"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "participant_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "fence": {
           "$ref": "#/$defs/Fence"
         },
         "barrier_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "covered_gate_ids": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
+            "$ref": "#/$defs/Identifier"
           },
           "minItems": 0,
           "maxItems": 4096,
@@ -1498,22 +1467,16 @@
           "const": "revocation_confirmed"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "participant_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "barrier_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "permission_version": {
           "$ref": "#/$defs/Counter"
@@ -1561,17 +1524,13 @@
           "const": "read_request"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "revision": {
           "$ref": "#/$defs/Counter"
@@ -1619,9 +1578,7 @@
           "const": "read_result"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
@@ -1660,9 +1617,7 @@
           "const": "checkpoint_request"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
@@ -1687,9 +1642,7 @@
           "const": "checkpoint_result"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "checkpoint": {
           "$ref": "#/$defs/Checkpoint"
@@ -1710,22 +1663,16 @@
           "const": "presence"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "participant_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "ttl_ms": {
           "$ref": "#/$defs/PositiveCounter"
@@ -1750,9 +1697,7 @@
       "type": "object",
       "properties": {
         "task_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "allow_partial": {
           "type": "boolean"
@@ -1777,16 +1722,12 @@
           "maxItems": 4096
         },
         "participant_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "unresolved_change_ids": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
+            "$ref": "#/$defs/Identifier"
           },
           "minItems": 0,
           "maxItems": 4096,
@@ -1898,17 +1839,13 @@
           "const": "task_status"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "task_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -1927,9 +1864,7 @@
           "const": "task_result"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
@@ -1954,17 +1889,13 @@
           "const": "task_cancel"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "task_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -1983,22 +1914,16 @@
           "const": "proposal"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "proposal_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "participant_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "base_revision": {
           "$ref": "#/$defs/Counter"
@@ -2037,25 +1962,19 @@
           "const": "proposal_accept"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "proposal_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "base_revision": {
           "$ref": "#/$defs/Counter"
         },
         "op_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -2076,35 +1995,25 @@
           "const": "undo_request"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "task_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "participant_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "base_revision": {
           "$ref": "#/$defs/Counter"
         },
         "op_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "target_change_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -2136,9 +2045,7 @@
           "const": "protocol_error"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
@@ -2170,14 +2077,10 @@
       "type": "object",
       "properties": {
         "target_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "model_type": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "revision": {
           "$ref": "#/$defs/Counter"
@@ -2246,9 +2149,7 @@
       "type": "object",
       "properties": {
         "command_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "input_schema": {
           "type": "object"
@@ -2257,9 +2158,7 @@
           "type": "object"
         },
         "effect_scope": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "mutation": {
           "type": "boolean"
@@ -2282,9 +2181,7 @@
       "type": "object",
       "properties": {
         "format_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "model_versions": {
           "type": "array",
@@ -2388,9 +2285,7 @@
       "type": "object",
       "properties": {
         "application_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "package_version": {
           "type": "string",
@@ -2435,9 +2330,7 @@
         "capabilities": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
+            "$ref": "#/$defs/Identifier"
           },
           "minItems": 0,
           "maxItems": 128,
@@ -2551,14 +2444,10 @@
           "const": "manifest_request"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "application_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -2576,9 +2465,7 @@
           "const": "manifest_result"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "manifest": {
           "$ref": "#/$defs/ApplicationManifest"
@@ -2599,17 +2486,13 @@
           "const": "lifecycle_request"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "fence": {
           "$ref": "#/$defs/Fence"
@@ -2644,17 +2527,13 @@
           "const": "lifecycle_result"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "generation": {
           "$ref": "#/$defs/Counter"
@@ -2689,9 +2568,7 @@
           "const": "session_join"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "ticket": {
           "type": "string",
@@ -2718,22 +2595,16 @@
           "const": "session_joined"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "participant_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "generation": {
           "$ref": "#/$defs/Counter"
@@ -2745,9 +2616,7 @@
           "$ref": "#/$defs/Versions"
         },
         "gate_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -2771,17 +2640,13 @@
           "const": "session_leave"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -2800,17 +2665,13 @@
           "const": "submit_changes"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "versions": {
           "$ref": "#/$defs/Versions"
@@ -2824,9 +2685,7 @@
           "maxItems": 256
         },
         "task_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -2847,24 +2706,18 @@
           "const": "changes_received"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "change_ids": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
+            "$ref": "#/$defs/Identifier"
           },
           "minItems": 1,
           "maxItems": 256,
@@ -2895,25 +2748,19 @@
           "const": "task_submit"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "versions": {
           "$ref": "#/$defs/Versions"
         },
         "task_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "allow_partial": {
           "type": "boolean"
@@ -2975,17 +2822,13 @@
           "const": "proposal_request"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "proposal_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -3004,17 +2847,13 @@
           "const": "collaboration_update"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "generation": {
           "$ref": "#/$defs/Counter"
@@ -3025,9 +2864,7 @@
         "change_ids": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
+            "$ref": "#/$defs/Identifier"
           },
           "minItems": 1,
           "maxItems": 256,
@@ -3069,17 +2906,13 @@
           "const": "document_update"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "generation": {
           "$ref": "#/$defs/Counter"
@@ -3147,25 +2980,19 @@
           "const": "asset_request"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "revision": {
           "$ref": "#/$defs/Counter"
         },
         "asset_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "offset_bytes": {
           "$ref": "#/$defs/Counter"
@@ -3194,9 +3021,7 @@
           "const": "asset_result"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
@@ -3205,9 +3030,7 @@
           "$ref": "#/$defs/Counter"
         },
         "asset_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "offset_bytes": {
           "$ref": "#/$defs/Counter"
@@ -3248,17 +3071,13 @@
           "const": "ticket_validate"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "fence": {
           "$ref": "#/$defs/Fence"
@@ -3269,9 +3088,7 @@
           "maxLength": 4096
         },
         "validation_nonce": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -3293,25 +3110,19 @@
           "const": "ticket_validated"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "generation": {
           "$ref": "#/$defs/Counter"
         },
         "participant_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "permission_version": {
           "$ref": "#/$defs/Counter"
@@ -3326,14 +3137,10 @@
           "$ref": "#/$defs/PositiveCounter"
         },
         "validation_nonce": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "gate_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -3360,40 +3167,30 @@
           "const": "revocation_notice"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "scope": {
           "$ref": "#/$defs/Scope"
         },
         "session_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "generation": {
           "$ref": "#/$defs/Counter"
         },
         "participant_ref": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "permission_version": {
           "$ref": "#/$defs/Counter"
         },
         "barrier_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "gate_ids": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
+            "$ref": "#/$defs/Identifier"
           },
           "minItems": 0,
           "maxItems": 4096,
@@ -3447,9 +3244,7 @@
           "type": "object",
           "properties": {
             "change_id": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200
+              "$ref": "#/$defs/Identifier"
             },
             "status": {
               "enum": [
@@ -3475,12 +3270,18 @@
           "const": "runtime_ready"
         },
         "request_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
+          "$ref": "#/$defs/Identifier"
         },
         "selected": {
           "$ref": "#/$defs/Versions"
+        },
+        "selected_control_profile": {
+          "enum": [
+            "mooring.prepare.v1",
+            "mooring.prepare-causal.v1",
+            "mooring.session-causal.v1"
+          ],
+          "description": "Optional exact offered inherited-FD private control profile selection. Absent retains old262144 bound; never infer support from versions alone."
         }
       },
       "required": [
@@ -3491,6 +3292,2188 @@
       "additionalProperties": false,
       "x-direction": "runtime_to_host",
       "description": "Version/readiness acknowledgement on the private inherited host RPC channel only. Carries no scope, participant identity, permissions, content or authority. Never a participant Welcome or durability receipt."
+    },
+    "Identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "not": {
+        "pattern": "\u0000"
+      },
+      "description": "1..200 Unicode scalar values, excluding U+0000. Strict JSON rejects invalid Unicode before schema; no Unicode normalization. Does not constrain opaque application payload text."
+    },
+    "OpaquePreparedCheckpoint": {
+      "type": "object",
+      "properties": {
+        "encoding": {
+          "const": "base64"
+        },
+        "state": {
+          "type": "string",
+          "maxLength": 11184812,
+          "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+          "not": {
+            "pattern": "[^A-Za-z0-9+/=]"
+          }
+        },
+        "digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "encoding",
+        "state",
+        "digest"
+      ],
+      "additionalProperties": false,
+      "description": "Full opaque app checkpoint. Digest is SHA256 of decoded bytes. E3 negotiated whole-frame bounds additionally apply; generic maxima unchanged. Private prepare profile decoded checkpoint limit1572864 bytes; canonical base64 including zero padding bits, digest equality checked before app interpretation."
+    },
+    "TargetIdentity": {
+      "type": "object",
+      "properties": {
+        "target_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "deleted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "target_id",
+        "deleted"
+      ],
+      "additionalProperties": false
+    },
+    "TargetVersion": {
+      "type": "object",
+      "properties": {
+        "target_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "revision": {
+          "$ref": "#/$defs/Counter"
+        },
+        "structure_revision": {
+          "$ref": "#/$defs/Counter"
+        },
+        "deleted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "target_id",
+        "revision",
+        "structure_revision",
+        "deleted"
+      ],
+      "additionalProperties": false
+    },
+    "PreparedOperationRevision": {
+      "type": "object",
+      "properties": {
+        "op_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "revision": {
+          "$ref": "#/$defs/PositiveCounter"
+        }
+      },
+      "required": [
+        "op_id",
+        "revision"
+      ],
+      "additionalProperties": false,
+      "description": "Host prospective contiguous per-op revision labels, not allocated or durable receipts. Runtime must not invent labels or issue Saved."
+    },
+    "PrepareContext": {
+      "type": "object",
+      "properties": {
+        "read_policy": {
+          "const": "agent_confirmed_current"
+        },
+        "document_revision": {
+          "$ref": "#/$defs/Counter"
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TargetVersion"
+          },
+          "minItems": 0,
+          "maxItems": 65536
+        },
+        "operation_revisions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PreparedOperationRevision"
+          },
+          "minItems": 1,
+          "maxItems": 256
+        }
+      },
+      "required": [
+        "read_policy",
+        "document_revision",
+        "targets",
+        "operation_revisions"
+      ],
+      "additionalProperties": false,
+      "description": "Host-only trusted current complete target inventory and prospective labels. First-stage capability rejects stale observations, including causal stale reads. Human updates/provisional target reads/causal overlay not supported until separately qualified."
+    },
+    "TargetEffect": {
+      "type": "object",
+      "properties": {
+        "target_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "content_changed": {
+          "type": "boolean"
+        },
+        "structure_changed": {
+          "type": "boolean"
+        },
+        "created": {
+          "type": "boolean"
+        },
+        "deleted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "target_id",
+        "content_changed",
+        "structure_changed",
+        "created",
+        "deleted"
+      ],
+      "additionalProperties": false
+    },
+    "PreparedOperationEffects": {
+      "type": "object",
+      "properties": {
+        "op_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TargetEffect"
+          },
+          "minItems": 0,
+          "maxItems": 4096
+        }
+      },
+      "required": [
+        "op_id",
+        "targets"
+      ],
+      "additionalProperties": false
+    },
+    "ValidateCheckpoint": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "validate_checkpoint"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "selected": {
+          "$ref": "#/$defs/Versions"
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/OpaquePreparedCheckpoint"
+        },
+        "control_profile": {
+          "const": "mooring.prepare.v1"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "scope",
+        "selected",
+        "checkpoint",
+        "control_profile"
+      ],
+      "additionalProperties": false,
+      "x-direction": "host_to_runtime",
+      "description": "Private inherited authenticated host RPC only. Full checkpoint validation and complete stable target inventory; never fake empty AtomicChange. Invalid checkpoint or uncertain engine failure closes the private channel; host Exchange aborts nonterminally, never a durable operation rejection."
+    },
+    "CheckpointValidated": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "checkpoint_validated"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "selected": {
+          "$ref": "#/$defs/Versions"
+        },
+        "input_checkpoint_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "inventory": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TargetIdentity"
+          },
+          "minItems": 0,
+          "maxItems": 65536
+        },
+        "control_profile": {
+          "const": "mooring.prepare.v1"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "scope",
+        "selected",
+        "input_checkpoint_digest",
+        "inventory",
+        "control_profile"
+      ],
+      "additionalProperties": false,
+      "x-direction": "runtime_to_host",
+      "description": "Private inherited RPC candidate validation result, not storage initialization or authority. Complete inventory includes retained tombstones; host assigns initial versions."
+    },
+    "PrepareAtomic": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "prepare_atomic"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "selected": {
+          "$ref": "#/$defs/Versions"
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/OpaquePreparedCheckpoint"
+        },
+        "context": {
+          "$ref": "#/$defs/PrepareContext"
+        },
+        "change": {
+          "$ref": "#/$defs/AtomicChange"
+        },
+        "control_profile": {
+          "const": "mooring.prepare.v1"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "scope",
+        "selected",
+        "checkpoint",
+        "context",
+        "change",
+        "control_profile"
+      ],
+      "additionalProperties": false,
+      "x-direction": "host_to_runtime",
+      "description": "Private inherited RPC only, actual admitted agent typed commands on confirmed current reads. Human Yrs updates unsupported. Full normalized immutable change; context is not fingerprint membership."
+    },
+    "PreparedCandidate": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "candidate"
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/OpaquePreparedCheckpoint"
+        },
+        "effects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PreparedOperationEffects"
+          },
+          "minItems": 1,
+          "maxItems": 256
+        },
+        "inventory": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TargetIdentity"
+          },
+          "minItems": 0,
+          "maxItems": 65536
+        }
+      },
+      "required": [
+        "kind",
+        "checkpoint",
+        "effects",
+        "inventory"
+      ],
+      "additionalProperties": false
+    },
+    "PreparedDirectFailure": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "failure"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "reason": {
+          "$ref": "#/$defs/Rejection"
+        }
+      },
+      "required": [
+        "kind",
+        "op_id",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "description": "Actual immutable failing member and valid direct terminal reason only. Host must validate attribution and durably record before terminal outcome. Unknown/ambiguous engine failures close the private channel and host aborts nonterminally."
+    },
+    "AtomicPrepared": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "atomic_prepared"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "selected": {
+          "$ref": "#/$defs/Versions"
+        },
+        "input_checkpoint_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "change_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "membership_hash": {
+          "$ref": "#/$defs/Digest"
+        },
+        "outcome": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/PreparedCandidate"
+            },
+            {
+              "$ref": "#/$defs/PreparedDirectFailure"
+            }
+          ]
+        },
+        "control_profile": {
+          "const": "mooring.prepare.v1"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "scope",
+        "selected",
+        "input_checkpoint_digest",
+        "change_id",
+        "membership_hash",
+        "outcome",
+        "control_profile"
+      ],
+      "additionalProperties": false,
+      "x-direction": "runtime_to_host",
+      "description": "Private inherited RPC candidate/failure only. No Saved/issuer/durability/authority. Exact request/checkpoint/change/membership/per-op effect binding is semantic validation."
+    },
+    "CausalReadIndex": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]?|1[0-9]{2}|2[0-4][0-9]|25[0-5])$",
+      "description": "Original immutable per-operation read index, canonical decimal 0..255.",
+      "not": {
+        "pattern": "[^0-9]"
+      }
+    },
+    "CausalEntryVersion": {
+      "type": "object",
+      "properties": {
+        "revision": {
+          "$ref": "#/$defs/Counter"
+        },
+        "structure_revision": {
+          "$ref": "#/$defs/Counter"
+        },
+        "deleted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "revision",
+        "structure_revision",
+        "deleted"
+      ],
+      "additionalProperties": false
+    },
+    "QualifiedCausalRead": {
+      "type": "object",
+      "properties": {
+        "op_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "read_index": {
+          "$ref": "#/$defs/CausalReadIndex"
+        },
+        "target_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "observed_revision": {
+          "$ref": "#/$defs/Counter"
+        },
+        "observed_structure_revision": {
+          "$ref": "#/$defs/Counter"
+        },
+        "entry": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/CausalEntryVersion"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "covered": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "op_id",
+        "read_index",
+        "target_id",
+        "observed_revision",
+        "entry",
+        "covered"
+      ],
+      "additionalProperties": false,
+      "description": "Trusted host attestation after complete durable dependency closure and every intervening target effect. Exact original read binding is mandatory; optional structure observation is absent, never null. Missing history is nonterminal, not uncovered."
+    },
+    "CausalPrepareContext": {
+      "type": "object",
+      "properties": {
+        "read_policy": {
+          "const": "agent_dependency_covered"
+        },
+        "document_revision": {
+          "$ref": "#/$defs/Counter"
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TargetVersion"
+          },
+          "minItems": 0,
+          "maxItems": 65536
+        },
+        "operation_revisions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PreparedOperationRevision"
+          },
+          "minItems": 1,
+          "maxItems": 256
+        },
+        "qualified_reads": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/QualifiedCausalRead"
+          },
+          "minItems": 0,
+          "maxItems": 65536
+        }
+      },
+      "required": [
+        "read_policy",
+        "document_revision",
+        "targets",
+        "operation_revisions",
+        "qualified_reads"
+      ],
+      "additionalProperties": false,
+      "description": "Separate private causal profile only. Full entry inventory and exact original-read attestations; same-atomic effects still require original earlier dependency closure. No provisional created-target reads or human deltas."
+    },
+    "ValidateCheckpointCausal": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "validate_checkpoint_causal"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "selected": {
+          "$ref": "#/$defs/Versions"
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/OpaquePreparedCheckpoint"
+        },
+        "control_profile": {
+          "const": "mooring.prepare-causal.v1"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "scope",
+        "selected",
+        "checkpoint",
+        "control_profile"
+      ],
+      "additionalProperties": false,
+      "x-direction": "host_to_runtime",
+      "description": "Separately negotiated causal inherited-host profile. Private inherited authenticated host RPC only. Full checkpoint validation and complete stable target inventory; never fake empty AtomicChange. Invalid checkpoint or uncertain engine failure closes the private channel; host Exchange aborts nonterminally, never a durable operation rejection."
+    },
+    "CheckpointValidatedCausal": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "checkpoint_validated_causal"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "selected": {
+          "$ref": "#/$defs/Versions"
+        },
+        "input_checkpoint_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "inventory": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TargetIdentity"
+          },
+          "minItems": 0,
+          "maxItems": 65536
+        },
+        "control_profile": {
+          "const": "mooring.prepare-causal.v1"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "scope",
+        "selected",
+        "input_checkpoint_digest",
+        "inventory",
+        "control_profile"
+      ],
+      "additionalProperties": false,
+      "x-direction": "runtime_to_host",
+      "description": "Separately negotiated causal inherited-host profile. Private inherited RPC candidate validation result, not storage initialization or authority. Complete inventory includes retained tombstones; host assigns initial versions."
+    },
+    "PrepareAtomicCausal": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "prepare_atomic_causal"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "selected": {
+          "$ref": "#/$defs/Versions"
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/OpaquePreparedCheckpoint"
+        },
+        "context": {
+          "$ref": "#/$defs/CausalPrepareContext"
+        },
+        "change": {
+          "$ref": "#/$defs/AtomicChange"
+        },
+        "control_profile": {
+          "const": "mooring.prepare-causal.v1"
+        },
+        "human_context": {
+          "$ref": "#/$defs/SessionHumanPrepareContext"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "scope",
+        "selected",
+        "checkpoint",
+        "context",
+        "change",
+        "control_profile"
+      ],
+      "additionalProperties": false,
+      "x-direction": "host_to_runtime",
+      "description": "Separately negotiated causal inherited-host profile. Private inherited RPC only, actual admitted agent typed commands on confirmed current reads. Human Yrs updates unsupported. Full normalized immutable change; context is not fingerprint membership."
+    },
+    "AtomicPreparedCausal": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "atomic_prepared_causal"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "selected": {
+          "$ref": "#/$defs/Versions"
+        },
+        "input_checkpoint_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "change_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "membership_hash": {
+          "$ref": "#/$defs/Digest"
+        },
+        "outcome": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/PreparedCandidate"
+            },
+            {
+              "$ref": "#/$defs/PreparedDirectFailure"
+            }
+          ]
+        },
+        "control_profile": {
+          "const": "mooring.prepare-causal.v1"
+        },
+        "native_delta": {
+          "$ref": "#/$defs/SessionNativeDelta"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "scope",
+        "selected",
+        "input_checkpoint_digest",
+        "change_id",
+        "membership_hash",
+        "outcome",
+        "control_profile"
+      ],
+      "additionalProperties": false,
+      "x-direction": "runtime_to_host",
+      "description": "Separately negotiated causal inherited-host profile. Private inherited RPC candidate/failure only. No Saved/issuer/durability/authority. Exact request/checkpoint/change/membership/per-op effect binding is semantic validation."
+    },
+    "ConfirmedCheckpointBasis": {
+      "type": "object",
+      "properties": {
+        "revision": {
+          "$ref": "#/$defs/Counter"
+        },
+        "digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "revision",
+        "digest"
+      ],
+      "additionalProperties": false,
+      "description": "Retained canonical checkpoint at an atomic boundary. Host checks inside the same SQL writer; not a client-asserted current head."
+    },
+    "SessionOpen": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_open"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "control_profile": {
+          "const": "mooring.session-causal.v1"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runtime_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        },
+        "required_capabilities": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "checkpoint_identity_v1",
+              "origin_inventory_v1",
+              "human_native_prepare_v1"
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "allOf": [
+            {
+              "not": {
+                "items": {
+                  "enum": [
+                    "origin_inventory_v1",
+                    "human_native_prepare_v1"
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "control_profile",
+        "scope",
+        "session_id",
+        "runtime_ref",
+        "versions",
+        "required_capabilities"
+      ],
+      "additionalProperties": false,
+      "x-direction": "host_to_runtime",
+      "description": "Small initialization request. Does not grant participant authority. Runtime requests real OwnerGrant before accepting restoration. Named profile pins exact limits: 100ms/256ops/262144 encoded batch; 4 outstanding/1048576 encoded flight; 262144 unsent; 100 participants; per-gate input262144/global4194304; delivery default5000ms/configured1..5000ms; private frame2097152; queued controls4194304/128; transfer2097152/chunks65536/max32/reassembly4194304. No implicit numeric defaults or generic maximum advertisement."
+    },
+    "SessionRestore": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_restore"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "control_profile": {
+          "const": "mooring.session-causal.v1"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runtime_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "fence": {
+          "$ref": "#/$defs/Fence"
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/Checkpoint"
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TargetVersion"
+          },
+          "minItems": 0,
+          "maxItems": 4096
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "control_profile",
+        "scope",
+        "session_id",
+        "runtime_ref",
+        "fence",
+        "versions",
+        "checkpoint",
+        "targets"
+      ],
+      "additionalProperties": false,
+      "x-direction": "host_to_runtime",
+      "description": "Only after correlated current OwnerGrant. Complete authenticated checkpoint and target inventory; no speculative candidate installation."
+    },
+    "SessionOpened": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_opened"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "control_profile": {
+          "const": "mooring.session-causal.v1"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runtime_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "fence": {
+          "$ref": "#/$defs/Fence"
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        },
+        "confirmed_basis": {
+          "$ref": "#/$defs/ConfirmedCheckpointBasis"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "checkpoint_identity_v1",
+              "origin_inventory_v1",
+              "human_native_prepare_v1"
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "allOf": [
+            {
+              "not": {
+                "items": {
+                  "enum": [
+                    "origin_inventory_v1",
+                    "human_native_prepare_v1"
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "control_profile",
+        "scope",
+        "session_id",
+        "runtime_ref",
+        "fence",
+        "versions",
+        "confirmed_basis",
+        "capabilities"
+      ],
+      "additionalProperties": false,
+      "x-direction": "runtime_to_host",
+      "description": "Running confirmation only after full restoration. No authority or durability receipt."
+    },
+    "SessionSubmitBatch": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_submit_batch"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "control_profile": {
+          "const": "mooring.session-causal.v1"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runtime_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "fence": {
+          "$ref": "#/$defs/Fence"
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        },
+        "confirmed_basis": {
+          "$ref": "#/$defs/ConfirmedCheckpointBasis"
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AtomicChange"
+          },
+          "minItems": 1,
+          "maxItems": 256
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "control_profile",
+        "scope",
+        "session_id",
+        "runtime_ref",
+        "fence",
+        "versions",
+        "confirmed_basis",
+        "changes"
+      ],
+      "additionalProperties": false,
+      "x-direction": "runtime_to_host",
+      "description": "Explicit queued-submit. Host qualifies retained confirmed basis inside writer and derives CURRENT transport expected head there. Original immutable changes remain byte-semantic unchanged. Inner request raw/JCS <=262144 even on private2MiB channel."
+    },
+    "SessionCommitResult": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_commit_result"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "control_profile": {
+          "const": "mooring.session-causal.v1"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runtime_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "fence": {
+          "$ref": "#/$defs/Fence"
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        },
+        "receipt": {
+          "$ref": "#/$defs/CommitResult"
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/Checkpoint"
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TargetVersion"
+          },
+          "minItems": 0,
+          "maxItems": 4096
+        },
+        "native_deltas": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "$ref": "#/$defs/SessionCommittedNativeDelta"
+          }
+        },
+        "public_receipt": {
+          "$ref": "#/$defs/CommitResult"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "control_profile",
+        "scope",
+        "session_id",
+        "runtime_ref",
+        "fence",
+        "versions",
+        "receipt",
+        "checkpoint",
+        "targets"
+      ],
+      "additionalProperties": false,
+      "x-direction": "host_to_runtime",
+      "description": "Bound exact host durable result plus authoritative resulting checkpoint/inventory. Whole encoded output fits negotiated capacity BEFORE COMMIT, not after. No receipt truncation or rewrite."
+    },
+    "SessionParticipantOpen": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_participant_open"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "control_profile": {
+          "const": "mooring.session-causal.v1"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runtime_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "fence": {
+          "$ref": "#/$defs/Fence"
+        },
+        "connection_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "join": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/SessionJoin"
+            },
+            {
+              "$ref": "#/$defs/SessionJoinBounded"
+            }
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "control_profile",
+        "scope",
+        "session_id",
+        "runtime_ref",
+        "fence",
+        "connection_ref",
+        "join"
+      ],
+      "additionalProperties": false,
+      "x-direction": "host_to_runtime",
+      "description": "Go-authenticated conduit binds opaque connection. Rust separately validates one-use ticket over inherited host channel and starts first-send BOOTTIME gate."
+    },
+    "SessionParticipantInput": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_participant_input"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "control_profile": {
+          "const": "mooring.session-causal.v1"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runtime_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "fence": {
+          "$ref": "#/$defs/Fence"
+        },
+        "connection_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "participant_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "gate_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "permission_version": {
+          "$ref": "#/$defs/Counter"
+        },
+        "message": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/SubmitChanges"
+            },
+            {
+              "$ref": "#/$defs/TaskSubmit"
+            },
+            {
+              "$ref": "#/$defs/ReadRequest"
+            },
+            {
+              "$ref": "#/$defs/StatusRequest"
+            },
+            {
+              "$ref": "#/$defs/SessionLeave"
+            },
+            {
+              "$ref": "#/$defs/Presence"
+            }
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "control_profile",
+        "scope",
+        "session_id",
+        "runtime_ref",
+        "fence",
+        "connection_ref",
+        "participant_ref",
+        "gate_id",
+        "permission_version",
+        "message"
+      ],
+      "additionalProperties": false,
+      "x-direction": "host_to_runtime",
+      "description": "Inner public message remains <=262144 raw/JCS. Immutable mutations must first have exact host-sealed ingress proof; participant_ref alone is no author authority."
+    },
+    "BoundedTransferBegin": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "bounded_transfer_begin"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "participant_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "gate_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "generation": {
+          "$ref": "#/$defs/Counter"
+        },
+        "permission_version": {
+          "$ref": "#/$defs/Counter"
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        },
+        "revision": {
+          "$ref": "#/$defs/Counter"
+        },
+        "transfer_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "kind": {
+          "enum": [
+            "checkpoint",
+            "document_update",
+            "host_receipt"
+          ]
+        },
+        "total_bytes": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "chunk_count": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "scope",
+        "session_id",
+        "participant_ref",
+        "gate_id",
+        "generation",
+        "permission_version",
+        "versions",
+        "revision",
+        "transfer_id",
+        "kind",
+        "total_bytes",
+        "chunk_count",
+        "digest"
+      ],
+      "additionalProperties": false,
+      "x-direction": "runtime_to_participant",
+      "description": "Requires explicitly selected participant bounded_transfer_v1 feature. Only known inner grammar, total raw/JCS<=2097152, exactlyceil(total/65536) chunks<=32, one active/gate and aggregate reassembly<=4194304. Does not widen public raw/canonical per-frame262144."
+    },
+    "BoundedTransferChunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "bounded_transfer_chunk"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "participant_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "gate_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "generation": {
+          "$ref": "#/$defs/Counter"
+        },
+        "permission_version": {
+          "$ref": "#/$defs/Counter"
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        },
+        "revision": {
+          "$ref": "#/$defs/Counter"
+        },
+        "transfer_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "index": {
+          "$ref": "#/$defs/Counter"
+        },
+        "data": {
+          "type": "string",
+          "maxLength": 87384,
+          "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+          "not": {
+            "pattern": "[^A-Za-z0-9+/=]"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "scope",
+        "session_id",
+        "participant_ref",
+        "gate_id",
+        "generation",
+        "permission_version",
+        "versions",
+        "revision",
+        "transfer_id",
+        "index",
+        "data"
+      ],
+      "additionalProperties": false,
+      "x-direction": "runtime_to_participant",
+      "description": "Strict canonical base64 incl padbits, decoded chunk<=65536. Exact increasingindex<chunk_count, all bindings match. Rust BOOTTIME and Go final gate before EACH chunk; closure discards partial. Whole digest and known inner shape/bindings verified before atomic installation."
+    },
+    "SessionParticipantOutput": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_participant_output"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "control_profile": {
+          "const": "mooring.session-causal.v1"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runtime_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "fence": {
+          "$ref": "#/$defs/Fence"
+        },
+        "connection_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "participant_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "gate_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "permission_version": {
+          "$ref": "#/$defs/Counter"
+        },
+        "message": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/SessionJoined"
+            },
+            {
+              "$ref": "#/$defs/ReadResult"
+            },
+            {
+              "$ref": "#/$defs/StatusResult"
+            },
+            {
+              "$ref": "#/$defs/ChangesReceived"
+            },
+            {
+              "$ref": "#/$defs/CommitResult"
+            },
+            {
+              "$ref": "#/$defs/TaskResult"
+            },
+            {
+              "$ref": "#/$defs/SessionClosed"
+            },
+            {
+              "$ref": "#/$defs/ProtocolError"
+            },
+            {
+              "$ref": "#/$defs/Presence"
+            },
+            {
+              "$ref": "#/$defs/DocumentUpdate"
+            },
+            {
+              "$ref": "#/$defs/BoundedTransferBegin"
+            },
+            {
+              "$ref": "#/$defs/BoundedTransferChunk"
+            },
+            {
+              "$ref": "#/$defs/SessionJoinedBounded"
+            }
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "control_profile",
+        "scope",
+        "session_id",
+        "runtime_ref",
+        "fence",
+        "connection_ref",
+        "participant_ref",
+        "gate_id",
+        "permission_version",
+        "message"
+      ],
+      "additionalProperties": false,
+      "x-direction": "runtime_to_host",
+      "description": "Go final bounded-send gate mandatory. Host-origin receipt must exactly match retained actual committed result/correlation; never infer Saved authority from issuer or child runtime. Inner ordinary public frames remain<=262144; large known payloads only chunked."
+    },
+    "SessionJoinBounded": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_join_bounded"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "ticket": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        },
+        "transfer_profile": {
+          "const": "bounded_transfer_v1"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "ticket",
+        "versions",
+        "transfer_profile"
+      ],
+      "additionalProperties": false,
+      "x-direction": "participant_to_runtime",
+      "description": "Separate explicit transfer-capable join. Old SessionJoin remains unchanged and cannot receive an overlimit checkpoint."
+    },
+    "SessionJoinedBounded": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_joined_bounded"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "joined": {
+          "$ref": "#/$defs/SessionJoined"
+        },
+        "selected_transfer_profile": {
+          "const": "bounded_transfer_v1"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "joined",
+        "selected_transfer_profile"
+      ],
+      "additionalProperties": false,
+      "x-direction": "runtime_to_participant",
+      "description": "Exact negotiated selection only when requested; unchanged SessionJoined bindings inside. No capability from unrequested feature."
+    },
+    "SessionRestored": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_restored"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "control_profile": {
+          "const": "mooring.session-causal.v1"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runtime_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "fence": {
+          "$ref": "#/$defs/Fence"
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        },
+        "confirmed_basis": {
+          "$ref": "#/$defs/ConfirmedCheckpointBasis"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "control_profile",
+        "scope",
+        "session_id",
+        "runtime_ref",
+        "fence",
+        "versions",
+        "confirmed_basis"
+      ],
+      "additionalProperties": false,
+      "x-direction": "runtime_to_host",
+      "description": "Echoes SessionRestore request_id after full restoration. SessionOpened separately echoes original SessionOpen request_id once owner+restore startup completed."
+    },
+    "SessionStatusRequest": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_status_request"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "control_profile": {
+          "const": "mooring.session-causal.v1"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runtime_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "fence": {
+          "$ref": "#/$defs/Fence"
+        },
+        "connection_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "participant_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "gate_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "permission_version": {
+          "$ref": "#/$defs/Counter"
+        },
+        "message": {
+          "$ref": "#/$defs/StatusRequest"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "control_profile",
+        "scope",
+        "session_id",
+        "runtime_ref",
+        "fence",
+        "connection_ref",
+        "participant_ref",
+        "gate_id",
+        "permission_version",
+        "message"
+      ],
+      "additionalProperties": false,
+      "x-direction": "runtime_to_host",
+      "description": "Host-captured FIFO barrier after every earlier accepted submit, never a child-selected sequence. Current external reader authorization before lookup; exact original fingerprint. Rust retains unsent/uncertain intent and never fabricates terminal unknown."
+    },
+    "SessionStatusResult": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_status_result"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "control_profile": {
+          "const": "mooring.session-causal.v1"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runtime_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "fence": {
+          "$ref": "#/$defs/Fence"
+        },
+        "connection_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "participant_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "gate_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "permission_version": {
+          "$ref": "#/$defs/Counter"
+        },
+        "message": {
+          "$ref": "#/$defs/StatusResult"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "control_profile",
+        "scope",
+        "session_id",
+        "runtime_ref",
+        "fence",
+        "connection_ref",
+        "participant_ref",
+        "gate_id",
+        "permission_version",
+        "message"
+      ],
+      "additionalProperties": false,
+      "x-direction": "host_to_runtime",
+      "description": "Host-captured FIFO barrier after every earlier accepted submit, never a child-selected sequence. Current external reader authorization before lookup; exact original fingerprint. Rust retains unsent/uncertain intent and never fabricates terminal unknown."
+    },
+    "CheckpointDescription": {
+      "type": "object",
+      "properties": {
+        "format_version": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        },
+        "assets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Asset"
+          },
+          "minItems": 0,
+          "maxItems": 4096
+        }
+      },
+      "required": [
+        "format_version",
+        "versions",
+        "assets"
+      ],
+      "additionalProperties": false
+    },
+    "SessionDescribeCheckpoint": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_describe_checkpoint"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "control_profile": {
+          "const": "mooring.session-causal.v1"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runtime_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/OpaquePreparedCheckpoint"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "control_profile",
+        "scope",
+        "session_id",
+        "runtime_ref",
+        "versions",
+        "checkpoint"
+      ],
+      "additionalProperties": false,
+      "x-direction": "host_to_runtime"
+    },
+    "SessionCheckpointDescribed": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_checkpoint_described"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "control_profile": {
+          "const": "mooring.session-causal.v1"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runtime_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        },
+        "input_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "description": {
+          "$ref": "#/$defs/CheckpointDescription"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "control_profile",
+        "scope",
+        "session_id",
+        "runtime_ref",
+        "versions",
+        "input_digest",
+        "description"
+      ],
+      "additionalProperties": false,
+      "x-direction": "runtime_to_host"
+    },
+    "AllocatedCrdtOrigin": {
+      "type": "object",
+      "properties": {
+        "origin": {
+          "$ref": "#/$defs/Counter"
+        },
+        "clock": {
+          "$ref": "#/$defs/PositiveCounter"
+        }
+      },
+      "required": [
+        "origin",
+        "clock"
+      ],
+      "additionalProperties": false,
+      "description": "Semantic bounded-profile validation requires origin<=9007199254740991 and clock<=4294967295. Zero origin may be occupied baseline; never an issued writer."
+    },
+    "SessionInspectOrigins": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_inspect_origins"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "control_profile": {
+          "const": "mooring.session-causal.v1"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runtime_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "fence": {
+          "$ref": "#/$defs/Fence"
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/Checkpoint"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "control_profile",
+        "scope",
+        "session_id",
+        "runtime_ref",
+        "fence",
+        "versions",
+        "checkpoint"
+      ],
+      "additionalProperties": false,
+      "x-direction": "host_to_runtime",
+      "description": "Read-only application inventory; requires separately observed origin_inventory_v1 opt-in. Current fence and full creator provenance remain distinct. No issuance or access authority."
+    },
+    "SessionOriginsInspected": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session_origins_inspected"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "control_profile": {
+          "const": "mooring.session-causal.v1"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runtime_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "fence": {
+          "$ref": "#/$defs/Fence"
+        },
+        "versions": {
+          "$ref": "#/$defs/Versions"
+        },
+        "checkpoint_basis": {
+          "$ref": "#/$defs/ConfirmedCheckpointBasis"
+        },
+        "checkpoint_generation": {
+          "$ref": "#/$defs/Counter"
+        },
+        "content_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "allocated": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AllocatedCrdtOrigin"
+          },
+          "maxItems": 4096
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "control_profile",
+        "scope",
+        "session_id",
+        "runtime_ref",
+        "fence",
+        "versions",
+        "checkpoint_basis",
+        "checkpoint_generation",
+        "content_digest",
+        "allocated"
+      ],
+      "additionalProperties": false,
+      "x-direction": "runtime_to_host",
+      "description": "Complete strictly sorted unique allocated origin/positive clock inventory for exact full checkpoint. Numeric validation and actual concrete adapter/runtime/full-basis/fence provenance are mandatory. No reservation, authority or inferred empty baseline."
+    },
+    "SessionNativeDelta": {
+      "type": "object",
+      "properties": {
+        "writer_origin": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "allocation_origins": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PositiveCounter"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "update": {
+          "type": "string",
+          "maxLength": 349528
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "minItems": 0,
+          "maxItems": 65536,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "writer_origin",
+        "allocation_origins",
+        "update",
+        "targets"
+      ],
+      "additionalProperties": false,
+      "description": "Session human_native_prepare_v1 only. Actual application-state difference and writer identifier DATA, never source authority. Decoder verifies exact insertion origins, full replay and bounds; empty allocation_origins means no allocations, not an invented origin. Retain only with matched durable host outcome."
+    },
+    "SessionSavedNativeDelta": {
+      "type": "object",
+      "properties": {
+        "reference": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "source_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "source_order": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "writer_origin": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "update": {
+          "type": "string",
+          "maxLength": 349528
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "minItems": 0,
+          "maxItems": 65536,
+          "uniqueItems": true
+        },
+        "revision": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "checkpoint_state_digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "reference",
+        "source_ref",
+        "source_order",
+        "writer_origin",
+        "update",
+        "targets",
+        "revision",
+        "checkpoint_state_digest"
+      ],
+      "additionalProperties": false,
+      "description": "Caller-trusted live host record bound to an actual Saved outcome and exact application checkpoint STATE bytes. This is not a participant assertion or full Checkpoint.Digest."
+    },
+    "SessionSavedHumanPrefix": {
+      "type": "object",
+      "properties": {
+        "reference": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "source_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "source_order": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "change": {
+          "$ref": "#/$defs/AtomicChange"
+        }
+      },
+      "required": [
+        "reference",
+        "source_ref",
+        "source_order",
+        "change"
+      ],
+      "additionalProperties": false,
+      "description": "Exact immutable original own atomic linked to actual Saved transcript by reference/source/order. Its authored state digest stays untrusted intent until replay matches; the authored view is never labelled Saved."
+    },
+    "SessionHumanPrepareContext": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runtime_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "fence": {
+          "$ref": "#/$defs/Fence"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "source_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "original_reference": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "origin": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "source_order": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "next_unsettled_order": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "original_basis": {
+          "$ref": "#/$defs/Checkpoint"
+        },
+        "saved_transcript": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SessionSavedNativeDelta"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "own_prefix": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SessionSavedHumanPrefix"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "own_history": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SessionSavedNativeDelta"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "replay_basis": {
+          "$ref": "#/$defs/Checkpoint",
+          "description": "Optional single earlier retained FULL checkpoint from the original own-prefix base. Original_basis remains the exact immutable current operation base; never selected by state vector or digest. Both are authenticated by the host writer and replay-qualified by the app."
+        },
+        "prepared_prefix": {
+          "$ref": "#/$defs/SessionPreparedPrefix"
+        }
+      },
+      "required": [
+        "session_id",
+        "runtime_ref",
+        "fence",
+        "op_id",
+        "source_ref",
+        "original_reference",
+        "origin",
+        "source_order",
+        "next_unsettled_order",
+        "original_basis",
+        "saved_transcript",
+        "own_prefix",
+        "own_history"
+      ],
+      "additionalProperties": false,
+      "description": "Only actual inherited session host after human_native_prepare_v1 negotiation may construct this optional context. All source/order/basis/history bindings derive from original authenticated live submissions and actual Saved outcomes. Not client authority; no durable issuer/journal implied. Single-operation human atomic only; generic causal agent preparation rejects this field."
+    },
+    "SessionPreparedNativeDelta": {
+      "type": "object",
+      "properties": {
+        "reference": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "source_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "source_order": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "writer_origin": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "update": {
+          "type": "string",
+          "maxLength": 349528
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "minItems": 0,
+          "maxItems": 65536,
+          "uniqueItems": true
+        },
+        "checkpoint_state_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "prospective_revision": {
+          "$ref": "#/$defs/PositiveCounter"
+        }
+      },
+      "required": [
+        "reference",
+        "source_ref",
+        "source_order",
+        "writer_origin",
+        "update",
+        "targets",
+        "prospective_revision",
+        "checkpoint_state_digest"
+      ],
+      "additionalProperties": false,
+      "description": "Only a concrete earlier candidate from the SAME active SQL writer. The revision and state digest are prospective, not Saved. Actual original sealed source and candidate membership must match; never released as durable history before successful COMMIT."
+    },
+    "SessionPreparedHumanPrefix": {
+      "type": "object",
+      "properties": {
+        "reference": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "source_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "source_order": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "change": {
+          "$ref": "#/$defs/AtomicChange"
+        }
+      },
+      "required": [
+        "reference",
+        "source_ref",
+        "source_order",
+        "change"
+      ],
+      "additionalProperties": false,
+      "description": "Exact immutable original own operation linked to a concrete earlier candidate in this SAME SQL writer. Its authored state digest is intent until replay matches. This is not an actual Saved prefix."
+    },
+    "SessionPreparedPrefix": {
+      "type": "object",
+      "properties": {
+        "transaction_revision": {
+          "$ref": "#/$defs/Counter"
+        },
+        "transaction_state_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "deltas": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SessionPreparedNativeDelta"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "own_prefix": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SessionPreparedHumanPrefix"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        }
+      },
+      "required": [
+        "transaction_revision",
+        "transaction_state_digest",
+        "deltas",
+        "own_prefix"
+      ],
+      "additionalProperties": false,
+      "description": "Separate bounded transaction-local candidate evidence. Actual Saved transcript ends at this exact transaction-start state; the app replays and verifies that raw-state hash, then each prospective candidate cut. No third checkpoint copy or pre-COMMIT Saved claim."
+    },
+    "SessionCommittedNativeDelta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "change_id",
+        "membership_hash",
+        "revision",
+        "checkpoint_state_digest",
+        "native_delta"
+      ],
+      "properties": {
+        "change_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "membership_hash": {
+          "$ref": "#/$defs/Digest"
+        },
+        "revision": {
+          "$ref": "#/$defs/PositiveCounter"
+        },
+        "checkpoint_state_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "native_delta": {
+          "$ref": "#/$defs/SessionNativeDelta"
+        }
+      }
     }
   },
   "x-schema-version": "0.4.0"

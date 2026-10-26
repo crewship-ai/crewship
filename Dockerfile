@@ -55,13 +55,19 @@ COPY config/*.json ./config/
 COPY schemas/*.json ./schemas/
 COPY schemas/wordcraft/ ./schemas/wordcraft/
 COPY internal/pages/content_types.json ./internal/pages/
-COPY e2e/ ./e2e/
-COPY mooring/protocol/generated/ts/ ./mooring/protocol/generated/ts/
 COPY mooring/client/ ./mooring/client/
+COPY mooring/protocol/generated/ts/ ./mooring/protocol/generated/ts/
+COPY e2e/ ./e2e/
+# Reference editors are TypeScript inputs checked by the production build.
+COPY examples/ ./examples/
 COPY scripts/prepare-pdf-assets.mjs scripts/prepare-chat-workers.mjs scripts/check-control-accessibility.tsx ./scripts/
 COPY tools/pages-build/sdk.ts ./tools/pages-build/
 # Standalone registry tooling is also part of the root TypeScript input graph.
 COPY tools/wordcraft-capabilities/ ./tools/wordcraft-capabilities/
+# Explicit C-E acceptance files participate in the root TypeScript graph.
+COPY e2e/wordcraft-ce/ ./e2e/wordcraft-ce/
+COPY tools/wordcraft-ce/ ./tools/wordcraft-ce/
+COPY playwright.wordcraft-ce.config.ts ./
 # The browser instantiates this shared closed model with its own pinned Yjs.
 # Copy only the schema source, without the separate Docs service runtime.
 COPY tools/docs-service/schema-core.mjs ./tools/docs-service/
@@ -110,6 +116,8 @@ RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \
     go mod download
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
+# Public schema and generated Go wire types; no Rust compiler or vendor tree.
+COPY mooring/protocol/ ./mooring/protocol/
 # CLI embeds the supported Pages dependency lock and source starter.
 COPY tools/ ./tools/
 COPY examples/ ./examples/
@@ -170,6 +178,11 @@ RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
     -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE} -X github.com/crewship-ai/crewship/internal/crashreport.DSN=${SENTRY_DSN}" \
     -o /crewship ./cmd/crewship
+# The workbook test barrier exists only in binaries built with the
+# crewship_testbarrier tag. No image may carry it, whatever build args or
+# GOFLAGS were used; the same guard checks every release archive.
+COPY scripts/check-no-test-barrier.sh /usr/local/bin/check-no-test-barrier
+RUN sh /usr/local/bin/check-no-test-barrier /crewship /crewship-sidecar
 
 # -- Runner --
 # The docker CLI (page builds, devcontainer images) comes from Docker's static

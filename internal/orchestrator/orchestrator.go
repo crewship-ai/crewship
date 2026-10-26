@@ -156,6 +156,8 @@ type AgentRunRequest struct {
 	// a turn of their own. Default false — a new dispatch path is watchable by
 	// construction, which is the point of #1823.
 	SuppressSessionStream bool
+	strictContentPrivacy  bool              // Host-only; JSON cannot create or clear this policy.
+	mooringDocumentTools  bool              // Host-only actual D1 task: fixed MCP surface, no builtin tools.
 	NetworkMode           string            // "free" (default) or "restricted" — crew-level network policy
 	AllowedDomains        []string          // Extra allowed domains for restricted mode
 	AllowPrivateEndpoints bool              // #961: crew opted in to reach a private/LAN model endpoint (RFC1918/loopback). Link-local/metadata stay blocked regardless.
@@ -530,6 +532,7 @@ type ContainerBusyProbe func(ctx context.Context, crewID, containerID string) bo
 type StatsRegisterFunc func(containerID, crewID, workspaceID string)
 
 type Orchestrator struct {
+	gridCraftEnabled         bool // startup-only, experimental offline workbook tools
 	hostOutputRoot           string
 	hostOutputCapacityBytes  int64
 	hostOutputCapacityRuns   int
@@ -1119,6 +1122,9 @@ func (o *Orchestrator) getSkillInvocationObserver() SkillInvocationObserver {
 // testable without driving a full agent run. event MUST be a tool_call
 // event; the caller guards the type check.
 func (o *Orchestrator) dispatchToolCallObservers(req AgentRunRequest, event AgentEvent) {
+	if req.strictContentPrivacy {
+		return
+	}
 	toolName := event.Content
 	if toolName == "" {
 		if m, ok := event.Metadata.(map[string]interface{}); ok {
@@ -1707,3 +1713,6 @@ func (o *Orchestrator) SetFeedbackPreferenceReader(reader func(context.Context, 
 	defer o.mu.Unlock()
 	o.feedbackPreferenceReader = reader
 }
+
+// SetGridCraftEnabled is called only during server construction, before runs.
+func (o *Orchestrator) SetGridCraftEnabled(enabled bool) { o.gridCraftEnabled = enabled }

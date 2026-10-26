@@ -378,6 +378,7 @@ export function AccessCard({
   canManage = true,
   manageRefusal,
   footer,
+  documentContent = false,
 }: {
   workspaceId: string
   slug: string
@@ -397,12 +398,14 @@ export function AccessCard({
    * section's save model (`SaveEffect`), not about this card alone.
    */
   footer?: React.ReactNode
+  /** Native document content uses read/write grants; panel production is inapplicable. */
+  documentContent?: boolean
 }) {
   const { grants, inertCount, loading, refusal, error } = usePageGrants(workspaceId, slug)
 
   const [subjectType, setSubjectType] = React.useState<PageSubjectType>("user")
   const [subject, setSubject] = React.useState("")
-  const [level, setLevel] = React.useState<PageGrantLevel>("produce")
+  const [level, setLevel] = React.useState<PageGrantLevel>(documentContent ? "read" : "produce")
   const [panels, setPanels] = React.useState("")
   /** The last write's refusal. Cleared when the form changes, because a
    *  message about a request nobody is making any more is worse than none. */
@@ -448,7 +451,7 @@ export function AccessCard({
           }`
 
   const forWorkspace = subjectType === "workspace"
-  const levels = pageGrantLevelsFor(subjectType)
+  const levels = pageGrantLevelsFor(subjectType).filter(level => !documentContent || level !== "produce")
 
   const onIssue = (e: React.FormEvent) => {
     e.preventDefault()
@@ -494,7 +497,9 @@ export function AccessCard({
             icon={KeyRound}
             title="No grants on this page"
             description={
-              canManage
+              documentContent
+                ? "Direct grants are listed here. Ownership and inherited access appear below."
+                : canManage
                 ? `It is reachable by its owner, by workspace admins, and by the crews that own its panels. Widen it with the form below, or run crewship page grant ${slug} --crew <slug> --level read.`
                 // Pointing a reader at a form that is not rendered for them
                 // makes the missing right read as a missing feature. The
@@ -642,7 +647,10 @@ export function AccessCard({
             )}
 
             <span className="type-page-meta text-muted-foreground-soft">
-              {PAGE_GRANT_LEVEL_MEANING[level]}
+              {documentContent
+                ? level === "write" ? "May read and edit document content. This does not grant sharing or agent delegation."
+                  : "May read document content. Writing and sharing require separate rights."
+                : PAGE_GRANT_LEVEL_MEANING[level]}
             </span>
           </form>
         )}

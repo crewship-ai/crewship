@@ -2,13 +2,16 @@
 /** Generate from the actual compiled registry, never from a hand-written command list. */
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+import { applyEngineQualifications } from './engine-qualification.mjs'
 
 export const ENGINE_SHA = '7ef2633a7e84956522d1ca47b99fe6feef16c1db'
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const digest = value => createHash('sha256').update(value).digest('hex')
+const profiles = JSON.parse(readFileSync(resolve(root, 'tools/wordcraft-capabilities/parameter-profiles.json'), 'utf8'))
 const git = (source, ...args) => execFileSync('git', ['--no-replace-objects', '-C', source, ...args], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 })
 
 export function sourceIdentity(source) {
@@ -55,17 +58,31 @@ export function parameterSchema(descriptor) {
 }
 
 export function generate(registry, identity) {
+  if (profiles.engineSha !== ENGINE_SHA) throw Error('parameter profile engine mismatch')
+  const registered = new Map(registry.map(command => [command.id, command]))
+  for (const [id, profile] of Object.entries(profiles.commands)) {
+    const command = registered.get(id)
+    if (!command || digest(command.params) !== profile.descriptorSha256) throw Error(`parameter profile registry drift: ${id}`)
+    if (classify(command).permanentlyForbidden) throw Error('forbidden command cannot receive a parameter profile')
+    for (const source of profile.sourceFiles) {
+      if (!identity.some(file => file.path === source.path && file.sha256 === source.sha256)) throw Error(`parameter profile source drift: ${id}`)
+    }
+  }
   const seen = new Set()
   const commands = registry.map(command => {
     if (typeof command.id !== 'string' || seen.has(command.id) || typeof command.params !== 'string' || typeof command.mutates !== 'boolean') throw Error('invalid or duplicate registry command')
     seen.add(command.id)
-    const parameters = parameterSchema(command.params)
+    const profile = profiles.commands[command.id]
+    const parameters = profile ? { status: 'exact', schema: profile.parameterSchema } : parameterSchema(command.params)
     return { id: command.id, label: command.label, location: command.location, shortcut: command.shortcut,
       parameterDescriptor: command.params, parameterSchema: parameters.schema, schemaStatus: parameters.status,
+      ...(profile ? { schemaCoverage: profile.coverage, schemaEvidence: profile.sourceFiles } : {}),
       ...classify(command), qualification: 'unqualified' }
   }).sort((a, b) => a.id.localeCompare(b.id, 'en'))
-  return { schemaVersion: 1, engine: { repository: 'https://github.com/storytold/wordcraft', sha: ENGINE_SHA },
-    version: `wordcraft:${ENGINE_SHA}:1`, sourceIdentity: identity, registryDigest: digest(JSON.stringify(registry)), commands }
+  const catalog = { schemaVersion: 1, engine: { repository: 'https://github.com/storytold/wordcraft', sha: ENGINE_SHA },
+    version: `wordcraft:${ENGINE_SHA}:${profiles.profileVersion}`, sourceIdentity: identity, registryDigest: digest(JSON.stringify(registry)), commands }
+  const policyPath = resolve(root, 'tools/wordcraft-capabilities/engine-qualification-policy.json')
+  return existsSync(policyPath) ? applyEngineQualifications(catalog, JSON.parse(readFileSync(policyPath, 'utf8')), readFileSync(resolve(root, 'tools/wordcraft-capabilities/parameter-profiles.json')), path => readFileSync(resolve(root, path))) : catalog
 }
 
 export function main(args) {

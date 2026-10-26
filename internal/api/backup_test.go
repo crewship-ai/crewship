@@ -60,6 +60,7 @@ func TestStatusForBackupError(t *testing.T) {
 		fmt.Errorf("wrapped: %w", backup.ErrNoOpRestore):                      http.StatusConflict,
 		fmt.Errorf("wrapped: %w", backup.ErrRestoreNameTaken):                 http.StatusConflict,
 		fmt.Errorf("wrapped: %w", backup.ErrPrivateArtifactTargetReplacement): http.StatusConflict,
+		fmt.Errorf("wrapped: %w", backup.ErrWorkbookTargetReplacement):        http.StatusConflict,
 		errors.New("database unavailable"):                                    http.StatusInternalServerError,
 	}
 	for err, wantStatus := range cases {

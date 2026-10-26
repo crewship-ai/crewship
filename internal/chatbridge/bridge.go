@@ -14,6 +14,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/admission"
 	"github.com/crewship-ai/crewship/internal/askforms"
+	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/crewstart"
@@ -531,6 +532,12 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 	if msgOpt.HumanResume && msgOpt.HumanAuthority == nil {
 		return fmt.Errorf("resolve chat: queued human authority required")
+	}
+	if msgOpt.HumanAuthority == nil && msgOpt.OriginalCredential != (auth.OriginalCredential{}) {
+		if !msgOpt.OriginalCredential.Valid() || msgOpt.OriginalCredential.UserID != userID {
+			return fmt.Errorf("resolve chat: original human credential required")
+		}
+		ctx = auth.WithOriginalCredential(ctx, msgOpt.OriginalCredential)
 	}
 	ctx = chataudience.WithReceipt(ctx, msgOpt.HumanAuthority)
 	info, err := resolver.ResolveHumanChat(ctx, userID, chatID)

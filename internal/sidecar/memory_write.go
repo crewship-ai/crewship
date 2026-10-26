@@ -1246,7 +1246,12 @@ func (s *Server) sendBoundedHostRequest(r *http.Request, method, path string, bo
 		return nil, &memoryHostTransportError{err: errors.New("IPC not configured")}
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), memoryHostIPCTimeout)
+	budget := memoryHostIPCTimeout
+	if path == "/api/v1/internal/gridcraft" {
+		// The workbook lease is 30s; retain time for commit and its receipt.
+		budget = 35 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), budget)
 	defer cancel()
 
 	var reader io.Reader
@@ -1282,7 +1287,13 @@ func (s *Server) sendBoundedHostRequest(r *http.Request, method, path string, bo
 		GotConn: func(httptrace.GotConnInfo) { gotConn.Store(true) },
 	}))
 
-	resp, err := ipcClient.Do(httpReq)
+	client := ipcClient
+	if client.Timeout != 0 && client.Timeout < budget {
+		clone := *client
+		clone.Timeout = budget
+		client = &clone
+	}
+	resp, err := client.Do(httpReq)
 	if err != nil {
 		// Deliberately conservative at the boundary. A connection that was
 		// obtained and then failed before a single byte was flushed (a stale

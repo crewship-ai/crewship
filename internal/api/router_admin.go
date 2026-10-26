@@ -145,6 +145,11 @@ func (r *Router) registerAdminRoutes() {
 	r.authedInstance("GET", "/api/v1/admin/instance/keeper/requests", ik.ListRequests)
 	// openapi: responses 200,401,403,500
 	r.authedInstance("GET", "/api/v1/admin/instance/keeper/health", ik.Health)
+	// The embedded workbook editor: its mode and, in same-host mode, the
+	// proxy self-check of each public Studio origin with its cause. The
+	// public /healthz carries only the coarse state.
+	// openapi: responses 200,401,403
+	r.authedInstance("GET", "/api/v1/admin/instance/workbook-editor", r.workbookEditorStatus)
 
 	// Admin › Data retention: how long every workspace keeps each kind of
 	// data, set for one, several or every existing workspace (dry_run
@@ -433,6 +438,7 @@ func (r *Router) registerAdminRoutes() {
 		backupDockerOps = r.backupDockerOps(r.dockerClient)
 	}
 	backupH := NewBackupHandler(r.db, r.logger, backupDockerOps, os.Getenv("CREWSHIP_VERSION"))
+	backupH.mooringHTTPEnabled = r.mooringHTTPConfig.Enabled
 	if transport, ok := r.keeperContainer.(backup.ServiceSnapshotRuntime); ok {
 		backupH.serviceSnapshots = transport
 	}

@@ -27,11 +27,22 @@ func (h *PageHandler) pageAuthReader(ctx context.Context) pageAuthQueryer {
 // tables participate in custody; absent features never make ordinary Page
 // departure or listing fail. A present unsupported schema fails closed.
 func privatePageOwnershipSQL(ctx context.Context, q pageAuthQueryer, alias string) (string, string, error) {
+	return privatePageOwnershipSQLForInitialization(ctx, q, alias, false)
+}
+
+// Only the final host initialization fence may exclude its own new attachment.
+// Other native engines and schema validation remain part of custody checks.
+func privatePageOwnershipSQLForInitialization(ctx context.Context, q pageAuthQueryer, alias string, excludeCollaboration bool) (string, string, error) {
 	terms := []string{}
 	cases := []string{}
 	for _, extension := range []struct{ table, kind string }{
 		{"slides_heads", "slides"}, {"documents", "document"},
 		{"page_boards", "board"}, {"page_artifacts", "artifact"},
+		// A workbook is a human-only private output too: crews never own one
+		// (gridcraft_require_personal_page_*), so a departing owner's workbook
+		// waits for an explicit human successor instead of going to a crew.
+		{"gridcraft_heads", "workbook"}, {"mooring_documents", "mooring"},
+		{"mooring_collab_documents", "mooring_collaboration"},
 	} {
 		var schemaType string
 		err := q.QueryRowContext(ctx, `SELECT type FROM sqlite_schema WHERE name=? COLLATE NOCASE AND type IN ('table','view')`, extension.table).Scan(&schemaType)
@@ -50,6 +61,15 @@ func privatePageOwnershipSQL(ctx context.Context, q pageAuthQueryer, alias strin
 		}
 		if !exists {
 			return "", "", fmt.Errorf("private output schema %s is missing page_id", extension.table)
+		}
+		if extension.table == "mooring_collab_documents" {
+			var scoped bool
+			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pragma_table_info(?) WHERE name='workspace_id')`, extension.table).Scan(&scoped); err != nil || !scoped {
+				return "", "", fmt.Errorf("unsupported collaboration output scope schema")
+			}
+		}
+		if excludeCollaboration && extension.table == "mooring_collab_documents" {
+			continue
 		}
 		// Names come exclusively from the fixed list above and internal aliases.
 		term := "EXISTS(SELECT 1 FROM " + extension.table + " WHERE page_id=" + alias + ".id)"

@@ -338,6 +338,14 @@ func buildDocument(routes []route) map[string]any {
 	for name, schema := range documentSchemaComponents() {
 		schemas[name] = schema
 	}
+	_, mooringComponents := mooringSchemaCatalog()
+	for name, schema := range mooringComponents {
+		schemas[name] = schema
+	}
+	_, workbookComponents := gridcraftSchemaCatalog()
+	for name, schema := range workbookComponents {
+		schemas[name] = schema
+	}
 	_, slidesComponents := slidesHumanSchemaCatalog()
 	for name, schema := range slidesComponents {
 		schemas[name] = schema
@@ -443,6 +451,14 @@ func buildDocument(routes []route) map[string]any {
 		// handler reached for. Success responses retain the generic schema
 		// until endpoint-specific schemas are added.
 		for status, response := range responses {
+			// Informational responses (including WebSocket's 101 upgrade) have
+			// headers but no HTTP message body. Do not invent a JSON error body.
+			if status[0] == '1' {
+				if headers := routeSchemaCatalog()[rt.method+" "+rt.path].SuccessHeaders; headers != nil {
+					response.(map[string]any)["headers"] = headers
+				}
+				continue
+			}
 			if status[0] != '2' && status != "304" {
 				response.(map[string]any)["content"] = errorContentForRoute(rt, info)
 			}
@@ -660,6 +676,14 @@ func routeSchemaCatalog() map[string]DomainSchema {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	for key, schema := range documentSchemaCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	mooringRoutes, _ := mooringSchemaCatalog()
+	for key, schema := range mooringRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	workbookRoutes, _ := gridcraftSchemaCatalog()
+	for key, schema := range workbookRoutes {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	slidesRoutes, _ := slidesHumanSchemaCatalog()

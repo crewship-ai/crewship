@@ -7,6 +7,9 @@ import { pagesKeys } from "@/hooks/use-pages"
 import { documentRequest } from "@/hooks/use-page-document"
 import { useDocumentsAvailability } from "@/hooks/use-documents-availability"
 import { usePageCreationAccess } from "@/hooks/use-page-creation-access"
+import { createEmptyWordCraftCheckpoint } from "@/lib/mooring/wordcraft-create"
+import { openWordCraftSession } from "@/lib/mooring/wordcraft-host-session"
+import { commandRequest } from "@/lib/mooring/wordcraft-command-session"
 import { verifyInitialization } from "@/lib/documents/contracts"
 import { FilePlus2 } from "lucide-react"
 import { Input } from "@/components/ui/input"
@@ -26,13 +29,16 @@ export function NewDocumentDialog({workspaceId,onClose,onCreated}:{workspaceId:s
   const [name,setName]=useState("")
   const [slug,setSlug]=useState("")
   const [frozen,setFrozen]=useState(false)
-  const intent=useRef<{name:string;slug:string;pageId?:string;attempted:boolean;initialize?:{id:string;schema:3;page_id:string;body:object}}>(undefined)
+  const [format,setFormat]=useState<"wordcraft"|"doc"|"commands">()
+  const intent=useRef<{name:string;slug:string;pageId?:string;attempted:boolean;commandAttempted?:boolean;format:"wordcraft"|"doc"|"commands";sdkPrefix?:string;checkpoint?:string;initialize?:{id:string;schema:3;page_id:string;body:object}}>(undefined)
   const allowed=usePageCreationAccess(workspaceId)
   const availability=useDocumentsAvailability(workspaceId)
+  const selectedFormat=format ?? (availability.wordcraftSDKPrefix ? "wordcraft" : availability.data === true ? "doc" : availability.wordcraftCommands ? "commands" : "doc")
+  const formatAvailable=selectedFormat === "commands" ? availability.wordcraftCommands === true : selectedFormat === "wordcraft" ? Boolean(availability.wordcraftSDKPrefix) : availability.data === true
   const client=useQueryClient()
   const create=useMutation({mutationFn:async()=>{
-    if (!allowed || availability.data !== true) throw new Error("Document creation is unavailable.")
-    const original=intent.current ??= {name:name.trim(),slug,attempted:false}
+    if (!allowed || !formatAvailable) throw new Error("Document creation is unavailable.")
+    const original=intent.current ??= {name:name.trim(),slug,attempted:false,format:selectedFormat,sdkPrefix:availability.wordcraftSDKPrefix}
     setFrozen(true)
     if (!original.pageId) {
       // Page creation has no idempotency key. An ambiguous response must not
@@ -50,6 +56,24 @@ export function NewDocumentDialog({workspaceId,onClose,onCreated}:{workspaceId:s
     }
     const pageId=original.pageId
     if (!pageId) throw new Error("The original Page identity is unavailable.")
+    if (original.format === "commands") {
+      // Only this just-created empty Page is eligible. On an ambiguous create
+      // response, a user retry READS/restores the same original Page; it never
+      // repeats initialization or converts an existing pilot document.
+      const initialize = !original.commandAttempted
+      original.commandAttempted = true
+      const opened = await commandRequest(workspaceId, pageId, {action:"open",write:true,...(initialize ? {create:true} : {})}, new AbortController().signal)
+      if (opened.outcome !== null || opened.projection.revision !== 0) throw new Error("The original empty command document could not be confirmed.")
+      return original.slug
+    }
+    if (original.format === "wordcraft") {
+      if (!original.sdkPrefix) throw new Error("WordCraft creation is unavailable.")
+      original.checkpoint ??= await createEmptyWordCraftCheckpoint(original.sdkPrefix)
+      // A failed or ambiguous response keeps the SAME Page/checkpoint for retry;
+      // the host's initialize path never replaces an existing native document.
+      await openWordCraftSession(workspaceId,pageId,true,new AbortController().signal,original.checkpoint)
+      return original.slug
+    }
     const input=original.initialize ??= {id:crypto.randomUUID(),schema:3,page_id:pageId,body:{type:"doc",content:[{type:"paragraph",attrs:{id:crypto.randomUUID()}}]}}
     const acknowledged=await documentRequest(workspaceId,original.slug,"/initialize",input)
     verifyInitialization(acknowledged,input.id)
@@ -60,7 +84,7 @@ export function NewDocumentDialog({workspaceId,onClose,onCreated}:{workspaceId:s
     await client.invalidateQueries({queryKey:pagesKeys.all(workspaceId)})
     onCreated(saved);onClose()
   }})
-  const canSubmit=allowed && availability.data===true && !create.isPending && Boolean(name.trim()) && SLUG.test(slug)
+  const canSubmit=allowed && formatAvailable && !create.isPending && Boolean(name.trim()) && SLUG.test(slug)
   const submit=()=>{if(canSubmit)create.mutate()}
   // The kit's create surface (dialogs-through-kit guard): Esc, the overlay
   // and the header close all go through onOpenChange, which a pending create
@@ -68,13 +92,16 @@ export function NewDocumentDialog({workspaceId,onClose,onCreated}:{workspaceId:s
   return <CreateSurface open size="sm" onOpenChange={open=>{if(!open && !create.isPending)onClose()}} onSubmit={submit} className="touch-form">
     <CreateSurfaceHeader icon={FilePlus2} context="Artifacts" title="New Doc" description="Create a document owned by you." onClose={create.isPending ? undefined : onClose} />
     <CreateSurfaceBody className="flex flex-col gap-3">
+      {(availability.wordcraftSDKPrefix || availability.wordcraftCommands) && <CreateSurfaceField label="Format" htmlFor="document-format"><select id="document-format" className={CREATE_SURFACE_INPUT} disabled={frozen || create.isPending} value={selectedFormat} onChange={event=>setFormat(event.target.value as "wordcraft"|"doc"|"commands")}>
+        {availability.wordcraftSDKPrefix && <option value="wordcraft">WordCraft</option>}{availability.data === true && <option value="doc">Doc</option>}{availability.wordcraftCommands && <option value="commands">WordCraft (test příkazů)</option>}
+      </select></CreateSurfaceField>}
       <CreateSurfaceField label="Name" htmlFor="document-name"><Input id="document-name" className={CREATE_SURFACE_INPUT} autoFocus required disabled={frozen || create.isPending} value={name} onChange={event=>{const next=event.target.value;setName(next);if(!slug || slug===name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,""))setSlug(next.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,""))}} /></CreateSurfaceField>
       <CreateSurfaceField label="Page address" htmlFor="document-slug" hint="Lowercase letters, numbers and hyphens."><Input id="document-slug" className={CREATE_SURFACE_INPUT} required pattern="[a-z0-9]+(-[a-z0-9]+)*" disabled={frozen || create.isPending} value={slug} onChange={event=>setSlug(event.target.value)} /></CreateSurfaceField>
       {/* The real audience of a Page created here (pageReach): its owner and every
           workspace OWNER/ADMIN, plus live grants and folders added later. It is
           not a private-audience Document; "My space" lists only those. */}
       <div className="text-sm"><p className="font-medium">Who can open it</p><p className="text-muted-foreground">You, and workspace owners and admins. Others only after you share it.</p></div>
-      {availability.data!==true && <p role="status" className="text-label text-muted-foreground">Document creation is unavailable.</p>}
+      {!formatAvailable && <p role="status" className="text-label text-muted-foreground">Document creation is unavailable.</p>}
     </CreateSurfaceBody>
     <CreateSurfaceRefusal message={create.error ? create.error.message : null} />
     <CreateSurfaceFooter onCancel={create.isPending ? undefined : onClose} primaryLabel={create.isPending?"Creating…":intent.current?.pageId?"Retry initialization":"Create Doc"} primaryDisabled={!canSubmit} busy={create.isPending} onPrimary={submit} />

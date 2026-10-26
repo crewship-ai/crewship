@@ -1,0 +1,1853 @@
+{
+  "status": "shape-numeric-direction-only-not-provenance-or-app-completeness",
+  "cases": [
+    {
+      "id": "session_inspect_origins-valid",
+      "message": {
+        "type": "session_inspect_origins",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint": {
+          "scope": {
+            "workspace_id": "vvvvv",
+            "artifact_id": "vvvvv",
+            "application_id": "vvvvv"
+          },
+          "revision": "0",
+          "generation": "1",
+          "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "0.2.0",
+            "engine_version": "0.10.0"
+          },
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "assets": []
+        }
+      },
+      "peer": "host",
+      "valid": true
+    },
+    {
+      "id": "session_inspect_origins-participant",
+      "message": {
+        "type": "session_inspect_origins",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint": {
+          "scope": {
+            "workspace_id": "vvvvv",
+            "artifact_id": "vvvvv",
+            "application_id": "vvvvv"
+          },
+          "revision": "0",
+          "generation": "1",
+          "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "0.2.0",
+            "engine_version": "0.10.0"
+          },
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "assets": []
+        }
+      },
+      "peer": "participant",
+      "valid": false
+    },
+    {
+      "id": "session_inspect_origins-wrong-direction",
+      "message": {
+        "type": "session_inspect_origins",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint": {
+          "scope": {
+            "workspace_id": "vvvvv",
+            "artifact_id": "vvvvv",
+            "application_id": "vvvvv"
+          },
+          "revision": "0",
+          "generation": "1",
+          "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "0.2.0",
+            "engine_version": "0.10.0"
+          },
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "assets": []
+        }
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "session_inspect_origins-missing-type",
+      "message": {
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint": {
+          "scope": {
+            "workspace_id": "vvvvv",
+            "artifact_id": "vvvvv",
+            "application_id": "vvvvv"
+          },
+          "revision": "0",
+          "generation": "1",
+          "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "0.2.0",
+            "engine_version": "0.10.0"
+          },
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "assets": []
+        }
+      },
+      "peer": "host",
+      "valid": false
+    },
+    {
+      "id": "session_inspect_origins-missing-request_id",
+      "message": {
+        "type": "session_inspect_origins",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint": {
+          "scope": {
+            "workspace_id": "vvvvv",
+            "artifact_id": "vvvvv",
+            "application_id": "vvvvv"
+          },
+          "revision": "0",
+          "generation": "1",
+          "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "0.2.0",
+            "engine_version": "0.10.0"
+          },
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "assets": []
+        }
+      },
+      "peer": "host",
+      "valid": false
+    },
+    {
+      "id": "session_inspect_origins-missing-control_profile",
+      "message": {
+        "type": "session_inspect_origins",
+        "request_id": "vvvvv",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint": {
+          "scope": {
+            "workspace_id": "vvvvv",
+            "artifact_id": "vvvvv",
+            "application_id": "vvvvv"
+          },
+          "revision": "0",
+          "generation": "1",
+          "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "0.2.0",
+            "engine_version": "0.10.0"
+          },
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "assets": []
+        }
+      },
+      "peer": "host",
+      "valid": false
+    },
+    {
+      "id": "session_inspect_origins-missing-scope",
+      "message": {
+        "type": "session_inspect_origins",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint": {
+          "scope": {
+            "workspace_id": "vvvvv",
+            "artifact_id": "vvvvv",
+            "application_id": "vvvvv"
+          },
+          "revision": "0",
+          "generation": "1",
+          "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "0.2.0",
+            "engine_version": "0.10.0"
+          },
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "assets": []
+        }
+      },
+      "peer": "host",
+      "valid": false
+    },
+    {
+      "id": "session_inspect_origins-missing-session_id",
+      "message": {
+        "type": "session_inspect_origins",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint": {
+          "scope": {
+            "workspace_id": "vvvvv",
+            "artifact_id": "vvvvv",
+            "application_id": "vvvvv"
+          },
+          "revision": "0",
+          "generation": "1",
+          "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "0.2.0",
+            "engine_version": "0.10.0"
+          },
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "assets": []
+        }
+      },
+      "peer": "host",
+      "valid": false
+    },
+    {
+      "id": "session_inspect_origins-missing-runtime_ref",
+      "message": {
+        "type": "session_inspect_origins",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint": {
+          "scope": {
+            "workspace_id": "vvvvv",
+            "artifact_id": "vvvvv",
+            "application_id": "vvvvv"
+          },
+          "revision": "0",
+          "generation": "1",
+          "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "0.2.0",
+            "engine_version": "0.10.0"
+          },
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "assets": []
+        }
+      },
+      "peer": "host",
+      "valid": false
+    },
+    {
+      "id": "session_inspect_origins-missing-versions",
+      "message": {
+        "type": "session_inspect_origins",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint": {
+          "scope": {
+            "workspace_id": "vvvvv",
+            "artifact_id": "vvvvv",
+            "application_id": "vvvvv"
+          },
+          "revision": "0",
+          "generation": "1",
+          "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "0.2.0",
+            "engine_version": "0.10.0"
+          },
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "assets": []
+        }
+      },
+      "peer": "host",
+      "valid": false
+    },
+    {
+      "id": "session_inspect_origins-missing-fence",
+      "message": {
+        "type": "session_inspect_origins",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "checkpoint": {
+          "scope": {
+            "workspace_id": "vvvvv",
+            "artifact_id": "vvvvv",
+            "application_id": "vvvvv"
+          },
+          "revision": "0",
+          "generation": "1",
+          "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "0.2.0",
+            "engine_version": "0.10.0"
+          },
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "assets": []
+        }
+      },
+      "peer": "host",
+      "valid": false
+    },
+    {
+      "id": "session_inspect_origins-missing-checkpoint",
+      "message": {
+        "type": "session_inspect_origins",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        }
+      },
+      "peer": "host",
+      "valid": false
+    },
+    {
+      "id": "session_inspect_origins-unknown",
+      "message": {
+        "type": "session_inspect_origins",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint": {
+          "scope": {
+            "workspace_id": "vvvvv",
+            "artifact_id": "vvvvv",
+            "application_id": "vvvvv"
+          },
+          "revision": "0",
+          "generation": "1",
+          "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "0.2.0",
+            "engine_version": "0.10.0"
+          },
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "assets": []
+        },
+        "authority": true
+      },
+      "peer": "host",
+      "valid": false
+    },
+    {
+      "id": "session_origins_inspected-valid",
+      "message": {
+        "type": "session_origins_inspected",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "checkpoint_generation": "1",
+        "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "allocated": [
+          {
+            "origin": "0",
+            "clock": "1"
+          },
+          {
+            "origin": "9007199254740991",
+            "clock": "4294967295"
+          }
+        ]
+      },
+      "peer": "runtime",
+      "valid": true
+    },
+    {
+      "id": "session_origins_inspected-participant",
+      "message": {
+        "type": "session_origins_inspected",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "checkpoint_generation": "1",
+        "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "allocated": [
+          {
+            "origin": "0",
+            "clock": "1"
+          },
+          {
+            "origin": "9007199254740991",
+            "clock": "4294967295"
+          }
+        ]
+      },
+      "peer": "participant",
+      "valid": false
+    },
+    {
+      "id": "session_origins_inspected-wrong-direction",
+      "message": {
+        "type": "session_origins_inspected",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "checkpoint_generation": "1",
+        "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "allocated": [
+          {
+            "origin": "0",
+            "clock": "1"
+          },
+          {
+            "origin": "9007199254740991",
+            "clock": "4294967295"
+          }
+        ]
+      },
+      "peer": "host",
+      "valid": false
+    },
+    {
+      "id": "session_origins_inspected-missing-type",
+      "message": {
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "checkpoint_generation": "1",
+        "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "allocated": [
+          {
+            "origin": "0",
+            "clock": "1"
+          },
+          {
+            "origin": "9007199254740991",
+            "clock": "4294967295"
+          }
+        ]
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "session_origins_inspected-missing-request_id",
+      "message": {
+        "type": "session_origins_inspected",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "checkpoint_generation": "1",
+        "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "allocated": [
+          {
+            "origin": "0",
+            "clock": "1"
+          },
+          {
+            "origin": "9007199254740991",
+            "clock": "4294967295"
+          }
+        ]
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "session_origins_inspected-missing-control_profile",
+      "message": {
+        "type": "session_origins_inspected",
+        "request_id": "vvvvv",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "checkpoint_generation": "1",
+        "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "allocated": [
+          {
+            "origin": "0",
+            "clock": "1"
+          },
+          {
+            "origin": "9007199254740991",
+            "clock": "4294967295"
+          }
+        ]
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "session_origins_inspected-missing-scope",
+      "message": {
+        "type": "session_origins_inspected",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "checkpoint_generation": "1",
+        "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "allocated": [
+          {
+            "origin": "0",
+            "clock": "1"
+          },
+          {
+            "origin": "9007199254740991",
+            "clock": "4294967295"
+          }
+        ]
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "session_origins_inspected-missing-session_id",
+      "message": {
+        "type": "session_origins_inspected",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "checkpoint_generation": "1",
+        "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "allocated": [
+          {
+            "origin": "0",
+            "clock": "1"
+          },
+          {
+            "origin": "9007199254740991",
+            "clock": "4294967295"
+          }
+        ]
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "session_origins_inspected-missing-runtime_ref",
+      "message": {
+        "type": "session_origins_inspected",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "checkpoint_generation": "1",
+        "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "allocated": [
+          {
+            "origin": "0",
+            "clock": "1"
+          },
+          {
+            "origin": "9007199254740991",
+            "clock": "4294967295"
+          }
+        ]
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "session_origins_inspected-missing-versions",
+      "message": {
+        "type": "session_origins_inspected",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "checkpoint_generation": "1",
+        "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "allocated": [
+          {
+            "origin": "0",
+            "clock": "1"
+          },
+          {
+            "origin": "9007199254740991",
+            "clock": "4294967295"
+          }
+        ]
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "session_origins_inspected-missing-fence",
+      "message": {
+        "type": "session_origins_inspected",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "checkpoint_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "checkpoint_generation": "1",
+        "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "allocated": [
+          {
+            "origin": "0",
+            "clock": "1"
+          },
+          {
+            "origin": "9007199254740991",
+            "clock": "4294967295"
+          }
+        ]
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "session_origins_inspected-missing-checkpoint_basis",
+      "message": {
+        "type": "session_origins_inspected",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint_generation": "1",
+        "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "allocated": [
+          {
+            "origin": "0",
+            "clock": "1"
+          },
+          {
+            "origin": "9007199254740991",
+            "clock": "4294967295"
+          }
+        ]
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "session_origins_inspected-missing-checkpoint_generation",
+      "message": {
+        "type": "session_origins_inspected",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "allocated": [
+          {
+            "origin": "0",
+            "clock": "1"
+          },
+          {
+            "origin": "9007199254740991",
+            "clock": "4294967295"
+          }
+        ]
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "session_origins_inspected-missing-content_digest",
+      "message": {
+        "type": "session_origins_inspected",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "checkpoint_generation": "1",
+        "allocated": [
+          {
+            "origin": "0",
+            "clock": "1"
+          },
+          {
+            "origin": "9007199254740991",
+            "clock": "4294967295"
+          }
+        ]
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "session_origins_inspected-missing-allocated",
+      "message": {
+        "type": "session_origins_inspected",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "checkpoint_generation": "1",
+        "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "session_origins_inspected-unknown",
+      "message": {
+        "type": "session_origins_inspected",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "checkpoint_generation": "1",
+        "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "allocated": [
+          {
+            "origin": "0",
+            "clock": "1"
+          },
+          {
+            "origin": "9007199254740991",
+            "clock": "4294967295"
+          }
+        ],
+        "authority": true
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "wide-origin",
+      "message": {
+        "type": "session_origins_inspected",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "checkpoint_generation": "1",
+        "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "allocated": [
+          {
+            "origin": "9007199254740992",
+            "clock": "1"
+          }
+        ]
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "wide-clock",
+      "message": {
+        "type": "session_origins_inspected",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "checkpoint_generation": "1",
+        "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "allocated": [
+          {
+            "origin": "1",
+            "clock": "4294967296"
+          }
+        ]
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "zero-clock",
+      "message": {
+        "type": "session_origins_inspected",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "checkpoint_generation": "1",
+        "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "allocated": [
+          {
+            "origin": "1",
+            "clock": "0"
+          }
+        ]
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "unsorted",
+      "message": {
+        "type": "session_origins_inspected",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "checkpoint_generation": "1",
+        "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "allocated": [
+          {
+            "origin": "2",
+            "clock": "1"
+          },
+          {
+            "origin": "1",
+            "clock": "1"
+          }
+        ]
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "duplicate",
+      "message": {
+        "type": "session_origins_inspected",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "checkpoint_generation": "1",
+        "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "allocated": [
+          {
+            "origin": "1",
+            "clock": "1"
+          },
+          {
+            "origin": "1",
+            "clock": "2"
+          }
+        ]
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "negative",
+      "message": {
+        "type": "session_origins_inspected",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "checkpoint_generation": "1",
+        "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "allocated": [
+          {
+            "origin": "-1",
+            "clock": "1"
+          }
+        ]
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "number",
+      "message": {
+        "type": "session_origins_inspected",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "checkpoint_generation": "1",
+        "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "allocated": [
+          {
+            "origin": 1,
+            "clock": "1"
+          }
+        ]
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "null",
+      "message": {
+        "type": "session_origins_inspected",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "2",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "checkpoint_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "checkpoint_generation": "1",
+        "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "allocated": [
+          {
+            "origin": null,
+            "clock": "1"
+          }
+        ]
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "open-identity-only",
+      "message": {
+        "type": "session_open",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "required_capabilities": [
+          "checkpoint_identity_v1"
+        ]
+      },
+      "peer": "host",
+      "valid": true
+    },
+    {
+      "id": "opened-identity-only",
+      "message": {
+        "type": "session_opened",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "confirmed_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "capabilities": [
+          "checkpoint_identity_v1"
+        ]
+      },
+      "peer": "runtime",
+      "valid": true
+    },
+    {
+      "id": "open-optin",
+      "message": {
+        "type": "session_open",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "required_capabilities": [
+          "checkpoint_identity_v1",
+          "origin_inventory_v1"
+        ]
+      },
+      "peer": "host",
+      "valid": true
+    },
+    {
+      "id": "opened-optin",
+      "message": {
+        "type": "session_opened",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "confirmed_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "capabilities": [
+          "checkpoint_identity_v1",
+          "origin_inventory_v1"
+        ]
+      },
+      "peer": "runtime",
+      "valid": true
+    },
+    {
+      "id": "open-missing-identity",
+      "message": {
+        "type": "session_open",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "required_capabilities": [
+          "origin_inventory_v1"
+        ]
+      },
+      "peer": "host",
+      "valid": false
+    },
+    {
+      "id": "opened-missing-identity",
+      "message": {
+        "type": "session_opened",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "confirmed_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "capabilities": [
+          "origin_inventory_v1"
+        ]
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "open-duplicate",
+      "message": {
+        "type": "session_open",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "required_capabilities": [
+          "checkpoint_identity_v1",
+          "checkpoint_identity_v1"
+        ]
+      },
+      "peer": "host",
+      "valid": false
+    },
+    {
+      "id": "opened-duplicate",
+      "message": {
+        "type": "session_opened",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "confirmed_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "capabilities": [
+          "checkpoint_identity_v1",
+          "checkpoint_identity_v1"
+        ]
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "open-empty",
+      "message": {
+        "type": "session_open",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "required_capabilities": []
+      },
+      "peer": "host",
+      "valid": false
+    },
+    {
+      "id": "opened-empty",
+      "message": {
+        "type": "session_opened",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "confirmed_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "capabilities": []
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "open-unknown",
+      "message": {
+        "type": "session_open",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "required_capabilities": [
+          "checkpoint_identity_v1",
+          "unknown"
+        ]
+      },
+      "peer": "host",
+      "valid": false
+    },
+    {
+      "id": "opened-unknown",
+      "message": {
+        "type": "session_opened",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "confirmed_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "capabilities": [
+          "checkpoint_identity_v1",
+          "unknown"
+        ]
+      },
+      "peer": "runtime",
+      "valid": false
+    }
+  ]
+}

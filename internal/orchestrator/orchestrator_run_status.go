@@ -6,6 +6,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -121,30 +122,34 @@ func (o *Orchestrator) wrapScrubHandler(handler EventHandler, secretValues []str
 	return wrapped, flush
 }
 
-func (o *Orchestrator) updateRunStatus(ctx context.Context, runID, status string) {
+func (o *Orchestrator) updateRunStatusForRun(ctx context.Context, req AgentRunRequest, runID, status string) {
+	o.updateRunStatusWithLogger(ctx, runID, status, o.loggerForRun(req))
+}
+
+func (o *Orchestrator) updateRunStatusWithLogger(ctx context.Context, runID, status string, logger *slog.Logger) {
 	data, err := o.state.Get(ctx, "agent_runs", runID)
 	if err != nil {
-		o.logger.Error("updateRunStatus: get failed", "run_id", runID, "error", err)
+		logger.Error("updateRunStatus: get failed", "run_id", runID, "error", err)
 		return
 	}
 	if data == nil {
-		o.logger.Warn("updateRunStatus: run not found", "run_id", runID)
+		logger.Warn("updateRunStatus: run not found", "run_id", runID)
 		return
 	}
 	var run RunState
 	if err := json.Unmarshal(data, &run); err != nil {
-		o.logger.Error("updateRunStatus: unmarshal failed", "run_id", runID, "error", err)
+		logger.Error("updateRunStatus: unmarshal failed", "run_id", runID, "error", err)
 		return
 	}
 	run.Status = status
 	run.LastActivity = time.Now()
 	updated, err := json.Marshal(run)
 	if err != nil {
-		o.logger.Error("updateRunStatus: marshal failed", "run_id", runID, "error", err)
+		logger.Error("updateRunStatus: marshal failed", "run_id", runID, "error", err)
 		return
 	}
 	if err := o.state.Set(ctx, "agent_runs", runID, updated); err != nil {
-		o.logger.Error("updateRunStatus: set failed", "run_id", runID, "error", err)
+		logger.Error("updateRunStatus: set failed", "run_id", runID, "error", err)
 	}
 }
 
@@ -152,7 +157,7 @@ func (o *Orchestrator) updateRunStatus(ctx context.Context, runID, status string
 // and emits the matching agent.run.* audit row via recordRunAudit. The two
 // calls always travel together at RunAgent's terminal return points.
 func (o *Orchestrator) failRun(ctx context.Context, req AgentRunRequest, runID, status string) {
-	o.updateRunStatus(ctx, runID, status)
+	o.updateRunStatusForRun(ctx, req, runID, status)
 	o.recordRunAudit(ctx, req, runID, status)
 }
 

@@ -75,6 +75,9 @@ function foldControls(parts: TurnPart[], controls: PendingControls | undefined, 
 
 /** A complete turn in the conversation (user message or multi-part assistant response). */
 export interface ChatTurn {
+  /** Original persisted user message identity, never an optimistic turn ID. */
+  originalMessageId?: string
+  originalAuthorUserId?: string
   turnState?: TurnState
   cancelRequested?: boolean
   /** A missing canonical event or truncated replay has not been recovered. */
@@ -169,6 +172,9 @@ export interface HistoryPart extends CanonicalPartFields {
 
 /** @deprecated Legacy flat chat message; use ChatTurn/TurnPart for new code. Kept for history loading compatibility. */
 export interface ChatMessage {
+  /** Set only by the authenticated stored-history response. */
+  originalMessageId?: string
+  originalAuthorUserId?: string
   checkpoint?: TurnCheckpoint
   runId?: string
   id: string
@@ -287,6 +293,8 @@ export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
     if (msg.role === "user") {
       turns.push({
         id: msg.id,
+        originalMessageId: msg.originalMessageId,
+        originalAuthorUserId: msg.originalAuthorUserId,
         role: "user",
         parts: [{ id: msg.id, type: "text", content: msg.content, timestamp: msg.timestamp }],
         isStreaming: false,

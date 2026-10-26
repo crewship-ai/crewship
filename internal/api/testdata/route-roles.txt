@@ -72,8 +72,11 @@ DELETE /api/v1/page-folders/{slug}/acl/{subject_type}/{subject_id} roleCreate
 DELETE /api/v1/page-folders/{slug}/pages/{page} roleSelf
 DELETE /api/v1/pages/{slug} roleSelf
 DELETE /api/v1/pages/{slug}/grants roleSelf
+DELETE /api/v1/pages/{slug}/mooring/mandates/{mandate} roleInline
 DELETE /api/v1/pages/{slug}/public/{tokenId} roleSelf
 DELETE /api/v1/pages/{slug}/webhooks/{webhookId} roleSelf
+DELETE /api/v1/pages/{slug}/workbook/mandates/{mandate} roleInline
+DELETE /api/v1/pages/{slug}/workbook/sessions/{session} roleInline
 DELETE /api/v1/projects/{projectId} roleManage
 DELETE /api/v1/provider-logins/pools/{poolId} roleManage
 DELETE /api/v1/recurring-issues/{recurringId} roleManage
@@ -318,6 +321,7 @@ POST /api/v1/memory/initialize roleManage
 POST /api/v1/memory/search/hybrid roleSelf
 POST /api/v1/memory/versions/{sha}/restore roleManage
 POST /api/v1/missions/{missionId}/checkpoints roleCreate
+POST /api/v1/mooring/documents roleInline
 POST /api/v1/notification-channels roleInline
 POST /api/v1/notification-channels/test roleInline
 POST /api/v1/notification-channels/{id}/agents roleInline
@@ -342,6 +346,8 @@ POST /api/v1/pages/{slug}/application/actions/{panelId}/{actionId} roleCreate
 POST /api/v1/pages/{slug}/document/initialize roleInline
 POST /api/v1/pages/{slug}/document/patch roleInline
 POST /api/v1/pages/{slug}/document/restore roleInline
+POST /api/v1/pages/{slug}/mooring/commands roleInline
+POST /api/v1/pages/{slug}/mooring/mandates roleInline
 POST /api/v1/pages/{slug}/panels/{panelId}/actions/{actionId} roleCreate
 POST /api/v1/pages/{slug}/project/build roleSelf
 POST /api/v1/pages/{slug}/project/check roleSelf
@@ -352,6 +358,11 @@ POST /api/v1/pages/{slug}/public roleSelf
 POST /api/v1/pages/{slug}/rollback roleSelf
 POST /api/v1/pages/{slug}/slides/initialize roleInline
 POST /api/v1/pages/{slug}/webhooks roleSelf
+POST /api/v1/pages/{slug}/workbook/edits roleInline
+POST /api/v1/pages/{slug}/workbook/editors roleInline
+POST /api/v1/pages/{slug}/workbook/mandates roleInline
+POST /api/v1/pages/{slug}/workbook/operations roleInline
+POST /api/v1/pages/{slug}/workbook/sessions roleInline
 POST /api/v1/projects roleCreate
 POST /api/v1/projects/{projectId}/milestones roleCreate
 POST /api/v1/provider-logins/device roleInline
@@ -366,6 +377,7 @@ POST /api/v1/triage-rules roleCreate
 POST /api/v1/triage/process roleCreate
 POST /api/v1/users/me/avatar roleSelf
 POST /api/v1/users/me/password roleSelf
+POST /api/v1/workbooks roleInline
 POST /api/v1/workflow-templates roleCreate
 POST /api/v1/workspaces roleSelf
 POST /api/v1/workspaces/{workspaceId}/invitations roleManage

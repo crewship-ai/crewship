@@ -22,6 +22,16 @@ All Crewship configuration can be set via environment variables. These override 
 | `CREWSHIP_HOST` | `0.0.0.0` | Server listen address |
 | `CREWSHIP_PORT` | `8080` | Server listen port |
 
+## Mooring session profile
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_MOORING_ENABLED` | `false` | Opt in to the experimental Rust-backed human session HTTP/WS profile. Disabled registers neither session route. Startup requires Linux suspend-aware timing and verified embedded runtime assets; invalid enabled configuration fails closed. This flag does not grant Page access or qualify multiuser/agent acceptance. |
+| `CREWSHIP_MOORING_DELIVERY_LEASE_MS` | `5000` | Delivery authorization lease in milliseconds. Zero selects the default; explicit nonzero values must be 1–5000. A grant is timed from sending its request, so a late reply cannot extend the horizon. This operator policy cannot grant participant authority. |
+
+See the [session transport contract](/specs/mooring-session-transport) for the
+current HTTP boundary and acceptance limitations.
+
 ## IPC
 
 | Variable | Default | Description |
@@ -604,6 +614,313 @@ rolling admission window; zero selects 600 seconds and the maximum is 86,400.
 These limits preserve confirmed receipts and history. Exact retries retain their
 original operation identity; a temporary admission refusal does not erase them.
 
+### Experimental offline workbook engine
+
+`CREWSHIP_GRIDCRAFT_ENABLED` enables the experimental personal workbook API and
+agent tools; default `false`. Only `true` or `1` enables it. Activation requires
+independent qualification of a persistent operator-pinned worker. Set
+`CREWSHIP_GRIDCRAFT_SERVICE_SOCKET` to its clean absolute private Unix socket
+path and `CREWSHIP_GRIDCRAFT_SERVICE_TOKEN_FILE` to its regular mode-0600 secret
+file. These paths must differ and fit within 100 bytes. The application never
+launches containers or falls back to an unsandboxed executable.
+`CREWSHIP_GRIDCRAFT_EDITOR_ENABLED` enables live workbook editing (editor
+sessions, cell edits and the commits feed); default `false`, only `true` or `1`
+enables it, and it requires `CREWSHIP_GRIDCRAFT_ENABLED`. Each workspace must
+also turn on the feature flag `gridcraft_editor`, which is off by default and
+can be switched off again without a restart.
+See [workbook commands](/cli/workbook) for scope and request contracts.
+
+The worker process (`crewship-gridcraft-worker`, inside its own container)
+reads its own limits; out-of-range values stop it at startup:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_GRIDCRAFT_WORKER_CAPACITY` | `2` | Concurrent candidates per worker, 1 to 8. The default fits the documented container profile (256 MiB, 32 PIDs); a higher value needs the larger profile. |
+| `CREWSHIP_GRIDCRAFT_ENGINE_MEMORY_MIB` | `256` | Address-space limit of each engine process in MiB, 64 to 4096. |
+| `CREWSHIP_GRIDCRAFT_ENGINE_FILE_MIB` | `4` | Largest file an engine process may write, in MiB, 2 to 32. |
+| `CREWSHIP_GRIDCRAFT_ENGINE_CPU_SECONDS` | `15` | CPU seconds per engine process, 1 to 20 (below the 20 s candidate timeout). |
+
+`CREWSHIP_GRIDCRAFT_TEST_BARRIER_DIR` and `CREWSHIP_GRIDCRAFT_TEST_BARRIER_SLOT`
+exist only in test builds (build tag `crewship_testbarrier`): the private
+directory for the commit barrier's park/release files and the development slot
+it is limited to. Release builds ignore both, and the release pipeline refuses
+a binary that contains the barrier.
+
+#### Embedded workbook editor origin
+
+The browser workbook editor is third-party code. It runs only in a sandboxed
+iframe with an opaque origin, holds no Crewship credential and is served only
+from operator-pinned bundles. All of it is off by default.
+
+**Zero-config default.** With the editor enabled and no
+`CREWSHIP_EDITOR_RUNTIME_ORIGIN`, Crewship serves the editor on the Studio
+origin under `/_editor/b/<digest>/` (see [Same-host mode](#same-host-mode)).
+No origin has to be configured: the editor follows the origin each browser
+request reaches. No DNS record, certificate or extra proxy route is needed. A
+dedicated origin is optional hardening on top.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_GRIDCRAFT_EDITOR_ENABLED` | `false` | Literal `true` or `1` serves the editor. Requires `CREWSHIP_GRIDCRAFT_ENABLED`. |
+| `CREWSHIP_EDITOR_RUNTIME_ORIGIN` | *(unset: same-host mode)* | Optional hardening. HTTPS origin of a dedicated editor host, e.g. `https://editor.example.org` for `https://studio.example.test`. Its host must be a subdomain (not an apex, no trailing dot), must differ from the Studio host and the Page runtime host and must not be a parent of either, and it must not appear in `CREWSHIP_ALLOWED_ORIGINS`. Once set, that host (any case, port or trailing dot) serves only editor bundles: the API, the UI and probes return 404 there, even while the editor is disabled. |
+| `CREWSHIP_EDITOR_RUNTIME_DEVELOPMENT_SAME_SITE` | `false` | Literal `true` permits a dedicated origin on a sibling subdomain of Studio (`https://editor.example.test`). Without it a dedicated origin must be on a different site. The origin itself is never shared with Studio. Refused without `CREWSHIP_EDITOR_RUNTIME_ORIGIN`. |
+| `CREWSHIP_GRIDCRAFT_EDITOR_BUNDLE_DIR` | *(unset)* | Clean absolute directory holding one `<digest>/` directory per bundle, each with a `manifest.json` (`{"files":{"<path>":"<sha256>"}}`) that lists `index.html`. |
+| `CREWSHIP_GRIDCRAFT_EDITOR_BUNDLES` | *(unset)* | Comma-separated allowlist (at most 4) of lowercase hex SHA-256 digests of each bundle's exact `manifest.json` bytes. The manifest pins every file, so the digest pins the whole bundle. Removing a digest stops serving it after restart. |
+
+At startup each allowlisted bundle is read once: `manifest.json` must hash to
+the pin and every file must match its manifest digest. The manifest is decoded
+strictly: only the exact, case-sensitive keys `files`, `source_commit` and
+`toolchain`, no duplicate keys at any level, string digests and nothing after
+the object. A symlink as a bundle
+file and paths that leave the bundle directory are refused; content is checked
+by hash either way. A bundle that references the WebRTC API
+(`RTCPeerConnection`, `RTCDataChannel` and the other `RTC*` transport
+interfaces) in a script, wasm, HTML, JSON or SVG file is refused as well: see
+the `webrtc` note below. A bundle that fails is not served and the error is logged.
+Files are served from memory at `/b/<digest>/<path>`.
+
+The editor document runs **sandboxed**: its policy ends in
+`sandbox allow-scripts`, so it has an opaque origin. Even on a sibling
+subdomain of Studio it cannot read or set cookies, use storage, navigate the top
+window, open popups or submit forms. Because of the opaque origin, sources name
+the editor origin explicitly rather than `'self'`. Every request from that
+document is cross-origin, so assets are sent with
+`Access-Control-Allow-Origin: *` for CORS loads and
+`Cross-Origin-Resource-Policy: cross-origin` for no-cors loads such as a
+stylesheet `<link>`, an `<img>` or a classic `<script src>`; never with
+credentials (the bundle is public, constant code). Inline scripts in `index.html`, such as a Trunk module
+bootstrap, are allowed only by their SHA-256 hash, computed from the verified
+file; there is no `'unsafe-inline'` script. Every response carries:
+
+```
+Content-Security-Policy: default-src 'none'; script-src <editor origin> 'wasm-unsafe-eval' [inline script hashes, index.html only]; style-src <editor origin> 'unsafe-inline'; img-src <editor origin> data: blob:; font-src <editor origin>; connect-src <editor origin>; worker-src 'none'; child-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors <Studio origin>; webrtc 'block'; sandbox allow-scripts
+Cross-Origin-Resource-Policy: same-origin               (index.html and errors)
+Cross-Origin-Resource-Policy: cross-origin              (other files)
+Cross-Origin-Opener-Policy: same-origin
+Origin-Agent-Cluster: ?1
+Referrer-Policy: no-referrer
+X-Content-Type-Options: nosniff
+Strict-Transport-Security: max-age=31536000              (same-host mode: Studio's value, max-age=31536000; includeSubDomains)
+Permissions-Policy: camera=(), microphone=(), geolocation=(), clipboard-read=(), usb=(), serial=(), hid=()
+Cache-Control: no-store                                  (index.html)
+Cache-Control: public, max-age=31536000, immutable      (other files, with Access-Control-Allow-Origin: *; same-host mode: private)
+```
+
+WebRTC is a network channel that `connect-src` does not govern, and the iframe
+sandbox does not block `RTCPeerConnection`. The policy carries
+`webrtc 'block'`, but Chromium does not enforce that directive yet, so a
+qualified bundle must not use WebRTC; bundles that name its API are refused at
+load. This is a qualification check against a supplier bundle that uses
+WebRTC, not a boundary against deliberately obfuscated code.
+
+Keep `Cross-Origin-Resource-Policy: same-origin` on the document: under
+Studio's `Cross-Origin-Embedder-Policy: credentialless` it means the editor can
+be framed only through a `credentialless` iframe.
+
+The host iframe must be exactly
+`<iframe sandbox="allow-scripts" credentialless referrerpolicy="no-referrer" …>`,
+never with `allow-same-origin`. The server's sandbox applies to the editor
+document only; if the frame navigates itself to another URL, only the iframe
+attribute applies. When Studio's `frame-src` includes Studio's own origin
+(for example a same-origin Page runtime), `allow-same-origin` would let such a
+navigation land in the Studio origin and read the host page. `'wasm-unsafe-eval'` is granted
+only on the editor origin. The editor never sets cookies; a dedicated host
+never reads them, and in same-host mode only their names are read.
+
+While the editor is enabled, Studio adds the editor origin to `frame-src` of
+every UI document. The UI routes on the client, so a policy scoped to one route
+would not follow navigation. Only this one origin is added, and `frame-src`
+controls what Studio frames, not who may frame Studio.
+
+##### Same-host mode
+
+Without `CREWSHIP_EDITOR_RUNTIME_ORIGIN`, an enabled editor is served at
+`<Studio origin>/_editor/b/<digest>/<path>` with the headers above, where every
+`<editor origin>` source is the bundle path `<Studio origin>/_editor/b/`, never
+the bare Studio origin. Studio's `frame-src` likewise names only that path.
+The host page frames the editor by that path (`/_editor/b/<digest>/index.html`),
+resolved against its own origin.
+
+**Which Studio origin.** Nothing needs to be configured. The `<Studio origin>`
+of each response is the one the request reached: its `Host` header, and
+`https` when the connection is TLS or a trusted proxy
+(`CREWSHIP_TRUSTED_PROXY_CIDRS`, loopback by default) sends
+`X-Forwarded-Proto: https`, otherwise `http`. A CSP source with `http` also
+matches the `https` URL of the same host, so a proxy that ends TLS without
+being trusted still gets a working policy. A `Host` that a CSP source cannot
+name (no valid DNS name or IPv4 address, an IPv6 literal, a bad port) gets
+`400` on the editor path and no editor in `frame-src`; requests on the Page
+runtime origin get `421`. Studio documents whose policy names the request's
+origin are sent with `private` added to their `Cache-Control` (HTML keeps its
+`no-cache, must-revalidate`), so no shared cache serves one host's policy to
+another; the editor's own responses are `no-store` or `private` already.
+
+When `CREWSHIP_PAGE_STUDIO_ORIGIN` is set, it is the only origin the editor
+answers on: a request that reaches Crewship under another `Host` gets `421` on
+the editor path and no editor in `frame-src` (fail closed). Set it only if the
+proxy forwards the original `Host`; `CREWSHIP_NEXTJS_URL` plays no part.
+
+Isolation then rests on:
+
+- **The opaque origin.** The server's `sandbox allow-scripts` applies whatever
+  the iframe says, so the editor cannot read or set Studio cookies, use
+  storage or service workers, open popups or navigate the top window.
+- **Path-scoped sources.** The editor cannot fetch, connect to or load
+  anything on the Studio origin outside `/_editor/b/`, so the Studio API is
+  unreachable. Because Studio frames only that path, a frame that navigates
+  itself cannot land on a Studio document, even if the host page drops the
+  `sandbox` attribute or adds `allow-same-origin`, provided nothing in front
+  of Crewship redirects or rewrites `/_editor/` (see the proxy requirements
+  below). The mandatory iframe attributes keep the frame opaque either way.
+- **One route for the prefix.** Every request whose path starts with
+  `/_editor` (any case, percent-encoded or with dot segments) is answered by
+  the editor handler and never reaches the API or the UI. Nothing under it
+  redirects, because a browser drops the path of a CSP source after a
+  redirect.
+- **Requests only a credentialless, sandboxed frame makes.** The editor
+  answers `403` to any request that carries one of Crewship's own cookies
+  (`authjs.*` and `next-auth.*` session, refresh and CSRF cookies, with or
+  without the `__Secure-`/`__Host-` prefix, and the UI's `sidebar_state`),
+  because an iframe without `credentialless` sends them. This holds even where
+  Studio's `Cross-Origin-Embedder-Policy` is missing. Other cookies are
+  ignored: a load balancer or CDN may set its own `SameSite=None` cookie
+  (stickiness, bot management) on editor responses, and the credentialless
+  frame's temporary cookie jar, which the whole Studio tab shares, sends it
+  back when the editor is reopened. `index.html` is served
+  only with `Sec-Fetch-Dest: iframe`. Other files are served only with
+  `Sec-Fetch-Site: cross-site`, which is what the opaque-origin document sends,
+  and never as a document. A Studio page therefore cannot load the third-party
+  code into the Studio origin. Responses carry
+  `Vary: Cookie, Sec-Fetch-Site, Sec-Fetch-Dest`, and assets are
+  `Cache-Control: private`, so a shared cache that ignores `Vary` cannot
+  replay a frame's response to a Studio page. Every editor response sends
+  Studio's own HSTS value, so loading the editor never weakens the host's
+  stored HSTS policy.
+
+Browsers load the editor only from an HTTPS Studio origin, or plain HTTP on
+loopback (the host page refuses anything else); a configured
+`CREWSHIP_PAGE_STUDIO_ORIGIN` must be one of those. Same-host mode is refused
+at startup when the configured Studio origin is the Page runtime origin,
+because Studio would then frame its own whole origin, and when
+`CREWSHIP_ALLOWED_ORIGINS` contains `null`; without a configured origin the
+Page runtime host is refused per request. The Page runtime origin
+(`CREWSHIP_PAGE_RUNTIME_ORIGIN`) must be a host that serves only the Page
+runtime, never the Studio UI: Studio lists that whole origin in `frame-src`,
+so if it also served Studio documents, a frame that navigates itself could
+land on one. The configuration compares origins, not what a host serves; this
+is on the operator.
+
+**Proxy requirements.** The path-scoped sources and `frame-src` hold only
+while the browser receives `/_editor/` responses from Crewship directly. A
+browser drops the path of a CSP source after a redirect, and a proxy that
+decodes `%2F` and resolves `..` can route a path under the prefix to the API
+or the UI. A reverse proxy, CDN or load balancer in front of Crewship must
+therefore:
+
+- pass `/_editor/` to Crewship **with the path unchanged**: no percent-decoding,
+  no dot-segment or slash normalisation (nginx: `proxy_pass http://upstream;`
+  without a URI part, not `proxy_pass http://upstream/;`);
+- **never redirect** under `/_editor/` (no trailing-slash or canonical-host
+  rules, no HTTP-to-HTTPS redirect for that prefix on an HTTPS listener);
+- put **no SSO or authentication gate** on `/_editor/`. The editor frame is
+  credentialless and always unauthenticated; the bundle is public, constant
+  code;
+- forward the original `Host` header (Caddy and Traefik do by default; nginx:
+  `proxy_set_header Host $host;`, Apache: `ProxyPreserveHost On`), as the rest
+  of Crewship already needs for its same-origin check of sign-in and other
+  state-changing requests;
+- forward the `Cookie` and `Sec-Fetch-*` request headers and pass the
+  `X-Crewship-Route` response header through. Setting its own cookies on these
+  responses is harmless but unnecessary;
+- not let a shared cache override `Cache-Control` for `/_editor/` ("cache
+  everything" rules).
+
+These are the defaults of common reverse proxies; the operator sets nothing
+for the editor itself.
+
+Crewship checks this itself. It uses `CREWSHIP_PAGE_STUDIO_ORIGIN` when set,
+and otherwise learns the public Studio origin from signed-in browser requests:
+the `Origin` or `Referer` of a same-origin request that a sign-in session
+authenticated (never an anonymous request or a CLI token). Those are plain
+headers to a script holding a session, so learning is bounded:
+
+- only `https` origins are learned; plain `http` only for `localhost` and
+  loopback addresses, and those only while the server itself listens on
+  loopback (`CREWSHIP_HOST=127.0.0.1`, development). IP literals that are
+  link-local (including cloud metadata `169.254.169.254`), unspecified,
+  multicast or broadcast are never learned, and the self-check refuses to
+  connect to such addresses whatever name resolved to them;
+- each user teaches at most one origin, at most four are checked, and an
+  origin no signed-in request has used for 24 hours is forgotten. When all
+  four are taken, an instance administrator's origin still gets in, replacing
+  the least recently used origin no administrator used, so other users can
+  never push out the origin administrators use;
+- a browser origin whose host differs from the `Host` Crewship received (a
+  proxy that rewrites `Host`) is reported, never checked, and takes no slot;
+- a learned origin's state applies to that exact origin only (scheme, host
+  and port). The one exception fails closed: a request Crewship sees as
+  `http` because TLS ended at a proxy it does not trust also takes the state
+  of `https` on the same host.
+
+Until a browser has used Studio, the check is `pending`, never `passed`. Then the server requests
+`/_editor/` variants through that public URL: soon after an origin is learned,
+hourly while it passes and every five minutes while it does not. Browsers
+resolve `..`, `%2e%2e` and `.%2e` segments before sending a request, so only
+spellings that reach a server unchanged are probed (`..%2f`, `..%5c`). Every
+Crewship response in same-host mode carries `X-Crewship-Route` (`editor` or
+`app`), so a path under the prefix that ends up elsewhere in Crewship is
+recognised positively; a refusal in front of Crewship, whatever its headers,
+reached nothing and is fine. If a probe is redirected, Crewship answers a
+traversal outside the editor, or the proxy strips `X-Crewship-Route` (then the
+check cannot tell where a traversal ends up), and a repeat 30 seconds later
+confirms it, the server **disables the editor on that origin**: bundle files
+answer `503`, the UI and API are unaffected, and the log names the problem
+and the user whose request taught the origin. After three consecutive passing
+checks (about 15 minutes after the proxy is fixed or a maintenance redirect
+ends) the editor is enabled again by itself. The check also reports, without
+disabling anything, a prefix that does not reach the editor and a proxy that
+rewrites `Host` (the browser's origin and the `Host` Crewship sees differ).
+Many deployments cannot reach their own public name from inside; then the
+self-check decides nothing.
+
+The public `/healthz` reports only a coarse `workbook_editor` state: `ok`,
+`pending`, `failed` or `disabled`. It counts only the configured origin and
+origins an instance administrator's session used, so other users cannot
+change it; until an administrator has used Studio it stays `pending`.
+Origins, causes, the problems found and who taught each origin are in the
+log and, for instance administrators, in
+[`crewship admin instance workbook-editor`](/cli/admin#workbook-editor).
+[`crewship doctor`](/cli/doctor#workbook-editor-proxy) runs the same check from
+the machine it runs on, through the proxy a browser uses. Run it from outside
+after any proxy change.
+
+To check a deployment by hand:
+
+```bash
+# The editor answers, with its sandboxed policy and no redirect:
+curl -sI -H 'Sec-Fetch-Dest: iframe' <Studio>/_editor/b/<digest>/index.html
+#   -> 200, Content-Security-Policy ending in "sandbox allow-scripts"
+curl -sI -H 'Sec-Fetch-Dest: iframe' -H 'Cookie: authjs.session-token=x' <Studio>/_editor/b/<digest>/index.html
+#   -> 403
+curl -sI <Studio>/_editor/b/x/
+#   -> 404 with the sandboxed policy, never 3xx
+curl -s -o /dev/null -D - '<Studio>/_editor/b/..%2f..%2fhealthz' | grep -i '^x-crewship-route'
+#   -> "X-Crewship-Route: editor", or nothing if the proxy refused it; never "app"
+```
+
+In a local development setup with the Next.js dev server, `/_editor/*` is
+proxied to the backend like `/api/*`. That dev server sends Studio pages
+without Crewship's security headers (no CSP, no COEP), so neither the
+path-scoped `frame-src` nor the browser's COEP check applies there. It is not a
+valid target for accepting the editor isolation; use the UI served by the
+Crewship server.
+
+A dedicated origin adds a second, independent boundary: a real origin, which
+on a different site also means a separate browser process. Configure one where
+the deployment can provide it. A sibling subdomain needs
+`CREWSHIP_EDITOR_RUNTIME_DEVELOPMENT_SAME_SITE`. Crewship does not derive an
+editor subdomain on its own, because it cannot tell whether DNS, the
+certificate and the proxy cover that name.
 
 ## Diff preview computation
 

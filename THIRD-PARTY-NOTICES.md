@@ -32,6 +32,13 @@ It is distributed under the MIT License:
 > OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 > SOFTWARE.
 
+## Mooring canonical JSON
+
+Mooring imports [`github.com/gowebpki/jcs` v1.0.2](https://github.com/gowebpki/jcs/tree/v1.0.2),
+licensed under Apache-2.0. Copyright 2021–2026 Bret Jordan & Benedikt Thoma;
+copyright 2006–2019 WebPKI.org. The [exact upstream license](internal/mooring/licenses/jcs-v1.0.2-LICENSE.txt)
+is retained with the [version and parser audit](internal/mooring/licenses/README.md).
+
 ## Go dependencies
 
 Sections below list every direct + transitive Go dependency of the `crewship`

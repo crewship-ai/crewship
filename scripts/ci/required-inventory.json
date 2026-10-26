@@ -1,11 +1,11 @@
 {
   "version": 1,
   "protected_files": {
-    ".github/workflows/ci.yml": "979826b689ea2cd054009b5e4cf4a1250fa02d9a2074f3ba4ffd4e3b31336e43",
+    ".github/workflows/ci.yml": "583168f55c65575e05d5a3cae02e3b4d65be7867a4a81a5b7c89e3d1d2e52000",
     ".github/workflows/security.yml": "f6ba09c25e1d72ba972e3aa91b36d6687f073ede6aa015accce0542320e7b258",
     ".github/workflows/codeql.yml": "08ba82c71afd5cf02aa224e9f26c543469bfe8bf3417c1e51d7eb76ae095c8bf",
     "scripts/ci/plan.py": "4383e14ede409fff4077013342dd7acb6146d8808ea376c53e4a0202ba1514aa",
-    "scripts/ci/verdict.py": "8b8be020996272e54c39b06822e3d669f7e7b0f435137ed6446d8a4990b9f025"
+    "scripts/ci/verdict.py": "b188613364a7b9c1fae22ac60debcecca6e2dfbb0ee298171768d7542f4d79fd"
   },
   "workflows": {
     ".github/workflows/ci.yml": {
@@ -36,6 +36,8 @@
         "image",
         "managed-environments",
         "merge-conflict-markers",
+        "mooring",
+        "mooring-actual",
         "onboarding-default-boots",
         "onboarding-journey",
         "pages-apps",

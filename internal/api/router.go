@@ -63,6 +63,9 @@ func (b *keeperWSBroadcaster) BroadcastInboxUpdated(workspaceID string, source s
 }
 
 type Router struct {
+	mooringStartupErr      error
+	mooringHTTPConfig      MooringHTTPConfig
+	mooringHTTP            *collaborationHTTPManager
 	skillGitImportPolicy   skills.GitImportPolicy
 	diffLimits             config.DiffConfig
 	diffs                  *diffComputeBudget
@@ -77,6 +80,7 @@ type Router struct {
 
 	issueMutationHandler   *IssueHandler
 	issueMutationWorker    *issueMutationWorker
+	gridcraftOutbox        *gridcraftOutboxWorker
 	transcriptLock         func(context.Context) (func(), error)
 	transcriptSnapshotLock func(context.Context) (func(), error)
 	restrictedWorkflow     *restrictedworkflow.Service
@@ -204,11 +208,17 @@ type Router struct {
 	pageBuildImage                   string
 	pageRuntimeOrigin                string
 	pageRuntimeDevelopmentSameOrigin bool
-	pageStudioOrigin                 string
-	storagePath                      string // base path for crew file storage
-	catalogFetcher                   *devcontainer.CatalogFetcher
-	runtimeFetcher                   *devcontainer.RuntimeFetcher
-	dockerClient                     *dockerclient.Client
+	// workbookEditorDetail answers GET /api/v1/admin/instance/workbook-editor;
+	// nil while the embedded workbook editor is off.
+	workbookEditorDetail func() any
+	// workbookEditorBundle names the editor bundle new workbook editor
+	// sessions frame; nil while the embedded workbook editor is off.
+	workbookEditorBundle func(*http.Request) (digest, url string)
+	pageStudioOrigin     string
+	storagePath          string // base path for crew file storage
+	catalogFetcher       *devcontainer.CatalogFetcher
+	runtimeFetcher       *devcontainer.RuntimeFetcher
+	dockerClient         *dockerclient.Client
 	// instanceBackups is Admin › Backups across the instance, kept so tests
 	// can point its instance backup at a temp directory.
 	instanceBackups    *InstanceBackupsHandler
@@ -923,6 +933,10 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	}
 	r.diffs = newDiffComputeBudget(limits)
 	r.registerRoutes()
+	if r.mooringStartupErr != nil {
+		r.Shutdown()
+		return nil, fmt.Errorf("new router: Mooring initialization failed: %w", r.mooringStartupErr)
+	}
 
 	// Close the method-routing hole every Go 1.22 ServeMux has: a request
 	// whose method is not registered for a literal path falls through to a
@@ -1059,6 +1073,9 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // reference to the DB handle or the Docker client.
 
 func (r *Router) Shutdown() {
+	if r.mooringHTTP != nil {
+		r.mooringHTTP.Close()
+	}
 	if r.documentsClient != nil {
 		r.documentsClient.CloseIdleConnections()
 	}
@@ -1071,6 +1088,7 @@ func (r *Router) Shutdown() {
 	})
 
 	r.issueMutationWorker.stop()
+	r.gridcraftOutbox.stop()
 	if r.provisioning != nil {
 		r.provisioning.Stop()
 	}

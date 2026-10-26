@@ -173,7 +173,7 @@ func scopeForRoute(pattern string) string {
 			return "webhooks:write"
 		}
 		return "workspace:admin"
-	case "pages", "page-folders":
+	case "pages", "page-folders", "workbooks", "mooring":
 		// A page is a workspace-wide surface with its own per-object ACL
 		// (docs/specs/pages.md §7.2), and the mintable scope vocabulary has no
 		// entry for it. workspace:admin is the honest "this is workspace
@@ -264,7 +264,10 @@ func (r *Router) requireRoleScopeMW(role, scope string, h http.HandlerFunc) http
 // It records the policy so the enumeration invariants can see it. This is the
 // single mediation point every state-changing, workspace-scoped endpoint flows
 // through.
-func (r *Router) authedMut(method, pattern, role string, h http.HandlerFunc) {
+// beforeAuth is reserved for trusted ingress middleware that must observe the
+// original request before authentication (for example a restore fence). It does
+// not replace any authentication, workspace, role or scope check.
+func (r *Router) authedMut(method, pattern, role string, h http.HandlerFunc, beforeAuth ...func(http.Handler) http.Handler) {
 	scope := scopeForRoute(pattern)
 	if role == roleSelf {
 		// Self-scoped: gated by ownership in the handler, not a resource
@@ -272,8 +275,11 @@ func (r *Router) authedMut(method, pattern, role string, h http.HandlerFunc) {
 		scope = scopeSelf
 	}
 	r.recordMut(method, pattern, role, scope)
-	r.mux.Handle(method+" "+pattern,
-		r.authMw.RequireAuth(r.authMw.RequireWorkspace(r.providerAccountPolicy(r.requireRoleScopeMW(role, scope, h)))))
+	handler := r.authMw.RequireAuth(r.authMw.RequireWorkspace(r.providerAccountPolicy(r.requireRoleScopeMW(role, scope, h))))
+	for i := len(beforeAuth) - 1; i >= 0; i-- {
+		handler = beforeAuth[i](handler)
+	}
+	r.mux.Handle(method+" "+pattern, handler)
 }
 
 // authedSelfMut registers a session-scoped mutation route that has no

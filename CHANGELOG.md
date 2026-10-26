@@ -9,6 +9,110 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Create vendored WordCraft numeric test fixtures exclusively so a competing output file cannot be truncated.
+
+- Execute a flat WordCraft editor package with a real WASM snippet import in the packaging regression, checking the original ABI identity and manifest hashes.
+- Keep an idle native WordCraft read alive when typing starts, ignoring its obsolete projection without resending the command.
+- Explain when a browser cannot support the isolated WordCraft command editor, including iPhone browsers.
+
+- Allow the 72 generated fixture-qualified WordCraft commands in the default-off C1 backend test profile, with closed parameters and a new exact catalog identity.
+- Keep native selection receipts valid when a WordCraft command also returns command-specific metadata.
+
+- Add a disabled native WordCraft command HTTP controller with immutable viewer fences, confirmed SQL-only projections and bounded current-rights delivery; product startup registration remains separate.
+- Validate private C1 checkpoints and quoted RPC frames with their existing 4MiB/32MiB byte bounds and a fixed bounded JCS structure profile, preserving the legacy command-envelope limits.
+
+- Preserve bounded native C1 command selection in the original immutable staged operation receipt and atomic SQL outcome, without adding a shared peer caret or inferring selection from input.
+
+- Add a disabled command-document runtime lifecycle that initializes only new documents, restores confirmed SQL state, and retains existing owner fencing without falling back to the legacy adapter.
+- Bound the native C1 host's live generation history across repeated restores, preserving pending candidates and handles when replacement capacity is refused.
+- Add a separate opt-in C1 renderer source recipe and actual native WASM registry/codec harness, with confirmed selection checks and explicit pending-input refusal; it does not enable product UI, preserve rapid input or change the legacy SDK.
+
+- Add a default-off private inherited-FD WordCraft command host that pins its native helper and stages immutable checkpoints for trusted SQL confirmation, without exposing a public commit endpoint.
+- Keep private native WordCraft agent commands and outcome lookups bound to their original confirmed chat mandate and current Page permissions.
+
+- Add an opt-in private native command port with pinned engine identity, bounded correlated process messages, opaque staged handles, and SQL-authoritative recovery without command replay.
+
+- Keep the opt-in WordCraft command host candidate separate from confirmed state until a trusted host SQL-success callback, retaining participant undo and committed operation receipts across checkpoint recovery.
+- Preserve new command-document formats and immutable engine pins while legacy collaboration adapters refuse their payloads, including when command support is disabled.
+- Add a separately disabled SQL interface for new WordCraft command documents, with current-rights checks, atomic checkpoints and operation receipts, and reconciliation without replay after uncertain outcomes.
+
+- Keep idle WordCraft editors connected through standard WebSocket ping/pong while preserving the existing response and inactivity limits.
+- Show the Crewship page name in attached WordCraft chrome and hide its standalone Discord, Share and Zotero controls.
+
+- Open document links in their accessible workspace before requesting document content, preserving unsaved-work navigation guards.
+
+- **WordCraft documents can be created from Pages.** When native collaboration is enabled, choose WordCraft in New Doc to open a blank document in the editor without setup scripts.
+
+- **One departing or expired collaborator could disconnect everyone.** Keep late lease replies scoped to the original closed participant and finish an already reserved reply before that participant leaves, preserving the other collaborators' session.
+
+- **Opening large collaborative documents could time out.** Avoid repeated checkpoint validation in incompatible message variants and scan the existing base64 schema vocabulary directly, preserving checkpoint integrity and the five-second startup deadline.
+
+- Bind document-agent task registration and partial-result policy to the original admitted human task before native submission.
+
+- Add bounded native document pages to the original task's `doc_read` tool, preserving one immutable revision, complete application data and current read authorization across continuations and physical delivery.
+
+- Allow an explicit read-only native document task through the existing original-message flow, preserving its attached read intent across admission, native grants, renewal and retirement while rejecting submissions. Default tasks retain their original write mode.
+
+- Qualify Mooring startup metadata and complete targets from one checked owned WordCraft document, preserving checkpoint integrity and final owner checks without changing runtime deadlines.
+
+- Replay contiguous committed Mooring native deltas after recipient reopen or a delivery gap, checking current reader rights for every frame without creating a new snapshot or source authority.
+
+- Show recorded native agent edits separately from current document grants and tasks, with independently authorized source-chat backlinks. Historical references grant no rights and do not claim artifact creation or complete version history.
+
+- Package the optional Mooring runtime and isolated WordCraft editor from pinned public sources, with embedded asset integrity checks and disabled-by-default runtime configuration.
+
+- Bound Mooring session admission request and response I/O, flush buffered responses under the original ingress lease, and retain the read deadline through HTTP body cleanup.
+
+- Rust-backed Mooring saves retain immutable original human/agent task attribution in the same transaction as each new saved atomic change. Rejections, failed commits and known retries do not create another edit record; this does not yet provide artifact creation, version browsing or live chat acceptance.
+
+- **Document access in chat:** distinguish the agent's current document grants from verified active task permissions. Hide inaccessible document metadata, expire unverified views, and identify unknown output provenance explicitly.
+
+- Preserve original task authority and private-run ownership through the existing Mooring agent dispatcher and confirmed-attempt chain. This prerequisite does not enable an agent route or qualify a private execution environment.
+- Mooring sessions retain a Pending notification and its matching terminal receipt separately while delivery is blocked, preserving each until its own completion.
+
+- WordCraft documents expose existing authorized sharing from their header and list menu without replacing the running editor. Opening access rechecks the current viewer and keeps document sharing separate from agent task permissions.
+
+- Run the complete catalog of actual Mooring Rust/SQL integration tests in hosted CI using freshly built public-source fixtures; reject missing, skipped or failed execution evidence.
+
+- Grade the actual Mooring session response and optional editor DTOs against their OpenAPI schema without increasing the ungraded-response budget.
+
+- Keep the participant stalled-write regression tied to its unchanged physical/context deadline even when the network poller wakes before the context timer callback.
+
+- Document the default-off Mooring session request/response and bodyless WebSocket upgrade, with exact conditional-route checks and CLI/configuration contracts.
+
+- WordCraft explains restricted undo/redo refusals without closing the editor or changing its save state; deletion undo and changes overlapping another author's deletion remain refused.
+
+- Mooring CLI streams honor JSON/NDJSON and YAML output; unsupported quiet output is rejected before opening input or connecting. Original submitted packets remain unchanged. Literal HTTP registrations expose the existing authenticated session and WebSocket paths to route inventories.
+- Account for both Mooring FIFO lifecycle goroutines during API teardown, and make the file-download classification guard ignore braces inside Go literals and comments.
+- Isolate Mooring Page-grant revocation to the affected participant while rechecking unaffected writers against current rights. Retain bounded old-gate output until its original provenance and current delivery gate are both verified, and decline a revoked pending ticket without inventing a replacement grant.
+
+- Connect default-off Mooring human submissions to immutable live originals, same-writer public receipts, and SQL-backed per-atomic peer updates. Bootstrap requires the actual native human and complete-origin-inventory capabilities; restart recovery and agent writing remain separate qualifications.
+
+- Add a default-off authenticated Mooring HTTP/WebSocket controller with one-use human joins and current SQL-gated checkpoint delivery. Raw editing remains refused until the native human prepare capability is integrated; in-process backup restore requires disabling the controller and restarting.
+- Retain bounded original human proposals only after authenticated admission commits, and require their immutable publication proof before any sealed outcome lookup or dependency rejection. Missing or uncertain originals remain nonterminal; this does not enable raw editing.
+
+- Mooring SDK recovery refuses incomplete full snapshots even when Yrs reports no missing updates, preserving every original unsaved draft instead of accepting silently omitted history.
+
+- **Mooring agent reads:** an inactive session checkpoint reader retains the original agent mandate and confirmed attempt under the existing immutable authority; it grants no write or external delivery access.
+
+- **Independent collaboration authors:** dormant admission callbacks distinguish original author generations from broad delivery invalidation, so another user's grant revocation does not reject an unaffected original author. Current source and Page policy remain required; missing tracking or schema drift stays nonterminal, and no content path is enabled.
+
+- **Collaboration revocation metadata:** prepare persistent author-relevant generations from canonical policy mutations, separate from broad delivery invalidation. Portable restore preserves target tombstones. Admission integration remains unqualified and disabled.
+
+- **Mooring ingress groundwork:** an inactive bounded host registry retains original operation membership and authenticated author proofs after admission COMMIT. Session transport remains disabled pending independent review and mixed-author revocation qualification.
+
+- **Mooring session groundwork:** inactive queued commits retain their exact owner and original author proofs; uncertain authorization cannot become a durable refusal. No session transport or agent execution is enabled.
+
+- **Mooring recovery groundwork:** inactive human admissions can retain their original identity and authority across a verified Rust-only replacement. Old store bindings and join tickets cannot follow the new process; issued delivery gates remain recorded until blocked or expired.
+- **Mooring ownership groundwork:** a host can voluntarily release its exact current owner lease, preserving its generation and every issued delivery expiry. Replacement ownership does not acknowledge pending delivery gates.
+
+- **Mooring admission groundwork:** an inactive human registry preserves original Page authority, burns bounded join tickets once and opens current SQL delivery gates. Its store wrapper holds the restore fence through the complete operation.
+
+- **Mooring authorization groundwork:** an inactive human Page authority adapter checks current canonical grants, folder scope and original credential inside the protected writer transaction.
+
+- **Mooring admission preserves the original human credential.** Authenticated chat receipts retain the original user revocation fence and exact credential through run admission and retries; legacy receipts remain unfenced and cannot authorize the new Mooring admission path.
+- Conversation transcript appends stay inside their configured storage root even when an existing transcript path is a symbolic link.
+- Adapt WordCraft C-E acceptance to actual HTTP commit receipts and passive native queue observations, keeping separate visual evidence, authenticated peers and participant undo requirements.
 - **[Resource Access v1](docs/security/rbac.mdx#resource-access-v1)** delivers Guest/restricted mode, per-object agent/routine/project sharing, crew View/Use presets and trusted Manage with ordinary membership controls, existing Pages ACL, Publish in UI/API/CLI, and atomic chained audit with sealed keyring, rotation, verification and alerts. Credential grants, crew/workspace recipients, the complete inherited Access card/grid, universal GET/stream/query-count guards, unified Pages grants and Guest published-routine execution remain deferred to v1.1; the documented absence of a universal leak guard is an accepted release limitation.
 
 - **Explicit crew managers can use ordinary member controls.** A live trusted Manage share enables adding and removing ordinary crew members in Settings. Role editing and removal of explicit crew roles remain administrator controls. Failed access checks and context switches withdraw grant-based controls.
@@ -34,6 +138,42 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **CLI object sharing accepts routine Publish.** `crewship share` and `unshare` now accept `--operation publish`, matching the Share dialog. The server still requires Edit in the resulting policy; unrelated grants and issuer provenance are preserved, and conflicts are never retried.
 
+- **An open workbook could remain active after its editor grant was removed.** Revocation now closes the persisted editor session in the grant transaction, sends a targeted `session_closed` control immediately, and drops queued protected frames while keeping other workbook subscriptions alive. A bounded fallback catches membership and ownership changes.
+
+- **An agent could save a result calculated from cells that had already changed.** Workbook commands now carry cell and range read preconditions, including the range structure revision, and reject changed inputs with a visible reason. Older agent clients conservatively require an unchanged base revision.
+
+- **A full workbook history could silently erase earlier revisions.** Writes now fail visibly with `quota_exceeded` when history or checkpoint capacity is exhausted, preserving the confirmed workbook and every previous revision.
+
+- **An unavailable embedded editor offered no direct retry.** A failed startup now explains the availability problem and offers “Retry editor” after the existing connection deadline, creating a fresh isolated frame. Connected editors retain their current draft and pending changes.
+
+
+- **A confirmed application edit could remain stuck on “Saving…” during a live update.** The editor host now waits for an in-flight snapshot read and its queued fresh read before acknowledging the durable receipt, while retaining the same mutation for a failed-read retry.
+
+
+- **Mooring activity was missing from journal filters.** Creation, confirmed edits and agent mandate changes now use registered event types and appear in the Artifact activity group with matching icons.
+
+
+- **Selecting a workspace could leave the rest of the application unclickable.** Workspace rows now allow the menu to dismiss normally after selection, releasing its modal pointer lock before returning to Artifacts or another workspace screen.
+
+
+- **Application editors can share a small TypeScript protocol SDK.** The pilot adds a manifest-driven editor surface and a non-Rust reference editor with separate local drafts, live confirmed state and durable receipt status; GridCraft retains its existing conflict recovery on the shared capability channel.
+
+
+- Workbook publication, custody requests, explicit ownership transfers and orphan deletion now append their authorization audit atomically; failed audit writes roll back the access change.
+
+- Workbook conflict notices and save status keep the editor frame stationary, preserving rapid input during refusals, including on narrow screens.
+
+- ⚠️ **Shared workbooks no longer accept direct agent mandates.** The experimental post-publication exception bypassed the required proposal path. New admissions and legacy mandate use now fail closed with `proposal_required`; proposal delivery remains unavailable. Private workbook mandates are unchanged.
+
+- **Workbook previews now explain why editing is unavailable.** A disabled workspace, unsupported browser, failed availability check or invalid editor configuration has a visible reason and next step. Failed availability checks can be retried without reloading the page.
+
+- **Workbook editor: edits saved during a reload no longer stay "Saving…".** When the workbook was reloaded (pruned history or an import) while a saved edit waited for earlier revisions, the editor was never told it was saved and kept showing it as unsaved, hiding later changes to that cell. Such an edit is now confirmed right after the reload, a repeated send gets the same confirmation without a second write, and a reload never takes the editor back behind a revision it already shows.
+- **Workbook editor: a refused edit never loses cells.** A refused multi-cell edit (a paste, a fill) keeps every cell on the Page, marks which ones another writer changed, and waits for a decision: **Keep mine** writes all of its cells again, **Take theirs** keeps the other writer's values only for the cells they changed and still saves the rest, and **Discard mine** drops an edit with no such cell. Every refusal (also an unconfirmed edit or one whose recalculation could not be confirmed) stays open until decided, survives a workbook reload, and holds the status at not saved and the leave prompt; deciding one never clears another. Each notice row names its cells for screen readers, announces itself politely, disables its buttons while the choice is saved and moves focus to the next decision or the editor. Taking theirs on a session that expired unnoticed reopens the session instead of closing the editor.
+- **Workbook editor: clearer bundle failures and same-cell conflicts.** An editor bundle that does not match the approved version is now reported as such instead of as a protocol break. When another writer changes a cell you are editing, the host warns at once (when the editor reports its open drafts) and keeps your draft; a commit refused because of that change shows both values with Keep mine or Take theirs instead of only an error. Take theirs sends nothing; once no other refused change is shown and nothing else is unsent, the status returns to no unsaved changes and the editor reloads the head so its own refusal notice clears. Conflict notices also clear whenever the editor loads a fresh snapshot.
+- **Experimental embedded workbook editor host (off by default).** With the workspace flag `gridcraft_editor` and a server editor session, a workbook Page frames the editor from its own origin with exactly `sandbox="allow-scripts"`, `credentialless` and no referrer, checks the handshake (frame window, opaque origin, bundle digest), and ends the session and removes the frame on any later load of the frame. **Saved** appears only after a durable server receipt; an answer without one is retried a bounded number of times and then reported as not saved, without holding back later edits. A failed workbook read at open, a handshake that does not finish within 15 seconds, the editor being turned off or its bundle withdrawn while open, and an expired session all remove the frame and fall back to the read-only preview with a notice. Leaving with unconfirmed edits asks first. Otherwise the read-only preview stays.
+- **The embedded workbook editor needs no extra hostname and no configured origin.** With the editor enabled and no `CREWSHIP_EDITOR_RUNTIME_ORIGIN`, Crewship serves it on the Studio origin under `/_editor/b/<digest>/`, with no DNS record, certificate or proxy route, and without any origin setting: the editor's policy and Studio's `frame-src` follow the origin each request reached (its `Host`, and the scheme by the trusted-proxy rule), and the host page frames the editor by path. `CREWSHIP_PAGE_STUDIO_ORIGIN`, when set, becomes the only origin the editor answers on (other hosts get `421`). The editor still runs in an opaque, CSP-sandboxed origin. Its policy sources and Studio's `frame-src` name only the bundle path, so it cannot call the Studio API or navigate itself onto a Studio page. That path scoping holds only while nothing in front of Crewship redirects or rewrites `/_editor/`; with the mandatory iframe attributes (`sandbox="allow-scripts"` and `credentialless`) the frame stays opaque and without cookies either way. The server learns the public origin from signed-in browser requests (or uses the configured one) and checks it for such a proxy, recognising a traversal that reaches Crewship outside the editor by its `X-Crewship-Route` header; a confirmed redirect, path rewrite or stripped `X-Crewship-Route` disables the editor on that exact origin until three consecutive checks pass again. Because those request headers are under any signed-in user's control, learning is bounded: `https` only (plain `http` only for loopback on a server bound to loopback), never link-local, cloud-metadata, unspecified or multicast addresses (the self-check also refuses to connect to them), one origin per user, at most four, forgotten after 24 hours unused, and an administrator's origin always gets a slot. Until a browser has used Studio the check is `pending`. The public `/healthz` shows only `ok`, `pending`, `failed` or `disabled`, counting only the configured origin and origins an administrator used; instance administrators see origins, causes and which user taught each origin with `crewship admin instance workbook-editor`, and `crewship doctor` repeats the check from outside for origins on the `--server` host and warns while the server's own check has not passed. The docs list the proxy rules (path unchanged, `Host` forwarded, no redirect, no SSO gate), which are reverse-proxy defaults. It answers `403` to requests that carry Crewship's own session, refresh or CSRF cookies, so it never loads without `credentialless`, while cookies a load balancer or CDN sets (for example ALB stickiness or `__cf_bm`) do not stop it from reopening in the same tab. It also refuses Studio pages loading its code. Editor responses send Studio's exact HSTS value, assets are `Cache-Control: private` so shared caches never store them, Studio documents get `private` added to their `Cache-Control` while their policy names the request's origin, and the editor policy carries `webrtc 'block'`; because Chromium does not enforce that directive yet, bundles that reference the WebRTC API are refused at load in both modes. A dedicated editor origin remains optional hardening. Same-host mode is refused with a cleartext non-loopback configured Studio origin, with a Page runtime on the Studio origin, and when `null` is a trusted origin.
+- **Default-off workbook editor origin.** Operators can configure a dedicated HTTPS origin that serves only digest-pinned, manifest-verified editor bundles (pinned by the manifest digest) under a fixed server-set policy: the document is CSP-sandboxed into an opaque origin (no cookies, storage, top navigation or popups) and must be framed with `sandbox="allow-scripts"` plus `credentialless`, assets load cross-origin without credentials, manifests are decoded strictly, inline scripts run only by hash, `'wasm-unsafe-eval'` applies only there and `frame-ancestors` is limited to the Studio origin. The configuration refuses an editor host shared with or parent of Studio or the Page runtime, apex and trailing-dot hosts, and trusted API origins; Studio frames it while enabled.
+- **Experimental offline workbook operations** add a default-off GridCraft Artifact adapter, native-file imports and scoped agent cell edits with durable receipts, retry recovery and bounded worker admission. Runtime activation requires a qualified persistent digest-pinned worker reached over a private authenticated socket. Embedded editing, collaboration and portable workbook backup/restore are unavailable; affected workspace backups fail explicitly.
 - **Guest access explanations match the supported resource policy.** Member settings name agents, routines and projects; CLI help explains the runtime prerequisites, and Edit explains the separate Publish share instead of claiming publication always needs a trusted reviewer.
 - **Skill repository imports use verified, pinned HTTPS connections.** Redirects and inherited Git/proxy/credential configuration are disabled. Administrators can allow exact private Git hosts with `skills.private_hosts`; loopback and metadata targets stay blocked. Imported `SKILL.md` files are read within the chosen import root, with bounded regular-file reads.
 - **Backup inspection reads metadata and reports that integrity has not been verified.** Restore, verification, recovery and conversion use operator-configured decoder, work, output, metadata, time and admission limits. Defaults allow one million logical entries and 256 MiB of cumulative path/link names across all passes. Large operations can fail with an explicit resource allowance error; operators can tune the documented capacity settings.
@@ -272,6 +412,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - If durable start recovery fails at startup, the server refuses to start. Resolve the reported recovery/storage error before restarting; do not bypass recovery.
 
 ### Fixed
+
+- **An identical Mooring create retry no longer returns a private document after its author loses access.** The existing transaction-local author check now runs before looking up the saved result as well as before committing a new document.
+
+- **Workbook creation now rechecks the original author’s current rights in its transaction.** Lost membership, restricted access or removed Page-create rights refuse both creation and identical retries; a rights change during insertion rolls back the staged Page.
 
 - Revoke every matching Page grant when a reference identifies both a current subject and a departed stored ID, without changing unrelated grants. ⚠️ References matching multiple live subjects now return 400 instead of selecting one arbitrarily. Creation and reissue also verify that other subjects' grants remain unchanged. Losing issuer authority during the audit commit returns 403 and rolls back the change; database failures remain server errors.
 - **Old `/paymaster` links open Spend instead of Not found.** The page moved into the Journal's Spend tab; `/paymaster` now redirects there, and spend links built by the app point at it directly.

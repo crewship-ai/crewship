@@ -297,6 +297,24 @@ reads return 404 and catalogs omit the name and entry. OWNER opening another
 human's private output writes a content-free audit before metadata or content is
 released; unavailable audit storage refuses that access. Ordinary grants,
 folders and legacy public links cannot silently publish a private artifact. Private grant administration and production are also limited to the custodian and workspace OWNER; an ADMIN role or a legacy producer grant does not widen those controls.
+The only explicit publication path is the experimental workbook share
+(`docs/cli/workbook.mdx`). The owner confirms it, it is audited and one-way, and
+it names editors as owner-issued user `write` grants. Workbook contents remain
+limited to the owner, those editors, and the audited workspace OWNER. Generic
+write grants are refused on a workbook Page, and a write grant not issued by
+its current owner is inert. Deleting, renaming, rolling back, moving into or out
+of a folder and reading spec versions of a workbook Page remain owner-only,
+because workbooks have no backup; deleting also needs a current human
+credential. A workbook is a human-only private output for departure and
+erasure (§7.1 rule 1b): it is never transferred to a crew, and a workspace
+OWNER selects a human successor through the custody flow. Workbook custody opens
+only once the owner is no longer a live member (removed, suspended, restricted,
+or with a removal or erasure refused because of the workbook within 7 days,
+recorded as `artifact.workbook_custody_requested`); ADMINs are never workbook
+custodians, and each transfer is audited as
+`artifact.workbook_custody_transferred` in the same transaction. A workbook
+whose owner is no longer a member without such a transfer may be deleted only
+by a workspace OWNER, audited as `artifact.orphaned_workbook_deleted`.
 Shared Page authorization and workspace-wide storage accounting are unchanged.
 Private read checks require a live account, workspace and membership. Guest
 catalogs omit unauthorized private outputs without failing the whole listing.

@@ -70,14 +70,25 @@ fn p30_old_client_and_model_engine_mismatch_require_upgrade() {
 
 #[test]
 fn generated_shapes_decode_and_roundtrip_every_positive_envelope_fixture() {
-    let fixtures: serde_json::Value = serde_json::from_str(include_str!("../../../protocol/conformance-fixtures.json")).unwrap();
+    let fixtures: serde_json::Value =
+        serde_json::from_str(include_str!("../../../protocol/conformance-fixtures.json")).unwrap();
     let mut count = 0;
     for case in fixtures["schema_cases"].as_array().unwrap() {
         if case["schema_ref"] == "#" && case["schema_valid"] == true {
-            let message: mooring_protocol::Message = serde_json::from_value(case["message"].clone()).unwrap_or_else(|error| panic!("{}: {error}",case["id"]));
-            assert_eq!(serde_json::to_value(message).unwrap(), case["message"], "{}",case["id"]);
+            let message: mooring_protocol::Message =
+                serde_json::from_value(case["message"].clone())
+                    .unwrap_or_else(|error| panic!("{}: {error}", case["id"]));
+            assert_eq!(
+                serde_json::to_value(message).unwrap(),
+                case["message"],
+                "{}",
+                case["id"]
+            );
             count += 1;
         }
     }
-    assert!(count >= 46, "every envelope needs a positive decoding fixture");
+    assert!(
+        count >= 46,
+        "every envelope needs a positive decoding fixture"
+    );
 }

@@ -1,0 +1,795 @@
+{
+  "status": "shape-direction-only-not-authentication-or-metadata-completeness-proof",
+  "profile": "mooring.session-causal.v1",
+  "cases": [
+    {
+      "id": "session_describe_checkpoint-valid",
+      "message": {
+        "type": "session_describe_checkpoint",
+        "request_id": "describe",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "wordcraft"
+        },
+        "session_id": "session",
+        "runtime_ref": "runtime",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        }
+      },
+      "peer": "host",
+      "valid": true
+    },
+    {
+      "id": "session_describe_checkpoint-participant",
+      "message": {
+        "type": "session_describe_checkpoint",
+        "request_id": "describe",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "wordcraft"
+        },
+        "session_id": "session",
+        "runtime_ref": "runtime",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        }
+      },
+      "peer": "participant",
+      "valid": false
+    },
+    {
+      "id": "session_describe_checkpoint-wrong-direction",
+      "message": {
+        "type": "session_describe_checkpoint",
+        "request_id": "describe",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "wordcraft"
+        },
+        "session_id": "session",
+        "runtime_ref": "runtime",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        }
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "session_describe_checkpoint-missing-scope",
+      "message": {
+        "type": "session_describe_checkpoint",
+        "request_id": "describe",
+        "control_profile": "mooring.session-causal.v1",
+        "session_id": "session",
+        "runtime_ref": "runtime",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        }
+      },
+      "peer": "host",
+      "valid": false
+    },
+    {
+      "id": "session_describe_checkpoint-missing-session_id",
+      "message": {
+        "type": "session_describe_checkpoint",
+        "request_id": "describe",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "wordcraft"
+        },
+        "runtime_ref": "runtime",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        }
+      },
+      "peer": "host",
+      "valid": false
+    },
+    {
+      "id": "session_describe_checkpoint-missing-runtime_ref",
+      "message": {
+        "type": "session_describe_checkpoint",
+        "request_id": "describe",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "wordcraft"
+        },
+        "session_id": "session",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        }
+      },
+      "peer": "host",
+      "valid": false
+    },
+    {
+      "id": "session_describe_checkpoint-missing-versions",
+      "message": {
+        "type": "session_describe_checkpoint",
+        "request_id": "describe",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "wordcraft"
+        },
+        "session_id": "session",
+        "runtime_ref": "runtime",
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        }
+      },
+      "peer": "host",
+      "valid": false
+    },
+    {
+      "id": "session_describe_checkpoint-missing-request_id",
+      "message": {
+        "type": "session_describe_checkpoint",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "wordcraft"
+        },
+        "session_id": "session",
+        "runtime_ref": "runtime",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        }
+      },
+      "peer": "host",
+      "valid": false
+    },
+    {
+      "id": "session_describe_checkpoint-unknown-field",
+      "message": {
+        "type": "session_describe_checkpoint",
+        "request_id": "describe",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "wordcraft"
+        },
+        "session_id": "session",
+        "runtime_ref": "runtime",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "checkpoint": {
+          "encoding": "base64",
+          "state": "e30=",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        },
+        "unexpected": true
+      },
+      "peer": "host",
+      "valid": false
+    },
+    {
+      "id": "session_checkpoint_described-valid",
+      "message": {
+        "type": "session_checkpoint_described",
+        "request_id": "describe",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "wordcraft"
+        },
+        "session_id": "session",
+        "runtime_ref": "runtime",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "input_digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "description": {
+          "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "0.2.0",
+            "engine_version": "0.10.0"
+          },
+          "assets": []
+        }
+      },
+      "peer": "runtime",
+      "valid": true
+    },
+    {
+      "id": "session_checkpoint_described-participant",
+      "message": {
+        "type": "session_checkpoint_described",
+        "request_id": "describe",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "wordcraft"
+        },
+        "session_id": "session",
+        "runtime_ref": "runtime",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "input_digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "description": {
+          "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "0.2.0",
+            "engine_version": "0.10.0"
+          },
+          "assets": []
+        }
+      },
+      "peer": "participant",
+      "valid": false
+    },
+    {
+      "id": "session_checkpoint_described-wrong-direction",
+      "message": {
+        "type": "session_checkpoint_described",
+        "request_id": "describe",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "wordcraft"
+        },
+        "session_id": "session",
+        "runtime_ref": "runtime",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "input_digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "description": {
+          "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "0.2.0",
+            "engine_version": "0.10.0"
+          },
+          "assets": []
+        }
+      },
+      "peer": "host",
+      "valid": false
+    },
+    {
+      "id": "session_checkpoint_described-missing-scope",
+      "message": {
+        "type": "session_checkpoint_described",
+        "request_id": "describe",
+        "control_profile": "mooring.session-causal.v1",
+        "session_id": "session",
+        "runtime_ref": "runtime",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "input_digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "description": {
+          "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "0.2.0",
+            "engine_version": "0.10.0"
+          },
+          "assets": []
+        }
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "session_checkpoint_described-missing-session_id",
+      "message": {
+        "type": "session_checkpoint_described",
+        "request_id": "describe",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "wordcraft"
+        },
+        "runtime_ref": "runtime",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "input_digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "description": {
+          "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "0.2.0",
+            "engine_version": "0.10.0"
+          },
+          "assets": []
+        }
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "session_checkpoint_described-missing-runtime_ref",
+      "message": {
+        "type": "session_checkpoint_described",
+        "request_id": "describe",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "wordcraft"
+        },
+        "session_id": "session",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "input_digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "description": {
+          "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "0.2.0",
+            "engine_version": "0.10.0"
+          },
+          "assets": []
+        }
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "session_checkpoint_described-missing-versions",
+      "message": {
+        "type": "session_checkpoint_described",
+        "request_id": "describe",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "wordcraft"
+        },
+        "session_id": "session",
+        "runtime_ref": "runtime",
+        "input_digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "description": {
+          "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "0.2.0",
+            "engine_version": "0.10.0"
+          },
+          "assets": []
+        }
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "session_checkpoint_described-missing-request_id",
+      "message": {
+        "type": "session_checkpoint_described",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "wordcraft"
+        },
+        "session_id": "session",
+        "runtime_ref": "runtime",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "input_digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "description": {
+          "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "0.2.0",
+            "engine_version": "0.10.0"
+          },
+          "assets": []
+        }
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "session_checkpoint_described-unknown-field",
+      "message": {
+        "type": "session_checkpoint_described",
+        "request_id": "describe",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "wordcraft"
+        },
+        "session_id": "session",
+        "runtime_ref": "runtime",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "input_digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "description": {
+          "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "0.2.0",
+            "engine_version": "0.10.0"
+          },
+          "assets": []
+        },
+        "unexpected": true
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "session_open-capability-valid",
+      "message": {
+        "type": "session_open",
+        "request_id": "open",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "wordcraft"
+        },
+        "session_id": "session",
+        "runtime_ref": "runtime",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "required_capabilities": [
+          "checkpoint_identity_v1"
+        ]
+      },
+      "peer": "host",
+      "valid": true
+    },
+    {
+      "id": "session_open-capability-empty",
+      "message": {
+        "type": "session_open",
+        "request_id": "open",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "wordcraft"
+        },
+        "session_id": "session",
+        "runtime_ref": "runtime",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "required_capabilities": []
+      },
+      "peer": "host",
+      "valid": false
+    },
+    {
+      "id": "session_open-capability-duplicate",
+      "message": {
+        "type": "session_open",
+        "request_id": "open",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "wordcraft"
+        },
+        "session_id": "session",
+        "runtime_ref": "runtime",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "required_capabilities": [
+          "checkpoint_identity_v1",
+          "checkpoint_identity_v1"
+        ]
+      },
+      "peer": "host",
+      "valid": false
+    },
+    {
+      "id": "session_open-capability-unknown",
+      "message": {
+        "type": "session_open",
+        "request_id": "open",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "wordcraft"
+        },
+        "session_id": "session",
+        "runtime_ref": "runtime",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "required_capabilities": [
+          "unknown"
+        ]
+      },
+      "peer": "host",
+      "valid": false
+    },
+    {
+      "id": "session_open-capability-missing",
+      "message": {
+        "type": "session_open",
+        "request_id": "open",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "wordcraft"
+        },
+        "session_id": "session",
+        "runtime_ref": "runtime",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        }
+      },
+      "peer": "host",
+      "valid": false
+    },
+    {
+      "id": "session_opened-capability-valid",
+      "message": {
+        "type": "session_opened",
+        "request_id": "open",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "wordcraft"
+        },
+        "session_id": "session",
+        "runtime_ref": "runtime",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "capabilities": [
+          "checkpoint_identity_v1"
+        ],
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "confirmed_basis": {
+          "revision": "0",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        }
+      },
+      "peer": "runtime",
+      "valid": true
+    },
+    {
+      "id": "session_opened-capability-empty",
+      "message": {
+        "type": "session_opened",
+        "request_id": "open",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "wordcraft"
+        },
+        "session_id": "session",
+        "runtime_ref": "runtime",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "capabilities": [],
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "confirmed_basis": {
+          "revision": "0",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        }
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "session_opened-capability-duplicate",
+      "message": {
+        "type": "session_opened",
+        "request_id": "open",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "wordcraft"
+        },
+        "session_id": "session",
+        "runtime_ref": "runtime",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "capabilities": [
+          "checkpoint_identity_v1",
+          "checkpoint_identity_v1"
+        ],
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "confirmed_basis": {
+          "revision": "0",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        }
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "session_opened-capability-unknown",
+      "message": {
+        "type": "session_opened",
+        "request_id": "open",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "wordcraft"
+        },
+        "session_id": "session",
+        "runtime_ref": "runtime",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "capabilities": [
+          "unknown"
+        ],
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "confirmed_basis": {
+          "revision": "0",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        }
+      },
+      "peer": "runtime",
+      "valid": false
+    },
+    {
+      "id": "session_opened-capability-missing",
+      "message": {
+        "type": "session_opened",
+        "request_id": "open",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "w",
+          "artifact_id": "a",
+          "application_id": "wordcraft"
+        },
+        "session_id": "session",
+        "runtime_ref": "runtime",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "fence": {
+          "generation": "1",
+          "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "confirmed_basis": {
+          "revision": "0",
+          "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        }
+      },
+      "peer": "runtime",
+      "valid": false
+    }
+  ]
+}

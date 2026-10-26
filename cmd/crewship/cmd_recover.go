@@ -53,7 +53,9 @@ then boot from.
 
 What it does, in order:
   1. verifies the bundle's checksum and decrypts it with your key;
-  2. refuses a non-empty --data-dir unless --force;
+  2. refuses a non-empty --data-dir unless --force; with --force it still
+     refuses a target database that holds workbooks (no bundle contains
+     them) unless --discard-workbooks acknowledges their loss;
   3. writes the database and every file store (attachments, memory and its
      version history, page projects, chats, skills), checking each file
      against the bundle's own index;
@@ -79,15 +81,19 @@ Examples:
 		bundle, _ := cmd.Flags().GetString("bundle")
 		dataDir, _ := cmd.Flags().GetString("data-dir")
 		force, _ := cmd.Flags().GetBool("force")
+		discardWorkbooks, _ := cmd.Flags().GetBool("discard-workbooks")
 		if bundle == "" || dataDir == "" {
 			return errors.New("--bundle and --data-dir are required")
+		}
+		if discardWorkbooks && !force {
+			return errors.New("--discard-workbooks only applies together with --force: without it the data directory must be empty")
 		}
 		ids, pass, err := bundleKeyFlags(cmd)
 		if err != nil {
 			return err
 		}
 		rep, err := backup.RecoverInstance(cmd.Context(), backup.RecoverOptions{
-			BundlePath: bundle, Identities: ids, Passphrase: pass, DataDir: dataDir, Force: force,
+			BundlePath: bundle, Identities: ids, Passphrase: pass, DataDir: dataDir, Force: force, DiscardWorkbooks: discardWorkbooks,
 			Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		})
 		if err != nil {
@@ -257,6 +263,7 @@ func init() {
 	}
 	recoverCmd.Flags().String("data-dir", "", "Where to write the restored instance (required; must be empty unless --force)")
 	recoverCmd.Flags().Bool("force", false, "Allow a non-empty data directory: its database is replaced and files the bundle carries are overwritten")
+	recoverCmd.Flags().Bool("discard-workbooks", false, "With --force: acknowledge that workbooks in the replaced database are destroyed (backups never contain workbooks)")
 	backupDrillCmd.Flags().Bool("env-keys", false, "Without a recovery kit in the bundle, unlock credentials with this machine's ENCRYPTION_KEY / ENCRYPTION_KEY_V<N>")
 	backupDrillCmd.Flags().String("post", "", "Record the result on the server this CLI is logged in to; --post=<url> also checks it is that server")
 	backupDrillCmd.Flags().Lookup("post").NoOptDefVal = "-"

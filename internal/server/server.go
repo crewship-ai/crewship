@@ -22,6 +22,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/editororigin"
 	"github.com/crewship-ai/crewship/internal/episodic"
 	"github.com/crewship-ai/crewship/internal/fileserver"
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -35,7 +36,9 @@ import (
 	"github.com/crewship-ai/crewship/internal/pages"
 	"path/filepath"
 
+	"github.com/crewship-ai/crewship/internal/appengine"
 	"github.com/crewship-ai/crewship/internal/memory"
+	"github.com/crewship-ai/crewship/internal/mooringassets"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
 	appleprovider "github.com/crewship-ai/crewship/internal/provider/apple"
@@ -54,6 +57,8 @@ import (
 
 type Server struct {
 	documentsStartupErr error
+	mooringStartupErr   error
+	mooringAssets       *mooringassets.Prepared
 	containerCleanup    *resourcelifecycle.Controller
 
 	recoveredStopsMu        sync.Mutex
@@ -101,6 +106,7 @@ type Server struct {
 	pprofShutdown     func()
 	pyroscopeShutdown func()
 	startedAt         time.Time
+	editor            *editororigin.Handler
 	runCtx            context.Context
 	runCancel         context.CancelFunc
 
@@ -405,6 +411,14 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	s.registerRoutes()
 	s.registerIPCRoutes()
 
+	// The embedded workbook editor (nil while off). Built before the API so
+	// the API can report it to administrators and, in same-host mode, show
+	// it the public origin of signed-in browser requests.
+	editor := newEditorOrigin(cfg, logger)
+	if (cfg.GridCraft.Enabled && cfg.GridCraft.EditorEnabled) || cfg.Mooring.Enabled {
+		s.editor = editor
+	}
+
 	// Mount Go API routes when database is available
 	if deps != nil && deps.DB != nil && cfg.Auth.JWTSecret != "" {
 		s.mountAPIRouter(cfg, logger, deps, orch, ctr, wsHub, logW, missionEngine, convStore, mux, ipcBase)
@@ -419,7 +433,20 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	// leak the actual API surface to a probing attacker.
 	mainHandler = pathTraversalRejectMiddleware(mainHandler)
 	// V-10: Wrap with security headers middleware
-	mainHandler = securityHeadersMiddleware(mainHandler, cfg.Storage.PageRuntimeOrigin)
+	if s.editor != nil {
+		// Reported on /healthz; in same-host mode the server also checks the
+		// public URL browsers use for a proxy that would defeat the
+		// path-scoped isolation.
+		if s.bgCtx == nil {
+			s.bgCtx, s.bgCancel = context.WithCancel(journal.WithSigningKeys(context.Background(), cfg.Audit.Keys))
+		}
+		startEditorProxyCheck(s.bgCtx, &s.bgWg, s.editor, logger, newEditorProxyCheckClient(s.editor.AllowsLoopbackProbes()), editorProxyCheckSchedule)
+	}
+	mainHandler = securityHeadersMiddlewareWith(mainHandler, editorHeaderOptions(cfg, editor))
+	// The editor (its host, or its path prefix on the Studio origin) serves
+	// only allowlisted bundles under its own headers; it never reaches the
+	// API, the SPA, path cleaning or the Studio security headers.
+	mainHandler = editororigin.Gate(editor, mainHandler)
 	// Panic recovery is the OUTERMOST wrapper so it also catches panics
 	// inside securityHeadersMiddleware itself (rare but possible if a
 	// future header derivation path-traverses a nil request). Forwards
@@ -722,6 +749,11 @@ func (s *Server) mountAPIRouter(
 		opts = append(opts, goapi.WithGoogleOAuth(cfg.Auth.GoogleClientID, cfg.Auth.GoogleSecret, cfg.Auth.NextjsURL))
 	}
 	opts = append(opts, goapi.WithStoragePath(cfg.Storage.BasePath), goapi.WithPageProjectsPath(cfg.Storage.PageProjectsPath), goapi.WithPageBuildImage(cfg.Storage.PageBuildImage), goapi.WithPageRuntime(cfg.Storage.PageRuntimeOrigin, cfg.PageStudioOrigin(), cfg.Storage.PageRuntimeDevelopmentSameOrigin))
+	if s.editor != nil {
+		editor := s.editor
+		opts = append(opts, goapi.WithWorkbookEditor(editor.LearnOrigin, func() any { return editor.Detail() }))
+		opts = append(opts, goapi.WithWorkbookEditorBundle(editor.SessionBundle))
+	}
 
 	// Dynamic catalog fetchers (devcontainer features + mise runtimes).
 	// They default to cached / embedded data; a background goroutine
@@ -816,6 +848,7 @@ func (s *Server) mountAPIRouter(
 	// from cfg.Keeper before this store existed, so an instance that was turned
 	// on (or off) through the API would otherwise run with the env's answer
 	// until somebody edited the setting again.
+	orch.SetGridCraftEnabled(cfg.GridCraft.Enabled)
 	orch.SetKeeperEnabled(keeperSettings.Effective().Enabled.Value)
 	keeperSettings.OnChange(func(eff keepercfg.Effective) {
 		if orch.KeeperEnabled() == eff.Enabled.Value {
@@ -1047,15 +1080,26 @@ func (s *Server) mountAPIRouter(
 	if cfg.Documents.Enabled {
 		opts = append(opts, goapi.WithDocumentAuthority(cfg.Documents.AuthoritySocket, cfg.Documents.ServiceTokenFile), goapi.WithDocumentService(cfg.Documents.ServiceSocket), goapi.WithDocumentLimits(cfg.Documents))
 	}
+	opts = s.configureMooringHTTP(opts)
 	apiRouter, err := goapi.NewRouter(deps.DB, cfg.Auth.JWTSecret, logger, opts...)
 	if err != nil {
 		logger.Error("failed to create API router", "error", err)
+		if cfg.Mooring.Enabled {
+			s.mooringStartupErr = err
+			s.closeMooringAssets()
+		}
 		if cfg.Documents.Enabled {
 			s.documentsStartupErr = err
 		}
 	} else {
 		s.apiRouter = apiRouter
 		apiRouter.RegisterSlidesHuman(cfg.Slides.Enabled)
+		if cfg.GridCraft.Enabled {
+			runner, err := appengine.NewWorkerClient(cfg.GridCraft.ServiceSocket, cfg.GridCraft.ServiceTokenFile)
+			if err == nil {
+				apiRouter.RegisterGridCraft(appengine.Options{Enabled: true, Editor: cfg.GridCraft.EditorEnabled, MaxWorkers: cfg.GridCraft.MaxWorkers, MaxWorkspaceWorkers: cfg.GridCraft.MaxWorkspaceWorkers}, appengine.GridCraft{Runner: runner})
+			}
+		}
 		// Provider-login refresh (docs/prd/provider-logins.md §5.3) rides the
 		// credential monitor's tick when there is one, and runs on its own
 		// ticker otherwise — a ChatGPT login must be renewed whether or not

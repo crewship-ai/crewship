@@ -242,12 +242,36 @@ describe("<ActivityBell> v67 panel", () => {
     expect(screen.getByTestId("activity-system-status-stub")).toBeInTheDocument()
   })
 
-  it("closes the day in the footer: completed today and what it cost, then Open Activity", () => {
-    h.runs = WORK()
-    render(<ActivityBell />)
-    openDropdown()
-    expect(screen.getByTestId("activity-footer-tally")).toHaveTextContent("1 completed today · $0.25")
-    expect(screen.getByRole("link", { name: /Open Activity/ })).toHaveAttribute("href", "/activity?status=waiting")
+  it.each([
+    { time: "just after midnight", now: new Date(2026, 9, 25, 0, 2) },
+    { time: "at noon", now: new Date(2026, 9, 25, 12) },
+  ])("closes the day in the footer $time: completed today and what it cost, then Open Activity", ({ now }) => {
+    vi.useFakeTimers({ toFake: ["Date"] })
+    vi.setSystemTime(now)
+    try {
+      // This positive fixture must finish today even in the first five
+      // minutes after midnight; WORK's relative completion may be yesterday.
+      h.runs = WORK().map(item => item.status === "completed" ? { ...item, ended_at: now.toISOString() } : item)
+      render(<ActivityBell />)
+      openDropdown()
+      expect(screen.getByTestId("activity-footer-tally")).toHaveTextContent("1 completed today · $0.25")
+      expect(screen.getByRole("link", { name: /Open Activity/ })).toHaveAttribute("href", "/activity?status=waiting")
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("does not count yesterday's completion just after midnight", () => {
+    vi.useFakeTimers({ toFake: ["Date"] })
+    vi.setSystemTime(new Date(2026, 9, 25, 0, 2))
+    try {
+      h.runs = WORK()
+      render(<ActivityBell />)
+      openDropdown()
+      expect(screen.getByTestId("activity-footer-tally")).toHaveTextContent(/^0 completed today$/)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("sets figures in sans tabular numerals, not mono", () => {

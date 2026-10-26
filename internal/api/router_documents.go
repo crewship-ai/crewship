@@ -21,7 +21,7 @@ func (r *Router) registerDocumentRoutes() {
 	// openapi: responses 200,400,401,403,500
 	r.mux.Handle("GET /api/v1/documents/status", authed(wsCtx(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
-		writeJSON(w, 200, DocumentAvailability{Enabled: p.documentCall != nil})
+		writeJSON(w, 200, r.documentAvailability(req))
 	}))))
 	// openapi: responses 200,401,403,404,500,503
 	r.mux.Handle("GET /api/v1/chats/{chatId}/document-results", authed(wsCtx(http.HandlerFunc(p.ListChatDocumentResults))))
@@ -39,4 +39,32 @@ func (r *Router) registerDocumentRoutes() {
 	r.authedMut("POST", "/api/v1/pages/{slug}/document/initialize", roleInline, p.MutateDocument)
 	// openapi: responses 200,400,401,403,404,409,413,422,429,500,502,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/document/patch", roleInline, p.MutateDocument)
+}
+
+// This advertises release assets only. Initialization and every later content
+// operation continue through the existing Page and original-source authority.
+func (r *Router) documentAvailability(req *http.Request) DocumentAvailability {
+	status := DocumentAvailability{Enabled: r.pages.documentCall != nil}
+	if m := r.mooringHTTP; m != nil && m.commandFactory != nil && m.commandFactory.editorBundle != nil {
+		f := m.commandFactory
+		f.mu.Lock()
+		live := !f.closed && f.enabled
+		f.mu.Unlock()
+		if live {
+			digest, indexURL := f.editorBundle(req)
+			status.WordCraftCommands = commandDigestValid("sha256:"+digest) && indexURL != ""
+		}
+	}
+	if m := r.mooringHTTP; m != nil && m.config.Enabled && m.config.EditorBundle != nil {
+		m.mu.Lock()
+		closed := m.closed
+		m.mu.Unlock()
+		if !closed {
+			digest, indexURL := m.config.EditorBundle(req)
+			if digest != "" && indexURL != "" {
+				status.WordCraftSDKPrefix = m.config.SDKPrefix
+			}
+		}
+	}
+	return status
 }

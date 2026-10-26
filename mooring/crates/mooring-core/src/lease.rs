@@ -88,7 +88,14 @@ impl DeliveryGate {
     /// Check immediately before every content send, including snapshots,
     /// updates, history, exports and assets. Expiry is an exclusive boundary.
     pub fn may_deliver(&mut self, now: Tick) -> bool {
-        self.observe(now).is_ok() && self.expires_at.is_some_and(|expiry| now < expiry)
+        matches!(self.observe_delivery(now), Ok(true))
+    }
+
+    // Same single observation as may_deliver. The owned ReadLease distinguishes
+    // a genuine horizon end from clock/closed failures without observing twice.
+    pub(crate) fn observe_delivery(&mut self, now: Tick) -> Result<bool, LeaseError> {
+        self.observe(now)?;
+        Ok(self.expires_at.is_some_and(|expiry| now < expiry))
     }
 
     /// Permanent closure. Late responses cannot reopen this participant gate;

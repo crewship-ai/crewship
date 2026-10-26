@@ -40,6 +40,7 @@ type MemoryConfig struct {
 // ContainerID is the Docker container where this agent is running; forwarded to
 // crewshipd so /keeper/execute can exec commands in the correct container.
 type IPCConfig struct {
+	GridCraftEnabled bool `json:"gridcraft_enabled,omitempty"`
 	// CrewOnly exposes only read-only fleet telemetry to agent-less scripts.
 	CrewOnly    bool   `json:"crew_only,omitempty"`
 	BaseURL     string `json:"base_url"`
@@ -592,6 +593,12 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 				return
 			}
 			switch {
+			case r.Method == http.MethodPost && r.URL.Path == "/api/v1/mooring":
+				s.handleMooring(w, r)
+				return
+			case r.Method == http.MethodPost && r.URL.Path == "/api/v1/gridcraft":
+				s.handleGridCraft(w, r)
+				return
 			case r.Method == http.MethodGet && r.URL.Path == "/api/v1/documents/draft":
 				s.handleDocumentDraft(w, r)
 				return
@@ -646,6 +653,9 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 				// calls resolve to its OWN .memory tier (CRE-137: alex's
 				// writes used to land in sam's directory).
 				s.handleMemoryMCPForAgent(w, r, strings.TrimPrefix(r.URL.Path, "/mcp/memory/"))
+				return
+			case r.Method == http.MethodPost && r.URL.Path == "/mcp/mooring":
+				s.handleMooringMCP(w, r)
 				return
 			case r.Method == http.MethodPost && r.URL.Path == "/mcp/routines":
 				// In-container MCP server exposing the routine-authoring

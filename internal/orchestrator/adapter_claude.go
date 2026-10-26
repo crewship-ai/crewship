@@ -58,7 +58,7 @@ func resolveMaxTurns(req AgentRunRequest) int {
 // claudePromptViaStdin is the shared predicate behind PromptViaStdin and the
 // arg-omission branch in BuildCommand so the two never disagree.
 func claudePromptViaStdin(req AgentRunRequest) bool {
-	return len(req.UserMessage) > promptArgMaxBytes
+	return req.mooringDocumentTools || len(req.UserMessage) > promptArgMaxBytes
 }
 
 // PromptViaStdin routes oversized prompts through stdin to dodge E2BIG. Normal
@@ -127,7 +127,11 @@ func (claudeCodeAdapter) BuildCommand(req AgentRunRequest) []string {
 	// listed are removed from the model's context); MCP tools come from
 	// --mcp-config and are unaffected, so crewship-memory + Composio still
 	// resolve. The per-profile policy lives in builtinToolAllowlist.
-	cmd = append(cmd, "--tools", builtinToolAllowlistCSV(req.ToolProfile))
+	tools := builtinToolAllowlistCSV(req.ToolProfile)
+	if req.mooringDocumentTools {
+		tools = ""
+	}
+	cmd = append(cmd, "--tools", tools)
 	// --max-turns caps runaway loops at the Claude side as defense-in-depth
 	// alongside Crewship's mission-level paymaster budget and the orchestrator
 	// loop guard. Interactive runs default to DefaultMaxTurns; routine runs
