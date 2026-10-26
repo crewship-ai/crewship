@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/askforms"
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/costvis"
 
@@ -553,8 +554,17 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 		errCh = "session:" + payload.ChatID
 	}
 
+	submissionID := askSubmissionID(payload.Metadata)
+	sendRefusal := func(channel, message string) {
+		if submissionID != "" {
+			c.sendAskSubmissionError(channel, submissionID, message, nil)
+		} else {
+			c.sendError(channel, message)
+		}
+	}
+
 	if c.hub.chatHandler == nil {
-		c.sendError(errCh, "chat not available")
+		sendRefusal(errCh, "chat not available")
 		return
 	}
 
@@ -562,7 +572,7 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 		c.hub.logger.Warn("send_message missing fields",
 			"user_id", c.userID, "remote_addr", c.remoteAddr(),
 			"chat_id_empty", payload.ChatID == "", "content_empty", payload.Content == "")
-		c.sendError(errCh, "session_id and content required")
+		sendRefusal(errCh, "session_id and content required")
 		return
 	}
 
@@ -572,7 +582,7 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 		// Grant path — authorizer errors fail closed.
 		if ok, err := c.hub.channelAuth.CanSubscribe(c.ctx, c.userID, sessionCh); err != nil || !ok {
 			c.hub.logger.Warn("send_message denied: no access to session", "user_id", c.userID, "chat_id", payload.ChatID, "error", err)
-			c.sendError(errCh, "access denied")
+			sendRefusal(errCh, "access denied")
 			return
 		}
 	}
@@ -599,7 +609,7 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 		c.hub.cancelMu.Lock()
 		if _, exists := c.hub.cancelFns[cancelKey]; exists {
 			c.hub.cancelMu.Unlock()
-			c.sendError(channel, "a message is already being processed")
+			sendRefusal(channel, "a message is already being processed")
 			return
 		}
 		c.hub.cancelFns[cancelKey] = runCancel
@@ -653,7 +663,24 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 		// handler's contract intact: it may stream, or not, and the fallback
 		// fires only when nothing was said.
 		var streamedError bool
+		var askStateMu sync.Mutex
+		askAccepted := false
+		askError := ""
 		streamFn := func(ev ChatEvent) {
+			if submissionID != "" {
+				askStateMu.Lock()
+				if ev.Type == "user_message" {
+					if metadata, ok := ev.Metadata.(map[string]any); ok && metadata["ask_submission_id"] == submissionID {
+						askAccepted = true
+					}
+				}
+				if ev.Type == "error" && !askAccepted {
+					askError = ev.Content
+					askStateMu.Unlock()
+					return // a refused send is private, never a shared run error
+				}
+				askStateMu.Unlock()
+			}
 			streamStart.Do(func() { run = c.hub.beginSessionRun(payload.ChatID, c) })
 			if ev.Type == "error" {
 				streamedError = true
@@ -674,6 +701,31 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 			},
 		)
 		if err != nil {
+			var submissionError *askforms.SubmissionError
+			if errors.As(err, &submissionError) {
+				// Validation is a private send rejection, not a run event.
+				// Do not start/reset replay or broadcast errors to other users.
+				c.sendAskSubmissionError(channel, submissionError.SubmissionID, submissionError.Error(), submissionError.Errors)
+				return
+			}
+			askStateMu.Lock()
+			persisted, privateError := askAccepted, askError
+			askStateMu.Unlock()
+			if submissionID != "" && !persisted && !errors.Is(err, ErrCrewProvisioning) {
+				if privateError == "" {
+					privateError = "The form could not be sent. Your answers have not been saved."
+				}
+				if errors.Is(err, ErrAgentBusy) {
+					privateError = agentBusyNotice
+				}
+				c.sendAskSubmissionError(channel, submissionID, privateError, nil)
+				// Only finish a stream this send actually began; a busy or
+				// validation rejection must not reset another user's replay.
+				if run != nil {
+					streamFn(ChatEvent{Type: "done"})
+				}
+				return
+			}
 			// Don't emit error if context was cancelled (user requested stop)
 			if runCtx.Err() == context.Canceled {
 				streamFn(ChatEvent{Type: "done", Content: ""})
@@ -737,7 +789,7 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 			// sender; do not broadcast a synthetic done or user turn.
 			var refused interface{ DocumentCreationSubmissionRefused() string }
 			if errors.As(err, &refused) {
-				c.sendError(channel, refused.DocumentCreationSubmissionRefused())
+				sendRefusal(channel, refused.DocumentCreationSubmissionRefused())
 				return
 			}
 			c.hub.logger.Error("chat message error", "error", err, "session_id", payload.ChatID)

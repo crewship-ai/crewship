@@ -8,7 +8,7 @@ import { useAbilities } from "@/hooks/use-abilities"
 import { useAccessMode } from "@/hooks/use-access-mode"
 import { apiFetch } from "@/lib/api-fetch"
 import { requireApiPathSegment } from "@/lib/api-path-segment"
-import { isResourceRight, resourcePolicySchema, resourceShareReplacement, shareOperations, type ResourcePolicy, type SharedResource } from "@/lib/resource-sharing"
+import { isResourceRight, resourcePolicySchema, resourceShareReplacement, resourceShareOperations, type ResourcePolicy, type SharedResource } from "@/lib/resource-sharing"
 import { Button } from "@/components/ui/button"
 import { CreateSurface, CreateSurfaceBody, CreateSurfaceFooter, CreateSurfaceHeader } from "@/components/layout/create-surface"
 import { ProjectGuestIntake } from "./project-guest-intake"
@@ -39,17 +39,17 @@ function ShareDialog({ workspaceId, resource }: { workspaceId: string; resource:
       const response = await apiFetch(`/api/v1/workspaces/${requireApiPathSegment(workspaceId)}/members?workspace_id=${encodeURIComponent(workspaceId)}`, { signal })
       if (!response.ok) throw new Error("Sharing is unavailable. Reload to check your access.")
       const members = rosterSchema.parse(await response.json())
-      const guests = members.filter(member => member.access_mode === "restricted")
+      const recipients = members.filter(member => member.access_mode === "restricted" || resource.kind === "crew")
       const policies = new Map<string, ResourcePolicy>()
       // Bound concurrent policy reads even in a large workspace.
       let next = 0
-      await Promise.all(Array.from({ length: Math.min(4, guests.length) }, async () => {
-        while (next < guests.length) {
-          const member = guests[next++]
+      await Promise.all(Array.from({ length: Math.min(4, recipients.length) }, async () => {
+        while (next < recipients.length) {
+          const member = recipients[next++]
           const res = await apiFetch(policyUrl(workspaceId, member.id), { signal })
           if (!res.ok) throw new Error("Could not load all shares. Reload before editing.")
           const policy = resourcePolicySchema.parse(await res.json())
-          if (policy.membership_id !== member.id || policy.mode !== "restricted") throw new Error("Membership changed. Reload before editing.")
+          if (policy.membership_id !== member.id || policy.mode !== member.access_mode) throw new Error("Membership changed. Reload before editing.")
           policies.set(member.id, policy)
         }
       }))
@@ -61,20 +61,20 @@ function ShareDialog({ workspaceId, resource }: { workspaceId: string; resource:
     <Button variant="outline" size="sm" className="coarse:h-[44px]" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}><Share2 className="mr-1.5 h-3.5 w-3.5" />Share</Button>
     <CreateSurface open={open} onOpenChange={requestOpen} size="md" restoreOpenerFocus>
       <CreateSurfaceHeader title={`Share ${resource.name}`} onClose={() => requestOpen(false)} description={<>
-        {resource.kind === "routine" ? "View shares the stored definition, including its prompts and defaults, without permission to execute. View runs and outputs additionally shares past and future routine run history and outputs; inherited private conversation audiences still apply. Inputs are not shown directly; outputs may contain them. It does not share transcripts or execution authority. Edit draft additionally shares the collaborative unpublished draft and permits changes with View. It does not publish or grant execution. Publish is separate and requires Edit; publishing additionally requires current View. It changes the published version without granting Run. Existing Run shares do not automatically expose the definition. Run uses the routine’s configured credentials and also requires access to every agent it uses." : "List shows the project in Issues. Read opens its issues and explicitly shared comments. Contribute also permits requests, shared comments and arranging intake work; it requires Read. Manage with Read explicitly shares the project description and permits editing its name, description and milestones. Only empty milestones can be removed. Delete issues also requires Read and Manage, and explicitly permits permanent removal of Backlog or Cancelled issues without active work or sub-issues."}
+        {resource.kind === "crew" ? "View shares the crew identity and current agent identities and status. Use also shares Chat and Run for current and future agents in this crew, subject to each agent’s authority and execution preflight. New agents added to the crew become discoverable. Trusted MEMBER/MANAGER recipients can additionally receive explicit Manage for this crew’s profile/configuration and ordinary membership, without role assignment, crew deletion, budget/policy changes or workspace administration. Execution may use the crew’s configured credentials after normal preflight, but Guest View/Use never grants Delegate, credential visibility, existing conversations, activity or crew administration." : resource.kind === "routine" ? "View shares the stored definition, including its prompts and defaults, without permission to execute. View runs and outputs additionally shares past and future routine run history and outputs; inherited private conversation audiences still apply. Inputs are not shown directly; outputs may contain them. It does not share transcripts or execution authority. Edit draft additionally shares the collaborative unpublished draft and permits changes with View. It does not publish or grant execution. Publish is separate and requires Edit; publishing additionally requires current View. It changes the published version without granting Run. Existing Run shares do not automatically expose the definition. Run uses the routine’s configured credentials and also requires access to every agent it uses." : "List shows the project in Issues. Read opens its issues and explicitly shared comments. Contribute also permits requests, shared comments and arranging intake work; it requires Read. Manage with Read explicitly shares the project description and permits editing its name, description and milestones. Only empty milestones can be removed. Delete issues also requires Read and Manage, and explicitly permits permanent removal of Backlog or Cancelled issues without active work or sub-issues."}
       </>} />
       <CreateSurfaceBody className="space-y-4">
-      <p className="text-sm text-muted-foreground">Trusted members use their workspace role. Individual shares apply to Guest accounts; changing account mode is managed in Settings.</p>
+      <p className="text-sm text-muted-foreground">{resource.kind === "crew" ? "Guest shares permit View/Use. Trusted MEMBER/MANAGER shares permit only Manage; workspace roles and account mode stay unchanged. Existing inactive shares remain visible for deliberate revocation." : "Trusted members use their workspace role. Individual shares apply to Guest accounts; changing account mode is managed in Settings."}</p>
       {open && resource.kind === "project" && <ProjectGuestIntake workspaceId={workspaceId} projectId={resource.id} disabled={busyMember !== null} onBusy={busy => setBusyMember(busy ? "__intake__" : null)} />}
       {query.isPending && <p role="status">Loading shares…</p>}
       {query.isError && <div role="alert"><p>{query.error.message}</p></div>}
       {!query.isError && query.data && <>
-        {query.data.members.filter(member => member.access_mode === "trusted").length > 0 && <details><summary>Trusted workspace members</summary><ul>{query.data.members.filter(member => member.access_mode === "trusted").map(member => <li key={member.id}>{member.user.full_name || member.user.email} · {member.role}</li>)}</ul></details>}
-        {query.data.policies.size === 0 && <p>No Guest members. Invite a Guest from Settings to share individual resources.</p>}
-        {query.data.members.filter(member => member.access_mode === "restricted").map(member => {
+        {resource.kind !== "crew" && query.data.members.filter(member => member.access_mode === "trusted").length > 0 && <details><summary>Trusted workspace members</summary><ul>{query.data.members.filter(member => member.access_mode === "trusted").map(member => <li key={member.id}>{member.user.full_name || member.user.email} · {member.role}</li>)}</ul></details>}
+        {query.data.policies.size === 0 && <p>No individual recipients. Invite a member from Settings to share this resource.</p>}
+        {query.data.members.filter(member => query.data.policies.has(member.id)).map(member => {
           const policy = query.data.policies.get(member.id)!
           return <ShareMember key={`${member.id}:${policy.revision}`} workspaceId={workspaceId} resource={resource} policy={policy}
-            label={member.user.full_name || member.user.email} disabled={busyMember !== null && busyMember !== member.id} onBusy={busy => setBusyMember(busy ? member.id : null)}
+            label={member.user.full_name || member.user.email} eligible={member.access_mode === "restricted" || member.role === "MEMBER" || member.role === "MANAGER"} disabled={busyMember !== null && busyMember !== member.id} onBusy={busy => setBusyMember(busy ? member.id : null)}
             onSaved={updated => client.setQueryData<typeof query.data>(queryKey, current => current ? { ...current, policies: new Map(current.policies).set(member.id, updated) } : current)} />
         })}
       </>}
@@ -86,10 +86,11 @@ function ShareDialog({ workspaceId, resource }: { workspaceId: string; resource:
   </>
 }
 
-function ShareMember({ workspaceId, resource, policy, label, onSaved, disabled, onBusy }: {
-  workspaceId: string; resource: SharedResource; policy: ResourcePolicy; label: string; onSaved: (policy: ResourcePolicy) => void; disabled: boolean; onBusy: (busy: boolean) => void
+function ShareMember({ workspaceId, resource, policy, label, eligible, onSaved, disabled, onBusy }: {
+  workspaceId: string; resource: SharedResource; policy: ResourcePolicy; label: string; eligible: boolean; onSaved: (policy: ResourcePolicy) => void; disabled: boolean; onBusy: (busy: boolean) => void
 }) {
   const client = useQueryClient()
+  const operations = resourceShareOperations(policy, resource)
   const original = policy.rights.filter(right => isResourceRight(right, resource)).map(right => right.operation)
   const [selected, setSelected] = useState(original)
   const [reissue, setReissue] = useState<string[]>([])
@@ -97,11 +98,11 @@ function ShareMember({ workspaceId, resource, policy, label, onSaved, disabled, 
   const [error, setError] = useState("")
   const [conflict, setConflict] = useState(false)
   const invalidPublish = resource.kind === "routine" && selected.includes("publish") && !selected.includes("edit")
-  const changed = shareOperations[resource.kind].some(operation => selected.includes(operation) !== original.includes(operation)) || reissue.length > 0
+  const changed = operations.some(operation => selected.includes(operation) !== original.includes(operation)) || reissue.length > 0
   async function save() {
     setSaving(true); onBusy(true); setError("")
     try {
-      const response = await apiFetch(policyUrl(workspaceId, policy.membership_id), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(resourceShareReplacement(policy, resource, selected.filter(op => (shareOperations[resource.kind] as readonly string[]).includes(op)), reissue)) })
+      const response = await apiFetch(policyUrl(workspaceId, policy.membership_id), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(resourceShareReplacement(policy, resource, selected.filter(op => operations.includes(op)), reissue)) })
       if (response.status === 409) { setConflict(true); throw new Error("Access changed. Reload shares and review the current policy before saving.") }
       if (!response.ok) throw new Error("Sharing was not saved. Your edits are kept.")
       const updated = resourcePolicySchema.parse(await response.json())
@@ -115,17 +116,18 @@ function ShareMember({ workspaceId, resource, policy, label, onSaved, disabled, 
   }
   return <fieldset disabled={saving || conflict || disabled} className="space-y-2 rounded-lg border p-3">
     <legend className="px-1 text-sm font-medium">{label}</legend>
-    {shareOperations[resource.kind].map(operation => {
+    {operations.map(operation => {
       const detail = policy.grant_details?.find(right => isResourceRight(right, resource) && right.operation === operation)
       return <div key={operation} className="space-y-1">
-        <label className="flex min-h-9 items-center gap-2 coarse:min-h-[44px]"><input type="checkbox" disabled={operation === "publish" && !selected.includes("edit") && !selected.includes("publish")} checked={selected.includes(operation)} onChange={event => {
+        <label className="flex min-h-9 items-center gap-2 coarse:min-h-[44px]"><input type="checkbox" disabled={(!eligible && !selected.includes(operation)) || (operation === "publish" && !selected.includes("edit") && !selected.includes("publish"))} checked={selected.includes(operation)} onChange={event => {
           setSelected(event.target.checked ? [...selected, operation] : selected.filter(op => op !== operation))
           if (!event.target.checked) setReissue(reissue.filter(op => op !== operation))
-        }} />{operation === "results" ? "View runs and outputs" : operation === "view" ? "View definition" : operation === "edit" ? "Edit draft" : operation === "publish" ? "Publish" : operation === "run" ? "Run" : operation === "list" ? "List in Issues" : operation === "contribute" ? "Contribute to issues" : operation === "delete_issues" ? "Delete issues" : operation === "manage" ? "Manage project" : "Read issues"}</label>
-        {detail && <p className="text-xs text-muted-foreground">{detail.live ? "Active" : "Inactive — issuer no longer has authority"} · Issued by {detail.issuer_name || detail.issuer_id}</p>}
-        {detail && !detail.live && selected.includes(operation) && <label className="flex min-h-9 items-center gap-2 text-xs coarse:min-h-[44px]"><input type="checkbox" checked={reissue.includes(operation)} onChange={event => setReissue(event.target.checked ? [...reissue, operation] : reissue.filter(op => op !== operation))} />Reissue {operation} as me</label>}
+        }} />{resource.kind === "crew" && operation === "manage" ? "Manage crew" : resource.kind === "crew" && operation === "view" ? "View" : resource.kind === "crew" && operation === "use" ? "Use" : operation === "results" ? "View runs and outputs" : operation === "view" ? "View definition" : operation === "edit" ? "Edit draft" : operation === "publish" ? "Publish" : operation === "run" ? "Run" : operation === "list" ? "List in Issues" : operation === "contribute" ? "Contribute to issues" : operation === "delete_issues" ? "Delete issues" : operation === "manage" ? "Manage project" : "Read issues"}</label>
+        {detail && <p className="text-xs text-muted-foreground">{detail.live ? "Active" : "Inactive — current share authority is unavailable"} · Issued by {detail.issuer_name || detail.issuer_id}</p>}
+        {eligible && detail && !detail.live && selected.includes(operation) && <label className="flex min-h-9 items-center gap-2 text-xs coarse:min-h-[44px]"><input type="checkbox" checked={reissue.includes(operation)} onChange={event => setReissue(event.target.checked ? [...reissue, operation] : reissue.filter(op => op !== operation))} />Reissue {operation} as me</label>}
       </div>
     })}
+    {!eligible && <p className="text-xs text-muted-foreground">New or reissued Manage shares require a trusted MEMBER or MANAGER. Existing shares can be removed.</p>}
     <Button variant="outline" size="sm" className="coarse:h-[44px]" disabled={!changed || saving || conflict || invalidPublish} onClick={() => void save()}>{saving ? "Saving…" : `Save access for ${label}`}</Button>
     {invalidPublish && <p role="alert" className="text-sm">Publish requires Edit. Select Edit or remove Publish before saving.</p>}
     {error && <p role="alert" className="text-sm">{error}</p>}

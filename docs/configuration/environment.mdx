@@ -321,6 +321,8 @@ These names are used by CLI commands, test harnesses, or the agent runtime rathe
 | `CREWSHIP_ADMIN_TOKEN_HMAC_KEY` | Auto-generated on first boot | 256-bit hex HMAC key for hashing ADMIN-tier CLI tokens at rest (`cli_tokens` table). Kept separate from `ENCRYPTION_KEY` so a DB dump alone cannot offline-crack admin tokens. Bootstrapped + persisted to `<dataDir>/secrets.env` like `ENCRYPTION_KEY` (32 bytes → 64 hex chars), so the ADMIN tier works out of the box. Read via `internal/secrets/bootstrap.go`. |
 | `CREWSHIP_FORCE_SECURE_COOKIES` | (unset — off) | Set truthy to force the `Secure` flag on auth cookies even when the `X-Forwarded-Proto` header is dropped by a proxy. Set behind any HTTPS edge. Read by `internal/api/nextauth.go`. |
 | `CREWSHIP_ALLOW_SIGNUP` | `false` | Allow new user registration (`true` or `1`) |
+| `CREWSHIP_PUBLIC_PAGE_PASSWORD_MAX_CONCURRENT` | `0` (automatic) | Concurrent public Pages password checks in one server process. Automatic uses `max(1, min(4, GOMAXPROCS / 2))`; 1–1024 sets an explicit limit. Changes require restart. |
+| `CREWSHIP_PUBLIC_PAGE_PASSWORD_MAX_CONCURRENT_PER_TARGET` | `0` (automatic: 1) | Concurrent checks per public link, including unknown links keyed by a token hash. Must not exceed the effective global limit. No waiting queue; busy requests return 429 with `Retry-After: 1`. |
 | `CREWSHIP_BOOTSTRAP_WINDOW` | _(unset — open until first admin)_ | Opt-in finite first-run window. Unset (default), `/bootstrap` stays open until the first admin account exists (the empty user table is the gate). Set to a positive Go duration (e.g. `5m`, `30s`, `1h`) to arm a deploy-race window that refuses `/bootstrap` with `410` after it elapses — for instances exposed to the internet before they're bootstrapped. Invalid or non-positive values are ignored (falls back to the open-until-admin default). |
 
 <Note>
@@ -919,3 +921,30 @@ the deployment can provide it. A sibling subdomain needs
 `CREWSHIP_EDITOR_RUNTIME_DEVELOPMENT_SAME_SITE`. Crewship does not derive an
 editor subdomain on its own, because it cannot tell whether DNS, the
 certificate and the proxy cover that name.
+
+## Diff preview computation
+
+These limits apply to routine-version and consolidation previews in one server
+process. Environment overrides YAML; restart to apply changes. Zero selects the
+defaults below. Negative, nonnumeric or out-of-range values fail configuration
+validation. Raising limits permits more computation; these are not hard CPU
+timeouts or an RSS ceiling.
+
+| Variable | Default when zero | Range |
+|---|---|---|
+| `CREWSHIP_DIFF_MAX_INPUT_BYTES` | `262144` (256 KiB) |0–8388608 |
+| `CREWSHIP_DIFF_MAX_LINES` | `2000` per input |0–20000 |
+| `CREWSHIP_DIFF_MAX_CONCURRENT` | `2` shared computations |0–64 |
+
+The byte budget covers both raw version definitions together and both
+pretty-printed matcher inputs together. Consolidation reads are individually
+bounded before checking the pair and the proposed merged result. The existing
+absolute 8 MiB per-file ceiling remains in force. The line budget counts exactly
+the matcher's newline-separated elements, including a final empty element after
+a newline. Output is additionally capped at four times the input-byte budget
+plus 128 KiB. An identical version hash returns its existing cheap response.
+
+Above budget, previews return 413 with an explicit too-large message. If both
+slots are occupied, they immediately return 429 and `Retry-After: 1`; there is no
+waiting queue. A canceled caller does not release a slot while synchronous
+computation is still running. Limits are per process, not shared across replicas.

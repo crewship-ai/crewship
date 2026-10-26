@@ -48,7 +48,7 @@ DELETE /api/v1/crews/{crewId}/integrations/{integrationId} roleManage
 DELETE /api/v1/crews/{crewId}/issues/{identifier} roleCreate
 DELETE /api/v1/crews/{crewId}/issues/{identifier}/attachments/{attachmentId} roleCreate
 DELETE /api/v1/crews/{crewId}/issues/{identifier}/code-links/{linkId} roleCreate
-DELETE /api/v1/crews/{crewId}/members/{memberId} roleManage
+DELETE /api/v1/crews/{crewId}/members/{memberId} roleInline
 DELETE /api/v1/crews/{crewId}/missions/{missionId} roleCreate
 DELETE /api/v1/crews/{crewId}/persona roleCreate
 DELETE /api/v1/feature-flags/{key} roleInstance
@@ -122,7 +122,7 @@ PATCH /api/v1/automations/{id} roleManage
 PATCH /api/v1/chats/{chatId}/proposals/{sourceId} roleInline
 PATCH /api/v1/credential-folders/{folderId} roleInline
 PATCH /api/v1/credentials/{credentialId} roleCreate
-PATCH /api/v1/crews/{crewId} roleManage
+PATCH /api/v1/crews/{crewId} roleInline
 PATCH /api/v1/crews/{crewId}/integrations/{integrationId} roleManage
 PATCH /api/v1/crews/{crewId}/integrations/{integrationId}/tools/{toolName} roleManage
 PATCH /api/v1/crews/{crewId}/issues/{identifier} roleCreate
@@ -131,7 +131,7 @@ PATCH /api/v1/crews/{crewId}/missions/{missionId} roleCreate
 PATCH /api/v1/crews/{crewId}/missions/{missionId}/tasks/{taskId} roleCreate
 PATCH /api/v1/escalations/{escalationId}/resolve roleCreate
 PATCH /api/v1/feature-flags/{key} roleInstance
-PATCH /api/v1/hooks/{id} roleManage
+PATCH /api/v1/hooks/{id} roleInline
 PATCH /api/v1/inbox/{id} roleSelf
 PATCH /api/v1/integrations/{integrationId} roleManage
 PATCH /api/v1/issues/bulk roleCreate
@@ -282,7 +282,7 @@ POST /api/v1/crews/{crewId}/issues/{identifier}/review roleCreate
 POST /api/v1/crews/{crewId}/issues/{identifier}/start roleCreate
 POST /api/v1/crews/{crewId}/issues/{identifier}/stop roleCreate
 POST /api/v1/crews/{crewId}/issues/{identifier}/work roleCreate
-POST /api/v1/crews/{crewId}/members roleCreate
+POST /api/v1/crews/{crewId}/members roleInline
 POST /api/v1/crews/{crewId}/missions roleCreate
 POST /api/v1/crews/{crewId}/missions/{missionId}/clone roleCreate
 POST /api/v1/crews/{crewId}/missions/{missionId}/restart roleCreate
@@ -301,9 +301,9 @@ POST /api/v1/eval/regression roleManage
 POST /api/v1/eval/replay roleManage
 POST /api/v1/feature-flags roleInstance
 POST /api/v1/feedback roleSelf
-POST /api/v1/hooks roleManage
-POST /api/v1/hooks/{id}/disable roleManage
-POST /api/v1/hooks/{id}/enable roleManage
+POST /api/v1/hooks roleInline
+POST /api/v1/hooks/{id}/disable roleInline
+POST /api/v1/hooks/{id}/enable roleInline
 POST /api/v1/inbox/bulk roleSelf
 POST /api/v1/inbox/{id}/act roleSelf
 POST /api/v1/integrations roleManage
@@ -462,7 +462,7 @@ PUT /api/v1/credentials/{credentialId} roleCreate
 PUT /api/v1/credentials/{credentialId}/fields/{fieldKey} roleCreate
 PUT /api/v1/credentials/{credentialId}/sensitivity roleInline
 PUT /api/v1/crew-connections/{connectionId}/file-access roleCreate
-PUT /api/v1/crews/{crewId} roleManage
+PUT /api/v1/crews/{crewId} roleInline
 PUT /api/v1/crews/{crewId}/budget roleManage
 PUT /api/v1/crews/{crewId}/files/save roleCreate
 PUT /api/v1/crews/{crewId}/issues/{identifier}/review-policy roleCreate

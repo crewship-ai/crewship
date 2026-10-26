@@ -34,6 +34,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
+	"github.com/crewship-ai/crewship/internal/skills"
 	"github.com/crewship-ai/crewship/internal/ws"
 	dockerclient "github.com/moby/moby/client"
 )
@@ -65,6 +66,9 @@ type Router struct {
 	mooringStartupErr      error
 	mooringHTTPConfig      MooringHTTPConfig
 	mooringHTTP            *collaborationHTTPManager
+	skillGitImportPolicy   skills.GitImportPolicy
+	diffLimits             config.DiffConfig
+	diffs                  *diffComputeBudget
 	documentsServiceSocket string
 	documentsClient        *http.Client
 	documentsSocket        string
@@ -167,19 +171,21 @@ type Router struct {
 	// govModelJudge is the same resolver as govModelStatus, concretely typed so
 	// the admin judge routes can build a candidate hosted judge. nil → those
 	// routes 503.
-	govModelJudge    *GovModelResolver
-	composioConfig   *config.ComposioConfig
-	keeperConvReader ConversationReader
-	convSearcher     ConversationSearcher
-	missionCallback  MissionCallback
-	scheduleUpdater  ScheduleUpdater
-	logWriter        *logcollector.Writer
-	allowSignup      bool
-	googleClientID   string
-	googleSecret     string
-	authBaseURL      string
-	license          *license.License
-	agentHandler     *AgentHandler
+	govModelJudge       *GovModelResolver
+	composioConfig      *config.ComposioConfig
+	keeperConvReader    ConversationReader
+	convSearcher        ConversationSearcher
+	missionCallback     MissionCallback
+	scheduleUpdater     ScheduleUpdater
+	logWriter           *logcollector.Writer
+	publicPagePasswords config.PublicPagePasswordsConfig
+	pagePublicHandler   *PagePublicHandler
+	allowSignup         bool
+	googleClientID      string
+	googleSecret        string
+	authBaseURL         string
+	license             *license.License
+	agentHandler        *AgentHandler
 	// credentialHandler and skillGenHandler are stashed at
 	// registerCrewsRoutes time so the registerInternalRoutes step
 	// can wire the matching /api/v1/internal/credentials and
@@ -882,6 +888,11 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	for _, opt := range opts {
 		opt(r)
 	}
+	var passwordLimitsErr error
+	r.publicPagePasswords, passwordLimitsErr = r.publicPagePasswords.Resolve()
+	if passwordLimitsErr != nil {
+		return nil, fmt.Errorf("new router: %w", passwordLimitsErr)
+	}
 	r.auditAlerts = &auditChainAlerter{db: r.db, logger: r.logger}
 	if writer, ok := r.journal.(interface {
 		SetChainBreakObserver(func(context.Context, string, error))
@@ -916,6 +927,11 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	notifiers = append(notifiers, r.revokeNotifiers...)
 	r.sessionsStore = newNotifyingSessionStore(r.sessionsStore, notifiers...)
 
+	limits, err := r.diffLimits.Resolve()
+	if err != nil {
+		return nil, err
+	}
+	r.diffs = newDiffComputeBudget(limits)
 	r.registerRoutes()
 	if r.mooringStartupErr != nil {
 		r.Shutdown()

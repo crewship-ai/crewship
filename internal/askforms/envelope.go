@@ -76,6 +76,8 @@ type Envelope struct {
 	// and this shape does not — which is why the field is named for identity
 	// rather than for paths.
 	FieldAttachmentIDs map[string][]string `json:"field_attachment_ids,omitempty"`
+	// MessageAttachmentIDs names uploads appended beside the rendered form.
+	MessageAttachmentIDs []string `json:"message_attachment_ids,omitempty"`
 	// RenderedText is the message this envelope belongs to, as the form
 	// rendered it. The tie-break for a reader holding both: an envelope whose
 	// text does not match the turn it is attached to is not describing it.

@@ -93,7 +93,7 @@ func TestSetEnabled_RoundtripsThroughDB(t *testing.T) {
 		t.Error("expected disabled, got enabled=true")
 	}
 
-	if err := Enable(ctx, db, "ws_test", id); err != nil {
+	if err := SetEnabledAuthorized(ctx, db, "ws_test", id, true, true); err != nil {
 		t.Fatalf("Enable: %v", err)
 	}
 	got, _ = Get(ctx, db, "ws_test", id)

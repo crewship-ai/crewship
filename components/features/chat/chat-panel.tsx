@@ -498,11 +498,25 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         toast.error(sizeCheck.message)
         return false
       }
-      if (sendMessage(text, withPage) === false) {
+      // The durable user_message receipt consumes Page context synchronously,
+      // before an Ask send's confirmation promise resolves.
+      const pendingText = text.trim()
+      pendingPageSendRef.current = pendingText
+      const clearPending = () => {
+        if (pendingPageSendRef.current === pendingText) pendingPageSendRef.current = null
+      }
+      let sent
+      try { sent = sendMessage(text, withPage) }
+      catch (error) { clearPending(); throw error }
+      if (sent instanceof Promise) return sent.then((accepted) => {
+        if (!accepted) clearPending()
+        return accepted
+      }, (error: unknown) => { clearPending(); throw error })
+      if (sent === false) {
+        clearPending()
         toast.error("Not connected — your message is still here. Try again when chat reconnects.")
         return false
       }
-      pendingPageSendRef.current = text.trim()
       return true
     } else {
       const sent = metadata ? sendMessage(text, metadata) : sendMessage(text)
@@ -682,6 +696,10 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     const prepared = prepareArtifactSend(text, metadata, deriveChatPrivacy({ ...privacyInputRef.current, now: refreshParticipantsRef.current ? Date.now() : undefined }))
     if (!prepared.ok) { toast.error(prepared.message); return false }
     const sent = sendMessageWithPage(text, prepared.metadata)
+    if (sent instanceof Promise) return sent.then((accepted) => {
+      if (accepted) artifactMarkSent(text, prepared.intent)
+      return accepted
+    })
     if (sent !== false) artifactMarkSent(text, prepared.intent)
     return sent
   }, [prepareArtifactSend, artifactMarkSent, sendMessageWithPage])

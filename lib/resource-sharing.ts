@@ -2,7 +2,7 @@ import { z } from "zod"
 import { presetSelectionSchema } from "./resource-preset-selection"
 
 export const resourceRightSchema = z.object({
-  kind: z.enum(["agent", "project", "routine"]), id: z.string().min(1), operation: z.string(),
+  kind: z.enum(["agent", "project", "routine", "crew"]), id: z.string().min(1), operation: z.string(),
 })
 export const resourcePolicySchema = z.object({
   membership_id: z.string().min(1), revision: z.number().int().positive(),
@@ -13,16 +13,19 @@ export const resourcePolicySchema = z.object({
   })).optional(),
 })
 export type ResourcePolicy = z.infer<typeof resourcePolicySchema>
-export type SharedResource = { kind: "routine" | "project"; id: string; name: string }
-export const shareOperations = { routine: ["view", "results", "run", "edit", "publish"], project: ["list", "read", "contribute", "manage", "delete_issues"] } as const
+export type SharedResource = { kind: "routine" | "project" | "crew"; id: string; name: string }
+export const shareOperations = { crew: ["view", "use"], routine: ["view", "results", "run", "edit", "publish"], project: ["list", "read", "contribute", "manage", "delete_issues"] } as const
 export const isResourceRight = (right: z.infer<typeof resourceRightSchema>, resource: SharedResource) =>
   right.kind === resource.kind && right.id === resource.id
 
+export const resourceShareOperations = (policy: ResourcePolicy, resource: SharedResource): readonly string[] =>
+  policy.mode === "trusted" ? (resource.kind === "crew" ? ["manage"] : []) : shareOperations[resource.kind]
+
 /** Preserve every other resource and unknown future operation; never convert accounts. */
 export function resourceShareReplacement(policy: ResourcePolicy, resource: SharedResource, operations: string[], reissue: string[]) {
-  if (policy.mode !== "restricted") throw new Error("Trusted access is managed through workspace roles")
+  if (policy.mode !== "restricted" && resource.kind !== "crew") throw new Error("Trusted access is managed through workspace roles")
   if (resource.kind === "routine" && operations.includes("publish") && !operations.includes("edit")) throw new Error("Publish requires Edit on the same routine")
-  const editable = new Set<string>(shareOperations[resource.kind])
+  const editable = new Set<string>(resourceShareOperations(policy, resource))
   if ([...operations, ...reissue].some(op => !editable.has(op)) || reissue.some(op => !operations.includes(op))) {
     throw new Error("Invalid resource operation")
   }

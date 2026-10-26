@@ -34,7 +34,7 @@ func stagedEnvironmentStore(dataDir string) *EnvironmentStore {
 // the workspaces' environments archives (envArchives). A drill only checks
 // — that every layer is there and opens with the key the bundle carries —
 // and its directory is thrown away.
-func stageRecoveredEnvironmentLayers(rep *RecoverReport, m *Manifest, opts RecoverOptions, dataDir string, envArchives []string) {
+func stageRecoveredEnvironmentLayers(ctx context.Context, rep *RecoverReport, m *Manifest, opts RecoverOptions, dataDir string, envArchives []string) error {
 	staged := stagedEnvironmentStore(dataDir)
 	src := EnvironmentStoreFor(filepath.Dir(opts.BundlePath))
 	var missing, copied int
@@ -54,14 +54,20 @@ func stageRecoveredEnvironmentLayers(rep *RecoverReport, m *Manifest, opts Recov
 			if opts.Drill {
 				continue
 			}
-			rc, _, err := src.Open(context.Background(), d)
+			rc, _, err := src.Open(ctx, d)
 			if err != nil {
+				if resourceFailure(err) {
+					return err
+				}
 				missing++
 				continue
 			}
-			_, n, err := staged.Put(rc, d)
+			_, n, err := staged.Put(&restoreReadGuard{ctx: ctx, r: rc, b: readBudget(ctx), decoded: true, generated: true}, d)
 			_ = rc.Close()
 			if err != nil {
+				if resourceFailure(err) {
+					return err
+				}
 				missing++
 				continue
 			}
@@ -70,7 +76,9 @@ func stageRecoveredEnvironmentLayers(rep *RecoverReport, m *Manifest, opts Recov
 		}
 	}
 	if opts.Drill {
-		checkRecoveredEnvironmentKeys(rep, src, envArchives)
+		if err := checkRecoveredEnvironmentKeys(ctx, rep, src, envArchives); err != nil {
+			return err
+		}
 	}
 	dir := filepath.Join(dataDir, RecoveredEnvironmentsDir)
 	if missing > 0 {
@@ -79,17 +87,20 @@ func stageRecoveredEnvironmentLayers(rep *RecoverReport, m *Manifest, opts Recov
 	if !opts.Drill {
 		rep.Notes = append(rep.Notes, fmt.Sprintf("%d crew environment(s) are staged under %s (%d layer file(s), %s copied); once the server runs with Docker, land them with `crewship admin instance backups environments land` — processes start fresh, nothing that was only in memory comes back", len(m.Contents.Environments), dir, copied, humanBytes(bytes)))
 	}
+	return ctx.Err()
 }
 
 // checkRecoveredEnvironmentKeys proves, for a drill, that the keys the
 // bundle carries open the encrypted layers in the store beside it: every
 // object's first chunk is decrypted (the whole object when it is one chunk).
-func checkRecoveredEnvironmentKeys(rep *RecoverReport, src *EnvironmentStore, envArchives []string) {
-	ctx := context.Background()
+func checkRecoveredEnvironmentKeys(ctx context.Context, rep *RecoverReport, src *EnvironmentStore, envArchives []string) error {
 	var checked, locked int
 	for _, a := range envArchives {
 		envEx, err := extractArchive(ctx, a)
 		if err != nil {
+			if resourceFailure(err) {
+				return err
+			}
 			rep.Warnings = append(rep.Warnings, fmt.Sprintf("the environments archive %s does not open: %v", filepath.Base(a), err))
 			continue
 		}
@@ -103,6 +114,10 @@ func checkRecoveredEnvironmentKeys(rep *RecoverReport, src *EnvironmentStore, en
 				}
 				seen[e.Object] = true
 				if err := src.CheckSealed(ctx, e.Object, e.Digest, keys); err != nil {
+					if resourceFailure(err) {
+						_ = envEx.Close()
+						return err
+					}
 					locked++
 					continue
 				}
@@ -117,6 +132,7 @@ func checkRecoveredEnvironmentKeys(rep *RecoverReport, src *EnvironmentStore, en
 	if checked > 0 {
 		rep.Notes = append(rep.Notes, fmt.Sprintf("%d encrypted environment layer file(s) open with the key the bundle carries", checked))
 	}
+	return ctx.Err()
 }
 
 // LandOptions configure LandStagedEnvironments.
@@ -151,6 +167,12 @@ type LandReport struct {
 // crew archive in restore-staging/crews). Each environment reports restored,
 // rebuilt or skipped; nothing here fails another crew's landing.
 func LandStagedEnvironments(ctx context.Context, ops DockerOps, opts LandOptions) (*LandReport, error) {
+	ctx, release, limitErr := BeginRestoreRead(ctx)
+	if limitErr != nil {
+		return nil, limitErr
+	}
+	defer release()
+
 	dir := filepath.Join(opts.DataDir, RecoveredEnvironmentsDir)
 	rep := &LandReport{Dir: dir, DryRun: opts.DryRun, Environments: []LandedEnvironment{}}
 	archives, err := filepath.Glob(filepath.Join(dir, "*"+instanceCrewsSuffix))
@@ -173,7 +195,12 @@ func LandStagedEnvironments(ctx context.Context, ops DockerOps, opts LandOptions
 	}
 	if !opts.DryRun {
 		b, _ := json.MarshalIndent(rep, "", "  ")
-		_ = memory.WriteFileDurable(filepath.Join(dir, "landed.json"), b, 0o600)
+		if err := reserveRestoreGenerated(ctx, int64(len(b))); err != nil {
+			return rep, err
+		}
+		if err := memory.WriteFileDurable(filepath.Join(dir, "landed.json"), b, 0o600); err != nil {
+			return rep, err
+		}
 	}
 	return rep, nil
 }
@@ -209,6 +236,9 @@ func landWorkspace(ctx context.Context, ops DockerOps, opts LandOptions, staged 
 			o = EnvironmentOutcome{Crew: env.Crew, Result: EnvSkipped, Reason: "no Docker on this server", Unsafe: env.UnsafeSentences()}
 		} else {
 			o = RestoreEnvironment(ctx, ops, env, ro)
+		}
+		if err := restoreOperationError(ctx); err != nil {
+			return out, err
 		}
 		out = append(out, LandedEnvironment{Workspace: ws, EnvironmentOutcome: o})
 	}

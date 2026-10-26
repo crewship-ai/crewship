@@ -5545,6 +5545,60 @@
         ],
         "type": "object"
       },
+      "CrewAccessDecision": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "allowed",
+              "conditional",
+              "denied"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "CrewAccessMe": {
+        "additionalProperties": false,
+        "properties": {
+          "actions": {
+            "additionalProperties": false,
+            "properties": {
+              "manage": {
+                "$ref": "#/components/schemas/CrewAccessDecision"
+              },
+              "use": {
+                "$ref": "#/components/schemas/CrewAccessDecision"
+              },
+              "view": {
+                "$ref": "#/components/schemas/CrewAccessDecision"
+              }
+            },
+            "required": [
+              "view",
+              "use",
+              "manage"
+            ],
+            "type": "object"
+          },
+          "crew_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "crew_id",
+          "actions"
+        ],
+        "type": "object"
+      },
       "CrewAssignmentsResponseV1": {
         "items": {
           "properties": {
@@ -5875,7 +5929,7 @@
       },
       "CrewList": {
         "items": {
-          "$ref": "#/components/schemas/Crew"
+          "$ref": "#/components/schemas/CrewRead"
         },
         "type": "array"
       },
@@ -6148,6 +6202,16 @@
           "total"
         ],
         "type": "object"
+      },
+      "CrewRead": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/Crew"
+          },
+          {
+            "$ref": "#/components/schemas/SharedCrew"
+          }
+        ]
       },
       "CrewServicesResponseV1": {
         "properties": {
@@ -11369,6 +11433,35 @@
         ],
         "type": "object"
       },
+      "MemberAccessCrewRight": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "crew"
+            ],
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "view",
+              "use",
+              "manage"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "operation"
+        ],
+        "type": "object"
+      },
       "MemberAccessGrant": {
         "additionalProperties": false,
         "properties": {
@@ -11406,6 +11499,7 @@
       },
       "MemberAccessPolicy": {
         "additionalProperties": false,
+        "description": "Trusted policies accept only crew manage shares for MEMBER/MANAGER recipients. Guest policies never accept Manage; revoke trusted-only shares before account downshift (422).",
         "properties": {
           "grant_details": {
             "items": {
@@ -11505,6 +11599,9 @@
           },
           {
             "$ref": "#/components/schemas/MemberAccessRoutineRight"
+          },
+          {
+            "$ref": "#/components/schemas/MemberAccessCrewRight"
           }
         ]
       },
@@ -18382,6 +18479,72 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "SharedCrew": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "agents": {
+            "items": {
+              "$ref": "#/components/schemas/SharedCrewAgent"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "restricted": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "slug": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "restricted",
+          "agent_count"
+        ],
+        "type": "object"
+      },
+      "SharedCrewAgent": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_role": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "agent_role",
+          "status"
+        ],
         "type": "object"
       },
       "SharedRoutineRun": {
@@ -68901,6 +69064,42 @@
             },
             "description": "Not Found"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "500": {
             "content": {
               "application/json": {
@@ -78271,7 +78470,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Crew"
+                  "$ref": "#/components/schemas/CrewRead"
                 }
               }
             },
@@ -78702,6 +78901,131 @@
           "crews"
         ],
         "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/crews/{crewId}/access/me": {
+      "get": {
+        "description": "Get crew access me (GET /api/v1/crews/{crewId}/access/me).",
+        "operationId": "get_api_v1_crews_crewId_access_me",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "crewId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CrewAccessMe"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get crew access me",
+        "tags": [
+          "crews"
+        ],
+        "x-crewship-read-only": true
       }
     },
     "/api/v1/crews/{crewId}/apply-avatar-style": {
@@ -146220,6 +146544,24 @@
             },
             "description": "Bad Request"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "500": {
             "content": {
               "application/json": {
@@ -157325,7 +157667,8 @@
                             "enum": [
                               "agent",
                               "project",
-                              "routine"
+                              "routine",
+                              "crew"
                             ],
                             "type": "string"
                           },
@@ -160657,7 +161000,8 @@
                             "enum": [
                               "agent",
                               "project",
-                              "routine"
+                              "routine",
+                              "crew"
                             ],
                             "type": "string"
                           },
@@ -171628,6 +171972,42 @@
               }
             },
             "description": "Not Found"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Too Many Requests"
           },
           "500": {
             "content": {
@@ -183371,6 +183751,36 @@
               }
             },
             "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           },
           "502": {
             "content": {

@@ -612,12 +612,12 @@ type CodeRunRequest struct {
 	Version     string
 	Code        string
 	InputEnv    map[string]string
-	// Inputs carries the render context's inputs with their ORIGINAL
-	// names and types (numbers stay numbers). The expr runner ignores
-	// it (operates on rendered literals); the CEL runner exposes it as
-	// the `inputs` map variable so expressions can do typed arithmetic
-	// and field access (inputs.spend_usd > inputs.threshold_usd).
-	Inputs     map[string]any
+	// Inputs retains original names and types for both expression runtimes.
+	Inputs map[string]any
+	// Variables contains only scoped, fixed expression namespaces supplied
+	// by the executor. It never contains arbitrary server environment values.
+	// Inputs remains authoritative for the inputs namespace.
+	Variables  map[string]any
 	TimeoutSec int
 	MaxBytes   int // stdout cap
 }

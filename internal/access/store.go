@@ -19,6 +19,7 @@ var ErrDenied = errors.New("resource authority denied")
 var ErrIssuerDenied = fmt.Errorf("grant issuer authority unavailable: %w", ErrDenied)
 var ErrConflict = errors.New("resource authority revision changed")
 var ErrPublishRequiresEdit = fmt.Errorf("Publish requires Edit on the same routine: %w", ErrDenied)
+var ErrGuestCeiling = fmt.Errorf("remove trusted-only grants before switching to Guest access: %w", ErrDenied)
 
 type Store struct{ DB *sql.DB }
 type Right struct {
@@ -48,6 +49,8 @@ func validRight(r Right) bool {
 		return false
 	}
 	switch r.Kind {
+	case "crew":
+		return r.Operation == "view" || r.Operation == "use" || r.Operation == "manage"
 	case "agent":
 		switch r.Operation {
 		case "discover", "chat", "run", "delegate":
@@ -102,6 +105,12 @@ func resourceExists(ctx context.Context, q queryer, workspace string, r Right) e
 	if r.Kind == "agent" {
 		query = `SELECT 1 FROM agents WHERE id=? AND workspace_id=? AND deleted_at IS NULL`
 	}
+	if r.Kind == "crew" {
+		query = `SELECT 1 FROM crews WHERE id=? AND workspace_id=? AND deleted_at IS NULL`
+		if r.Operation == "manage" {
+			query += ` AND kind<>'setup'`
+		}
+	}
 	if r.Kind == "routine" {
 		query = `SELECT 1 FROM pipelines WHERE id=? AND workspace_id=? AND deleted_at IS NULL`
 	}
@@ -146,11 +155,11 @@ WHERE p.member_id=? AND p.resource_kind='routine' AND p.routine_id=? AND p.opera
 		return m, ErrDenied
 	}
 	var one int
-	err = q.QueryRowContext(ctx, `SELECT 1 FROM live_access_grants WHERE member_id=? AND resource_kind=? AND COALESCE(agent_id,project_id,routine_id)=? AND operation=?`, m.ID, r.Kind, r.ID, r.Operation).Scan(&one)
+	err = q.QueryRowContext(ctx, `SELECT 1 FROM live_access_grants WHERE member_id=? AND resource_kind=? AND COALESCE(agent_id,project_id,routine_id,crew_id)=? AND operation=?`, m.ID, r.Kind, r.ID, r.Operation).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
 		// Retained inert rows explain denial without treating them as authority.
 		var issuer string
-		err = q.QueryRowContext(ctx, `SELECT created_by FROM access_grants WHERE member_id=? AND resource_kind=? AND COALESCE(agent_id,project_id,routine_id)=? AND operation=?`, m.ID, r.Kind, r.ID, r.Operation).Scan(&issuer)
+		err = q.QueryRowContext(ctx, `SELECT created_by FROM access_grants WHERE member_id=? AND resource_kind=? AND COALESCE(agent_id,project_id,routine_id,crew_id)=? AND operation=?`, m.ID, r.Kind, r.ID, r.Operation).Scan(&issuer)
 		if errors.Is(err, sql.ErrNoRows) {
 			return m, ErrDenied
 		}
@@ -232,7 +241,7 @@ func (s Store) ReplaceIn(ctx context.Context, tx *sql.Tx, actor, user, workspace
 	if tx == nil {
 		return Membership{}, ErrDenied
 	}
-	if mode != "trusted" && mode != "restricted" || len(rights) > 256 || (mode == "trusted" && len(rights) > 0) {
+	if mode != "trusted" && mode != "restricted" || len(rights) > 256 {
 		return Membership{}, ErrDenied
 	}
 	var err error
@@ -247,6 +256,13 @@ func (s Store) ReplaceIn(ctx context.Context, tx *sql.Tx, actor, user, workspace
 		return m, ErrConflict
 	}
 	if mode == "restricted" {
+		var aboveCeiling bool
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM access_grants g JOIN workspace_members wm ON wm.id=g.member_id WHERE wm.user_id=? AND g.resource_kind='crew' AND g.operation='manage')`, user).Scan(&aboveCeiling); err != nil {
+			return m, err
+		}
+		if aboveCeiling {
+			return m, ErrGuestCeiling
+		}
 		// The restriction applies to the account, so protecting only this
 		// membership would let another workspace lock out an administrator.
 		var administrator bool
@@ -257,8 +273,36 @@ func (s Store) ReplaceIn(ctx context.Context, tx *sql.Tx, actor, user, workspace
 			return m, ErrDenied
 		}
 	}
+	renew := map[Right]bool{}
+	for _, r := range reissue {
+		if renew[r] {
+			return m, ErrDenied
+		}
+		renew[r] = true
+	}
 	seen := map[Right]bool{}
 	for _, r := range rights {
+		if mode == "trusted" {
+			if r.Kind != "crew" || r.Operation != "manage" {
+				return m, ErrDenied
+			}
+			if err := trustedCrewRecipient(ctx, tx, user, workspace); err != nil {
+				if !errors.Is(err, ErrDenied) || m.Mode != "trusted" || renew[r] {
+					return m, err
+				}
+				// An ineligible recipient may retain inert metadata during a
+				// partial revoke. It cannot receive or reissue a new share.
+				var retained bool
+				if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM access_grants WHERE member_id=? AND resource_kind='crew' AND crew_id=? AND operation='manage')`, m.ID, r.ID).Scan(&retained); err != nil {
+					return m, err
+				}
+				if !retained {
+					return m, ErrDenied
+				}
+			}
+		} else if r.Kind == "crew" && r.Operation == "manage" {
+			return m, ErrGuestCeiling
+		}
 		if seen[r] {
 			return m, ErrDenied
 		}
@@ -270,16 +314,14 @@ func (s Store) ReplaceIn(ctx context.Context, tx *sql.Tx, actor, user, workspace
 	if err := publicationDependencies(seen); err != nil {
 		return m, err
 	}
-	renew := map[Right]bool{}
 	for _, r := range reissue {
-		if !seen[r] || renew[r] {
+		if !seen[r] {
 			return m, ErrDenied
 		}
-		renew[r] = true
 	}
 	// Read before modifying: a complete-document save must preserve the issuer
 	// and timestamp of unchanged rights, including inert shares.
-	rows, err := tx.QueryContext(ctx, `SELECT id,resource_kind,COALESCE(agent_id,project_id,routine_id),operation FROM access_grants WHERE member_id=?`, m.ID)
+	rows, err := tx.QueryContext(ctx, `SELECT id,resource_kind,COALESCE(agent_id,project_id,routine_id,crew_id),operation FROM access_grants WHERE member_id=?`, m.ID)
 	if err != nil {
 		return m, err
 	}
@@ -317,15 +359,17 @@ func (s Store) ReplaceIn(ctx context.Context, tx *sql.Tx, actor, user, workspace
 		if !seen[r] {
 			continue
 		}
-		var agentID, projectID, routineID any
+		var agentID, projectID, routineID, crewID any
 		if r.Kind == "agent" {
 			agentID = r.ID
+		} else if r.Kind == "crew" {
+			crewID = r.ID
 		} else if r.Kind == "routine" {
 			routineID = r.ID
 		} else {
 			projectID = r.ID
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO access_grants(id,member_id,resource_kind,agent_id,project_id,routine_id,operation,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, randomID(), m.ID, r.Kind, agentID, projectID, routineID, r.Operation, actor, tsformat.Format(time.Now())); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO access_grants(id,member_id,resource_kind,agent_id,project_id,routine_id,crew_id,operation,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, randomID(), m.ID, r.Kind, agentID, projectID, routineID, crewID, r.Operation, actor, tsformat.Format(time.Now())); err != nil {
 			return m, err
 		}
 	}
@@ -344,6 +388,10 @@ func ValidateRights(ctx context.Context, q queryer, workspace string, rights []R
 	}
 	seen := map[Right]bool{}
 	for _, right := range rights {
+		// This entrypoint validates future Guest invitation grants only.
+		if right.Kind == "crew" && right.Operation == "manage" {
+			return ErrGuestCeiling
+		}
 		if seen[right] {
 			return ErrDenied
 		}

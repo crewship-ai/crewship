@@ -62,7 +62,7 @@ func (c *instanceServiceCapture) write(tw *TarZstWriter, sc *stagingCipher, now 
 		return err
 	}
 	defer r.Close()
-	tr, err := NewTarZstReader(r)
+	tr, err := newCreatedTarZstReader(r)
 	if err != nil {
 		return err
 	}

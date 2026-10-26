@@ -30,6 +30,35 @@ function mockPolicy() {
 }
 afterEach(() => { cleanup(); fetchMock.mockReset(); toastError.mockReset() })
 describe("member resource access", () => {
+  it("shows trusted crew management shares and requires an explicit saved revoke before Guest conversion", async () => {
+    const trusted = { ...policy, mode: "trusted", rights: [{ kind: "crew", id: "crew-1", operation: "manage" }] }
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method === "PUT") return response({ ...JSON.parse(String(init.body)), revision: 8 })
+      return response(trusted)
+    })
+    show(); fireEvent.click(screen.getByRole("button", { name: "Edit resource access" }))
+    const remove = await screen.findByRole("button", { name: "Remove crew crew-1 manage" })
+    expect(screen.getByRole("option", { name: "Guest — explicit resources" })).toBeDisabled()
+    expect(bar()).toBeNull()
+    fireEvent.click(remove)
+    expect(bar()).toHaveTextContent("1 unsaved change")
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(1))
+    const [, init] = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT")!
+    expect(JSON.parse(init.body)).toEqual({ ...trusted, rights: [] })
+    await waitFor(() => expect(screen.getByRole("option", { name: "Guest — explicit resources" })).toBeEnabled())
+  })
+  it("reissues a trusted crew share without clearing it or changing account mode", async () => {
+    const right = { kind: "crew", id: "crew-1", operation: "manage" }
+    const trusted = { ...policy, mode: "trusted", rights: [right], grant_details: [{ ...right, issuer_id: "old-admin", created_at: "original", live: false }] }
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => init?.method === "PUT" ? response({ ...JSON.parse(String(init.body)), revision: 8 }) : response(trusted))
+    show(); fireEvent.click(screen.getByRole("button", { name: "Edit resource access" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Reissue as me" }))
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(1))
+    const [, init] = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT")!
+    expect(JSON.parse(init.body)).toEqual({ membership_id: trusted.membership_id, revision: 7, mode: "trusted", rights: [right], reissue: [right] })
+  })
   it("requires an explicit Edit grant before saving Publish without adding View or Run", async () => {
     mockPolicy(); show(); fireEvent.click(screen.getByRole("button", { name: "Edit resource access" }))
     fireEvent.change(await screen.findByLabelText("Resource kind"), { target: { value: "routine" } })
@@ -199,3 +228,71 @@ it("keeps inactive issuer metadata visible and reissues only after an explicit c
   const [,init]=fetchMock.mock.calls.find(([,init])=>init?.method==="PUT")!
   expect(JSON.parse(init.body)).toEqual({...policy,reissue:policy.rights})
 })
+
+
+it("keeps crew shares visible and preserves them while editing another resource", async () => {
+ const crew = {kind:"crew",id:"crew-1",operation:"use"}
+ fetchMock.mockImplementation(async (url:string,init?:RequestInit) => {
+  if(init?.method==="PUT") return response({...JSON.parse(String(init.body)),revision:8})
+  if(url.includes("/access/effective")) return response({membership_id:policy.membership_id,revision:7,account_restricted:true,explanation:"Crew inheritance",decisions:[]})
+  if(url.includes("/members/")) return response({...policy,rights:[...policy.rights,crew]})
+  return response([{id:"agent-1",name:"Shared agent"}])
+ })
+ show();fireEvent.click(screen.getByRole("button",{name:"Edit resource access"}))
+ expect(await screen.findByRole("button",{name:"Remove crew crew-1 use"})).toBeVisible()
+ fireEvent.click(screen.getByRole("button",{name:"Remove agent agent-1 chat"}))
+ fireEvent.click(saveButton())
+ await waitFor(()=>expect(fetchMock.mock.calls.filter(([,init])=>init?.method==="PUT")).toHaveLength(1))
+ const [,init]=fetchMock.mock.calls.find(([,init])=>init?.method==="PUT")!
+ expect(JSON.parse(init.body).rights).toEqual([crew])
+})
+
+it("adds an explicit crew Use share from the person editor without widening other rights", async () => {
+ fetchMock.mockImplementation(async (url:string,init?:RequestInit) => {
+  if(init?.method==="PUT") return response({...JSON.parse(String(init.body)),revision:8})
+  if(url.includes("/access/effective")) return response({membership_id:policy.membership_id,revision:7,account_restricted:true,explanation:"Current shares",decisions:[]})
+  if(url.includes("/members/")) return response(policy)
+  if(url.includes("/crews?")) return response([{id:"crew-1",name:"Shared crew"}])
+  return response([{id:"agent-1",name:"Shared agent"}])
+ })
+ show(); fireEvent.click(screen.getByRole("button",{name:"Edit resource access"}))
+ fireEvent.change(await screen.findByLabelText("Resource kind"),{target:{value:"crew"}})
+ await screen.findByRole("option",{name:"Shared crew"})
+ expect(screen.getByText(/current and future agents/)).toHaveTextContent("execution preflight")
+ const operations=screen.getByLabelText("Resource operation") as HTMLSelectElement
+ expect([...operations.options].map(option=>option.value)).toEqual(["view","use"])
+ fireEvent.change(screen.getByLabelText("Resource"),{target:{value:"crew-1"}})
+ fireEvent.change(operations,{target:{value:"use"}})
+ fireEvent.click(screen.getByRole("button",{name:"Add grant"}))
+ fireEvent.click(saveButton())
+ await waitFor(()=>expect(fetchMock.mock.calls.filter(([,init])=>init?.method==="PUT")).toHaveLength(1))
+ const [,init]=fetchMock.mock.calls.find(([,init])=>init?.method==="PUT")!
+ expect(JSON.parse(init.body)).toEqual({...policy,rights:[...policy.rights,{kind:"crew",id:"crew-1",operation:"use"}]})
+})
+
+  it.each(["MEMBER", "MANAGER"])("creates trusted Manage for %s from the person card without clearing other shares", async role => {
+    const trusted = {...policy, mode:"trusted",rights:[{kind:"crew",id:"crew-old",operation:"manage"}]};
+    fetchMock.mockImplementation(async (url:string,init?:RequestInit)=>{
+      if(init?.method === "PUT") return response({...JSON.parse(String(init.body)),revision:8});
+      if(url.includes("/members/")) return response(trusted);
+      return response([{id:"crew-new",name:"New managed crew"}]);
+    });
+    show(role);fireEvent.click(screen.getByRole("button",{name:"Edit resource access"}));
+    await screen.findByRole("option",{name:"New managed crew"});
+    expect(screen.getByLabelText("Resource kind")).toHaveValue("crew");
+    expect(screen.getByLabelText("Resource operation")).toHaveValue("manage");
+    fireEvent.change(screen.getByLabelText("Resource"),{target:{value:"crew-new"}});
+    fireEvent.click(screen.getByRole("button",{name:"Add grant"}));fireEvent.click(saveButton());
+    await waitFor(()=>expect(fetchMock.mock.calls.some(([,init])=>init?.method === "PUT")).toBe(true));
+    const [,init]=fetchMock.mock.calls.find(([,init])=>init?.method === "PUT")!;
+    expect(JSON.parse(init.body)).toEqual({membership_id:trusted.membership_id,revision:7,mode:"trusted",rights:[...trusted.rights,{kind:"crew",id:"crew-new",operation:"manage"}]});
+  });
+
+  it.each(["VIEWER", "ADMIN", "OWNER"])("keeps trusted creation/reissue unavailable to %s while showing saved shares",async role=>{
+    const right={kind:"crew",id:"crew-old",operation:"manage"};
+    fetchMock.mockImplementation(async()=>response({...policy,mode:"trusted",rights:[right],grant_details:[{...right,issuer_id:"old-admin",created_at:"old",live:false}]}));
+    show(role);fireEvent.click(screen.getByRole("button",{name:"Edit resource access"}));
+    await screen.findByRole("button",{name:"Remove crew crew-old manage"});
+    expect(screen.queryByLabelText("Resource kind")).toBeNull();
+    expect(screen.queryByRole("button",{name:"Reissue as me"})).toBeNull();
+  });

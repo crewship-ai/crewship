@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/askforms"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
@@ -733,8 +734,21 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 			"chat_id", msg.ChatID, "user_id", msg.UserID)
 		return
 	}
+	// The envelope identifies only the private reply. The bridge rechecks
+	// current form data and human authority when the queued send resumes.
+	submission, hasSubmission := askforms.EnvelopeFromMetadata(msg.Opts.Metadata)
+	rejectPendingAsk := func(message string) bool {
+		if !hasSubmission {
+			return false
+		}
+		h.wsHub.NotifyAskSubmissionRejected(msg.UserID, msg.ChatID, &askforms.SubmissionError{SubmissionID: submission.SubmissionID, Message: message})
+		return true
+	}
 	if buildErr != nil {
 		h.clearDeferredResume(pendingMessageKey(msg))
+		if rejectPendingAsk(fmt.Sprintf("Your message could not run: the environment build failed (%s). Fix the devcontainer configuration and send your message again.", buildErr.Error())) {
+			return
+		}
 		run := h.wsHub.BeginSessionRun(msg.ChatID)
 		defer run.End()
 		// The build itself failed: say so plainly and point at the fix,
@@ -767,6 +781,9 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 		h.clearDeferredResume(pendingMessageKey(msg))
 		h.logger.Error("deferred chat message gave up: every completed build left the crew unstartable",
 			"chat_id", msg.ChatID, "rebuilds", maxDeferredResumes)
+		if rejectPendingAsk("Your message could not run: the crew environment is still unavailable after repeated builds. Check the server logs and send your message again.") {
+			return
+		}
 		run := h.wsHub.BeginSessionRun(msg.ChatID)
 		defer run.End()
 		run.Emit(ws.ChatEvent{
@@ -790,16 +807,45 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 		}
 	}
 
-	run := h.wsHub.BeginSessionRun(msg.ChatID)
-	defer run.End()
+	var run ws.SessionRun
+	var streamStart sync.Once
+	var askStateMu sync.Mutex
+	askAccepted := false
+	askError := ""
+	emit := func(event ws.ChatEvent) {
+		if hasSubmission {
+			askStateMu.Lock()
+			if event.Type == "user_message" {
+				if metadata, ok := event.Metadata.(map[string]any); ok && metadata["ask_submission_id"] == submission.SubmissionID {
+					askAccepted = true
+				}
+			}
+			if event.Type == "error" && !askAccepted {
+				askError = event.Content
+				askStateMu.Unlock()
+				return
+			}
+			askStateMu.Unlock()
+		}
+		streamStart.Do(func() { run = h.wsHub.BeginSessionRun(msg.ChatID) })
+		run.Emit(event)
+	}
+	defer func() {
+		if run != nil {
+			run.End()
+		}
+	}()
 
 	if h.chatResumer == nil {
 		// Should not happen in production boot (cmd_start.go wires this
 		// alongside SetProvisioningEnqueuer) but surface rather than silently
 		// swallow the user's message if it ever does.
 		h.logger.Error("cannot resume deferred chat message: no chat resumer wired", "chat_id", msg.ChatID)
-		run.Emit(ws.ChatEvent{Type: "error", Content: "internal error: could not resume your message — please send it again"})
-		run.Emit(ws.ChatEvent{Type: "done", Content: ""})
+		if rejectPendingAsk("Your message could not resume. Send your form again.") {
+			return
+		}
+		emit(ws.ChatEvent{Type: "error", Content: "internal error: could not resume your message — please send it again"})
+		emit(ws.ChatEvent{Type: "done", Content: ""})
 		return
 	}
 
@@ -811,7 +857,7 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 	// again in the seconds since this job finished, which re-enters the same
 	// defer-and-attach path and is handled identically to the first time.
 	msg.Opts.HumanResume = true
-	err := h.chatResumer.HandleChatMessage(ctx, msg.UserID, msg.ChatID, msg.Content, run.Emit, msg.Opts)
+	err := h.chatResumer.HandleChatMessage(ctx, msg.UserID, msg.ChatID, msg.Content, emit, msg.Opts)
 	if err == nil {
 		h.clearDeferredResume(pendingMessageKey(msg))
 		return
@@ -820,6 +866,21 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 	// ended this message's journey through the build queue.
 	if !errors.Is(err, ws.ErrCrewProvisioning) {
 		h.clearDeferredResume(pendingMessageKey(msg))
+	}
+	var refused *askforms.SubmissionError
+	if errors.As(err, &refused) {
+		h.wsHub.NotifyAskSubmissionRejected(msg.UserID, msg.ChatID, refused)
+		return
+	}
+	askStateMu.Lock()
+	persisted, privateError := askAccepted, askError
+	askStateMu.Unlock()
+	if hasSubmission && !persisted && !errors.Is(err, ws.ErrCrewProvisioning) {
+		if privateError == "" {
+			privateError = "The form could not be sent. Your answers have not been saved."
+		}
+		rejectPendingAsk(privateError)
+		return
 	}
 	switch {
 	case errors.Is(err, chatbridge.ErrAgentBusyElsewhere):
@@ -832,12 +893,12 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 		// already has a live run — most plausibly the user's own manual
 		// resend racing this one) keeps its zero-trace contract: that run
 		// will settle the UI, and a notice here would be a lie.
-		run.Emit(ws.ChatEvent{
+		emit(ws.ChatEvent{
 			Type:     "error",
 			Content:  "Your message was not delivered: the agent is busy with another run. Send it again once the agent is free.",
 			Metadata: map[string]any{"reason": "agent_busy"},
 		})
-		run.Emit(ws.ChatEvent{Type: "done", Content: ""})
+		emit(ws.ChatEvent{Type: "done", Content: ""})
 		// Another run (most plausibly the user's own manual resend, racing
 		// this one) already owns the chat's run slot. That run is the one
 		// that will complete and settle the UI; nothing further to do here,

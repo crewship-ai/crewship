@@ -1351,7 +1351,13 @@ to_version, from_hash, to_hash, identical, unified_diff}`.
 `crewship routine rollback <slug> --to N` calls this same endpoint after a
 successful rollback to print a **"What changed"** view against the
 version it just rolled back from — best-effort, so a diff-fetch failure
-never fails the rollback itself.
+never fails the rollback itself, including `413` or `429` preview refusals.
+
+An explicit `routine diff` refusal is an error: `413` exits 1 and says the
+comparison is too large; `429` exits 6 and asks the caller to try again shortly.
+View versions separately or ask an administrator to adjust the shared
+[diff limits](/configuration/environment#diff-preview-computation). The CLI does
+not automatically retry a refused preview.
 
 ## `crewship routine iterate <slug>`
 

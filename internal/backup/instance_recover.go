@@ -159,6 +159,17 @@ func (o *RecoverOptions) validate() error {
 // in the restored database) even when the result is partial; an error means
 // the result is failed.
 func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport, retErr error) {
+	ctx, release, limitErr := BeginRestoreRead(ctx)
+	if limitErr != nil {
+		return nil, limitErr
+	}
+	defer release()
+	defer func() {
+		if retErr == nil {
+			retErr = restoreOperationError(ctx)
+		}
+	}()
+
 	if err := opts.validate(); err != nil {
 		return nil, err
 	}
@@ -283,7 +294,9 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport
 		rep.Notes = append(rep.Notes, fmt.Sprintf("%d workspace(s) carry crew container files; they are kept under %s and are not in any container yet — start the crews, then land them from a workspace bundle or copy them in", len(ex.crewArchives), filepath.Join(dataDir, RecoveredCrewsDir)))
 	}
 	if len(m.Contents.Environments) > 0 {
-		stageRecoveredEnvironmentLayers(rep, m, opts, dataDir, ex.envArchives)
+		if err := stageRecoveredEnvironmentLayers(ctx, rep, m, opts, dataDir, ex.envArchives); err != nil {
+			return rep, err
+		}
 	}
 	if rep.PageProjectsPath != "" {
 		rep.Notes = append(rep.Notes, "set CREWSHIP_PAGE_PROJECTS_PATH="+rep.PageProjectsPath+" before starting the server")
@@ -365,12 +378,26 @@ type extractedInstance struct {
 
 // openInstancePayload opens the bundle and returns a plaintext payload
 // reader over the decrypted tar.zst, plus a closer.
-func openInstancePayload(path string, identities []age.Identity, passphrase string) (*Manifest, *TarZstReader, func(), error) {
+func openInstancePayload(path string, identities []age.Identity, passphrase string, contexts ...context.Context) (*Manifest, *TarZstReader, func(), error) {
+	ctx := context.Background()
+	if len(contexts) > 0 {
+		ctx = contexts[0]
+	}
+	ctx, release, limitErr := ensureReadBudget(ctx)
+	if limitErr != nil {
+		return nil, nil, nil, limitErr
+	}
+	success := false
+	defer func() {
+		if !success {
+			release()
+		}
+	}()
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	m, sealed, closeBundle, err := ReadBundleStream(f)
+	m, sealed, closeBundle, err := ReadBundleStream(f, ctx)
 	if err != nil {
 		_ = f.Close()
 		return m, nil, nil, err
@@ -389,17 +416,18 @@ func openInstancePayload(path string, identities []age.Identity, passphrase stri
 		_ = f.Close()
 		return m, nil, nil, err
 	}
-	tr, err := NewTarZstReader(plain)
+	tr, err := NewTarZstReader(plain, ctx)
 	if err != nil {
 		_ = closeBundle()
 		_ = f.Close()
 		return m, nil, nil, err
 	}
-	return m, tr, func() { _ = tr.Close(); _ = closeBundle(); _ = f.Close() }, nil
+	success = true
+	return m, tr, func() { _ = tr.Close(); _ = closeBundle(); _ = f.Close(); release() }, nil
 }
 
 func extractInstancePayload(ctx context.Context, opts RecoverOptions, m *Manifest, dataDir string) (*extractedInstance, error) {
-	_, tr, closeAll, err := openInstancePayload(opts.BundlePath, opts.Identities, opts.Passphrase)
+	_, tr, closeAll, err := openInstancePayload(opts.BundlePath, opts.Identities, opts.Passphrase, ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -439,19 +467,19 @@ func extractInstancePayload(ctx context.Context, opts RecoverOptions, m *Manifes
 			}
 		case name == instanceDBEntry:
 			dst := filepath.Join(dataDir, "crewship.db")
-			sha, _, err := writeExtracted(dst, tr)
+			sha, _, err := writeExtracted(ctx, dst, tr)
 			if err != nil {
 				return nil, fmt.Errorf("backup: write database: %w", err)
 			}
 			ex.dbSHA = sha
 		case name == instanceIndexEntry:
 			var idx InstanceIndex
-			if err := json.NewDecoder(io.LimitReader(tr, maxBackupDBDumpBytes)).Decode(&idx); err != nil {
+			if err := json.NewDecoder(io.LimitReader(RestoreBufferedReader(ctx, tr), maxBackupDBDumpBytes)).Decode(&idx); err != nil {
 				return nil, fmt.Errorf("backup: read file index: %w", err)
 			}
 			ex.index = &idx
 		case name == RecoveryKitPath:
-			data, err := io.ReadAll(io.LimitReader(tr, 1<<20))
+			data, err := io.ReadAll(io.LimitReader(RestoreBufferedReader(ctx, tr), 1<<20))
 			if err != nil {
 				return nil, err
 			}
@@ -470,7 +498,7 @@ func extractInstancePayload(ctx context.Context, opts RecoverOptions, m *Manifes
 			if err != nil || dst == RecoveredStoreDir(dataDir, store) {
 				return nil, fmt.Errorf("backup: refuse unsafe payload path %q", name)
 			}
-			sha, n, err := writeExtracted(dst, tr)
+			sha, n, err := writeExtracted(ctx, dst, tr)
 			if err != nil {
 				return nil, fmt.Errorf("backup: write %s: %w", name, err)
 			}
@@ -489,7 +517,7 @@ func extractInstancePayload(ctx context.Context, opts RecoverOptions, m *Manifes
 			if err != nil {
 				return nil, fmt.Errorf("backup: refuse unsafe payload path %q", name)
 			}
-			if _, _, err := writeExtracted(dst, tr); err != nil {
+			if _, _, err := writeExtracted(ctx, dst, tr); err != nil {
 				return nil, err
 			}
 			ex.crewArchives = append(ex.crewArchives, dst)
@@ -499,7 +527,7 @@ func extractInstancePayload(ctx context.Context, opts RecoverOptions, m *Manifes
 			if err != nil {
 				return nil, fmt.Errorf("backup: refuse unsafe payload path %q", name)
 			}
-			if _, _, err := writeExtracted(dst, tr); err != nil {
+			if _, _, err := writeExtracted(ctx, dst, tr); err != nil {
 				return nil, err
 			}
 			ex.envArchives = append(ex.envArchives, dst)
@@ -547,7 +575,7 @@ func knownStore(s string) bool {
 	return false
 }
 
-func writeExtracted(dst string, r io.Reader) (string, int64, error) {
+func writeExtracted(ctx context.Context, dst string, r io.Reader) (string, int64, error) {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
 		return "", 0, err
 	}
@@ -559,7 +587,7 @@ func writeExtracted(dst string, r io.Reader) (string, int64, error) {
 		return "", 0, err
 	}
 	h := sha256.New()
-	n, err := io.Copy(io.MultiWriter(f, h), r)
+	n, err := io.Copy(RestoreWriter(ctx, io.MultiWriter(f, h)), r)
 	if err == nil {
 		// A recovered data directory is the only copy the operator will
 		// boot from: every landed file reaches the disk before recover
@@ -706,6 +734,16 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 			}
 		}
 		rep.MigrationsApplied = len(AppliedMigrationVersions(ctx, db.DB)) - before
+
+		// A physical snapshot carries source-instance execution approvals too.
+		// Recovery must require local review even when no migration is pending.
+		count, err := resetRecoveredHostHooks(ctx, db.DB)
+		if err != nil {
+			return err
+		}
+		if count > 0 {
+			rep.Warnings = append(rep.Warnings, fmt.Sprintf("%d restored host shell hook(s) require instance administrator review; configurations are preserved and disabled. Review in Settings > Lifecycle hooks, then use crewship hooks enable <id>.", count))
+		}
 
 		if len(serviceArgs) != 0 && serviceArgs[0].count > 0 {
 			services := serviceArgs[0].payload

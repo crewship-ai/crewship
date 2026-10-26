@@ -5,7 +5,8 @@ package main
 func memberAccessPolicySchema() map[string]any {
 	schema := map[string]any{
 		"type": "object", "additionalProperties": false,
-		"required": []string{"membership_id", "mode", "revision", "rights"},
+		"description": "Trusted policies accept only crew manage shares for MEMBER/MANAGER recipients. Guest policies never accept Manage; revoke trusted-only shares before account downshift (422).",
+		"required":    []string{"membership_id", "mode", "revision", "rights"},
 		"properties": map[string]any{
 			"membership_id": map[string]any{"type": "string", "minLength": 1},
 			"mode":          map[string]any{"type": "string", "enum": []string{"trusted", "restricted"}},
@@ -31,7 +32,7 @@ func memberEffectiveAccessSchema() map[string]any {
 	properties["explanation"] = map[string]any{"type": "string"}
 	properties["decisions"] = map[string]any{"type": "array", "items": map[string]any{
 		"type": "object", "additionalProperties": false, "required": []string{"kind", "id", "operation", "state", "reason"},
-		"properties": map[string]any{"name": map[string]any{"type": "string"}, "kind": map[string]any{"type": "string", "enum": []string{"agent", "project", "routine"}}, "id": map[string]any{"type": "string"}, "operation": map[string]any{"type": "string"}, "state": map[string]any{"type": "string", "enum": []string{"allowed", "denied", "conditional", "unavailable"}}, "reason": map[string]any{"type": "string"}},
+		"properties": map[string]any{"name": map[string]any{"type": "string"}, "kind": map[string]any{"type": "string", "enum": []string{"agent", "project", "routine", "crew"}}, "id": map[string]any{"type": "string"}, "operation": map[string]any{"type": "string"}, "state": map[string]any{"type": "string", "enum": []string{"allowed", "denied", "conditional", "unavailable"}}, "reason": map[string]any{"type": "string"}},
 	}}
 	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"membership_id", "mode", "revision", "account_restricted", "restriction_scope", "explanation", "decisions"}, "properties": properties}
 }
@@ -57,10 +58,11 @@ func memberAccessRightVariant(kind string, operations []string) map[string]any {
 }
 
 func memberAccessRightSchema() map[string]any {
-	return map[string]any{"oneOf": []any{ref("MemberAccessAgentRight"), ref("MemberAccessProjectRight"), ref("MemberAccessRoutineRight")}}
+	return map[string]any{"oneOf": []any{ref("MemberAccessAgentRight"), ref("MemberAccessProjectRight"), ref("MemberAccessRoutineRight"), ref("MemberAccessCrewRight")}}
 }
 func memberAccessSchemaComponents() map[string]any {
 	return map[string]any{
+		"MemberAccessCrewRight":    memberAccessRightVariant("crew", []string{"view", "use", "manage"}),
 		"MemberAccessAgentRight":   memberAccessRightVariant("agent", []string{"discover", "chat", "run", "delegate"}),
 		"MemberAccessProjectRight": memberAccessRightVariant("project", []string{"list", "read", "write", "delete", "contribute", "manage", "delete_issues"}),
 		"MemberAccessRoutineRight": memberAccessRightVariant("routine", []string{"view", "results", "run", "edit", "publish"}),

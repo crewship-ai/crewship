@@ -55,8 +55,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	crewID := r.PathValue("crewId")
 
-	if !canRole(role, "manage") {
-		replyError(w, http.StatusForbidden, "Forbidden")
+	if !h.crewManageRequest(w, r, crewID, "manage") {
 		return
 	}
 
@@ -79,6 +78,11 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var req updateCrewRequest
 	if err := readCrewConfigJSON(r, &req); err != nil {
 		replyError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	// Private-network egress remains a workspace administrator decision.
+	if req.AllowPrivateEndpoints != nil && !canRole(role, "manage") {
+		replyError(w, http.StatusForbidden, "Workspace administration required for private endpoints")
 		return
 	}
 
@@ -445,8 +449,13 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		where += " AND services_json IS ?"
 		whereArgs = append(whereArgs, previousServices)
 	}
-	tx, _ := h.beginMemberMutation(w, r, crewID, "manage")
+	tx, currentRole := h.beginCrewManageMutation(w, r, crewID, "manage")
 	if tx == nil {
+		return
+	}
+	if req.AllowPrivateEndpoints != nil && !canRole(currentRole, "manage") {
+		_ = tx.Rollback()
+		replyError(w, http.StatusForbidden, "Workspace administration required for private endpoints")
 		return
 	}
 	defer tx.Rollback()
@@ -563,7 +572,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := settingsActorIn(r, tx); err != nil {
+	if err := h.crewMutationActorIn(r, tx, crewID, "manage", req.AllowPrivateEndpoints == nil); err != nil {
 		if err == sql.ErrNoRows {
 			replyError(w, http.StatusForbidden, "Forbidden")
 		} else {

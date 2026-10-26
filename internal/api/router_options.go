@@ -27,6 +27,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
+	"github.com/crewship-ai/crewship/internal/skills"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -229,6 +230,12 @@ func WithComposioConfig(cfg *config.ComposioConfig) RouterOption {
 
 // WithKeeperConversations attaches a conversation reader so Keeper can inspect
 // the agent's actual chat history before making access decisions.
+// WithPublicPagePasswords configures nonblocking password-work admission.
+// NewRouter validates and resolves automatic values before serving requests.
+func WithPublicPagePasswords(limits config.PublicPagePasswordsConfig) RouterOption {
+	return func(r *Router) { r.publicPagePasswords = limits }
+}
+
 func WithAllowSignup(allow bool) RouterOption {
 	return func(r *Router) {
 		r.allowSignup = allow
@@ -524,4 +531,11 @@ func WithDocumentLimits(c config.DocumentsConfig) RouterOption {
 // WithDocumentService connects the public Pages bridge to a private engine.
 func WithDocumentService(socket string) RouterOption {
 	return func(r *Router) { r.documentsServiceSocket = socket }
+}
+
+// WithSkillGitImportPolicy snapshots boot-owned policy; this is not an API
+// setting and workspace roles cannot change it.
+func WithSkillGitImportPolicy(policy skills.GitImportPolicy) RouterOption {
+	copyPolicy := skills.GitImportPolicy{PrivateHosts: append([]string(nil), policy.PrivateHosts...)}
+	return func(r *Router) { r.skillGitImportPolicy = copyPolicy }
 }

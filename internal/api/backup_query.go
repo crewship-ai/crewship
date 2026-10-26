@@ -152,7 +152,7 @@ func (h *BackupHandler) Inspect(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusNotFound, "backup not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, m)
+	writeJSON(w, http.StatusOK, backupInspectResponse{Manifest: m, IntegrityVerified: false})
 }
 
 // restoreRequest is the body of POST /api/v1/admin/backups/restore.
@@ -321,3 +321,9 @@ func (h *BackupHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 // status using sentinel errors (errors.Is) rather than substring
 // matching on the message. When the backup package reworks its
 // wording the status codes stay stable.
+
+// backupInspectResponse deliberately reports metadata, not payload integrity.
+type backupInspectResponse struct {
+	*backup.Manifest
+	IntegrityVerified bool `json:"integrity_verified"`
+}

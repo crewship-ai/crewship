@@ -64,6 +64,7 @@ func NewIPCResolver(nextjsURL, internalToken string, logger *slog.Logger) *IPCRe
 }
 
 type chatResolveResponse struct {
+	AskForms              string                   `json:"ask_forms"`
 	HumanAuthority        *chataudience.Receipt    `json:"human_authority"`
 	AgentID               string                   `json:"agent_id"`
 	AgentSlug             string                   `json:"agent_slug"`
@@ -751,6 +752,7 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 	}
 
 	return &ChatInfo{
+		AskForms:              data.AskForms,
 		AgentID:               data.AgentID,
 		AgentSlug:             data.AgentSlug,
 		AgentRole:             data.AgentRole,

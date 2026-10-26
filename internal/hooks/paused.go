@@ -11,13 +11,13 @@ import (
 // nothing runs: Dispatch returns before reading hooks_config, the
 // /api/v1/hooks routes answer 503 (internal/api/hooks_handler.go), the
 // `crewship hooks` command is hidden, and Settings no longer links to the
-// page. Rows already in hooks_config are kept untouched, so resuming is a
-// switch, not a migration.
+// page. Rows stay stored. Legacy host hooks require instance administrator
+// review before they can run after upgrade, even when the pause is lifted.
 //
 // Why: what exists today needs a developer to be useful — a webhook receives
 // the raw event JSON, which Slack, Teams or PagerDuty will not accept without
 // a relay in between; the subagent handler was never wired; shell is
-// owner-only. Until hooks can reach those destinations directly, offering
+// instance-administrator-only. Until hooks can reach those destinations directly, offering
 // them reads as a feature nobody can use.
 //
 // CREWSHIP_HOOKS_ENABLED=1 turns them back on for one server process, for

@@ -320,6 +320,9 @@ single field change reads as a single-hunk diff rather than the whole
 minified blob changing). 'versions show <n>' dumps one version at a time
 for external diffing; this is the native in-product equivalent.
 
+Oversized comparisons return 413 (exit 1); busy comparisons return 429
+(exit 6). View versions separately or retry later. No automatic retry.
+
 Examples:
   crewship routine diff my-routine --from 2 --to 5
   crewship routine diff my-routine --from 2 --to 5 --format json | jq -r .unified_diff

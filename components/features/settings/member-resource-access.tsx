@@ -18,7 +18,7 @@ const policySchema = resourcePolicySchema
 type Policy = z.infer<typeof policySchema>
 type Right = z.infer<typeof rightSchema>
 const directorySchema = z.array(z.object({ id: z.string(), name: z.string() }))
-const operations = { agent: ["discover", "chat", "run", "delegate"], project: ["list", "read", "contribute", "manage", "delete_issues", "write", "delete"], routine: ["view", "results", "run", "edit", "publish"] }
+const operations = { crew: ["view", "use"], agent: ["discover", "chat", "run", "delegate"], project: ["list", "read", "contribute", "manage", "delete_issues", "write", "delete"], routine: ["view", "results", "run", "edit", "publish"] }
 
 export function MemberResourceAccess({ workspaceId, memberId, label, role, onSaved }: {
   workspaceId: string; memberId: string; label: string; role: string
@@ -63,13 +63,17 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
   const [mode, setMode] = useState(policy.mode)
   const [rights, setRights] = useState<Right[]>(policy.rights)
   const [reissue, setReissue] = useState<Right[]>([])
-  const [kind, setKind] = useState<Right["kind"]>("agent")
+  const [kind, setKind] = useState<keyof typeof operations>(policy.mode === "trusted" ? "crew" : "agent")
   const [resourceId, setResourceId] = useState("")
-  const [operation, setOperation] = useState("chat")
+  const [operation, setOperation] = useState(policy.mode === "trusted" ? "manage" : "chat")
   const [conflict, setConflict] = useState(false)
-  // Both directories load so every grant resolves its name by its own kind,
+  const trustedEligible = role === "MEMBER" || role === "MANAGER"
+  const canAddTrusted = policy.mode === "trusted" && mode === "trusted" && trustedEligible
+  const availableOperations: readonly string[] = mode === "trusted" ? ["manage"] : operations[kind]
+  // Each directory loads so every grant resolves its name by its own kind,
   // not by whichever kind the add-grant selector currently shows (#2863).
   const directories = {
+    crew: useResourceDirectory(workspaceId, "crew", mode === "restricted" || canAddTrusted),
     agent: useResourceDirectory(workspaceId, "agent", mode === "restricted"),
     project: useResourceDirectory(workspaceId, "project", mode === "restricted"),
     routine: useResourceDirectory(workspaceId, "routine", mode === "restricted"),
@@ -80,8 +84,8 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
     mutationFn: async () => {
       if (invalidPublish) throw new Error("Publish requires Edit on the same routine")
       const response = await apiFetch(url, { method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ membership_id: policy.membership_id, revision: policy.revision, mode, rights: mode === "trusted" ? [] : rights,
-          ...(mode === "restricted" && reissue.length ? {reissue: reissue.filter(r => rights.some(right => rightKey(right) === rightKey(r)))} : {}) }) })
+        body: JSON.stringify({ membership_id: policy.membership_id, revision: policy.revision, mode, rights: mode === "trusted" && policy.mode !== "trusted" ? [] : rights,
+          ...(reissue.length ? {reissue: reissue.filter(r => rights.some(right => rightKey(right) === rightKey(r)))} : {}) }) })
       if (response.status === 409) { setConflict(true); throw new Error("Policy changed. Reload the current policy before saving.") }
       if (!response.ok) throw new Error("Resource access was not saved")
       const updated = policySchema.parse(await response.json())
@@ -99,7 +103,7 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
   // The page's floating Save commits this draft: one change for the mode, one
   // per grant added or removed. A conflict keeps the draft but blocks Save
   // until the current policy is reloaded.
-  const pending = changeCount(policy, mode, rights) + (mode === "restricted" ? reissue.filter(r => rights.some(right => rightKey(right) === rightKey(r))).length : 0)
+  const pending = changeCount(policy, mode, rights) + (mode === "restricted" || policy.mode === "trusted" ? reissue.filter(r => rights.some(right => rightKey(right) === rightKey(r))).length : 0)
   const invalidPublish = mode === "restricted" && rights.some(right => right.kind === "routine" && right.operation === "publish" && !rights.some(edit => edit.kind === "routine" && edit.id === right.id && edit.operation === "edit"))
   usePageSave({
     label: `Resource access for ${label}`, count: pending, canSave: !conflict && !presetBusy && !invalidPublish, saving: save.isPending || presetBusy,
@@ -107,7 +111,7 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
     discard: () => { setMode(policy.mode); setRights(policy.rights); setReissue([]) },
   })
   function addRight() {
-    if (!directory.data?.some(resource => resource.id === resourceId)) return
+    if (!directory.data?.some(resource => resource.id === resourceId) || !availableOperations.includes(operation) || (mode === "trusted" && (!canAddTrusted || kind !== "crew"))) return
     const right = { kind, id: resourceId, operation }
     if (!rights.some(existing => existing.kind === kind && existing.id === resourceId && existing.operation === operation)) setRights([...rights, right])
   }
@@ -116,40 +120,42 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
   return <div className="space-y-3 text-xs">
     <label className="flex flex-wrap items-center gap-2">Access mode
       <select aria-label="Access mode" className={selectClass} value={mode} disabled={save.isPending || presetBusy || conflict}
-        onChange={event => setMode(event.target.value as Policy["mode"])}>
+        onChange={event => { const next = event.target.value as Policy["mode"]; setMode(next); setKind("crew"); setResourceId(""); setOperation(next === "trusted" ? "manage" : "view") }}>
         <option value="trusted">Trusted workspace access</option>
-        <option value="restricted" disabled={protectedRole}>Guest — explicit resources</option>
+        <option value="restricted" disabled={protectedRole || (policy.mode === "trusted" && policy.rights.length > 0)}>Guest — explicit resources</option>
       </select>
     </label>
     <p className="text-muted-foreground">{mode === "trusted"
-      ? "Trusted access uses the member’s workspace role and capabilities. Saving clears individual resource grants."
+      ? (policy.mode === "trusted" ? "Trusted access keeps workspace roles and explicit crew management shares. Remove and save trusted-only shares before switching to Guest." : "Restoring trusted access clears Guest resource grants and restores the workspace role and capabilities.")
       : "Guest restrictions apply to the entire account, across all workspaces. Only listed operations are allowed; conversation privacy checks still apply. Running a routine also requires run access to every agent it uses, and uses its configured credentials."}</p>
-    {mode === "restricted" && <>
-      <ul className="space-y-1" aria-label="Resource grants">{rights.map((right, index) => <li key={`${right.kind}:${right.id}:${right.operation}`} className="flex flex-wrap items-center gap-2">
+    {(mode === "restricted" || policy.mode === "trusted") && <ul className="space-y-1" aria-label="Resource grants">{rights.map((right, index) => <li key={`${right.kind}:${right.id}:${right.operation}`} className="flex flex-wrap items-center gap-2">
         {policy.grant_details?.filter(detail => rightKey(detail) === rightKey(right)).map(detail => <span key={rightKey(detail)} className="text-muted-foreground">
-          Issuer: {detail.issuer_name || detail.issuer_id} · {detail.live ? "Active" : "Inactive — issuer no longer has authority"}
-          {!detail.live && <Button size="sm" variant="outline" disabled={save.isPending || presetBusy || conflict} onClick={() => setReissue(current => current.some(r => rightKey(r) === rightKey(right)) ? current.filter(r => rightKey(r) !== rightKey(right)) : [...current,right])}>
+          Issuer: {detail.issuer_name || detail.issuer_id} · {detail.live ? "Active" : "Inactive — current share authority is unavailable"}
+          {!detail.live && (policy.mode === "restricted" || trustedEligible) && <Button size="sm" variant="outline" disabled={save.isPending || presetBusy || conflict} onClick={() => setReissue(current => current.some(r => rightKey(r) === rightKey(right)) ? current.filter(r => rightKey(r) !== rightKey(right)) : [...current,right])}>
             {reissue.some(r => rightKey(r) === rightKey(right)) ? "Cancel reissue" : "Reissue as me"}
           </Button>}
         </span>)}
-        <span>{right.kind}: {directories[right.kind].data?.find(resource => resource.id === right.id)?.name ?? right.id} · {resourceOperationLabel(right.operation)}</span>
+        <span>{right.kind}: {right.kind === "crew" ? right.id : directories[right.kind].data?.find(resource => resource.id === right.id)?.name ?? right.id} · {resourceOperationLabel(right.operation)}</span>
         <Button size="sm" variant="ghost" className="coarse:h-[44px]" disabled={save.isPending || presetBusy || conflict} onClick={() => setRights(rights.filter((_, row) => row !== index))}
           aria-label={`Remove ${right.kind} ${right.id} ${right.operation}`}>Remove</Button>
-      </li>)}</ul>
+      </li>)}</ul>}
+    {(mode === "restricted" || canAddTrusted) && <>
       {invalidPublish && <p role="alert">Publish requires Edit on the same routine. Add Edit or remove Publish before saving.</p>}
       {rights.length === 0 && <p>No resource operations are granted.</p>}
       <div className="flex flex-wrap gap-2">
         <select aria-label="Resource kind" className={selectClass} value={kind} disabled={save.isPending || presetBusy || conflict} onChange={event => {
-          const next = event.target.value as Right["kind"]; setKind(next); setResourceId(""); setOperation(operations[next][0])
-        }}><option value="agent">Agent</option><option value="project">Project</option><option value="routine">Routine</option></select>
+          const next = event.target.value as keyof typeof operations; setKind(next); setResourceId(""); setOperation(operations[next][0])
+        }}><option value="crew">Crew</option>{mode === "restricted" && <><option value="agent">Agent</option><option value="project">Project</option><option value="routine">Routine</option></>}</select>
         <select aria-label="Resource" className={selectClass} value={resourceId} disabled={save.isPending || presetBusy || conflict || !directory.data} onChange={event => setResourceId(event.target.value)}>
           <option value="">Choose a resource</option>{directory.data?.map(resource => <option key={resource.id} value={resource.id}>{resource.name}</option>)}
         </select>
         <select aria-label="Resource operation" className={selectClass} value={operation} disabled={save.isPending || presetBusy || conflict} onChange={event => setOperation(event.target.value)}>
-          {operations[kind].map(value => <option key={value} value={value}>{resourceOperationLabel(value)}</option>)}
+          {availableOperations.map(value => <option key={value} value={value}>{resourceOperationLabel(value)}</option>)}
         </select>
         <Button size="sm" className="coarse:h-[44px]" variant="outline" disabled={save.isPending || presetBusy || conflict || !resourceId || rights.length >= 256} onClick={addRight}>Add grant</Button>
       </div>
+      {kind === "crew" && mode === "trusted" && <p className="text-sm text-muted-foreground">Manage permits this crew’s profile/configuration and ordinary membership. It does not assign crew roles, delete the crew, change budgets/policy, administer the workspace or expose credentials.</p>}
+      {kind === "crew" && mode === "restricted" && <p className="text-sm text-muted-foreground">View shares the crew identity and current agent identities and status. Use also shares Chat and Run for current and future agents, subject to each agent’s authority and execution preflight. Newly added agents become discoverable. This does not grant Delegate, credential visibility, existing conversations, activity or crew administration.</p>}
       {policy.mode === "restricted" && (kind === "project" || kind === "routine") && resourceId && <ResourcePresetEditor key={`${kind}:${resourceId}:${policy.revision}`} workspaceId={workspaceId} policy={policy} resource={{kind,id:resourceId}}
         disabled={pending > 0 || save.isPending || conflict} onSaveStarted={onPolicySaveStarted} onBusy={busy => {setPresetBusy(busy);onPresetBusy(busy)}} onSaved={updated => queryClient.setQueryData(queryKey,updated)} />}
       {directory.isError && <p role="alert">Resources unavailable. <button type="button" onClick={() => void directory.refetch()}>Reload resources</button></p>}
@@ -166,19 +172,19 @@ const rightKey = (right: Right) => `${right.kind}:${right.id}:${right.operation}
 
 /** Edits pending against the saved policy: the mode, then each grant added or removed. */
 function changeCount(policy: Policy, mode: Policy["mode"], rights: Right[]): number {
-  const before = new Set(policy.mode === "trusted" ? [] : policy.rights.map(rightKey))
-  const after = new Set(mode === "trusted" ? [] : rights.map(rightKey))
+  const before = new Set(policy.rights.map(rightKey))
+  const after = new Set(mode === "trusted" && policy.mode !== "trusted" ? [] : rights.map(rightKey))
   let n = mode === policy.mode ? 0 : 1
   for (const key of after) if (!before.has(key)) n++
   for (const key of before) if (!after.has(key)) n++
   return n
 }
 
-function useResourceDirectory(workspaceId: string, kind: Right["kind"], enabled: boolean) {
+function useResourceDirectory(workspaceId: string, kind: keyof typeof operations, enabled: boolean) {
   return useQuery({
     queryKey: ["resource-access-directory", workspaceId, kind], enabled, retry: false,
     queryFn: async ({ signal }) => {
-      const path = kind === "routine" ? `workspaces/${requireApiPathSegment(workspaceId)}/pipelines` : kind === "agent" ? "agents" : "projects"
+      const path = kind === "routine" ? `workspaces/${requireApiPathSegment(workspaceId)}/pipelines` : kind === "agent" ? "agents" : kind === "crew" ? "crews" : "projects"
       const response = await apiFetch(`/api/v1/${path}?workspace_id=${encodeURIComponent(workspaceId)}`, { signal })
       if (!response.ok) throw new Error("Resources unavailable")
       return directorySchema.parse(await response.json())

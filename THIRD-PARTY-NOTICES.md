@@ -223,3 +223,16 @@ monitored for upstream resolution.
 | CVE | Module | Status | Notes |
 |-----|--------|--------|-------|
 | GO-2026-5932 | golang.org/x/crypto/openpgp | No upstream fix (Fixed in: N/A) | The openpgp package is unmaintained and unsafe by design; upstream will never ship a fix (advisory is "use a maintained alternative"). **Not reachable in Crewship**: we never import `golang.org/x/crypto/openpgp` (it is a transitive-graph presence only — `go mod why golang.org/x/crypto` reports "main module does not need package"), and govulncheck lists it under "modules you require, but your code doesn't appear to call". Bumping x/crypto does not help — every published version, including the latest, still ships openpgp with the same advisory. Accepted as known, non-reachable risk. Monitor https://pkg.go.dev/vuln/GO-2026-5932 |
+
+### Restricted native worker — bubblewrap
+
+The restricted native image distributes Debian bubblewrap 0.8.0 with Debian's
+`0.8.0-2+deb12u1` security patches and Crewship's atime-preserving remount patch.
+The rebuilt Debian package is versioned `0.8.0-2+deb12u1+crewship1`.
+Bubblewrap and the local derivative patch/header are LGPL-2.0-or-later; original
+copyright and license texts remain in the package's `/usr/share/doc/bubblewrap/`.
+The image also includes the complete modified corresponding source, Debian
+build files and image build recipe as
+`/usr/share/doc/bubblewrap/crewship-source.tar.xz`. The local patch and regression
+source are in `cmd/crewship-restricted-native-runner/bubblewrap/`.
+Upstream: https://github.com/containers/bubblewrap.

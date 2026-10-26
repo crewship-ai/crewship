@@ -16,6 +16,10 @@ import (
 // (or a surface's optional parts) rather than defining one. Naming them here is
 // what keeps the next allowlist entry from silently appearing in no surface.
 var restrictedSharedPatterns = map[string]bool{
+	// Optional crew context; no Crews navigation surface is enabled yet.
+	"GET /api/v1/crews":                                                                    true,
+	"GET /api/v1/crews/{crewId}":                                                           true,
+	"GET /api/v1/crews/{crewId}/access/me":                                                 true,
 	"POST /api/v1/auth/invitation/accept":                                                  true,
 	"GET /api/v1/workspaces":                                                               true,
 	"GET /api/v1/agents/{agentId}":                                                         true,

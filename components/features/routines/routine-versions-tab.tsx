@@ -5,6 +5,7 @@ import { formatRoutineTime } from "@/lib/routine-time"
 import { useEffect, useState } from "react"
 import { toast } from "@/lib/toast"
 import { apiFetch } from "@/lib/api-fetch"
+import { diffErrorMessage } from "@/lib/diff-error"
 import { useUrlSelection } from "@/hooks/use-issue-detail"
 import { useAbilities } from "@/hooks/use-abilities"
 import { useSessionSafe } from "@/hooks/use-auth"
@@ -125,7 +126,7 @@ export function RoutineVersionsTab({ workspaceId, slug, draft, routine, onPublis
             `${base}/diff?from=${encodeURIComponent(selected)}&to=${head}`,
             { signal: c.signal },
           )
-          if (!d.ok) throw new Error("The comparison could not be loaded.")
+          if (!d.ok) throw new Error(diffErrorMessage(d.status, "The comparison could not be loaded."))
           const change = await d.json()
           if (!c.signal.aborted) setDiff(change)
         }

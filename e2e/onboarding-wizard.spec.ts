@@ -187,7 +187,7 @@ test.describe("onboarding wizard — first-run flow", () => {
     // Pin that contract so a future persistence PR notices.
     await page.waitForSelector("#workspace_name", { timeout: 20_000 })
     expect((await page.inputValue("#workspace_name")).length).toBeGreaterThanOrEqual(2)
-    await page.reload({ waitUntil: "networkidle" })
+    await page.reload({ waitUntil: "domcontentloaded" })
     await page.waitForSelector("#workspace_name", { timeout: 20_000 })
     expect((await page.inputValue("#workspace_name")).length).toBeGreaterThanOrEqual(2)
 
@@ -200,7 +200,7 @@ test.describe("onboarding wizard — first-run flow", () => {
     // language, and preferred_language acts as the server-side checkpoint.
     // Reloading here must resume at Adapter, not ask for the workspace again.
     await page.waitForSelector('button:has-text("Pair my CLI")', { timeout: 10_000 })
-    await page.reload({ waitUntil: "networkidle" })
+    await page.reload({ waitUntil: "domcontentloaded" })
     await expect(page.locator("#workspace_name")).toHaveCount(0)
 
     // Step 2: adapter + token. Switch to browser mode so Continue gates on
@@ -227,9 +227,8 @@ test.describe("onboarding wizard — first-run flow", () => {
     )
     // Step 3 mounts the setup chat, which immediately POSTs
     // /onboarding/setup-agent/start (a write). Reloading while that request is
-    // still in flight cancels it, and the reload's "networkidle" wait could
-    // then hang on the abandoned request until the test timed out. Let it
-    // finish first.
+    // still in flight can cancel the write. Let it finish first; readiness
+    // after reload is asserted on the resumed step, not background traffic.
     const setupAgentStartPromise = page.waitForResponse(
       (r) =>
         new URL(r.url()).pathname === "/api/v1/onboarding/setup-agent/start" &&
@@ -245,11 +244,30 @@ test.describe("onboarding wizard — first-run flow", () => {
     // React state at step 1 and demanded both the workspace and token again.
     // Durable state must take us straight back to Crew without ever revealing
     // the saved secret to the browser.
-    await page.reload({ waitUntil: "networkidle" })
-    await expect(page.locator("#workspace_name")).toHaveCount(0)
-    await expect(page.getByRole("button", { name: /^pick a template instead$/i })).toBeVisible({
-      timeout: 20_000,
+    // Keep an unrelated background read open across the reload. The wizard
+    // must resume from durable state without waiting for global network idle
+    // (polling and streams can keep that condition from ever being reached).
+    let releaseBackgroundRead!: () => void
+    const backgroundRead = new Promise<void>((resolve) => { releaseBackgroundRead = resolve })
+    const backgroundPath = "/__onboarding-resume-background"
+    await page.route(`**${backgroundPath}`, async (route) => {
+      await backgroundRead
+      await route.fulfill({ status: 204 })
     })
+    await page.addInitScript((path) => {
+      if (location.pathname === "/onboarding") void fetch(path).catch(() => {})
+    }, backgroundPath)
+    const backgroundStarted = page.waitForRequest((r) => new URL(r.url()).pathname === backgroundPath)
+    try {
+      await page.reload({ waitUntil: "domcontentloaded" })
+      await backgroundStarted
+      await expect(page.locator("#workspace_name")).toHaveCount(0)
+      await expect(page.getByRole("button", { name: /^pick a template instead$/i })).toBeVisible({
+        timeout: 20_000,
+      })
+    } finally {
+      releaseBackgroundRead()
+    }
 
     // Step 3: pick crew template — the escape hatch, not the chat default,
     // since the chat would need a real setup-agent conversation this suite

@@ -650,13 +650,11 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("GET /api/v1/feedback", authed(http.HandlerFunc(mfh.List)))
 	r.authedSelfMut("DELETE", "/api/v1/feedback", mfh.Delete)
 
-	// Hooks registry: lifecycle intercepts. List is available to every
-	// workspace member for auditability; every write is OWNER/ADMIN
-	// (roleManage) because a hook can invoke shell commands, hit
-	// third-party endpoints, or dispatch subagents. Create/Update layer a
-	// further OWNER-only gate on handler_kind='shell' inside the handler
-	// — that one is not a plain role check (it depends on the body), so
-	// it cannot be declared at the route table.
+	// Hooks registry: workspace members may read. Non-host writes and deletion
+	// require workspace management authority. Host creation/edit/enable require
+	// instance authority checked inside the handler; stopping host execution
+	// also permits workspace management authority. Body/row-dependent gates
+	// use roleInline while preserving the route's workspace token scope.
 	hh := NewHooksHandler(r.db, r.logger)
 	hh.SetJournal(r.Journal())
 	//
@@ -664,11 +662,11 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// authenticates and authorizes as before, then answers 503 instead of
 	// acting, so a client learns why rather than meeting a 404.
 	r.mux.Handle("GET /api/v1/hooks", authed(wsCtx(hooksPausedGate(hh.List))))
-	r.authedMut("POST", "/api/v1/hooks", roleManage, hooksPausedGate(hh.Create))
-	r.authedMut("PATCH", "/api/v1/hooks/{id}", roleManage, hooksPausedGate(hh.Update))
+	r.authedMut("POST", "/api/v1/hooks", roleInline, hooksPausedGate(hh.Create))
+	r.authedMut("PATCH", "/api/v1/hooks/{id}", roleInline, hooksPausedGate(hh.Update))
 	r.authedMut("DELETE", "/api/v1/hooks/{id}", roleManage, hooksPausedGate(hh.Delete))
-	r.authedMut("POST", "/api/v1/hooks/{id}/enable", roleManage, hooksPausedGate(hh.Enable))
-	r.authedMut("POST", "/api/v1/hooks/{id}/disable", roleManage, hooksPausedGate(hh.Disable))
+	r.authedMut("POST", "/api/v1/hooks/{id}/enable", roleInline, hooksPausedGate(hh.Enable))
+	r.authedMut("POST", "/api/v1/hooks/{id}/disable", roleInline, hooksPausedGate(hh.Disable))
 
 	// Watch Roster: per-workspace presence snapshot. Read-only — agent
 	// runtime owns status, so there's no POST here.
@@ -706,6 +704,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// decision side of that flow. Explain is read-only (MEMBER+);
 	// approve/reject are gated to OWNER/ADMIN by the handler itself.
 	propH := NewProposedHandler(r.db, r.logger)
+	propH.diffs = r.diffs
 	propH.SetJournal(r.Journal())
 	propH.SetBlobRoot(r.memoryVersionsBlobRoot)
 	r.authedMut("POST", "/api/v1/consolidate/proposed/{id}/approve", roleManage, propH.Approve)
@@ -716,6 +715,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// auth surface as Explain. Pairs with the existing approve/
 	// reject flow so the HITL UI can show a diff before the
 	// operator commits.
+	// openapi: responses 413,429
 	r.mux.Handle("GET /api/v1/consolidate/proposed/{id}/diff", authed(wsCtx(http.HandlerFunc(propH.Diff))))
 
 	// memory→Skills bridge HITL surface (PR #4 step 7). When the

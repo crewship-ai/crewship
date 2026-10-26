@@ -179,3 +179,18 @@ describe("test result on a version (ODCH-RT-13)", () => {
     expect(screen.getByTestId("routine-version-1")).not.toHaveTextContent("Test run")
   })
 })
+
+it.each([
+  [413, /diff is too large/i],
+  [429, /comparisons are busy/i],
+] as const)("shows an explicit archive comparison refusal for HTTP %i", async (status, message) => {
+  fetcher.mockImplementation(async (url: string) => {
+    if (url.endsWith("/versions")) return json([{ version: 2, is_head: true }, { version: 1 }])
+    if (url.includes("/diff?")) return { ok: false, status, json: async () => ({}) }
+    return json({ version: 1, definition })
+  })
+  render(<RoutineVersionsTab workspaceId="ws" slug="recipe" />)
+  fireEvent.click(await screen.findByRole("button", { name: "Compare with published" }))
+  expect(await screen.findByText(message)).toBeInTheDocument()
+  expect(fetcher.mock.calls.filter(([url]) => String(url).includes("/diff?"))).toHaveLength(1)
+})

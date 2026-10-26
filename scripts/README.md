@@ -66,6 +66,15 @@ publication or provider calls. The main-only `Native Worker Release` workflow
 owns candidate publication and signing; see the
 [release procedure](../docs/guides/restricted-native-codex.md#independent-release-candidates).
 
+`ci/prepare-text-release.sh /absolute/new/context-directory` prepares the
+`responses_text` runner, pinned image recipe, binary checksum, source identity
+and Go/project license bundle. The main-only `Text Worker Release` workflow
+publishes and signs candidates only when explicitly dispatched with
+`publish=true`, after exact-source CI/Security/CodeQL verification. The separate
+PR candidate check runs the actual production text-worker accounting canary
+against synthetic TLS data and refuses missing, skipped or failed execution.
+See the [runtime contract](../docs/specs/restricted-workflows.md#independent-text-worker-candidates).
+
 Publishing helpers under `ci/` are workflow components, not general local test
 commands. They may publish or remove release/package artifacts.
 
@@ -192,6 +201,13 @@ execute Chromium. Executing either tagged test set requires the explicit browser
 environment and real static export; missing configuration fails rather than skips.
 `go test -tags conformance ./...` therefore also requires those prerequisites.
 
+`ci/native-noatime-fixture.sh IMAGE OUTPUT red|green` is restricted to a
+disposable Linux acceptance host with the unchanged native AppArmor policy and
+an owned atime fixture on its Docker network-file source directory. It invokes the real production native canary,
+rejecting skips; the RED control must exhibit the expected resolver remount
+failure. It neither publishes an image nor activates a runtime. Do not run its
+fixture setup on a shared development host; use the candidate workflow.
+
 `tools/wordcraft-capabilities/generate.mjs` exports the pinned compiled WordCraft
-registry into the shared JSON capability catalog. Its [README](../tools/wordcraft-capabilities/README.md)
+registry into a shared JSON capability catalog. Its [README](../tools/wordcraft-capabilities/README.md)
 documents canonical inputs, qualification scope and drift checks.

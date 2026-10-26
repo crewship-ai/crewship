@@ -731,6 +731,7 @@ func (s *Server) mountAPIRouter(
 		opts = append(opts, goapi.WithPortExposeNetwork(cfg.Container.Network))
 	}
 	opts = append(opts, goapi.WithHub(wsHub))
+	opts = append(opts, goapi.WithDiffLimits(cfg.Diff))
 	// The terminal handler joins the hub as a session-revocation
 	// notifier: a Revoke/RevokeAllForUser through the API immediately
 	// tears down any open container shell for that session/user, instead
@@ -743,7 +744,7 @@ func (s *Server) mountAPIRouter(
 	if missionEngine != nil {
 		opts = append(opts, goapi.WithMissionCallback(missionEngine))
 	}
-	opts = append(opts, goapi.WithAllowSignup(cfg.Auth.AllowSignup))
+	opts = append(opts, goapi.WithAllowSignup(cfg.Auth.AllowSignup), goapi.WithPublicPagePasswords(cfg.Auth.PublicPagePasswords))
 	if cfg.Auth.GoogleClientID != "" {
 		opts = append(opts, goapi.WithGoogleOAuth(cfg.Auth.GoogleClientID, cfg.Auth.GoogleSecret, cfg.Auth.NextjsURL))
 	}
@@ -859,7 +860,7 @@ func (s *Server) mountAPIRouter(
 	})
 
 	// Wire Composio managed-integration provider (API key from env/yaml)
-	opts = append(opts, goapi.WithComposioConfig(&cfg.Composio))
+	opts = append(opts, goapi.WithComposioConfig(&cfg.Composio), goapi.WithSkillGitImportPolicy(cfg.Skills))
 
 	// M2a/M2b (#1001): ONE gov-model resolver shared by the access
 	// gatekeeper AND the Phase-2 aux evaluators, so a workspace's

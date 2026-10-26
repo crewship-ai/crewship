@@ -92,3 +92,11 @@ it.each([401,403,404])("clears cached rows when access is lost (%s)",async(statu
  await waitFor(()=>expect(mocks.fetch).toHaveBeenCalledTimes(3))
  expect(screen.queryByText(/Former shared agent/)).not.toBeInTheDocument()
 })
+
+it("renders server-derived crew access without treating it as an invalid policy", async () => {
+  mocks.fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ ...accessMetadata, explanation: "Guest crew access", decisions: [{kind:"crew",id:"crew-1",name:"Shared crew",operation:"use",state:"allowed",reason:"Inherits agent run without delegation"}] }) })
+  view()
+  expect(await screen.findByText("Crew · Shared crew · use · Allowed")).toBeVisible()
+  expect(screen.getByText("Inherits agent run without delegation")).toBeVisible()
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+})

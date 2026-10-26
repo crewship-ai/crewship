@@ -38,9 +38,10 @@ type ImportResult struct {
 
 // Importer fetches, parses, and upserts skills into the database.
 type Importer struct {
-	db     *sql.DB
-	logger *slog.Logger
-	client *http.Client
+	db        *sql.DB
+	logger    *slog.Logger
+	client    *http.Client
+	gitPolicy GitImportPolicy
 	// SkipURLValidation disables SSRF checks (testing only).
 	SkipURLValidation bool
 }
@@ -428,4 +429,15 @@ func generateSkillID() string {
 		panic("skills: crypto/rand unavailable: " + err.Error())
 	}
 	return "sk_" + hex.EncodeToString(b)
+}
+
+// NewImporterWithGitPolicy snapshots administrator-owned boot policy. Request
+// bodies cannot change the private-host allowlist.
+func NewImporterWithGitPolicy(db *sql.DB, logger *slog.Logger, policy GitImportPolicy) (*Importer, error) {
+	if err := ValidateGitImportPolicy(policy); err != nil {
+		return nil, err
+	}
+	imp := NewImporter(db, logger)
+	imp.gitPolicy = GitImportPolicy{PrivateHosts: append([]string(nil), policy.PrivateHosts...)}
+	return imp, nil
 }

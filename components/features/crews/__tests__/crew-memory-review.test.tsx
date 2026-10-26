@@ -15,7 +15,7 @@ const explain = (proposal: string, crew: string, status = "pending") => ({
 })
 
 type Call = { url: string; method: string; body: unknown }
-function server(opts: { inbox?: unknown[]; explain?: Record<string, unknown>; inboxStatus?: number; diff?: unknown } = {}) {
+function server(opts: { inbox?: unknown[]; explain?: Record<string, unknown>; inboxStatus?: number; diff?: unknown; diffStatus?: number } = {}) {
   const calls: Call[] = []
   let rows = opts.inbox ?? [item("i1", "mp_1"), item("i2", "mp_2")]
   vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
@@ -31,7 +31,7 @@ function server(opts: { inbox?: unknown[]; explain?: Record<string, unknown>; in
       const e = (opts.explain ?? { mp_1: explain("mp_1", "c1"), mp_2: explain("mp_2", "c2") })[id]
       return e ? new Response(JSON.stringify(e)) : new Response("{}", { status: 404 })
     }
-    if (url.includes("/diff")) return new Response(JSON.stringify(opts.diff ?? { diff: "+- Use the EU price when both are shown", stats: { additions: 1, deletions: 0 } }))
+    if (url.includes("/diff")) return new Response(JSON.stringify(opts.diff ?? { diff: "+- Use the EU price when both are shown", stats: { additions: 1, deletions: 0 } }), { status: opts.diffStatus ?? 200 })
     if (method === "POST") { rows = rows.filter((r) => (r as { source_id: string }).source_id !== /proposed\/([^/]+)\//.exec(url)![1]); return new Response("{}") }
     if (method === "PATCH") return new Response("{}")
     return new Response("{}", { status: 404 })
@@ -191,4 +191,19 @@ describe("Memory › Waiting for review › skill proposals", () => {
     expect(await screen.findByText(/staged skill not found/)).toBeInTheDocument()
     expect(screen.getByRole("region", { name: "Waiting for review · 1" })).toBeInTheDocument()
   })
+})
+
+it.each([
+  [413, "diff is too large; view the inputs separately"],
+  [429, "diff service is busy; retry shortly"],
+] as const)("shows HTTP %i preview refusals without accepting or hiding the proposal", async (status, message) => {
+  const calls = server({ diffStatus: status, diff: { error: message } })
+  view()
+  const card = await screen.findByRole("region", { name: "Waiting for review · 1" })
+  fireEvent.click(within(card).getByRole("button", { name: /View changes/ }))
+  expect(await screen.findByText(message)).toBeInTheDocument()
+  expect(screen.queryByText("No changes to show.")).toBeNull()
+  expect(screen.getByRole("region", { name: "Waiting for review · 1" })).toBeInTheDocument()
+  expect(calls.filter((call) => call.url.includes("/diff"))).toHaveLength(1)
+  expect(calls.some((call) => call.method === "POST" || call.method === "PATCH")).toBe(false)
 })

@@ -17,8 +17,7 @@ package api
 //     lists, toggles, and looks healthy while being permanently dead. The
 //     rejection message enumerates the legal values so the caller can fix
 //     it without reading Go source.
-//   - `handler_kind: shell` requires OWNER, not just the roleManage
-//     (OWNER/ADMIN) the route declares. A shell hook runs a command on the
+//   - `handler_kind: shell` requires instance administrator authority. A shell hook runs a command on the
 //     crewshipd host (internal/hooks/shell.go), so creating one is a
 //     host-execution grant, a strictly larger power than the rest of the
 //     ADMIN surface. Update carries the same gate: an http hook PATCHed
@@ -67,20 +66,20 @@ func (h *HooksHandler) decodeHookWrite(w http.ResponseWriter, r *http.Request) (
 }
 
 // validateHandlerKind checks the kind against the three the dispatcher can
-// actually run, and applies the OWNER gate for shell. Returns false having
+// actually run, and applies the instance administrator gate for shell. Returns false having
 // written the response.
 //
 // The schema's CHECK constraint would also refuse an unknown kind, but as a
 // 500 from a failed INSERT; naming the three legal values in a 400 is the
 // difference between a usable API and a puzzle.
-func validateHandlerKind(w http.ResponseWriter, kind, role string) bool {
+func validateHandlerKind(w http.ResponseWriter, kind string, hostAdmin bool) bool {
 	switch hooks.HandlerKind(kind) {
 	case hooks.HandlerKindHTTP, hooks.HandlerKindSubagent:
 		return true
 	case hooks.HandlerKindShell:
-		if role != "OWNER" {
+		if !hostAdmin {
 			replyError(w, http.StatusForbidden,
-				"handler_kind 'shell' requires OWNER role — shell hooks execute commands on the crewshipd host")
+				"host shell hooks require an instance administrator and instance:admin token scope — shell hooks execute commands on the crewshipd host")
 			return false
 		}
 		return true
@@ -124,8 +123,8 @@ func (h *HooksHandler) resolveHookCrew(w http.ResponseWriter, r *http.Request, c
 
 // Create serves POST /api/v1/hooks.
 //
-// The route declares roleManage (OWNER/ADMIN); shell additionally needs
-// OWNER, enforced above. New hooks default to enabled=true: a registry you
+// The handler checks workspace management authority for non-host hooks and
+// instance administrator authority for host hooks. New hooks default to enabled=true: a registry you
 // have to enable in a second call is a registry half of whose entries are
 // silently off.
 func (h *HooksHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -134,7 +133,6 @@ func (h *HooksHandler) Create(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
-	role := RoleFromContext(r.Context())
 
 	in, ok := h.decodeHookWrite(w, r)
 	if !ok {
@@ -152,7 +150,10 @@ func (h *HooksHandler) Create(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "handler_kind is required (valid: shell, http, subagent)")
 		return
 	}
-	if !validateHandlerKind(w, *in.HandlerKind, role) {
+	if !h.authorizeHookWrite(w, r, *in.HandlerKind == "shell") {
+		return
+	}
+	if !validateHandlerKind(w, *in.HandlerKind, h.hostHookAuthority(r)) {
 		return
 	}
 
@@ -187,22 +188,27 @@ func (h *HooksHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// allowedShell mirrors the gate above rather than re-deriving it: the
 	// store validates independently (store.go's comment explains why), and
-	// passing role=="OWNER" keeps the two answers from drifting.
-	id, err := hooks.Register(r.Context(), h.db, hk, role == "OWNER")
+	// passing the verified instance authority keeps the two answers aligned.
+	hostAllowed := h.hostHookAuthority(r)
+	id, hostAudited, err := h.mutateHook(r, workspaceID, "", "hook.create", func(db hooks.StoreDB) (string, error) {
+		return hooks.Register(r.Context(), db, hk, hostAllowed)
+	})
 	if err != nil {
 		h.writeStoreError(w, r, err, "create")
 		return
 	}
 
-	WriteAuditLog(r.Context(), h.db, h.journal, "hook.create", "hook", id,
-		actorIDFromContext(r), workspaceID, map[string]interface{}{
-			"event":        *in.Event,
-			"handler_kind": *in.HandlerKind,
-			"crew_id":      crewID,
-			"blocking":     hk.Blocking,
-			"enabled":      hk.Enabled,
-		})
+	if !hostAudited {
+		WriteAuditLog(r.Context(), h.db, h.journal, "hook.create", "hook", id,
+			actorIDFromContext(r), workspaceID, map[string]interface{}{
+				"event":        *in.Event,
+				"handler_kind": *in.HandlerKind,
+				"crew_id":      crewID,
+				"blocking":     hk.Blocking,
+				"enabled":      hk.Enabled,
+			})
 
+	}
 	h.replyHook(w, r, workspaceID, id, http.StatusCreated)
 }
 
@@ -218,7 +224,7 @@ func (h *HooksHandler) Update(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
-	role := RoleFromContext(r.Context())
+
 	id := r.PathValue("id")
 	if id == "" {
 		replyError(w, http.StatusBadRequest, "id required")
@@ -248,18 +254,18 @@ func (h *HooksHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		merged.Event = hooks.Event(*in.Event)
 	}
+	desiredKind := string(merged.HandlerKind)
 	if in.HandlerKind != nil {
-		if !validateHandlerKind(w, *in.HandlerKind, role) {
-			return
-		}
-		merged.HandlerKind = hooks.HandlerKind(*in.HandlerKind)
-	} else if merged.HandlerKind == hooks.HandlerKindShell && role != "OWNER" {
-		// Editing an existing shell hook is editing a host command, even
-		// when the kind field is untouched. Same gate, same reason.
-		replyError(w, http.StatusForbidden,
-			"editing a shell hook requires OWNER role — shell hooks execute commands on the crewshipd host")
+		desiredKind = *in.HandlerKind
+	}
+	if !h.authorizeHookWrite(w, r, existing.HandlerKind == hooks.HandlerKindShell || desiredKind == "shell") {
 		return
 	}
+	if !validateHandlerKind(w, desiredKind, h.hostHookAuthority(r)) {
+		return
+	}
+	merged.HandlerKind = hooks.HandlerKind(desiredKind)
+
 	if in.CrewID != nil {
 		crewID := strings.TrimSpace(*in.CrewID)
 		if !h.resolveHookCrew(w, r, crewID, workspaceID) {
@@ -280,20 +286,26 @@ func (h *HooksHandler) Update(w http.ResponseWriter, r *http.Request) {
 		merged.Enabled = *in.Enabled
 	}
 
-	if err := hooks.Update(r.Context(), h.db, workspaceID, merged, role == "OWNER"); err != nil {
+	hostAllowed := h.hostHookAuthority(r)
+	_, hostAudited, err := h.mutateHook(r, workspaceID, id, "hook.update", func(db hooks.StoreDB) (string, error) {
+		return id, hooks.Update(r.Context(), db, workspaceID, merged, hostAllowed)
+	})
+	if err != nil {
 		h.writeStoreError(w, r, err, "update")
 		return
 	}
 
-	WriteAuditLog(r.Context(), h.db, h.journal, "hook.update", "hook", id,
-		actorIDFromContext(r), workspaceID, map[string]interface{}{
-			"event":        string(merged.Event),
-			"handler_kind": string(merged.HandlerKind),
-			"crew_id":      merged.CrewID,
-			"blocking":     merged.Blocking,
-			"enabled":      merged.Enabled,
-		})
+	if !hostAudited {
+		WriteAuditLog(r.Context(), h.db, h.journal, "hook.update", "hook", id,
+			actorIDFromContext(r), workspaceID, map[string]interface{}{
+				"event":        string(merged.Event),
+				"handler_kind": string(merged.HandlerKind),
+				"crew_id":      merged.CrewID,
+				"blocking":     merged.Blocking,
+				"enabled":      merged.Enabled,
+			})
 
+	}
 	h.replyHook(w, r, workspaceID, id, http.StatusOK)
 }
 
@@ -325,7 +337,10 @@ func (h *HooksHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := hooks.Delete(r.Context(), h.db, workspaceID, id); err != nil {
+	_, hostAudited, err := h.mutateHook(r, workspaceID, id, "hook.delete", func(db hooks.StoreDB) (string, error) {
+		return id, hooks.Delete(r.Context(), db, workspaceID, id)
+	})
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, "hook not found")
 			return
@@ -335,13 +350,15 @@ func (h *HooksHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	WriteAuditLog(r.Context(), h.db, h.journal, "hook.delete", "hook", id,
-		actorIDFromContext(r), workspaceID, map[string]interface{}{
-			"event":        string(existing.Event),
-			"handler_kind": string(existing.HandlerKind),
-			"crew_id":      existing.CrewID,
-		})
+	if !hostAudited {
+		WriteAuditLog(r.Context(), h.db, h.journal, "hook.delete", "hook", id,
+			actorIDFromContext(r), workspaceID, map[string]interface{}{
+				"event":        string(existing.Event),
+				"handler_kind": string(existing.HandlerKind),
+				"crew_id":      existing.CrewID,
+			})
 
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"id": id, "deleted": true})
 }
 
@@ -353,7 +370,7 @@ func (h *HooksHandler) writeStoreError(w http.ResponseWriter, r *http.Request, e
 	switch {
 	case errors.Is(err, hooks.ErrShellHookNotAllowed):
 		replyError(w, http.StatusForbidden,
-			"handler_kind 'shell' requires OWNER role — shell hooks execute commands on the crewshipd host")
+			"host shell hooks require an instance administrator and instance:admin token scope — shell hooks execute commands on the crewshipd host")
 	case errors.Is(err, hooks.ErrUnknownEvent):
 		replyError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, hooks.ErrEventCannotBlock):
@@ -395,18 +412,19 @@ func hookToRow(hk hooks.Hook) hookRow {
 		cfg = map[string]any{}
 	}
 	return hookRow{
-		ID:            hk.ID,
-		WorkspaceID:   hk.WorkspaceID,
-		CrewID:        hk.CrewID,
-		Event:         string(hk.Event),
-		HandlerKind:   string(hk.HandlerKind),
-		HandlerConfig: cfg,
-		Matcher:       hk.Matcher,
-		Enabled:       hk.Enabled,
-		Blocking:      hk.Blocking,
-		CreatedBy:     hk.CreatedBy,
-		CreatedAt:     hk.CreatedAt,
-		UpdatedAt:     hk.UpdatedAt,
+		ID:                 hk.ID,
+		WorkspaceID:        hk.WorkspaceID,
+		CrewID:             hk.CrewID,
+		Event:              string(hk.Event),
+		HandlerKind:        string(hk.HandlerKind),
+		HandlerConfig:      cfg,
+		Matcher:            hk.Matcher,
+		Enabled:            hk.Enabled,
+		Blocking:           hk.Blocking,
+		CreatedBy:          hk.CreatedBy,
+		CreatedAt:          hk.CreatedAt,
+		UpdatedAt:          hk.UpdatedAt,
+		HostReviewRequired: hk.HandlerKind == hooks.HandlerKindShell && !hooks.HostAuthorized(hk),
 	}
 }
 
