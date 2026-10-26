@@ -262,3 +262,7 @@ and rechecks every mutation; an earlier successful display never authorizes a
 later request. Budgets, deletion and workspace administration keep their guards.
 The corresponding CLI commands remain `crewship crew member add` and
 `crewship crew member remove` under the same server policy.
+
+Losing management authority closes and discards an open Add Member draft.
+Losing the administrator floor also discards an open role editor, even if an
+ordinary Manage share remains. Restoring access never reopens those drafts.

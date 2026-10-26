@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { UserPlus, Pencil, Check, X } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Badge } from "@/components/ui/badge"
@@ -86,7 +86,14 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, canManage =
   const [pendingRole, setPendingRole] = useState<CrewMemberRole | null>(null)
   const [savingRole, setSavingRole] = useState(false)
 
+  useEffect(() => {
+    if (!canManage) setAddDialogOpen(false)
+    if (!canEdit) { setEditingId(null); setPendingRole(null) }
+  }, [canManage, canEdit])
+
   async function handleRemoveMember(memberId: string, memberName: string) {
+    const target = members.find(member => member.id === memberId)
+    if (!target || (!canEdit && (!canManage || target.role != null))) return
     setRemovingId(memberId)
     try {
       const res = await apiFetch(
@@ -107,6 +114,7 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, canManage =
   }
 
   function handleMemberAdded(member: CrewMember) {
+    if (!canManage) return
     onMembersChange([...members, member])
     toast.success(`${member.user.full_name || member.user.email} added to crew`)
   }
@@ -117,7 +125,7 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, canManage =
   // optimistically mutate the local list rather than refetching —
   // the server returns the new value in the response.
   async function handleSaveRole(memberId: string) {
-    if (savingRole) return
+    if (!canEdit || savingRole) return
     setSavingRole(true)
     const isInherit = pendingRole === null || pendingRole === undefined
     try {
@@ -149,6 +157,7 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, canManage =
   }
 
   function startEdit(member: CrewMember) {
+    if (!canEdit) return
     setEditingId(member.id)
     setPendingRole(member.role ?? null)
   }
@@ -163,7 +172,7 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, canManage =
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-default font-semibold">Members</h2>
         {canManage && (
-          <Button variant="outline" size="sm" className="gap-2" onClick={() => setAddDialogOpen(true)}>
+          <Button variant="outline" size="sm" className="gap-2" onClick={() => { if (canManage) setAddDialogOpen(true) }}>
             <UserPlus className="h-3.5 w-3.5" />
             Add Member
           </Button>
@@ -187,7 +196,7 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, canManage =
               </TableHeader>
               <TableBody>
                 {members.map((member) => {
-                  const isEditing = editingId === member.id
+                  const isEditing = canEdit && editingId === member.id
                   return (
                     <TableRow key={member.id} className="group">
                       <TableCell className="text-body font-medium">
@@ -329,8 +338,9 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, canManage =
       )}
 
       <AddMemberDialog
-        open={addDialogOpen}
-        onOpenChange={setAddDialogOpen}
+        open={addDialogOpen && canManage}
+        canAdd={canManage}
+        onOpenChange={open => setAddDialogOpen(open && canManage)}
         crewId={crewId}
         workspaceId={workspaceId}
         existingMemberIds={members.map((m) => m.user_id)}
