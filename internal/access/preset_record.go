@@ -50,7 +50,7 @@ func (s Store) RecordPresetSelectionIn(ctx context.Context, tx *sql.Tx, actor, u
 		return err
 	}
 	selectedAt := tsformat.Format(time.Now())
-	result, err := tx.ExecContext(ctx, `UPDATE access_preset_selections SET preset_id=?,preset_version=?,level=?,definition_hash=?,managed_operations=?,selected_by=?,selected_at=? WHERE workspace_id=? AND member_id=? AND resource_kind=? AND COALESCE(project_id,routine_id)=? AND preset_id=? AND preset_version=?`, definition.ID, definition.Version, req.Level, definition.Hash(), string(managed), actor, selectedAt, workspace, policy.ID, req.Resource.Kind, req.Resource.ID, definition.ID, definition.Version)
+	result, err := tx.ExecContext(ctx, `UPDATE access_preset_selections SET preset_id=?,preset_version=?,level=?,definition_hash=?,managed_operations=?,selected_by=?,selected_at=? WHERE workspace_id=? AND member_id=? AND resource_kind=? AND COALESCE(project_id,routine_id,crew_id)=? AND preset_id=? AND preset_version=?`, definition.ID, definition.Version, req.Level, definition.Hash(), string(managed), actor, selectedAt, workspace, policy.ID, req.Resource.Kind, req.Resource.ID, definition.ID, definition.Version)
 	if err != nil {
 		return err
 	}
@@ -61,13 +61,15 @@ func (s Store) RecordPresetSelectionIn(ctx context.Context, tx *sql.Tx, actor, u
 	if changed != 0 {
 		return nil
 	}
-	var project, routine any
+	var project, routine, crew any
 	if req.Resource.Kind == "project" {
 		project = req.Resource.ID
-	} else {
+	} else if req.Resource.Kind == "routine" {
 		routine = req.Resource.ID
+	} else {
+		crew = req.Resource.ID
 	}
-	result, err = tx.ExecContext(ctx, `INSERT INTO access_preset_selections(id,workspace_id,member_id,resource_kind,project_id,routine_id,preset_id,preset_version,level,definition_hash,managed_operations,selected_by,selected_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, randomID(), workspace, policy.ID, req.Resource.Kind, project, routine, definition.ID, definition.Version, req.Level, definition.Hash(), string(managed), actor, selectedAt)
+	result, err = tx.ExecContext(ctx, `INSERT INTO access_preset_selections(id,workspace_id,member_id,resource_kind,project_id,routine_id,crew_id,preset_id,preset_version,level,definition_hash,managed_operations,selected_by,selected_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, randomID(), workspace, policy.ID, req.Resource.Kind, project, routine, crew, definition.ID, definition.Version, req.Level, definition.Hash(), string(managed), actor, selectedAt)
 	if err != nil {
 		return err
 	}

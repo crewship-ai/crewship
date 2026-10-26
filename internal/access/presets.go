@@ -38,6 +38,9 @@ func PresetCatalog() []PresetDefinition {
 		{"routine-levels", 2, "routine", []string{"edit", "publish"}, []PresetLevel{
 			{"none", []string{}}, {"edit", []string{"edit"}}, {"edit_publish", []string{"edit", "publish"}},
 		}},
+		{"crew-levels", 1, "crew", []string{"view", "use"}, []PresetLevel{
+			{"none", []string{}}, {"view", []string{"view"}}, {"use", []string{"view", "use"}},
+		}},
 	}
 }
 func ResolvePreset(id string, version int) (PresetDefinition, bool) {
@@ -93,7 +96,7 @@ func (s Store) PresetSelectionsIn(ctx context.Context, tx *sql.Tx, actor, user, 
 // Caller has already checked live administrative authority and read canonical
 // grants in this same transaction. This helper cannot recursively read Policy.
 func presetSelectionsForPolicyIn(ctx context.Context, tx *sql.Tx, policy Policy, workspace string) ([]PresetSelection, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT id,resource_kind,COALESCE(project_id,routine_id),preset_id,preset_version,level,definition_hash,managed_operations,selected_by,selected_at FROM access_preset_selections WHERE workspace_id=? AND member_id=? ORDER BY resource_kind,COALESCE(project_id,routine_id)`, workspace, policy.ID)
+	rows, err := tx.QueryContext(ctx, `SELECT id,resource_kind,COALESCE(project_id,routine_id,crew_id),preset_id,preset_version,level,definition_hash,managed_operations,selected_by,selected_at FROM access_preset_selections WHERE workspace_id=? AND member_id=? ORDER BY resource_kind,COALESCE(project_id,routine_id,crew_id)`, workspace, policy.ID)
 	if err != nil {
 		return nil, err
 	}

@@ -2633,6 +2633,15 @@ CLI: `crewship routine shared-runs <routine-id-or-slug> [run-id]`.
 
 Catalog responses: `200` returns the definitions; `400` rejects invalid workspace context; `401` requires authentication; `403` rejects insufficient credential scope or route authority; `404` hides unavailable workspaces or live administrative authority; `500` reports an internal database failure.
 
+`crew-levels` v1 supports `resource: {kind: "crew", id: "crew-id"}` and
+levels `none` (no View/Use), `view` (`view`), and `use` (`view,use`). Preview
+returns `CREW_DYNAMIC_AUDIENCE`: shares include current and future agents;
+per-agent authority/runtime preflight still applies. No Delegate, credential
+visibility, existing conversations, activity or administration is granted.
+Apply preserves unrelated grants and original issuers; None removes only this
+crew's View/Use and preserves any independent agent shares. The same existing
+preview/confirmed-apply endpoints and consent checks apply.
+
 ### Informational preset selections
 
 Administrative member access GET/PUT responses include `preset_selections: []` or saved selection entries (`id`, `kind`, `resource_id`, `preset_id`, `version`, `level`, `definition_hash`, `selected_at`, optional `selected_by`, and `state`). Entries describe saved intent, not effective authority. A manual PUT may round-trip this read-only field but cannot create or rewrite a selection through it; the response is computed from stored canonical state. Own-access responses omit the administrative metadata.

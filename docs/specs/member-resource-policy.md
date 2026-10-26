@@ -125,6 +125,15 @@ issuer was already unavailable. Effective access explains an unavailable issuer.
 
 ### Ordered resource presets
 
+Crew `crew-levels` v1 explicitly manages only View/Use: None clears those two
+crew-root operations, View saves `view`, and Use saves `view,use`. The preview
+explains the current/future agent audience and individual execution preflight.
+Delegate, credential visibility, existing conversations, activity and crew
+administration stay outside the bundle. Independent agent/resource grants and
+inactive issuer provenance survive; lowering a crew preset does not revoke an
+independent agent grant. Existing project/routine selections survive the schema
+upgrade unchanged. Trusted crew Manage is outside this Guest preset.
+
 The immutable v1 catalog defines routine View (`view,results`), Run
 (`view,results,run`) and draft-only Edit (`view,results,run,edit`), plus project
 View (`list,read`), Contribute (`list,read,contribute`) and Manage
