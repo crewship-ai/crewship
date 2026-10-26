@@ -65,6 +65,40 @@ workspace ID or slug.
 
 ---
 
+## Explicit Guest crew shares
+
+`GET /api/v1/crews` and `GET /api/v1/crews/{crewId}` support explicit Guest
+View or Use shares. Use also permits View. List filtering, pagination, search
+(name/slug only) and `X-Total-Count` cover granted live crews only, with a default
+page of 100 and maximum of 500. A missing, foreign, deleted or ungranted detail
+returns the same opaque 404. Revocation and issuer authority are checked live.
+
+These responses carry `X-Crew-Access-Mode: restricted`, `Cache-Control: no-store`
+and only `id`, `name`, `slug`, `restricted: true` and `agent_count`. Detail adds
+an optional `agents` array of `id`, `name`, `slug`, `agent_role` and current
+`status`. No descriptions, settings, members, credentials, activity, outputs or
+container information are exposed. Other crew endpoints remain denied to Guests.
+Trusted members retain the existing full response and per-operation rules.
+
+### Own Guest crew access
+
+```http
+GET /api/v1/crews/{crewId}/access/me
+```
+
+Authentication: workspace bearer token or session for a current Guest.
+Request: no body; `crewId` path parameter and `X-Workspace-ID` header.
+Response: HTTP 200 JSON with the fields below; HTTP 404 for unavailable shares,
+401 for invalid authentication, and 500 for lookup failures.
+
+This Guest-only projection requires the same live View or Use share. Its body
+contains `crew_id` and `actions` for `view`, `use`, `manage`, each with `state`
+(`allowed`, `conditional`, `denied`) and `reason`. View is allowed; Use is
+conditional only with a Use share and still requires agent authority and runtime
+preflight; Manage is denied by the Guest ceiling. It never grants Delegate or
+credential access. Unavailable shares and trusted callers receive 404. CLI:
+`crewship crew access <slug-or-id>`.
+
 ## Crew CRUD
 
 Create, read, update, and soft-delete crews and their container/network configuration.
