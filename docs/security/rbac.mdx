@@ -24,8 +24,73 @@ installation refuses Guest run requests with HTTP 503 and code
 administrator must explicitly configure the qualified runtime; a Run share
 alone does not install it. See the [private workflow contract](../specs/restricted-workflows.md).
 
+## Resource Access v1
+
+Resource Access v1 adds explicit resource sharing to the workspace roles below.
+**Guest** is the UI name for an account in restricted access mode, rather than
+another value in the workspace-role enum. Its restriction applies across the
+account; a grant does not change the account mode or grant a workspace role.
+
+The v1 release includes:
+
+- Per-object grants for agents, routines, and projects and their issues. An
+  unshared object remains unavailable through its supported Guest view. Routine
+  definition View, Results, Edit, Publish and Run are separate permissions.
+- Crew View/Use sharing for Guests and explicit Manage sharing for trusted
+  MEMBER/MANAGER recipients. Guest crew presets preview and confirm None,
+  View or Use; Manage remains a separate explicit share. View/Use covers current
+  and future agents, with each agent's authority and execution preflight still
+  required. Manage permits profile/configuration and ordinary membership, while
+  explicit role assignment/removal, deletion, budgets and workspace administration
+  keep their existing administrator guards.
+- Pages with their existing, separate ACL and issuer checks. This release does
+  not migrate Pages to the unified resource-grant model.
+- Routine Publish controls in the web UI, API and CLI. Publish requires Edit;
+  publishing also requires current View. Publishing a definition does not grant
+  execution. Existing triggers and member execution retain their own guards.
+- Atomic permission mutations and chained audit records, a sealed audit keyring
+  at rest, key rotation, tail verification and chain-break alerts. Verification
+  reports retain their distinction between verified continuation and older
+  unverified history; an alert or successful tail check is not proof that all
+  historical records have been verified.
+
+Resource sharing uses the same versioned policy across the web UI, API and CLI.
+Saved shares retain their issuers and become inactive when current issuer
+checks fail. Logout and revocation keep their existing account/session fences.
+For crew details, see [Guest sharing](#explicit-guest-crew-shares) and
+[trusted Manage](#explicit-trusted-crew-manage-shares); for audit operations,
+see [audit CLI](/cli/audit) and [encryption and rotation](/security/encryption).
+
+### Deferred to v1.1
+
+The following are **not delivered by Resource Access v1**:
+
+- Credential resource grants, including separate See, Use and Reveal rights.
+- Crews and workspaces as grant recipients; current resource grants target people.
+- A person Access card with complete inherited-source explanations and the
+  people × objects permissions grid. Existing explicit policy editors and the
+  Guest's own-access explanation do not provide that complete interface.
+- A universal leak guard across all GET routes and streams, and a universal
+  constant-query-count guard for resource lists.
+- Migration of Pages from their existing ACL to unified resource grants.
+- Guest execution of published routines and its provider-backed acceptance.
+  In a default installation, without a qualified restricted runtime, this
+  execution remains unavailable and Run is rejected with HTTP 503 before work
+  is created. Guests can still view shared definitions/results, edit shared
+  drafts and publish with the required rights. Members or existing triggers
+  start runs under the crew's normal execution policy.
+
+**Known risk accepted for this release:** there is no universal GET/stream leak
+or list-query-count guard. Existing leak regressions cover individual features
+where implemented, including the projects/issues response-body checks; they do
+not establish coverage of every read route or stream. Feature-specific SQL
+query-count tests likewise do not establish a universal performance guarantee.
+Enterprise phase 1 remains a separate scope; this release does not claim it.
+
 ## Workspace Roles (Human Users)
 
+The table describes the trusted workspace-role baseline; restricted Guest mode
+and explicit resource grants apply the additional boundaries described above.
 Users are assigned one of five roles within a workspace:
 
 | Role | Level | Permissions |

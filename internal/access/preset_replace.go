@@ -20,7 +20,7 @@ func (s Store) ReplacePresetIn(ctx context.Context, tx *sql.Tx, actor, user, wor
 	for _, change := range plan.Changes {
 		r := change.Right
 		if change.Action == "remove" || change.Action == "reissue" {
-			result, err := tx.ExecContext(ctx, `DELETE FROM access_grants WHERE member_id=? AND resource_kind=? AND COALESCE(agent_id,project_id,routine_id)=? AND operation=?`, req.MembershipID, r.Kind, r.ID, r.Operation)
+			result, err := tx.ExecContext(ctx, `DELETE FROM access_grants WHERE member_id=? AND resource_kind=? AND COALESCE(agent_id,project_id,routine_id,crew_id)=? AND operation=?`, req.MembershipID, r.Kind, r.ID, r.Operation)
 			if err != nil {
 				return Membership{}, err
 			}
@@ -33,13 +33,15 @@ func (s Store) ReplacePresetIn(ctx context.Context, tx *sql.Tx, actor, user, wor
 			}
 		}
 		if change.Action == "add" || change.Action == "reissue" {
-			var projectID, routineID any
+			var projectID, routineID, crewID any
 			if r.Kind == "project" {
 				projectID = r.ID
-			} else {
+			} else if r.Kind == "routine" {
 				routineID = r.ID
+			} else {
+				crewID = r.ID
 			}
-			result, err := tx.ExecContext(ctx, `INSERT INTO access_grants(id,member_id,resource_kind,project_id,routine_id,operation,created_by,created_at) VALUES(?,?,?,?,?,?,?,?)`, randomID(), req.MembershipID, r.Kind, projectID, routineID, r.Operation, actor, tsformat.Format(time.Now()))
+			result, err := tx.ExecContext(ctx, `INSERT INTO access_grants(id,member_id,resource_kind,project_id,routine_id,crew_id,operation,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, randomID(), req.MembershipID, r.Kind, projectID, routineID, crewID, r.Operation, actor, tsformat.Format(time.Now()))
 			if err != nil {
 				return Membership{}, err
 			}

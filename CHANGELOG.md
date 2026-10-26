@@ -113,6 +113,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Mooring admission preserves the original human credential.** Authenticated chat receipts retain the original user revocation fence and exact credential through run admission and retries; legacy receipts remain unfenced and cannot authorize the new Mooring admission path.
 - Conversation transcript appends stay inside their configured storage root even when an existing transcript path is a symbolic link.
 - Adapt WordCraft C-E acceptance to actual HTTP commit receipts and passive native queue observations, keeping separate visual evidence, authenticated peers and participant undo requirements.
+- **[Resource Access v1](docs/security/rbac.mdx#resource-access-v1)** delivers Guest/restricted mode, per-object agent/routine/project sharing, crew View/Use presets and trusted Manage with ordinary membership controls, existing Pages ACL, Publish in UI/API/CLI, and atomic chained audit with sealed keyring, rotation, verification and alerts. Credential grants, crew/workspace recipients, the complete inherited Access card/grid, universal GET/stream/query-count guards, unified Pages grants and Guest published-routine execution remain deferred to v1.1; the documented absence of a universal leak guard is an accepted release limitation.
 
 - **Explicit crew managers can use ordinary member controls.** A live trusted Manage share enables adding and removing ordinary crew members in Settings. Role editing and removal of explicit crew roles remain administrator controls. Failed access checks and context switches withdraw grant-based controls.
 
@@ -399,6 +400,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **One attachment queue for the chat composer.** Picked, dropped, pasted and camera files now share one queue per conversation and upload one at a time. A chip says Waiting, Uploading, Failed or Cancelled in words; a queued or running upload can be cancelled and retried without removing the chip, and files past a provisional client limit (10 per message, 25 MB each; not server-approved) are refused with a reason. Pasted files are now attached instead of being silently held back. A failed or cancelled file keeps Send off with a visible reason and Retry/Remove on the chip; uploads are kept per person and workspace, continue while you switch to another chat, and stop when you leave the chat page.
 
 - **Crew sharing is available from the web controls.** Workspace administrators can share View/Use from crew Settings or select Crew in a person’s resource Access editor. The dialog explains the current/future agent audience, conditional execution and the exclusion of Delegate, credential visibility and crew administration. Existing API/CLI authorization, issuer provenance, revision conflicts and account modes are preserved.
+
+- **Crew View/Use shares support explicit presets.** Administrators can preview and confirm None, View or Use in person Access or the existing API/CLI flow. Preview explains the current/future agent audience; unrelated grants, original issuers and older preset selections are preserved. Crew presets grant neither Delegate, credential visibility nor administration.
 
 ### Upgrade and recovery notes
 

@@ -14,10 +14,10 @@ afterEach(() => { cleanup(); fetchMock.mockReset(); success.mockReset() })
 const policy: ResourcePolicy = { membership_id: "member", revision: 7, mode: "restricted", rights: [], grant_details: [], preset_selections: [] }
 const response = (body: unknown, status = 200) => ({ ok: status < 400, status, json: async () => body })
 const digest = "a".repeat(64)
-const catalog = { presets: ["project", "routine"].map(kind => ({ definition_hash: `${kind}-v1`, definition: {
+const catalog = { presets: ["project", "routine", "crew"].map(kind => ({ definition_hash: `${kind}-v1`, definition: {
   preset_id: `${kind}-levels`, version: 1, kind,
-  managed_operations: kind === "project" ? ["list", "read", "contribute", "manage"] : ["view", "results", "run", "edit"],
-  levels: kind === "project" ? [{ level: "view", operations: ["list", "read"] }, { level: "manage", operations: ["list", "read", "contribute", "manage"] }] : [{ level: "view", operations: ["view", "results"] }, { level: "edit", operations: ["view", "results", "run", "edit"] }],
+  managed_operations: kind === "crew" ? ["view", "use"] : kind === "project" ? ["list", "read", "contribute", "manage"] : ["view", "results", "run", "edit"],
+  levels: kind === "crew" ? [{level:"view",operations:["view"]},{level:"use",operations:["view","use"]}] : kind === "project" ? [{ level: "view", operations: ["list", "read"] }, { level: "manage", operations: ["list", "read", "contribute", "manage"] }] : [{ level: "view", operations: ["view", "results"] }, { level: "edit", operations: ["view", "results", "run", "edit"] }],
 } })) }
 type Options = { policy?: ResourcePolicy; policyReadStatus?: number; policyReadResponse?: ResourcePolicy; previewStatus?: number; applyStatus?: number; corruptPreview?: boolean; applyThrows?: boolean; refusal?: string }
 function show(options: Options = {}) {
@@ -35,7 +35,7 @@ function show(options: Options = {}) {
           before: original.grant_details ?? [], changes: operations.map(operation => ({ right: { kind, id: input.resource.id, operation }, action: "add", issuer_id: "current-owner", live: true })),
           after_rights: [...original.rights.filter(right => !definition.definition.managed_operations.includes(right.operation)), ...operations.map(operation => ({ kind, id: input.resource.id, operation }))],
           orthogonal_rights: original.grant_details?.filter(right => !definition.definition.managed_operations.includes(right.operation)) ?? [],
-          warnings: kind === "routine" ? [{ code: "ROUTINE_RESULTS_HISTORY", message: "Past and future regular outputs may include input material; private audiences still apply." }] : [{ code: "RETAINED_DELETE_ISSUES", message: "Separate destructive share remains unchanged.", before_eligible: false, after_eligible: true }], confirmation_digest: digest,
+          warnings: kind === "crew" ? [{code:"CREW_DYNAMIC_AUDIENCE",message:"Shares current and future agents; per-agent preflight remains required."}] : kind === "routine" ? [{ code: "ROUTINE_RESULTS_HISTORY", message: "Past and future regular outputs may include input material; private audiences still apply." }] : [{ code: "RETAINED_DELETE_ISSUES", message: "Separate destructive share remains unchanged.", before_eligible: false, after_eligible: true }], confirmation_digest: digest,
         })
       }
       if (options.applyThrows) throw new Error("private response must never be displayed")
@@ -50,6 +50,7 @@ function show(options: Options = {}) {
     if (url.includes("/access/presets")) return response(catalog)
     if (url.includes("/access/effective")) return response({ membership_id: "member", revision: original.revision, account_restricted: original.mode === "restricted", explanation: "Current policy", decisions: [] })
     if (url.includes("/members/member/access")) return response(options.policyReadStatus ? {} : options.policyReadResponse ?? original, options.policyReadStatus ?? 200)
+    if (url.includes("/crews?")) return response([{id:"crew",name:"Crew"}])
     if (url.includes("/projects")) return response([{ id: "project", name: "Project" }])
     if (url.includes("/pipelines")) return response([{ id: "routine", name: "Routine" }])
     return response([])
@@ -62,7 +63,7 @@ async function choose(kind = "project", level = "manage") {
   const open = screen.queryByRole("button", { name: "Edit resource access" })
   if (open) fireEvent.click(open)
   fireEvent.change(await screen.findByLabelText("Resource kind"), { target: { value: kind } })
-  await within(screen.getByLabelText("Resource")).findByRole("option", { name: kind === "project" ? "Project" : "Routine" })
+  await within(screen.getByLabelText("Resource")).findByRole("option", { name: kind === "crew" ? "Crew" : kind === "project" ? "Project" : "Routine" })
   fireEvent.change(screen.getByLabelText("Resource"), { target: { value: kind } })
   await waitFor(() => expect(screen.getByRole("combobox", { name: "Ordered preset" })).toBeEnabled())
   fireEvent.change(screen.getByRole("combobox", { name: "Ordered preset" }), { target: { value: JSON.stringify([`${kind}-levels`, 1, level]) } })
@@ -350,3 +351,20 @@ it("shows each preset version's saved record and offers the v2 removal levels", 
     expect(screen.getByRole("option", { name: "Edit + Publish v2 · edit + publish" })).toBeVisible()
   } finally { catalog.presets.pop() }
 })
+
+ it("previews a crew preset only after explicit dynamic audience consent", async()=>{
+ const client=show()
+ await choose("crew","use")
+ expect(screen.getByText(/current and future agents/)).toBeVisible()
+ fireEvent.click(screen.getByRole("button",{name:"Preview preset"}))
+ await screen.findByLabelText("Preset consequences")
+ const [,init]=fetchMock.mock.calls.find(([url,init])=>url.includes("/presets/preview")&&init?.method==="POST")!
+ expect(JSON.parse(init.body)).toMatchObject({resource:{kind:"crew",id:"crew"},preset_id:"crew-levels",preset_version:1,level:"use",revision:7})
+ expect(screen.getByRole("button",{name:"Apply confirmed preset"})).toBeDisabled()
+ fireEvent.click(screen.getByRole("checkbox",{name:"I reviewed these exact changes and consequences"}))
+ fireEvent.click(screen.getByRole("button",{name:"Apply confirmed preset"}))
+ await waitFor(()=>expect(success).toHaveBeenCalledWith("Preset applied"))
+ expect(client.getQueryData<ResourcePolicy>(["member-resource-access","workspace","member"])?.preset_selections?.[0]).toMatchObject({kind:"crew",preset_id:"crew-levels",level:"use",state:"selected"})
+ expect(screen.getByRole("button",{name:"Remove crew crew view"})).toBeVisible()
+ expect(screen.getByRole("button",{name:"Remove crew crew use"})).toBeVisible()
+ })

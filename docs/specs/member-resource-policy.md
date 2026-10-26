@@ -125,6 +125,16 @@ issuer was already unavailable. Effective access explains an unavailable issuer.
 
 ### Ordered resource presets
 
+Crew `crew-levels` v1 explicitly manages only View/Use: None clears those two
+crew-root operations, View saves `view`, and Use saves `view,use`. The preview
+explains the current/future agent audience and individual execution preflight.
+Delegate, credential visibility, existing conversations, activity and crew
+administration stay outside the bundle. Independent agent/resource grants and
+inactive issuer provenance survive; lowering a crew preset does not revoke an
+independent agent grant. Existing project/routine selections and their table stay unchanged; crew intent
+uses separate informational storage read into the same policy projection, so
+a prior crew-capable binary safely ignores the new metadata on rollback. Trusted crew Manage is outside this Guest preset.
+
 The immutable v1 catalog defines routine View (`view,results`), Run
 (`view,results,run`) and draft-only Edit (`view,results,run,edit`), plus project
 View (`list,read`), Contribute (`list,read,contribute`) and Manage
@@ -993,10 +1003,10 @@ from the current crew share without persisting individual agent grants.
 
 Saved policy/provenance lists only explicit crew grants. Access explanations
 read all granted crew names in one query; snapshots for private context/files
-contain the distinct effective leaf grants. Crew detail/management routes,
-crew Share dialogs/presets and trusted additive crew rights are subsequent
-slices. Existing resource editors preserve saved crew grants and can remove
-them. Credential grants and Pages migration are not added by this slice.
+contain the distinct effective leaf grants. Crew Share and person Access
+editors can add and remove Guest crew shares, including explicit crew-levels
+v1 presets. Trusted additive crew management remains a subsequent slice.
+Credential grants and Pages migration are not added by this slice.
 
 ```sh
 crewship share crew CREW_ID --with MEMBER_ID --operation use

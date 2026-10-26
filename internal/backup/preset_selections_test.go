@@ -25,7 +25,12 @@ func TestPresetSelectionsBackupHistoryAndForkWithoutAuthority(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	legacyCount := 0
 	for _, d := range access.PresetCatalog() {
+		if d.Kind == "crew" {
+			continue
+		}
+		legacyCount++
 		managed, _ := json.Marshal(d.ManagedOperations)
 		var project, routine any
 		if d.Kind == "project" {
@@ -43,7 +48,7 @@ func TestPresetSelectionsBackupHistoryAndForkWithoutAuthority(t *testing.T) {
 	}
 	// One explicit record per catalog version: later versions never replace
 	// an earlier version's record for the same member and resource.
-	if len(dump.Tables["access_preset_selections"]) != len(access.PresetCatalog()) {
+	if len(dump.Tables["access_preset_selections"]) != legacyCount {
 		t.Fatal("explicit choice history lost")
 	}
 	found := false

@@ -156,7 +156,7 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
       </div>
       {kind === "crew" && mode === "trusted" && <p className="text-sm text-muted-foreground">Manage permits this crew’s profile/configuration and ordinary membership. It does not assign crew roles, delete the crew, change budgets/policy, administer the workspace or expose credentials.</p>}
       {kind === "crew" && mode === "restricted" && <p className="text-sm text-muted-foreground">View shares the crew identity and current agent identities and status. Use also shares Chat and Run for current and future agents, subject to each agent’s authority and execution preflight. Newly added agents become discoverable. This does not grant Delegate, credential visibility, existing conversations, activity or crew administration.</p>}
-      {policy.mode === "restricted" && (kind === "project" || kind === "routine") && resourceId && <ResourcePresetEditor key={`${kind}:${resourceId}:${policy.revision}`} workspaceId={workspaceId} policy={policy} resource={{kind,id:resourceId}}
+      {policy.mode === "restricted" && (kind === "project" || kind === "routine" || kind === "crew") && resourceId && <ResourcePresetEditor key={`${kind}:${resourceId}:${policy.revision}`} workspaceId={workspaceId} policy={policy} resource={{kind,id:resourceId}}
         disabled={pending > 0 || save.isPending || conflict} onSaveStarted={onPolicySaveStarted} onBusy={busy => {setPresetBusy(busy);onPresetBusy(busy)}} onSaved={updated => queryClient.setQueryData(queryKey,updated)} />}
       {directory.isError && <p role="alert">Resources unavailable. <button type="button" onClick={() => void directory.refetch()}>Reload resources</button></p>}
     </>}

@@ -15,7 +15,7 @@ const levelLabel = (level: string) => level === "edit_publish" ? "Edit + Publish
 /** A 422 is a definite refusal before any write; its reason is shown as is. */
 class PresetRefused extends Error {}
 
-type Resource = {kind:"project"|"routine";id:string}
+type Resource = {kind:"project"|"routine"|"crew";id:string}
 export function ResourcePresetEditor({workspaceId,policy,resource,disabled,onBusy,onSaved,onSaveStarted}:{
   workspaceId:string;policy:ResourcePolicy;resource:Resource;disabled:boolean;onBusy:(busy:boolean)=>void;onSaved:(policy:ResourcePolicy)=>void;onSaveStarted:()=>((policy:ResourcePolicy)=>boolean)
 }) {

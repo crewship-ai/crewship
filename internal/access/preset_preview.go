@@ -118,6 +118,9 @@ func (s Store) PlanPresetIn(ctx context.Context, tx *sql.Tx, actor, user, worksp
 	if d.Kind == "routine" {
 		query = `SELECT json_object('id',id,'publication_revision',publication_revision,'definition_hash',definition_hash,'status',status) FROM pipelines WHERE id=? AND workspace_id=? AND deleted_at IS NULL`
 	}
+	if d.Kind == "crew" {
+		query = `SELECT json_object('id',id,'updated_at',updated_at,'kind',kind) FROM crews WHERE id=? AND workspace_id=? AND deleted_at IS NULL AND kind<>'setup'`
+	}
 	if err = tx.QueryRowContext(ctx, query, req.Resource.ID, workspace).Scan(&resourceSnapshot); err != nil {
 		return result, err
 	}
@@ -250,9 +253,12 @@ func (s Store) PlanPresetIn(ctx context.Context, tx *sql.Tx, actor, user, worksp
 		if _, held := before[Right{d.Kind, req.Resource.ID, "publish"}]; held && !desired[Right{d.Kind, req.Resource.ID, "publish"}] {
 			result.Warnings = append(result.Warnings, PresetWarning{Code: "PUBLISH_REVOKED", Message: "Publish is removed. Already published versions stay unchanged; no run is started or stopped."})
 		}
-	} else if g, retained := before[Right{"project", req.Resource.ID, "delete_issues"}]; retained {
+	} else if g, retained := before[Right{"project", req.Resource.ID, "delete_issues"}]; d.Kind == "project" && retained {
 		was, will := g.Live && live("read", false) && live("manage", false), g.Live && live("read", true) && live("manage", true)
 		result.Warnings = append(result.Warnings, PresetWarning{Code: "RETAINED_DELETE_ISSUES", Message: "The separate destructive right remains unchanged; Read and Manage affect eligibility. Disposable-work and active-execution guards still apply.", BeforeEligible: &was, AfterEligible: &will})
+	}
+	if d.Kind == "crew" {
+		result.Warnings = append(result.Warnings, PresetWarning{Code: "CREW_DYNAMIC_AUDIENCE", Message: "Crew shares apply to current and future agents. View shares crew and agent identities/status; Use adds Chat and Run subject to each agent's authority and execution preflight. It grants neither Delegate, credential visibility, existing conversations, activity nor administration. This preview starts no work."})
 	}
 	if d.Kind == "project" && role != "MANAGER" && role != "ADMIN" && role != "OWNER" {
 		for _, g := range result.OrthogonalRights {
