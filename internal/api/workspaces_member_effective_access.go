@@ -94,8 +94,24 @@ func (h *WorkspaceHandler) writeEffectiveAccess(w http.ResponseWriter, r *http.R
 		h.memberAccessError(w, err)
 		return
 	}
+	crewNames, err := liveCrewGrantNames(r.Context(), h.db, workspace, p)
+	if err != nil {
+		h.memberAccessError(w, err)
+		return
+	}
 	for _, right := range p.Rights {
 		decision := memberAccessDecision{Right: right, State: "allowed", Reason: "explicit_resource_grant"}
+		if right.Kind == "crew" {
+			if name, ok := crewNames[right]; ok {
+				decision.Name = name
+				decision.Reason = "Crew View allows discovering its agents; Crew Use also allows chatting and running them. Neither grants delegation, credential access or crew administration."
+			} else {
+				decision.State = "denied"
+				decision.Reason = "Crew or grant issuer authority is unavailable."
+			}
+			result.Decisions = append(result.Decisions, decision)
+			continue
+		}
 		// Names are read only for currently granted local resources. The final
 		// membership fence also covers changes while building this explanation.
 		grantErr := store.Check(r.Context(), user, workspace, right)

@@ -11234,6 +11234,34 @@
         ],
         "type": "object"
       },
+      "MemberAccessCrewRight": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "crew"
+            ],
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "view",
+              "use"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "operation"
+        ],
+        "type": "object"
+      },
       "MemberAccessGrant": {
         "additionalProperties": false,
         "properties": {
@@ -11370,6 +11398,9 @@
           },
           {
             "$ref": "#/components/schemas/MemberAccessRoutineRight"
+          },
+          {
+            "$ref": "#/components/schemas/MemberAccessCrewRight"
           }
         ]
       },
@@ -151362,7 +151393,8 @@
                             "enum": [
                               "agent",
                               "project",
-                              "routine"
+                              "routine",
+                              "crew"
                             ],
                             "type": "string"
                           },
@@ -154694,7 +154726,8 @@
                             "enum": [
                               "agent",
                               "project",
-                              "routine"
+                              "routine",
+                              "crew"
                             ],
                             "type": "string"
                           },

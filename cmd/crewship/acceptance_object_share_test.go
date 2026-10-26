@@ -26,6 +26,9 @@ func TestAcceptanceObjectShareCLI(t *testing.T) {
 		wantReissue    bool
 		initialRoutine []string
 	}{
+		{"share crew view", []string{"share", "crew", "crew-1", "--with", "member-1", "--operation", "view"}, "restricted", 200, false, []string{"view"}, false, nil},
+		{"share crew use", []string{"share", "crew", "crew-1", "--with", "member-1", "--operation", "use"}, "restricted", 200, false, []string{"use"}, false, nil},
+		{"unshare crew use", []string{"unshare", "crew", "crew-1", "--with", "member-1", "--operation", "use"}, "restricted", 200, false, []string{}, false, nil},
 		{"share project by email", []string{"share", "project", "project-1", "--with", "CLIENT@example.test", "--operation", "list,read", "--format", "yaml"}, "restricted", 200, false, []string{"list", "read"}, false, nil},
 		{"share project management", []string{"share", "project", "project-1", "--with", "member-1", "--operation", "read,manage", "--format", "json"}, "restricted", 200, false, []string{"read", "manage"}, false, nil},
 		{"share explicit issue deletion", []string{"share", "project", "project-1", "--with", "member-1", "--operation", "read,manage,delete_issues", "--format", "json"}, "restricted", 200, false, []string{"read", "manage", "delete_issues"}, false, nil},
@@ -48,6 +51,9 @@ func TestAcceptanceObjectShareCLI(t *testing.T) {
 				{Kind: "routine", ID: "routine-1", Operation: "run"},
 				{Kind: "routine", ID: "routine-1", Operation: "future-operation"},
 			}, GrantDetails: []access.GrantDetail{{Right: access.Right{Kind: "routine", ID: "routine-1", Operation: "run"}, IssuerID: "old-admin", Live: false}}}
+			if tc.name == "unshare crew use" {
+				original.Rights = append(original.Rights, access.Right{Kind: "crew", ID: "crew-1", Operation: "use"})
+			}
 			for _, op := range tc.initialRoutine {
 				original.Rights = append(original.Rights, access.Right{Kind: "routine", ID: "routine-1", Operation: op})
 			}
@@ -129,7 +135,7 @@ func TestAcceptanceObjectShareCLI(t *testing.T) {
 				t.Fatalf("unrelated/future rights lost: %+v", submitted)
 			}
 			kind, id := tc.args[1], tc.args[2]
-			for _, operation := range []string{"run", "view", "edit", "publish", "results", "list", "read", "contribute", "manage", "delete_issues"} {
+			for _, operation := range []string{"use", "run", "view", "edit", "publish", "results", "list", "read", "contribute", "manage", "delete_issues"} {
 				right := access.Right{Kind: kind, ID: id, Operation: operation}
 				if slices.Contains(submitted.Rights, right) != slices.Contains(tc.wantOperations, operation) {
 					t.Fatalf("wrong operation %s: %+v", operation, submitted)
@@ -153,6 +159,8 @@ func TestAcceptanceObjectShareValidationBeforeHTTP(t *testing.T) {
 	}))
 	defer server.Close()
 	for _, args := range [][]string{
+		{"share", "crew", "crew-1", "--with", "member-1", "--operation", "manage"},
+		{"share", "crew", "crew-1", "--with", "member-1", "--operation", "delegate"},
 		{"share", "project", "project-1", "--with", "member-1", "--operation", "write"},
 		{"share", "project", "project-1", "--with", "member-1", "--operation", "publish"},
 		{"share", "routine", "..", "--with", "member-1", "--operation", "run"},

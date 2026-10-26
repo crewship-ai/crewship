@@ -2080,6 +2080,7 @@ END;
 	// migrate_consts_pin_legacy_avatar_style.go.
 	{version: 20261019194500, name: "pin_legacy_avatar_style", sql: migrationPinLegacyAvatarStyle,
 		restoreBackfill: restoreBackfillPinLegacyAvatarStyle},
+	{version: 20261025233100, name: "crew_resource_grants", fn: migrationCrewResourceGrants},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
