@@ -219,3 +219,106 @@ class NativeLicenseTests(unittest.TestCase):
                 with patch.object(build, 'ROOT', Path(temp)):
                     with self.assertRaises(ValueError):
                         build.collect_native_licenses(destination, native, {'base':'b'*40,'patch_sha256':'c'*64}, metadata)
+
+
+class CommandAssetBuildTests(unittest.TestCase):
+    def test_executables_require_qualified_elf_not_just_matching_hash(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp)/'host'
+            header = bytearray(64)
+            header[:7] = b'\x7fELF\x02\x01\x01'
+            header[16:20] = b'\x03\x00\x3e\x00'
+            path.write_bytes(header)
+            self.assertEqual(build.verified_command_elf(path), build.digest(path))
+            for offset, value in ((4, 1), (5, 2), (18, 3)):
+                wrong = header[:]
+                wrong[offset] = value
+                path.write_bytes(wrong)
+                with self.assertRaises(ValueError):
+                    build.verified_command_elf(path)
+            path.write_bytes(header)
+            linked = Path(temp)/'linked'
+            linked.symlink_to(path)
+            with self.assertRaises(ValueError):
+                build.verified_command_elf(linked)
+
+    def test_actual_command_closure_keeps_runtime_build_features_not_dev(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            native, _, _, metadata, _ = NativeLicenseTests().fixture(root)
+            result = build.command_package_closure(metadata, native/'Cargo.lock',
+                native/'apps/wordcraft-web/Cargo.toml', {'source':native})
+            self.assertEqual([public['name'] for public, _ in result], ['macro','runtime','wordcraft-web'])
+            metadata['resolve']['nodes'][1]['features'] = ['actual-feature']
+            result = build.command_package_closure(metadata, native/'Cargo.lock',
+                native/'apps/wordcraft-web/Cargo.toml', {'source':native})
+            self.assertEqual(next(p['features'] for p, _ in result if p['name']=='runtime'), ['actual-feature'])
+            metadata['resolve']['nodes'][0]['deps'][0]['dep_kinds'][0]['kind'] = 'unknown'
+            with self.assertRaises(ValueError):
+                build.command_package_closure(metadata, native/'Cargo.lock',
+                    native/'apps/wordcraft-web/Cargo.toml', {'source':native})
+
+    def test_missing_crate_license_reuses_only_identical_verified_text(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            _, recipe, _, _, inventory = NativeLicenseTests().fixture(root)
+            entry = next(e for e in inventory['packages'] if e['package']['name']=='runtime')
+            entry['texts'][0]['origin'] = {'repository':'https://example.invalid/public', 'revision':'b'*40, 'path':'LICENSE'}
+            (recipe/'license-inventory.json').write_text(json.dumps(inventory))
+            public = dict(entry['package'], features=['new-actual-feature'])
+            with patch.object(build, 'ROOT', root):
+                texts = build.command_pinned_license_texts(public)
+                self.assertEqual(texts[0][1]['origin'], entry['texts'][0]['origin'])
+                for key in ('name','version','source','checksum','spdx'):
+                    with self.subTest(key=key), self.assertRaises(ValueError):
+                        build.command_pinned_license_texts(dict(public, **{key:'changed'}))
+                texts[0][0].write_bytes(b'changed license')
+                with self.assertRaises(ValueError):
+                    build.command_pinned_license_texts(public)
+
+    def test_c1_never_falls_back_to_legacy_child(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(build, 'ROOT', Path(temp)):
+            with self.assertRaisesRegex(ValueError, 'separate C1 child'):
+                build.build_commands('a'*40, None, None, None, None, None, None, None, None, None, None)
+
+    def test_supplemental_license_is_exact_package_and_exact_bytes(self):
+        public = {'name':'accesskit','version':'0.25.1',
+            'source':'registry+https://github.com/rust-lang/crates.io-index',
+            'checksum':'ad442f58ee04714aaa0ba0a2768c1ea1935b29507bb22ddece8cbbc76db02932',
+            'spdx':'MIT OR Apache-2.0'}
+        with tempfile.TemporaryDirectory() as temp, patch.object(build.urllib.request, 'urlopen', return_value=io.BytesIO(b'wrong text')) as fetch:
+            with self.assertRaisesRegex(ValueError, 'supplemental license mismatch'):
+                build.command_pinned_license_texts(public, Path(temp))
+            self.assertIn('/ce8164ba92995cfa86005b6259115e08c8244253/', fetch.call_args.args[0])
+            fetch.reset_mock()
+            with self.assertRaisesRegex(ValueError, 'license text absent'):
+                build.command_pinned_license_texts(dict(public, checksum='0'*64), Path(temp))
+            fetch.assert_not_called()
+
+    def test_font_dependency_includes_nested_mandatory_notices(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            prepared, directory, destination = root/'prepared', root/'crate', root/'licenses'
+            (prepared/'source').mkdir(parents=True)
+            (prepared/'helper').mkdir()
+            (prepared/'helper/Cargo.lock').write_text('version=4\n')
+            (directory/'fonts').mkdir(parents=True)
+            (directory/'LICENSE-MIT').write_text('MIT fixture')
+            (directory/'fonts/UFL.txt').write_text('Ubuntu fixture')
+            (directory/'fonts/Hack-Regular.txt').write_text('Copyright and license fixture')
+            (directory/'fonts/LICENSE').symlink_to('../LICENSE-MIT')
+            destination.mkdir()
+            (destination/'manifest.json').write_text('[]')
+            public = {'name':'font-fixture','version':'1.0.0','spdx':'MIT AND Ubuntu-font-1.0'}
+            package = {'source':'registry+https://example.invalid/index','manifest_path':str(directory/'Cargo.toml')}
+            with patch.object(build, 'command_package_closure', return_value=[(public, package)]):
+                inventory = build.collect_command_licenses(destination, prepared, {}, 'engine')
+            self.assertEqual({t['name'] for t in inventory['packages'][0]['texts']},
+                {'LICENSE-MIT','UFL.txt','Hack-Regular.txt'})
+            outside = root/'outside-license'
+            outside.write_text('outside')
+            (directory/'fonts/LICENSE').unlink()
+            (directory/'fonts/LICENSE').symlink_to(outside)
+            with patch.object(build, 'command_package_closure', return_value=[(public, package)]):
+                with self.assertRaisesRegex(ValueError, 'escapes source'):
+                    build.collect_command_licenses(destination, prepared, {}, 'engine')

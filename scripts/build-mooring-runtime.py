@@ -302,7 +302,9 @@ def prepare_editor_inputs(temp):
     return native, fonts, metadata
 
 
-def assemble_editor(sha, native, fonts, metadata, native_output, sdk, child, licenses, output, config):
+def assemble_editor(sha, native, fonts, metadata, native_output, sdk, child, licenses, output, config,
+                    native_inventory=('wordcraft-native-inventory.json', 'wordcraft-native-license-inventory.json'),
+                    additional_inventories=(), provenance_extra=None):
     # All names are flat and fixed; the same immutable bytes are checked again
     # by editororigin before serving. No runtime filesystem or private path.
     output.mkdir()
@@ -327,7 +329,9 @@ def assemble_editor(sha, native, fonts, metadata, native_output, sdk, child, lic
     copy(ROOT / 'LICENSE', 'mooring-LICENSE-APACHE.txt')
     copy(ROOT / 'NOTICE', 'mooring-NOTICE.txt')
     copy(ROOT / 'mooring/licenses/inventory.json', 'mooring-license-inventory.json')
-    copy(licenses / 'wordcraft-native-inventory.json', 'wordcraft-native-license-inventory.json')
+    copy(licenses / native_inventory[0], native_inventory[1])
+    for name in additional_inventories:
+        copy(licenses / name, name)
     license_text = []
     included_licenses = set()
     for item in json.loads((licenses / 'manifest.json').read_text()):
@@ -347,10 +351,12 @@ def assemble_editor(sha, native, fonts, metadata, native_output, sdk, child, lic
     copy(fonts / 'provenance.json', 'font-provenance.json')
     tools = {'rustc': config['rust_version'], 'wasm_bindgen': config['tools']['wasm-bindgen']['version'],
              'wasm_opt': config['tools']['binaryen']['version'] + ' -Oz --all-features', 'sdk_source_commit': sha}
-    (output / 'build-provenance.json').write_text(json.dumps({'crewship_source': sha,
+    provenance = {'crewship_source': sha,
         'native_upstream_source': metadata['base'], 'native_patch_sha256': metadata['patch_sha256'],
         'native_patch_commit': metadata['native_patch_commit'], 'release_fonts': 'original-six-8dcd-no-Myanmar',
-        'tools': tools, 'qualification': 'Build only; requires HTTP/WS/UI/Saved acceptance'}, sort_keys=True, indent=2) + '\n')
+        'tools': tools, 'qualification': 'Build only; requires HTTP/WS/UI/Saved acceptance'}
+    provenance.update(provenance_extra or {})
+    (output / 'build-provenance.json').write_text(json.dumps(provenance, sort_keys=True, indent=2) + '\n')
     files = {file.name: digest(file) for file in sorted(output.iterdir())}
     raw = json.dumps({'files': files, 'source_commit': metadata['native_patch_commit'], 'toolchain': tools},
                      sort_keys=True, separators=(',', ':')).encode()
@@ -361,8 +367,8 @@ def assemble_editor(sha, native, fonts, metadata, native_output, sdk, child, lic
     return hashlib.sha256(raw).hexdigest()
 
 
-def build_editor(sha, temp, build_root, cargo, env, bindgen, binaryen, sdk, embedded, config):
-    native, fonts, metadata = prepare_editor_inputs(temp)
+def build_editor(sha, temp, build_root, cargo, env, bindgen, binaryen, sdk, embedded, config, inputs=None):
+    native, fonts, metadata = inputs or prepare_editor_inputs(temp)
     native_env = dict(env)
     native_env['CARGO_TARGET_DIR'] = str(build_root / 'wordcraft-target')
     native_env['CRAFT_FONTS_DIR'] = str(fonts)
@@ -398,6 +404,255 @@ def build_editor(sha, temp, build_root, cargo, env, bindgen, binaryen, sdk, embe
     return editor_digest
 
 
+COMMAND_FORMAT = 'wordcraft-c1-v2'
+COMMAND_REVISION = '7ef2633a7e84956522d1ca47b99fe6feef16c1db'
+COMMAND_CLOCK_PATCH = '9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581'
+
+
+def verified_command_elf(path):
+    if path.is_symlink() or not path.is_file() or not 64 <= path.stat().st_size <= 64 * 1024 * 1024:
+        raise ValueError('C1 executable missing or oversized')
+    with path.open('rb') as stream:
+        header = stream.read(64)
+    if (header[:7] != b'\x7fELF\x02\x01\x01' or
+            header[16:18] not in (b'\x02\x00', b'\x03\x00') or header[18:20] != b'\x3e\x00'):
+        raise ValueError('C1 executable must be Linux x86_64 ELF64')
+    return digest(path)
+
+
+def command_package_closure(metadata, lock_path, root_manifest, roots):
+    """Actual resolved normal/build closure, not a binary linkage/license audit."""
+    packages = {p['id']: p for p in metadata['packages']}
+    nodes = {p['id']: p for p in metadata['resolve']['nodes']}
+    found = [p['id'] for p in packages.values() if Path(p['manifest_path']).resolve() == root_manifest.resolve()]
+    if len(found) != 1 or len(packages) != len(metadata['packages']) or len(nodes) != len(metadata['resolve']['nodes']):
+        raise ValueError('C1 resolved package identity mismatch')
+    locked = {(p['name'], p['version'], p.get('source')): p for p in tomllib.loads(lock_path.read_text())['package']}
+    pending, visited, result = found[:], set(), []
+    while pending:
+        identity = pending.pop()
+        if identity in visited:
+            continue
+        visited.add(identity)
+        package, node = packages[identity], nodes[identity]
+        source = package.get('source')
+        if source is not None and not source.startswith(('registry+https://', 'sparse+https://', 'git+https://')):
+            raise ValueError('unsupported C1 dependency source')
+        local = None
+        if source is None:
+            directory = Path(package['manifest_path']).resolve().parent
+            matches = [label + '/' + str(directory.relative_to(root.resolve())) for label, root in roots.items() if directory.is_relative_to(root.resolve())]
+            if len(matches) != 1:
+                raise ValueError('C1 local dependency outside prepared inputs')
+            local = matches[0].rstrip('/.')
+        lock = locked[(package['name'], package['version'], source)]
+        public = {'name': package['name'], 'version': package['version'], 'source': source,
+                  'checksum': lock.get('checksum'), 'package_path': local,
+                  'spdx': package.get('license'), 'features': sorted(node['features'])}
+        result.append((public, package))
+        for dependency in node['deps']:
+            kinds = dependency['dep_kinds']
+            if not kinds or any(k['kind'] not in (None, 'build', 'dev') for k in kinds):
+                raise ValueError('unknown C1 dependency kind')
+            if any(k['kind'] != 'dev' for k in kinds):
+                pending.append(dependency['pkg'])
+    return sorted(result, key=lambda item: (item[0]['name'], item[0]['version'], item[0]['source'] or ''))
+
+
+def command_pinned_license_texts(public, destination=None):
+    """Reuse texts only for the exact immutable crate, never its old closure."""
+    recipe = ROOT / 'tools/wordcraft-mooring-native'
+    inventory = json.loads((recipe / 'license-inventory.json').read_text())
+    keys = ('name', 'version', 'source', 'checksum', 'spdx')
+    if not public.get('checksum'):
+        raise ValueError('C1 missing license requires immutable registry identity')
+    matches = [entry for entry in inventory['packages']
+               if all(entry['package'].get(key) == public.get(key) for key in keys)]
+    if len(matches) == 1 and any(t.get('kind') == 'license' for t in matches[0]['texts']):
+        return [(verified_native_text(recipe, text), text) for text in matches[0]['texts']]
+    # This exact registry crate omits repository-level license files. The
+    # crate's .cargo_vcs_info.json binds the revision; texts are independently
+    # hash-pinned, not fetched from a branch or inferred from its SPDX label.
+    accesskit = ('accesskit', '0.25.1', 'registry+https://github.com/rust-lang/crates.io-index',
+                 'ad442f58ee04714aaa0ba0a2768c1ea1935b29507bb22ddece8cbbc76db02932', 'MIT OR Apache-2.0')
+    if destination is None or tuple(public.get(key) for key in keys) != accesskit:
+        raise ValueError('C1 dependency license text absent: ' + public['name'] + '-' + public['version'])
+    revision = 'ce8164ba92995cfa86005b6259115e08c8244253'
+    result = []
+    for name, size, expected in (
+            ('LICENSE-MIT', 1023, '23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3'),
+            ('LICENSE-APACHE', 9723, '62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a')):
+        url = 'https://raw.githubusercontent.com/AccessKit/accesskit/' + revision + '/' + name
+        with urllib.request.urlopen(url, timeout=60) as response:
+            body = response.read(size + 1)
+        if len(body) != size or hashlib.sha256(body).hexdigest() != expected:
+            raise ValueError('C1 pinned supplemental license mismatch')
+        target = destination / 'commands' / (expected + '.txt')
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.is_symlink() or (target.exists() and digest(target) != expected):
+            raise ValueError('C1 pinned supplemental license collision')
+        target.write_bytes(body)
+        result.append((target, {'kind': 'license', 'origin': {
+            'repository': 'https://github.com/AccessKit/accesskit', 'revision': revision,
+            'path': name, 'url': url}}))
+    return result
+
+
+def collect_command_licenses(destination, prepared, metadata, component):
+    """Ship actual resolved source licenses separately from the legacy inventory.
+
+    Public package identities/lock hashes/features, never cache paths, are
+    retained. Selecting upstream WordCraft MIT is explicit and source-verified;
+    transitive SPDX declarations and all discovered notices remain unchanged.
+    """
+    source, helper = prepared / 'source', prepared / 'helper'
+    root_manifest = helper / 'Cargo.toml' if component == 'engine' else source / 'apps/wordcraft-web/Cargo.toml'
+    lock = helper / 'Cargo.lock' if component == 'engine' else source / 'Cargo.lock'
+    closure = command_package_closure(metadata, lock, root_manifest, {'source': source, 'helper': helper})
+    inventory = {'component': component, 'engine_revision': COMMAND_REVISION,
+                 'clock_patch_sha256': COMMAND_CLOCK_PATCH, 'cargo_lock_sha256': digest(lock),
+                 'filter_platform': 'x86_64-unknown-linux-gnu' if component == 'engine' else 'wasm32-unknown-unknown',
+                 'method': 'Conservative actual resolved normal/build/proc-macro closure; excludes dev-only edges. Not a binary linkage or complete legal audit.',
+                 'packages': []}
+    manifest = json.loads((destination / 'manifest.json').read_text())
+    for public, package in closure:
+        directory = Path(package['manifest_path']).resolve().parent
+        local_wordcraft = package.get('source') is None and directory.is_relative_to(source.resolve())
+        local_wrapper = directory == helper.resolve()
+        selected = None
+        pinned = {}
+        if local_wordcraft:
+            if public['spdx'] != 'MIT OR Apache-2.0' or digest(source / 'LICENSE-MIT') != digest(ROOT / 'tools/wordcraft-c1-engine/WORDCRAFT-LICENSE-MIT'):
+                raise ValueError('C1 upstream MIT choice does not match pinned source')
+            texts = [source / 'LICENSE-MIT', source / 'NOTICE']
+            selected = 'MIT'
+        elif local_wrapper:
+            texts = [ROOT / 'LICENSE', ROOT / 'NOTICE']
+        else:
+            # Registry crates own their package root. A git crate may refer to
+            # repository-level notices: stop at that exact public checkout.
+            boundary = directory
+            if (package.get('source') or '').startswith('git+'):
+                for parent in (directory, *directory.parents):
+                    boundary = parent
+                    if (parent / '.git').exists():
+                        break
+                else:
+                    raise ValueError('C1 git dependency license boundary absent')
+            license_names = ('license', 'copying', 'unlicense', 'notice', 'authors', 'ofl', 'ufl', 'copyright')
+            # Font crates carry mandatory OFL/Ubuntu notices below fonts/.
+            # Recurse only inside this exact package, not sibling dependencies.
+            candidates = [p for p in directory.rglob('*') if p.is_file() and
+                          (p.name.lower().startswith(license_names) or 'license' in p.name.lower() or
+                           ('fonts' in p.relative_to(directory).parts and p.suffix.lower() == '.txt'))]
+            for parent in (directory, *directory.parents):
+                candidates.extend(p for p in parent.iterdir() if p.is_file() and p.name.lower().startswith(license_names))
+                if parent == boundary:
+                    break
+            if package.get('license_file'):
+                named = Path(package['license_file'])
+                candidates.append(named if named.is_absolute() else directory / named)
+            texts = sorted(set(candidates))
+            if any(not p.resolve().is_relative_to(boundary.resolve()) for p in texts):
+                raise ValueError('C1 dependency license escapes source')
+            # Upstream git packages may link a nested LICENSE to their own
+            # repository root; copy only the bounded in-repository target.
+            texts = sorted(set(p.resolve() for p in texts))
+            if not texts:
+                pinned = dict(command_pinned_license_texts(public, destination))
+                texts = list(pinned)
+        if not public['spdx']:
+            raise ValueError('C1 dependency SPDX declaration absent')
+        records = []
+        for text in texts:
+            if text.is_symlink() or not text.is_file() or not 0 < text.stat().st_size <= 2 * 1024 * 1024:
+                raise ValueError('C1 license source must be bounded regular text')
+            hashed = digest(text)
+            relative = 'commands/' + hashed + '.txt'
+            target = destination / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists() and digest(target) != hashed:
+                raise ValueError('C1 license collision')
+            if not target.exists():
+                shutil.copyfile(text, target)
+            record = {'name': text.name, 'path': relative, 'sha256': hashed}
+            if text in pinned:
+                record.update(kind=pinned[text]['kind'])
+                if 'origin' in pinned[text]:
+                    record['origin'] = pinned[text]['origin']
+            records.append(record)
+            manifest.append({'crate': public['name'], 'version': public['version'], 'spdx': public['spdx'],
+                             'component': 'wordcraft-command-' + component, 'path': relative, 'sha256': hashed})
+        inventory['packages'].append({'package': public, 'selected_license': selected, 'texts': records})
+    (destination / ('wordcraft-command-' + component + '-inventory.json')).write_text(json.dumps(inventory, sort_keys=True, indent=2) + '\n')
+    (destination / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+    return inventory
+
+
+def build_commands(sha, temp, build_root, cargo, env, bindgen, binaryen, sdk, embedded, fonts, config):
+    entry = ROOT / 'lib/mooring/wordcraft-command-child-loader.ts'
+    if not entry.is_file():
+        raise ValueError('release source lacks the separate C1 child integration')
+    engine_spec = json.loads((ROOT / 'tools/wordcraft-c1-engine/source.json').read_text())
+    browser_spec = json.loads((ROOT / 'tools/wordcraft-c1-browser/source.json').read_text())
+    if (engine_spec['rev'] != COMMAND_REVISION or engine_spec['patch_sha256'] != COMMAND_CLOCK_PATCH or
+            browser_spec['revision'] != COMMAND_REVISION or
+            browser_spec['engine_source_manifest_sha256'] != digest(ROOT / 'tools/wordcraft-c1-engine/source.json')):
+        raise ValueError('C1 source/clock/renderer pins disagree')
+    native_host = build_root / 'target/release/mooring-wordcraft-command-host'
+    command([cargo, 'build', '--release', '--locked', '--offline', '-p', 'mooring-collab',
+             '--features', 'wordcraft-command-experiment', '--bin', 'mooring-wordcraft-command-host'], cwd=ROOT / 'mooring', env=env)
+    host_hash = verified_command_elf(native_host)
+    inputs = temp / 'command-engine-inputs'
+    command([sys.executable, ROOT / 'tools/wordcraft-c1-engine/prepare.py', '--output', inputs], env=git_environment())
+    renderer = temp / 'command-renderer-inputs'
+    command([sys.executable, ROOT / 'tools/wordcraft-c1-browser/prepare.py', '--output', renderer], env=git_environment())
+    common = dict(env)
+    common.update(CRAFT_FONTS_DIR=str(fonts), CARGO_NET_OFFLINE='false')
+    helper_env = dict(common, CARGO_TARGET_DIR=str(build_root / 'command-engine-target'),
+                      RUSTFLAGS=f'--remap-path-prefix={ROOT}=/crewship --remap-path-prefix={inputs}=/wordcraft-c1')
+    command([cargo, 'build', '--release', '--locked'], cwd=inputs / 'helper', env=helper_env)
+    helper = build_root / 'command-engine-target/release/wordcraft-c1-engine'
+    engine_hash = verified_command_elf(helper)
+    for prepared, component, manifest, local_env in [
+            (inputs, 'engine', inputs / 'helper/Cargo.toml', helper_env)]:
+        resolved = json.loads(subprocess.check_output([str(cargo), 'metadata', '--locked', '--offline', '--filter-platform', config['target'],
+            '--format-version', '1', '--manifest-path', str(manifest)], cwd=manifest.parent, env=local_env))
+        collect_command_licenses(embedded / 'licenses', prepared, resolved, component)
+    web_env = dict(common, CARGO_TARGET_DIR=str(build_root / 'command-web-target'),
+                   RUSTFLAGS=f'--remap-path-prefix={ROOT}=/crewship --remap-path-prefix={renderer}=/wordcraft-c1')
+    source = renderer / 'source'
+    command([cargo, 'build', '--release', '--locked', '--target', 'wasm32-unknown-unknown', '-p', 'wordcraft-web'], cwd=source, env=web_env)
+    resolved = json.loads(subprocess.check_output([str(cargo), 'metadata', '--locked', '--offline', '--filter-platform', 'wasm32-unknown-unknown',
+        '--format-version', '1', '--manifest-path', str(source / 'apps/wordcraft-web/Cargo.toml')], cwd=source, env=web_env))
+    collect_command_licenses(embedded / 'licenses', renderer, resolved, 'renderer')
+    native_output = temp / 'command-web'
+    command([bindgen / 'wasm-bindgen', build_root / 'command-web-target/wasm32-unknown-unknown/release/wordcraft-web.wasm',
+             '--target', 'web', '--out-name', 'wordcraft_web', '--out-dir', native_output])
+    optimized = native_output / 'wordcraft_web_bg.optimized.wasm'
+    command([binaryen / 'bin/wasm-opt', '-Oz', '--all-features', native_output / 'wordcraft_web_bg.wasm', '-o', optimized])
+    optimized.replace(native_output / 'wordcraft_web_bg.wasm')
+    child = temp / 'command-child.js'
+    command([ROOT / 'node_modules/.bin/esbuild', entry, '--bundle', '--format=esm', '--platform=browser', '--target=es2022', '--outfile=' + str(child)])
+    bundle = temp / 'command-editor-bundle'
+    # Use the established immutable editor package layout, with the C1 entry
+    # and actual dependency texts; never substitute the legacy bundle digest.
+    metadata = {'base': COMMAND_REVISION, 'patch_sha256': browser_spec['patch_sha256'], 'native_patch_commit': sha}
+    editor_hash = assemble_editor(sha, source, fonts, metadata, native_output, sdk, child, embedded / 'licenses', bundle, config,
+        native_inventory=('wordcraft-command-renderer-inventory.json', 'wordcraft-command-renderer-inventory.json'),
+        additional_inventories=('wordcraft-command-engine-inventory.json',),
+        provenance_extra={'format': COMMAND_FORMAT, 'clock_patch_sha256': COMMAND_CLOCK_PATCH, 'component': 'wordcraft-command-c1'})
+    destination = embedded / 'editor' / editor_hash
+    if destination.exists():
+        raise ValueError('C1 editor must not replace an existing legacy bundle')
+    shutil.move(bundle, destination)
+    shutil.copyfile(native_host, embedded / 'command-host')
+    shutil.copyfile(helper, embedded / 'command-engine')
+    return {'format': COMMAND_FORMAT, 'engine_revision': COMMAND_REVISION,
+            'clock_patch_sha256': COMMAND_CLOCK_PATCH, 'host_sha256': host_hash,
+            'engine_sha256': engine_hash, 'editor_bundle_digest': editor_hash}
+
+
 def build(sha):
     verify_source(sha)
     if not (ROOT / 'lib/mooring/wordcraft-child-loader.ts').is_file():
@@ -430,15 +685,18 @@ def build(sha):
         embedded.mkdir()
         shutil.copyfile(build_root / 'target/release/mooring-collab', embedded / 'mooring-collab')
         collect_licenses(embedded / 'licenses')
-        editor_digest = build_editor(sha, temp, build_root, cargo, env, bindgen, binaryen, sdk, embedded, config)
+        editor_inputs = prepare_editor_inputs(temp)
+        editor_digest = build_editor(sha, temp, build_root, cargo, env, bindgen, binaryen, sdk, embedded, config, inputs=editor_inputs)
+        commands = build_commands(sha, temp, build_root, cargo, env, bindgen, binaryen, sdk, embedded, editor_inputs[1], config)
         # The wrapper has no runtime imports; remove its TypeScript-only types.
         wrapper = subprocess.check_output(['node', '--input-type=module', '-e',
             "import{readFileSync}from'node:fs';import{stripTypeScriptTypes}from'node:module';process.stdout.write(stripTypeScriptTypes(readFileSync(process.argv[1],'utf8'),{mode:'transform'}))", str(ROOT / 'mooring/client/index.ts')])
         (sdk / 'index.js').write_bytes(wrapper)
         assets = {str(path.relative_to(sdk)): digest(path) for path in sorted(sdk.rglob('*')) if path.is_file()}
         sdk_digest = hashlib.sha256(json.dumps(assets, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
-        manifest = {'schema_version':1, 'source_sha':sha, 'target':config['target'], 'versions':config['versions'], 'binary_sha256':digest(embedded / 'mooring-collab'), 'editor_bundle_digest':editor_digest, 'sdk':assets, 'sdk_prefix':'/mooring-sdk/generated/' + sdk_digest, 'tools':config}
+        manifest = {'schema_version':1, 'source_sha':sha, 'target':config['target'], 'versions':config['versions'], 'binary_sha256':digest(embedded / 'mooring-collab'), 'editor_bundle_digest':editor_digest, 'commands':commands, 'sdk':assets, 'sdk_prefix':'/mooring-sdk/generated/' + sdk_digest, 'tools':config}
         (embedded / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+        verify_source(sha)  # Detect source drift before publishing any generated assets.
         # Only generated paths inside this disposable source are replaced.
         # Never remove the tracked disabled placeholder or unrelated public assets.
         output = ROOT / 'internal/mooringassets/embedded/generated'
