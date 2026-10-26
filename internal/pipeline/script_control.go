@@ -163,7 +163,7 @@ printf '%s' "$$" > "$control/pid" || exit 125
 printf 'crewship-script-created-v1:%s:%s\n' "$nonce" "$$" || exit 125
 metadata=-
 if command -v timeout >/dev/null 2>&1; then
-  metadata=$(timeout -s KILL 0.1s sh -s -- "$control" "$$" 2>/dev/null <<'CREWSHIP_SCRIPT_METADATA'
+  metadata=$(timeout -s KILL 0.1s sh -s -- "$control" "$$" 2>/dev/null <<'SCRIPT_METADATA_END'
 control=$1
 pid=$2
 pgid=$(ps -o pgid= -p "$pid" 2>/dev/null) || exit 1
@@ -173,7 +173,7 @@ pgid=$(printf '%s' "$pgid" | tr -d '[:space:]') || exit 1
 identity=$(stat -c '%d:%i' -- "$control" 2>/dev/null) || exit 1
 case "$identity" in ''|*[!0-9:]*|:*|*:) exit 1;; esac
 printf '%s:%s' "$pgid" "$identity"
-CREWSHIP_SCRIPT_METADATA
+SCRIPT_METADATA_END
   ) 2>/dev/null || metadata=-
 fi
 printf 'crewship-script-cleanup-v1:%s:%s\n' "$nonce" "$metadata"
