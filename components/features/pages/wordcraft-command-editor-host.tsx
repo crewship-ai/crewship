@@ -38,14 +38,14 @@ export function WordCraftCommandEditorHost({ workspaceId, pageId, name, unavaila
       if (!port || raw.length > COMMAND_MESSAGE_BYTES || new TextEncoder().encode(raw).length > COMMAND_MESSAGE_BYTES) throw new Error("invalid_command_frame")
       port.postMessage(raw)
     }
-    const stop = () => {
+    const stop = (message = "The editor is unavailable. Unconfirmed changes have not been marked saved.") => {
       if (dead) return
       dead = true; clearTimeout(startupTimer); abort.abort(); host?.stop(); callback.current?.()
       try { send({ type: "wordcraft-command:stop" }) } catch { /* retain frame and original */ }
       if (frame) frame.hidden = true
       if (port) { port.onmessage = null; port.close() }
       setState(prior => prior === "pending" || prior === "unknown" ? "unknown" : "stopped")
-      setError("The editor is unavailable. Unconfirmed changes have not been marked saved.")
+      setError(message)
     }
     const receive = (raw: unknown) => {
       if (dead) return
@@ -74,7 +74,8 @@ export function WordCraftCommandEditorHost({ workspaceId, pageId, name, unavaila
     setState("connecting"); setError(undefined)
     void (async () => {
       try {
-        if (!human || unavailableRef.current || !editorFrameSupported()) { stop(); return }
+        if (!editorFrameSupported()) { stop("Tento prohlížeč zatím není podporován"); return }
+        if (!human || unavailableRef.current) { stop(); return }
         let write = true, opened
         try { opened = await commandRequest(workspaceId, pageId, { action: "open", write: true }, abort.signal) }
         catch (cause) {
