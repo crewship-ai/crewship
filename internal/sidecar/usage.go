@@ -209,6 +209,148 @@ func parseLLMUsage(codec, body string) LLMUsage {
 	return out
 }
 
+type anthropicUsageJSON = struct {
+	Model string `json:"model"`
+	Usage struct {
+		InputTokens              int64 `json:"input_tokens"`
+		OutputTokens             int64 `json:"output_tokens"`
+		CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+		CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
+	} `json:"usage"`
+}
+
+type openAIUsageJSON = struct {
+	Model string `json:"model"`
+	Usage struct {
+		PromptTokens        int64 `json:"prompt_tokens"`
+		CompletionTokens    int64 `json:"completion_tokens"`
+		PromptTokensDetails struct {
+			CachedTokens int64 `json:"cached_tokens"`
+		} `json:"prompt_tokens_details"`
+
+		InputTokens        int64 `json:"input_tokens"`
+		OutputTokens       int64 `json:"output_tokens"`
+		InputTokensDetails struct {
+			CachedTokens int64 `json:"cached_tokens"`
+		} `json:"input_tokens_details"`
+	} `json:"usage"`
+}
+
+type googleUsageJSON = struct {
+	ModelVersion  string `json:"modelVersion"`
+	UsageMetadata struct {
+		PromptTokenCount        int64 `json:"promptTokenCount"`
+		CandidatesTokenCount    int64 `json:"candidatesTokenCount"`
+		CachedContentTokenCount int64 `json:"cachedContentTokenCount"`
+	} `json:"usageMetadata"`
+}
+
+func anthropicLLMUsage(msg anthropicUsageJSON) LLMUsage {
+	var out LLMUsage
+	out.Model = msg.Model
+	out.InputTokens = msg.Usage.InputTokens
+	out.OutputTokens = msg.Usage.OutputTokens
+	out.CachedInputTokens = msg.Usage.CacheReadInputTokens
+	out.CacheCreationTokens = msg.Usage.CacheCreationInputTokens
+	return out
+}
+
+func openAILLMUsage(msg openAIUsageJSON) LLMUsage {
+	var out LLMUsage
+	out.Model = msg.Model
+
+	// Whichever family the body actually used. A response carries one or
+	// the other, never both, so summing would be wrong and preferring a
+	// fixed one would zero the other.
+	in, outTok, cached := msg.Usage.PromptTokens, msg.Usage.CompletionTokens, msg.Usage.PromptTokensDetails.CachedTokens
+	if in == 0 && outTok == 0 && cached == 0 {
+		in, outTok, cached = msg.Usage.InputTokens, msg.Usage.OutputTokens, msg.Usage.InputTokensDetails.CachedTokens
+	}
+
+	// Both families' input count INCLUDES cached tokens; subtract so the
+	// fresh-input number we feed to paymaster.Estimate is what gets
+	// billed at the input rate (cached gets the cached rate).
+	fresh := in - cached
+	if fresh < 0 {
+		fresh = 0
+	}
+	out.InputTokens = fresh
+	out.OutputTokens = outTok
+	out.CachedInputTokens = cached
+	// OpenAI does not report cache-write tokens separately — they bill at
+	// the input rate, which our pricing.go reflects by setting
+	// CacheWritePerM equal to InputPerM for OpenAI rows.
+	return out
+}
+
+func googleLLMUsage(msg googleUsageJSON) LLMUsage {
+	var out LLMUsage
+	out.Model = msg.ModelVersion
+	fresh := msg.UsageMetadata.PromptTokenCount - msg.UsageMetadata.CachedContentTokenCount
+	if fresh < 0 {
+		fresh = 0
+	}
+	out.InputTokens = fresh
+	out.OutputTokens = msg.UsageMetadata.CandidatesTokenCount
+	out.CachedInputTokens = msg.UsageMetadata.CachedContentTokenCount
+	return out
+}
+
+type llmUsageEnvelope struct {
+	Response json.RawMessage `json:"response"`
+	Message  json.RawMessage `json:"message"`
+}
+
+// Decode the root and envelope together on valid events. Invalid typed root
+// fields must not hide a separately valid nested response or message.
+func parseLLMUsageSSEEvent(codec, data string) LLMUsage {
+	var root LLMUsage
+	var envelope llmUsageEnvelope
+	var decodeErr error
+	switch codec {
+	case "anthropic":
+		var event struct {
+			anthropicUsageJSON
+			llmUsageEnvelope
+		}
+		decodeErr = json.Unmarshal([]byte(data), &event)
+		root, envelope = anthropicLLMUsage(event.anthropicUsageJSON), event.llmUsageEnvelope
+	case "openai":
+		var event struct {
+			openAIUsageJSON
+			llmUsageEnvelope
+		}
+		decodeErr = json.Unmarshal([]byte(data), &event)
+		root, envelope = openAILLMUsage(event.openAIUsageJSON), event.llmUsageEnvelope
+	case "google":
+		var event struct {
+			googleUsageJSON
+			llmUsageEnvelope
+		}
+		decodeErr = json.Unmarshal([]byte(data), &event)
+		root, envelope = googleLLMUsage(event.googleUsageJSON), event.llmUsageEnvelope
+	default:
+		return LLMUsage{}
+	}
+	if decodeErr != nil {
+		root = LLMUsage{}
+		envelope = llmUsageEnvelope{}
+		if json.Unmarshal([]byte(data), &envelope) != nil {
+			envelope = llmUsageEnvelope{}
+		}
+	}
+	var out LLMUsage
+	// Starting at zero preserves the legacy SSE filtering of negative counts.
+	mergeLLMUsageMax(&out, root)
+	if len(envelope.Response) > 0 {
+		mergeLLMUsageMax(&out, parseLLMUsage(codec, string(envelope.Response)))
+	}
+	if len(envelope.Message) > 0 {
+		mergeLLMUsageMax(&out, parseLLMUsage(codec, string(envelope.Message)))
+	}
+	return out
+}
+
 // parseLLMUsageSSE extracts the last/cumulative usage values from Server-Sent
 // Events. The streaming observer calls it per event with reusable scratch;
 // callers with a complete response can use it directly. Providers use
@@ -232,22 +374,7 @@ func parseLLMUsageSSEWithScratch(codec, body string, scratch *[]string) LLMUsage
 		if data == "[DONE]" {
 			return
 		}
-		candidates := []string{data}
-		var envelope struct {
-			Response json.RawMessage `json:"response"`
-			Message  json.RawMessage `json:"message"`
-		}
-		if json.Unmarshal([]byte(data), &envelope) == nil {
-			if len(envelope.Response) > 0 {
-				candidates = append(candidates, string(envelope.Response))
-			}
-			if len(envelope.Message) > 0 {
-				candidates = append(candidates, string(envelope.Message))
-			}
-		}
-		for _, candidate := range candidates {
-			mergeLLMUsageMax(&out, parseLLMUsage(codec, candidate))
-		}
+		mergeLLMUsageMax(&out, parseLLMUsageSSEEvent(codec, data))
 	}
 
 	// Iterate without allocating a slice entry for every SSE line.
