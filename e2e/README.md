@@ -1,6 +1,6 @@
 # Browser acceptance tests
 
-Choose a suite by its server and data prerequisites. The seven configurations
+Choose a suite by its server and data prerequisites. The configurations
 below serve different purposes; combining them would mix fresh-instance,
 authenticated-server and isolated-fixture tests.
 
@@ -8,6 +8,7 @@ authenticated-server and isolated-fixture tests.
 
 | Configuration | Tests and prerequisites | Caller |
 | --- | --- | --- |
+| [playwright.wordcraft-ce.config.ts](../playwright.wordcraft-ce.config.ts) | Explicit C-E native WordCraft journeys and latency; owned shared document, two writer identities and real integration observations required; missing inputs fail | [WordCraft C-E acceptance](wordcraft-ce/README.md) |
 | [playwright.config.ts](../playwright.config.ts) | Main local suite with an explicit `testIgnore` list; requires an authenticated test instance | `pnpm test:e2e`, `pnpm test:e2e:ui` |
 | [playwright.pr.config.ts](../playwright.pr.config.ts) | `pr-contract.spec.ts`: authenticated desktop workflow and phone contract | [ci.yml](../.github/workflows/ci.yml), `playwright-pr` job |
 | [playwright.fresh.config.ts](../playwright.fresh.config.ts) | `onboarding-wizard.spec.ts`; disposable, never-bootstrapped database, no shared login state | `onboarding-journey` in [ci.yml](../.github/workflows/ci.yml), plus the [devcontainer workflow](../.github/workflows/e2e-devcontainer.yml) |
