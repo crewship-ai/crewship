@@ -31,6 +31,9 @@ func mooringSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	})
 	// No required properties: {} is a valid read-only session request.
 	delete(schemas["MooringSessionRequest"].(map[string]any), "required")
+	schemas["MooringReauthorizeRequest"] = obj(map[string]any{
+		"connection_ref": map[string]any{"type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\u0000]+$", "description": "Exact original live connection reference; request body at most 1 KiB. No credential, role, participant or document override."},
+	}, "connection_ref")
 	schemas["MooringSession"] = obj(map[string]any{
 		"session_id": text, "checkpoint_revision": map[string]any{"type": "string", "pattern": "^(0|[1-9][0-9]*)$"},
 		"sdk_prefix": text, "participant_ref": text, "ticket": text, "connection_ref": text,
@@ -46,6 +49,15 @@ func mooringSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	routes["POST "+base+"/session"] = DomainSchema{
 		Request: ref("MooringSessionRequest"), RequestRequired: true, Response: ref("MooringSession"),
 		ErrorStatuses: []string{"400", "401", "403", "413", "500", "503"},
+	}
+	routes["POST "+base+"/session/reauthorize"] = DomainSchema{
+		Request: ref("MooringReauthorizeRequest"), RequestRequired: true, SuccessStatuses: []string{"204"},
+		ErrorStatuses: []string{"400", "401", "403", "413", "500", "503"},
+		Parameters: []map[string]any{
+			{"name": "workspace_id", "in": "query", "required": true, "schema": map[string]any{"type": "string"}},
+			{"name": "Origin", "in": "header", "required": true, "schema": map[string]any{"type": "string"}, "description": "Must exactly match the configured trusted frontend origin."},
+		},
+		SuccessHeaders: map[string]any{"Cache-Control": map[string]any{"schema": map[string]any{"type": "string", "enum": []string{"no-store"}}}},
 	}
 	routes["GET "+base+"/ws"] = DomainSchema{
 		NoRequest: true, SuccessStatuses: []string{"101"},

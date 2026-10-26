@@ -61,3 +61,36 @@ func TestMooringSessionAndUpgradeWireContracts(t *testing.T) {
 		t.Fatal("upgrade lost required original connection_ref")
 	}
 }
+
+// A reauthorization response is neither content nor a Saved receipt. Clients
+// must not wait for a fictitious JSON200 or supply a replacement identity.
+func TestMooringReauthorizeIsOriginalConnectionAndNoContent(t *testing.T) {
+	const path = "/api/v1/pages/{slug}/mooring/session/reauthorize"
+	doc := buildDocument([]route{{method: "POST", path: path, auth: true, ws: true}})
+	op := doc["paths"].(map[string]any)[path].(map[string]any)["post"].(map[string]any)
+	responses := op["responses"].(map[string]any)
+	if responses["200"] != nil {
+		t.Fatal("reauthorize falsely advertises JSON200")
+	}
+	success, ok := responses["204"].(map[string]any)
+	if !ok || success["content"] != nil || success["headers"] == nil {
+		t.Fatal("reauthorize lost bodyless no-store response", success)
+	}
+	request := op["requestBody"].(map[string]any)
+	if request["required"] != true {
+		t.Fatal("missing original connection is not a request")
+	}
+	schema := request["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)
+	if schema["$ref"] != "#/components/schemas/MooringReauthorizeRequest" {
+		t.Fatal("missing exact request schema", schema)
+	}
+	input := doc["components"].(map[string]any)["schemas"].(map[string]any)["MooringReauthorizeRequest"].(map[string]any)
+	properties := input["properties"].(map[string]any)
+	if input["additionalProperties"] != false || len(properties) != 1 || properties["connection_ref"] == nil {
+		t.Fatal("reauthorize accepts authority overrides", input)
+	}
+	required := input["required"].([]string)
+	if len(required) != 1 || required[0] != "connection_ref" {
+		t.Fatal("original reference not required", required)
+	}
+}
