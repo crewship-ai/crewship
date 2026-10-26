@@ -450,3 +450,56 @@ func TestCommandNativeActualSQLQualified72FormattingAndEnter(t *testing.T) {
 		t.Fatal("actual canonical SQL reload changed formatted document", e)
 	}
 }
+
+func TestCommandNativeActualSQLQualifiedListDefineSelection(t *testing.T) {
+	r := newActualCommandNativeRig(t)
+	req := httptest.NewRequest("POST", "/native-test-only", nil).WithContext(r.f.ctx)
+	if _, e := r.s.Submit(req, r.a, r.actor, r.input("seed", 0, "Alpha")); e != nil {
+		t.Fatal(e)
+	}
+	policy, e := os.ReadFile("../../tools/wordcraft-capabilities/engine-qualification-policy.json")
+	if e != nil {
+		t.Fatal(e)
+	}
+	var declared struct {
+		Commands map[string]struct {
+			Params json.RawMessage `json:"testedParameters"`
+		} `json:"commands"`
+	}
+	if json.Unmarshal(policy, &declared) != nil || len(declared.Commands["list.define"].Params) == 0 {
+		t.Fatal("missing canonical list fixture")
+	}
+	raw, _ := json.Marshal(map[string]any{"op_id": r.generation + ":list", "generation": r.generation, "participant": r.actor.actor, "base_revision": 1, "command": "list.define", "params": declared.Commands["list.define"].Params, "target": map[string]any{"block_id": r.block, "unit": "utf8_bytes", "start": 0, "end": 5}})
+	out, e := r.s.Submit(req, r.a, r.actor, raw)
+	if e != nil || out.Revision != 2 {
+		t.Fatal("actual list.define SQL commit", e)
+	}
+	cp := r.sqlSnapshot(t)
+	selection, e := commandReceiptSelection(out.Receipt, cp.Checkpoint, "list.define")
+	if e != nil {
+		t.Fatal("native list selection must survive strict SQL receipt validation", e)
+	}
+	var positions map[string]json.RawMessage
+	if json.Unmarshal(selection, &positions) != nil || len(positions) != 2 || positions["num"] != nil {
+		t.Fatal("command metadata leaked into selection", string(selection))
+	}
+	projection, e := r.p.Projection(context.Background())
+	if e != nil || actualNativeText(t, projection) != "Alpha" {
+		t.Fatal("native list projection", e)
+	}
+	if !bytes.Equal(cp.Checkpoint, r.sqlSnapshot(t).Checkpoint) {
+		t.Fatal("projection changed canonical SQL")
+	}
+	q, e := startCommandNativePort(context.Background(), r.config)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer q.Close()
+	if e = q.RestoreConfirmed(context.Background(), cp); e != nil {
+		t.Fatal(e)
+	}
+	restored, e := q.Projection(context.Background())
+	if e != nil || restored.NativeJSON != projection.NativeJSON || restored.Revision != 2 {
+		t.Fatal("committed native list changed after reload", e)
+	}
+}

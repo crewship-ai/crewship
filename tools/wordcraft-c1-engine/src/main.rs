@@ -285,10 +285,18 @@ fn run(raw: &[u8]) -> Result<Value, &'static str> {
         }
         s.run_with_host_context("select.range",&json!({"anchor":{"block":t.block,"off":t.start},"focus":{"block":t.block,"off":t.end}}),&r.author,&r.time).map_err(|_|"invalid_clock")?;
     }
-    let result = s
+    let command_result = s
         .run_with_host_context(engine, &params, &r.author, &r.time)
         .map_err(|_| "engine_refused")?;
     let _layout = s.layout();
+    // Commands may return extra metadata (list.define adds num). The receipt
+    // carries the actual same-command native selection, never a guessed caret
+    // or a relaxed interpretation of an arbitrary command return value.
+    let result = if matches!(r.command.as_str(), "init" | "document.read") {
+        command_result
+    } else {
+        serde_json::to_value(&s.sel).map_err(|_| "engine_selection")?
+    };
     let native: Value = serde_json::from_slice(
         &native_io::save_bytes("state.json", &s.doc).map_err(|_| "invalid_document")?,
     )
@@ -476,5 +484,49 @@ mod catalog_validation_tests {
                 "wordcraft-c1-qualified72-v5:9f1cb61f8ffb8e4890001aab1a9a222e327a8e98f4531ef50a7b66e28cc0f0cb"
             )
         );
+    }
+    #[test]
+    fn actual_list_define_metadata_is_not_the_selection_receipt() {
+        let author = "Alice";
+        let time = "2026-10-26T12:00:00Z";
+        let mut session = Session::new(Document::new());
+        session
+            .run_with_host_context("text.insert", &json!({"text":"Alpha"}), author, time)
+            .unwrap();
+        let before: Value =
+            serde_json::from_slice(&native_io::save_bytes("state.json", &session.doc).unwrap())
+                .unwrap();
+        let params =
+            catalog_entry("list.define").unwrap()["engineQualification"]["testedParameters"]
+                .clone();
+        session
+            .run_with_host_context(
+                "select.range",
+                &json!({"anchor":{"block":0,"off":0},"focus":{"block":0,"off":5}}),
+                author,
+                time,
+            )
+            .unwrap();
+        let original = session
+            .run_with_host_context("list.define", &params, author, time)
+            .unwrap();
+        assert!(
+            original["num"].as_u64().is_some_and(|n| n > 0),
+            "the actual native command returns num metadata"
+        );
+        let selected = serde_json::to_value(&session.sel).unwrap();
+        let expected: Value =
+            serde_json::from_slice(&native_io::save_bytes("state.json", &session.doc).unwrap())
+                .unwrap();
+        let reply = run(&serde_json::to_vec(&json!({"command":"list.define","params":params,"native":before,"target":{"block":0,"unit":"utf8_bytes","start":0,"end":5},"author":author,"time":time})).unwrap()).unwrap();
+        assert_eq!(
+            reply["native"], expected,
+            "normalization must not change native list definitions or document"
+        );
+        assert_eq!(
+            reply["result"], selected,
+            "receipt must use actual same-command Session selection, not metadata or an inferred caret"
+        );
+        assert_eq!(reply["result"].as_object().unwrap().len(), 2);
     }
 }
