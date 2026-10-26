@@ -12,7 +12,7 @@ it is safe against a shared development instance.
 | Start development | `./dev.sh start` | Starts the instance's Go/Next.js services; use `status` to inspect first |
 | Build a release-style binary | `make build` | Builds and embeds the UI, then builds Go |
 | Mooring dev release assets | `python3 scripts/build-mooring-runtime.py --release-dev EXACT_SHA` | In a clean committed Linux source tree, build the pinned Rust runtime, WASM SDK and isolated WordCraft editor. Requires the pinned Rust/WASM toolchain and frozen pnpm install. Fetches only pinned public source/font inputs and locked WordCraft dependencies; includes licenses. Writes only ignored generated assets; enables no environment or route. Build output requires separate application and authorization acceptance. |
-| Mooring build isolation checks | `python3 -m unittest discover -s scripts -p test_build_mooring_runtime.py` | Synthetic owned Git repositories and bounded tool archives; no network, compiler or live environment. |
+| Mooring build isolation checks | `python3 -m unittest discover -s scripts -p test_build_mooring_runtime.py` | Synthetic owned Git repositories, bounded tool archives and execution of a flat editor package with a real WASM snippet import. Requires Node.js; no network, Rust compiler or live environment. |
 | Fast pre-push checks | `bash scripts/verify.sh quick` | CI helper tests, toolchain/build-path checks and workflow lint; not the full test suite |
 | Backend pre-push checks | `bash scripts/verify.sh go` | Quick checks plus the Go test wrapper and `go vet` |
 | Full pre-push entrypoint | `bash scripts/verify.sh full` | Adds frontend lint, types, coverage and static export build |

@@ -420,3 +420,69 @@ class CommandAssetBuildTests(unittest.TestCase):
             with patch.object(build, 'command_package_closure', return_value=[(public, package)]):
                 with self.assertRaisesRegex(ValueError, 'escapes source'):
                     build.collect_command_licenses(destination, prepared, {}, 'engine')
+
+
+class FlatNativeBundleTests(unittest.TestCase):
+    def test_snippet_is_bundled_before_manifest_hashing(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            native, fonts, generated, sdk, licenses = [root/name for name in
+                ('native', 'fonts', 'generated', 'sdk', 'licenses')]
+            for directory in (native/'apps/wordcraft-web', native/'assets/fonts', fonts/'fonts',
+                              generated/'snippets/eframe-fixture', sdk, licenses):
+                directory.mkdir(parents=True)
+            (native/'apps/wordcraft-web/index.html').write_text('<html><body></body></html>')
+            for name in ('LICENSE-MIT', 'NOTICE', 'ATTRIBUTION.md'):
+                (native/name).write_text('fixture license')
+            (fonts/'fonts/manifest.txt').write_text('fixture fonts')
+            (fonts/'provenance.json').write_text('{"files": []}')
+            (licenses/'manifest.json').write_text('[]')
+            (licenses/'wordcraft-native-inventory.json').write_text('{}')
+            for name in ('mooring_wordcraft_client.js', 'mooring_wordcraft_client_bg.wasm'):
+                (sdk/name).write_bytes(b'fixture SDK')
+            child = root/'child.js'
+            child.write_text('export const child = true;')
+            # A real WASM import names the original snippet module. That ABI
+            # identity is distinct from an ES module URL and must survive bundling.
+            module_name = b'./snippets/eframe-fixture/inline0.js'
+            imports = b'\x01' + bytes([len(module_name)]) + module_name + b'\x07snippet\x00\x00'
+            wasm = (b'\x00asm\x01\x00\x00\x00\x01\x05\x01\x60\x00\x01\x7f' +
+                    b'\x02' + bytes([len(imports)]) + imports + b'\x07\x07\x01\x03run\x00\x00')
+            (generated/'wordcraft_web_bg.wasm').write_bytes(wasm)
+            (generated/'snippets/eframe-fixture/inline0.js').write_text(
+                'export function snippet(value) { return value + 7; }')
+            (generated/'wordcraft_web.js').write_text(
+                'import {snippet} from "./snippets/eframe-fixture/inline0.js";\n'
+                'export const wasmURL = new URL("wordcraft_web_bg.wasm", import.meta.url).href;\n'
+                'export class WebHandle { value() { return snippet(35); } }\n'
+                'export default async function init(bytes) {\n'
+                '  const imports = {"./snippets/eframe-fixture/inline0.js": {snippet: () => snippet(35)}};\n'
+                '  return (await WebAssembly.instantiate(bytes, imports)).instance.exports.run();\n'
+                '}\n')
+            output = root/'bundle'
+            config = {'rust_version':'fixture', 'tools':{'wasm-bindgen':{'version':'fixture'},
+                                                       'binaryen':{'version':'fixture'}}}
+            metadata = {'base':'b'*40, 'patch_sha256':'c'*64, 'native_patch_commit':'d'*40}
+            bundle_hash = build.assemble_editor('a'*40, native, fonts, metadata, generated, sdk,
+                                                child, licenses, output, config)
+            manifest = json.loads((output/'manifest.json').read_text())
+            self.assertEqual(bundle_hash, build.digest(output/'manifest.json'))
+            self.assertEqual(manifest['files']['wordcraft_web.js'], build.digest(output/'wordcraft_web.js'))
+            self.assertEqual(manifest['files']['wordcraft_web_bg.wasm'], build.digest(generated/'wordcraft_web_bg.wasm'))
+            self.assertTrue(all(path.is_file() for path in output.iterdir()))
+            self.assertFalse(any('/' in name for name in manifest['files']))
+            self.assertEqual(set(manifest['files']), {path.name for path in output.iterdir()} - {'manifest.json'})
+            for name, expected in manifest['files'].items():
+                self.assertEqual(expected, build.digest(output/name), name)
+            self.assertEqual(len(list(output.glob('wasm-snippet-*.js'))), 1)
+            # Remove the original sources: importing the published flat package
+            # must evaluate the snippet and preserve wasm-bindgen's public API.
+            shutil.rmtree(generated)
+            (root/'package.json').write_text('{"type":"module"}')
+            script = ('import {readFile} from "node:fs/promises"; '
+                      'const m = await import(process.argv[1]); '
+                      'const result = await m.default(await readFile(new URL(m.wasmURL))); '
+                      'console.log(JSON.stringify([new m.WebHandle().value(), result, m.wasmURL]));')
+            result = json.loads(subprocess.check_output(
+                ['node', '--input-type=module', '-e', script, (output/'wordcraft_web.js').as_uri()], text=True))
+            self.assertEqual(result, [42, 42, (output/'wordcraft_web_bg.wasm').as_uri()])
