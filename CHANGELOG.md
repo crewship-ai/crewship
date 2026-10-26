@@ -109,6 +109,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Mooring admission preserves the original human credential.** Authenticated chat receipts retain the original user revocation fence and exact credential through run admission and retries; legacy receipts remain unfenced and cannot authorize the new Mooring admission path.
 - Conversation transcript appends stay inside their configured storage root even when an existing transcript path is a symbolic link.
+- Adapt WordCraft C-E acceptance to actual HTTP commit receipts and passive native queue observations, keeping separate visual evidence, authenticated peers and participant undo requirements.
+
 - **Explicit crew managers can use ordinary member controls.** A live trusted Manage share enables adding and removing ordinary crew members in Settings. Role editing and removal of explicit crew roles remain administrator controls. Failed access checks and context switches withdraw grant-based controls.
 
 - **Crew sharing can create explicit trusted Manage grants.** The crew Share dialog and person Access editor offer Manage to trusted MEMBER/MANAGER recipients, preserves account mode and other grants, and keeps inactive shares visible for revocation after role changes. Guest shares remain View/Use; Manage does not assign roles or expose credentials.

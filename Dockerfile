@@ -64,6 +64,9 @@ COPY scripts/prepare-pdf-assets.mjs scripts/prepare-chat-workers.mjs scripts/che
 COPY tools/pages-build/sdk.ts ./tools/pages-build/
 # Standalone registry tooling is also part of the root TypeScript input graph.
 COPY tools/wordcraft-capabilities/ ./tools/wordcraft-capabilities/
+# Explicit C-E acceptance files participate in the root TypeScript graph.
+COPY e2e/wordcraft-ce/ ./e2e/wordcraft-ce/
+COPY playwright.wordcraft-ce.config.ts ./
 # The browser instantiates this shared closed model with its own pinned Yjs.
 # Copy only the schema source, without the separate Docs service runtime.
 COPY tools/docs-service/schema-core.mjs ./tools/docs-service/
