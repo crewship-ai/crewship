@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"math"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -25,6 +26,7 @@ type collaborationHumanContinuityTransport struct {
 type collaborationHumanFreshness struct {
 	deadline      atomic.Int64
 	credentialCap time.Duration
+	pins          atomic.Int32
 }
 
 func (a collaborationHumanAdmission) currentDeadline() time.Duration {
@@ -125,4 +127,21 @@ func (s *collaborationHumanRegistry) prepareHumanContinuity(ctx context.Context,
 		}
 		return publish()
 	}, nil
+}
+
+// Keep the original denial metadata while an operation/connection still needs
+// exact retirement. A pin is NOT authority: checkCaptured still refuses the
+// exhausted horizon, and an unknown participant never acquires this proof.
+func (s *collaborationHumanRegistry) pinHumanAdmission(participant string) (collaborationHumanAdmission, func(), error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.admissions[participant]
+	if !ok {
+		return collaborationHumanAdmission{}, nil, errCollaborationAdmission
+	}
+	if a.freshness == nil {
+		return a, func() {}, nil
+	} // legacy unit fixtures only
+	a.freshness.pins.Add(1)
+	return a, sync.OnceFunc(func() { a.freshness.pins.Add(-1) }), nil
 }

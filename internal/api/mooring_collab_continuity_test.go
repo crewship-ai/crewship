@@ -415,3 +415,70 @@ func TestCollaborationHumanContinuityExpiredPeerCannotRenewOrAffectFreshPeer(t *
 		t.Fatal("unaffected refreshed peer lost authority", err)
 	}
 }
+
+func TestCollaborationHumanContinuitySweepKeepsActiveDenialProof(t *testing.T) {
+	f := newContinuityRig(t, true)
+	storeBinding, err := f.s.storeBinding()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.bound(func(ctx context.Context) error {
+		f.advance(t, 5*time.Minute+time.Second)
+		f.s.mu.Lock()
+		f.s.sweepLocked(f.clock.boot, f.clock.now)
+		f.s.mu.Unlock()
+		// The real reconnect lookup must classify this exact expired original,
+		// even after a sweep. Arbitrary unknown participants are never expiry proof.
+		_, e := f.s.reconnect(ctx, storeBinding, f.owner, f.admission.participant)
+		if !errors.Is(e, errCollaborationAdmissionHorizon) {
+			t.Fatalf("active original lost its denial proof during sweep: %v", e)
+		}
+		if _, e = f.s.reconnect(ctx, storeBinding, f.owner, "unknown-participant"); errors.Is(e, errCollaborationAdmissionHorizon) || e == nil {
+			t.Fatal("unknown participant became proven expiry", e)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.s.mu.Lock()
+	f.s.sweepLocked(f.clock.boot, f.clock.now)
+	_, retained := f.s.admissions[f.admission.participant]
+	f.s.mu.Unlock()
+	if retained {
+		t.Fatal("completed operation leaked expired unconnected admission")
+	}
+}
+
+func TestCollaborationHumanContinuityLiveConnectionKeepsExpiredDenialUntilClose(t *testing.T) {
+	f := newContinuityRig(t, true)
+	original, closeConnection, err := f.s.pinHumanAdmission(f.admission.participant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeConnection()
+	f.advance(t, 5*time.Minute+time.Second)
+	f.s.mu.Lock()
+	f.s.sweepLocked(f.clock.boot, f.clock.now)
+	_, retained := f.s.admissions[original.participant]
+	f.s.mu.Unlock()
+	if !retained {
+		t.Fatal("live connection lost original expiry proof")
+	}
+	if err = f.check(t, true); !errors.Is(err, errCollaborationAdmissionHorizon) {
+		t.Fatal("expired live participant gained authority or lost exact denial", err)
+	}
+	// The same host close release is idempotent. It grants no new lifetime and
+	// the next sweep can discard an expired participant once no operation uses it.
+	closeConnection()
+	closeConnection()
+	f.s.mu.Lock()
+	f.s.sweepLocked(f.clock.boot, f.clock.now)
+	_, retained = f.s.admissions[original.participant]
+	f.s.mu.Unlock()
+	if retained {
+		t.Fatal("closed connection leaked expired admission")
+	}
+	if err = f.check(t, true); err == nil || errors.Is(err, errCollaborationAdmissionHorizon) {
+		t.Fatal("missing identity became an expiry capability", err)
+	}
+}

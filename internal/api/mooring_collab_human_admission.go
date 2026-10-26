@@ -141,7 +141,7 @@ func collaborationOpaqueID() (string, error) {
 
 func (s *collaborationHumanRegistry) sweepLocked(boot string, now time.Duration) {
 	for key, value := range s.admissions {
-		if value.boot != boot || now >= value.currentDeadline() {
+		if value.boot != boot || (now >= value.currentDeadline() && (value.freshness == nil || value.freshness.pins.Load() == 0)) {
 			delete(s.admissions, key)
 		}
 	}
@@ -415,12 +415,11 @@ func (s *collaborationHumanRegistry) runHumanOperation(r *http.Request, particip
 	if err != nil {
 		return err
 	}
-	s.mu.Lock()
-	admission, ok := s.admissions[participant]
-	s.mu.Unlock()
-	if !ok {
-		return errCollaborationAdmission
+	admission, unpin, err := s.pinHumanAdmission(participant)
+	if err != nil {
+		return err
 	}
+	defer unpin()
 	release, err := s.fence.acquire(ctx, admission.ingress)
 	if err != nil {
 		return err

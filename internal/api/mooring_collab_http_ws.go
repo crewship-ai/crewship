@@ -87,6 +87,16 @@ func (m *collaborationHTTPManager) websocket(w http.ResponseWriter, r *http.Requ
 		replyError(w, 403, "Mooring access denied")
 		return
 	}
+	pinned, unpinAdmission, pinErr := d.humans.pinHumanAdmission(c.admission.participant)
+	if pinErr != nil || pinned.freshness != c.admission.freshness {
+		if unpinAdmission != nil {
+			unpinAdmission()
+		}
+		c.mu.Unlock()
+		replyError(w, 403, "Mooring access denied")
+		return
+	}
+	defer unpinAdmission()
 	c.used = true
 	// The live authenticated HTTP request must match the ORIGINAL admission. Its
 	// fresh middleware snapshot cannot replace any original counter or horizon.
