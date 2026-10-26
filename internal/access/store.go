@@ -48,6 +48,8 @@ func validRight(r Right) bool {
 		return false
 	}
 	switch r.Kind {
+	case "crew":
+		return r.Operation == "view" || r.Operation == "use"
 	case "agent":
 		switch r.Operation {
 		case "discover", "chat", "run", "delegate":
@@ -102,6 +104,9 @@ func resourceExists(ctx context.Context, q queryer, workspace string, r Right) e
 	if r.Kind == "agent" {
 		query = `SELECT 1 FROM agents WHERE id=? AND workspace_id=? AND deleted_at IS NULL`
 	}
+	if r.Kind == "crew" {
+		query = `SELECT 1 FROM crews WHERE id=? AND workspace_id=? AND deleted_at IS NULL`
+	}
 	if r.Kind == "routine" {
 		query = `SELECT 1 FROM pipelines WHERE id=? AND workspace_id=? AND deleted_at IS NULL`
 	}
@@ -146,11 +151,11 @@ WHERE p.member_id=? AND p.resource_kind='routine' AND p.routine_id=? AND p.opera
 		return m, ErrDenied
 	}
 	var one int
-	err = q.QueryRowContext(ctx, `SELECT 1 FROM live_access_grants WHERE member_id=? AND resource_kind=? AND COALESCE(agent_id,project_id,routine_id)=? AND operation=?`, m.ID, r.Kind, r.ID, r.Operation).Scan(&one)
+	err = q.QueryRowContext(ctx, `SELECT 1 FROM live_access_grants WHERE member_id=? AND resource_kind=? AND COALESCE(agent_id,project_id,routine_id,crew_id)=? AND operation=?`, m.ID, r.Kind, r.ID, r.Operation).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
 		// Retained inert rows explain denial without treating them as authority.
 		var issuer string
-		err = q.QueryRowContext(ctx, `SELECT created_by FROM access_grants WHERE member_id=? AND resource_kind=? AND COALESCE(agent_id,project_id,routine_id)=? AND operation=?`, m.ID, r.Kind, r.ID, r.Operation).Scan(&issuer)
+		err = q.QueryRowContext(ctx, `SELECT created_by FROM access_grants WHERE member_id=? AND resource_kind=? AND COALESCE(agent_id,project_id,routine_id,crew_id)=? AND operation=?`, m.ID, r.Kind, r.ID, r.Operation).Scan(&issuer)
 		if errors.Is(err, sql.ErrNoRows) {
 			return m, ErrDenied
 		}
@@ -279,7 +284,7 @@ func (s Store) ReplaceIn(ctx context.Context, tx *sql.Tx, actor, user, workspace
 	}
 	// Read before modifying: a complete-document save must preserve the issuer
 	// and timestamp of unchanged rights, including inert shares.
-	rows, err := tx.QueryContext(ctx, `SELECT id,resource_kind,COALESCE(agent_id,project_id,routine_id),operation FROM access_grants WHERE member_id=?`, m.ID)
+	rows, err := tx.QueryContext(ctx, `SELECT id,resource_kind,COALESCE(agent_id,project_id,routine_id,crew_id),operation FROM access_grants WHERE member_id=?`, m.ID)
 	if err != nil {
 		return m, err
 	}
@@ -317,15 +322,17 @@ func (s Store) ReplaceIn(ctx context.Context, tx *sql.Tx, actor, user, workspace
 		if !seen[r] {
 			continue
 		}
-		var agentID, projectID, routineID any
+		var agentID, projectID, routineID, crewID any
 		if r.Kind == "agent" {
 			agentID = r.ID
+		} else if r.Kind == "crew" {
+			crewID = r.ID
 		} else if r.Kind == "routine" {
 			routineID = r.ID
 		} else {
 			projectID = r.ID
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO access_grants(id,member_id,resource_kind,agent_id,project_id,routine_id,operation,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, randomID(), m.ID, r.Kind, agentID, projectID, routineID, r.Operation, actor, tsformat.Format(time.Now())); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO access_grants(id,member_id,resource_kind,agent_id,project_id,routine_id,crew_id,operation,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, randomID(), m.ID, r.Kind, agentID, projectID, routineID, crewID, r.Operation, actor, tsformat.Format(time.Now())); err != nil {
 			return m, err
 		}
 	}

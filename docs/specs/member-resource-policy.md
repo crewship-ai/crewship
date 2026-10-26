@@ -974,3 +974,32 @@ exact draft ID/revision/base revision and live explicit rights in one writer
 transaction with audit. Validation is structural only; publishing creates no
 run, chat or attempt. Bounded manual runs of a published routine are described
 in [restricted workflows](restricted-workflows.md#guest-published-routines).
+
+
+## Explicit crew inheritance
+
+The existing member-policy GET/PUT and `crewship share|unshare crew CREW_ID`
+accept explicit `view` or `use` rights for an existing Guest. Only a current
+trusted workspace OWNER/ADMIN can issue them. A crew in another workspace or
+an unsupported crew operation is refused; this does not change crew roles.
+
+Crew View inherits `discover` on its current, non-retired agents. Crew Use
+inherits `discover`, `chat` and `run`, and never `delegate`, credential Use or
+Reveal. Agent list/detail remain the existing metadata-only Guest projection;
+overlapping direct and crew grants produce one agent row. Crew retirement,
+agent moves/removal, grant revocation and issuer loss invalidate admitted work;
+restoring the same source cannot revive an old attempt. New agents inherit
+from the current crew share without persisting individual agent grants.
+
+Saved policy/provenance lists only explicit crew grants. Access explanations
+read all granted crew names in one query; snapshots for private context/files
+contain the distinct effective leaf grants. Crew detail/management routes,
+crew Share dialogs/presets and trusted additive crew rights are subsequent
+slices. Existing resource editors preserve saved crew grants and can remove
+them. Credential grants and Pages migration are not added by this slice.
+
+```sh
+crewship share crew CREW_ID --with MEMBER_ID --operation use
+crewship share list crew CREW_ID
+crewship unshare crew CREW_ID --with MEMBER_ID --operation use
+```

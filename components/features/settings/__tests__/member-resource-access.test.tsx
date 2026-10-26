@@ -199,3 +199,21 @@ it("keeps inactive issuer metadata visible and reissues only after an explicit c
   const [,init]=fetchMock.mock.calls.find(([,init])=>init?.method==="PUT")!
   expect(JSON.parse(init.body)).toEqual({...policy,reissue:policy.rights})
 })
+
+
+it("keeps crew shares visible and preserves them while editing another resource", async () => {
+ const crew = {kind:"crew",id:"crew-1",operation:"use"}
+ fetchMock.mockImplementation(async (url:string,init?:RequestInit) => {
+  if(init?.method==="PUT") return response({...JSON.parse(String(init.body)),revision:8})
+  if(url.includes("/access/effective")) return response({membership_id:policy.membership_id,revision:7,account_restricted:true,explanation:"Crew inheritance",decisions:[]})
+  if(url.includes("/members/")) return response({...policy,rights:[...policy.rights,crew]})
+  return response([{id:"agent-1",name:"Shared agent"}])
+ })
+ show();fireEvent.click(screen.getByRole("button",{name:"Edit resource access"}))
+ expect(await screen.findByRole("button",{name:"Remove crew crew-1 use"})).toBeVisible()
+ fireEvent.click(screen.getByRole("button",{name:"Remove agent agent-1 chat"}))
+ fireEvent.click(saveButton())
+ await waitFor(()=>expect(fetchMock.mock.calls.filter(([,init])=>init?.method==="PUT")).toHaveLength(1))
+ const [,init]=fetchMock.mock.calls.find(([,init])=>init?.method==="PUT")!
+ expect(JSON.parse(init.body).rights).toEqual([crew])
+})
