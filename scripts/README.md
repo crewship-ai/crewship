@@ -197,3 +197,7 @@ an owned atime fixture on its Docker network-file source directory. It invokes t
 rejecting skips; the RED control must exhibit the expected resolver remount
 failure. It neither publishes an image nor activates a runtime. Do not run its
 fixture setup on a shared development host; use the candidate workflow.
+
+`tools/wordcraft-capabilities/generate.mjs` exports the pinned compiled WordCraft
+registry into a shared JSON capability catalog. Its [README](../tools/wordcraft-capabilities/README.md)
+documents the owned source/binary inputs, drift checks and default-deny schema limits.
