@@ -58,3 +58,75 @@ large checkpoint/receipt chunk distribution. Unsupported controls close all
 lanes without manufacturing an outcome; these paths must be connected before
 service enablement. The current 20 ms inbox poll can add dispatch jitter beyond
 the core timer's 100 ms deadline; end-to-end latency is not yet qualified.
+# Whole-document binding preparation experiment
+
+The default-off Cargo feature `wordcraft-binding-experiment` selects
+`experimental_binding::BindingAdapter`, inactive application preparation for
+the separate WordCraft binding checkpoint format. It consumes a bounded raw Yrs
+update inside the existing strict `PrepareAdapter`/private-dispatch contract.
+It does not execute engine commands. Callers must gate engine commands with
+external effects before execution; validating a resulting document cannot undo
+file, network, font-loading or macro effects.
+
+This is **untrusted DATA preparation for locally generated fixtures**, not a
+live-admission capability. Neither numeric origin nor declared basis proves
+authorship, allocation ownership or permission to modify another author's
+formatting history. Those proofs must be integrated before participant updates
+can be accepted. The basis envelope preserves producer data; it does not attest
+the original authoring checkpoint.
+
+Only explicit host `WriteScope::WholeDocument` configuration is accepted. Scoped
+block mandates are refused. Every update conservatively requires current reads
+and emits content effects for **all live targets**, including unchanged blocks
+and document metadata/structure. New/deleted identities and retained tombstones
+are reported separately. These are conservative fences, not precise affected
+block attribution: equal-value formatting can change CRDT history without
+changing native JSON. Precise deep-event tracing is required before narrower
+mandates can be supported.
+
+This adapter accepts one operation per atomic change and uses strict current
+read observations for every live/reserved target. It rejects stale concurrent
+text submissions even when the standalone binding could merge their Yrs data.
+The existing target-effect grammar cannot resurrect a tombstoned identity, so
+structural Undo requiring resurrection is unsupported. This is not a qualified
+collaboration session or complete Undo implementation.
+
+Candidate creation currently restores/copies the full checkpoint, scans complete
+inventories, validates an isolated binding clone and serializes a full candidate;
+the generic dispatcher revalidates that candidate. These correctness checks have
+not been qualified for interactive latency or process-memory growth.
+
+The adapter grants no participant authority, origin ownership or durable status.
+The host must authenticate/authorize the whole document, bind the input to its
+exact scope/change, reserve CRDT origins, and commit before any Saved receipt.
+Production registration, the production executable and session profiles do not
+select this adapter. Production checkpoints remain a separate format.
+
+The explicit `binding_prepare_host` example implements the inherited-FD entry
+contract and delegates framing, negotiation and preparation to the existing
+generic private dispatcher. `binding_prepare_fixture` generates local inputs
+from the pinned native fixture. To run the separate Go process/SQL regression:
+
+```sh
+crewship-heavy cargo build --manifest-path mooring/Cargo.toml \
+  --config mooring/.cargo/config.toml --locked --offline -p mooring-collab \
+  --features wordcraft-binding-experiment \
+  --example binding_prepare_host --example binding_prepare_fixture
+fixture_dir=$(mktemp -d)
+crewship-heavy mooring/target/debug/examples/binding_prepare_fixture "$fixture_dir"
+binary="$PWD/mooring/target/debug/examples/binding_prepare_host"
+crewship-heavy env MOORING_TEST_RUST_BINARY="$binary" \
+  MOORING_TEST_RUST_SHA256="$(sha256sum "$binary" | cut -d ' ' -f 1)" \
+  MOORING_TEST_WORDCRAFT_CHECKPOINT="$fixture_dir/checkpoint.json" \
+  MOORING_TEST_WORDCRAFT_PAYLOAD="$fixture_dir/payload.json" \
+  MOORING_TEST_WORDCRAFT_READS="$fixture_dir/reads.json" \
+  go test -tags mooring_binding_experiment ./internal/mooring \
+  -run '^TestBindingPrepareActualRustSQLReceiptAndRetry$' -count=1
+```
+
+This regression uses the existing SQL store, which still saves a complete
+checkpoint per revision. It proves neither journal/snapshot storage nor browser,
+MCP, concurrent structural intent, or production-session qualification. Retained
+historical checkpoint identity includes original generation and metadata; a
+future journal must reconstruct that exact basis before snapshots can replace
+historical checkpoint rows.

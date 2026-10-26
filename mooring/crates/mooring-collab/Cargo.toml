@@ -8,6 +8,7 @@ publish.workspace = true
 
 [features]
 default = []
+wordcraft-binding-experiment = []
 wordcraft-command-experiment = ["serde_json/float_roundtrip", "dep:sha2"]
 
 [dependencies]
@@ -29,3 +30,15 @@ yrs = "=0.28.0"
 name = "mooring-wordcraft-command-host"
 path = "src/command_host_main.rs"
 required-features = ["wordcraft-command-experiment"]
+
+[[example]]
+name = "binding_prepare_host"
+required-features = ["wordcraft-binding-experiment"]
+
+[[example]]
+name = "binding_prepare_fixture"
+required-features = ["wordcraft-binding-experiment"]
+
+[[test]]
+name = "binding_prepare"
+required-features = ["wordcraft-binding-experiment"]

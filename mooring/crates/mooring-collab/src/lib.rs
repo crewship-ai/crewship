@@ -4,6 +4,8 @@ pub mod command_experiment;
 use std::io::{self, Read, Write};
 pub mod dispatch;
 pub mod dispatch_causal;
+#[cfg(feature = "wordcraft-binding-experiment")]
+pub mod experimental_binding;
 #[cfg(unix)]
 pub mod session_actor;
 #[cfg(unix)]
