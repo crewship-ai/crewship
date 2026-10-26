@@ -1,6 +1,7 @@
 package sidecar
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -40,8 +41,12 @@ func (s *Server) handleMooringMCP(w http.ResponseWriter, r *http.Request) {
 		var params struct {
 			Name      string          `json:"name"`
 			Arguments json.RawMessage `json:"arguments"`
+			// MCP request metadata is an envelope field, not a command argument.
+			// It is bounded and duplicate-checked with the entire request and is
+			// deliberately neither interpreted nor forwarded to the host.
+			Meta json.RawMessage `json:"_meta"`
 		}
-		if decodeMooringMCP(req.Params, &params) != nil {
+		if decodeMooringMCP(req.Params, &params) != nil || (len(params.Meta) != 0 && bytes.TrimSpace(params.Meta)[0] != '{') {
 			s.writeRoutinesMCPToolResult(w, req, 400, mustJSON(map[string]string{"error": "invalid arguments"}))
 			return
 		}
