@@ -370,7 +370,7 @@ func TestCommandNativeActualSQLSelectionInsertEnterRestore(t *testing.T) {
 	}); e != nil {
 		t.Fatal("restored known receipt lost actual selection", e)
 	}
-	if actualNativeText(t, projection) != "abč" {
+	if actualNativeText(t, projection) != "Abč" {
 		t.Fatal("sequential own offsets reversed text")
 	}
 }

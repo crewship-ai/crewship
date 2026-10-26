@@ -155,7 +155,7 @@ func (p *commandNativePort) Close() { p.poison(); <-p.done }
 // Closed object decoder also rejects duplicate keys and Go's case-insensitive
 // struct-field aliases. Every wire object here has flat, explicitly named keys.
 func commandNativeDecode(raw []byte, out any, required ...string) error {
-	canonical, e := mooring.CanonicalJSON(raw)
+	canonical, e := commandPrivateFrameJSON(raw)
 	if e != nil {
 		return errCommandStore
 	}
@@ -249,7 +249,7 @@ func (p *commandNativePort) exchangeChecked(ctx context.Context, kind string, fi
 		return errCommandUnknown
 	}
 	var envelope map[string]json.RawMessage
-	canonical, e := mooring.CanonicalJSON(raw)
+	canonical, e := commandPrivateFrameJSON(raw)
 	if e != nil || json.Unmarshal(canonical, &envelope) != nil {
 		p.poison()
 		return errCommandUnknown
@@ -534,10 +534,10 @@ var _ collaborationCommandPort = (*commandNativePort)(nil)
 // reconstructing the checkpoint bytes used for SQL CAS. Native engine schema
 // and history validation remain the pinned Rust host's responsibility.
 func commandNativeCheckpoint(raw []byte, document, generation string, revision uint64) error {
-	if len(raw) == 0 || len(raw) > commandNativeFrameLimit || !commandNativeID(document) || !commandNativeID(generation) {
+	if len(raw) == 0 || len(raw) > commandCheckpointLimit || !commandNativeID(document) || !commandNativeID(generation) {
 		return errCommandStore
 	}
-	canonical, e := mooring.CanonicalJSON(raw)
+	canonical, e := commandCheckpointJSON(raw)
 	if e != nil {
 		return errCommandStore
 	}

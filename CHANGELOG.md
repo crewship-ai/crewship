@@ -10,6 +10,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 - Add a disabled native WordCraft command HTTP controller with immutable viewer fences, confirmed SQL-only projections and bounded current-rights delivery; product startup registration remains separate.
+- Validate private C1 checkpoints and quoted RPC frames with their existing 4MiB/32MiB byte bounds and a fixed bounded JCS structure profile, preserving the legacy command-envelope limits.
+
 - Preserve bounded native C1 command selection in the original immutable staged operation receipt and atomic SQL outcome, without adding a shared peer caret or inferring selection from input.
 
 - Add a disabled command-document runtime lifecycle that initializes only new documents, restores confirmed SQL state, and retains existing owner fencing without falling back to the legacy adapter.

@@ -126,3 +126,16 @@ when the stage validation was observed before any engine call and K is absent;
 engine errors and uncertain outcomes are conservative refusals without that
 proof. RPC process tests use actual native engines but simulate SQL callbacks;
 real SQL integration must be verified by the product bridge separately.
+
+
+### Private C1 JSON profiles
+
+The Go native port validates checkpoint JSON with the existing 4 MiB product
+limit before canonicalizer allocation. Private RPC frames retain the existing
+32 MiB limit so quoting a valid checkpoint does not apply an unrelated HTTP
+envelope budget. Both use RFC 8785 JCS with strict UTF8 and duplicate-key
+rejection, depth at most 64 and at most 1,048,576 structural delimiters outside
+strings (`{`, `[`, `,`, `:`). The canonical checkpoint bytes used for digest,
+SQL storage and compare-and-swap are never replaced by the validator's output.
+The legacy operation-envelope canonicalization remains unchanged at 1 MiB and
+32,768 structural delimiters; app-command input limits are also unchanged.
