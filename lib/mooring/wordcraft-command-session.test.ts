@@ -107,19 +107,68 @@ it("serializes peer projection consumption and never lets a peer acknowledge an 
   await vi.advanceTimersByTimeAsync(2000); expect(fetcher).toHaveBeenCalledTimes(2)
   f.control.close()
 })
-it("ignores a cancelled idle read when the original command is captured, without replaying either", async () => {
+it("ignores an obsolete idle read while the original command is retained, without replaying either", async () => {
   const f = setup(); f.control.start()
   let resolveRead!: (v: Response) => void
-  fetcher.mockImplementationOnce(() => new Promise(resolve => { resolveRead = resolve }))
+  let readSignal!: AbortSignal
+  fetcher.mockImplementationOnce((_url, init) => new Promise((resolve, reject) => {
+    resolveRead = resolve; readSignal = init.signal
+    readSignal.addEventListener("abort", () => reject(new Error("read cancelled")), { once: true })
+  }))
   await vi.advanceTimersByTimeAsync(2000)
   fetcher.mockRejectedValueOnce(new Error("unknown submit"))
   expect(f.control.submit(proposal, 0)).toBe(true)
+  expect(readSignal.aborted).toBe(false)
   const peer = opened(); peer.projection.revision = 9
   resolveRead(response(peer)); await flush()
   expect(f.project).not.toHaveBeenCalled()
   await vi.waitFor(() => expect(f.state).toHaveBeenCalledWith("unknown"))
   expect(fetcher).toHaveBeenCalledTimes(2); expect(f.stopped).not.toHaveBeenCalled()
   f.control.close()
+})
+it("ignores a late idle cut after own Saved and resumes fresh polling without replay", async () => {
+  const f = setup(); f.control.start()
+  let resolveRead!: (v: Response) => void
+  let readSignal!: AbortSignal
+  fetcher.mockImplementationOnce((_url, init) => new Promise((resolve, reject) => {
+    resolveRead = resolve; readSignal = init.signal
+    readSignal.addEventListener("abort", () => reject(new Error("read cancelled")), { once: true })
+  }))
+  await vi.advanceTimersByTimeAsync(2000)
+  fetcher.mockImplementationOnce((_url, init) => Promise.resolve(response(committed(JSON.parse(init.body).raw))))
+  expect(f.control.submit(proposal, 0)).toBe(true)
+  await vi.waitFor(() => expect(f.project).toHaveBeenCalledOnce())
+  f.control.applied(true, 1)
+  expect(f.state).toHaveBeenLastCalledWith("saved")
+  expect(readSignal.aborted).toBe(false)
+  await vi.advanceTimersByTimeAsync(2000)
+  expect(fetcher).toHaveBeenCalledTimes(2) // Never overlap two idle reads.
+  // This cut predates our original, even though it arrives after its apply.
+  resolveRead(response(opened())); await flush()
+  expect(f.project).toHaveBeenCalledOnce()
+  expect(f.stopped).not.toHaveBeenCalled()
+  expect(f.control.canEdit()).toBe(true)
+  const fresh = opened(); fresh.projection.revision = 2
+  fetcher.mockResolvedValueOnce(response(fresh))
+  await vi.advanceTimersByTimeAsync(2000)
+  await vi.waitFor(() => expect(f.project).toHaveBeenCalledTimes(2))
+  expect(f.project.mock.calls[1]).toEqual([fresh.projection, null])
+  expect(fetcher.mock.calls.map(call => JSON.parse(call[1].body).action)).toEqual(["read", "submit", "read"])
+  f.control.close()
+})
+it("still closes on access denial from an idle read arriving after own Saved", async () => {
+  const f = setup(); f.control.start()
+  let resolveRead!: (v: Response) => void
+  fetcher.mockImplementationOnce(() => new Promise(resolve => { resolveRead = resolve }))
+  await vi.advanceTimersByTimeAsync(2000)
+  fetcher.mockImplementationOnce((_url, init) => Promise.resolve(response(committed(JSON.parse(init.body).raw))))
+  expect(f.control.submit(proposal, 0)).toBe(true)
+  await vi.waitFor(() => expect(f.project).toHaveBeenCalledOnce())
+  f.control.applied(true, 1)
+  resolveRead(response({}, 403)); await flush()
+  expect(f.stopped).toHaveBeenCalledOnce()
+  expect(f.state).toHaveBeenLastCalledWith("stopped")
+  expect(f.control.canEdit()).toBe(false)
 })
 it("keeps reader input disabled and closes on a later delivery denial", async () => {
   const f = setup(false); f.control.start()

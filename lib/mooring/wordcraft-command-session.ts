@@ -61,7 +61,7 @@ export interface CommandSessionCallbacks {
 export function createCommandSession(workspace: string, page: string, opened: CommandResponse, write: boolean, callbacks: CommandSessionCallbacks) {
   let current = opened.projection, original: string | undefined, busy = false, reading = false, stopped = false, awaitingApply = false
   let timer: ReturnType<typeof setTimeout> | undefined, active: AbortController | undefined
-  let settled = 0
+  let settled = 0, commandEpoch = 0
   const state = (s: CommandState) => { if (!stopped) callbacks.state(s) }
   const stop = () => { if (stopped) return; stopped = true; clearTimeout(timer); active?.abort(); callbacks.state(original ? "unknown" : "stopped"); callbacks.stopped() }
   const qualified = (value: CommandResponse) => {
@@ -70,21 +70,29 @@ export function createCommandSession(workspace: string, page: string, opened: Co
   const request = async (action: "read" | "submit" | "outcome", raw?: string) => {
     const abort = new AbortController(); active = abort
     const timeout = setTimeout(() => abort.abort(), action === "read" ? 2_500 : 6_000)
-    try { const result = await commandRequest(workspace, page, { action, view: opened.view, ...(raw !== undefined ? { raw } : {}) }, abort.signal); qualified(result); return result }
+    try { const result = await commandRequest(workspace, page, { action, view: opened.view, ...(raw !== undefined ? { raw } : {}) }, abort.signal); if (action !== "read") qualified(result); return result }
     finally { clearTimeout(timeout); if (active === abort) active = undefined }
   }
   const poll = async () => {
-    if (stopped || busy || original || awaitingApply) return
+    if (stopped || busy || reading || original || awaitingApply) return
+    const epoch = commandEpoch
     busy = true; reading = true
     try {
       const result = await request("read")
-      if (stopped || original) return
+      if (stopped || original || epoch !== commandEpoch) return
+      qualified(result)
       if (result.outcome !== null) throw new Error("unexpected_receipt")
       if (result.projection.revision > current.revision) {
         current = result.projection; awaitingApply = true; callbacks.project(current, null)
       } else schedule()
-    } catch { if (!stopped && !original) stop() }
-    finally { reading = false; if (!original) busy = false }
+    } catch (error) {
+      if (!stopped && !original && (epoch === commandEpoch || (error instanceof Error && error.message === "access_unavailable"))) stop()
+    }
+    finally {
+      reading = false
+      if (epoch === commandEpoch) busy = false
+      else if (!busy && !original && !awaitingApply) schedule()
+    }
   }
   const schedule = () => { clearTimeout(timer); if (!stopped && !original && !awaitingApply) timer = setTimeout(() => { void poll() }, 2_000) }
   const accept = async (result: CommandResponse) => {
@@ -104,9 +112,6 @@ export function createCommandSession(workspace: string, page: string, opened: Co
     submit(proposalRaw: string, shownRevision: number) {
       if (stopped || !write || (busy && !reading) || original || awaitingApply || settled >= 256 || shownRevision !== current.revision) return false
       try {
-        // An idle read has no mutation to replay. Cancel/ignore it before
-        // capturing this one original against the last actually shown cut.
-        if (reading) active?.abort()
         if (proposalRaw.length > COMMAND_INPUT_BYTES || bytes(proposalRaw) > COMMAND_INPUT_BYTES) throw new Error("invalid_command")
         const proposal: unknown = JSON.parse(proposalRaw)
         // Registry/catalog/target/parameter semantics belong to the actual
@@ -118,7 +123,9 @@ export function createCommandSession(workspace: string, page: string, opened: Co
         if (!commandID(op)) throw new Error("invalid_identity")
         const raw = commandCanonicalJSON({ op_id: op, generation: current.generation, participant: opened.actor, base_revision: current.revision, target: proposal.target, command: proposal.command, params: proposal.params })
         if (bytes(raw) > COMMAND_INPUT_BYTES) throw new Error("command_too_large")
-        original = raw; busy = true; clearTimeout(timer); state("pending")
+        // Let an on-wire idle read finish within its existing deadline: cancelling
+        // it can poison the shared native RPC port. Its cut predates this original.
+        commandEpoch++; original = raw; busy = true; clearTimeout(timer); state("pending")
         void request("submit", raw).then(async result => { if (!stopped) await accept(result) }).catch(error => { if (!stopped) { if (error instanceof Error && error.message === "access_unavailable") stop(); else state("unknown") } }).finally(() => { busy = false })
         return true
       } catch { stop(); return false }
