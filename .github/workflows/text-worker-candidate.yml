@@ -1,0 +1,76 @@
+name: Text Worker Candidate Check
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/text-worker-candidate.yml
+      - .github/workflows/text-worker-release.yml
+      - cmd/crewship-restricted-runner/**
+      - scripts/ci/prepare-text-release.sh
+      - scripts/ci/test_text_release.py
+      - internal/restrictedruntime/**
+      - internal/restricteddispatch/**
+      - go.mod
+      - go.sum
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@90ad2b35f69faf97585ad74d28fa006d2739b7af
+        with:
+          go-version-file: go.mod
+      - name: Test runner and prepare the licensed release context
+        run: |
+          go test ./cmd/crewship-restricted-runner -count=1 -timeout 5m
+          bash scripts/ci/prepare-text-release.sh "$RUNNER_TEMP/text-context"
+      - name: Build the candidate without publication
+        run: docker build --pull --tag crewship-text-candidate:verify "$RUNNER_TEMP/text-context"
+      - name: Exercise the actual text worker and durable accounting
+        run: |
+          image=$(docker image inspect --format '{{.Id}}' crewship-text-candidate:verify)
+          CREWSHIP_RESTRICTED_LIVE=1 CREWSHIP_RESTRICTED_PRODUCTION_IMAGE="$image" \
+            go test -tags restrictedruntime_live ./internal/restricteddispatch \
+              -run '^TestLiveProductionWorkerDurableAccounting$' -count=1 -timeout 10m -json > "$RUNNER_TEMP/text-worker-tests.jsonl"
+          python3 - "$RUNNER_TEMP/text-worker-tests.jsonl" <<'PYTEST'
+          import json, sys
+          events = [json.loads(line) for line in open(sys.argv[1])]
+          name = 'TestLiveProductionWorkerDurableAccounting'
+          selected = [e['Action'] for e in events if e.get('Test') == name]
+          if selected.count('run') != 1 or selected.count('pass') != 1 or 'skip' in selected or 'fail' in selected:
+              raise SystemExit('The real text worker canary must execute and pass exactly once')
+          PYTEST
+      - name: Scan before this recipe can be approved
+        id: scan
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439
+        with:
+          image: crewship-text-candidate:verify
+          fail-build: true
+          severity-cutoff: critical
+          output-format: sarif
+      - name: Record the tested source and local image identity
+        env:
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          docker image inspect crewship-text-candidate:verify > "$RUNNER_TEMP/text-context/image-inspect.json"
+          printf '%s\n' "$SOURCE_SHA" > "$RUNNER_TEMP/text-context/tested-source.txt"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: text-worker-candidate-check-${{ github.event.pull_request.head.sha }}
+          path: |
+            ${{ runner.temp }}/text-context/release-source.json
+            ${{ runner.temp }}/text-context/image-inspect.json
+            ${{ runner.temp }}/text-context/tested-source.txt
+            ${{ steps.scan.outputs.sarif }}
+            ${{ runner.temp }}/text-worker-tests.jsonl
+          if-no-files-found: warn
+          retention-days: 14

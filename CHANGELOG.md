@@ -10,6 +10,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 - ⚠️ **Behaviour change: Host lifecycle hooks require instance administration.** Creating, editing or enabling host commands now requires an instance administrator and appropriate token scope. Existing host hooks are retained but disabled for explicit review after upgrade; restored hooks also require local review. UI and CLI explain how an administrator can review and re-enable them. Live host-hook changes commit atomically with their authorization audit. Shell output capture is bounded while retaining the existing truncation and exit-result behavior. Container hooks and the default lifecycle pause are unchanged.
+- **Restricted text workers have an independent release producer.** A main-only manual workflow can publish scanned, signed immutable `responses_text` candidates with source, binary and license provenance. Pull requests and publication test the real production worker against synthetic data; signing requires the exact candidate digest to pass. Image approval, host qualification and Guest runtime acceptance remain separate steps.
 
 - **Restricted native scratch tools can fail on noatime-backed Docker storage.** The native image rebuilds bubblewrap with an atime-preserving remount fix while retaining the inner workspace sandbox and unchanged container security policies.
 
