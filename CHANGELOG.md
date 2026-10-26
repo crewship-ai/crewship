@@ -12,6 +12,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Opt-in WordCraft controls could accept parameters outside their catalog profiles:** the gate now validates enum choices, finite bounds, unions and nested closed schemas before dispatch, and refuses unsupported schema combinations or values with custom JSON serialization.
 
 - **Unqualified WordCraft controls can appear usable:** an opt-in catalog ribbon and shared shortcut gate now require qualified commands and effective participant permissions; product host integration remains separate.
+- **Copy feedback can outlive onboarding:** the copied-command reset timer now clears when the page unmounts, preventing delayed updates after leaving setup.
 
 - **Idle work polling avoids unnecessary writer transactions.** Empty or not-yet-eligible queues use a fresh read hint; capacity, deadlines and attempt ownership remain checked in the claiming transaction when work is present.
 - ⚠️ **Behaviour change: Host lifecycle hooks require instance administration.** Creating, editing or enabling host commands now requires an instance administrator and appropriate token scope. Existing host hooks are retained but disabled for explicit review after upgrade; restored hooks also require local review. UI and CLI explain how an administrator can review and re-enable them. Live host-hook changes commit atomically with their authorization audit. Shell output capture is bounded while retaining the existing truncation and exit-result behavior. Container hooks and the default lifecycle pause are unchanged.
