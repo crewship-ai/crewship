@@ -259,6 +259,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Crew sharing is available from the web controls.** Workspace administrators can share View/Use from crew Settings or select Crew in a person’s resource Access editor. The dialog explains the current/future agent audience, conditional execution and the exclusion of Delegate, credential visibility and crew administration. Existing API/CLI authorization, issuer provenance, revision conflicts and account modes are preserved.
 
+- **Crew View/Use shares support explicit presets.** Administrators can preview and confirm None, View or Use in person Access or the existing API/CLI flow. Preview explains the current/future agent audience; unrelated grants, original issuers and older preset selections are preserved. Crew presets grant neither Delegate, credential visibility nor administration.
+
 ### Upgrade and recovery notes
 
 - Preserve the configured v1 audit/journal root in encrypted instance recovery kits after secret re-encryption; successful envelope conversion does not authorize retiring that root. ⚠️ **Behaviour change:** Instance backup now rejects an invalid `ENCRYPTION_KEY` instead of producing a recovery kit with an unusable audit root.

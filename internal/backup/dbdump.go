@@ -221,10 +221,11 @@ var BackupTables = []string{
 	"approvals_queue",
 	"routine_folders", // pipelines.folder_id → routine_folders, so folders land first (ODCH-RT-01)
 	"pipelines",
-	"routine_folder_members",   // FK pipeline_id → pipelines, folder_id → routine_folders: after both (ODCH-RT-01)
-	"routine_templates",        // saved routine definitions (ODCH-RT-22); FK workspace only
-	"routine_test_results",     // latest Test run per definition hash (ODCH-RT-13); FK workspace only
-	"access_preset_selections", // informational choice; after membership and typed resource parents
+	"routine_folder_members",        // FK pipeline_id → pipelines, folder_id → routine_folders: after both (ODCH-RT-01)
+	"routine_templates",             // saved routine definitions (ODCH-RT-22); FK workspace only
+	"routine_test_results",          // latest Test run per definition hash (ODCH-RT-13); FK workspace only
+	"access_preset_selections",      // informational choice; after membership and typed resource parents
+	"crew_access_preset_selections", // after crew and membership parents
 	"pipeline_versions",
 	"pipeline_drafts",
 	"pipeline_schedules",
