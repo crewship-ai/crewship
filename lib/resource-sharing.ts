@@ -2,7 +2,7 @@ import { z } from "zod"
 import { presetSelectionSchema } from "./resource-preset-selection"
 
 export const resourceRightSchema = z.object({
-  kind: z.enum(["agent", "project", "routine"]), id: z.string().min(1), operation: z.string(),
+  kind: z.enum(["agent", "project", "routine", "crew"]), id: z.string().min(1), operation: z.string(),
 })
 export const resourcePolicySchema = z.object({
   membership_id: z.string().min(1), revision: z.number().int().positive(),

@@ -17,7 +17,7 @@ func memberDepartureSnapshot(ctx context.Context, tx *sql.Tx, workspace, user st
 		return nil, err
 	}
 	rights := []access.Right{}
-	rows, err := tx.QueryContext(ctx, `SELECT resource_kind,COALESCE(agent_id,project_id,routine_id),operation FROM access_grants WHERE member_id=? ORDER BY resource_kind,COALESCE(agent_id,project_id,routine_id),operation`, id)
+	rows, err := tx.QueryContext(ctx, `SELECT resource_kind,COALESCE(agent_id,project_id,routine_id,crew_id),operation FROM access_grants WHERE member_id=? ORDER BY resource_kind,COALESCE(agent_id,project_id,routine_id,crew_id),operation`, id)
 	if err != nil {
 		return nil, err
 	}
