@@ -24,3 +24,8 @@ libc = "=0.2.191"
 [dev-dependencies]
 mooring-text = { path = "../mooring-text" }
 yrs = "=0.28.0"
+
+[[bin]]
+name = "mooring-wordcraft-command-host"
+path = "src/command_host_main.rs"
+required-features = ["wordcraft-command-experiment"]

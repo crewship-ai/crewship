@@ -93,3 +93,36 @@ sources are reproducible with Cargo metadata. Their presence does not establish
 a complete license audit or an attribution bundle for distribution; that remains
 separate qualification. Production authority/SQL integration, peer projection,
 UI, deployment, crash recovery and GateC are outside this experiment.
+
+
+## Private native host channel (default off)
+
+The optional `mooring-wordcraft-command-host` binary requires the existing
+`wordcraft-command-experiment` Cargo feature. It accepts only a connected,
+inherited AF_UNIX stream at FD 3 (`MOORING_C1_HOST_FD=3`), not a listener or a
+public endpoint. Trusted startup arguments select `--engine` (an absolute
+artifact path), `--engine-sha256` (`sha256:<hex>`) and `--runtime-ref`. The helper
+ELF bytes are checked before each spawn; the engine also verifies the existing
+source/patch/catalog identity. Artifact paths belong to the trusted host and
+must remain immutable while selected for execution.
+
+Frames are a four-byte big-endian length and UTF-8 JSON, at most 32 MiB. A frame
+in progress and writes have bounded total deadlines; malformed/unknown fields
+or protocol/correlation syntax close the channel without replay. Requests are a
+closed `kind` enum: `init`, `restore`, `stage`, `confirm`, `reject`, `status`,
+`projection`, all with `protocol:1` and a bounded `request_id`. No app command is
+added. `checkpoint_json`, `receipt_json`, `input_json` and `native_json` are JSON
+**strings**; the host must preserve exact checkpoint/receipt bytes.
+
+Only the trusted Go SQL bridge may send admission and confirmation. A retained
+opaque `stage_ref` identifies one immutable candidate; possession of that string
+by a public caller is never authorization to commit. Confirm is exclusively the
+callback after the exact SQL checkpoint+receipt transaction commits. Unknown SQL
+outcomes retain K and require SQL reconciliation. Restore accepts canonical SQL
+P in a fresh generation, including as the first call, and does not rewrite SQL.
+Status and projection are pure DATA: they neither execute engine commands nor
+establish delivery rights or Saved. A `no_candidate:true` error is allowed only
+when the stage validation was observed before any engine call and K is absent;
+engine errors and uncertain outcomes are conservative refusals without that
+proof. RPC process tests use actual native engines but simulate SQL callbacks;
+real SQL integration must be verified by the product bridge separately.

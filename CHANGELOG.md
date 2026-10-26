@@ -10,6 +10,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 - Add a disabled command-document runtime lifecycle that initializes only new documents, restores confirmed SQL state, and retains existing owner fencing without falling back to the legacy adapter.
+- Add a default-off private inherited-FD WordCraft command host that pins its native helper and stages immutable checkpoints for trusted SQL confirmation, without exposing a public commit endpoint.
 
 - Keep the opt-in WordCraft command host candidate separate from confirmed state until a trusted host SQL-success callback, retaining participant undo and committed operation receipts across checkpoint recovery.
 - Preserve new command-document formats and immutable engine pins while legacy collaboration adapters refuse their payloads, including when command support is disabled.

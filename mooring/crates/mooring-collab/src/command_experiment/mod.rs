@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
+pub mod native_channel;
 pub mod process;
 mod staging;
 pub use staging::StagedCommit;
