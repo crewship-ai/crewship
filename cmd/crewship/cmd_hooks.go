@@ -62,8 +62,8 @@ Examples:
   crewship hooks enable hk_abc
   crewship hooks disable hk_abc
 
-Writes require OWNER or ADMIN. Creating or editing a shell hook requires
-OWNER — shell handlers execute commands on the crewshipd host.`,
+Non-host writes and deletion require workspace OWNER or ADMIN. Creating, editing or enabling a host shell hook requires
+an instance administrator — shell handlers execute commands on the crewshipd host.`,
 }
 
 // hookEventNames / hookHandlerKinds are rendered from the engine's own
@@ -132,7 +132,7 @@ func hookWriteFlags(cmd *cobra.Command) {
 	cmd.Flags().String("event", "", "Lifecycle event ("+strings.Join(hookEventNames(), " | ")+")")
 	cmd.Flags().String("handler", "", "Handler kind ("+strings.Join(hookHandlerKinds, " | ")+")")
 	cmd.Flags().String("url", "", "http handler: destination URL")
-	cmd.Flags().String("command", "", "shell handler: command to execute on the host (OWNER only)")
+	cmd.Flags().String("command", "", "shell handler: command to execute on the host (instance administrator only)")
 	cmd.Flags().String("subagent", "", "subagent handler: agent slug or ID to dispatch")
 	cmd.Flags().String("handler-config", "", "Raw handler_config JSON — escape hatch for keys the flags above don't cover")
 	cmd.Flags().String("crew", "", "Scope the hook to one crew (slug or ID); omit for workspace-wide")
@@ -265,7 +265,7 @@ var hooksCreateCmd = &cobra.Command{
 	Short: "Register a new lifecycle hook",
 	Long: `Register a hook that fires on a platform lifecycle event.
 
-Requires OWNER or ADMIN. --handler shell additionally requires OWNER: a
+Requires OWNER or ADMIN. --handler shell requires an instance administrator: a
 shell hook runs its command on the crewshipd host, which is a strictly
 larger grant than the rest of the admin surface.
 
@@ -318,8 +318,8 @@ var hooksUpdateCmd = &cobra.Command{
 	Long: `Patch an existing hook. Only the flags you pass are sent — everything
 else keeps its current value on the server.
 
-Requires OWNER or ADMIN. Editing a shell hook, or converting a hook INTO a
-shell hook, requires OWNER.
+Non-host edits require workspace OWNER or ADMIN. Editing a host shell hook, or converting a hook INTO a
+shell hook, requires an instance administrator.
 
 Examples:
   crewship hooks update hk_abc --url https://new.test/hook
@@ -402,14 +402,15 @@ Examples:
 // hookDetail is the single-hook projection create/update return — the same
 // shape GET /api/v1/hooks emits per row.
 type hookDetail struct {
-	ID            string         `json:"id" yaml:"id"`
-	CrewID        string         `json:"crew_id" yaml:"crew_id"`
-	Event         string         `json:"event" yaml:"event"`
-	HandlerKind   string         `json:"handler_kind" yaml:"handler_kind"`
-	HandlerConfig map[string]any `json:"handler_config" yaml:"handler_config"`
-	Enabled       bool           `json:"enabled" yaml:"enabled"`
-	Blocking      bool           `json:"blocking" yaml:"blocking"`
-	CreatedAt     string         `json:"created_at" yaml:"created_at"`
+	HostReviewRequired bool           `json:"host_review_required" yaml:"host_review_required"`
+	ID                 string         `json:"id" yaml:"id"`
+	CrewID             string         `json:"crew_id" yaml:"crew_id"`
+	Event              string         `json:"event" yaml:"event"`
+	HandlerKind        string         `json:"handler_kind" yaml:"handler_kind"`
+	HandlerConfig      map[string]any `json:"handler_config" yaml:"handler_config"`
+	Enabled            bool           `json:"enabled" yaml:"enabled"`
+	Blocking           bool           `json:"blocking" yaml:"blocking"`
+	CreatedAt          string         `json:"created_at" yaml:"created_at"`
 }
 
 func printHookDetail(verb string, hk hookDetail) {
@@ -432,6 +433,9 @@ func printHookDetail(verb string, hk hookDetail) {
 		mode = "blocking"
 	}
 	fmt.Printf("  state    %s, %s\n", state, mode)
+	if hk.HostReviewRequired {
+		fmt.Println("  review   Instance administrator must review the command and run crewship hooks enable ID; lifecycle hooks remain globally paused unless configured by the operator.")
+	}
 }
 
 var hooksListCmd = &cobra.Command{
@@ -473,14 +477,15 @@ var hooksListCmd = &cobra.Command{
 		// always blank. The target is derived from handler_config below.
 		var body struct {
 			Rows []struct {
-				ID            string         `json:"id" yaml:"id"`
-				CrewID        string         `json:"crew_id" yaml:"crew_id"`
-				Event         string         `json:"event" yaml:"event"`
-				HandlerKind   string         `json:"handler_kind" yaml:"handler_kind"`
-				HandlerConfig map[string]any `json:"handler_config" yaml:"handler_config"`
-				Enabled       bool           `json:"enabled" yaml:"enabled"`
-				Blocking      bool           `json:"blocking" yaml:"blocking"`
-				CreatedAt     string         `json:"created_at" yaml:"created_at"`
+				HostReviewRequired bool           `json:"host_review_required" yaml:"host_review_required"`
+				ID                 string         `json:"id" yaml:"id"`
+				CrewID             string         `json:"crew_id" yaml:"crew_id"`
+				Event              string         `json:"event" yaml:"event"`
+				HandlerKind        string         `json:"handler_kind" yaml:"handler_kind"`
+				HandlerConfig      map[string]any `json:"handler_config" yaml:"handler_config"`
+				Enabled            bool           `json:"enabled" yaml:"enabled"`
+				Blocking           bool           `json:"blocking" yaml:"blocking"`
+				CreatedAt          string         `json:"created_at" yaml:"created_at"`
 			} `json:"rows" yaml:"rows"`
 			Count int `json:"count" yaml:"count"`
 		}
@@ -501,6 +506,9 @@ var hooksListCmd = &cobra.Command{
 				if r.Enabled {
 					enabled = "yes"
 				}
+				if r.HostReviewRequired {
+					enabled = "review required"
+				}
 				blocking := "no"
 				if r.Blocking {
 					blocking = "yes"
@@ -509,6 +517,12 @@ var hooksListCmd = &cobra.Command{
 				rows = append(rows, []string{r.ID, r.Event, r.HandlerKind, target, enabled, blocking, r.CreatedAt})
 			}
 			f.Table(header, rows)
+			for _, r := range body.Rows {
+				if r.HostReviewRequired {
+					fmt.Println("Host hooks pending review require an instance administrator to inspect the command and run crewship hooks enable ID.")
+					break
+				}
+			}
 		})
 	},
 }

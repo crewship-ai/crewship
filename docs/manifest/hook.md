@@ -12,7 +12,7 @@ commands, dispatch sub-agents, or call HTTP endpoints. Because that
 surface is sensitive (arbitrary shell, third-party network egress),
 registration is kept out of the manifest and behind an explicit
 role gate: `crewship hooks create` / `POST /api/v1/hooks` (OWNER or
-ADMIN; shell handlers OWNER only), or `hooks.Register` from Go.
+ADMIN; host shell handlers require an instance administrator), or `hooks.Register` from Go.
 
 The manifest therefore exposes exactly one verb: **toggle**. If the
 hook does not exist server-side, `crewship apply` fails with
@@ -220,9 +220,9 @@ deliberately don't, because:
 1. **Shell hooks execute arbitrary commands.** A hook registered in
    YAML would let any operator with manifest-apply rights smuggle
    shell commands into the supervisor — an obvious privilege
-   escalation. `POST /api/v1/hooks` gates that on OWNER explicitly;
+   escalation. `POST /api/v1/hooks` gates that on instance administrator authority explicitly;
    `crewship apply` has no comparable per-document role check, so
-   routing creation through it would launder an OWNER-only grant
+   routing creation through it would launder an instance-administrator-only grant
    through a weaker gate.
 2. **HTTP hooks egress sensitive workspace state.** Same reasoning —
    any new HTTP destination needs to go through the egress-allowlist
@@ -247,3 +247,20 @@ declaratively.
 - `kind: TriageRule` — also "rules in YAML", but those *are*
   user-creatable because they only mutate workspace data, not the
   control plane.
+
+
+## Host hook review after upgrade or restore
+
+Host shell hooks require instance administrator authority, not workspace ownership.
+Existing host hook definitions are preserved but disabled on upgrade because prior
+versions did not record historical instance authority. The audit log records
+`hook.host_review_required` without recording command contents. A restored host
+hook also loses imported approval and stays disabled until local review.
+
+An instance administrator must inspect the current command and configuration,
+then use **Enable** in Lifecycle hooks or `crewship hooks enable ID` with the
+appropriate workspace and an instance-admin session/token (`instance:admin`).
+`host_review_required` in list/detail responses identifies pending review.
+Creating or editing a host hook requires the same authority. The default global
+lifecycle pause still prevents execution; it is not an authorization bypass.
+Container startup hooks are a separate feature and are unchanged.

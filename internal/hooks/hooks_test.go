@@ -17,7 +17,8 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// schemaSQL mirrors migration 52's hooks_config shape. Test opens a fresh
+// schemaSQL mirrors the current minimal hooks_config shape, including host
+// approval. Test opens a fresh
 // in-memory DB and applies this directly rather than pulling in the whole
 // migrate package — keeps the unit tests fast and decoupled from migration
 // order.
@@ -39,6 +40,7 @@ CREATE TABLE hooks_config (
     blocking INTEGER NOT NULL DEFAULT 0,
     enabled INTEGER NOT NULL DEFAULT 1,
     created_by TEXT,
+    host_authorization TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
