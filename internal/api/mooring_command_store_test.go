@@ -7,13 +7,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"github.com/crewship-ai/crewship/internal/auth"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/mooring"
 )
 
@@ -206,7 +206,7 @@ func TestCommandSQLDeniedAndStaleNeverReachEngine(t *testing.T) {
 	t.Run("reader", func(t *testing.T) {
 		r := newCommandSQLRig(t, false)
 		before := append([]byte(nil), r.p.p...)
-		for _, command := range []string{"text.insert", "text.delete", "text.backspace", "text.newParagraph", "format.bold", "format.font", "format.size", "format.align", "edit.undo"} {
+		for _, command := range []string{"text.insert", "text.delete", "text.backspace", "text.newParagraph", "format.bold", "format.font", "format.size", "para.align", "participant.undo"} {
 			raw := bytes.ReplaceAll(r.input("one", 0, "no"), []byte("text.insert"), []byte(command))
 			if _, err := r.s.Submit(r.request(), r.a, r.actor(), raw); err == nil {
 				t.Fatal("reader write", command)
