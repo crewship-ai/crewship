@@ -48,13 +48,45 @@ the operation identity is refused. A new generation and a new operation identity
 are an explicit new operation, not a retry. Completion is a host experiment result, not SQL
 persistence. A fresh trusted generation is required after checkpoint restoration.
 
-The ten commands are text insert/delete/backspace/newParagraph, bold/font/size,
-paragraph alignment, document read and participant undo. Targets use stable host
-block IDs and UTF8 byte positions at grapheme boundaries. Undo uses bounded host
-preimages and refuses overlap; it never invokes engine global undo. Exact base
-revision matching deliberately provides no rebase or preservation of pending
-formatting. Each candidate loads P and performs layout: timings measure this
-cold M2 reference path, not an interactive performance promise.
+The candidate command and parameter inventory comes from the generated WordCraft
+catalog, copied verbatim into `src/capabilities.json`. Refresh it from the reviewed
+catalog tree and verify both copies of the bounded schema validator:
+
+```sh
+crewship-heavy python3 tools/wordcraft-c1-engine/catalog_snapshot.py --source-root "$CATALOG_SOURCE"
+crewship-heavy python3 tools/wordcraft-c1-engine/catalog_snapshot.py --check --source-root "$CATALOG_SOURCE"
+```
+
+The helper preparation already copies `src/`, so no build-time external checkout
+is required. Offline `--check` verifies snapshot/vector hashes and host/helper
+validator equality. The canonical registry generator still owns command discovery;
+this tool never writes IDs or schemas by hand. Provenance records the canonical
+catalog commit and hashes. Engine identity includes catalog version, registry
+digest and copied catalog digest so checkpoints cannot cross catalog versions.
+
+Only closed, exact schemas for document candidates in the four C-E groups can be
+probed. Process-global, unknown, unresolved and non-document commands are denied.
+Objects, arrays, numbers, integers, booleans, null, enum and anyOf use a bounded
+schema subset; unknown keywords and patterns fail closed. Three known anchored
+pattern forms (hex color, bounded printable ASCII and base64) are evaluated
+without adding a regex/runtime dependency. All 44 source profiles have positive
+and negative examples exercised in both host and actual helper unit tests.
+
+This is **candidate admission for the default-off isolated qualification host**,
+not qualification or a product permission grant. The catalog's product flags stay
+unqualified. Production integration must require the qualified catalog and trusted
+participant permissions before dispatching; this experiment remains unsuitable
+as a standalone authorization boundary. The only special command branches are
+host controls (`init`/read/participant undo) and reviewed targeting/effect guards.
+Single-block text insertion retains its structural guard. Targets still use
+stable host IDs and UTF8 byte positions at grapheme boundaries. Existing Enter,
+backspace/delete stable-ID mappings, unknown-structure refusal, P/K, admission and
+participant undo are unchanged. No pending formatting rebase is introduced.
+
+Each candidate loads P and performs layout; timings measure the cold M2 reference
+path. Catalog admission alone cannot establish semantic effects, P restoration,
+participant-only undo, storage or browser behavior. The complete actual matrix
+must prove those properties per fixture before engine qualification is recorded.
 
 Bounds:64KiB user input,4MiB native/frame,4096 blocks, one candidate,32 undo
 records with a16MiB aggregate cap,256 operation IDs per host,32 generations and

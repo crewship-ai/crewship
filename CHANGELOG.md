@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- The isolated WordCraft C1 experiment derives candidate commands and closed parameter validation from the generated engine catalog. Product qualification and participant authorization remain separate gates.
+
 - Keep idle WordCraft editors connected through standard WebSocket ping/pong while preserving the existing response and inactivity limits.
 - Show the Crewship page name in attached WordCraft chrome and hide its standalone Discord, Share and Zotero controls.
 
