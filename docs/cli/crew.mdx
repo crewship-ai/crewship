@@ -1440,3 +1440,14 @@ agent authorization and execution preflight still apply. It never grants
 Delegate, credential visibility or crew administration. Existing grant issuers
 are retained unless an inactive grant is explicitly reissued; conflicts require
 reviewing the current policy, without a silent retry.
+
+### Explicit Manage and ordinary membership
+
+`crewship crew member add` and `crewship crew member remove` also use a live
+trusted crew Manage share. This permits only ordinary membership: assigning,
+editing or removing an explicit crew role retains the existing administrator
+check. Crew Settings mirrors this boundary using the signed-in actor's own
+`GET /api/v1/workspaces/{workspaceId}/access/me` explanation. Missing, inactive,
+unavailable or Guest-ceiling decisions never enable the additional controls.
+The API rechecks authority on the writer and after audit; stale UI state does
+not authorize a mutation.

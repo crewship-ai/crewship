@@ -251,3 +251,18 @@ visible after a recipient becomes VIEWER, ADMIN or OWNER: they can be removed,
 but a new or reissued Manage share requires a trusted MEMBER/MANAGER. The API
 rechecks current recipient and issuer authority on every save. Conflicts require
 an explicit reload, and account mode is never changed by the Share dialog.
+
+A trusted recipient with a currently allowed Manage share sees **Add Member**
+and **Remove** for ordinary crew members in Crew Settings. Memberships with
+an explicit crew role can be removed or edited only by the existing
+administrator controls. The UI checks the signed-in actor's own effective
+access and hides grant-based controls while checking, after a failed refresh,
+or after an account, crew or workspace switch. The API remains authoritative
+and rechecks every mutation; an earlier successful display never authorizes a
+later request. Budgets, deletion and workspace administration keep their guards.
+The corresponding CLI commands remain `crewship crew member add` and
+`crewship crew member remove` under the same server policy.
+
+Losing management authority closes and discards an open Add Member draft.
+Losing the administrator floor also discards an open role editor, even if an
+ordinary Manage share remains. Restoring access never reopens those drafts.
