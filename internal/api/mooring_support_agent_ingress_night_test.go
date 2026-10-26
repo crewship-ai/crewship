@@ -26,6 +26,7 @@ func TestSupportNightAgentIngressConfirmedMandateIsNotHumanSession(t *testing.T)
 	for _, endpoint := range []string{"command-session", "session"} {
 		t.Run(endpoint, func(t *testing.T) {
 			r := httptest.NewRequest("POST", "https://studio.example/api/v1/pages/@agent-shared-page/mooring/"+endpoint, strings.NewReader(`{"write":true}`)).WithContext(request.Context())
+			r.Header = request.Header.Clone()
 			r.SetPathValue("slug", "@agent-shared-page")
 			r.Header.Set("Origin", "https://studio.example")
 			w := &collaborationSessionIOWriter{ResponseRecorder: httptest.NewRecorder(), fence: x.fence}
