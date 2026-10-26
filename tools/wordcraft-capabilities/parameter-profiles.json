@@ -1,6 +1,6 @@
 {
   "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
-  "profileVersion": 2,
+  "profileVersion": 3,
   "commands": {
     "para.bullets": {
       "descriptorSha256": "e26cfdb1260d0750ccde6826c96f81f1ea3f15a7e9adedcfbab43e8055857e10",
@@ -388,7 +388,7 @@
                   "anyOf": [
                     {
                       "type": "string",
-                      "pattern": "^[0-9A-Fa-f]{6}$"
+                      "pattern": "^[0-9A-Fa-f]{6}(?![\\s\\S])"
                     },
                     {
                       "type": "null"
@@ -479,6 +479,3149 @@
             {},
             {}
           ]
+        },
+        {
+          "levels": [
+            {
+              "color": "FF0000\n"
+            }
+          ]
+        }
+      ]
+    },
+    "caret.set": {
+      "descriptorSha256": "4431344697f2cdfd6411cec7425b24ff07b8aebc2e85b61dbc09c473ee8fea2a",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/caret.rs",
+          "sha256": "005a0f731ce96ad707aa9e64d707b6c32e85b5f440bc3dc9a5177ac3240ecce3"
+        },
+        {
+          "path": "crates/engine/src/cmd/mod.rs",
+          "sha256": "7f54c999b329ad504829f40c1591cbb598893faff51c18f329438e6828b75552"
+        },
+        {
+          "path": "crates/doc/src/lib.rs",
+          "sha256": "e3701d8d58fcacc35bce249f25434f155e3e997aeb559fbd07f0a593f5b608f6"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "pos": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "block": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 4095
+                      },
+                      "off": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 32768
+                      }
+                    },
+                    "required": [
+                      "block",
+                      "off"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "story": {
+                        "type": "string",
+                        "enum": [
+                          "body"
+                        ]
+                      },
+                      "path": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 4095
+                        },
+                        "minItems": 1,
+                        "maxItems": 1
+                      },
+                      "off": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 32768
+                      }
+                    },
+                    "required": [
+                      "story",
+                      "path",
+                      "off"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "extend": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "pos"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "page": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4095
+              },
+              "x": {
+                "type": "number",
+                "minimum": -1584,
+                "maximum": 1584
+              },
+              "y": {
+                "type": "number",
+                "minimum": -1584,
+                "maximum": 1584
+              },
+              "extend": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "page",
+              "x",
+              "y"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "validExamples": [
+        {
+          "pos": {
+            "block": 0,
+            "off": 0
+          }
+        },
+        {
+          "page": 0,
+          "x": 1,
+          "y": 2
+        }
+      ],
+      "invalidExamples": [
+        {},
+        {
+          "pos": {
+            "block": 0,
+            "off": 0,
+            "command": "file.open"
+          }
+        },
+        {
+          "page": 0,
+          "x": 1
+        }
+      ]
+    },
+    "edit.find": {
+      "descriptorSha256": "107126af0bb8a52761631dbbdfaf5ed75e4ec808120d92503d54f0c595f5eb4f",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/edit.rs",
+          "sha256": "d292d9e316b5fe2e99afd30598eaade95a7dd0626f5e95a8798ab89fe8013747"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 32768
+          },
+          "matchCase": {
+            "type": "boolean"
+          },
+          "wholeWord": {
+            "type": "boolean"
+          },
+          "matchPrefix": {
+            "type": "boolean"
+          },
+          "matchSuffix": {
+            "type": "boolean"
+          },
+          "ignorePunct": {
+            "type": "boolean"
+          },
+          "ignoreSpace": {
+            "type": "boolean"
+          },
+          "wildcards": {
+            "type": "boolean"
+          },
+          "special": {
+            "type": "boolean"
+          },
+          "regex": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {
+          "text": "alpha",
+          "matchCase": true
+        }
+      ],
+      "invalidExamples": [
+        {},
+        {
+          "text": "x",
+          "regex": "true"
+        }
+      ]
+    },
+    "edit.advancedFind": {
+      "descriptorSha256": "3395e758d8ab57c29fae2305493d23943c1125a8dbf3a18bc305806cf9de1215",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/edit.rs",
+          "sha256": "d292d9e316b5fe2e99afd30598eaade95a7dd0626f5e95a8798ab89fe8013747"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 32768
+          },
+          "matchCase": {
+            "type": "boolean"
+          },
+          "wholeWord": {
+            "type": "boolean"
+          },
+          "matchPrefix": {
+            "type": "boolean"
+          },
+          "matchSuffix": {
+            "type": "boolean"
+          },
+          "ignorePunct": {
+            "type": "boolean"
+          },
+          "ignoreSpace": {
+            "type": "boolean"
+          },
+          "wildcards": {
+            "type": "boolean"
+          },
+          "special": {
+            "type": "boolean"
+          },
+          "regex": {
+            "type": "boolean"
+          },
+          "in": {
+            "type": "string",
+            "enum": [
+              "main",
+              "selection"
+            ]
+          },
+          "highlight": {
+            "type": "boolean"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {},
+        {
+          "text": "alpha",
+          "in": "selection"
+        }
+      ],
+      "invalidExamples": [
+        {
+          "in": "file"
+        },
+        {
+          "highlight": 1
+        }
+      ]
+    },
+    "edit.deleteClipboardItem": {
+      "descriptorSha256": "228d33d4d6ce6effac5788dc2c0c360bbb0af1f2c004be2383b49c7db39311bc",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/edit.rs",
+          "sha256": "d292d9e316b5fe2e99afd30598eaade95a7dd0626f5e95a8798ab89fe8013747"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
+          }
+        },
+        "required": [
+          "index"
+        ],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {
+          "index": 0
+        }
+      ],
+      "invalidExamples": [
+        {},
+        {
+          "index": -1
+        }
+      ]
+    },
+    "edit.pasteClipboardItem": {
+      "descriptorSha256": "228d33d4d6ce6effac5788dc2c0c360bbb0af1f2c004be2383b49c7db39311bc",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/edit.rs",
+          "sha256": "d292d9e316b5fe2e99afd30598eaade95a7dd0626f5e95a8798ab89fe8013747"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
+          }
+        },
+        "required": [
+          "index"
+        ],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {
+          "index": 0
+        }
+      ],
+      "invalidExamples": [
+        {},
+        {
+          "index": -1
+        }
+      ]
+    },
+    "edit.findReplace": {
+      "descriptorSha256": "21e65d5f5d98fbac1d2666d9eec28c02f101eaa20e684ecd4c6f9b8d1564ef31",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/edit.rs",
+          "sha256": "d292d9e316b5fe2e99afd30598eaade95a7dd0626f5e95a8798ab89fe8013747"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "tab": {
+            "type": "string",
+            "enum": [
+              "find",
+              "replace",
+              "goto"
+            ]
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {},
+        {
+          "tab": "find"
+        }
+      ],
+      "invalidExamples": [
+        {
+          "tab": "run-macro"
+        }
+      ]
+    },
+    "edit.goto": {
+      "descriptorSha256": "807772b5dfeee86688ff9c2b979d2faa8f5850669d600636daceaea5f2b4898d",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/edit.rs",
+          "sha256": "d292d9e316b5fe2e99afd30598eaade95a7dd0626f5e95a8798ab89fe8013747"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4095
+          },
+          "pageBy": {
+            "type": "integer",
+            "minimum": -4095,
+            "maximum": 4095
+          },
+          "bookmark": {
+            "type": "string",
+            "maxLength": 253
+          },
+          "paragraph": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4095
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {},
+        {
+          "page": 0
+        },
+        {
+          "pageBy": -1
+        }
+      ],
+      "invalidExamples": [
+        {
+          "paragraph": -1
+        },
+        {
+          "bookmark": 4
+        }
+      ]
+    },
+    "edit.pasteSpecial": {
+      "descriptorSha256": "2663bb9d90193116ed9de6ed9e52055b6c5142139507f44b8532d20cc9edac50",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/paste.rs",
+          "sha256": "a0463edf431253aab537d35425c099a1c8a0cdb6e49bef39fbe5ab2294d8138f"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "as": {
+            "type": "string",
+            "enum": [
+              "formatted",
+              "rtf",
+              "html",
+              "picture",
+              "text"
+            ]
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 32768
+          },
+          "html": {
+            "type": "string",
+            "maxLength": 32768
+          },
+          "rtf": {
+            "type": "string",
+            "maxLength": 32768
+          },
+          "picture": {
+            "type": "string",
+            "maxLength": 32768,
+            "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?(?![\\s\\S])"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {
+          "as": "text",
+          "text": "alpha"
+        },
+        {
+          "as": "picture",
+          "picture": "YWJj"
+        }
+      ],
+      "invalidExamples": [
+        {
+          "as": "file"
+        },
+        {
+          "picture": "???"
+        }
+      ]
+    },
+    "edit.replace": {
+      "descriptorSha256": "0e244534dce995809d16358ec8fe9a798f94b4032830281dcacbebfb2251b906",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/edit.rs",
+          "sha256": "d292d9e316b5fe2e99afd30598eaade95a7dd0626f5e95a8798ab89fe8013747"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 32768
+          },
+          "with": {
+            "type": "string",
+            "maxLength": 32768
+          },
+          "matchCase": {
+            "type": "boolean"
+          },
+          "wholeWord": {
+            "type": "boolean"
+          },
+          "matchPrefix": {
+            "type": "boolean"
+          },
+          "matchSuffix": {
+            "type": "boolean"
+          },
+          "ignorePunct": {
+            "type": "boolean"
+          },
+          "ignoreSpace": {
+            "type": "boolean"
+          },
+          "wildcards": {
+            "type": "boolean"
+          },
+          "special": {
+            "type": "boolean"
+          },
+          "regex": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "text",
+          "with"
+        ],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {
+          "text": "alpha",
+          "with": "beta",
+          "wholeWord": true
+        }
+      ],
+      "invalidExamples": [
+        {
+          "text": "x"
+        },
+        {
+          "text": "x",
+          "with": "y",
+          "regex": 1
+        }
+      ]
+    },
+    "edit.replaceAll": {
+      "descriptorSha256": "11cf090135d94e29cca2f55c0fe516ca3d6fddf6eeaa5a784e785a75aef2abd5",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/edit.rs",
+          "sha256": "d292d9e316b5fe2e99afd30598eaade95a7dd0626f5e95a8798ab89fe8013747"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 32768
+          },
+          "with": {
+            "type": "string",
+            "maxLength": 32768
+          },
+          "matchCase": {
+            "type": "boolean"
+          },
+          "wholeWord": {
+            "type": "boolean"
+          },
+          "matchPrefix": {
+            "type": "boolean"
+          },
+          "matchSuffix": {
+            "type": "boolean"
+          },
+          "ignorePunct": {
+            "type": "boolean"
+          },
+          "ignoreSpace": {
+            "type": "boolean"
+          },
+          "wildcards": {
+            "type": "boolean"
+          },
+          "special": {
+            "type": "boolean"
+          },
+          "regex": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "text",
+          "with"
+        ],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {
+          "text": "alpha",
+          "with": "beta",
+          "wholeWord": true
+        }
+      ],
+      "invalidExamples": [
+        {
+          "text": "x"
+        },
+        {
+          "text": "x",
+          "with": "y",
+          "regex": 1
+        }
+      ]
+    },
+    "edit.undoTo": {
+      "descriptorSha256": "833e5c559008d389f1a2046a09d029b3dce1df75e2ce278d92984e352c7b0647",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/edit.rs",
+          "sha256": "d292d9e316b5fe2e99afd30598eaade95a7dd0626f5e95a8798ab89fe8013747"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 32
+          }
+        },
+        "required": [
+          "count"
+        ],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {
+          "count": 1
+        }
+      ],
+      "invalidExamples": [
+        {
+          "count": 0
+        },
+        {
+          "count": 33
+        }
+      ]
+    },
+    "text.overtype": {
+      "descriptorSha256": "2c9b24997f4b4969f11f62ddfa12ca59789f299c2ad7bf237680e4fc0a2e3f38",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/options.rs",
+          "sha256": "2066cd7305b796f09f82980b0afa6e25ed0a80e81f49e0e2af0324defcf6ddbf"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "boolean"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {},
+        {
+          "value": true
+        }
+      ],
+      "invalidExamples": [
+        {
+          "value": 1
+        }
+      ]
+    },
+    "text.typeCode": {
+      "descriptorSha256": "dab70e193e4a5f15f0b89b9e5e6b3b48cba59a4e8142cc0cac698e9459676024",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/text.rs",
+          "sha256": "de444de5e83abd421f2ff52fb34682397232424414a8475578acbb2a8b97b038"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "65",
+              "66",
+              "67",
+              "0233",
+              "0169"
+            ]
+          },
+          "ansi": {
+            "type": "integer",
+            "enum": [
+              874,
+              1250,
+              1251,
+              1252,
+              1253,
+              1254,
+              1255,
+              1256,
+              1257,
+              1258
+            ]
+          },
+          "oem": {
+            "type": "integer",
+            "enum": [
+              437,
+              737,
+              850,
+              852,
+              857,
+              866
+            ]
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {
+          "code": "0233",
+          "ansi": 1252
+        }
+      ],
+      "invalidExamples": [
+        {
+          "code": "x"
+        },
+        {
+          "code": "233",
+          "ansi": 999
+        },
+        {
+          "code": "0"
+        },
+        {
+          "code": "9999999999"
+        },
+        {
+          "code": "55296"
+        },
+        {
+          "code": "65\n"
+        }
+      ]
+    },
+    "format.changeCase": {
+      "descriptorSha256": "9a18a5d935ef0115334e5ac0d89594fe4655b7cf40dbda421b4d627be08ef28f",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/format.rs",
+          "sha256": "4ddcf5ed1b5b3b7007ce5d470cb87e5c44723930c3d4534659fb16275e9eb392"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "sentence",
+              "lower",
+              "upper",
+              "title",
+              "toggle"
+            ]
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {},
+        {
+          "mode": "upper"
+        }
+      ],
+      "invalidExamples": [
+        {
+          "mode": "bogus"
+        }
+      ]
+    },
+    "format.color": {
+      "descriptorSha256": "956fbf4ee993867f929addcc08eacd0ec65729f3177bdfe38d65a38f76c155a3",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/format.rs",
+          "sha256": "4ddcf5ed1b5b3b7007ce5d470cb87e5c44723930c3d4534659fb16275e9eb392"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9A-Fa-f]{6}(?![\\s\\S])"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "auto"
+                ]
+              }
+            ]
+          }
+        },
+        "required": [
+          "color"
+        ],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {
+          "color": "123456"
+        },
+        {
+          "color": "auto"
+        }
+      ],
+      "invalidExamples": [
+        {},
+        {
+          "color": "nothex"
+        },
+        {
+          "color": "123456\n"
+        }
+      ]
+    },
+    "format.enclose": {
+      "descriptorSha256": "3847e65b88f0012110e8eb1873d7e5962c668e05d5f805fbef1e486cf9825603",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/format.rs",
+          "sha256": "4ddcf5ed1b5b3b7007ce5d470cb87e5c44723930c3d4534659fb16275e9eb392"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "shape": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "circle",
+                  "square",
+                  "triangle",
+                  "diamond"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "style": {
+            "type": "string",
+            "enum": [
+              "shrink",
+              "enlarge"
+            ]
+          },
+          "text": {
+            "type": "string",
+            "pattern": "^[\\x20-\\x7e]{1,2}(?![\\s\\S])"
+          }
+        },
+        "required": [
+          "shape"
+        ],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {
+          "shape": "circle"
+        },
+        {
+          "shape": null
+        },
+        {
+          "shape": "circle",
+          "text": "AB"
+        }
+      ],
+      "invalidExamples": [
+        {},
+        {
+          "shape": "pentagon"
+        },
+        {
+          "shape": "circle",
+          "text": "ABC"
+        },
+        {
+          "shape": "circle",
+          "text": "漢字"
+        },
+        {
+          "shape": "circle",
+          "text": "AB\n"
+        }
+      ]
+    },
+    "format.highlight": {
+      "descriptorSha256": "97a3870287ca8c023aae2df98507f12a65962ba3afb8983328cbabc0939d7bf4",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/format.rs",
+          "sha256": "4ddcf5ed1b5b3b7007ce5d470cb87e5c44723930c3d4534659fb16275e9eb392"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "color": {
+            "type": "string",
+            "enum": [
+              "yellow",
+              "brightGreen",
+              "turquoise",
+              "pink",
+              "blue",
+              "red",
+              "darkBlue",
+              "teal",
+              "green",
+              "violet",
+              "darkRed",
+              "darkYellow",
+              "gray50",
+              "gray25",
+              "black",
+              "none"
+            ]
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {},
+        {
+          "color": "yellow"
+        }
+      ],
+      "invalidExamples": [
+        {
+          "color": "orange"
+        }
+      ]
+    },
+    "format.phonetic": {
+      "descriptorSha256": "74f42478f7a78a3c9dd80c7c8408cb9e2dbe860948bcb89d3a512d3c1e50625d",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/phonetic.rs",
+          "sha256": "db439172085c4c716ff17a460172f45621c451b5d52ef942b84bf8c06b87e1df"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "ruby": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "align": {
+            "type": "string",
+            "enum": [
+              "center",
+              "distributeLetter",
+              "distributeSpace",
+              "left",
+              "right",
+              "rightVertical"
+            ]
+          },
+          "size": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 1584
+          },
+          "offset": {
+            "type": "number",
+            "minimum": -1584,
+            "maximum": 1584
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {},
+        {
+          "ruby": "r",
+          "align": "center"
+        },
+        {
+          "ruby": null
+        }
+      ],
+      "invalidExamples": [
+        {
+          "ruby": 1
+        },
+        {
+          "ruby": "r",
+          "align": "sideways"
+        }
+      ]
+    },
+    "format.set": {
+      "descriptorSha256": "8090cf5e4e0fb25d1056859e91faf22f054ecf83d99a2e6d0de5b8f19e419335",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/format.rs",
+          "sha256": "4ddcf5ed1b5b3b7007ce5d470cb87e5c44723930c3d4534659fb16275e9eb392"
+        },
+        {
+          "path": "crates/doc/src/props.rs",
+          "sha256": "cfd6ee7ec91bd8b736c3b4c632d41ea19055662fc77acbc5325cd89a08c1287b"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "props": {
+            "type": "object",
+            "properties": {
+              "font": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "fontCs": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "fontEa": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "size": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 1,
+                    "maximum": 200
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "sizeCs": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 1,
+                    "maximum": 200
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "bold": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "boldCs": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "italic": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "italicCs": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "underline": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "single",
+                      "double",
+                      "thick",
+                      "dotted",
+                      "dash",
+                      "dotDash",
+                      "dotDotDash",
+                      "wave",
+                      "words"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "color": {
+                "anyOf": [
+                  {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9A-Fa-f]{6}(?![\\s\\S])"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "auto",
+                          "Auto"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "Rgb": {
+                            "type": "array",
+                            "items": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 255
+                            },
+                            "minItems": 3,
+                            "maxItems": 3
+                          }
+                        },
+                        "required": [
+                          "Rgb"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "highlight": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "yellow",
+                      "brightGreen",
+                      "turquoise",
+                      "pink",
+                      "blue",
+                      "red",
+                      "darkBlue",
+                      "teal",
+                      "green",
+                      "violet",
+                      "darkRed",
+                      "darkYellow",
+                      "gray50",
+                      "gray25",
+                      "black",
+                      "white"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "strike": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "doubleStrike": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "caps": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "smallCaps": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "hidden": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "style": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 253
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "vertAlign": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "baseline",
+                      "superscript",
+                      "subscript"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "props"
+        ],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {
+          "props": {
+            "bold": true,
+            "color": "123456",
+            "size": 18
+          }
+        },
+        {
+          "props": {
+            "font": null
+          }
+        }
+      ],
+      "invalidExamples": [
+        {},
+        {
+          "props": {
+            "command": "file.open"
+          }
+        },
+        {
+          "props": {
+            "color": {
+              "Rgb": [
+                256,
+                0,
+                0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "format.shading": {
+      "descriptorSha256": "62dac12347ec8ad3916d9bfa7704361462ba3c59586658496a572dbb78ff4c65",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/format.rs",
+          "sha256": "4ddcf5ed1b5b3b7007ce5d470cb87e5c44723930c3d4534659fb16275e9eb392"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9A-Fa-f]{6}(?![\\s\\S])"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "color"
+        ],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {
+          "color": "ABCDEF"
+        },
+        {
+          "color": null
+        }
+      ],
+      "invalidExamples": [
+        {},
+        {
+          "color": "nope"
+        }
+      ]
+    },
+    "para.shading": {
+      "descriptorSha256": "62dac12347ec8ad3916d9bfa7704361462ba3c59586658496a572dbb78ff4c65",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/para.rs",
+          "sha256": "d7805f023406fc66830c7d0695c0a591797470ca5079e4d5ccc9b86b5fbaf3fd"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9A-Fa-f]{6}(?![\\s\\S])"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "color"
+        ],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {
+          "color": "ABCDEF"
+        },
+        {
+          "color": null
+        }
+      ],
+      "invalidExamples": [
+        {},
+        {
+          "color": "nope"
+        }
+      ]
+    },
+    "format.textEffects": {
+      "descriptorSha256": "62680dd00586d17456814a92da505d24f4f59cc406913b80a233bceb9dc48123",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/wordart.rs",
+          "sha256": "ff16a12a7c4bee7e8f2daf6a653076fb0201ea885aaff726dc51fbb95c44c3e2"
+        },
+        {
+          "path": "crates/doc/src/wordart.rs",
+          "sha256": "a72d55fae26bfae204657f65f8549672cc19005dda5c28ebfde22170ececb181"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "style": {
+            "type": "string",
+            "enum": [
+              "solid",
+              "outlined",
+              "hollow",
+              "gradient",
+              "shadowed",
+              "glowing",
+              "reflected",
+              "sunset"
+            ]
+          },
+          "clear": {
+            "type": "boolean"
+          },
+          "fill": {
+            "anyOf": [
+              {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[0-9A-Fa-f]{6}(?![\\s\\S])"
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "none"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "color": {
+                        "type": "string",
+                        "pattern": "^[0-9A-Fa-f]{6}(?![\\s\\S])"
+                      },
+                      "transparency": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 100
+                      }
+                    },
+                    "required": [
+                      "color"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "gradient": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[0-9A-Fa-f]{6}(?![\\s\\S])"
+                        },
+                        "minItems": 2,
+                        "maxItems": 10
+                      },
+                      "angle": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 360
+                      }
+                    },
+                    "required": [
+                      "gradient"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "outline": {
+            "anyOf": [
+              {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[0-9A-Fa-f]{6}(?![\\s\\S])"
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "none"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "color": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[0-9A-Fa-f]{6}(?![\\s\\S])"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "width": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 20
+                      },
+                      "transparency": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 100
+                      }
+                    },
+                    "required": [],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "shadow": {
+            "anyOf": [
+              {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "none"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "color": {
+                        "type": "string",
+                        "pattern": "^[0-9A-Fa-f]{6}(?![\\s\\S])"
+                      },
+                      "transparency": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 100
+                      },
+                      "blur": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 100
+                      },
+                      "distance": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 100
+                      },
+                      "angle": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 360
+                      }
+                    },
+                    "required": [],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "glow": {
+            "anyOf": [
+              {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 20
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "none"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "color": {
+                        "type": "string",
+                        "pattern": "^[0-9A-Fa-f]{6}(?![\\s\\S])"
+                      },
+                      "size": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 20
+                      },
+                      "transparency": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 100
+                      }
+                    },
+                    "required": [],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reflection": {
+            "anyOf": [
+              {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "none"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "transparency": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 100
+                      },
+                      "size": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 100
+                      },
+                      "distance": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 100
+                      }
+                    },
+                    "required": [],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {
+          "clear": true
+        },
+        {
+          "fill": {
+            "gradient": [
+              "FF0000",
+              "0000FF"
+            ],
+            "angle": 90
+          },
+          "glow": 4
+        }
+      ],
+      "invalidExamples": [
+        {
+          "fill": {
+            "gradient": [
+              "FF0000"
+            ]
+          }
+        },
+        {
+          "shadow": {
+            "command": "file.open"
+          }
+        },
+        {
+          "outline": {
+            "width": -1
+          }
+        }
+      ]
+    },
+    "format.underline": {
+      "descriptorSha256": "b1a0d155781dbc326a47206087fec4189b3d43eee7bf0a73a699a7fd8a32e4fe",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/format.rs",
+          "sha256": "4ddcf5ed1b5b3b7007ce5d470cb87e5c44723930c3d4534659fb16275e9eb392"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "boolean"
+          },
+          "style": {
+            "type": "string",
+            "enum": [
+              "single",
+              "double",
+              "thick",
+              "dotted",
+              "dash",
+              "dotDash",
+              "dotDotDash",
+              "wave",
+              "words"
+            ]
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {},
+        {
+          "value": true,
+          "style": "double"
+        }
+      ],
+      "invalidExamples": [
+        {
+          "style": "bogus"
+        }
+      ]
+    },
+    "format.underlineColor": {
+      "descriptorSha256": "f5efb0130f4bd1f4f923245359f712e6dc1f22b4d730f1ab5a8754a55fd68dce",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/format.rs",
+          "sha256": "4ddcf5ed1b5b3b7007ce5d470cb87e5c44723930c3d4534659fb16275e9eb392"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9A-Fa-f]{6}(?![\\s\\S])"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "auto"
+                ]
+              }
+            ]
+          }
+        },
+        "required": [
+          "color"
+        ],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {
+          "color": "auto"
+        },
+        {
+          "color": "00FF00"
+        }
+      ],
+      "invalidExamples": [
+        {},
+        {
+          "color": "blue"
+        }
+      ]
+    },
+    "para.align": {
+      "descriptorSha256": "517b11d795c7d18d03cb3fa1b36d1ff276142b32aa887b765c2bac9ffd9bbb4f",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/para.rs",
+          "sha256": "d7805f023406fc66830c7d0695c0a591797470ca5079e4d5ccc9b86b5fbaf3fd"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string",
+            "enum": [
+              "left",
+              "center",
+              "right",
+              "justify",
+              "distribute",
+              "start",
+              "end"
+            ]
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {
+          "value": "center"
+        },
+        {
+          "value": "start"
+        }
+      ],
+      "invalidExamples": [
+        {},
+        {
+          "value": "bogus"
+        }
+      ]
+    },
+    "para.asianTypography": {
+      "descriptorSha256": "bad9905aa5344dfe648ead80b5fa4830ef4b88a7331890baedf31e2a93e505d0",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/para.rs",
+          "sha256": "d7805f023406fc66830c7d0695c0a591797470ca5079e4d5ccc9b86b5fbaf3fd"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "kinsoku": {
+            "type": "boolean"
+          },
+          "wordWrap": {
+            "type": "boolean"
+          },
+          "overflowPunct": {
+            "type": "boolean"
+          },
+          "topLinePunct": {
+            "type": "boolean"
+          },
+          "autoSpaceDE": {
+            "type": "boolean"
+          },
+          "autoSpaceDN": {
+            "type": "boolean"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {},
+        {
+          "kinsoku": true
+        }
+      ],
+      "invalidExamples": [
+        {
+          "wordWrap": 1
+        }
+      ]
+    },
+    "para.borders": {
+      "descriptorSha256": "2b4f2fe35f5f5bca9105a1707909ef01eda849f9c2407a2b2c5f2043d4b1e01b",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/para.rs",
+          "sha256": "d7805f023406fc66830c7d0695c0a591797470ca5079e4d5ccc9b86b5fbaf3fd"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "bottom",
+              "top",
+              "left",
+              "right",
+              "none",
+              "all",
+              "outside",
+              "inside",
+              "horizontalLine"
+            ]
+          },
+          "width": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 20
+          },
+          "color": {
+            "type": "string",
+            "pattern": "^[0-9A-Fa-f]{6}(?![\\s\\S])"
+          },
+          "style": {
+            "type": "string",
+            "enum": [
+              "single",
+              "double",
+              "dotted",
+              "dashed",
+              "thick",
+              "triple",
+              "dotDash",
+              "wave"
+            ]
+          },
+          "sides": {
+            "type": "object",
+            "properties": {
+              "top": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "style": {
+                        "type": "string",
+                        "enum": [
+                          "single",
+                          "double",
+                          "dotted",
+                          "dashed",
+                          "thick",
+                          "triple",
+                          "dotDash",
+                          "wave",
+                          "none"
+                        ]
+                      },
+                      "width": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 20
+                      },
+                      "color": {
+                        "type": "string",
+                        "pattern": "^[0-9A-Fa-f]{6}(?![\\s\\S])"
+                      }
+                    },
+                    "required": [],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "left": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "style": {
+                        "type": "string",
+                        "enum": [
+                          "single",
+                          "double",
+                          "dotted",
+                          "dashed",
+                          "thick",
+                          "triple",
+                          "dotDash",
+                          "wave",
+                          "none"
+                        ]
+                      },
+                      "width": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 20
+                      },
+                      "color": {
+                        "type": "string",
+                        "pattern": "^[0-9A-Fa-f]{6}(?![\\s\\S])"
+                      }
+                    },
+                    "required": [],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "bottom": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "style": {
+                        "type": "string",
+                        "enum": [
+                          "single",
+                          "double",
+                          "dotted",
+                          "dashed",
+                          "thick",
+                          "triple",
+                          "dotDash",
+                          "wave",
+                          "none"
+                        ]
+                      },
+                      "width": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 20
+                      },
+                      "color": {
+                        "type": "string",
+                        "pattern": "^[0-9A-Fa-f]{6}(?![\\s\\S])"
+                      }
+                    },
+                    "required": [],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "right": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "style": {
+                        "type": "string",
+                        "enum": [
+                          "single",
+                          "double",
+                          "dotted",
+                          "dashed",
+                          "thick",
+                          "triple",
+                          "dotDash",
+                          "wave",
+                          "none"
+                        ]
+                      },
+                      "width": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 20
+                      },
+                      "color": {
+                        "type": "string",
+                        "pattern": "^[0-9A-Fa-f]{6}(?![\\s\\S])"
+                      }
+                    },
+                    "required": [],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "between": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "style": {
+                        "type": "string",
+                        "enum": [
+                          "single",
+                          "double",
+                          "dotted",
+                          "dashed",
+                          "thick",
+                          "triple",
+                          "dotDash",
+                          "wave",
+                          "none"
+                        ]
+                      },
+                      "width": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 20
+                      },
+                      "color": {
+                        "type": "string",
+                        "pattern": "^[0-9A-Fa-f]{6}(?![\\s\\S])"
+                      }
+                    },
+                    "required": [],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {
+          "kind": "bottom"
+        },
+        {
+          "sides": {
+            "top": {
+              "style": "single",
+              "width": 1
+            }
+          }
+        }
+      ],
+      "invalidExamples": [
+        {
+          "kind": "bogus"
+        },
+        {
+          "sides": {
+            "command": "file.open"
+          }
+        }
+      ]
+    },
+    "para.defineNumber": {
+      "descriptorSha256": "d607a874c44096927092f0f3765d8000cb2cab49c4ca7ae5ac9c2e9262e62324",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/tools.rs",
+          "sha256": "d15cbb9c8dfe62b4d5a0b838fdabcb8aa20c9fe52c50d9d814541584e445ec1a"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "decimal",
+              "upperRoman",
+              "lowerRoman",
+              "upperLetter",
+              "lowerLetter",
+              "decimalZero",
+              "ordinal"
+            ]
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "start": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000
+          }
+        },
+        "required": [
+          "format"
+        ],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {
+          "format": "decimal",
+          "text": "%1.",
+          "start": 1
+        }
+      ],
+      "invalidExamples": [
+        {},
+        {
+          "start": -1,
+          "format": "decimal"
+        }
+      ]
+    },
+    "para.indents": {
+      "descriptorSha256": "610ee21d23cabd6179e1f638d200c0ebb598438c812024485cef1c938bcffb2a",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/para.rs",
+          "sha256": "d7805f023406fc66830c7d0695c0a591797470ca5079e4d5ccc9b86b5fbaf3fd"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "left": {
+            "type": "number",
+            "minimum": -1584,
+            "maximum": 1584
+          },
+          "right": {
+            "type": "number",
+            "minimum": -1584,
+            "maximum": 1584
+          },
+          "firstLine": {
+            "type": "number",
+            "minimum": -1584,
+            "maximum": 1584
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {},
+        {
+          "left": 10,
+          "firstLine": -5
+        }
+      ],
+      "invalidExamples": [
+        {
+          "left": "10"
+        },
+        {
+          "right": 1585
+        }
+      ]
+    },
+    "para.lineSpacing": {
+      "descriptorSha256": "439c1ea42071dc734c80ace9df863045d06c221224c47416886bf93bb38501f6",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/para.rs",
+          "sha256": "d7805f023406fc66830c7d0695c0a591797470ca5079e4d5ccc9b86b5fbaf3fd"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "number",
+                "minimum": 0.1,
+                "maximum": 100
+              }
+            },
+            "required": [
+              "value"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "atLeast": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1584
+              }
+            },
+            "required": [
+              "atLeast"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "exactly": {
+                "type": "number",
+                "minimum": 0.7,
+                "maximum": 1584
+              }
+            },
+            "required": [
+              "exactly"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "validExamples": [
+        {
+          "value": 1.5
+        },
+        {
+          "atLeast": 12
+        },
+        {
+          "exactly": 18
+        }
+      ],
+      "invalidExamples": [
+        {},
+        {
+          "value": 1,
+          "exactly": 12
+        },
+        {
+          "value": -1
+        },
+        {
+          "exactly": 0
+        },
+        {
+          "exactly": 0.1
+        }
+      ]
+    },
+    "para.ltr": {
+      "descriptorSha256": "e7e771bba8fcd2d6faa6bd0c6604facf90700d9569eab81c6c27756ac026d678",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/para.rs",
+          "sha256": "d7805f023406fc66830c7d0695c0a591797470ca5079e4d5ccc9b86b5fbaf3fd"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "boolean"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {},
+        {
+          "value": true
+        }
+      ],
+      "invalidExamples": [
+        {
+          "value": 1
+        }
+      ]
+    },
+    "para.rtl": {
+      "descriptorSha256": "e29b50b14c0cae9fd23abe539f84576c7c751cc16cca34c579d0164e28cb3080",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/para.rs",
+          "sha256": "d7805f023406fc66830c7d0695c0a591797470ca5079e4d5ccc9b86b5fbaf3fd"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "boolean"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {},
+        {
+          "value": true
+        }
+      ],
+      "invalidExamples": [
+        {
+          "value": 1
+        }
+      ]
+    },
+    "para.multilevel": {
+      "descriptorSha256": "a9f05e1e2a35b6ad176ca3bc0b4e31f25addf7596778e18dd50c0d59b7730aba",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/para.rs",
+          "sha256": "d7805f023406fc66830c7d0695c0a591797470ca5079e4d5ccc9b86b5fbaf3fd"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "legal",
+              "outline"
+            ]
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {},
+        {
+          "kind": "outline"
+        }
+      ],
+      "invalidExamples": [
+        {
+          "kind": "bogus"
+        }
+      ]
+    },
+    "para.set": {
+      "descriptorSha256": "03b877e85750f3d7de2e1cf577e535c70281f4b3417b05e3876eea42d62e3f35",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/para.rs",
+          "sha256": "d7805f023406fc66830c7d0695c0a591797470ca5079e4d5ccc9b86b5fbaf3fd"
+        },
+        {
+          "path": "crates/doc/src/props.rs",
+          "sha256": "cfd6ee7ec91bd8b736c3b4c632d41ea19055662fc77acbc5325cd89a08c1287b"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "props": {
+            "type": "object",
+            "properties": {
+              "style": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 253
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "align": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "left",
+                      "center",
+                      "right",
+                      "justify",
+                      "distribute"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "indentLeft": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": -1584,
+                    "maximum": 1584
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "indentRight": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": -1584,
+                    "maximum": 1584
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "indentFirst": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": -1584,
+                    "maximum": 1584
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "spaceBefore": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1584
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "spaceAfter": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1584
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "spaceBeforeAuto": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "spaceAfterAuto": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "keepNext": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "keepLines": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "widowControl": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "pageBreakBefore": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "outlineLevel": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "numbering": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "num": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 4294967295
+                      },
+                      "level": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 8
+                      }
+                    },
+                    "required": [
+                      "num",
+                      "level"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "tabs": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "pos": {
+                          "type": "number",
+                          "minimum": -1584,
+                          "maximum": 1584
+                        },
+                        "align": {
+                          "type": "string",
+                          "enum": [
+                            "left",
+                            "center",
+                            "right",
+                            "decimal",
+                            "bar",
+                            "clear"
+                          ]
+                        },
+                        "leader": {
+                          "type": "string",
+                          "enum": [
+                            "none",
+                            "dot",
+                            "hyphen",
+                            "underscore",
+                            "middleDot"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "pos"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "minItems": 0,
+                    "maxItems": 64
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "lineSpacing": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "rule": {
+                        "type": "string",
+                        "enum": [
+                          "multiple",
+                          "atLeast",
+                          "exactly"
+                        ]
+                      },
+                      "value": {
+                        "type": "number",
+                        "minimum": 0.1,
+                        "maximum": 1584
+                      }
+                    },
+                    "required": [
+                      "rule",
+                      "value"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          "onPage": {
+            "type": "object",
+            "properties": {
+              "align": {
+                "type": "string",
+                "enum": [
+                  "left",
+                  "center",
+                  "right",
+                  "justify",
+                  "distribute"
+                ]
+              },
+              "left": {
+                "type": "number",
+                "minimum": -1584,
+                "maximum": 1584
+              },
+              "right": {
+                "type": "number",
+                "minimum": -1584,
+                "maximum": 1584
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "props"
+        ],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {
+          "props": {
+            "align": "center",
+            "numbering": {
+              "num": 1,
+              "level": 0
+            }
+          }
+        },
+        {
+          "props": {},
+          "onPage": {
+            "left": 20
+          }
+        }
+      ],
+      "invalidExamples": [
+        {},
+        {
+          "props": {
+            "command": "file.open"
+          }
+        },
+        {
+          "props": {
+            "tabs": [
+              {
+                "pos": 2,
+                "command": "file.open"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "para.spacing": {
+      "descriptorSha256": "3666c9a45e06f602e7492da533fb02d9b4a3592d2335fa0eb119984fc89ba062",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/para.rs",
+          "sha256": "d7805f023406fc66830c7d0695c0a591797470ca5079e4d5ccc9b86b5fbaf3fd"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "before": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1584
+          },
+          "after": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1584
+          },
+          "beforeAuto": {
+            "type": "boolean"
+          },
+          "afterAuto": {
+            "type": "boolean"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {},
+        {
+          "before": 2,
+          "afterAuto": true
+        }
+      ],
+      "invalidExamples": [
+        {
+          "before": -1
+        },
+        {
+          "beforeAuto": 1
+        }
+      ]
+    },
+    "para.style": {
+      "descriptorSha256": "c95b5b32873651b8e1f016c59c6e2613e0e71bc81a2e7977bd5f7b742ef08116",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/para.rs",
+          "sha256": "d7805f023406fc66830c7d0695c0a591797470ca5079e4d5ccc9b86b5fbaf3fd"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "style": {
+            "type": "string",
+            "maxLength": 253
+          }
+        },
+        "required": [
+          "style"
+        ],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {
+          "style": "Heading 1"
+        }
+      ],
+      "invalidExamples": [
+        {},
+        {
+          "style": 1
+        }
+      ]
+    },
+    "para.tabs": {
+      "descriptorSha256": "137a827ebac50e2d5664db3529c5928d02e372508ad320bb81ccbf607964d1d7",
+      "sourceFiles": [
+        {
+          "path": "crates/engine/src/cmd/para.rs",
+          "sha256": "d7805f023406fc66830c7d0695c0a591797470ca5079e4d5ccc9b86b5fbaf3fd"
+        },
+        {
+          "path": "crates/doc/src/props.rs",
+          "sha256": "cfd6ee7ec91bd8b736c3b4c632d41ea19055662fc77acbc5325cd89a08c1287b"
+        }
+      ],
+      "coverage": "bounded-source-profile",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "tabs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "pos": {
+                  "type": "number",
+                  "minimum": -1584,
+                  "maximum": 1584
+                },
+                "align": {
+                  "type": "string",
+                  "enum": [
+                    "left",
+                    "center",
+                    "right",
+                    "decimal",
+                    "bar",
+                    "clear"
+                  ]
+                },
+                "leader": {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "dot",
+                    "hyphen",
+                    "underscore",
+                    "middleDot"
+                  ]
+                }
+              },
+              "required": [
+                "pos"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 0,
+            "maxItems": 64
+          },
+          "set": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "pos": {
+                  "type": "number",
+                  "minimum": -1584,
+                  "maximum": 1584
+                },
+                "align": {
+                  "type": "string",
+                  "enum": [
+                    "left",
+                    "center",
+                    "right",
+                    "decimal",
+                    "bar",
+                    "clear"
+                  ]
+                },
+                "leader": {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "dot",
+                    "hyphen",
+                    "underscore",
+                    "middleDot"
+                  ]
+                }
+              },
+              "required": [
+                "pos"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 0,
+            "maxItems": 64
+          },
+          "clear": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "minimum": -1584,
+              "maximum": 1584
+            },
+            "minItems": 0,
+            "maxItems": 64
+          },
+          "clearAll": {
+            "type": "boolean"
+          },
+          "default": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 1584
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "validExamples": [
+        {},
+        {
+          "set": [
+            {
+              "pos": 20,
+              "align": "left",
+              "leader": "dot"
+            }
+          ],
+          "default": 36
+        }
+      ],
+      "invalidExamples": [
+        {
+          "set": [
+            {
+              "pos": 20,
+              "align": "bogus"
+            }
+          ]
+        },
+        {
+          "tabs": [
+            {
+              "pos": 20,
+              "file": "x"
+            }
+          ]
+        },
+        {
+          "default": 0
         }
       ]
     }

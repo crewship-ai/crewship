@@ -68,3 +68,13 @@ C1 host and must not substitute a direct engine call for host target/revision,
 rejected-commit restoration or participant undo. The existing frontend's small
 scalar validator also needs a real JSON Schema adapter before using enums, unions,
 nested objects or arrays; ignoring those constraints is not valid profile checking.
+
+The C-E profile set resolves all 44 previously missing schemas in the four first
+feature groups. `format.set` and `para.set` expose explicit bounded subsets of
+`CharProps`/`ParaProps`; other upstream fields stay outside this catalog profile.
+`format.enclose.text` is limited to one or two printable ASCII characters.
+`text.typeCode` deliberately allows only the five known valid code strings
+`65`, `66`, `67`, `0233`, `0169`; it is not a general decimal-code parser.
+Line spacing `exactly` starts at 0.7pt to avoid silent clamping. These restrictions
+must remain visible in integration documentation and must not be confused with
+qualification or full upstream parameter coverage.
