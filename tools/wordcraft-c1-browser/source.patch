@@ -1,0 +1,788 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index ed1d671..f9b37ce 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1545,7 +1545,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
+ dependencies = [
+  "libc",
+- "windows-sys 0.60.2",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -3516,7 +3516,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
+ dependencies = [
+  "libc",
+- "windows-sys 0.60.2",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -4018,7 +4018,7 @@ dependencies = [
+  "once_cell",
+  "socket2",
+  "tracing",
+- "windows-sys 0.60.2",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -4395,7 +4395,7 @@ dependencies = [
+  "errno",
+  "libc",
+  "linux-raw-sys 0.12.1",
+- "windows-sys 0.60.2",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -4454,7 +4454,7 @@ dependencies = [
+  "security-framework",
+  "security-framework-sys",
+  "webpki-root-certs",
+- "windows-sys 0.60.2",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -4612,9 +4612,9 @@ dependencies = [
+ 
+ [[package]]
+ name = "serde_json"
+-version = "1.0.151"
++version = "1.0.154"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
++checksum = "e7e9cc8b1b85264074fbcc02a88680c4096b1e47df8f739dceb03bf482f04bd6"
+ dependencies = [
+  "itoa",
+  "memchr",
+@@ -5056,7 +5056,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
+ dependencies = [
+  "libc",
+- "windows-sys 0.60.2",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -5241,7 +5241,7 @@ dependencies = [
+  "getrandom 0.4.3",
+  "once_cell",
+  "rustix 1.1.5",
+- "windows-sys 0.60.2",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -5607,7 +5607,7 @@ checksum = "f2f6fb2847f6742cd76af783a2a2c49e9375d0a111c7bef6f71cd9e738c72d6e"
+ dependencies = [
+  "memoffset",
+  "tempfile",
+- "windows-sys 0.60.2",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -6278,7 +6278,7 @@ version = "0.1.11"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
+ dependencies = [
+- "windows-sys 0.60.2",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+diff --git a/Cargo.toml b/Cargo.toml
+index bedb555..44c9468 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -33,7 +33,7 @@ wordcraft-metafile = { path = "crates/metafile" }
+ kurbo = { version = "0.13", features = ["serde"] }
+ thiserror = "2"
+ serde = { version = "1", features = ["derive", "rc"] }
+-serde_json = { version = "1", features = ["float_roundtrip"] }
++serde_json = { version = "=1.0.154", features = ["float_roundtrip"] }
+ log = "0.4"
+ # All date/time conversion goes through chrono (no hand-rolled calendar code beyond the 400-year range extension; AGENTS.md).
+ chrono = { version = "0.4.45", default-features = false, features = ["std"] }
+diff --git a/apps/wordcraft-web/src/c1.rs b/apps/wordcraft-web/src/c1.rs
+new file mode 100644
+index 0000000..62c6fd3
+--- /dev/null
++++ b/apps/wordcraft-web/src/c1.rs
+@@ -0,0 +1,109 @@
++//! LOCAL C1 display/command adapter only. The authenticated parent validates
++//! actual SQL receipts; callbacks are never credentials or Saved authority.
++use js_sys::Function;
++use std::{
++    cell::{Cell, RefCell},
++    rc::Rc,
++};
++use wasm_bindgen::prelude::*;
++use wordcraft_doc::Document;
++use wordcraft_ui_egui::c1_commands::{CommandBridge, native_document, validate_confirmed_selection_input, validate_ids};
++thread_local! { static ATTACHED: Cell<bool> = const { Cell::new(false) }; }
++struct Projection {
++    pub raw: String,
++    pub ids: String,
++    pub acknowledges_pending: bool,
++    pub selection: String,
++}
++pub(crate) struct State {
++    pub initial: Document,
++    pub bridge: Rc<CommandBridge>,
++    pending: RefCell<Option<Projection>>,
++    failed: Function,
++    failure_reported: Cell<bool>,
++}
++fn callback(value: &JsValue, name: &str) -> Result<Function, JsValue> {
++    js_sys::Reflect::get(value, &JsValue::from_str(name))?.dyn_into::<Function>().map_err(|_| JsValue::from_str("missing C1 callback"))
++}
++#[wasm_bindgen]
++pub struct WordCraftC1Handle {
++    state: Rc<State>,
++}
++#[wasm_bindgen]
++impl WordCraftC1Handle {
++    /// Caller first verifies canonical SQL projection and exact own operation
++    /// receipt. Peer-only projection passes false and cannot unblock a local write.
++    pub fn project_confirmed(
++        &self,
++        native_json: &str,
++        ids_json: &str,
++        acknowledges_pending: bool,
++        confirmed_selection_json: &str,
++    ) -> Result<(), JsValue> {
++        validate_confirmed_selection_input(confirmed_selection_json, acknowledges_pending)
++            .map_err(|_| JsValue::from_str("invalid C1 selection input"))?;
++        if self.state.bridge.stopped() {
++            return Err(JsValue::from_str("C1 stopped"));
++        }
++        let doc = native_document(native_json).map_err(|_| JsValue::from_str("invalid C1 native projection"))?;
++        validate_ids(ids_json, &doc).map_err(|_| JsValue::from_str("invalid C1 projection IDs"))?;
++        if self.state.pending.borrow().is_some() {
++            return Err(JsValue::from_str("C1 projection awaiting application"));
++        }
++        *self.state.pending.borrow_mut() =
++            Some(Projection { raw: native_json.into(), ids: ids_json.into(), acknowledges_pending, selection: confirmed_selection_json.into() });
++        Ok(())
++    }
++    pub fn stop(&self) {
++        self.state.bridge.stop();
++    }
++    pub fn command_pending(&self) -> bool {
++        self.state.bridge.pending()
++    }
++}
++impl State {
++    pub fn apply_projection(&self, app: &mut wordcraft_ui_egui::WordApp) {
++        if let Some(p) = self.pending.borrow_mut().take() {
++            if app.project_c1_confirmed(&p.raw, &p.ids, p.acknowledges_pending, &p.selection).is_err() {
++                self.bridge.stop();
++                if !self.failure_reported.replace(true) {
++                    let _ = self.failed.call1(&JsValue::NULL, &JsValue::from_str("native-projection-failed"));
++                }
++            }
++        }
++        if self.bridge.stopped() && !self.failure_reported.replace(true) {
++            let _ = self.failed.call1(&JsValue::NULL, &JsValue::from_str("connection_unavailable"));
++        }
++    }
++}
++/// One attached C1 renderer, selected by this separate bundle's explicit mode.
++/// No Yjs producer, document import endpoint or alternate parent channel exists.
++#[wasm_bindgen]
++pub fn start_c1_commands(native_json: &str, ids_json: &str, callbacks: JsValue) -> Result<WordCraftC1Handle, JsValue> {
++    if !super::web::c1_mode() {
++        return Err(JsValue::from_str("C1 mode not selected"));
++    }
++    let initial = native_document(native_json).map_err(|_| JsValue::from_str("invalid C1 native document"))?;
++    let gate = callback(&callbacks, "can_edit")?;
++    let capture = callback(&callbacks, "command")?;
++    let failed = callback(&callbacks, "failed")?;
++    let bridge = CommandBridge::new(
++        &initial,
++        ids_json,
++        Box::new(move || gate.call0(&JsValue::NULL).ok().and_then(|v| v.as_bool()) == Some(true)),
++        Box::new(move |raw| {
++            if capture.call1(&JsValue::NULL, &JsValue::from_str(raw)).ok().and_then(|v| v.as_bool()) == Some(true) {
++                Ok(())
++            } else {
++                Err("C1 command capture failed".into())
++            }
++        }),
++    )
++    .map_err(|_| JsValue::from_str("invalid C1 command bridge"))?;
++    let state = Rc::new(State { initial, bridge, pending: RefCell::new(None), failed, failure_reported: Cell::new(false) });
++    if ATTACHED.with(|active| active.replace(true)) {
++        return Err(JsValue::from_str("C1 already attached"));
++    }
++    super::web::start_c1(state.clone());
++    Ok(WordCraftC1Handle { state })
++}
+diff --git a/apps/wordcraft-web/src/main.rs b/apps/wordcraft-web/src/main.rs
+index d959222..d8073cb 100644
+--- a/apps/wordcraft-web/src/main.rs
++++ b/apps/wordcraft-web/src/main.rs
+@@ -18,6 +18,8 @@ mod prefs;
+ #[cfg(any(target_arch = "wasm32", test))]
+ mod save_fallback;
+ 
++#[cfg(target_arch = "wasm32")]
++mod c1;
+ #[cfg(target_arch = "wasm32")]
+ mod host;
+ #[cfg(target_arch = "wasm32")]
+diff --git a/apps/wordcraft-web/src/web.rs b/apps/wordcraft-web/src/web.rs
+index 7fa947f..0f2185a 100644
+--- a/apps/wordcraft-web/src/web.rs
++++ b/apps/wordcraft-web/src/web.rs
+@@ -16,9 +16,20 @@ mod font_store;
+ const CANVAS_ID: &str = "wordcraft_canvas";
+ const LOADING_ID: &str = "wordcraft_loading";
+ 
++pub fn c1_mode() -> bool {
++    query_param("mooring").as_deref() == Some("1")
++}
+ pub fn start() {
++    if !c1_mode() {
++        start_inner(None);
++    }
++}
++pub fn start_c1(state: Rc<super::c1::State>) {
++    start_inner(Some(state));
++}
++fn start_inner(c1: Option<Rc<super::c1::State>>) {
+     eframe::WebLogger::init(log::LevelFilter::Info).ok();
+-    wasm_bindgen_futures::spawn_local(async {
++    wasm_bindgen_futures::spawn_local(async move {
+         let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+             log::error!("no document");
+             return;
+@@ -29,7 +40,7 @@ pub fn start() {
+         };
+         // `?host=parent`: a same-origin page framing WordCraft opens documents in it and stores
+         // what it saves (`host`). That page guards leaving it, so this one doesn't.
+-        let bridge = if query_param("host").as_deref() == Some("parent") { crate::host::Bridge::new() } else { None };
++        let bridge = if c1.is_none() && query_param("host").as_deref() == Some("parent") { crate::host::Bridge::new() } else { None };
+         let app_bridge = bridge.clone();
+         let dirty = Rc::new(Cell::new(false));
+         let saves = AsyncSaves::default();
+@@ -53,18 +64,28 @@ pub fn start() {
+                         log::info!("wordcraft-web: wgpu backend {:?}", rs.adapter.get_info().backend);
+                     }
+                     // Fonts the user added on an earlier visit (#582); the app notices them arrive.
+-                    font_store::load_all(cc.egui_ctx.clone());
++                    if c1.is_none() {
++                        font_store::load_all(cc.egui_ctx.clone());
++                    }
+                     let inbox: Inbox = Inbox::default();
+                     let pasted: Inbox = Inbox::default();
+-                    if let Err(e) = listen_for_pasted_pictures(pasted.clone(), cc.egui_ctx.clone()) {
++                    if c1.is_none()
++                        && let Err(e) = listen_for_pasted_pictures(pasted.clone(), cc.egui_ctx.clone())
++                    {
+                         log::error!("pasting pictures is unavailable: {e}");
+                     }
+                     // The browser's locale picks the new document's paper, the units and the
+                     // decimal separator (#838).
+                     let region = wordcraft_ui_egui::i18n::system_region();
+                     // In host mode the parent sends the document to edit; no sample meanwhile.
+-                    let sample = app_bridge.is_none() && query().contains("sample");
+-                    let doc = if sample { wordcraft_engine::sample::sample_document() } else { wordcraft_engine::blank_document(&region) };
++                    let sample = c1.is_none() && app_bridge.is_none() && query().contains("sample");
++                    let doc = if let Some(state) = &c1 {
++                        state.initial.clone()
++                    } else if sample {
++                        wordcraft_engine::sample::sample_document()
++                    } else {
++                        wordcraft_engine::blank_document(&region)
++                    };
+                     let mut session = Session::new(doc);
+                     session.system_region = region;
+                     let messages = Rc::new(RefCell::new(Vec::new()));
+@@ -73,21 +94,26 @@ pub fn start() {
+                         bridge.connect(&mut services, inbox.clone(), cc.egui_ctx.clone());
+                     }
+                     let mut app = WordApp::new(session, services);
++                    if let Some(state) = &c1 {
++                        app.attach_c1_commands(state.bridge.clone()).map_err(|_| std::io::Error::other("C1 attachment refused"))?;
++                    }
+                     // Pasted pictures wait apart from dropped files: the app inserts one only when the page is the edit target (#1349).
+                     app.services.pasted = Some(pasted);
+                     app.autosave = false;
+                     // Preferences from an earlier visit (#2132), as the desktop app reads `ui.json`.
+-                    let stored = stored_prefs();
+-                    crate::prefs::restore(&mut app, stored.as_deref());
++                    let stored = if c1.is_none() { stored_prefs() } else { None };
++                    if c1.is_none() {
++                        crate::prefs::restore(&mut app, stored.as_deref());
++                    }
+                     // A region chosen in File › Options replaces the browser's for the first blank
+                     // document too (#838).
+-                    if !sample && app.session.prefs.region.is_some() {
++                    if c1.is_none() && !sample && app.session.prefs.region.is_some() {
+                         let doc = app.session.blank_document();
+                         app.session.set_document(doc);
+                     }
+                     let mut prefs = crate::prefs::PrefsSync::new(stored);
+                     // No document to show: start on File › Home, as the desktop app does (#766).
+-                    if !sample {
++                    if c1.is_none() && !sample {
+                         app.start_screen();
+                     }
+                     // The host's name for the user signs this visit's work, but isn't stored as the
+@@ -99,7 +125,7 @@ pub fn start() {
+                         crate::host::Bridge::set_author(&mut app, &author);
+                         prefs.keep_own_author(&app.session.author, &own);
+                     }
+-                    Ok(Box::new(WebShell { app, inbox, messages, prefs }))
++                    Ok(Box::new(WebShell { app, inbox, messages, prefs, c1 }))
+                 }),
+             )
+             .await;
+@@ -130,6 +156,7 @@ fn query_param(key: &str) -> Option<String> {
+ /// Wraps the app to read dropped files asynchronously (browsers can't read them synchronously)
+ /// and feed them through the inbox.
+ struct WebShell {
++    c1: Option<Rc<super::c1::State>>,
+     app: WordApp,
+     inbox: Inbox,
+     messages: Rc<RefCell<Vec<String>>>,
+@@ -150,13 +177,18 @@ impl eframe::App for WebShell {
+     /// then writes changed preferences to browser storage immediately, because a reload or closed
+     /// tab never runs the exit path.
+     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
++        if let Some(state) = &self.c1 {
++            state.apply_projection(&mut self.app);
++        }
+         let msgs = std::mem::take(&mut *self.messages.borrow_mut());
+         for msg in msgs {
+             self.app.status(msg);
+         }
+         self.app.logic(ctx);
+         // Store changed preferences straight away: a reload or closed tab runs no exit code (#2132).
+-        if let Some(json) = self.prefs.changed(&self.app) {
++        if self.c1.is_none()
++            && let Some(json) = self.prefs.changed(&self.app)
++        {
+             match local_storage() {
+                 Some(store) => {
+                     if let Err(e) = store.set_item(crate::prefs::KEY, &json) {
+@@ -181,7 +213,7 @@ impl eframe::App for WebShell {
+         if ui.ctx().current_pass_index() == 0 {
+             let ctx = ui.ctx().clone();
+             let dropped = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
+-            for f in dropped {
++            for f in dropped.into_iter().filter(|_| self.c1.is_none()) {
+                 let inbox = self.inbox.clone();
+                 let ctx = ctx.clone();
+                 wasm_bindgen_futures::spawn_local(async move {
+diff --git a/crates/ui-egui/src/c1_commands.rs b/crates/ui-egui/src/c1_commands.rs
+new file mode 100644
+index 0000000..7919f44
+--- /dev/null
++++ b/crates/ui-egui/src/c1_commands.rs
+@@ -0,0 +1,261 @@
++//! Default-off C1 LOCAL command/render seam. Callers own SQL receipts, transport,
++//! current permissions, operation identity and reconciliation. No local Saved.
++use crate::WordApp;
++use serde_json::{Value, json};
++use std::{
++    cell::{Cell, RefCell},
++    rc::Rc,
++};
++use wordcraft_doc::{Document, StoryRef};
++use wordcraft_engine::{Session, io as native_io};
++const MAX: usize = 4 * 1024 * 1024;
++/// Validate the borrowed display input before any copy or selection parse.
++/// Peer data has no authority to supply an own-operation selection.
++pub fn validate_confirmed_selection_input(raw: &str, acknowledges_pending: bool) -> Result<(), String> {
++    if raw.len() > 2048 || (!acknowledges_pending && !raw.is_empty()) {
++        return Err("invalid C1 selection input".into());
++    }
++    Ok(())
++}
++type Capture = Box<dyn Fn(&str) -> Result<(), String>>;
++pub struct CommandBridge {
++    ids: RefCell<Vec<String>>,
++    capture: Capture,
++    can_edit: Box<dyn Fn() -> bool>,
++    pending: Cell<bool>,
++    stopped: Cell<bool>,
++    proposal: RefCell<Option<Value>>,
++}
++pub fn native_document(raw: &str) -> Result<Document, String> {
++    if raw.is_empty() || raw.len() > MAX {
++        return Err("invalid C1 native size".into());
++    }
++    let before: Value = serde_json::from_str(raw).map_err(|_| "invalid C1 native JSON")?;
++    let doc = native_io::open_bytes("state.json", raw.as_bytes()).map_err(|_| "invalid C1 native document")?;
++    let saved = native_io::save_bytes("state.json", &doc).map_err(|_| "invalid C1 native document")?;
++    let after: Value = serde_json::from_slice(&saved).map_err(|_| "invalid C1 native document")?;
++    if before != after || doc.body.is_empty() || doc.body.len() > 4096 || doc.body.iter().any(|b| b.as_para().is_none()) {
++        return Err("lossy or unsupported C1 native document".into());
++    }
++    Ok(doc)
++}
++pub fn validate_ids(raw: &str, doc: &Document) -> Result<Vec<String>, String> {
++    if raw.len() > 1024 * 1024 {
++        return Err("invalid C1 IDs".into());
++    }
++    let ids: Vec<String> = serde_json::from_str(raw).map_err(|_| "invalid C1 IDs")?;
++    if ids.len() != doc.body.len()
++        || ids.iter().any(|s| s.is_empty() || s.len() > 200 || s.contains('\0'))
++        || ids.iter().collect::<std::collections::BTreeSet<_>>().len() != ids.len()
++    {
++        return Err("invalid C1 IDs".into());
++    }
++    Ok(ids)
++}
++impl CommandBridge {
++    pub fn new(doc: &Document, stable_ids_json: &str, can_edit: Box<dyn Fn() -> bool>, capture: Capture) -> Result<Rc<Self>, String> {
++        Ok(Rc::new(Self {
++            ids: RefCell::new(validate_ids(stable_ids_json, doc)?),
++            can_edit,
++            capture,
++            pending: Cell::new(false),
++            stopped: Cell::new(false),
++            proposal: RefCell::new(None),
++        }))
++    }
++    pub fn stopped(&self) -> bool {
++        self.stopped.get()
++    }
++    pub fn pending(&self) -> bool {
++        self.pending.get()
++    }
++    pub fn stop(&self) {
++        self.stopped.set(true);
++    }
++    pub fn stable_ids_json(&self) -> Result<String, String> {
++        serde_json::to_string(&*self.ids.borrow()).map_err(|_| "invalid C1 IDs".into())
++    }
++    fn forward(&self, session: &Session, registry_id: &str, params: &Value) -> Result<Value, String> {
++        if self.stopped.get() || self.pending.get() || !(self.can_edit)() {
++            return Err("C1 command unavailable".into());
++        }
++        let command = if registry_id == "edit.undo" { "participant.undo" } else { registry_id };
++        if !matches!(
++            command,
++            "document.read"
++                | "text.insert"
++                | "text.delete"
++                | "text.backspace"
++                | "text.newParagraph"
++                | "format.bold"
++                | "format.font"
++                | "format.size"
++                | "para.align"
++                | "participant.undo"
++        ) || session.registry.get(registry_id).is_none()
++        {
++            return Err("unsupported C1 command".into());
++        }
++        let target = if matches!(command, "document.read" | "participant.undo") {
++            Value::Null
++        } else {
++            let (start, end) = session.sel.ordered();
++            if start.story != StoryRef::Body || end.story != StoryRef::Body || start.path.0.len() != 1 || start.path != end.path {
++                return Err("unsupported C1 selection".into());
++            }
++            let index = start.path.0[0] as usize;
++            let para = session.doc.body.get(index).and_then(|b| b.as_para()).ok_or("unsupported C1 selection")?;
++            if start.off > end.off || !para.text.is_char_boundary(start.off) || !para.text.is_char_boundary(end.off) {
++                return Err("invalid UTF8 C1 selection".into());
++            }
++            json!({"block_id":self.ids.borrow().get(index).ok_or("invalid C1 block ID")?,"unit":"utf8_bytes","start":start.off,"end":end.off})
++        };
++        let proposal = json!({"registry_id":registry_id,"command":command,"params":params,"target":target});
++        let raw = serde_json::to_string(&proposal).map_err(|_| "invalid C1 command")?;
++        if raw.len() > 65536 {
++            return Err("C1 command capacity".into());
++        }
++        // Reserve the one original BEFORE entering JS so reentrant input is
++        // denied. Capture error/panic is uncertain: retain it and stop, never
++        // claim refusal or silently accept a successor original.
++        *self.proposal.borrow_mut() = Some(proposal);
++        self.pending.set(true);
++        if (self.capture)(&raw).is_err() {
++            self.stop();
++            return Err("C1 command capture failed".into());
++        }
++        if command == "document.read" {
++            self.proposal.borrow_mut().take();
++            self.pending.set(false);
++        }
++        Ok(json!({"command_pending":command!="document.read"}))
++    }
++}
++fn local_navigation(session: &Session, id: &str) -> bool {
++    session.registry.get(id).is_some_and(|s| !s.mutates)
++        && matches!(
++            id,
++            "caret.left"
++                | "caret.right"
++                | "caret.up"
++                | "caret.down"
++                | "caret.wordLeft"
++                | "caret.wordRight"
++                | "caret.home"
++                | "caret.end"
++                | "caret.docStart"
++                | "caret.docEnd"
++                | "caret.set"
++                | "select.all"
++                | "select.range"
++                | "select.collapse"
++                | "select.word"
++                | "select.paragraph"
++                | "view.zoomIn"
++                | "view.zoomOut"
++                | "view.zoom100"
++                | "view.marks"
++                | "view.state"
++                | "format.state"
++                | "document.selection"
++                | "document.layout"
++        )
++}
++impl WordApp {
++    pub fn attach_c1_commands(&mut self, bridge: Rc<CommandBridge>) -> Result<(), String> {
++        if self.c1_commands.is_some() || self.session.path.is_some() || self.session.dirty {
++            return Err("C1 requires a fresh native session".into());
++        }
++        self.c1_commands = Some(bridge);
++        self.autosave = false;
++        Ok(())
++    }
++    pub(crate) fn dispatch_c1(&mut self, id: &str, params: &Value) -> Option<Result<Value, String>> {
++        let bridge = self.c1_commands.clone()?;
++        if local_navigation(&self.session, id) {
++            return None;
++        }
++        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| bridge.forward(&self.session, id, params))).unwrap_or_else(|_| {
++            bridge.stop();
++            Err("C1 command capture stopped".into())
++        });
++        if result.is_err() && bridge.pending() && !bridge.stopped() {
++            self.status("Another command is pending. This input was not accepted.");
++        } else if result.is_err() {
++            self.status("This command is not available in collaborative mode.");
++        } else {
++            self.status("Waiting for the host command result.");
++        }
++        Some(result)
++    }
++    /// Render only after caller validated canonical native bytes and the original
++    /// pending outcome. Peer-only data passes acknowledges_pending=false, retains
++    /// the original and keeps further edits blocked. Only an exact own committed
++    /// receipt permits true; this display flag is not a host authority proof.
++    /// This method grants no permissions and does not emit Saved or SQL ACK.
++    pub fn project_c1_confirmed(
++        &mut self,
++        native_json: &str,
++        stable_ids_json: &str,
++        acknowledges_pending: bool,
++        confirmed_selection_json: &str,
++    ) -> Result<(), String> {
++        validate_confirmed_selection_input(confirmed_selection_json, acknowledges_pending)?;
++        let bridge = self.c1_commands.clone().ok_or("C1 not attached")?;
++        if bridge.stopped.get() {
++            return Err("C1 stopped".into());
++        }
++        let doc = native_document(native_json)?;
++        let new_ids = validate_ids(stable_ids_json, &doc)?;
++        let old_ids = bridge.ids.borrow().clone();
++        let previous = self.session.sel.clone();
++        let map = |pos: &wordcraft_doc::Pos| {
++            let old = pos.path.0.first().copied().unwrap_or(0) as usize;
++            let index = old_ids.get(old).and_then(|id| new_ids.iter().position(|v| v == id)).unwrap_or(old.min(doc.body.len() - 1));
++            let mut result = pos.clone();
++            result.story = StoryRef::Body;
++            result.path = wordcraft_doc::Path(vec![index as u32]);
++            let text = &doc.body[index].as_para().ok_or("unsupported C1 projection")?.text;
++            result.off = pos.off.min(text.len());
++            while !text.is_char_boundary(result.off) {
++                result.off = result.off.saturating_sub(1);
++            }
++            Ok::<_, String>(result)
++        };
++        let mut anchor = map(&previous.anchor)?;
++        let mut focus = map(&previous.focus)?;
++        if acknowledges_pending && bridge.pending.get() {
++            // Never infer caret from input length: AutoCorrect, deletion and Enter
++            // have native semantics. Caller supplies the ACTUAL committed engine
++            // selection result, bound to the same own operation receipt.
++            let confirmed: wordcraft_engine::Selection =
++                serde_json::from_str(confirmed_selection_json).map_err(|_| "missing confirmed C1 selection")?;
++            for pos in [&confirmed.anchor, &confirmed.focus] {
++                if pos.story != StoryRef::Body || pos.path.0.len() != 1 {
++                    return Err("invalid confirmed C1 selection".into());
++                }
++                let para = doc.body.get(pos.path.0[0] as usize).and_then(|p| p.as_para()).ok_or("invalid confirmed C1 selection")?;
++                if !para.text.is_char_boundary(pos.off) {
++                    return Err("invalid confirmed C1 selection".into());
++                }
++            }
++            anchor = confirmed.anchor;
++            focus = confirmed.focus;
++        }
++        // All checks precede native content/ID replacement; retain Session identity,
++        // path and native history. No local engine mutation or file import runs.
++        let dirty = self.session.dirty;
++        self.session.doc = doc;
++        self.session.sel.anchor = anchor;
++        self.session.sel.focus = focus;
++        self.session.touch();
++        self.session.dirty = dirty;
++        self.session.relayout();
++        *bridge.ids.borrow_mut() = new_ids;
++        if acknowledges_pending {
++            bridge.proposal.borrow_mut().take();
++            bridge.pending.set(false);
++        }
++        Ok(())
++    }
++}
+diff --git a/crates/ui-egui/src/keys.rs b/crates/ui-egui/src/keys.rs
+index a3bfd58..218241d 100644
+--- a/crates/ui-egui/src/keys.rs
++++ b/crates/ui-egui/src/keys.rs
+@@ -819,6 +819,14 @@ fn finish_alt_code(app: &mut WordApp) {
+ /// around the insertion itself: a transformation the engine performs (AutoCorrect, AutoFormat)
+ /// makes the frame [`egui::ImeChangeCause::Other`] instead.
+ fn type_text(app: &mut WordApp, text: &str, ime: bool) {
++    if app.c1_commands.is_some() {
++        if ime {
++            app.status("IME is not qualified in collaborative mode.");
++        } else {
++            let _ = app.run("text.insert", json!({"text":text}));
++        }
++        return;
++    }
+     let before = ime.then(|| ime_stamp(app));
+     // Where the text lands, so a quote can be checked against what the engine actually inserted.
+     let start = app.session.sel.ordered().0;
+@@ -1113,6 +1121,10 @@ fn note_automatic_change(app: &mut WordApp, outcome: ImeEditOutcome) {
+ /// text that follows joins it too ([`type_text`]), so one Undo takes back the typing with its
+ /// correction. Neither path runs inside an equation, whose text is not the document's.
+ fn delete_surrounding(app: &mut WordApp, before: usize, after: usize) {
++    if app.c1_commands.is_some() {
++        app.status("IME is not qualified in collaborative mode.");
++        return;
++    }
+     delete_surrounding_common(app, before, after, wordcraft_doc::ime_text::DeleteUnit::Chars);
+ }
+ 
+@@ -1122,6 +1134,10 @@ fn delete_surrounding(app: &mut WordApp, before: usize, after: usize) {
+ /// character leaves that character whole. The selection and paragraph marks stay outside the
+ /// range.
+ fn delete_surrounding_bytes(app: &mut WordApp, before: usize, after: usize) {
++    if app.c1_commands.is_some() {
++        app.status("IME is not qualified in collaborative mode.");
++        return;
++    }
+     delete_surrounding_common(app, before, after, wordcraft_doc::ime_text::DeleteUnit::Bytes);
+ }
+ 
+diff --git a/crates/ui-egui/src/lib.rs b/crates/ui-egui/src/lib.rs
+index 3a77229..e208827 100644
+--- a/crates/ui-egui/src/lib.rs
++++ b/crates/ui-egui/src/lib.rs
+@@ -535,9 +535,12 @@ fn migrate_units(v: &mut Value) {
+     }
+ }
+ 
++pub mod c1_commands;
++
+ /// The application.
+ pub struct WordApp {
+     pub session: Session,
++    pub(crate) c1_commands: Option<std::rc::Rc<c1_commands::CommandBridge>>,
+     pub ui: UiState,
+     pub services: Services,
+     pub printing: printing::State,
+@@ -723,6 +726,7 @@ impl WordApp {
+         }
+         WordApp {
+             session,
++            c1_commands: None,
+             ui: UiState::default(),
+             services,
+             printing: Default::default(),
+@@ -930,6 +934,10 @@ impl WordApp {
+     ///
+     /// The origin is restored on every return, including errors and nested commands.
+     pub(crate) fn run_ime(&mut self, id: &str, params: Value) -> Result<Value, String> {
++        if self.c1_commands.is_some() {
++            self.status("IME is not qualified in collaborative mode.");
++            return Err("C1 IME unqualified".into());
++        }
+         let previous = std::mem::replace(&mut self.ime_origin, true);
+         let result = self.run(id, params);
+         self.ime_origin = previous;
+@@ -940,6 +948,9 @@ impl WordApp {
+     /// Close, Envelopes, Labels and Finish & Merge on a document with unsaved changes first ask
+     /// Save / Don't Save / Cancel, and the command runs once that is answered (`ui.saveChanges`).
+     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
++        if let Some(result) = self.dispatch_c1(id, &params) {
++            return result;
++        }
+         // Comment text still being typed is written first, so a save or export has it and a
+         // close, New or Open counts it as a change (#1348). A draft the document refuses is not
+         // part of it: saving and exporting go on without it (the refusal stays on the status
+@@ -1021,6 +1032,9 @@ impl WordApp {
+     /// Run a command for a script or an agent (control channel, MCP bridge): never asks first.
+     /// UI-level commands (`ui.*`) are handled here, the rest by the engine.
+     pub fn execute(&mut self, id: &str, params: Value) -> Result<Value, String> {
++        if let Some(result) = self.dispatch_c1(id, &params) {
++            return result;
++        }
+         // A pending Change Picture only survives until the next action (#147).
+         if !matches!(id, "ui.changePicture" | "picture.change" | "insert.picture") {
+             self.change_picture_target = None;
+@@ -2346,7 +2360,9 @@ impl WordApp {
+         self.drain_pasted();
+         self.watch_fonts(ctx);
+         let document = self.session.document_id();
+-        self.session.recovery_tick();
++        if self.c1_commands.is_none() {
++            self.session.recovery_tick();
++        }
+         if self.session.document_id() != document {
+             self.autosave_path = None;
+             self.dialog = None;
+@@ -2774,6 +2790,9 @@ impl WordApp {
+     /// Files that arrived asynchronously (web picker, drops): documents open, pictures insert,
+     /// recipient lists (CSV/TSV, spreadsheets, or a text file asked for as one) load as recipients.
+     fn drain_inbox(&mut self) {
++        if self.c1_commands.is_some() {
++            return;
++        }
+         let Some(inbox) = self.services.inbox.clone() else { return };
+         let files = std::mem::take(&mut *inbox.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+         let mut placed_picture = false;
+@@ -2808,6 +2827,9 @@ impl WordApp {
+     /// Pictures pasted in the browser: inserted once when the page is the edit target, dropped
+     /// otherwise so the focused field's own paste applies (a text field ignores a picture).
+     fn drain_pasted(&mut self) {
++        if self.c1_commands.is_some() {
++            return;
++        }
+         let Some(pasted) = self.services.pasted.clone() else { return };
+         let pictures = std::mem::take(&mut *pasted.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+         let target = paste_target(self.canvas.focused, self.ui.backstage, self.dialog.is_some() || self.file_dialog_open());
+@@ -2823,6 +2845,9 @@ impl WordApp {
+     /// Drains queued control requests, dispatches each through `control::handle`, sends its reply or
+     /// admits a screenshot, then puts the receiver back.
+     fn drain_control(&mut self, ctx: &egui::Context) {
++        if self.c1_commands.is_some() {
++            return;
++        }
+         let Some(rx) = self.control_rx.take() else { return };
+         while let Ok(req) = rx.try_recv() {
+             let reply = req.reply.clone();

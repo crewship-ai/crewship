@@ -43,6 +43,7 @@ running the full suite with a deliberately adjusted timeout. Mutation tests
 | --- | --- |
 | [build-stamp.sh](build-stamp.sh) | Reads Git identity correctly in worktrees; supplies build metadata |
 | [WordCraft native source preparation](../tools/wordcraft-mooring-native/README.md) | Copies a fixed public Git revision into a new directory, checks the inventoried dormant seam patch and original/patched hashes; no changes to input tracked files/index, dependency download, service or capability enablement |
+| [Separate C1 renderer seam](../tools/wordcraft-c1-browser/README.md) | Prepares the pinned C1 renderer and actual WASM registry/codec harness in new owned directories; no legacy SDK, host authority, service or default build changes |
 | [embed-web-out.sh](embed-web-out.sh) | Stages/verifies the static export in `web/out/`; preserves the placeholder |
 | [check-chat-table-worker.mjs](check-chat-table-worker.mjs), [check-chat-xlsx-worker.mjs](check-chat-xlsx-worker.mjs) | Chromium acceptance of built `out/chat-workers` bundles with synthetic CSV/XLSX; runs through `pnpm test:chat-worker` / `pnpm test:chat-xlsx-worker` in CI Playwright PR subset; no live server or external parser |
 | [prepare-chat-workers.mjs](prepare-chat-workers.mjs) | Bundles chat preview workers as local JavaScript before frontend dev/build; public output is generated and ignored |

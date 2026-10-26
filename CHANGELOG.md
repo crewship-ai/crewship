@@ -11,6 +11,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Add a disabled command-document runtime lifecycle that initializes only new documents, restores confirmed SQL state, and retains existing owner fencing without falling back to the legacy adapter.
 - Bound the native C1 host's live generation history across repeated restores, preserving pending candidates and handles when replacement capacity is refused.
+- Add a separate opt-in C1 renderer source recipe and actual native WASM registry/codec harness, with confirmed selection checks and explicit pending-input refusal; it does not enable product UI, preserve rapid input or change the legacy SDK.
 
 - Add a default-off private inherited-FD WordCraft command host that pins its native helper and stages immutable checkpoints for trusted SQL confirmation, without exposing a public commit endpoint.
 - Keep private native WordCraft agent commands and outcome lookups bound to their original confirmed chat mandate and current Page permissions.

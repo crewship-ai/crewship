@@ -1,0 +1,40 @@
+{
+  "revision": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+  "engine_source_manifest_sha256": "c6a784cc85d7bce594a0f049e07af79ffa353694f32cde18d04f526c2af1e4dc",
+  "patch_sha256": "05d38a163f15d75311cfdcc04a20c7b89dd6cf4c0ddef9bf80e94a825ec1023b",
+  "files": {
+    "Cargo.toml": {
+      "before_sha256": "e7594df0f5f9556f465586bf752eef7fe743740422b6b7d5c4c4f7a97c8146c8",
+      "after_sha256": "e5e53c80b6a59a8fa0c2da173ca42c5972c85e090e8dd7f121efce31415272b1"
+    },
+    "Cargo.lock": {
+      "before_sha256": "ece0a03e437dd7448d681dbf76f4c21480990ea7f0f552636e0be608e1539383",
+      "after_sha256": "a87a04fa5f3cb1af701967e69e49ced48c1008e732db413af50c6f99d81a30a9"
+    },
+    "apps/wordcraft-web/src/c1.rs": {
+      "before_sha256": null,
+      "after_sha256": "25b1df822bb3ee7a196bd736f8fdfdc91eb543cfa9d617f6ab3d3860e4c65fd4"
+    },
+    "apps/wordcraft-web/src/main.rs": {
+      "before_sha256": "2732b5c95004f9273a2eb14b936cee1a0a1d77bc518f206920575285ccf0c5af",
+      "after_sha256": "3f09167bca2f03729e4c96ba7330765b0cd7e6feb758386f0728abe1afa4f374"
+    },
+    "apps/wordcraft-web/src/web.rs": {
+      "before_sha256": "4def4b970cc688e4e4996296fe5ac1fca945aa543f1d31aa2e856ffd449a943d",
+      "after_sha256": "deaa56f7fc0f0aaff25f73b7dcb86f33ab694b33854ebc36a3d78659d5d49d43"
+    },
+    "crates/ui-egui/src/c1_commands.rs": {
+      "before_sha256": null,
+      "after_sha256": "7e2d1013e74fa34387f3c3bb649809e0d24568846b584a9b89fb23e8f99a3e6e"
+    },
+    "crates/ui-egui/src/keys.rs": {
+      "before_sha256": "4ee9013e16669b5ae41d738deda009a11f699a1abd59a14e82f6e055cd35bea7",
+      "after_sha256": "e3f8580375a9c532509deaa6aa323d8e5ef65d1bad2650227f50384ffb2ac6b8"
+    },
+    "crates/ui-egui/src/lib.rs": {
+      "before_sha256": "415dd04810687fb94d5738d720914f595fc5e2d3105dc0f0622a00fba4e4b524",
+      "after_sha256": "29edd1c23dfd3528579eaeafa06c267418f058b1845308ec1192fd8aca1f0789"
+    }
+  },
+  "scope": "Separate C1 renderer and local command seam only; legacy SDK recipe unchanged. No SQL/Saved/live UI qualification."
+}
