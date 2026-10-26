@@ -421,7 +421,9 @@ func (r *OrchestratorRunner) RunScript(ctx context.Context, req ScriptRunRequest
 		return ScriptRunResult{}, err
 	}
 	nonceText := hex.EncodeToString(nonce[:])
-	controlDir := scriptControlPrefix + nonceText
+	// Keep the container path rooted at its original audited creation site.
+	const controlPrefix = "/tmp/crewship-script-"
+	controlDir := controlPrefix + nonceText
 	cmd := append([]string{"setsid", "--wait", "sh", "-c", scriptProcessWrapper, "crewship-script", controlDir, nonceText}, argv...)
 
 	// #1473: a script step runs inside the agent container but used to build
@@ -488,7 +490,7 @@ func (r *OrchestratorRunner) RunScript(ctx context.Context, req ScriptRunRequest
 	}()
 	buffered := bufio.NewReaderSize(execRes.Reader, scriptControlFrameLimit)
 	line, frameErr := buffered.ReadSlice('\n')
-	control, receiptErr := parseScriptControlReceipt(controlDir, nonceText, line, frameErr)
+	control, receiptErr := parseScriptControlReceipt(controlDir, nonceText, controlPrefix, line, frameErr)
 	var output io.Reader = buffered
 	var framingReadErr error
 	if receiptErr != nil {

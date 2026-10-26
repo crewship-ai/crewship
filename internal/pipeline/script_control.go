@@ -11,20 +11,21 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
-const scriptControlPrefix = "/tmp/crewship-script-"
 const scriptControlFrameLimit = 256
 
 // Ownership is independent of optional cleanup evidence. Metadata failure must
 // not prevent an otherwise supported script from running.
 type scriptControlReceipt struct {
-	dir, nonce, pid      string
-	group, device, inode string
-	owned                bool
+	dir, nonce, prefix, pid string
+	group, device, inode    string
+	owned                   bool
 }
 
-func parseScriptControlReceipt(dir, nonce string, line []byte, readErr error) (scriptControlReceipt, error) {
-	receipt := scriptControlReceipt{dir: dir, nonce: nonce}
-	if !validScriptControlDir(dir, nonce) || readErr != nil || !strings.HasSuffix(string(line), "\n") {
+// controlPrefix is the immutable local Go constant at the sole production
+// call site, not request, environment, or remote receipt data.
+func parseScriptControlReceipt(dir, nonce, controlPrefix string, line []byte, readErr error) (scriptControlReceipt, error) {
+	receipt := scriptControlReceipt{dir: dir, nonce: nonce, prefix: controlPrefix}
+	if !validScriptControlDir(dir, nonce, controlPrefix) || readErr != nil || !strings.HasSuffix(string(line), "\n") {
 		return receipt, fmt.Errorf("invalid or incomplete creation receipt")
 	}
 	fields := strings.Split(strings.TrimSuffix(string(line), "\n"), ":")
@@ -61,8 +62,8 @@ func scriptDecimal(value string, bits int, minimum uint64) bool {
 	return err == nil && n >= minimum
 }
 
-func validScriptControlDir(dir, nonce string) bool {
-	if len(nonce) != 32 || dir != scriptControlPrefix+nonce {
+func validScriptControlDir(dir, nonce, controlPrefix string) bool {
+	if controlPrefix == "" || len(nonce) != 32 || dir != controlPrefix+nonce {
 		return false
 	}
 	for _, c := range nonce {
@@ -74,7 +75,7 @@ func validScriptControlDir(dir, nonce string) bool {
 }
 
 func (r scriptControlReceipt) eligible() bool {
-	return r.owned && validScriptControlDir(r.dir, r.nonce) && r.group == r.pid &&
+	return r.owned && validScriptControlDir(r.dir, r.nonce, r.prefix) && r.group == r.pid &&
 		scriptDecimal(r.group, 32, 2) && scriptDecimal(r.device, 64, 0) && scriptDecimal(r.inode, 64, 1)
 }
 

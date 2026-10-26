@@ -12,6 +12,9 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
+// Test-only expected prefix. Production obtains this solely from RunScript.
+const scriptControlPrefix = "/tmp/crewship-script-"
+
 func TestScriptControlReceiptAndOptionalMetadata(t *testing.T) {
 	nonce := strings.Repeat("a", 32)
 	dir := scriptControlPrefix + nonce
@@ -28,10 +31,15 @@ func TestScriptControlReceiptAndOptionalMetadata(t *testing.T) {
 		{"sibling", dir, strings.Repeat("b", 32), frame, nil, false},
 		{"trailing slash", dir + "/", nonce, frame, nil, false},
 		{"fake parent", "/other/crewship-script-" + nonce, nonce, frame, nil, false},
+		{"relative path", "tmp/crewship-script-" + nonce, nonce, frame, nil, false},
+		{"double slash", "/tmp//crewship-script-" + nonce, nonce, frame, nil, false},
+		{"dot alias", "/tmp/./crewship-script-" + nonce, nonce, frame, nil, false},
+		{"wrong frame nonce", dir, nonce, []byte("crewship-script-created-v1:" + strings.Repeat("b", 32) + ":4321\n"), nil, false},
+		{"uppercase nonce", scriptControlPrefix + strings.Repeat("A", 32), strings.Repeat("A", 32), []byte("crewship-script-created-v1:" + strings.Repeat("A", 32) + ":4321\n"), nil, false},
 		{"zero pid", dir, nonce, []byte("crewship-script-created-v1:" + nonce + ":0\n"), nil, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r, err := parseScriptControlReceipt(tc.dir, tc.nonce, tc.frame, tc.err)
+			r, err := parseScriptControlReceipt(tc.dir, tc.nonce, scriptControlPrefix, tc.frame, tc.err)
 			if r.owned != tc.owned || (err == nil) != tc.owned {
 				t.Fatalf("receipt: %#v %v", r, err)
 			}
