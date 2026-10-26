@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 pub mod process;
+mod staging;
+pub use staging::StagedCommit;
 
 const FRAME: usize = 4 * 1024 * 1024;
 const INPUT: usize = 65_536;
@@ -94,7 +96,7 @@ struct Seen {
     input: Vec<u8>,
     result: Value,
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Checkpoint {
     engine_identity: Value,
@@ -127,11 +129,6 @@ pub enum Prepared {
     Pending { op_id: String },
     Known(Value),
 }
-#[derive(Clone, Copy)]
-pub enum Decision {
-    Committed,
-    Rejected,
-}
 
 pub struct Host<E: Engine> {
     engine: E,
@@ -139,6 +136,9 @@ pub struct Host<E: Engine> {
     k: Option<Candidate>,
     issued: u64,
     rejected: BTreeMap<String, Seen>,
+    // Exact last canonical SQL checkpoint identity; generation rotation in RAM
+    // must not change the base digest used by the next SQL compare-and-swap.
+    canonical_digest: String,
 }
 impl<E: Engine> Host<E> {
     pub fn new(
@@ -175,12 +175,14 @@ impl<E: Engine> Host<E> {
             k: None,
             issued: 0,
             rejected: BTreeMap::new(),
+            canonical_digest: String::new(),
         };
         for _ in 0..count {
             let value = host.allocate()?;
             host.state.p.ids.push(value)
         }
         host.validate()?;
+        host.canonical_digest = staging::digest(&host.checkpoint()?);
         Ok(host)
     }
     pub fn restore(engine: E, raw: &[u8], generation: &str) -> Result<Self> {
@@ -200,6 +202,7 @@ impl<E: Engine> Host<E> {
             k: None,
             issued: 0,
             rejected: BTreeMap::new(),
+            canonical_digest: staging::digest(raw),
         };
         host.validate()?;
         let reply=host.engine.call(json!({"command":"init","params":{},"native":host.state.p.native,"target":null,"author":"host","time":"2001-01-01T00:00:00Z"}))?;
@@ -252,6 +255,9 @@ impl<E: Engine> Host<E> {
             usize::from(self.k.is_some()),
             self.state.seen.len() + self.rejected.len(),
         )
+    }
+    pub fn canonical_checkpoint_digest(&self) -> &str {
+        &self.canonical_digest
     }
     pub fn checkpoint(&self) -> Result<Vec<u8>> {
         serde_json::to_vec(&self.state).map_err(|_| "checkpoint_encode")
@@ -414,69 +420,23 @@ impl<E: Engine> Host<E> {
         });
         Ok(Prepared::Pending { op_id })
     }
-    /// Trusted host completion, deliberately unavailable through user JSON.
-    /// A changed/revoked/reader admission discards K without changing P/history.
-    pub fn resolve(
-        &mut self,
-        op_id: &str,
-        decision: Decision,
-        current: Option<&Admission>,
-    ) -> Result<Value> {
+    /// Only a definitive host rejection/rollback may discard K. Unknown SQL
+    /// outcomes MUST retain K and reconcile the same op_id with canonical SQL.
+    /// Rejection changes neither confirmed P nor its participant undo history.
+    pub fn reject(&mut self, op_id: &str) -> Result<Value> {
         let k = self.k.take().ok_or("no_pending")?;
         if k.envelope.op_id != op_id {
             self.k = Some(k);
             return Err("wrong_pending");
         }
-        let qualified = current.is_some_and(|a| {
-            a.writer
-                && a.participant == k.envelope.participant
-                && a.epoch == k.epoch
-                && a.author == k.author
-        });
-        let committed = matches!(decision, Decision::Committed) && qualified;
-        let next_revision = self
-            .state
-            .revision
-            .checked_add(1)
-            .ok_or("revision_exhausted")?;
-        let result = if committed {
-            if let Some(index) = k.undo {
-                self.state.history[index].undone = true;
-            } else {
-                self.state.history.push(Undo {
-                    participant: k.envelope.participant.clone(),
-                    op_id: op_id.into(),
-                    before: self.state.p.clone(),
-                    after: k.snapshot.clone(),
-                    undone: false,
-                });
-                while self.state.history.len() > HISTORY
-                    || history_size(&self.state.history) > HISTORY_BYTES
-                {
-                    self.state.history.remove(0);
-                }
-            }
-            self.state.p = k.snapshot;
-            self.state.revision = next_revision;
-            json!({"state":"host_committed","op_id":op_id,"revision":self.state.revision,"actor":k.envelope.participant,"author":k.author,"command_time":k.time,"fingerprint":String::from_utf8_lossy(&k.input)})
-        } else {
-            json!({"state":"rejected","op_id":op_id,"revision":self.state.revision})
-        };
-        let seen = if committed {
-            &mut self.state.seen
-        } else {
-            &mut self.rejected
-        };
-        seen.insert(
+        let result = json!({"state":"rejected","op_id":op_id,"revision":self.state.revision});
+        self.rejected.insert(
             op_id.into(),
             Seen {
                 input: k.input,
                 result: result.clone(),
             },
         );
-        if matches!(decision, Decision::Committed) && !qualified {
-            return Err("commit_admission_denied");
-        }
         Ok(result)
     }
 }

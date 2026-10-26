@@ -33,9 +33,31 @@ baseline for the unpatched engine.
 `Admission` is a trusted Rust input, not user JSON. The JSON boundary refuses
 client authority, duplicate/unknown fields, stale revisions, unsupported targets
 and commands. The host stamps author/time before the actual engine command.
-Preparation produces one candidate K from confirmed P; a separate trusted
-completion requires fresh writer admission and the original permission epoch.
-Rejection discards K while retaining confirmed state and participant undo. The
+Preparation produces one candidate K from confirmed P. `stage_commit` builds an
+opaque `StagedCommit`: immutable candidate checkpoint bytes and a candidate
+receipt, without changing P, participant undo or confirmed operation history.
+The checkpoint includes the future confirmed operation receipt so a restart after
+an actual SQL commit but before Rust ACK can return a known operation without
+engine execution. Its read-only metadata includes document/generation, base and
+next revision, engine identity, operation fingerprint and checkpoint digests.
+`canonical_checkpoint_digest` identifies the exact last SQL blob, even when a
+restore rotates the in-memory generation; the next SQL compare-and-swap must use
+that base identity. Digest getters use the `sha256:<lowercase hex>` format.
+
+Only after the host has actually committed those exact checkpoint bytes AND the
+receipt in one canonical SQL transaction may it call `confirm_committed`. The
+callback rechecks fresh writer admission, original participant/author/epoch,
+original candidate and the entire confirmed-base digest before K becomes P.
+This trusted callback is not decoded from user JSON; it does not itself perform
+or prove SQL. There is no direct `resolve(Committed)` shortcut. Tests explicitly
+simulate this callback and must not be presented as SQL durability evidence.
+
+A definitive `reject` discards K while retaining confirmed state and participant
+undo. A SQL error/unknown outcome must not invoke success or rejection: retain K,
+block successor mutations, and look up the original operation/canonical SQL
+checkpoint. Do not persist an unconfirmed K in another journal or blindly replay
+it. A failed final ACK likewise retains P AND K because SQL may already have
+committed; canonical reconciliation belongs to the product host. The
 ephemeral monotonic issued-ID counter burns IDs without changing the confirmed
 checkpoint. Rejected operation receipts are bounded, live-host tombstones outside
 that checkpoint; committed receipts survive restoration. Requests explicitly carry

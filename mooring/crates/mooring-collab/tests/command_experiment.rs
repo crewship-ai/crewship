@@ -1,6 +1,6 @@
 #![cfg(all(target_os = "linux", feature = "wordcraft-command-experiment"))]
 use mooring_collab::command_experiment::{
-    process::ProcessEngine, Admission, Decision, Engine, Host, Prepared,
+    process::ProcessEngine, Admission, Engine, Host, Prepared,
 };
 use serde_json::{json, Value};
 use std::{path::PathBuf, time::Instant};
@@ -18,8 +18,8 @@ fn host() -> Host<ProcessEngine> {
 fn actor(name: &str, epoch: u64, writer: bool) -> Admission {
     Admission::new(name, name, "2001-02-03T04:05:06Z", epoch, writer).unwrap()
 }
-fn packet(
-    h: &Host<ProcessEngine>,
+fn packet<E: Engine>(
+    h: &Host<E>,
     op: &str,
     who: &str,
     cmd: &str,
@@ -35,20 +35,40 @@ fn packet(
     }
     serde_json::to_vec(&json!({"generation":h.generation(),"op_id":key(h,op),"participant":who,"base_revision":h.revision(),"command":cmd,"params":params,"target":block.map(|(i,start,end)|json!({"block_id":h.ids()[i],"unit":"utf8_bytes","start":start,"end":end}))})).unwrap()
 }
-fn key(h: &Host<ProcessEngine>, local: &str) -> String {
+fn key<E: Engine>(h: &Host<E>, local: &str) -> String {
     format!("{}:{local}", h.generation())
 }
-fn resolve(
-    h: &mut Host<ProcessEngine>,
+// Test-fixture decisions simulate the trusted host callback; they are NOT SQL evidence.
+enum Decision {
+    Committed,
+    Rejected,
+}
+fn resolve<E: Engine>(
+    h: &mut Host<E>,
     local: &str,
     decision: Decision,
     current: Option<&Admission>,
 ) -> Result<Value, &'static str> {
     let op = key(h, local);
-    h.resolve(&op, decision, current)
+    match decision {
+        Decision::Rejected => h.reject(&op),
+        Decision::Committed => {
+            let staged = match current
+                .ok_or("commit_admission_denied")
+                .and_then(|a| h.stage_commit(&op, a))
+            {
+                Ok(staged) => staged,
+                Err(error) => {
+                    h.reject(&op).unwrap();
+                    return Err(error);
+                }
+            };
+            h.confirm_committed(&staged, current.unwrap())
+        }
+    }
 }
-fn commit(
-    h: &mut Host<ProcessEngine>,
+fn commit<E: Engine>(
+    h: &mut Host<E>,
     op: &str,
     who: &str,
     cmd: &str,
@@ -66,10 +86,10 @@ fn commit(
         "host_committed"
     )
 }
-fn text(h: &Host<ProcessEngine>, i: usize) -> String {
+fn text<E: Engine>(h: &Host<E>, i: usize) -> String {
     h.native()["body"][i]["text"].as_str().unwrap().into()
 }
-fn unchanged(h: &Host<ProcessEngine>) -> (Value, u64, usize, Vec<u8>) {
+fn unchanged<E: Engine>(h: &Host<E>) -> (Value, u64, usize, Vec<u8>) {
     (
         h.native().clone(),
         h.revision(),
@@ -759,4 +779,332 @@ fn restart_fences_rejected_and_denied_operations_without_reexecuting_them() {
         );
         assert_eq!(text(&h, 0), "NEWCONFIRMED");
     }
+}
+
+// Observation wrapper around the REAL pinned helper, not an engine mock.
+struct CountedEngine {
+    actual: ProcessEngine,
+    calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+impl Engine for CountedEngine {
+    fn call(&mut self, request: Value) -> Result<Value, &'static str> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.actual.call(request)
+    }
+}
+fn counted_engine() -> (
+    CountedEngine,
+    std::sync::Arc<std::sync::atomic::AtomicUsize>,
+) {
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    (
+        CountedEngine {
+            actual: engine(),
+            calls: calls.clone(),
+        },
+        calls,
+    )
+}
+fn call_count(calls: &std::sync::atomic::AtomicUsize) -> usize {
+    calls.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+#[test]
+fn staged_checkpoint_is_immutable_until_trusted_ack_and_ack_is_idempotent() {
+    let (e, calls) = counted_engine();
+    let mut h = Host::new(e, "document", "generation1", None).unwrap();
+    let jana = actor("Jana", 1, true);
+    let before = unchanged(&h);
+    let raw = packet(
+        &h,
+        "insert",
+        "Jana",
+        "text.insert",
+        Some((0, 0, 0)),
+        json!({"text":"Jana"}),
+    );
+    h.prepare(&raw, &jana).unwrap();
+    let executed = call_count(&calls);
+    let staged = h.stage_commit(&key(&h, "insert"), &jana).unwrap();
+    assert_eq!(unchanged(&h), before);
+    assert_eq!(h.counts(), (0, 1, 0));
+    assert_eq!(
+        call_count(&calls),
+        executed,
+        "staging must not execute engine again"
+    );
+    let again = h.stage_commit(staged.op_id(), &jana).unwrap();
+    assert_eq!(again.checkpoint(), staged.checkpoint());
+    assert_eq!(again.candidate_receipt(), staged.candidate_receipt());
+    assert_eq!(again.checkpoint_digest(), staged.checkpoint_digest());
+    assert_eq!(
+        staged.candidate_receipt()["fingerprint"],
+        staged.fingerprint()
+    );
+    assert_eq!(staged.base_revision(), 0);
+    assert_eq!(staged.revision(), 1);
+    assert_eq!(staged.document(), "document");
+    assert_eq!(staged.generation(), "generation1");
+    assert_eq!(staged.format(), "wordcraft-c1-v2");
+    assert_eq!(staged.engine_identity()["catalog"], "wordcraft-c1-10-v1");
+    assert_ne!(staged.base_checkpoint_digest(), staged.checkpoint_digest());
+    // This explicitly SIMULATES a trusted SQL-success callback. No SQL proof.
+    let result = h.confirm_committed(&staged, &jana).unwrap();
+    assert_eq!(result, *staged.candidate_receipt());
+    assert_eq!(h.checkpoint().unwrap(), staged.checkpoint());
+    assert_eq!(h.revision(), 1);
+    assert_eq!(h.counts(), (1, 0, 1));
+    assert_eq!(text(&h, 0), "Jana");
+    assert_eq!(h.confirm_committed(&staged, &jana).unwrap(), result);
+    assert!(matches!(h.prepare(&raw, &jana).unwrap(), Prepared::Known(value) if value == result));
+    assert_eq!(
+        call_count(&calls),
+        executed,
+        "ACK and known retries must not execute engine"
+    );
+}
+
+#[test]
+fn committed_stage_restores_after_crash_before_ack_without_reexecution() {
+    let (e, calls) = counted_engine();
+    let mut h = Host::new(e, "document", "generation1", None).unwrap();
+    let jana = actor("Jana", 1, true);
+    let raw = packet(
+        &h,
+        "before-crash",
+        "Jana",
+        "text.insert",
+        Some((0, 0, 0)),
+        json!({"text":"Confirmed after SQL"}),
+    );
+    let unknown = packet(
+        &h,
+        "unknown-old",
+        "Jana",
+        "text.insert",
+        Some((0, 0, 0)),
+        json!({"text":"MUST NOT REEXECUTE"}),
+    );
+    h.prepare(&raw, &jana).unwrap();
+    let staged = h.stage_commit(&key(&h, "before-crash"), &jana).unwrap();
+    let executed = call_count(&calls);
+    assert_eq!(h.revision(), 0);
+    assert_eq!(call_count(&calls), executed);
+    let canonical_bytes = staged.checkpoint().to_vec();
+    let canonical_receipt = staged.candidate_receipt().clone();
+    // These are the bytes a REAL host must atomically commit with the receipt.
+    // The test simulates committed canonical input, not a database transaction.
+    drop(h); // Crash BEFORE confirm_committed, after the simulated SQL boundary.
+    let (e, restored_calls) = counted_engine();
+    let mut restored = Host::restore(e, &canonical_bytes, "generation2").unwrap();
+    let initialized = call_count(&restored_calls);
+    assert_eq!(restored.revision(), 1);
+    assert_eq!(text(&restored, 0), "Confirmed after SQL");
+    assert_eq!(restored.counts(), (1, 0, 1));
+    assert!(
+        matches!(restored.prepare(&raw, &jana).unwrap(), Prepared::Known(value) if value == canonical_receipt)
+    );
+    assert_eq!(restored.prepare(&unknown, &jana), Err("stale_generation"));
+    let mut conflict: Value = serde_json::from_slice(&raw).unwrap();
+    conflict["params"]["text"] = json!("changed known identity");
+    assert_eq!(
+        restored.prepare(&serde_json::to_vec(&conflict).unwrap(), &jana),
+        Err("op_id_conflict")
+    );
+    assert_eq!(
+        call_count(&restored_calls),
+        initialized,
+        "known/stale/conflicting operations must not execute"
+    );
+}
+
+#[test]
+fn denied_ack_unknown_store_outcome_and_rejection_preserve_p_and_participant_undo() {
+    let (e, calls) = counted_engine();
+    let mut h = Host::new(e, "document", "generation1", None).unwrap();
+    commit(
+        &mut h,
+        "jana",
+        "Jana",
+        "text.insert",
+        Some((0, 0, 0)),
+        json!({"text":"Jana"}),
+    );
+    let before = unchanged(&h);
+    let agent = actor("Agent", 1, true);
+    let raw = packet(
+        &h,
+        "agent",
+        "Agent",
+        "text.insert",
+        Some((0, 4, 4)),
+        json!({"text":" rejected candidate"}),
+    );
+    h.prepare(&raw, &agent).unwrap();
+    let staged = h.stage_commit(&key(&h, "agent"), &agent).unwrap();
+    let executed = call_count(&calls);
+    for denied in [
+        actor("Agent", 1, false),
+        actor("Agent", 2, true),
+        actor("Jana", 1, true),
+        Admission::new("Agent", "changed author", "2001-02-03T04:05:06Z", 1, true).unwrap(),
+    ] {
+        assert_eq!(
+            h.confirm_committed(&staged, &denied),
+            Err("commit_admission_denied")
+        );
+        assert_eq!(unchanged(&h), before);
+        assert_eq!(h.counts().1, 1, "failed ACK retains unknown candidate");
+    }
+    // A SQL error/unknown MUST NOT invoke the success callback or discard K.
+    // Here no SQL is executed. Exercise the required blocked successor behavior.
+    let successor = packet(
+        &h,
+        "successor",
+        "Jana",
+        "text.insert",
+        Some((0, 4, 4)),
+        json!({"text":"never"}),
+    );
+    assert_eq!(
+        h.prepare(&successor, &actor("Jana", 1, true)),
+        Err("pending_limit")
+    );
+    assert!(matches!(
+        h.prepare(&raw, &agent).unwrap(),
+        Prepared::Pending { .. }
+    ));
+    assert_eq!(unchanged(&h), before);
+    assert_eq!(call_count(&calls), executed);
+    // Simulate a DEFINITIVE host rollback/rejection, not an unknown SQL outcome.
+    h.reject(staged.op_id()).unwrap();
+    assert_eq!(unchanged(&h), before);
+    assert_eq!(h.counts().1, 0);
+    assert!(
+        matches!(h.prepare(&raw,&agent).unwrap(), Prepared::Known(v) if v["state"]=="rejected")
+    );
+    // M2 rejection did not destroy Jana's confirmed undo record.
+    commit(
+        &mut h,
+        "undo-jana",
+        "Jana",
+        "participant.undo",
+        None,
+        json!({"op_id":"jana"}),
+    );
+    assert_eq!(text(&h, 0), "");
+}
+
+#[test]
+fn staged_handle_cannot_confirm_another_candidate_document_or_base() {
+    let jana = actor("Jana", 1, true);
+    let mut a = host();
+    let raw = packet(
+        &a,
+        "same-op",
+        "Jana",
+        "text.insert",
+        Some((0, 0, 0)),
+        json!({"text":"A"}),
+    );
+    a.prepare(&raw, &jana).unwrap();
+    let staged = a.stage_commit(&key(&a, "same-op"), &jana).unwrap();
+    let mut b = host();
+    let other = packet(
+        &b,
+        "same-op",
+        "Jana",
+        "text.insert",
+        Some((0, 0, 0)),
+        json!({"text":"B"}),
+    );
+    b.prepare(&other, &jana).unwrap();
+    let before = unchanged(&b);
+    assert_eq!(
+        b.confirm_committed(&staged, &jana),
+        Err("commit_binding_mismatch")
+    );
+    assert_eq!(unchanged(&b), before);
+    assert_eq!(b.counts().1, 1);
+    let mut foreign = Host::new(engine(), "other-document", "generation1", None).unwrap();
+    assert_eq!(
+        foreign.confirm_committed(&staged, &jana),
+        Err("commit_binding_mismatch")
+    );
+    // A rejected handle cannot later overwrite a different pending original.
+    a.reject(staged.op_id()).unwrap();
+    let next = packet(
+        &a,
+        "new-op",
+        "Jana",
+        "text.insert",
+        Some((0, 0, 0)),
+        json!({"text":"new"}),
+    );
+    a.prepare(&next, &jana).unwrap();
+    let before = unchanged(&a);
+    assert_eq!(
+        a.confirm_committed(&staged, &jana),
+        Err("commit_binding_mismatch")
+    );
+    assert_eq!(unchanged(&a), before);
+}
+
+#[test]
+fn restored_generation_keeps_exact_sql_base_digest_for_next_commit() {
+    let mut h = host();
+    let jana = actor("Jana", 1, true);
+    let raw = packet(
+        &h,
+        "first",
+        "Jana",
+        "text.insert",
+        Some((0, 0, 0)),
+        json!({"text":"one"}),
+    );
+    h.prepare(&raw, &jana).unwrap();
+    let first = h.stage_commit(&key(&h, "first"), &jana).unwrap();
+    let canonical_bytes = first.checkpoint().to_vec();
+    let canonical_digest = first.checkpoint_digest().to_string();
+    drop(h); // Simulated SQL-committed checkpoint, before Rust success callback.
+    let mut restored = Host::restore(engine(), &canonical_bytes, "generation2").unwrap();
+    assert_eq!(restored.canonical_checkpoint_digest(), canonical_digest);
+    assert_ne!(
+        restored.checkpoint().unwrap(),
+        canonical_bytes,
+        "runtime generation rotated, SQL bytes did not"
+    );
+    let next = packet(
+        &restored,
+        "next",
+        "Jana",
+        "text.insert",
+        Some((0, 3, 3)),
+        json!({"text":" two"}),
+    );
+    restored.prepare(&next, &jana).unwrap();
+    let staged = restored
+        .stage_commit(&key(&restored, "next"), &jana)
+        .unwrap();
+    assert_eq!(
+        staged.base_checkpoint_digest(),
+        canonical_digest,
+        "SQL CAS must compare the actual stored original checkpoint"
+    );
+    assert_eq!(staged.base_revision(), 1);
+    let before = unchanged(&restored);
+    assert_eq!(
+        restored.confirm_committed(&staged, &actor("Jana", 2, true)),
+        Err("commit_admission_denied")
+    );
+    assert_eq!(restored.canonical_checkpoint_digest(), canonical_digest);
+    assert_eq!(unchanged(&restored), before);
+    // Explicit simulated SQL success callback. No real SQL is executed here.
+    restored.confirm_committed(&staged, &jana).unwrap();
+    assert_eq!(
+        restored.canonical_checkpoint_digest(),
+        staged.checkpoint_digest()
+    );
+    assert_eq!(restored.checkpoint().unwrap(), staged.checkpoint());
+    assert_eq!(text(&restored, 0), "one two");
 }

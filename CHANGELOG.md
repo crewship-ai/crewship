@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Keep the opt-in WordCraft command host candidate separate from confirmed state until a trusted host SQL-success callback, retaining participant undo and committed operation receipts across checkpoint recovery.
+
 - Keep idle WordCraft editors connected through standard WebSocket ping/pong while preserving the existing response and inactivity limits.
 - Show the Crewship page name in attached WordCraft chrome and hide its standalone Discord, Share and Zotero controls.
 
