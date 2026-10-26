@@ -339,3 +339,38 @@ fn actual_private_host_handles_cannot_cross_processes_with_reused_runtime_ref() 
     first.close();
     second.close();
 }
+
+#[test]
+fn actual_private_host_bounds_union_when_restoring_same_old_sql_checkpoint() {
+    let mut p = Peer::spawn(None);
+    let original = p.init();
+    let checkpoint = original["checkpoint_json"].clone();
+    let base = format!(
+        "sha256:{:x}",
+        Sha256::digest(checkpoint.as_str().unwrap().as_bytes())
+    );
+    let mut current = original.clone();
+    for i in 2..=32 {
+        current=p.good(json!({"kind":"restore","revision":0,"checkpoint_json":checkpoint,"generation":format!("generation{i}")}));
+    }
+    let projection = p.projection();
+    let mut request = stage_request(&current, &projection, "pending-at-capacity", "K");
+    request["base_digest"] = json!(base);
+    let staged = p.good(request);
+    for i in 33..=34 {
+        let refused=p.rpc(json!({"kind":"restore","revision":0,"checkpoint_json":checkpoint,"generation":format!("generation{i}")}));
+        assert_eq!(refused["error"], "capacity");
+        assert_eq!(refused["no_candidate"], false);
+        assert_eq!(p.projection(), projection);
+        assert_eq!(p.good(status(&staged))["state"], "pending");
+    }
+    // Neither the capacity refusal nor a prohibited reuse consumed the retained
+    // handle. Only the trusted callback can now promote its original candidate.
+    assert_eq!(p.rpc(json!({"kind":"restore","revision":0,"checkpoint_json":checkpoint,"generation":"generation2"}))["error"],"restore_failed");
+    assert_eq!(
+        p.good(confirm(&staged))["receipt_json"],
+        staged["receipt_json"]
+    );
+    assert_eq!(p.good(status(&staged))["state"], "committed");
+    p.close();
+}

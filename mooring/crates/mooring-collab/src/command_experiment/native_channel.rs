@@ -180,7 +180,14 @@ impl Channel {
                 {
                     return Err(failure("restore_failed"));
                 }
-                self.generations.extend(h.state.generations.iter().cloned());
+                let mut generations = self.generations.clone();
+                generations.extend(h.state.generations.iter().cloned());
+                if generations.len() > 32 {
+                    // No trimming/reuse: failed replacement must retain current
+                    // P, K and its opaque handle for canonical reconciliation.
+                    return Err(failure("capacity"));
+                }
+                self.generations = generations;
                 self.host = Some(h);
                 self.staged = None;
                 self.metadata().map_err(|_| failure("invalid_state"))
