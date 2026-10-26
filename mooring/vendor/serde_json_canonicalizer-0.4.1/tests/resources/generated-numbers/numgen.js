@@ -101,12 +101,15 @@ function next() {
     return f
 }
 
-if (fs.existsSync(outputFile)) {
+// Crewship: exclusive creation prevents a competing file from being truncated.
+var f
+try {
+	f = fs.openSync(outputFile, 'wx')
+} catch (error) {
+	if (error.code !== 'EEXIST') throw error
 	console.log("File " + outputFile + " already exists.")
 	process.exit(1)
 }
-
-var f = fs.openSync(outputFile, 'w')
 var u64 = new BigUint64Array(1)
 var f64 = new Float64Array(u64.buffer)
 var hash = crypto.createHash("sha256")

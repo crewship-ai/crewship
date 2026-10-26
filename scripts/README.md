@@ -80,6 +80,11 @@ commands. They may publish or remove release/package artifacts.
 
 ## Static checks and test infrastructure
 
+`crewship-heavy node --test scripts/wordcraft-numgen-node-test.mjs` checks that
+the vendored numeric-fixture generator preserves existing output, including a
+competing create immediately before its real filesystem open. It uses disposable
+files and stops before the large fixture-generation loop.
+
 | Location | Checks |
 | --- | --- |
 | [agents-invariants/](agents-invariants/) | The machine-checkable repository rules in AGENTS.md |
