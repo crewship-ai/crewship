@@ -65,6 +65,13 @@ during reauthorization. A different session or changed revocation epoch cannot
 renew the original admission. A still-valid access cookie remains usable if
 the refresh cookie is unavailable; the unchanged credential cap still applies.
 Agent task credentials and mandates remain fixed.
+
+Proactive cookie rotation requires Web Locks. The shared authentication helper
+serializes rotation across same-origin tabs before issuing the cookie-carrying
+fetch; its ten-second budget includes lock waiting and network time. Without
+Web Locks the parent skips proactive rotation and uses the still-valid access
+cookie with its unchanged cap. Uninterrupted long sessions in that fallback
+are not qualified.
 Failure or an unanswered request stops the connection while retaining the local
 draft and treating unobserved write results as unknown. Later HTTP responses
 cannot revive it. This source contract does not assert deployed acceptance.

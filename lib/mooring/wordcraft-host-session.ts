@@ -39,7 +39,7 @@ export interface WordCraftOpening {
 /** The path is chosen from original host scope, never a server/iframe URL. */
 export async function openWordCraftSession(workspaceId: string, pageId: string, write: boolean, signal: AbortSignal, checkpointBase64?: string): Promise<WordCraftOpening> {
   if (!identifier(workspaceId) || !identifier(pageId) || getAuthMode() !== "cookie") throw new Error("session_unavailable")
-  await tryRefresh()
+  await tryRefresh({ requireCrossTabLock: true })
   if (signal.aborted) throw new Error("access_unavailable")
   const query = new URLSearchParams({ workspace_id: workspaceId })
   const response = await apiFetch(`/api/v1/pages/${encodeURIComponent("@" + pageId)}/mooring/session?${query}`, {
@@ -106,7 +106,7 @@ export function connectWordCraftHost(workspaceId: string, pageId: string, openin
     try {
       // Renew only authentication first. Pending mutations keep their exact
       // original packets and identity while the server rechecks live rights.
-      await tryRefresh()
+      await tryRefresh({ requireCrossTabLock: true })
       if (stopped || abort.signal.aborted) return
       const response = await apiFetch(`/api/v1/pages/${encodeURIComponent("@" + pageId)}/mooring/session/reauthorize?${new URLSearchParams({ workspace_id: workspaceId })}`, {
         method: "POST", cache: "no-store", skipRefresh: true, redirect: "error", signal: abort.signal,

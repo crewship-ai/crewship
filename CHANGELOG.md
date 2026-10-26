@@ -9,7 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Long WordCraft sessions stopped when their opening access token expired.** Reauthorization now accepts freshly authenticated tokens for the same session while rechecking current identity and document rights and preserving revocation fences and pending edits.
+- **Long WordCraft sessions stopped when their opening access token expired.** Reauthorization now accepts freshly authenticated tokens for the same session while rechecking current identity and document rights and preserving revocation fences and pending edits. Cookie rotation is serialized across tabs where Web Locks are available.
 
 - Create vendored WordCraft numeric test fixtures exclusively so a competing output file cannot be truncated.
 

@@ -115,6 +115,7 @@ describe("authenticated authorization continuity", () => {
     try {
       await vi.advanceTimersByTimeAsync(240_000)
       expect(refresh).toHaveBeenCalledTimes(1)
+      expect(refresh).toHaveBeenCalledWith({ requireCrossTabLock: true })
       expect(refresh.mock.invocationCallOrder[0]).toBeLessThan(fetch.mock.invocationCallOrder[0])
       expect(callbacks.stopped).not.toHaveBeenCalled()
     } finally { host.close() }

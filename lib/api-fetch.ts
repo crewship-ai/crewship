@@ -274,7 +274,7 @@ let refreshInflight: Promise<RefreshOutcome> | null = null
  *  awaiting a fresh tryRefresh, leaving it observing a stale promise.
  *  Synchronous cleanup is fine — racers awaiting `refreshInflight`
  *  resolved their await before the finally block runs. */
-/** REFRESH_TIMEOUT_MS bounds the shared refresh round-trip. Without it,
+/** REFRESH_TIMEOUT_MS bounds cross-tab lock waiting and the shared refresh round-trip. Without it,
  *  every concurrent 401 awaits the same `refreshInflight` promise — if
  *  /api/auth/token/refresh hangs (proxy buffering, half-open TCP, …),
  *  the entire app stalls behind that single hung request. AbortController
@@ -283,8 +283,16 @@ let refreshInflight: Promise<RefreshOutcome> | null = null
  *  see a transport error instead of an indefinite spinner. */
 const REFRESH_TIMEOUT_MS = 10_000
 
-export async function tryRefresh(): Promise<RefreshResult> {
+/** Proactive callers may skip rotation when cross-tab serialization is not
+ * available. Ordinary 401 recovery retains its existing fallback behavior. */
+export async function tryRefresh(options?: { requireCrossTabLock?: boolean }): Promise<RefreshResult> {
+  if (options?.requireCrossTabLock && !refreshLocks()) return "retryable_failed"
   return (await refreshShared()).result
+}
+
+function refreshLocks(): LockManager | undefined {
+  return typeof navigator !== "undefined" && typeof navigator.locks?.request === "function"
+    ? navigator.locks : undefined
 }
 
 function refreshShared(): Promise<RefreshOutcome> {
@@ -296,12 +304,20 @@ function refreshShared(): Promise<RefreshOutcome> {
       // withServerBase: remote-server cookie mode refreshes against the
       // configured server; same-origin default is byte-identical. (Bearer
       // mode never reaches tryRefresh — apiFetch returns early.)
-      const r = await fetch(withServerBase(REFRESH_PATH), {
+      const request = () => fetch(withServerBase(REFRESH_PATH), {
         method: "POST",
         credentials: "include",
         headers: { Accept: "application/json" },
         signal: controller.signal,
       })
+      // Per-tab deduplication cannot protect the shared HttpOnly rotation
+      // cookie. Acquire before fetch snapshots that cookie, and keep the lock
+      // until the response has installed its replacement. Waiting and network
+      // share the same timeout; an aborted waiter must never send afterward.
+      const locks = refreshLocks()
+      const r = await (locks
+        ? locks.request("crewship.auth.refresh", { signal: controller.signal }, request)
+        : request())
       if (r.ok) return { result: "ok", reason: null }
       // Only a 401 from the refresh endpoint is "your session is gone".
       // 5xx / 502 / 503 / 504 / 429 / anything else means the server
