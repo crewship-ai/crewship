@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
@@ -97,8 +98,8 @@ func commandNativeFileDigest(path string) (string, error) {
 }
 
 // No HTTP/CLI registration: an explicitly enabled trusted runtime factory owns
-// this process and its lifetime. Stderr is discarded rather than logging native
-// payloads or engine errors. The child receives no provider credentials.
+// this process and its lifetime. The existing bounded static-vocabulary stderr
+// sink retains failure events without native payloads. No provider credentials.
 func startCommandNativePort(ctx context.Context, c commandNativeConfig) (*commandNativePort, error) {
 	if !c.Enabled || !filepath.IsAbs(c.HostBinary) || !commandNativeID(c.RuntimeRef) || !commandDigestValid(c.EngineSHA256) {
 		return nil, errCommandStore
@@ -128,6 +129,7 @@ func startCommandNativePort(ctx context.Context, c commandNativeConfig) (*comman
 	cmd := exec.Command(c.HostBinary, "--engine", c.EngineBinary, "--engine-sha256", c.EngineSHA256, "--runtime-ref", c.RuntimeRef)
 	cmd.Env = []string{"LANG=C.UTF-8", "TZ=UTC", "MOORING_C1_HOST_FD=3"}
 	cmd.ExtraFiles = []*os.File{child}
+	cmd.Stderr = mooring.RuntimeStderrWriter(slog.Default().With("runtime_ref", c.RuntimeRef))
 	if e = cmd.Start(); e != nil {
 		_ = conn.Close()
 		return nil, errCommandStore

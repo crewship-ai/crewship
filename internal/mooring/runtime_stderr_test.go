@@ -38,6 +38,8 @@ func TestRuntimeStderrStaticErrorsAndRedaction(t *testing.T) {
 		"mooring session lane: peer-eof kind=None",
 		"mooring session lane: output-error kind=BrokenPipe",
 		"mooring runtime stopped: kind=InvalidData",
+		"mooring command host stopped",
+		"mooring command host stopped " + secret,
 	} {
 		raw := []byte(line + "\n")
 		// Recognition must survive arbitrary stderr write boundaries.
@@ -51,8 +53,8 @@ func TestRuntimeStderrStaticErrorsAndRedaction(t *testing.T) {
 		t.Fatal("untrusted stderr entered logs")
 	}
 	records := stderrTestRecords(t, output.String())
-	stages := []string{"unrecognized-stderr-suppressed", "frame-read-error", "peer-eof", "output-error", "runtime-stopped"}
-	kinds := []string{"none", "UnexpectedEof", "none", "BrokenPipe", "InvalidData"}
+	stages := []string{"unrecognized-stderr-suppressed", "frame-read-error", "peer-eof", "output-error", "runtime-stopped", "command-host-stopped"}
+	kinds := []string{"none", "UnexpectedEof", "none", "BrokenPipe", "InvalidData", "none"}
 	if len(records) != len(stages) {
 		t.Fatalf("unexpected records: %s", output.String())
 	}

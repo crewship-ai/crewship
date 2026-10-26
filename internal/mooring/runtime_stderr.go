@@ -1,6 +1,7 @@
 package mooring
 
 import (
+	"io"
 	"log/slog"
 	"os/exec"
 )
@@ -28,6 +29,11 @@ func runtimeStderrEvidence(cmd *exec.Cmd) (func(), error) {
 	// No additional close, timer, runtime state or authority is introduced here.
 	return func() {}, nil
 }
+
+// RuntimeStderrWriter shares the existing bounded, static-vocabulary diagnostic
+// sink with the separately pinned command host. It never forwards native payloads.
+// The process owner supplies trusted correlation attributes through logger.
+func RuntimeStderrWriter(logger *slog.Logger) io.Writer { return newRuntimeStderr(logger) }
 
 func newRuntimeStderr(logger *slog.Logger) *runtimeStderr {
 	return &runtimeStderr{logger: logger, remaining: runtimeStderrBytes}
@@ -82,6 +88,9 @@ func (s *runtimeStderr) emit(stage, kind string) {
 }
 
 func runtimeStderrLiteral(line string) (string, string, bool) {
+	if line == "mooring command host stopped" {
+		return "command-host-stopped", "none", true
+	}
 	for _, stage := range []string{"peer-eof", "invalid-incoming-control", "already-closed", "queue-capacity"} {
 		if line == "mooring session lane: "+stage+" kind=None" {
 			return stage, "none", true
