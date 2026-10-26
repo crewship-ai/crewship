@@ -948,10 +948,13 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// see inband_failure.go for the run-vs-tool boundary.
 	var inBand inBandFailure
 	var documentInitDiagnostic mooringDocumentInitDiagnostic
+	var documentToolDiagnostic mooringDocumentToolDiagnostic
+	defer documentToolDiagnostic.report(o.logger, req)
 	usageModel := req.LLMModel
 	tappedHandler := EventHandler(func(event AgentEvent) {
 		inBand.observe(event)
 		documentInitDiagnostic.observe(o.logger, req, event)
+		documentToolDiagnostic.observe(req, event)
 		if !req.strictContentPrivacy && event.Type == "system" {
 			if meta, ok := event.Metadata.(map[string]any); ok {
 				if model, ok := meta["model"].(string); ok && model != "" {
