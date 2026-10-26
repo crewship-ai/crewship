@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Distinguish bounded WordCraft WebSocket ingress checks, original-record capacity predicates and submission deadlines without logging packet contents or raw errors.
+
 - Correlate bounded WordCraft runtime failure diagnostics across host callbacks, RPC replies, Rust actor shutdown and browser connections without logging document contents or raw errors.
 
 - Keep idle WordCraft editors connected through standard WebSocket ping/pong while preserving the existing response and inactivity limits.

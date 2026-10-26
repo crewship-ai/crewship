@@ -27,17 +27,22 @@ type collaborationOriginalGroup struct {
 }
 
 func (l *collaborationLiveOriginals) capturePublic(ctx context.Context, c *collaborationHTTPConnection, raw []byte) (*collaborationOriginalGroup, error) {
+	diagnostic := collaborationIngressDiagnosticFrom(ctx)
+	diagnostic.at("capture_public_validate")
 	if l == nil || l.document == nil || l.document.manager == nil || l.document.manager.schema == nil || c == nil || c.document != l.document || len(raw) == 0 || len(raw) > collaborationHTTPFrameLimit {
 		return nil, errCollaborationHTTP
 	}
+	diagnostic.at("capture_public_schema")
 	raw, err := l.document.manager.schema.ValidateE3(raw)
 	if err != nil {
 		return nil, err
 	}
+	diagnostic.at("capture_public_envelope")
 	var public protocol.SubmitChanges
 	if json.Unmarshal(raw, &public) != nil || public.Type != "submit_changes" || public.Scope != l.document.wireScope() || public.SessionID != protocol.Identifier(l.document.activation.SessionID()) || public.Versions != l.document.wireVersions() || public.TaskID != nil || !mooring.ValidWireIdentifier(string(public.RequestID)) {
 		return nil, errCollaborationHTTP
 	}
+	diagnostic.at("capture_public_changes")
 	encoded, err := json.Marshal(public.Changes)
 	if err != nil {
 		return nil, err
@@ -46,29 +51,35 @@ func (l *collaborationLiveOriginals) capturePublic(ctx context.Context, c *colla
 	if json.Unmarshal(encoded, &changes) != nil {
 		return nil, errCollaborationHTTP
 	}
+	diagnostic.at("capture_public_normalize")
 	changes, err = mooring.NormalizeSessionIngress(l.document.key, changes)
 	if err != nil {
 		return nil, err
 	}
+	diagnostic.at("capture_public_encode")
 	encoded, err = json.Marshal(changes)
 	if err != nil || json.Unmarshal(encoded, &public.Changes) != nil {
 		return nil, errCollaborationHTTP
 	}
+	diagnostic.at("capture_public_packet")
 	packet, err := json.Marshal(public)
 	if err != nil || len(packet) > collaborationHTTPFrameLimit {
 		return nil, mooring.ErrBatchCapacity
 	}
+	diagnostic.at("capture_public_id")
 	outer, err := collaborationOpaqueID()
 	if err != nil {
 		return nil, err
 	}
 	l.mu.Lock()
+	diagnostic.at("capture_public_source")
 	source := l.sources[c]
 	key := c.ref + "\x00" + string(public.RequestID)
 	if source == nil || source.retired {
 		l.mu.Unlock()
 		return nil, errCollaborationHTTP
 	}
+	diagnostic.at("capture_public_duplicate")
 	if old := l.groups[key]; old != nil {
 		valid := old.source == source && old.captured && bytes.Equal(old.packet, packet)
 		l.mu.Unlock()
@@ -78,14 +89,20 @@ func (l *collaborationLiveOriginals) capturePublic(ctx context.Context, c *colla
 		return old, nil
 	}
 	if len(l.groups) >= collaborationOriginalRecordLimit || len(packet) > collaborationOriginalByteLimit-l.bytes {
+		diagnostic.capacityAt("capture_public_capacity", "capacity_records")
+		if len(l.groups) < collaborationOriginalRecordLimit {
+			diagnostic.capacityAt("capture_public_capacity", "capacity_bytes")
+		}
 		l.mu.Unlock()
 		return nil, mooring.ErrBatchCapacity
 	}
 	for _, change := range changes {
+		diagnostic.at("capture_public_change_identity")
 		if l.changes[change.ID] != nil {
 			l.mu.Unlock()
 			return nil, errCollaborationHTTP
 		}
+		diagnostic.at("capture_public_operation_identity")
 		for _, operation := range change.Operations {
 			if l.operations[operation.ID] != nil {
 				l.mu.Unlock()
@@ -107,6 +124,7 @@ func (l *collaborationLiveOriginals) capturePublic(ctx context.Context, c *colla
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	diagnostic.at("capture_public_slots")
 	if source.retired || len(slots) != len(changes) {
 		return nil, errCollaborationHTTP
 	}

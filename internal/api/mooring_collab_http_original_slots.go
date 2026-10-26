@@ -120,9 +120,15 @@ func collaborationOriginalRevision(revision string) bool {
 // A failed capture burns these reservations until the process dies; no eviction
 // can reuse their source order, original reference or intent identity.
 func (l *collaborationLiveOriginals) reserve(c *collaborationHTTPConnection, changes []mooring.BatchChange) ([]*collaborationLiveOriginal, []*collaborationLiveOriginal, error) {
+	return l.reserveObserved(c, changes, nil)
+}
+
+func (l *collaborationLiveOriginals) reserveObserved(c *collaborationHTTPConnection, changes []mooring.BatchChange, diagnostic *collaborationIngressDiagnostic) ([]*collaborationLiveOriginal, []*collaborationLiveOriginal, error) {
+	diagnostic.at("reserve_validate")
 	if l == nil || l.document == nil || c == nil || c.document != l.document || len(changes) == 0 || len(changes) > collaborationOriginalRecordLimit {
 		return nil, nil, errCollaborationHTTP
 	}
+	diagnostic.at("reserve_normalize")
 	ownedChanges, err := mooring.NormalizeSessionIngress(l.document.key, changes)
 	if err != nil {
 		return nil, nil, err
@@ -137,18 +143,25 @@ func (l *collaborationLiveOriginals) reserve(c *collaborationHTTPConnection, cha
 	}
 	prepared := make([]candidate, 0, len(changes))
 	for _, change := range changes {
+		diagnostic.at("reserve_packet")
 		raw, err := json.Marshal(change)
 		if err != nil || len(raw) > collaborationOriginalByteLimit {
+			if len(raw) > collaborationOriginalByteLimit {
+				diagnostic.capacityAt("reserve_packet", "capacity_bytes")
+			}
 			return nil, nil, mooring.ErrBatchCapacity
 		}
+		diagnostic.at("reserve_decode")
 		var owned mooring.BatchChange
 		if json.Unmarshal(raw, &owned) != nil {
 			return nil, nil, errCollaborationHTTP
 		}
+		diagnostic.at("reserve_parse")
 		payload, err := c.parseOriginalHumanChange(owned)
 		if err != nil {
 			return nil, nil, err
 		}
+		diagnostic.at("reserve_id")
 		ref, err := collaborationOpaqueID()
 		if err != nil {
 			return nil, nil, err
@@ -163,6 +176,7 @@ func (l *collaborationLiveOriginals) reserve(c *collaborationHTTPConnection, cha
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	diagnostic.at("reserve_source")
 	source := l.sources[c]
 	if source == nil || source.retired {
 		return nil, nil, errCollaborationHTTP
@@ -171,6 +185,7 @@ func (l *collaborationLiveOriginals) reserve(c *collaborationHTTPConnection, cha
 	seen := make(map[string]bool, len(prepared))
 	seenOps := make(map[string]bool, len(prepared))
 	for _, candidate := range prepared {
+		diagnostic.at("reserve_identity")
 		opID := candidate.change.Operations[0].ID
 		if seen[candidate.change.ID] || seenOps[opID] {
 			return nil, nil, errCollaborationHTTP
@@ -186,6 +201,7 @@ func (l *collaborationLiveOriginals) reserve(c *collaborationHTTPConnection, cha
 			}
 			continue
 		}
+		diagnostic.at("reserve_basis")
 		if _, ok := source.observed[candidate.change.Operations[0].BaseRevision]; !ok {
 			return nil, nil, errCollaborationHTTP
 		}
@@ -193,6 +209,10 @@ func (l *collaborationLiveOriginals) reserve(c *collaborationHTTPConnection, cha
 		extra += candidate.bytes
 	}
 	if len(l.changes)+added > collaborationOriginalRecordLimit || extra > collaborationOriginalByteLimit-l.bytes {
+		diagnostic.capacityAt("reserve_capacity", "capacity_records")
+		if len(l.changes)+added <= collaborationOriginalRecordLimit {
+			diagnostic.capacityAt("reserve_capacity", "capacity_bytes")
+		}
 		return nil, nil, mooring.ErrBatchCapacity
 	}
 	all := make([]*collaborationLiveOriginal, 0, len(prepared))
@@ -217,16 +237,20 @@ func (l *collaborationLiveOriginals) reserve(c *collaborationHTTPConnection, cha
 // seal writer commits, under the original runtime/ingress operation lease.
 // Native application semantics remain unqualified DATA until session prepare.
 func (l *collaborationLiveOriginals) capture(ctx context.Context, c *collaborationHTTPConnection, changes []mooring.BatchChange) ([]*collaborationLiveOriginal, error) {
+	diagnostic := collaborationIngressDiagnosticFrom(ctx)
+	diagnostic.at("capture_validate")
 	if l == nil || l.document == nil || l.document.originals != l || l.document.manager == nil || l.document.humans == nil || l.document.submissions == nil || ctx == nil || ctx.Err() != nil || c == nil || c.document != l.document {
 		return nil, errCollaborationHTTP
 	}
 	c.mu.Lock()
 	request, valid := c.request, !c.closed && c.used && c.joinedDelivered && c.admission.write
 	c.mu.Unlock()
+	diagnostic.at("capture_connection")
 	if !valid || request == nil {
 		return nil, errCollaborationHTTP
 	}
 	d := l.document
+	diagnostic.at("capture_origin")
 	n, originErr := strconv.ParseUint(c.origin, 10, 53)
 	d.manager.mu.Lock()
 	_, allocated := d.manager.usedOrigins[d.key][n]
@@ -238,7 +262,7 @@ func (l *collaborationLiveOriginals) capture(ctx context.Context, c *collaborati
 	if originErr != nil || !collaborationHumanOrigin(c.origin) || !mooring.ValidWireIdentifier(c.ref) || !allocated || !issuedDocument || !issuedConnection {
 		return nil, errCollaborationHTTP
 	}
-	all, fresh, err := l.reserve(c, changes)
+	all, fresh, err := l.reserveObserved(c, changes, diagnostic)
 	if err != nil {
 		return nil, err
 	}
@@ -252,6 +276,7 @@ func (l *collaborationLiveOriginals) capture(ctx context.Context, c *collaborati
 			l.finishCapture(fresh, errCollaborationHTTP)
 		}
 	}()
+	diagnostic.at("capture_store_binding")
 	binding, err := d.humans.storeBinding()
 	if err != nil {
 		return nil, err
@@ -260,8 +285,11 @@ func (l *collaborationLiveOriginals) capture(ctx context.Context, c *collaborati
 	stop := context.AfterFunc(ctx, cancel)
 	defer stop()
 	defer cancel()
+	diagnostic.at("capture_run_human")
 	err = d.humans.runHumanOperation(request.Clone(operationCtx), c.admission.participant, func(bound context.Context) error {
+		diagnostic.at("capture_submission")
 		return d.submissions.run(bound, binding, func(bound context.Context) error {
+			diagnostic.at("capture_seal")
 			if e := d.submissions.sealHuman(bound, sealed); e != nil {
 				return e
 			}
@@ -273,6 +301,7 @@ func (l *collaborationLiveOriginals) capture(ctx context.Context, c *collaborati
 	if err != nil {
 		return nil, err
 	}
+	diagnostic.at("capture_wait")
 	if err = l.waitCaptured(ctx, all); err != nil {
 		return nil, err
 	}

@@ -213,30 +213,36 @@ func (m *collaborationHTTPManager) websocket(w http.ResponseWriter, r *http.Requ
 			_, raw, err = ws.ReadMessage()
 			if err != nil {
 				closedReason = collaborationSocketCloseReason(err)
+				c.logIngressFailure("active_read", closedReason)
 				return
 			}
 			normalized, err = m.schema.ValidateE3(raw)
 			if err != nil {
+				c.logIngressFailure("active_schema", collaborationIngressCategory(err, operationContext, nil))
 				return
 			}
 			var header struct {
 				Type string `json:"type"`
 			}
 			if json.Unmarshal(normalized, &header) != nil {
+				c.logIngressFailure("active_header", "rejected")
 				return
 			}
 			if err = c.ensureCurrentGate(operationContext); err != nil {
+				c.logIngressFailure("active_current_gate", collaborationIngressCategory(err, operationContext, nil))
 				return
 			}
 			if header.Type == "checkpoint_request" {
-				if c.checkpoint(normalized) != nil {
+				if err := c.checkpoint(normalized); err != nil {
+					c.logIngressFailure("active_checkpoint", collaborationIngressCategory(err, operationContext, nil))
 					return
 				}
 				continue
 			}
 			if header.Type == "submit_changes" {
 				if !c.admission.write {
-					if c.rejectUnqualified(normalized) != nil {
+					if err := c.rejectUnqualified(normalized); err != nil {
+						c.logIngressFailure("active_reject", collaborationIngressCategory(err, operationContext, nil))
 						return
 					}
 				} else if c.submitOriginal(normalized) != nil {
@@ -248,11 +254,13 @@ func (m *collaborationHTTPManager) websocket(w http.ResponseWriter, r *http.Requ
 			// bridge. Reject locally without sending them into the shared process or
 			// converting them to a durable operation outcome.
 			if header.Type == "presence" || header.Type == "operation_status" {
-				if c.rejectUnqualified(normalized) != nil {
+				if err := c.rejectUnqualified(normalized); err != nil {
+					c.logIngressFailure("active_reject", collaborationIngressCategory(err, operationContext, nil))
 					return
 				}
 				continue
 			}
+			c.logIngressFailure("active_type", "rejected")
 			return
 
 		}
