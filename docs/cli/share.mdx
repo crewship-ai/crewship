@@ -83,9 +83,10 @@ crew retirement and revocation invalidate existing attempts. Guest crew detail
 routes and crew Share dialogs/presets are not included in this initial slice.
 
 Crew `manage` is separate from Guest View/Use and requires a trusted MEMBER or
-MANAGER. It permits crew profile/configuration and ordinary membership changes,
+MANAGER. It permits crew profile/configuration and membership changes without explicit crew role overrides,
 without crew role assignment, deletion, private-network opt-in, budget/policy or
 workspace administration, or credential reveal. `share list crew` includes explicit
-trusted management shares with their original issuer and active/inactive state.
+trusted management shares with their original issuer and active/inactive state,
+including retained inactive shares after a recipient changes role.
 Before converting a recipient to Guest, explicitly unshare all trusted-only
 shares and save; a downshift while any remain returns422.

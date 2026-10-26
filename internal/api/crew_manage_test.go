@@ -185,3 +185,22 @@ func TestTrustedCrewManageHTTPRechecksWriterAndAudit(t *testing.T) {
 		}
 	}
 }
+
+func TestTrustedCrewManageHTTPExplicitCrewRolesStayAdminOnly(t *testing.T) {
+	f := newCrewManageHTTPFixture(t)
+	if rr := f.grant(t, []access.Right{{Kind: "crew", ID: f.crew, Operation: "manage"}}, "trusted"); rr.Code != 200 {
+		t.Fatal(rr.Code, rr.Body.String())
+	}
+	seedCrewMemberRow(t, f.db, "explicit-crew-role", f.crew, f.subject, "VIEWER")
+	path := "/api/v1/crews/" + f.crew + "/members/explicit-crew-role"
+	if rr := f.do(f.user, "DELETE", path, ""); rr.Code != 403 {
+		t.Fatal("grant-only removal stripped explicit crew role", rr.Code, rr.Body.String())
+	}
+	var role string
+	if err := f.db.QueryRow(`SELECT role FROM crew_members WHERE id='explicit-crew-role'`).Scan(&role); err != nil || role != "VIEWER" {
+		t.Fatal("explicit role changed", role, err)
+	}
+	if rr := f.do(f.owner, "DELETE", path, ""); rr.Code != 200 {
+		t.Fatal("workspace admin lost role-bearing removal", rr.Code, rr.Body.String())
+	}
+}

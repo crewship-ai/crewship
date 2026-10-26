@@ -1782,7 +1782,8 @@ are retained through stop/start. Arbitrary agent shell background processes are 
 ### Explicit trusted crew management
 
 A trusted MEMBER/MANAGER with a live explicit crew Manage share may PATCH/PUT
-that crew's profile/configuration and POST/DELETE its ordinary members. The
+that crew's profile/configuration and POST/DELETE its members without explicit
+crew role overrides. Removing a role-bearing membership remains administrator-only. The
 administrator issues the share through the versioned member-policy API or
 `crewship share crew CREW_ID --with MEMBER_ID --operation manage`.
 

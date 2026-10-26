@@ -101,3 +101,46 @@ func TestTrustedCrewManageNeverBecomesGuestOrAgentAuthority(t *testing.T) {
 		}
 	}
 }
+
+func TestTrustedCrewManageRetainedInertSharesCanBeRevokedSeparately(t *testing.T) {
+	s := fixture(t)
+	if _, err := s.DB.Exec(`INSERT INTO crews(id,workspace_id,name,slug) VALUES('second','w','Second','second'),('new','w','New','new')`); err != nil {
+		t.Fatal(err)
+	}
+	m, _ := s.Membership(t.Context(), "h1", "w")
+	first, second := Right{"crew", "crew", "manage"}, Right{"crew", "second", "manage"}
+	if _, err := s.Replace(t.Context(), "owner", "h1", "w", "trusted", m, []Right{first, second}); err != nil {
+		t.Fatal(err)
+	}
+	var id, stamp string
+	if err := s.DB.QueryRow(`SELECT id,created_at FROM access_grants WHERE crew_id='second'`).Scan(&id, &stamp); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.Exec(`UPDATE workspace_members SET role='VIEWER' WHERE id='m1'`); err != nil {
+		t.Fatal(err)
+	}
+	m, _ = s.Membership(t.Context(), "h1", "w")
+	if _, err := s.Replace(t.Context(), "owner", "h1", "w", "trusted", m, []Right{second}); err != nil {
+		t.Fatal("partial revoke of inert shares", err)
+	}
+	p, err := s.Policy(t.Context(), "owner", "h1", "w")
+	if err != nil || len(p.GrantDetails) != 1 || p.GrantDetails[0].Live || p.GrantDetails[0].IssuerID != "owner" || p.GrantDetails[0].CreatedAt != stamp {
+		t.Fatalf("retained inactive provenance: %+v %v", p, err)
+	}
+	var retainedID string
+	if err := s.DB.QueryRow(`SELECT id FROM access_grants WHERE crew_id='second'`).Scan(&retainedID); err != nil || retainedID != id {
+		t.Fatal("retained share reissued", retainedID, err)
+	}
+	for _, rights := range [][]Right{{second, {"crew", "new", "manage"}}, {second}} {
+		var reissue []Right
+		if len(rights) == 1 {
+			reissue = []Right{second}
+		}
+		if _, err := s.Replace(t.Context(), "owner", "h1", "w", "trusted", p.Membership, rights, reissue...); !errors.Is(err, ErrDenied) {
+			t.Fatal("ineligible recipient received new or reissued authority", err)
+		}
+	}
+	if _, err := s.Replace(t.Context(), "owner", "h1", "w", "restricted", p.Membership, nil); !errors.Is(err, ErrGuestCeiling) {
+		t.Fatal("inactive share escaped Guest ceiling", err)
+	}
+}

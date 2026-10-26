@@ -273,6 +273,13 @@ func (s Store) ReplaceIn(ctx context.Context, tx *sql.Tx, actor, user, workspace
 			return m, ErrDenied
 		}
 	}
+	renew := map[Right]bool{}
+	for _, r := range reissue {
+		if renew[r] {
+			return m, ErrDenied
+		}
+		renew[r] = true
+	}
 	seen := map[Right]bool{}
 	for _, r := range rights {
 		if mode == "trusted" {
@@ -280,7 +287,18 @@ func (s Store) ReplaceIn(ctx context.Context, tx *sql.Tx, actor, user, workspace
 				return m, ErrDenied
 			}
 			if err := trustedCrewRecipient(ctx, tx, user, workspace); err != nil {
-				return m, err
+				if !errors.Is(err, ErrDenied) || m.Mode != "trusted" || renew[r] {
+					return m, err
+				}
+				// An ineligible recipient may retain inert metadata during a
+				// partial revoke. It cannot receive or reissue a new share.
+				var retained bool
+				if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM access_grants WHERE member_id=? AND resource_kind='crew' AND crew_id=? AND operation='manage')`, m.ID, r.ID).Scan(&retained); err != nil {
+					return m, err
+				}
+				if !retained {
+					return m, ErrDenied
+				}
 			}
 		} else if r.Kind == "crew" && r.Operation == "manage" {
 			return m, ErrGuestCeiling
@@ -296,12 +314,10 @@ func (s Store) ReplaceIn(ctx context.Context, tx *sql.Tx, actor, user, workspace
 	if err := publicationDependencies(seen); err != nil {
 		return m, err
 	}
-	renew := map[Right]bool{}
 	for _, r := range reissue {
-		if !seen[r] || renew[r] {
+		if !seen[r] {
 			return m, ErrDenied
 		}
-		renew[r] = true
 	}
 	// Read before modifying: a complete-document save must preserve the issuer
 	// and timestamp of unchanged rights, including inert shares.

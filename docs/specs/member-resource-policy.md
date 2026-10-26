@@ -1013,7 +1013,9 @@ Guest membership elsewhere keeps the account ceiling closed. Guest crew View/Use
 and agent derivation remain unchanged; Manage never derives agent Run or Delegate.
 
 This API/CLI slice permits PATCH/PUT crew profile/configuration and ordinary
-crew membership add/remove. It does not permit crew role assignment, crew deletion,
+crew membership add/remove without explicit crew role overrides. Removing a
+role-bearing membership retains its administrator floor. It does not permit
+crew role assignment, crew deletion,
 private-network egress opt-in, budgets, policy administration, credential reveal
 or workspace administration. Existing token scopes and workspace runtime privilege
 ceilings still apply. Authority is checked on the writer and after audit hooks;
@@ -1023,7 +1025,10 @@ removal/reissue; creation and the crew's management affordances remain CLI/API w
 
 Switching an account to Guest while it holds any trusted-only crew share returns
 422, including shares in another workspace or from an inactive issuer. First
-explicitly remove those shares, save the trusted policy, then change the mode.
+explicitly remove those shares, save the trusted policy, then change the mode. Retained
+inactive shares remain visible after a recipient role change, can be revoked
+individually without reissuing the others, and cannot be newly granted or
+reissued while the recipient is ineligible.
 The same policy cannot silently remove a trusted-only share while downshifting.
 
 The timestamp migration rebuilds only the canonical child grant table, preserving

@@ -232,7 +232,7 @@ func listObjectShares(kind, id string) error {
 	result := []objectShareRow{}
 	rows := [][]string{}
 	for _, member := range members {
-		if member.AccessMode != "restricted" && !(kind == "crew" && member.AccessMode == "trusted" && (member.Role == "MEMBER" || member.Role == "MANAGER")) {
+		if member.AccessMode != "restricted" && !(kind == "crew" && member.AccessMode == "trusted") {
 			continue
 		}
 		policy, _, err := sharingPolicy(client, workspace, member.ID)

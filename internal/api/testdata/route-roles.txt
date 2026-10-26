@@ -48,7 +48,7 @@ DELETE /api/v1/crews/{crewId}/integrations/{integrationId} roleManage
 DELETE /api/v1/crews/{crewId}/issues/{identifier} roleCreate
 DELETE /api/v1/crews/{crewId}/issues/{identifier}/attachments/{attachmentId} roleCreate
 DELETE /api/v1/crews/{crewId}/issues/{identifier}/code-links/{linkId} roleCreate
-DELETE /api/v1/crews/{crewId}/members/{memberId} roleManage
+DELETE /api/v1/crews/{crewId}/members/{memberId} roleInline
 DELETE /api/v1/crews/{crewId}/missions/{missionId} roleCreate
 DELETE /api/v1/crews/{crewId}/persona roleCreate
 DELETE /api/v1/feature-flags/{key} roleInstance
@@ -119,7 +119,7 @@ PATCH /api/v1/automations/{id} roleManage
 PATCH /api/v1/chats/{chatId}/proposals/{sourceId} roleInline
 PATCH /api/v1/credential-folders/{folderId} roleInline
 PATCH /api/v1/credentials/{credentialId} roleCreate
-PATCH /api/v1/crews/{crewId} roleManage
+PATCH /api/v1/crews/{crewId} roleInline
 PATCH /api/v1/crews/{crewId}/integrations/{integrationId} roleManage
 PATCH /api/v1/crews/{crewId}/integrations/{integrationId}/tools/{toolName} roleManage
 PATCH /api/v1/crews/{crewId}/issues/{identifier} roleCreate
@@ -279,7 +279,7 @@ POST /api/v1/crews/{crewId}/issues/{identifier}/review roleCreate
 POST /api/v1/crews/{crewId}/issues/{identifier}/start roleCreate
 POST /api/v1/crews/{crewId}/issues/{identifier}/stop roleCreate
 POST /api/v1/crews/{crewId}/issues/{identifier}/work roleCreate
-POST /api/v1/crews/{crewId}/members roleCreate
+POST /api/v1/crews/{crewId}/members roleInline
 POST /api/v1/crews/{crewId}/missions roleCreate
 POST /api/v1/crews/{crewId}/missions/{missionId}/clone roleCreate
 POST /api/v1/crews/{crewId}/missions/{missionId}/restart roleCreate
@@ -450,7 +450,7 @@ PUT /api/v1/credentials/{credentialId} roleCreate
 PUT /api/v1/credentials/{credentialId}/fields/{fieldKey} roleCreate
 PUT /api/v1/credentials/{credentialId}/sensitivity roleInline
 PUT /api/v1/crew-connections/{connectionId}/file-access roleCreate
-PUT /api/v1/crews/{crewId} roleManage
+PUT /api/v1/crews/{crewId} roleInline
 PUT /api/v1/crews/{crewId}/budget roleManage
 PUT /api/v1/crews/{crewId}/files/save roleCreate
 PUT /api/v1/crews/{crewId}/issues/{identifier}/review-policy roleCreate

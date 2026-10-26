@@ -165,7 +165,7 @@ func (h *CrewHandler) commitMemberMutation(r *http.Request, tx *sql.Tx, action s
 			return errors.Join(err, errors.New("crew membership did not persist"))
 		}
 	}
-	permission, allowGrant := "manage", action == "removed"
+	permission, allowGrant := "manage", action == "removed" && !before.Role.Valid
 	if action == "added" {
 		permission, allowGrant = "create", !after.Role.Valid
 	}

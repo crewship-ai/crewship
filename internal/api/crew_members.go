@@ -307,7 +307,7 @@ func (h *CrewHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tx, _ := h.beginCrewManageMutation(w, r, crewID, "manage")
+	tx, currentRole := h.beginCrewManageMutation(w, r, crewID, "manage")
 	if tx == nil {
 		return
 	}
@@ -321,9 +321,13 @@ func (h *CrewHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "read removed crew membership", err)
 		return
 	}
+	if before.Role.Valid && !canRole(currentRole, "manage") {
+		replyError(w, http.StatusForbidden, "Crew Manage cannot remove an explicit crew role")
+		return
+	}
 	res, err := tx.ExecContext(r.Context(),
-		"DELETE FROM crew_members WHERE id = ? AND crew_id = ?",
-		memberID, crewID)
+		"DELETE FROM crew_members WHERE id = ? AND crew_id = ? AND role IS ?",
+		memberID, crewID, before.Role)
 	if err != nil {
 		replyInternalError(w, h.logger, "delete crew member", err)
 		return

@@ -110,7 +110,7 @@ func (h *WorkspaceHandler) writeEffectiveAccess(w http.ResponseWriter, r *http.R
 				}
 			} else {
 				decision.State = "denied"
-				decision.Reason = "Crew or grant issuer authority is unavailable."
+				decision.Reason = "Current crew share authority is unavailable."
 			}
 			result.Decisions = append(result.Decisions, decision)
 			continue
