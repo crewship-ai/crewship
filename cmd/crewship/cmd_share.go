@@ -18,7 +18,7 @@ func newObjectShareCommand(remove bool) *cobra.Command {
 		verb = "unshare"
 	}
 	cmd := &cobra.Command{
-		Use: verb + " <routine|project> <resource-id>", Short: "Change one Guest's explicit shares on an object",
+		Use: verb + " <routine|project|crew> <resource-id>", Short: "Change one Guest's explicit shares on an object",
 		Long: "Edit only this object's requested operations while preserving all other grants and issuer provenance. Trusted workspace OWNER/ADMIN only. No account conversion or conflict retry. Routine Run still requires agent grants and an installed runtime.",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -32,13 +32,13 @@ func newObjectShareCommand(remove bool) *cobra.Command {
 		},
 	}
 	cmd.Flags().String("with", "", "Existing member ID, user ID or exact email")
-	cmd.Flags().StringSlice("operation", nil, "Operations to add/remove: routine view,results,run,edit,publish; project list,read,contribute,manage,delete_issues (repeatable or comma-separated)")
+	cmd.Flags().StringSlice("operation", nil, "Operations to add/remove: routine view,results,run,edit,publish; project list,read,contribute,manage,delete_issues; crew view,use (repeatable or comma-separated)")
 	_ = cmd.MarkFlagRequired("with")
 	_ = cmd.MarkFlagRequired("operation")
 	if !remove {
 		cmd.Flags().Bool("reissue", false, "Explicitly reissue the selected rights as the current administrator")
 		cmd.AddCommand(&cobra.Command{
-			Use: "list <routine|project> <resource-id>", Short: "List explicit object shares with issuer and active/inactive state", Args: cobra.ExactArgs(2),
+			Use: "list <routine|project|crew> <resource-id>", Short: "List explicit object shares with issuer and active/inactive state", Args: cobra.ExactArgs(2),
 			RunE: func(cmd *cobra.Command, args []string) error { return listObjectShares(args[0], args[1]) },
 		})
 	}
@@ -46,8 +46,8 @@ func newObjectShareCommand(remove bool) *cobra.Command {
 }
 
 func sharingClient(kind, id string) (*cli.Client, string, error) {
-	if kind != "routine" && kind != "project" {
-		return nil, "", fmt.Errorf("resource kind must be routine or project")
+	if kind != "routine" && kind != "project" && kind != "crew" {
+		return nil, "", fmt.Errorf("resource kind must be routine, project or crew")
 	}
 	if id == "" || id == "." || id == ".." {
 		return nil, "", fmt.Errorf("provide a resource ID")
@@ -121,7 +121,7 @@ func changeObjectShare(kind, id, target string, operations []string, remove, rei
 	}
 	selected := map[access.Right]bool{}
 	for _, operation := range operations {
-		if (kind == "routine" && operation != "run" && operation != "view" && operation != "edit" && operation != "results" && operation != "publish") || (kind == "project" && operation != "list" && operation != "read" && operation != "contribute" && operation != "manage" && operation != "delete_issues") {
+		if (kind == "routine" && operation != "run" && operation != "view" && operation != "edit" && operation != "results" && operation != "publish") || (kind == "project" && operation != "list" && operation != "read" && operation != "contribute" && operation != "manage" && operation != "delete_issues") || (kind == "crew" && operation != "view" && operation != "use") {
 			return fmt.Errorf("unsupported %s operation %q", kind, operation)
 		}
 		selected[access.Right{Kind: kind, ID: id, Operation: operation}] = true

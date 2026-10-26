@@ -1,6 +1,6 @@
 ---
 title: "Unshare"
-description: "Revoke selected explicit routine or project operations from a Guest."
+description: "Revoke selected explicit routine, project or crew operations from a Guest."
 icon: "link-slash"
 stability: experimental
 tag: Experimental
@@ -8,7 +8,7 @@ tag: Experimental
 
 # crewship unshare
 
-## `unshare <routine|project> <resource-id>`
+## `unshare <routine|project|crew> <resource-id>`
 
 Trusted workspace OWNER/ADMIN members can remove only the selected operations
 from an existing Guest. Resource arguments are IDs. Other grants, issuer metadata
@@ -25,7 +25,7 @@ crewship unshare project PROJECT_ID --with MEMBER_ID --operation read
 | Flag | Default | Effect |
 | --- | --- | --- |
 | `--with <member>` | required | Existing membership ID, user ID or exact email. |
-| `--operation <operation>` | required | Routine `view`, `results`, `run`, `edit` or `publish`; project `list`, `read`, `contribute`, `manage` or `delete_issues`. Repeat or use comma-separated values. |
+| `--operation <operation>` | required | Routine `view`, `results`, `run`, `edit` or `publish`; project `list`, `read`, `contribute`, `manage` or `delete_issues`. Crew `view` or `use`. Repeat or use comma-separated values. |
 
 Removing `edit` revokes collaborative draft access while preserving an existing
 View share on the published definition. Removing View also prevents draft reads
@@ -35,3 +35,10 @@ Use [`share list`](./share) to inspect the
 current shares. [`share`](./share) adds operations or explicitly reissues them.
 These commands never convert a trusted account to Guest or grant missing agent
 prerequisites automatically.
+
+
+Crew `view` discovers the crew's current agents. Crew `use` additionally grants
+Chat and Run; it never grants Delegate, credential access or crew role changes.
+Crew shares use the same versioned member policy and issuer checks. Agent moves,
+crew retirement and revocation invalidate existing attempts. Guest crew detail
+routes and crew Share dialogs/presets are not included in this initial slice.

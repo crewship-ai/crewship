@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { ResourceShareDialog } from "../resource-share-dialog"
-import { resourceShareReplacement, type ResourcePolicy } from "@/lib/resource-sharing"
+import { resourceShareReplacement, resourcePolicySchema, type ResourcePolicy } from "@/lib/resource-sharing"
 
 const h = vi.hoisted(() => ({ fetch: vi.fn(), role: "OWNER", mode: "trusted", loading: false }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: h.fetch }))
@@ -134,4 +134,13 @@ describe("resource Share", () => {
     expect(rights).toHaveLength(3)
     expect(rights).toEqual(expect.arrayContaining([policy.rights[0], { kind: "routine", id: "routine-1", operation: "edit" }, { kind: "routine", id: "routine-1", operation: "publish" }]))
   })
+})
+
+
+it("preserves a saved crew share when editing an unrelated routine", () => {
+  const crew = {kind:"crew" as const,id:"crew-1",operation:"use"}
+  const parsed = resourcePolicySchema.parse({...policy, rights:[...policy.rights,crew]})
+  const changed = resourceShareReplacement(parsed,resource,["view"],[])
+  expect(changed.rights).toContainEqual(crew)
+  expect(changed.rights).toContainEqual(policy.rights[0])
 })

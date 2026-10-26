@@ -53,7 +53,7 @@ func (r *Router) createRestrictedCLIContext(w http.ResponseWriter, req *http.Req
 	}
 	id := generateCUID()
 	result, err := r.db.ExecContext(req.Context(), `INSERT INTO chats(id,workspace_id,agent_id,created_by,visibility,origin)
- SELECT ?,a.workspace_id,a.id,wm.user_id,'private','CLI' FROM agents a
+ SELECT DISTINCT ?,a.workspace_id,a.id,wm.user_id,'private','CLI' FROM agents a
  JOIN workspace_members wm ON wm.workspace_id=a.workspace_id AND wm.user_id=? AND wm.access_mode='restricted'
  JOIN workspaces w ON w.id=a.workspace_id AND w.deleted_at IS NULL
  JOIN live_access_grants g ON g.member_id=wm.id AND g.resource_kind='agent' AND g.agent_id=a.id AND g.operation='run'

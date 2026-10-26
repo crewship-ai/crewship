@@ -63,7 +63,7 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
   const [mode, setMode] = useState(policy.mode)
   const [rights, setRights] = useState<Right[]>(policy.rights)
   const [reissue, setReissue] = useState<Right[]>([])
-  const [kind, setKind] = useState<Right["kind"]>("agent")
+  const [kind, setKind] = useState<keyof typeof operations>("agent")
   const [resourceId, setResourceId] = useState("")
   const [operation, setOperation] = useState("chat")
   const [conflict, setConflict] = useState(false)
@@ -132,7 +132,7 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
             {reissue.some(r => rightKey(r) === rightKey(right)) ? "Cancel reissue" : "Reissue as me"}
           </Button>}
         </span>)}
-        <span>{right.kind}: {directories[right.kind].data?.find(resource => resource.id === right.id)?.name ?? right.id} · {resourceOperationLabel(right.operation)}</span>
+        <span>{right.kind}: {right.kind === "crew" ? right.id : directories[right.kind].data?.find(resource => resource.id === right.id)?.name ?? right.id} · {resourceOperationLabel(right.operation)}</span>
         <Button size="sm" variant="ghost" className="coarse:h-[44px]" disabled={save.isPending || presetBusy || conflict} onClick={() => setRights(rights.filter((_, row) => row !== index))}
           aria-label={`Remove ${right.kind} ${right.id} ${right.operation}`}>Remove</Button>
       </li>)}</ul>
@@ -140,7 +140,7 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
       {rights.length === 0 && <p>No resource operations are granted.</p>}
       <div className="flex flex-wrap gap-2">
         <select aria-label="Resource kind" className={selectClass} value={kind} disabled={save.isPending || presetBusy || conflict} onChange={event => {
-          const next = event.target.value as Right["kind"]; setKind(next); setResourceId(""); setOperation(operations[next][0])
+          const next = event.target.value as keyof typeof operations; setKind(next); setResourceId(""); setOperation(operations[next][0])
         }}><option value="agent">Agent</option><option value="project">Project</option><option value="routine">Routine</option></select>
         <select aria-label="Resource" className={selectClass} value={resourceId} disabled={save.isPending || presetBusy || conflict || !directory.data} onChange={event => setResourceId(event.target.value)}>
           <option value="">Choose a resource</option>{directory.data?.map(resource => <option key={resource.id} value={resource.id}>{resource.name}</option>)}
@@ -174,7 +174,7 @@ function changeCount(policy: Policy, mode: Policy["mode"], rights: Right[]): num
   return n
 }
 
-function useResourceDirectory(workspaceId: string, kind: Right["kind"], enabled: boolean) {
+function useResourceDirectory(workspaceId: string, kind: keyof typeof operations, enabled: boolean) {
   return useQuery({
     queryKey: ["resource-access-directory", workspaceId, kind], enabled, retry: false,
     queryFn: async ({ signal }) => {

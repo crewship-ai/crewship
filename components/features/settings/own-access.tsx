@@ -16,11 +16,11 @@ const ownAccessSchema = z.object({
   mode: z.enum(["trusted", "restricted"]), account_restricted: z.boolean(), restriction_scope: z.literal("account"),
   explanation: z.string(),
   decisions: z.array(z.object({
-    kind: z.enum(["agent", "routine", "project"]), id: z.string(), name: z.string().optional(),
+    kind: z.enum(["agent", "routine", "project", "crew"]), id: z.string(), name: z.string().optional(),
     operation: z.string(), state: z.enum(["allowed", "denied", "conditional", "unavailable"]), reason: z.string(),
   })),
 })
-const kindLabels = { agent: "Agent", routine: "Routine", project: "Project" }
+const kindLabels = { agent: "Agent", routine: "Routine", project: "Project", crew: "Crew" }
 const stateLabels = { allowed: "Allowed", denied: "No access", conditional: "Subject to execution checks", unavailable: "Currently unavailable" }
 
 export function OwnAccessCard() {
