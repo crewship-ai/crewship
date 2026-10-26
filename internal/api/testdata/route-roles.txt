@@ -128,7 +128,7 @@ PATCH /api/v1/crews/{crewId}/missions/{missionId} roleCreate
 PATCH /api/v1/crews/{crewId}/missions/{missionId}/tasks/{taskId} roleCreate
 PATCH /api/v1/escalations/{escalationId}/resolve roleCreate
 PATCH /api/v1/feature-flags/{key} roleInstance
-PATCH /api/v1/hooks/{id} roleManage
+PATCH /api/v1/hooks/{id} roleInline
 PATCH /api/v1/inbox/{id} roleSelf
 PATCH /api/v1/integrations/{integrationId} roleManage
 PATCH /api/v1/issues/bulk roleCreate
@@ -298,9 +298,9 @@ POST /api/v1/eval/regression roleManage
 POST /api/v1/eval/replay roleManage
 POST /api/v1/feature-flags roleInstance
 POST /api/v1/feedback roleSelf
-POST /api/v1/hooks roleManage
-POST /api/v1/hooks/{id}/disable roleManage
-POST /api/v1/hooks/{id}/enable roleManage
+POST /api/v1/hooks roleInline
+POST /api/v1/hooks/{id}/disable roleInline
+POST /api/v1/hooks/{id}/enable roleInline
 POST /api/v1/inbox/bulk roleSelf
 POST /api/v1/inbox/{id}/act roleSelf
 POST /api/v1/integrations roleManage

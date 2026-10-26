@@ -69,6 +69,9 @@ func (c *sidecarScriptContainer) Exec(_ context.Context, cfg provider.ExecConfig
 	if strings.Contains(joined, "127.0.0.1:9119/health") {
 		return &provider.ExecResult{ExecID: "exec-health", Reader: io.NopCloser(strings.NewReader(c.health))}, nil
 	}
+	if len(cfg.Cmd) > 7 && cfg.Cmd[0] == "setsid" {
+		return &provider.ExecResult{ExecID: "exec-script", Reader: io.NopCloser(strings.NewReader(scriptTestFrames(cfg, "4321", "-") + "out"))}, nil
+	}
 	return &provider.ExecResult{ExecID: "exec-aux", Reader: io.NopCloser(strings.NewReader("out"))}, nil
 }
 
@@ -385,6 +388,9 @@ func (c *countingSidecarContainer) Exec(_ context.Context, cfg provider.ExecConf
 		c.mu.Lock()
 		c.started++
 		c.mu.Unlock()
+	}
+	if len(cfg.Cmd) > 7 && cfg.Cmd[0] == "setsid" {
+		return &provider.ExecResult{ExecID: "exec-script", Reader: io.NopCloser(strings.NewReader(scriptTestFrames(cfg, "4321", "-") + "out"))}, nil
 	}
 	return &provider.ExecResult{ExecID: "exec-aux", Reader: io.NopCloser(strings.NewReader("out"))}, nil
 }

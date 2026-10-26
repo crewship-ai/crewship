@@ -10,6 +10,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 - **Idle work polling avoids unnecessary writer transactions.** Empty or not-yet-eligible queues use a fresh read hint; capacity, deadlines and attempt ownership remain checked in the claiming transaction when work is present.
+- ⚠️ **Behaviour change: Host lifecycle hooks require instance administration.** Creating, editing or enabling host commands now requires an instance administrator and appropriate token scope. Existing host hooks are retained but disabled for explicit review after upgrade; restored hooks also require local review. UI and CLI explain how an administrator can review and re-enable them. Live host-hook changes commit atomically with their authorization audit. Shell output capture is bounded while retaining the existing truncation and exit-result behavior. Container hooks and the default lifecycle pause are unchanged.
 - **Guest agent access can inherit from an explicit crew share.** Administrators can share a crew with View or Use through the member-policy API and CLI. View discovers current crew agents; Use also permits Chat and Run, without Delegate or credential access. Revocation, crew retirement and agent moves fence existing attempts. Access screens preserve and display saved crew shares.
 
 - **Restricted text workers have an independent release producer.** A main-only manual workflow can publish scanned, signed immutable `responses_text` candidates with source, binary and license provenance. Pull requests and publication test the real production worker against synthetic data; signing requires the exact candidate digest to pass. Image approval, host qualification and Guest runtime acceptance remain separate steps.
@@ -24,6 +25,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Skill repository imports use verified, pinned HTTPS connections.** Redirects and inherited Git/proxy/credential configuration are disabled. Administrators can allow exact private Git hosts with `skills.private_hosts`; loopback and metadata targets stay blocked. Imported `SKILL.md` files are read within the chosen import root, with bounded regular-file reads.
 - **Backup inspection reads metadata and reports that integrity has not been verified.** Restore, verification, recovery and conversion use operator-configured decoder, work, output, metadata, time and admission limits. Defaults allow one million logical entries and 256 MiB of cumulative path/link names across all passes. Large operations can fail with an explicit resource allowance error; operators can tune the documented capacity settings.
 
+
+- **LLM stream accounting avoids redundant JSON decoding.** The sidecar decodes valid SSE usage envelopes once while retaining existing token accounting and malformed-root fallback.
 
 - Mooring SDK recovery refuses incomplete full snapshots even when Yrs reports no missing updates, preserving every original unsaved draft instead of accepting silently omitted history.
 
@@ -6970,6 +6973,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Accepted deferred routine starts disappeared when execution capacity was busy or dispatch failed.** Capacity rejection now retries with bounded backoff until TTL, and errors/expiry remain inspectable through `routine pending get` and `pending list --status`. Retry preserves the accepted recipe and occurrence identity. ⚠️ **Behaviour change:** starts without TTL stop after ten capacity rejections; attempted debounce starts keep their payload while newer triggers open a separate window, and attempted one-time starts cannot be rewritten by another save. (#3010)
 
 - **Content inspection allocates less on repeated matches (#4006).** Redaction emits spans once per rule and encoded-content scanning collects only the existing first 256 candidates, preserving finding order and results.
+
+- **Routine script steps clean up completed control directories (#4003).** Cleanup checks invocation ownership and process-group state, and reports cleanup failures separately from the script result.
 
 ## [1.0.0-rc.1] — 2026-07-12
 

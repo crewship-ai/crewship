@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -168,19 +169,36 @@ type scriptCovContainer struct {
 	onExec func()
 }
 
+// Existing feature fakes opt out of optional cleanup metadata. Lifecycle
+// deletion cases use the separate per-exec state machine fixture.
+type scriptFramedReadCloser struct {
+	io.Reader
+	io.Closer
+}
+
+func scriptTestFrames(cfg provider.ExecConfig, pid, metadata string) string {
+	nonce := cfg.Cmd[7]
+	return fmt.Sprintf("crewship-script-created-v1:%s:%s\ncrewship-script-cleanup-v1:%s:%s\n", nonce, pid, nonce, metadata)
+}
+
 func (m *scriptCovContainer) Exec(_ context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
-	m.lastExecCfg = cfg
-	if m.onExec != nil {
-		m.onExec()
-	}
 	if m.execErr != nil {
 		return nil, m.execErr
 	}
-	r := m.execReader
-	if r == nil {
-		r = io.NopCloser(strings.NewReader("out"))
+	if len(cfg.Cmd) > 7 && cfg.Cmd[0] == "setsid" {
+		m.lastExecCfg = cfg
+		if m.onExec != nil {
+			m.onExec()
+		}
+		reader := m.execReader
+		if reader == nil {
+			reader = io.NopCloser(strings.NewReader("out"))
+		}
+		return &provider.ExecResult{ExecID: "exec-script", Reader: scriptFramedReadCloser{
+			Reader: io.MultiReader(strings.NewReader(scriptTestFrames(cfg, "4321", "-")), reader), Closer: reader,
+		}}, nil
 	}
-	return &provider.ExecResult{ExecID: "exec-script", Reader: r}, nil
+	return &provider.ExecResult{ExecID: "exec-control", Reader: io.NopCloser(strings.NewReader(""))}, nil
 }
 
 func (m *scriptCovContainer) ExecInspect(_ context.Context, _ string) (bool, int, error) {
