@@ -103,6 +103,28 @@ crewship crew get <slug-or-id>
 
 ---
 
+## `crewship crew access`
+
+Explain your own explicit Guest View/Use share, using
+`GET /api/v1/crews/{crewId}/access/me`. Trusted callers and unavailable shares
+receive 404. This command does not change permissions.
+
+```bash
+crewship crew access <slug-or-id>
+crewship crew access <slug-or-id> --format json
+```
+
+**Output:** ACTION, STATE, REASON for View, conditional Use and denied Manage.
+Use still requires each agent's authority and runtime preflight. No Delegate or
+credential access is implied.
+
+For Guests, `crew list` and `crew get` show only explicitly shared crew identities
+and counts; detail includes current agent identities/status. Configuration and
+runtime columns are omitted even with `crew list --runtime`; JSON/YAML retain
+only the safe projection. Existing trusted output remains unchanged.
+
+---
+
 ## `crewship crew create`
 
 Create a new crew.

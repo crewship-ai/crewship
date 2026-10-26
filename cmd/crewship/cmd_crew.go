@@ -49,6 +49,10 @@ var crewListCmd = &cobra.Command{
 			return err
 		}
 
+		if resp.Header.Get("X-Crew-Access-Mode") == "restricted" {
+			return printSharedCrewList(resp)
+		}
+
 		var crews []struct {
 			ID          string  `json:"id" yaml:"id"`
 			Name        string  `json:"name" yaml:"name"`
@@ -169,6 +173,10 @@ var crewGetCmd = &cobra.Command{
 		resp, _, err := getByRef(client, "/api/v1/crews/", args[0], resolveCrewID)
 		if err != nil {
 			return err
+		}
+
+		if resp.Header.Get("X-Crew-Access-Mode") == "restricted" {
+			return printSharedCrewDetail(resp)
 		}
 
 		var crew struct {
@@ -483,7 +491,7 @@ func init() {
 	crewMemberCmd.AddCommand(crewMemberRemoveCmd)
 
 	crewCmd.AddCommand(crewListCmd)
-	crewCmd.AddCommand(crewGetCmd)
+	crewCmd.AddCommand(crewGetCmd, crewAccessCmd)
 	crewCmd.AddCommand(crewCreateCmd)
 	crewCmd.AddCommand(crewUpdateCmd)
 	crewCmd.AddCommand(crewDeleteCmd)
