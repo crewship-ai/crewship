@@ -15,6 +15,7 @@ export function useDocumentsAvailability(workspaceId: string) {
       const value = await response.json()
       return {
         enabled: value?.enabled === true,
+        wordcraftCommands: value?.wordcraft_commands === true,
         wordcraftSDKPrefix: typeof value?.wordcraft_sdk_prefix === "string" && /^\/mooring-sdk\/generated\/[0-9a-f]{64}$/.test(value.wordcraft_sdk_prefix)
           ? value.wordcraft_sdk_prefix as string : undefined,
       }
@@ -22,5 +23,5 @@ export function useDocumentsAvailability(workspaceId: string) {
   })
   // Failed refreshes must withdraw cached admission, while preserving the
   // query error for callers and the editor's separately retained local draft.
-  return {...query, data: query.isError ? false : query.data?.enabled, wordcraftSDKPrefix: query.isError ? undefined : query.data?.wordcraftSDKPrefix}
+  return {...query, data: query.isError ? false : query.data?.enabled, wordcraftCommands: !query.isError && query.data?.wordcraftCommands === true, wordcraftSDKPrefix: query.isError ? undefined : query.data?.wordcraftSDKPrefix}
 }

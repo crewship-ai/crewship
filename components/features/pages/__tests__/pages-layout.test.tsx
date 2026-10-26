@@ -76,6 +76,7 @@ vi.mock("@/components/features/pages/wordcraft-editor-host", () => ({ WordCraftE
   nativeHost.unavailable = onUnavailable
   return <div data-testid="native-wordcraft" data-blocked={String(Boolean(unavailable))}><button onClick={() => onDirtyChange(true)}>Make draft</button></div>
 } }))
+vi.mock("@/components/features/pages/wordcraft-command-editor-host", () => ({ WordCraftCommandEditorHost: ({ onDirtyChange, unavailable }: { unavailable?: boolean; onDirtyChange: (dirty: boolean) => void }) => <div data-testid="native-commands" data-blocked={String(Boolean(unavailable))}><button onClick={() => onDirtyChange(true)}>Make command pending</button></div> }))
 vi.mock("@/components/features/pages/native-document-access-dialog", () => ({ NativeDocumentAccessDialog: ({ slug, onClose }: { slug: string; onClose: () => void }) => <div role="dialog">Access {slug}<button onClick={onClose}>Close access</button></div> }))
 // The leaf's independent ACL/query behavior has its own tests. Here observe
 // whether the layout mounts CURRENT metadata beside a retained draft producer.
@@ -161,6 +162,40 @@ describe("PagesLayout", () => {
     act(() => nativeHost.unavailable?.())
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
     expect(screen.getByTestId("native-wordcraft")).toBe(editor)
+  })
+
+  it("selects C1 by immutable format and keeps that original host blocked when availability is withdrawn", async () => {
+    const view = renderLayout([{ ...FLEET, has_collaboration: true, collaboration_format: "wordcraft-c1-v2" }], FLEET.slug!, {enabled:false,wordcraft_commands:true})
+    const editor = await screen.findByTestId("native-commands")
+    expect(screen.queryByTestId("native-wordcraft")).toBeNull()
+    fireEvent.click(screen.getByRole("button",{name:"Make command pending"}))
+    act(() => { view.qc.setQueryData(["documents-status","ws-1"],{enabled:false,wordcraftCommands:false}) })
+    await waitFor(() => expect(editor).toHaveAttribute("data-blocked","true"))
+    expect(screen.getByTestId("native-commands")).toBe(editor)
+    expect(screen.queryByTestId("native-wordcraft")).toBeNull()
+  })
+
+  it.each(["unknown","wordcraft-c1-v2"])("does not open an alternate engine for unavailable format %s",async format=>{
+    renderLayout([{ ...FLEET, has_collaboration:true,collaboration_format:format }], FLEET.slug!, {enabled:false,wordcraft_commands:false})
+    await screen.findByText("This document format is unavailable. No alternate editor has been opened.")
+    expect(screen.queryByTestId("native-wordcraft")).toBeNull()
+    expect(screen.queryByTestId("native-commands")).toBeNull()
+  })
+
+  it("does not fall back to a pilot when declared format contradicts storage classification",async()=>{
+    renderLayout([{...FLEET,has_collaboration:false,has_mooring:true,collaboration_format:"unknown"}],FLEET.slug!)
+    await screen.findByText("This document format is unavailable. No alternate editor has been opened.")
+    expect(screen.queryByTestId("native-wordcraft")).toBeNull()
+  })
+
+  it("does not replace a retained C1 producer when a metadata refresh changes its format",async()=>{
+    const page = {...FLEET,has_collaboration:true,collaboration_format:"wordcraft-c1-v2"}
+    const view=renderLayout([page],FLEET.slug!,{enabled:false,wordcraft_commands:true})
+    const editor=await screen.findByTestId("native-commands")
+    act(()=>view.qc.setQueryData(pagesKeys.detail("ws-1",FLEET.slug!,identity.id),{...page,collaboration_format:"mooring-causal-v1"}))
+    await waitFor(()=>expect(editor).toHaveAttribute("data-blocked","true"))
+    expect(screen.getByTestId("native-commands")).toBe(editor)
+    expect(screen.queryByTestId("native-wordcraft")).toBeNull()
   })
 
   it("replaces the old native host even when the new human Page cache is already warm", async () => {

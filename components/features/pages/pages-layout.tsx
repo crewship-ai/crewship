@@ -8,6 +8,8 @@ import { PageSlides } from "./page-slides"
 import { MooringEditorHost } from "./mooring-editor-host"
 import { NativeDocumentProvenance } from "../chat/right-panel-tabs/chat-document-access"
 import { WordCraftEditorHost } from "./wordcraft-editor-host"
+import { WordCraftCommandEditorHost } from "./wordcraft-command-editor-host"
+import { wordCraftRenderer } from "@/lib/mooring/wordcraft-renderer"
 import { PageWorkbookSurface } from "./workbook-editor-host"
 import { slidesEditorMount } from "@/lib/feature-flags"
 import { DocumentCatalog } from "./document-catalog"
@@ -261,14 +263,20 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
     ? JSON.stringify([workspaceId, currentUserId, selectedSlug]) : null
   // An original producer's identity is retained DATA, never cached read/write
   // permission. A failed current Page read stops it without deleting its draft.
-  const [nativeOriginal, setNativeOriginal] = React.useState<{ scope: string; pageId: string; name?: string } | null>(null)
+  const [nativeOriginal, setNativeOriginal] = React.useState<{ scope: string; pageId: string; name?: string; format?: string | null; commandsMounted?: boolean } | null>(null)
   let original = nativeOriginal?.scope === nativeScope ? nativeOriginal : null
   if (nativeOriginal && !original) setNativeOriginal(null)
-  if (!original && nativeScope && nativePageId && detail.page?.hasCollaboration === true && !detail.error && !detail.accessDenied) {
-    original = { scope: nativeScope, pageId: nativePageId, name: detail.page.name }
+  if (!original && nativeScope && nativePageId && detail.page && (detail.page.hasCollaboration === true || detail.page.collaborationFormat !== undefined) && !detail.error && !detail.accessDenied) {
+    original = { scope: nativeScope, pageId: nativePageId, name: detail.page.name, format: detail.page.collaborationFormat, commandsMounted: documentAvailability.wordcraftCommands === true }
     setNativeOriginal(original)
   }
-  const nativeUnavailable = Boolean(original) && (detail.accessDenied || Boolean(detail.error) || detail.page?.hasCollaboration !== true || nativePageId !== original?.pageId)
+  // Once mounted, retain the same producer even when availability is withdrawn;
+  // stop its input/delivery without deleting an unknown original from memory.
+  if (original?.format === "wordcraft-c1-v2" && !original.commandsMounted && documentAvailability.wordcraftCommands === true) {
+    original = { ...original, commandsMounted: true }; setNativeOriginal(original)
+  }
+  const commandRenderer = wordCraftRenderer(original?.format, original?.commandsMounted === true)
+  const nativeUnavailable = Boolean(original) && (detail.accessDenied || Boolean(detail.error) || detail.page?.hasCollaboration !== true || nativePageId !== original?.pageId || detail.page?.collaborationFormat !== original?.format || commandRenderer === "unavailable" || (original?.format === "wordcraft-c1-v2" && documentAvailability.wordcraftCommands !== true))
   React.useEffect(() => { if (nativeUnavailable) closeNativeAccess() }, [nativeUnavailable, closeNativeAccess])
   const nativeDocument = !original && detail.page?.hasDocument === true
   // Flag off: has_slides is never read and the Page renders exactly as before.
@@ -438,7 +446,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
             {canCreatePage && <SubBarSecondary icon={Upload} onClick={() => canCreatePage && setImporting(true)}>
               Import
             </SubBarSecondary>}
-            {canCreatePage && (documentAvailability.data === true || documentAvailability.wordcraftSDKPrefix) && <SubBarSecondary icon={FilePlus2} className="coarse:min-h-[44px]" onClick={() => setCreatingDocument(true)}>New Doc</SubBarSecondary>}
+            {canCreatePage && (documentAvailability.data === true || documentAvailability.wordcraftSDKPrefix || documentAvailability.wordcraftCommands) && <SubBarSecondary icon={FilePlus2} className="coarse:min-h-[44px]" onClick={() => setCreatingDocument(true)}>New Doc</SubBarSecondary>}
             {canCreatePage && <SubBarPrimary icon={FilePlus2} onClick={() => canCreatePage && setCreating(true)}>
               New page
             </SubBarPrimary>}
@@ -565,7 +573,9 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 ) : nativeCollaboration ? (
                   <>
                     {!nativeUnavailable && currentUserId && <NativeDocumentProvenance workspaceId={workspaceId} pageId={original!.pageId} viewerId={currentUserId} />}
-                    <WordCraftEditorHost key={`${original!.scope}:${original!.pageId}`} workspaceId={workspaceId} pageId={original!.pageId} name={detail.page?.name ?? original!.name} unavailable={nativeUnavailable} onDirtyChange={nav.setDirty} onUnavailable={closeNativeAccess} />
+                    {commandRenderer === "commands" ? <WordCraftCommandEditorHost key={`${original!.scope}:${original!.pageId}`} workspaceId={workspaceId} pageId={original!.pageId} name={detail.page?.name ?? original!.name} unavailable={nativeUnavailable} onDirtyChange={nav.setDirty} onUnavailable={closeNativeAccess} />
+                      : commandRenderer === "legacy" ? <WordCraftEditorHost key={`${original!.scope}:${original!.pageId}`} workspaceId={workspaceId} pageId={original!.pageId} name={detail.page?.name ?? original!.name} unavailable={nativeUnavailable} onDirtyChange={nav.setDirty} onUnavailable={closeNativeAccess} />
+                        : <p role="alert" className="p-6">This document format is unavailable. No alternate editor has been opened.</p>}
                     <UnsentEditsLeaveDialog pending={nav.pending} onReturnFocus={focusNativeView} />
                   </>
                 ) : nativeMooring ? (

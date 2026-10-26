@@ -139,6 +139,7 @@ export interface WirePage {
   has_mooring?: boolean
   /** Protocol-backed collaboration storage; never infer the legacy pilot. */
   has_collaboration?: boolean
+  collaboration_format?: string | null
   /** A published application exists. See `has_project` for source that is not published yet. */
   has_application?: boolean
   /**
@@ -492,6 +493,7 @@ export interface PageView {
   hasWorkbook?: boolean
   hasMooring?: boolean
   hasCollaboration?: boolean
+  collaborationFormat?: string | null
   id: string
   slug: string
   name: string
@@ -644,6 +646,7 @@ export function toPageView(raw: WirePage): PageView {
     hasWorkbook: raw.has_workbook === true,
     hasMooring: raw.has_mooring === true,
     hasCollaboration: raw.has_collaboration === true,
+    collaborationFormat: raw.collaboration_format,
     slug,
     name: trimmed(raw.name) ?? slug,
     description: trimmed(raw.description),
