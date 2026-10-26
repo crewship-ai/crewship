@@ -1,5 +1,21 @@
 # Restricted private workflows
 
+## V1 release scope
+
+Guest-initiated runs of published routines are deferred from the v1 release
+contract. Guests retain their explicitly shared View, Results, Edit and Publish
+operations on routines and drafts; publishing never starts a run. Routine
+execution in the v1 user flow is initiated by a team member or a crew trigger.
+This does not enable a trusted fallback for a Guest-published version: existing
+published-routine restrictions on generic execution and triggers still apply.
+
+A default installation has no qualified private runtime. A Guest's manual run
+request is refused with HTTP 503 and `restricted_runtime_unavailable`, without
+creating a run, chat, execution attempt or queued work. Guest execution requires
+a separately qualified runtime and an explicit operator opt-in. Existing
+implementation and qualification procedures below describe that optional
+runtime; they do not establish v1 acceptance of Guest execution.
+
 Status (2026-10-01): execution remains an explicit operator opt-in through immutable runtime image configuration. Manual routines, declared Page actions and assigned-issue preflight use the common `work` ledger and `dispatch.Dispatcher` for claims, capacity, leases and recovery. The isolated Docker manager still uses its own CLI transport; direct chat/CLI execution and provider lifecycle integration remain separate release work. This integration does not establish release-1.0 acceptance. Backup write barriers and post-recovery queue holds also apply to private dispatch. If a quiet window refuses runtime admission after a claim but before execution, the private job retains its authority and waits for the common dispatcher's bounded retry; graph failures are not automatically retried. A running private job holds its writer lease through completion, so a backup may time out and retry rather than snapshot active writes.
 
 Restricted members invoke manual routines through `POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run`. An explicit root-routine run grant is required; Guests do not need a workspace-wide `routine.run` capability. Each resolved leaf additionally requires current target-agent run authority; cross-agent delegation requires explicit delegate authority. Unsupported scripts, HTTP steps, cycles, cross-workspace targets and unavailable execution profiles fail before enqueue.
