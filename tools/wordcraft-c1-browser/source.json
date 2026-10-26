@@ -1,7 +1,7 @@
 {
   "revision": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
   "engine_source_manifest_sha256": "c6a784cc85d7bce594a0f049e07af79ffa353694f32cde18d04f526c2af1e4dc",
-  "patch_sha256": "6a9a4a7d65d93a12d71e3cfcf0369c7403a551495c296c0eafa6183fd9fb6c72",
+  "patch_sha256": "bfcbc7d0c4d944e02ccabecf009b8aea162099d3ee70387f83ebfe96682a28a1",
   "files": {
     "Cargo.toml": {
       "before_sha256": "e7594df0f5f9556f465586bf752eef7fe743740422b6b7d5c4c4f7a97c8146c8",
@@ -25,7 +25,7 @@
     },
     "crates/ui-egui/src/c1_commands.rs": {
       "before_sha256": null,
-      "after_sha256": "4e4dab2dda1bcb5b28f6a2a8cc025a28424e150eadb46cba81379d89f4fc9b54"
+      "after_sha256": "350daaad21353da50af9ffbb97f8cbb965b522084e73a38976033edea1045b11"
     },
     "crates/ui-egui/src/keys.rs": {
       "before_sha256": "4ee9013e16669b5ae41d738deda009a11f699a1abd59a14e82f6e055cd35bea7",

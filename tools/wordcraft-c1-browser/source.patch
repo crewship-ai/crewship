@@ -403,10 +403,10 @@ index 7fa947f..e6301bf 100644
                  wasm_bindgen_futures::spawn_local(async move {
 diff --git a/crates/ui-egui/src/c1_commands.rs b/crates/ui-egui/src/c1_commands.rs
 new file mode 100644
-index 0000000..fb7a70a
+index 0000000..cce9057
 --- /dev/null
 +++ b/crates/ui-egui/src/c1_commands.rs
-@@ -0,0 +1,544 @@
+@@ -0,0 +1,548 @@
 +//! Default-off C1 LOCAL command/render seam. Callers own SQL receipts, transport,
 +//! current permissions, operation identity and reconciliation. No local Saved.
 +use crate::WordApp;
@@ -434,6 +434,7 @@ index 0000000..fb7a70a
 +    params: Value,
 +    selection: wordcraft_engine::Selection,
 +    due: f64,
++    latest: f64,
 +}
 +struct FluidTyping {
 +    confirmed: Document,
@@ -733,8 +734,11 @@ index 0000000..fb7a70a
 +        if merge {
 +            let q = proposed.back_mut().unwrap();
 +            q.params = json!({"text":q.params["text"].as_str().unwrap().to_owned() + params["text"].as_str().unwrap_or("")});
++            // Debounce adjacent typing, but never defer continuous input forever.
++            // Enter/format remain immediate ordered barriers in tick_c1_typing.
++            q.due = (bridge.clock.get() + 0.12).min(q.latest);
 +        } else {
-+            proposed.push_back(DraftCommand { id: id.into(), params: params.clone(), selection: before, due: bridge.clock.get() + 0.12 });
++            proposed.push_back(DraftCommand { id: id.into(), params: params.clone(), selection: before, due: bridge.clock.get() + 0.12, latest: bridge.clock.get() + 1.0 });
 +        }
 +        // Rebuild the display from P using exactly the queued batch boundaries.
 +        // Per-character AutoCorrect may differ from a combined text.insert;

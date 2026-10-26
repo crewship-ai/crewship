@@ -27,7 +27,8 @@ its own receipt can supply a qualified native selection; it never runs local und
 
 The dedicated C1 product renderer enables a bounded local typing preview. It
 rebuilds that preview with the original engine using the same batch boundaries
-as the stateless server helper. Consecutive text is collected for about 120ms;
+as the stateless server helper. Consecutive text uses a 120ms idle debounce
+with a one-second maximum wait during continuous typing;
 Enter and formatting seal a batch and retain their position. Only one original
 is sent at a time. Limits are 64KiB of queued parameter data, 256 queued commands
 and 8KiB per action/batch; a refused input has an explicit message. Confirmed SQL
@@ -49,13 +50,14 @@ the actual native projection queue so the product can wait before another peer
 projection. It is neither a SQL receipt nor evidence of a completed GPU paint. Missing/invalid own selection is refused; it
 is never inferred from text length. Peer projections cannot clear own pending.
 
-One pending command blocks further mutating registry input with a visible
-“This input was not accepted” status. There is **no preserved typing buffer**.
+In the default nonoptimistic test seam, one pending command blocks further
+mutating registry input with a visible
+“This input was not accepted” status. That seam has **no preserved typing buffer**.
 Capture uncertainty retains pending and stops successors. IME is explicitly
 unqualified; paste is refused rather than translated into a new command.
-This is not a usable rapid-typing/IME/draft solution or live GUI qualification.
-The existing host projection currently omits write-command selection results;
-that integration and draft lifecycle need separate reviewed work.
+That default seam does not qualify rapid typing, IME, drafts or live GUI usage.
+The dedicated product transport supplies actual committed selections and
+its own draft lifecycle; it never infers selection from text length.
 
 Prepare into a new owned directory. A source-only checkout without the canonical
 catalog may supply `--capabilities /absolute/catalog.json`; its exact pinned hash
@@ -81,3 +83,6 @@ peer isolation, and forwarding of all 72 qualified registry identities with
 their catalog fixture parameters. It does not execute those 72 mutations or drive a rendered native canvas or real keyboard,
 IME, SQL, Saved, model runs or human acceptance. Native history is retained but
 is not a qualified participant-undo or local draft implementation.
+
+The debounce bounds save delay without exhausting the existing prototype
+checkpoint budget on per-character commands. SQL and operation limits are unchanged.

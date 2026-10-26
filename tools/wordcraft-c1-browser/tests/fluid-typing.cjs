@@ -56,6 +56,15 @@ const { chromium } = require('@playwright/test');
       timed.project_confirmed(fixtures.items[0].native_json, ids(1), true, JSON.stringify(fixtures.items[0].selection));
       timed.tick_typing(0.26); yes(captured(timed).length === 1, 'next text batch has its own collection deadline after previous ACK');
       timed.tick_typing(0.28); yes(captured(timed).length === 2 && captured(timed)[1].params.text === 'b', 'next batch flushes at its bounded deadline'); timed.free();
+      const continuous = fresh();
+      run(continuous, 'text.insert', { text: 'a' });
+      for (let i = 1; i < 10; i++) { continuous.tick_typing(i / 10); run(continuous, 'text.insert', { text: 'a' }); }
+      yes(text(continuous) === 'a'.repeat(10) && captured(continuous).length === 0, '10characters/s stays visible and coalesces across adjacent keystrokes');
+      continuous.tick_typing(0.99); yes(captured(continuous).length === 0, 'continuous batch cannot flush prematurely');
+      continuous.tick_typing(1.0); yes(captured(continuous).length === 1 && captured(continuous)[0].params.text === 'a'.repeat(10), 'continuous typing has a one-second maximum batch wait'); continuous.free();
+      const idle = fresh(); run(idle, 'text.insert', { text: 'a' }); idle.tick_typing(0.1); run(idle, 'text.insert', { text: 'b' });
+      idle.tick_typing(0.21); yes(captured(idle).length === 0, 'new character restarts the120ms idle timer');
+      idle.tick_typing(0.23); yes(captured(idle).length === 1 && captured(idle)[0].params.text === 'ab', 'idle text flushes after120ms'); idle.free();
       const ordered = fresh(); run(ordered, 'text.insert', { text: 'a' }); run(ordered, 'para.align', { value: 'center' }); run(ordered, 'text.insert', { text: 'b' });
       ordered.tick_typing(0);
       yes(captured(ordered)[0].params.text === 'a' && drafts(ordered).count === 3, 'format seals previous text and stays between text commands'); ordered.free();
