@@ -40,13 +40,15 @@ export function parseCommandResponse(value: unknown): CommandResponse {
 /** RFC8785 uses ECMAScript number/string serialization and UTF16 key order.
  * This only emits our bounded, JSON-parsed command DATA; native P stays opaque. */
 export function commandCanonicalJSON(value: unknown): string {
-  const sorted = (v: unknown): unknown => {
-    if (Array.isArray(v)) return v.map(sorted)
-    if (record(v)) return Object.fromEntries(Object.keys(v).sort().map(key => [key, sorted(v[key])]))
-    if (v === null || typeof v === "string" || typeof v === "boolean" || (typeof v === "number" && Number.isFinite(v))) return v
+  const encode = (v: unknown): string => {
+    if (Array.isArray(v)) return "[" + v.map(encode).join(",") + "]"
+    // Serialize in sorted key order directly. Building another JS object
+    // would enumerate integer-like properties numerically again (2 before10).
+    if (record(v)) return "{" + Object.keys(v).sort().map(key => JSON.stringify(key) + ":" + encode(v[key])).join(",") + "}"
+    if (v === null || typeof v === "string" || typeof v === "boolean" || (typeof v === "number" && Number.isFinite(v))) return JSON.stringify(v)
     throw new Error("invalid_command_json")
   }
-  return JSON.stringify(sorted(value))
+  return encode(value)
 }
 export function commandOwnSelection(response: CommandResponse, original: string, inputDigest: string): string {
   const request: unknown = JSON.parse(original), out = response.outcome

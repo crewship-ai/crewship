@@ -166,3 +166,7 @@ it("does not infer selection from text length or accept wrong-author receipts", 
   value.outcome!.receipt.author = "mallory"
   expect(() => commandOwnSelection(value, raw, hash(raw))).toThrow("unconfirmed_original")
 })
+it("canonicalizes nested numeric object keys in JCS UTF16 order, not ECMAScript property enumeration order", () => {
+  const value = { "2": "root two", "10": "root ten", nested: { "2": [{ "2": 2, "10": 10 }, 1.25, null], "10": { "2": "two", "10": "ten" } } }
+  expect(commandCanonicalJSON(value)).toBe('{"10":"root ten","2":"root two","nested":{"10":{"10":"ten","2":"two"},"2":[{"10":10,"2":2},1.25,null]}}')
+})
