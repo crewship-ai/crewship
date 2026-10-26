@@ -1,6 +1,6 @@
 ---
 title: "Share"
-description: "Share individual routines, projects and crew agent access with existing Guest members."
+description: "Share individual routines, projects and crew agent access with existing members, including explicit trusted crew management."
 icon: "share-nodes"
 stability: experimental
 tag: Experimental
@@ -14,12 +14,14 @@ tag: Experimental
 Trusted workspace OWNER/ADMIN members can change individual Guest shares from
 an object's side. These commands take a **resource ID**, not a slug; `--with`
 accepts an existing membership ID, user ID or exact email. They never invite
-someone or change their account mode. Trusted members keep role-based access.
+someone or change their account mode. Trusted members keep role-based access;
+trusted MEMBER/MANAGER recipients can additionally receive crew `manage`.
 
 ```bash
 crewship share routine ROUTINE_ID --with client@example.com --operation run
 crewship share routine ROUTINE_ID --with MEMBER_ID --operation edit,publish
 crewship share project PROJECT_ID --with MEMBER_ID --operation list,read
+crewship share crew CREW_ID --with TRUSTED_MEMBER_ID --operation manage
 crewship share list routine ROUTINE_ID
 crewship --format json share list project PROJECT_ID
 crewship unshare routine ROUTINE_ID --with MEMBER_ID --operation run
@@ -51,12 +53,12 @@ list. Use `workspace member access get` for a complete member policy.
 | Flag | Default | Effect |
 | --- | --- | --- |
 | `--with <member>` | required | Existing membership ID, user ID or exact email. |
-| `--operation <operation>` | required | Routine `view`, `results`, `run`, `edit` or `publish`; project `list`, `read`, `contribute`, `manage` or `delete_issues`. Crew `view` or `use`. Repeat or use comma-separated values. |
+| `--operation <operation>` | required | Routine `view`, `results`, `run`, `edit` or `publish`; project `list`, `read`, `contribute`, `manage` or `delete_issues`. Crew `view` or `use` for Guests, or `manage` for trusted MEMBER/MANAGER. Repeat or use comma-separated values. |
 | `--reissue` | `false` | Explicitly reissue the selected rights as the authenticated administrator. |
 
 ## `share list <routine|project|crew> <resource-id>`
 
-List explicit Guest shares for this object with member, email, operation, issuer
+List explicit resource shares for this object with member, email, operation, issuer
 and active/inactive state. Takes no command-specific flags. Use `--format json`
 for machine output. A policy read error fails the command, rather than hiding
 an unreadable share in an otherwise successful list.
@@ -79,3 +81,11 @@ Chat and Run; it never grants Delegate, credential access or crew role changes.
 Crew shares use the same versioned member policy and issuer checks. Agent moves,
 crew retirement and revocation invalidate existing attempts. Guest crew detail
 routes and crew Share dialogs/presets are not included in this initial slice.
+
+Crew `manage` is separate from Guest View/Use and requires a trusted MEMBER or
+MANAGER. It permits crew profile/configuration and ordinary membership changes,
+without crew role assignment, deletion, private-network opt-in, budget/policy or
+workspace administration, or credential reveal. `share list crew` includes explicit
+trusted management shares with their original issuer and active/inactive state.
+Before converting a recipient to Guest, explicitly unshare all trusted-only
+shares and save; a downshift while any remain returns422.

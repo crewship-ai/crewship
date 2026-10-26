@@ -80,8 +80,8 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
     mutationFn: async () => {
       if (invalidPublish) throw new Error("Publish requires Edit on the same routine")
       const response = await apiFetch(url, { method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ membership_id: policy.membership_id, revision: policy.revision, mode, rights: mode === "trusted" ? [] : rights,
-          ...(mode === "restricted" && reissue.length ? {reissue: reissue.filter(r => rights.some(right => rightKey(right) === rightKey(r)))} : {}) }) })
+        body: JSON.stringify({ membership_id: policy.membership_id, revision: policy.revision, mode, rights: mode === "trusted" && policy.mode !== "trusted" ? [] : rights,
+          ...(reissue.length ? {reissue: reissue.filter(r => rights.some(right => rightKey(right) === rightKey(r)))} : {}) }) })
       if (response.status === 409) { setConflict(true); throw new Error("Policy changed. Reload the current policy before saving.") }
       if (!response.ok) throw new Error("Resource access was not saved")
       const updated = policySchema.parse(await response.json())
@@ -99,7 +99,7 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
   // The page's floating Save commits this draft: one change for the mode, one
   // per grant added or removed. A conflict keeps the draft but blocks Save
   // until the current policy is reloaded.
-  const pending = changeCount(policy, mode, rights) + (mode === "restricted" ? reissue.filter(r => rights.some(right => rightKey(right) === rightKey(r))).length : 0)
+  const pending = changeCount(policy, mode, rights) + (mode === "restricted" || policy.mode === "trusted" ? reissue.filter(r => rights.some(right => rightKey(right) === rightKey(r))).length : 0)
   const invalidPublish = mode === "restricted" && rights.some(right => right.kind === "routine" && right.operation === "publish" && !rights.some(edit => edit.kind === "routine" && edit.id === right.id && edit.operation === "edit"))
   usePageSave({
     label: `Resource access for ${label}`, count: pending, canSave: !conflict && !presetBusy && !invalidPublish, saving: save.isPending || presetBusy,
@@ -118,14 +118,13 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
       <select aria-label="Access mode" className={selectClass} value={mode} disabled={save.isPending || presetBusy || conflict}
         onChange={event => setMode(event.target.value as Policy["mode"])}>
         <option value="trusted">Trusted workspace access</option>
-        <option value="restricted" disabled={protectedRole}>Guest — explicit resources</option>
+        <option value="restricted" disabled={protectedRole || (policy.mode === "trusted" && policy.rights.length > 0)}>Guest — explicit resources</option>
       </select>
     </label>
     <p className="text-muted-foreground">{mode === "trusted"
-      ? "Trusted access uses the member’s workspace role and capabilities. Saving clears individual resource grants."
+      ? (policy.mode === "trusted" ? "Trusted access keeps workspace roles and explicit crew management shares. Remove and save trusted-only shares before switching to Guest." : "Restoring trusted access clears Guest resource grants and restores the workspace role and capabilities.")
       : "Guest restrictions apply to the entire account, across all workspaces. Only listed operations are allowed; conversation privacy checks still apply. Running a routine also requires run access to every agent it uses, and uses its configured credentials."}</p>
-    {mode === "restricted" && <>
-      <ul className="space-y-1" aria-label="Resource grants">{rights.map((right, index) => <li key={`${right.kind}:${right.id}:${right.operation}`} className="flex flex-wrap items-center gap-2">
+    {(mode === "restricted" || policy.mode === "trusted") && <ul className="space-y-1" aria-label="Resource grants">{rights.map((right, index) => <li key={`${right.kind}:${right.id}:${right.operation}`} className="flex flex-wrap items-center gap-2">
         {policy.grant_details?.filter(detail => rightKey(detail) === rightKey(right)).map(detail => <span key={rightKey(detail)} className="text-muted-foreground">
           Issuer: {detail.issuer_name || detail.issuer_id} · {detail.live ? "Active" : "Inactive — issuer no longer has authority"}
           {!detail.live && <Button size="sm" variant="outline" disabled={save.isPending || presetBusy || conflict} onClick={() => setReissue(current => current.some(r => rightKey(r) === rightKey(right)) ? current.filter(r => rightKey(r) !== rightKey(right)) : [...current,right])}>
@@ -135,7 +134,8 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
         <span>{right.kind}: {right.kind === "crew" ? right.id : directories[right.kind].data?.find(resource => resource.id === right.id)?.name ?? right.id} · {resourceOperationLabel(right.operation)}</span>
         <Button size="sm" variant="ghost" className="coarse:h-[44px]" disabled={save.isPending || presetBusy || conflict} onClick={() => setRights(rights.filter((_, row) => row !== index))}
           aria-label={`Remove ${right.kind} ${right.id} ${right.operation}`}>Remove</Button>
-      </li>)}</ul>
+      </li>)}</ul>}
+    {mode === "restricted" && <>
       {invalidPublish && <p role="alert">Publish requires Edit on the same routine. Add Edit or remove Publish before saving.</p>}
       {rights.length === 0 && <p>No resource operations are granted.</p>}
       <div className="flex flex-wrap gap-2">
@@ -166,8 +166,8 @@ const rightKey = (right: Right) => `${right.kind}:${right.id}:${right.operation}
 
 /** Edits pending against the saved policy: the mode, then each grant added or removed. */
 function changeCount(policy: Policy, mode: Policy["mode"], rights: Right[]): number {
-  const before = new Set(policy.mode === "trusted" ? [] : policy.rights.map(rightKey))
-  const after = new Set(mode === "trusted" ? [] : rights.map(rightKey))
+  const before = new Set(policy.rights.map(rightKey))
+  const after = new Set(mode === "trusted" && policy.mode !== "trusted" ? [] : rights.map(rightKey))
   let n = mode === policy.mode ? 0 : 1
   for (const key of after) if (!before.has(key)) n++
   for (const key of before) if (!after.has(key)) n++

@@ -5,7 +5,8 @@ package main
 func memberAccessPolicySchema() map[string]any {
 	schema := map[string]any{
 		"type": "object", "additionalProperties": false,
-		"required": []string{"membership_id", "mode", "revision", "rights"},
+		"description": "Trusted policies accept only crew manage shares for MEMBER/MANAGER recipients. Guest policies never accept Manage; revoke trusted-only shares before account downshift (422).",
+		"required":    []string{"membership_id", "mode", "revision", "rights"},
 		"properties": map[string]any{
 			"membership_id": map[string]any{"type": "string", "minLength": 1},
 			"mode":          map[string]any{"type": "string", "enum": []string{"trusted", "restricted"}},
@@ -61,7 +62,7 @@ func memberAccessRightSchema() map[string]any {
 }
 func memberAccessSchemaComponents() map[string]any {
 	return map[string]any{
-		"MemberAccessCrewRight":    memberAccessRightVariant("crew", []string{"view", "use"}),
+		"MemberAccessCrewRight":    memberAccessRightVariant("crew", []string{"view", "use", "manage"}),
 		"MemberAccessAgentRight":   memberAccessRightVariant("agent", []string{"discover", "chat", "run", "delegate"}),
 		"MemberAccessProjectRight": memberAccessRightVariant("project", []string{"list", "read", "write", "delete", "contribute", "manage", "delete_issues"}),
 		"MemberAccessRoutineRight": memberAccessRightVariant("routine", []string{"view", "results", "run", "edit", "publish"}),

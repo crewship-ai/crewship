@@ -6,12 +6,23 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/journal"
 )
 
-// Only the three membership handlers use this writer. Keep their existing
-// role floors; re-read live authority and resource state on that same writer.
+// Crew deletion and role assignment keep their existing role floors. Re-read
+// live authority and resource state on the same writer as the mutation.
 func (h *CrewHandler) beginMemberMutation(w http.ResponseWriter, r *http.Request, crewID, permission string) (*sql.Tx, string) {
+	return h.beginCrewMutation(w, r, crewID, permission, false)
+}
+
+// Only profile/configuration and ordinary membership changes opt in. Crew
+// deletion and role assignment keep the original workspace role floor.
+func (h *CrewHandler) beginCrewManageMutation(w http.ResponseWriter, r *http.Request, crewID, permission string) (*sql.Tx, string) {
+	return h.beginCrewMutation(w, r, crewID, permission, true)
+}
+
+func (h *CrewHandler) beginCrewMutation(w http.ResponseWriter, r *http.Request, crewID, permission string, allowGrant bool) (*sql.Tx, string) {
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		replyInternalError(w, h.logger, "begin crew membership mutation", err)
@@ -27,7 +38,13 @@ JOIN users u ON u.id=m.user_id AND u.suspended_at IS NULL
 JOIN workspaces w ON w.id=m.workspace_id AND w.deleted_at IS NULL
 WHERE m.workspace_id=? AND m.user_id=? AND NOT EXISTS(
  SELECT 1 FROM workspace_members guest WHERE guest.user_id=m.user_id AND guest.access_mode='restricted')`, WorkspaceIDFromContext(r.Context()), userID).Scan(&role)
-	if errors.Is(err, sql.ErrNoRows) || (err == nil && !canRole(role, permission)) {
+	if err == nil && !canRole(role, permission) {
+		err = access.ErrDenied
+		if allowGrant {
+			err = (access.Store{DB: h.db}).CrewManageIn(r.Context(), tx, userID, WorkspaceIDFromContext(r.Context()), crewID)
+		}
+	}
+	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, access.ErrDenied) {
 		_ = tx.Rollback()
 		replyError(w, http.StatusForbidden, "Forbidden")
 		return nil, ""
@@ -47,6 +64,48 @@ WHERE m.workspace_id=? AND m.user_id=? AND NOT EXISTS(
 		return nil, ""
 	}
 	return tx, role
+}
+
+func (h *CrewHandler) crewManageRequest(w http.ResponseWriter, r *http.Request, crewID, permission string) bool {
+	if canRole(RoleFromContext(r.Context()), permission) {
+		return true
+	}
+	u := UserFromContext(r.Context())
+	if u != nil {
+		err := (access.Store{DB: h.db}).CrewManage(r.Context(), u.ID, WorkspaceIDFromContext(r.Context()), crewID)
+		if err == nil {
+			return true
+		}
+		if !errors.Is(err, access.ErrDenied) {
+			replyInternalError(w, h.logger, "read crew Manage grant", err)
+			return false
+		}
+	}
+	replyError(w, http.StatusForbidden, "Forbidden")
+	return false
+}
+
+// Recheck after audit hooks as well: a hook must not revoke the issuer, grant
+// or recipient and still allow the protected mutation to commit.
+func (h *CrewHandler) crewMutationActorIn(r *http.Request, tx *sql.Tx, crewID, permission string, allowGrant bool) error {
+	u := UserFromContext(r.Context())
+	if u == nil {
+		return sql.ErrNoRows
+	}
+	var role string
+	err := tx.QueryRowContext(r.Context(), `SELECT wm.role FROM workspace_members wm
+JOIN users u ON u.id=wm.user_id AND u.suspended_at IS NULL
+JOIN workspaces w ON w.id=wm.workspace_id AND w.deleted_at IS NULL
+JOIN crews c ON c.workspace_id=w.id AND c.id=? AND c.deleted_at IS NULL
+WHERE wm.user_id=? AND wm.workspace_id=?
+AND NOT EXISTS(SELECT 1 FROM workspace_members ceiling WHERE ceiling.user_id=wm.user_id AND ceiling.access_mode='restricted')`, crewID, u.ID, WorkspaceIDFromContext(r.Context())).Scan(&role)
+	if err != nil || canRole(role, permission) {
+		return err
+	}
+	if allowGrant {
+		return (access.Store{DB: h.db}).CrewManageIn(r.Context(), tx, u.ID, WorkspaceIDFromContext(r.Context()), crewID)
+	}
+	return sql.ErrNoRows
 }
 
 type crewMembershipState struct {
@@ -105,6 +164,13 @@ func (h *CrewHandler) commitMemberMutation(r *http.Request, tx *sql.Tx, action s
 		if err != nil || *saved != *after {
 			return errors.Join(err, errors.New("crew membership did not persist"))
 		}
+	}
+	permission, allowGrant := "manage", action == "removed"
+	if action == "added" {
+		permission, allowGrant = "create", !after.Role.Valid
+	}
+	if err := h.crewMutationActorIn(r, tx, identity.CrewID, permission, allowGrant); err != nil {
+		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return err

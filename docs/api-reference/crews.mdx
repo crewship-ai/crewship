@@ -1778,3 +1778,16 @@ are retained through stop/start. Arbitrary agent shell background processes are 
 | `404` | Crew/service not found in this workspace |
 | `409` | Stale version or unsupported runtime |
 | `500` | Intent could not be persisted |
+
+### Explicit trusted crew management
+
+A trusted MEMBER/MANAGER with a live explicit crew Manage share may PATCH/PUT
+that crew's profile/configuration and POST/DELETE its ordinary members. The
+administrator issues the share through the versioned member-policy API or
+`crewship share crew CREW_ID --with MEMBER_ID --operation manage`.
+
+The share does not permit assigning crew roles, deleting the crew, private-network
+opt-in, budgets, policy administration or workspace administration. Existing token
+scopes and workspace runtime privilege ceilings still apply. Unshared crews and
+revoked/inactive shares are denied; Guest mode never acquires Manage. The mutation
+and its audit are atomic and recheck current authority before committing.

@@ -105,6 +105,9 @@ func (h *WorkspaceHandler) writeEffectiveAccess(w http.ResponseWriter, r *http.R
 			if name, ok := crewNames[right]; ok {
 				decision.Name = name
 				decision.Reason = "Crew View allows discovering its agents; Crew Use also allows chatting and running them. Neither grants delegation, credential access or crew administration."
+				if right.Operation == "manage" {
+					decision.Reason = "Explicit trusted Crew Manage permits crew profile/configuration and ordinary membership changes. It does not permit assigning crew roles, private-network opt-in, deletion or workspace administration."
+				}
 			} else {
 				decision.State = "denied"
 				decision.Reason = "Crew or grant issuer authority is unavailable."

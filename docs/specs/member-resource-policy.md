@@ -44,9 +44,9 @@ The replacement body is the same shape as the GET response:
 ```
 
 `rights: []` explicitly revokes all resource grants in restricted mode. Omitted
-or null rights are rejected, as are unknown body fields. `trusted` requires an
-empty rights array and restores ordinary workspace access; it is not a narrower
-client setting. The actor always comes from authentication, not JSON.
+or null rights are rejected, as are unknown body fields. `trusted` restores ordinary workspace access and also accepts explicit crew
+`manage` shares for trusted MEMBER/MANAGER recipients. Other trusted resource
+rights are rejected. It is not a narrower client setting. The actor always comes from authentication, not JSON.
 
 Every accepted replacement advances the membership revision. Treat it as an
 opaque version: grant/role triggers can advance it by more than one. A stale revision
@@ -1003,3 +1003,32 @@ crewship share crew CREW_ID --with MEMBER_ID --operation use
 crewship share list crew CREW_ID
 crewship unshare crew CREW_ID --with MEMBER_ID --operation use
 ```
+
+## Explicit trusted crew management
+
+Trusted OWNER/ADMIN operators can add `{kind:"crew",id:"CREW_ID",operation:"manage"}`
+to a trusted MEMBER/MANAGER's versioned policy. No shares are added on upgrade.
+VIEWER and OWNER/ADMIN targets do not receive additive management shares. Any
+Guest membership elsewhere keeps the account ceiling closed. Guest crew View/Use
+and agent derivation remain unchanged; Manage never derives agent Run or Delegate.
+
+This API/CLI slice permits PATCH/PUT crew profile/configuration and ordinary
+crew membership add/remove. It does not permit crew role assignment, crew deletion,
+private-network egress opt-in, budgets, policy administration, credential reveal
+or workspace administration. Existing token scopes and workspace runtime privilege
+ceilings still apply. Authority is checked on the writer and after audit hooks;
+settings/membership and the authorization audit commit or roll back together.
+The existing Access editor displays saved trusted shares and permits deliberate
+removal/reissue; creation and the crew's management affordances remain CLI/API work.
+
+Switching an account to Guest while it holds any trusted-only crew share returns
+422, including shares in another workspace or from an inactive issuer. First
+explicitly remove those shares, save the trusted policy, then change the mode.
+The same policy cannot silently remove a trusted-only share while downshifting.
+
+The timestamp migration rebuilds only the canonical child grant table, preserving
+all existing grant IDs, scope, provenance, timestamps, indexes and dependent
+views/triggers. It fails transactionally on an unknown schema or incoming foreign
+key. A rollback binary predating trusted Manage does not support these shares;
+remove them explicitly before reverting that feature. Existing crew grants and
+informational preset metadata remain intact. No runtime image or provider changes.
