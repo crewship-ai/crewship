@@ -11878,8 +11878,7 @@
           "format",
           "engine",
           "projection",
-          "outcome",
-          "editor"
+          "outcome"
         ],
         "type": "object"
       },

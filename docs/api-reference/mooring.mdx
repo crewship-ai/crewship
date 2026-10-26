@@ -110,7 +110,7 @@ case aliases, null fields and oversized bodies are refused. A view is an identit
 fence, never an authentication credential or a grant.
 
 **Response:** `MooringCommandSession` with `view`, stable `actor`, fixed `format`
-and `engine`, confirmed `projection`, nullable `outcome`, and pinned `editor` URL
+and `engine`, confirmed `projection`, nullable `outcome`, and optional pinned `editor` URL
 and digest. Projection contains `generation`, SQL `revision`, stable `ids` and
 opaque `native_json`. Saved requires a matching original operation's durable SQL
 receipt. Unknown outcomes support lookup and confirmed-state recovery without

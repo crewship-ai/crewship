@@ -69,7 +69,7 @@ func mooringSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		"engine":     map[string]any{"type": "string", "enum": []string{"7ef2633a7e84956522d1ca47b99fe6feef16c1db"}},
 		"projection": ref("MooringCommandProjection"), "outcome": ref("MooringCommandOutcome"),
 		"editor": obj(map[string]any{"url": text, "bundle_digest": text}, "url", "bundle_digest"),
-	}, "view", "actor", "format", "engine", "projection", "outcome", "editor")
+	}, "view", "actor", "format", "engine", "projection", "outcome")
 	base := "/api/v1/pages/{slug}/mooring"
 	routes := map[string]DomainSchema{"GET /api/v1/mooring/apps": {Response: ref("MooringApplications")}, "POST /api/v1/mooring/documents": {Request: ref("MooringCreate"), RequestRequired: true, Response: ref("MooringCreated"), SuccessStatuses: []string{"200", "201"}}, "GET " + base: {Response: ref("MooringRead")}, "POST " + base + "/commands": {Request: ref("MooringCommand"), RequestRequired: true, Response: ref("MooringReceipt")}, "POST " + base + "/mandates": {Request: ref("MooringMandate"), RequestRequired: true, Response: ref("MooringMandate")}, "DELETE " + base + "/mandates/{mandate}": {Response: ref("MooringRevoked")}}
 	routes["POST "+base+"/tasks"] = DomainSchema{Request: ref("MooringTaskRequest"), RequestRequired: true, Response: ref("MooringTaskAccepted"), SuccessStatuses: []string{"202"}, ErrorStatuses: []string{"400", "401", "403", "409", "413", "500", "503"}}

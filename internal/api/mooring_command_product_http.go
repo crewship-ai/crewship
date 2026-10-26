@@ -25,6 +25,16 @@ type commandProductEditor struct {
 	URL          string `json:"url"`
 }
 
+type commandProductHTTPResponse struct {
+	View       string                `json:"view"`
+	Actor      string                `json:"actor"`
+	Format     string                `json:"format"`
+	Engine     string                `json:"engine"`
+	Projection json.RawMessage       `json:"projection"`
+	Outcome    *commandSQLOutcome    `json:"outcome"`
+	Editor     *commandProductEditor `json:"editor,omitempty"`
+}
+
 func commandSameView(original, fresh collaborationHumanAdmission) bool {
 	a, b := original.source, fresh.source
 	// JWT expiry belongs to each independent HTTP request. A view cannot
@@ -205,15 +215,7 @@ func (f *commandProductFactory) serve(w http.ResponseWriter, r *http.Request) {
 		if !bounded || controller.SetWriteDeadline(sendDeadline) != nil {
 			return errCommandStore
 		}
-		response, e := json.Marshal(struct {
-			View       string                `json:"view"`
-			Actor      string                `json:"actor"`
-			Format     string                `json:"format"`
-			Engine     string                `json:"engine"`
-			Projection json.RawMessage       `json:"projection"`
-			Outcome    *commandSQLOutcome    `json:"outcome"`
-			Editor     *commandProductEditor `json:"editor,omitempty"`
-		}{input.View, actor.actor, commandFormat, commandEngineRevision, projection, outcome, editor})
+		response, e := json.Marshal(commandProductHTTPResponse{input.View, actor.actor, commandFormat, commandEngineRevision, projection, outcome, editor})
 		if e != nil {
 			return e
 		}

@@ -140,8 +140,13 @@ func TestMooringCommandSessionKeepsNativeStateOpaqueAndAuthorityOutOfInput(t *te
 		t.Fatal("command session lost named response")
 	}
 	output := schema["MooringCommandSession"].(map[string]any)
-	if output["additionalProperties"] != false || len(output["required"].([]string)) != 7 || output["properties"].(map[string]any)["outcome"].(map[string]any)["$ref"] != "#/components/schemas/MooringCommandOutcome" {
+	if output["additionalProperties"] != false || len(output["required"].([]string)) != 6 || output["properties"].(map[string]any)["outcome"].(map[string]any)["$ref"] != "#/components/schemas/MooringCommandOutcome" {
 		t.Fatal("read or unknown outcome must not imply a saved receipt", output)
+	}
+	for _, name := range output["required"].([]string) {
+		if name == "editor" {
+			t.Fatal("editor has omitempty on the actual response DTO")
+		}
 	}
 	outcome := schema["MooringCommandOutcome"].(map[string]any)
 	if outcome["type"] != "object" || outcome["nullable"] != true {
