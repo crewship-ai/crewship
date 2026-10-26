@@ -30,3 +30,8 @@ it('resolves every previously missing list schema without granting any capabilit
   expect(lists).toHaveLength(9)
   expect(lists.every(command => command.schemaStatus === 'exact' && command.parameterSchema !== false && command.qualification === 'unqualified')).toBe(true)
 })
+it('has a closed parameter schema for every one of the 163 C-E commands', () => {
+  const commands = catalog.commands.filter(command => ['text-enter', 'character-format', 'paragraphs', 'lists'].includes(command.group))
+  expect(commands).toHaveLength(163)
+  expect(commands.every(command => command.schemaStatus === 'exact' && command.parameterSchema !== false && command.qualification === 'unqualified')).toBe(true)
+})
