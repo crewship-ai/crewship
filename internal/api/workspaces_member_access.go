@@ -41,6 +41,8 @@ func (h *WorkspaceHandler) memberAccessTarget(w http.ResponseWriter, r *http.Req
 
 func (h *WorkspaceHandler) memberAccessError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, access.ErrGuestCeiling):
+		replyError(w, http.StatusUnprocessableEntity, "Remove trusted-only grants before switching to Guest access")
 	case errors.Is(err, access.ErrPublishRequiresEdit):
 		replyError(w, http.StatusUnprocessableEntity, "Publish requires Edit on the same routine")
 	case errors.Is(err, access.ErrDenied), errors.Is(err, sql.ErrNoRows):

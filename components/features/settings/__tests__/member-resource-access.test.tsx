@@ -30,6 +30,35 @@ function mockPolicy() {
 }
 afterEach(() => { cleanup(); fetchMock.mockReset(); toastError.mockReset() })
 describe("member resource access", () => {
+  it("shows trusted crew management shares and requires an explicit saved revoke before Guest conversion", async () => {
+    const trusted = { ...policy, mode: "trusted", rights: [{ kind: "crew", id: "crew-1", operation: "manage" }] }
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method === "PUT") return response({ ...JSON.parse(String(init.body)), revision: 8 })
+      return response(trusted)
+    })
+    show(); fireEvent.click(screen.getByRole("button", { name: "Edit resource access" }))
+    const remove = await screen.findByRole("button", { name: "Remove crew crew-1 manage" })
+    expect(screen.getByRole("option", { name: "Guest — explicit resources" })).toBeDisabled()
+    expect(bar()).toBeNull()
+    fireEvent.click(remove)
+    expect(bar()).toHaveTextContent("1 unsaved change")
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(1))
+    const [, init] = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT")!
+    expect(JSON.parse(init.body)).toEqual({ ...trusted, rights: [] })
+    await waitFor(() => expect(screen.getByRole("option", { name: "Guest — explicit resources" })).toBeEnabled())
+  })
+  it("reissues a trusted crew share without clearing it or changing account mode", async () => {
+    const right = { kind: "crew", id: "crew-1", operation: "manage" }
+    const trusted = { ...policy, mode: "trusted", rights: [right], grant_details: [{ ...right, issuer_id: "old-admin", created_at: "original", live: false }] }
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => init?.method === "PUT" ? response({ ...JSON.parse(String(init.body)), revision: 8 }) : response(trusted))
+    show(); fireEvent.click(screen.getByRole("button", { name: "Edit resource access" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Reissue as me" }))
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(1))
+    const [, init] = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT")!
+    expect(JSON.parse(init.body)).toEqual({ membership_id: trusted.membership_id, revision: 7, mode: "trusted", rights: [right], reissue: [right] })
+  })
   it("requires an explicit Edit grant before saving Publish without adding View or Run", async () => {
     mockPolicy(); show(); fireEvent.click(screen.getByRole("button", { name: "Edit resource access" }))
     fireEvent.change(await screen.findByLabelText("Resource kind"), { target: { value: "routine" } })

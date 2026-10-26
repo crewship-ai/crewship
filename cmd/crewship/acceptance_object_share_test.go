@@ -159,7 +159,7 @@ func TestAcceptanceObjectShareValidationBeforeHTTP(t *testing.T) {
 	}))
 	defer server.Close()
 	for _, args := range [][]string{
-		{"share", "crew", "crew-1", "--with", "member-1", "--operation", "manage"},
+		{"share", "crew", "crew-1", "--with", "member-1", "--operation", "delete"},
 		{"share", "crew", "crew-1", "--with", "member-1", "--operation", "delegate"},
 		{"share", "project", "project-1", "--with", "member-1", "--operation", "write"},
 		{"share", "project", "project-1", "--with", "member-1", "--operation", "publish"},
