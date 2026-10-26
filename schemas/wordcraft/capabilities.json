@@ -4,7 +4,7 @@
     "repository": "https://github.com/storytold/wordcraft",
     "sha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db"
   },
-  "version": "wordcraft:7ef2633a7e84956522d1ca47b99fe6feef16c1db:4",
+  "version": "wordcraft:7ef2633a7e84956522d1ca47b99fe6feef16c1db:5",
   "sourceIdentity": [
     {
       "path": "crates/doc/src/bidi.rs",
@@ -3968,7 +3968,50 @@
       "group": "character-format",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_format_allcaps",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "format.bold",
@@ -3995,15 +4038,15 @@
         "status": "qualified",
         "scope": "isolated-c1-fixture",
         "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
-        "c1HostSha": "96f3ca3a5c21e480ff6fbc01f289e317e285ed13",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
         "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
         "testSource": {
           "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
-          "sha256": "d86a609313fa6a449fc320b3b38dd3cba57e70ed8a90758ad92d6f299ac3d3a6"
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
         },
         "fixturesSource": {
           "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
-          "sha256": "2a3ab30a2b8e537f16de9e52d68d4dfca19f1dc06ab822f6e623a0b1a96a8ba3"
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
         },
         "test": "ce_format_bold",
         "testedParameters": {
@@ -4014,9 +4057,15 @@
           "start": 1,
           "end": 3
         },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
         "coverage": "tested-fixture-only",
         "invariants": [
           "execution",
+          "oracleIntegrity",
           "ownUndo",
           "restoreP",
           "staleTarget"
@@ -4179,7 +4228,61 @@
       "group": "character-format",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_format_color",
+        "testedParameters": {
+          "color": "FF0000"
+        },
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {
+            "color": {
+              "type": "string",
+              "enum": [
+                "FF0000"
+              ]
+            }
+          },
+          "required": [
+            "color"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "format.doubleStrikethrough",
@@ -4196,7 +4299,50 @@
       "group": "character-format",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_format_doublestrikethrough",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "format.doubleUnderline",
@@ -4213,7 +4359,50 @@
       "group": "character-format",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_format_doubleunderline",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "format.emboss",
@@ -4230,7 +4419,50 @@
       "group": "character-format",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_format_emboss",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "format.enclose",
@@ -4302,7 +4534,50 @@
       "group": "character-format",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_format_engrave",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "format.font",
@@ -4332,15 +4607,15 @@
         "status": "qualified",
         "scope": "isolated-c1-fixture",
         "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
-        "c1HostSha": "96f3ca3a5c21e480ff6fbc01f289e317e285ed13",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
         "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
         "testSource": {
           "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
-          "sha256": "d86a609313fa6a449fc320b3b38dd3cba57e70ed8a90758ad92d6f299ac3d3a6"
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
         },
         "fixturesSource": {
           "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
-          "sha256": "2a3ab30a2b8e537f16de9e52d68d4dfca19f1dc06ab822f6e623a0b1a96a8ba3"
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
         },
         "test": "ce_format_font",
         "testedParameters": {
@@ -4351,9 +4626,15 @@
           "start": 1,
           "end": 3
         },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
         "coverage": "tested-fixture-only",
         "invariants": [
           "execution",
+          "oracleIntegrity",
           "ownUndo",
           "restoreP",
           "staleTarget"
@@ -4443,7 +4724,50 @@
       "group": "character-format",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_format_hidden",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "format.highlight",
@@ -4490,7 +4814,61 @@
       "group": "character-format",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_format_highlight",
+        "testedParameters": {
+          "color": "yellow"
+        },
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {
+            "color": {
+              "type": "string",
+              "enum": [
+                "yellow"
+              ]
+            }
+          },
+          "required": [
+            "color"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "format.italic",
@@ -4512,7 +4890,61 @@
       "group": "character-format",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_format_italic",
+        "testedParameters": {
+          "value": true
+        },
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "boolean",
+              "enum": [
+                true
+              ]
+            }
+          },
+          "required": [
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "format.outline",
@@ -4529,7 +4961,50 @@
       "group": "character-format",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_format_outline",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "format.phonetic",
@@ -4611,7 +5086,61 @@
       "group": "character-format",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_format_position",
+        "testedParameters": {
+          "points": 2
+        },
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {
+            "points": {
+              "type": "number",
+              "enum": [
+                2
+              ]
+            }
+          },
+          "required": [
+            "points"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "format.resetChar",
@@ -4652,7 +5181,61 @@
       "group": "character-format",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_format_scale",
+        "testedParameters": {
+          "percent": 120
+        },
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {
+            "percent": {
+              "type": "number",
+              "enum": [
+                120
+              ]
+            }
+          },
+          "required": [
+            "percent"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "format.set",
@@ -4956,7 +5539,67 @@
       "group": "character-format",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_format_set",
+        "testedParameters": {
+          "props": {
+            "italic": true,
+            "size": 18
+          }
+        },
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {
+            "props": {
+              "type": "object",
+              "enum": [
+                {
+                  "italic": true,
+                  "size": 18
+                }
+              ]
+            }
+          },
+          "required": [
+            "props"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "format.shading",
@@ -4995,7 +5638,61 @@
       "group": "character-format",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_format_shading",
+        "testedParameters": {
+          "color": "FF0000"
+        },
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {
+            "color": {
+              "type": "string",
+              "enum": [
+                "FF0000"
+              ]
+            }
+          },
+          "required": [
+            "color"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "format.shadow",
@@ -5012,7 +5709,50 @@
       "group": "character-format",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_format_shadow",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "format.shrinkFont",
@@ -5075,15 +5815,15 @@
         "status": "qualified",
         "scope": "isolated-c1-fixture",
         "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
-        "c1HostSha": "96f3ca3a5c21e480ff6fbc01f289e317e285ed13",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
         "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
         "testSource": {
           "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
-          "sha256": "d86a609313fa6a449fc320b3b38dd3cba57e70ed8a90758ad92d6f299ac3d3a6"
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
         },
         "fixturesSource": {
           "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
-          "sha256": "2a3ab30a2b8e537f16de9e52d68d4dfca19f1dc06ab822f6e623a0b1a96a8ba3"
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
         },
         "test": "ce_format_size",
         "testedParameters": {
@@ -5094,9 +5834,15 @@
           "start": 1,
           "end": 3
         },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
         "coverage": "tested-fixture-only",
         "invariants": [
           "execution",
+          "oracleIntegrity",
           "ownUndo",
           "restoreP",
           "staleTarget"
@@ -5135,7 +5881,50 @@
       "group": "character-format",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_format_smallcaps",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "format.spacing",
@@ -5159,7 +5948,61 @@
       "group": "character-format",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_format_spacing",
+        "testedParameters": {
+          "points": 2
+        },
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {
+            "points": {
+              "type": "number",
+              "enum": [
+                2
+              ]
+            }
+          },
+          "required": [
+            "points"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "format.state",
@@ -5198,7 +6041,61 @@
       "group": "character-format",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_format_strikethrough",
+        "testedParameters": {
+          "value": true
+        },
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "boolean",
+              "enum": [
+                true
+              ]
+            }
+          },
+          "required": [
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "format.subscript",
@@ -5215,7 +6112,50 @@
       "group": "character-format",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_format_subscript",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "format.superscript",
@@ -5232,7 +6172,50 @@
       "group": "character-format",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_format_superscript",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "format.textEffects",
@@ -5568,7 +6551,61 @@
       "group": "character-format",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_format_underline",
+        "testedParameters": {
+          "style": "single"
+        },
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {
+            "style": {
+              "type": "string",
+              "enum": [
+                "single"
+              ]
+            }
+          },
+          "required": [
+            "style"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "format.underlineColor",
@@ -5610,7 +6647,61 @@
       "group": "character-format",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_format_underlinecolor",
+        "testedParameters": {
+          "color": "00FF00"
+        },
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {
+            "color": {
+              "type": "string",
+              "enum": [
+                "00FF00"
+              ]
+            }
+          },
+          "required": [
+            "color"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "format.wordUnderline",
@@ -5627,7 +6718,50 @@
       "group": "character-format",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_format_wordunderline",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "hf.next",
@@ -6822,7 +7956,71 @@
       "group": "lists",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_list_define",
+        "testedParameters": {
+          "levels": [
+            {
+              "format": "bullet",
+              "text": "•"
+            }
+          ]
+        },
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {
+            "levels": {
+              "type": "array",
+              "enum": [
+                [
+                  {
+                    "format": "bullet",
+                    "text": "•"
+                  }
+                ]
+              ]
+            }
+          },
+          "required": [
+            "levels"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "list.get",
@@ -7702,7 +8900,50 @@
       "group": "paragraphs",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_para_addspacebefore",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "para.align",
@@ -7747,15 +8988,15 @@
         "status": "qualified",
         "scope": "isolated-c1-fixture",
         "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
-        "c1HostSha": "96f3ca3a5c21e480ff6fbc01f289e317e285ed13",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
         "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
         "testSource": {
           "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
-          "sha256": "d86a609313fa6a449fc320b3b38dd3cba57e70ed8a90758ad92d6f299ac3d3a6"
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
         },
         "fixturesSource": {
           "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
-          "sha256": "2a3ab30a2b8e537f16de9e52d68d4dfca19f1dc06ab822f6e623a0b1a96a8ba3"
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
         },
         "test": "ce_para_align",
         "testedParameters": {
@@ -7766,9 +9007,15 @@
           "start": 0,
           "end": 5
         },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
         "coverage": "tested-fixture-only",
         "invariants": [
           "execution",
+          "oracleIntegrity",
           "ownUndo",
           "restoreP",
           "staleTarget"
@@ -7807,7 +9054,50 @@
       "group": "paragraphs",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_para_aligncenter",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "para.alignLeft",
@@ -7841,7 +9131,50 @@
       "group": "paragraphs",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_para_alignright",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "para.asianTypography",
@@ -8183,7 +9516,61 @@
       "group": "lists",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_para_bullets",
+        "testedParameters": {
+          "kind": "bullet"
+        },
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "bullet"
+              ]
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "para.defineBullet",
@@ -8307,7 +9694,50 @@
       "group": "paragraphs",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_para_distribute",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "para.double",
@@ -8324,7 +9754,50 @@
       "group": "paragraphs",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_para_double",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "para.hangingIndent",
@@ -8341,7 +9814,50 @@
       "group": "paragraphs",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_para_hangingindent",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "para.heading1",
@@ -8358,7 +9874,50 @@
       "group": "paragraphs",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_para_heading1",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "para.heading2",
@@ -8375,7 +9934,50 @@
       "group": "paragraphs",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_para_heading2",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "para.heading3",
@@ -8392,7 +9994,50 @@
       "group": "paragraphs",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_para_heading3",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "para.indent",
@@ -8409,7 +10054,50 @@
       "group": "paragraphs",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_para_indent",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "para.indents",
@@ -8450,7 +10138,77 @@
       "group": "paragraphs",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_para_indents",
+        "testedParameters": {
+          "firstLine": 12,
+          "left": 36,
+          "right": 18
+        },
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {
+            "firstLine": {
+              "type": "number",
+              "enum": [
+                12
+              ]
+            },
+            "left": {
+              "type": "number",
+              "enum": [
+                36
+              ]
+            },
+            "right": {
+              "type": "number",
+              "enum": [
+                18
+              ]
+            }
+          },
+          "required": [
+            "firstLine",
+            "left",
+            "right"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "para.justify",
@@ -8467,7 +10225,50 @@
       "group": "paragraphs",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_para_justify",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "para.keepLines",
@@ -8489,7 +10290,61 @@
       "group": "paragraphs",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_para_keeplines",
+        "testedParameters": {
+          "value": true
+        },
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "boolean",
+              "enum": [
+                true
+              ]
+            }
+          },
+          "required": [
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "para.keepNext",
@@ -8511,7 +10366,61 @@
       "group": "paragraphs",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_para_keepnext",
+        "testedParameters": {
+          "value": true
+        },
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "boolean",
+              "enum": [
+                true
+              ]
+            }
+          },
+          "required": [
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "para.lineSpacing",
@@ -8576,7 +10485,61 @@
       "group": "paragraphs",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_para_linespacing",
+        "testedParameters": {
+          "value": 1.5
+        },
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "number",
+              "enum": [
+                1.5
+              ]
+            }
+          },
+          "required": [
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "para.listLevel",
@@ -8609,7 +10572,68 @@
       "group": "lists",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_para_listlevel",
+        "testedParameters": {
+          "level": 1
+        },
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [
+          {
+            "command": "para.numbering",
+            "params": {
+              "kind": "numbered"
+            }
+          }
+        ],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {
+            "level": {
+              "type": "number",
+              "enum": [
+                1
+              ]
+            }
+          },
+          "required": [
+            "level"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "para.ltr",
@@ -8722,7 +10746,50 @@
       "group": "paragraphs",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_para_normal",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "para.numbering",
@@ -8762,7 +10829,61 @@
       "group": "lists",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_para_numbering",
+        "testedParameters": {
+          "kind": "numbered"
+        },
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "numbered"
+              ]
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "para.oneAndHalf",
@@ -8779,7 +10900,50 @@
       "group": "paragraphs",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_para_oneandhalf",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "para.outdent",
@@ -8835,7 +10999,61 @@
       "group": "paragraphs",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_para_pagebreakbefore",
+        "testedParameters": {
+          "value": true
+        },
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "boolean",
+              "enum": [
+                true
+              ]
+            }
+          },
+          "required": [
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "para.promote",
@@ -8949,7 +11167,61 @@
       "group": "paragraphs",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_para_rtl",
+        "testedParameters": {
+          "value": true
+        },
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "boolean",
+              "enum": [
+                true
+              ]
+            }
+          },
+          "required": [
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "para.set",
@@ -9279,7 +11551,67 @@
       "group": "paragraphs",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_para_set",
+        "testedParameters": {
+          "props": {
+            "align": "center",
+            "keepNext": true
+          }
+        },
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {
+            "props": {
+              "type": "object",
+              "enum": [
+                {
+                  "align": "center",
+                  "keepNext": true
+                }
+              ]
+            }
+          },
+          "required": [
+            "props"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "para.setNumberingValue",
@@ -9351,7 +11683,61 @@
       "group": "paragraphs",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_para_shading",
+        "testedParameters": {
+          "color": "FF0000"
+        },
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {
+            "color": {
+              "type": "string",
+              "enum": [
+                "FF0000"
+              ]
+            }
+          },
+          "required": [
+            "color"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "para.single",
@@ -9368,7 +11754,50 @@
       "group": "paragraphs",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_para_single",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "para.sort",
@@ -9432,7 +11861,69 @@
       "group": "paragraphs",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_para_spacing",
+        "testedParameters": {
+          "after": 6,
+          "before": 12
+        },
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {
+            "after": {
+              "type": "number",
+              "enum": [
+                6
+              ]
+            },
+            "before": {
+              "type": "number",
+              "enum": [
+                12
+              ]
+            }
+          },
+          "required": [
+            "after",
+            "before"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "para.style",
@@ -9464,7 +11955,61 @@
       "group": "paragraphs",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_para_style",
+        "testedParameters": {
+          "style": "Heading 1"
+        },
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {
+            "style": {
+              "type": "string",
+              "enum": [
+                "Heading 1"
+              ]
+            }
+          },
+          "required": [
+            "style"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "para.tabs",
@@ -9614,7 +12159,61 @@
       "group": "paragraphs",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_para_widowcontrol",
+        "testedParameters": {
+          "value": true
+        },
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "boolean",
+              "enum": [
+                true
+              ]
+            }
+          },
+          "required": [
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "picture.altText",
@@ -12339,15 +14938,15 @@
         "status": "qualified",
         "scope": "isolated-c1-fixture",
         "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
-        "c1HostSha": "96f3ca3a5c21e480ff6fbc01f289e317e285ed13",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
         "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
         "testSource": {
           "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
-          "sha256": "d86a609313fa6a449fc320b3b38dd3cba57e70ed8a90758ad92d6f299ac3d3a6"
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
         },
         "fixturesSource": {
           "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
-          "sha256": "2a3ab30a2b8e537f16de9e52d68d4dfca19f1dc06ab822f6e623a0b1a96a8ba3"
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
         },
         "test": "ce_text_backspace",
         "testedParameters": {},
@@ -12356,9 +14955,15 @@
           "start": 1,
           "end": 3
         },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
         "coverage": "tested-fixture-only",
         "invariants": [
           "execution",
+          "oracleIntegrity",
           "ownUndo",
           "restoreP",
           "staleTarget"
@@ -12422,7 +15027,50 @@
       "group": "text-enter",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_text_copyright",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "text.delete",
@@ -12444,15 +15092,15 @@
         "status": "qualified",
         "scope": "isolated-c1-fixture",
         "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
-        "c1HostSha": "96f3ca3a5c21e480ff6fbc01f289e317e285ed13",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
         "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
         "testSource": {
           "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
-          "sha256": "d86a609313fa6a449fc320b3b38dd3cba57e70ed8a90758ad92d6f299ac3d3a6"
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
         },
         "fixturesSource": {
           "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
-          "sha256": "2a3ab30a2b8e537f16de9e52d68d4dfca19f1dc06ab822f6e623a0b1a96a8ba3"
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
         },
         "test": "ce_text_delete",
         "testedParameters": {},
@@ -12461,9 +15109,15 @@
           "start": 1,
           "end": 3
         },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
         "coverage": "tested-fixture-only",
         "invariants": [
           "execution",
+          "oracleIntegrity",
           "ownUndo",
           "restoreP",
           "staleTarget"
@@ -12493,7 +15147,50 @@
       "group": "text-enter",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_text_deletewordback",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "text.deleteWordForward",
@@ -12510,7 +15207,50 @@
       "group": "text-enter",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_text_deletewordforward",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "text.ellipsis",
@@ -12527,7 +15267,50 @@
       "group": "text-enter",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_text_ellipsis",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "text.emDash",
@@ -12544,7 +15327,50 @@
       "group": "text-enter",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_text_emdash",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "text.insert",
@@ -12573,15 +15399,15 @@
         "status": "qualified",
         "scope": "isolated-c1-fixture",
         "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
-        "c1HostSha": "96f3ca3a5c21e480ff6fbc01f289e317e285ed13",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
         "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
         "testSource": {
           "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
-          "sha256": "d86a609313fa6a449fc320b3b38dd3cba57e70ed8a90758ad92d6f299ac3d3a6"
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
         },
         "fixturesSource": {
           "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
-          "sha256": "2a3ab30a2b8e537f16de9e52d68d4dfca19f1dc06ab822f6e623a0b1a96a8ba3"
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
         },
         "test": "ce_text_insert",
         "testedParameters": {
@@ -12592,9 +15418,15 @@
           "start": 1,
           "end": 3
         },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
         "coverage": "tested-fixture-only",
         "invariants": [
           "execution",
+          "oracleIntegrity",
           "ownUndo",
           "restoreP",
           "staleTarget"
@@ -12633,7 +15465,50 @@
       "group": "text-enter",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_text_inserttab",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "text.lineBreak",
@@ -12650,7 +15525,50 @@
       "group": "text-enter",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_text_linebreak",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "text.nbHyphen",
@@ -12667,7 +15585,50 @@
       "group": "text-enter",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_text_nbhyphen",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "text.nbsp",
@@ -12684,7 +15645,50 @@
       "group": "text-enter",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_text_nbsp",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "text.newParagraph",
@@ -12706,15 +15710,15 @@
         "status": "qualified",
         "scope": "isolated-c1-fixture",
         "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
-        "c1HostSha": "96f3ca3a5c21e480ff6fbc01f289e317e285ed13",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
         "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
         "testSource": {
           "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
-          "sha256": "d86a609313fa6a449fc320b3b38dd3cba57e70ed8a90758ad92d6f299ac3d3a6"
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
         },
         "fixturesSource": {
           "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
-          "sha256": "2a3ab30a2b8e537f16de9e52d68d4dfca19f1dc06ab822f6e623a0b1a96a8ba3"
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
         },
         "test": "ce_text_newparagraph",
         "testedParameters": {},
@@ -12723,9 +15727,15 @@
           "start": 2,
           "end": 2
         },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
         "coverage": "tested-fixture-only",
         "invariants": [
           "execution",
+          "oracleIntegrity",
           "ownUndo",
           "restoreP",
           "staleTarget"
@@ -12755,7 +15765,50 @@
       "group": "text-enter",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_text_optionalhyphen",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "text.overtype",
@@ -12818,7 +15871,50 @@
       "group": "text-enter",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_text_registered",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "text.tab",
@@ -12869,7 +15965,50 @@
       "group": "text-enter",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
-      "qualification": "unqualified"
+      "qualification": "unqualified",
+      "engineQualification": {
+        "status": "qualified",
+        "scope": "isolated-c1-fixture",
+        "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+        "c1HostSha": "9f1cda0e6609a0b7ae1c3398f846a520ca9f6481",
+        "helperPatchSha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+        "testSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/qualification.rs",
+          "sha256": "0078ad2dfe8f223b6ccaca7b848c8357634d2e18cf1063f863f472a1af1e3bc1"
+        },
+        "fixturesSource": {
+          "path": "tools/wordcraft-capabilities/c1-qualification/fixtures.json",
+          "sha256": "ee2440d01acb76fac1c26338446962b4f1598b9dfd32beee463fff70b987f457"
+        },
+        "test": "ce_text_trademark",
+        "testedParameters": {},
+        "testedTarget": {
+          "unit": "utf8_bytes",
+          "start": 1,
+          "end": 3
+        },
+        "testedSetup": [],
+        "initialParagraphs": [
+          "Alpha",
+          "Peer"
+        ],
+        "coverage": "tested-fixture-only",
+        "invariants": [
+          "execution",
+          "oracleIntegrity",
+          "ownUndo",
+          "restoreP",
+          "staleTarget"
+        ],
+        "testedParameterSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "targetProfile": "exact-current-revision/body/utf8-grapheme-boundaries",
+        "undoCommand": "participant.undo"
+      }
     },
     {
       "id": "text.typeCode",

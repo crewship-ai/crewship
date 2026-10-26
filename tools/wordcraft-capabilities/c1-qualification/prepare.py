@@ -12,7 +12,7 @@ import subprocess
 import tarfile
 import uuid
 
-C1_SHA = '96f3ca3a5c21e480ff6fbc01f289e317e285ed13'
+C1_SHA = '9f1cda0e6609a0b7ae1c3398f846a520ca9f6481'
 ENGINE_SHA = '7ef2633a7e84956522d1ca47b99fe6feef16c1db'
 GROUPS = {'text-enter', 'character-format', 'paragraphs', 'lists'}
 
@@ -74,6 +74,7 @@ def main():
             start, end = 1, 3
         cases.append({'id': command_id, 'group': command['group'], 'params': params, 'start': start, 'end': end,
                       'effectOracle': command_id if command_id in supported else None,
+                      'setup': supported.get(command_id, {}).get('setup', []), 'oracle': supported.get(command_id, {}).get('oracle'),
                       'parameterSchemaSha256': hashlib.sha256(json.dumps(command['parameterSchema'], sort_keys=True, separators=(',', ':')).encode()).hexdigest()})
     tests = output / 'mooring/crates/mooring-collab/tests'
     (tests / 'ce_catalog_cases.json').write_text(json.dumps(cases, indent=2) + '\n')

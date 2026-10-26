@@ -11,9 +11,9 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-C1_SHA = '96f3ca3a5c21e480ff6fbc01f289e317e285ed13'
+C1_SHA = '9f1cda0e6609a0b7ae1c3398f846a520ca9f6481'
 ENGINE_SHA = '7ef2633a7e84956522d1ca47b99fe6feef16c1db'
-CHECKS = {'execution', 'staleTarget', 'restoreP', 'ownUndo'}
+CHECKS = {'execution', 'staleTarget', 'restoreP', 'ownUndo', 'oracleIntegrity'}
 
 
 def closed(properties, required=()):
@@ -21,18 +21,17 @@ def closed(properties, required=()):
 
 
 # Only these commands have meaningful effect oracles at the pinned C1 commit.
-SUPPORTED = {'text.insert', 'text.delete', 'text.backspace', 'text.newParagraph',
-             'format.bold', 'format.font', 'format.size', 'para.align'}
+SUPPORTED = set(json.loads(Path(__file__).with_name('fixtures.json').read_text()))
 
 
 def tested_schema(params):
     properties = {}
     for key, value in params.items():
-        kind = 'boolean' if type(value) is bool else 'number' if type(value) in (int, float) else 'string' if type(value) is str else None
+        kind = 'boolean' if type(value) is bool else 'number' if type(value) in (int, float) else 'string' if type(value) is str else 'object' if type(value) is dict else 'array' if type(value) is list else 'null' if value is None else None
         if kind is None:
             raise ValueError('no reviewed scalar fixture representation')
         properties[key] = {'type': kind, 'enum': [value]}
-    return closed(properties, params.keys())
+    return closed(properties, sorted(params.keys()))
 
 
 def digest(path):
@@ -135,7 +134,7 @@ def main():
     rows = [json.loads(path.read_text()) for path in paths]
     passed = checked_rows(cases, rows, preparation, execution['invocationId'])
     source = json.loads((args.prepared / 'tools/wordcraft-c1-engine/source.json').read_text())
-    policy = {'schemaVersion': 1, 'catalogVersion': 4, 'engineSha': ENGINE_SHA, 'c1HostSha': C1_SHA,
+    policy = {'schemaVersion': 1, 'catalogVersion': 5, 'engineSha': ENGINE_SHA, 'c1HostSha': C1_SHA,
               'helperPatchSha256': source['patch_sha256'], 'registryDigest': preparation['registryDigest'],
               'profileSha256': preparation['profileSha256'], 'scope': 'isolated-c1-fixture',
               'fixturesSource': {'path': 'tools/wordcraft-capabilities/c1-qualification/fixtures.json', 'sha256': preparation['fixturesSha256']},
@@ -146,6 +145,7 @@ def main():
         case = next(case for case in cases if case['id'] == command_id)
         policy['commands'][command_id] = {'test': row['test'], 'testedParameters': row['params'],
                                          'testedTarget': {'unit': 'utf8_bytes', 'start': case['start'], 'end': case['end']},
+                                         'testedSetup': case['setup'], 'initialParagraphs': ['Alpha', 'Peer'],
                                          'coverage': 'tested-fixture-only', 'invariants': sorted(CHECKS), 'testedParameterSchema': tested_schema(row['params']),
                                          'targetProfile': 'exact-current-revision/body/utf8-grapheme-boundaries',
                                          'undoCommand': 'participant.undo'}

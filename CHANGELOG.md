@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- WordCraft engine qualification now covers 72 exact fixtures against the catalog-backed isolated C1 host, including lists. Full-document semantic checks reject collateral changes; product qualification remains separate.
+
 - WordCraft catalog records isolated C1 engine fixture evidence separately from product qualification. The complete first-group matrix retains unsupported commands as failing tests; engine evidence alone enables no editor command.
 
 - **Idle work polling avoids unnecessary writer transactions.** Empty or not-yet-eligible queues use a fresh read hint; capacity, deadlines and attempt ownership remain checked in the claiming transaction when work is present.

@@ -78,6 +78,9 @@ class PromotionTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'runtime source drift'):
                     module.verify_runtime(prepared, prepared, identity)
 
+    def test_multi_field_fixture_required_keys_are_canonical(self):
+        self.assertEqual(module.tested_schema({'left': 36, 'right': 18, 'firstLine': 12})['required'], ['firstLine', 'left', 'right'])
+
     def test_declaration_does_not_widen_the_tested_parameter(self):
         schema = module.tested_schema({'name': 'Arial'})
         self.assertEqual(schema['properties']['name'], {'type': 'string', 'enum': ['Arial']})

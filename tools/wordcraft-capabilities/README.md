@@ -86,7 +86,7 @@ covers only the listed parameters, selection and exact revision at the pinned C1
 host; it grants no role authority and says nothing about SQL or browsers.
 
 To reproduce the complete first-group matrix, use a clean checkout of C1 at
-`96f3ca3a5c21e480ff6fbc01f289e317e285ed13` and its unchanged helper preparation/build
+`9f1cda0e6609a0b7ae1c3398f846a520ca9f6481` and its unchanged helper preparation/build
 tools. Set the variables below to owned source/output locations; keep raw evidence
 outside the public repository. All builds and tests use the host build queue.
 
@@ -106,14 +106,30 @@ crewship-heavy python3 tools/wordcraft-capabilities/c1-qualification/promote.py 
 crewship-heavy node tools/wordcraft-capabilities/generate.mjs --source "$WORDCRAFT_SOURCE"
 ```
 
-`run.py` always runs all 163 actual tests without filtering or skipping. At this
-C1 pin, 155 commands are denied; the process remains red and preserves Cargo's
-exit status. Eight semantic fixtures exercise prepare at a current stable target,
-stale revision/removed-block rejection, rejected K restoration to P compared with
-a fresh actual engine, and participant undo preserving the other actor's change.
-The registry's `edit.undo` is not qualified by the host's `participant.undo`.
-Unsupported commands fail at actual host admission and cannot reach later checks;
-their effect oracles must be added when the owner extends the runtime.
+`run.py` always runs all 163 actual tests without filtering or skipping. The
+catalog-backed C1 pin admits document candidates instead of a hand-written
+command list. The reviewed matrix has 72 passing exact fixtures and 91 failing
+cases: 40 denied unreviewed/non-document effects, 28 missing semantic fixtures,
+13 engine refusals and 10 no-ops on the chosen baseline. Cargo remains red.
+These are actual results for this pin, not a promise about future executions.
+
+Each passing fixture verifies target/revision execution, stale revision and
+removed-block rejection, restoration to P compared with a fresh actual engine,
+and participant undo preserving the other actor. Semantic validation compares
+**the entire native document** against an explicit expected change, including
+selected properties/runs and complete nine-level numbering definitions. Five
+mutants per fixture must be refused (paragraph property, run property, text,
+numbering and replacement of an expected null-valued key). This is recorded as
+`oracleIntegrity`, alongside the four original invariants. No expected outcome is
+inferred from a captured run. Numbering expectations follow the pinned public
+`doc::numbering::levels_for` and `engine::cmd::lists::define` models.
+
+The baseline is two plain paragraphs, `Alpha` and `Peer`; `testedSetup` records any
+additional precondition (the level-change fixture starts with a numbered list).
+Exact tested parameter values, target and preconditions remain visible in the
+engine declaration. The registry's `edit.undo` is not qualified by the host's
+`participant.undo`. Non-document controls and missing semantic oracles remain
+failing cases, never automatically qualified by registry mutation metadata.
 
 Promotion requires the complete matrix and binds every row to its compiled test
 sources, preparation, invocation and actual helper binary. It verifies original

@@ -50,7 +50,7 @@ fn commit(
         "host_committed"
     );
 }
-fn seed() -> H {
+fn seed(case: &Value) -> H {
     let binary = PathBuf::from(
         std::env::var_os("MOORING_C1_ENGINE_BINARY").expect("actual C1 helper required"),
     );
@@ -85,6 +85,16 @@ fn seed() -> H {
         Some((1, 0, 0)),
         json!({"text":"Peer"}),
     );
+    for (index, setup) in case["setup"].as_array().unwrap().iter().enumerate() {
+        commit(
+            &mut h,
+            &format!("fixture-setup-{index}"),
+            "Alice",
+            setup["command"].as_str().unwrap(),
+            Some((0, 1, 3)),
+            setup["params"].clone(),
+        );
+    }
     h
 }
 fn strings(native: &Value) -> Vec<&str> {
@@ -104,43 +114,123 @@ fn props(native: &Value) -> Vec<Value> {
     }
     result
 }
-fn effect(case: &Value, before: &Value, after: &Value) {
-    assert_ne!(before, after, "qualification cannot pass a no-op");
-    match case["effectOracle"]
-        .as_str()
-        .expect("missing_effect_oracle; add a meaningful fixture before qualification")
-    {
-        "text.insert" => assert_eq!(strings(after), vec!["AZha", "Peer"]),
-        "text.delete" | "text.backspace" => assert_eq!(strings(after), vec!["Aha", "Peer"]),
-        "text.newParagraph" => assert_eq!(strings(after), vec!["Al", "pha", "Peer"]),
-        "para.align" => {
-            assert_eq!(strings(after), strings(before));
-            assert_eq!(after["body"][0]["props"]["align"], "center");
+fn assert_expected(actual: &Value, expected: &Value) {
+    if expected.is_number() {
+        assert_eq!(actual.as_f64(), expected.as_f64());
+    } else if let Some(object) = expected.as_object() {
+        assert_eq!(
+            actual.as_object().unwrap().keys().collect::<Vec<_>>(),
+            object.keys().collect::<Vec<_>>()
+        );
+        for (key, value) in object {
+            assert_expected(&actual[key], value);
         }
-        id @ ("format.bold" | "format.font" | "format.size") => {
-            assert_eq!(strings(after), strings(before));
+    } else if let Some(array) = expected.as_array() {
+        assert_eq!(actual.as_array().unwrap().len(), array.len());
+        for (left, right) in actual.as_array().unwrap().iter().zip(array) {
+            assert_expected(left, right);
+        }
+    } else {
+        assert_eq!(actual, expected);
+    }
+}
+fn declarative_effect(case: &Value, before: &Value, after: &Value) {
+    let oracle = &case["oracle"];
+    let expected = &oracle["expected"];
+    let mut wanted = before.clone();
+    match oracle["kind"].as_str().expect("missing_effect_oracle") {
+        "text" => {
+            assert_eq!(strings(before), vec!["Alpha", "Peer"]);
+            wanted["body"] = Value::Array(
+                expected
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|text| {
+                        let text = text.as_str().unwrap();
+                        json!({"kind":"para","text":text,"runs":[{"len":text.len()}]})
+                    })
+                    .collect(),
+            );
+        }
+        "character" => {
             let old = props(before);
-            let new = props(after);
             assert_eq!(old.len(), 5);
-            assert_eq!(new.len(), 5);
-            let (field, want) = match id {
-                "format.bold" => ("bold", json!(true)),
-                "format.font" => ("font", json!("Arial")),
-                _ => ("size", json!(18.0)),
-            };
-            for i in 0..5 {
+            let mut runs: Vec<Value> = vec![];
+            for (i, original) in old.iter().enumerate() {
+                let mut properties = original.clone();
                 if (1..3).contains(&i) {
-                    assert_eq!(new[i][field], want);
-                } else {
-                    assert_eq!(new[i], old[i], "formatting escaped the selected range");
+                    for (field, value) in expected.as_object().unwrap() {
+                        properties
+                            .as_object_mut()
+                            .unwrap()
+                            .insert(field.clone(), value.clone());
+                    }
                 }
+                let same = runs.last().is_some_and(|run| {
+                    run.get("props").cloned().unwrap_or(json!({})) == properties
+                });
+                if same {
+                    let run = runs.last_mut().unwrap();
+                    run["len"] = json!(run["len"].as_u64().unwrap() + 1);
+                } else {
+                    let mut run = json!({"len":1});
+                    if properties != json!({}) {
+                        run["props"] = properties;
+                    }
+                    runs.push(run);
+                }
+            }
+            wanted["body"][0]["runs"] = Value::Array(runs);
+        }
+        "paragraph" | "list" => {
+            let block = wanted["body"][0].as_object_mut().unwrap();
+            let properties = block
+                .entry("props")
+                .or_insert(json!({}))
+                .as_object_mut()
+                .unwrap();
+            for (field, value) in expected.as_object().unwrap() {
+                properties.insert(field.clone(), value.clone());
+            }
+            if oracle["kind"] == "list" {
+                assert_eq!(before["numbering"], json!({"abstracts":[],"nums":[]}));
+                wanted["numbering"] = oracle["numbering"].clone();
             }
         }
         _ => panic!("missing_effect_oracle"),
     }
+    // Compare the entire native document, including all selected properties,
+    // runs, objects, peer blocks and complete numbering definitions.
+    assert_expected(after, &wanted);
 }
+fn effect(case: &Value, before: &Value, after: &Value) {
+    assert_ne!(before, after, "qualification cannot pass a no-op");
+    declarative_effect(case, before, after);
+}
+fn oracle_integrity(case: &Value, before: &Value, after: &Value) {
+    for kind in 0..5 {
+        let mut damaged = after.clone();
+        match kind {
+            0 => damaged["body"][0]["props"]["unreviewed"] = json!(true),
+            1 => damaged["body"][0]["runs"][0]["props"]["unreviewed"] = json!(true),
+            2 => damaged["body"][0]["text"] = json!("damaged"),
+            3 => damaged["numbering"]["unreviewed"] = json!([1]),
+            _ => {
+                let section = damaged["lastSection"].as_object_mut().unwrap();
+                assert_eq!(section.remove("docGrid"), Some(Value::Null));
+                section.insert("unreviewedNull".into(), Value::Null);
+            }
+        }
+        assert!(
+            std::panic::catch_unwind(|| effect(case, before, &damaged)).is_err(),
+            "oracle accepted unrelated native damage"
+        );
+    }
+}
+
 fn exercise(case: &Value, checks: &mut BTreeMap<&str, bool>) {
-    let mut h = seed();
+    let mut h = seed(case);
     let initial = h.native().clone();
     let checkpoint = h.checkpoint().unwrap();
     let rev = h.revision();
@@ -243,6 +333,8 @@ fn exercise(case: &Value, checks: &mut BTreeMap<&str, bool>) {
         case["params"].clone(),
     );
     effect(case, &initial, h.native());
+    oracle_integrity(case, &initial, h.native());
+    checks.insert("oracleIntegrity", true);
     let untouched_peer = h.ids().iter().position(|id| id == &ids[1]).unwrap();
     assert_eq!(
         h.native()["body"][untouched_peer],
@@ -253,6 +345,18 @@ fn exercise(case: &Value, checks: &mut BTreeMap<&str, bool>) {
     header_before.as_object_mut().unwrap().remove("body");
     let mut header_after = h.native().clone();
     header_after.as_object_mut().unwrap().remove("body");
+    if let Some(allowed) = case["oracle"]["allowedHeaderKeys"].as_array() {
+        assert_eq!(case["oracle"]["kind"], "list");
+        for key in allowed {
+            let key = key.as_str().unwrap();
+            assert_eq!(
+                key, "numbering",
+                "only reviewed list definitions may change header"
+            );
+            header_before.as_object_mut().unwrap().remove(key);
+            header_after.as_object_mut().unwrap().remove(key);
+        }
+    }
     assert_eq!(
         header_after, header_before,
         "this tested C1 profile must not change unrelated native metadata"
@@ -380,6 +484,7 @@ fn qualify(id: &str) {
     let case = cases.iter().find(|case| case["id"] == id).unwrap();
     let mut checks = BTreeMap::from([
         ("execution", false),
+        ("oracleIntegrity", false),
         ("staleTarget", false),
         ("restoreP", false),
         ("ownUndo", false),

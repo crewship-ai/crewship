@@ -4,49 +4,1384 @@
       "text": "Z"
     },
     "start": 1,
-    "end": 3
+    "end": 3,
+    "oracle": {
+      "kind": "text",
+      "expected": [
+        "AZha",
+        "Peer"
+      ]
+    }
   },
   "text.delete": {
     "params": {},
     "start": 1,
-    "end": 3
+    "end": 3,
+    "oracle": {
+      "kind": "text",
+      "expected": [
+        "Aha",
+        "Peer"
+      ]
+    }
   },
   "text.backspace": {
     "params": {},
     "start": 1,
-    "end": 3
+    "end": 3,
+    "oracle": {
+      "kind": "text",
+      "expected": [
+        "Aha",
+        "Peer"
+      ]
+    }
   },
   "text.newParagraph": {
     "params": {},
     "start": 2,
-    "end": 2
+    "end": 2,
+    "oracle": {
+      "kind": "text",
+      "expected": [
+        "Al",
+        "pha",
+        "Peer"
+      ]
+    }
   },
   "format.bold": {
     "params": {
       "value": true
     },
     "start": 1,
-    "end": 3
+    "end": 3,
+    "oracle": {
+      "kind": "character",
+      "expected": {
+        "bold": true,
+        "boldCs": true
+      }
+    }
   },
   "format.font": {
     "params": {
       "name": "Arial"
     },
     "start": 1,
-    "end": 3
+    "end": 3,
+    "oracle": {
+      "kind": "character",
+      "expected": {
+        "font": "Arial",
+        "fontCs": "Arial"
+      }
+    }
   },
   "format.size": {
     "params": {
       "size": 18
     },
     "start": 1,
-    "end": 3
+    "end": 3,
+    "oracle": {
+      "kind": "character",
+      "expected": {
+        "size": 18,
+        "sizeCs": 18
+      }
+    }
   },
   "para.align": {
     "params": {
       "value": "center"
     },
     "start": 0,
-    "end": 5
+    "end": 5,
+    "oracle": {
+      "kind": "paragraph",
+      "expected": {
+        "align": "center"
+      }
+    }
+  },
+  "format.italic": {
+    "params": {
+      "value": true
+    },
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "character",
+      "expected": {
+        "italic": true,
+        "italicCs": true
+      }
+    }
+  },
+  "format.strikethrough": {
+    "params": {
+      "value": true
+    },
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "character",
+      "expected": {
+        "strike": true
+      }
+    }
+  },
+  "format.doubleStrikethrough": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "character",
+      "expected": {
+        "doubleStrike": true
+      }
+    }
+  },
+  "format.allCaps": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "character",
+      "expected": {
+        "caps": true
+      }
+    }
+  },
+  "format.smallCaps": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "character",
+      "expected": {
+        "smallCaps": true
+      }
+    }
+  },
+  "format.hidden": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "character",
+      "expected": {
+        "hidden": true
+      }
+    }
+  },
+  "format.outline": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "character",
+      "expected": {
+        "outline": true
+      }
+    }
+  },
+  "format.shadow": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "character",
+      "expected": {
+        "shadow": true
+      }
+    }
+  },
+  "format.emboss": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "character",
+      "expected": {
+        "emboss": true
+      }
+    }
+  },
+  "format.engrave": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "character",
+      "expected": {
+        "engrave": true
+      }
+    }
+  },
+  "format.underline": {
+    "params": {
+      "style": "single"
+    },
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "character",
+      "expected": {
+        "underline": "single"
+      }
+    }
+  },
+  "format.doubleUnderline": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "character",
+      "expected": {
+        "underline": "double"
+      }
+    }
+  },
+  "format.wordUnderline": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "character",
+      "expected": {
+        "underline": "words"
+      }
+    }
+  },
+  "format.subscript": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "character",
+      "expected": {
+        "vertAlign": "subscript"
+      }
+    }
+  },
+  "format.superscript": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "character",
+      "expected": {
+        "vertAlign": "superscript"
+      }
+    }
+  },
+  "format.color": {
+    "params": {
+      "color": "FF0000"
+    },
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "character",
+      "expected": {
+        "color": {
+          "Rgb": [
+            255,
+            0,
+            0
+          ]
+        }
+      }
+    }
+  },
+  "format.underlineColor": {
+    "params": {
+      "color": "00FF00"
+    },
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "character",
+      "expected": {
+        "underlineColor": [
+          0,
+          255,
+          0
+        ]
+      }
+    }
+  },
+  "format.shading": {
+    "params": {
+      "color": "FF0000"
+    },
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "character",
+      "expected": {
+        "shading": [
+          255,
+          0,
+          0
+        ]
+      }
+    }
+  },
+  "format.highlight": {
+    "params": {
+      "color": "yellow"
+    },
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "character",
+      "expected": {
+        "highlight": "yellow"
+      }
+    }
+  },
+  "format.position": {
+    "params": {
+      "points": 2
+    },
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "character",
+      "expected": {
+        "position": 2
+      }
+    }
+  },
+  "format.spacing": {
+    "params": {
+      "points": 2
+    },
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "character",
+      "expected": {
+        "spacing": 2
+      }
+    }
+  },
+  "format.scale": {
+    "params": {
+      "percent": 120
+    },
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "character",
+      "expected": {
+        "scale": 120
+      }
+    }
+  },
+  "format.set": {
+    "params": {
+      "props": {
+        "italic": true,
+        "size": 18
+      }
+    },
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "character",
+      "expected": {
+        "italic": true,
+        "size": 18,
+        "italicCs": true,
+        "sizeCs": 18
+      }
+    }
+  },
+  "para.alignCenter": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "paragraph",
+      "expected": {
+        "align": "center"
+      }
+    }
+  },
+  "para.alignRight": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "paragraph",
+      "expected": {
+        "align": "right"
+      }
+    }
+  },
+  "para.justify": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "paragraph",
+      "expected": {
+        "align": "justify"
+      }
+    }
+  },
+  "para.distribute": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "paragraph",
+      "expected": {
+        "align": "distribute"
+      }
+    }
+  },
+  "para.single": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "paragraph",
+      "expected": {
+        "lineSpacing": {
+          "rule": "multiple",
+          "value": 1
+        }
+      }
+    }
+  },
+  "para.double": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "paragraph",
+      "expected": {
+        "lineSpacing": {
+          "rule": "multiple",
+          "value": 2
+        }
+      }
+    }
+  },
+  "para.oneAndHalf": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "paragraph",
+      "expected": {
+        "lineSpacing": {
+          "rule": "multiple",
+          "value": 1.5
+        }
+      }
+    }
+  },
+  "para.lineSpacing": {
+    "params": {
+      "value": 1.5
+    },
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "paragraph",
+      "expected": {
+        "lineSpacing": {
+          "rule": "multiple",
+          "value": 1.5
+        }
+      }
+    }
+  },
+  "para.keepNext": {
+    "params": {
+      "value": true
+    },
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "paragraph",
+      "expected": {
+        "keepNext": true
+      }
+    }
+  },
+  "para.keepLines": {
+    "params": {
+      "value": true
+    },
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "paragraph",
+      "expected": {
+        "keepLines": true
+      }
+    }
+  },
+  "para.pageBreakBefore": {
+    "params": {
+      "value": true
+    },
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "paragraph",
+      "expected": {
+        "pageBreakBefore": true
+      }
+    }
+  },
+  "para.widowControl": {
+    "params": {
+      "value": true
+    },
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "paragraph",
+      "expected": {
+        "widowControl": true
+      }
+    }
+  },
+  "para.rtl": {
+    "params": {
+      "value": true
+    },
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "paragraph",
+      "expected": {
+        "bidi": true
+      }
+    }
+  },
+  "para.indent": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "paragraph",
+      "expected": {
+        "indentLeft": 36,
+        "indentLeftChars": 0
+      }
+    }
+  },
+  "para.hangingIndent": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "paragraph",
+      "expected": {
+        "indentLeft": 36,
+        "indentFirst": -36,
+        "indentLeftChars": 0,
+        "indentFirstChars": 0
+      }
+    }
+  },
+  "para.addSpaceBefore": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "paragraph",
+      "expected": {
+        "spaceBefore": 12
+      }
+    }
+  },
+  "para.indents": {
+    "params": {
+      "left": 36,
+      "right": 18,
+      "firstLine": 12
+    },
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "paragraph",
+      "expected": {
+        "indentLeft": 36,
+        "indentRight": 18,
+        "indentFirst": 12,
+        "indentLeftChars": 0,
+        "indentRightChars": 0,
+        "indentFirstChars": 0
+      }
+    }
+  },
+  "para.spacing": {
+    "params": {
+      "before": 12,
+      "after": 6
+    },
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "paragraph",
+      "expected": {
+        "spaceBefore": 12,
+        "spaceAfter": 6
+      }
+    }
+  },
+  "para.shading": {
+    "params": {
+      "color": "FF0000"
+    },
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "paragraph",
+      "expected": {
+        "shading": [
+          255,
+          0,
+          0
+        ]
+      }
+    }
+  },
+  "para.heading1": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "paragraph",
+      "expected": {
+        "style": "Heading1"
+      }
+    }
+  },
+  "para.heading2": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "paragraph",
+      "expected": {
+        "style": "Heading2"
+      }
+    }
+  },
+  "para.heading3": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "paragraph",
+      "expected": {
+        "style": "Heading3"
+      }
+    }
+  },
+  "para.normal": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "paragraph",
+      "expected": {
+        "style": "Normal"
+      }
+    }
+  },
+  "para.style": {
+    "params": {
+      "style": "Heading 1"
+    },
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "paragraph",
+      "expected": {
+        "style": "Heading1"
+      }
+    }
+  },
+  "para.set": {
+    "params": {
+      "props": {
+        "align": "center",
+        "keepNext": true
+      }
+    },
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "paragraph",
+      "expected": {
+        "align": "center",
+        "keepNext": true
+      }
+    }
+  },
+  "text.lineBreak": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "text",
+      "expected": [
+        "A\nha",
+        "Peer"
+      ]
+    }
+  },
+  "text.insertTab": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "text",
+      "expected": [
+        "A\tha",
+        "Peer"
+      ]
+    }
+  },
+  "text.nbsp": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "text",
+      "expected": [
+        "A ha",
+        "Peer"
+      ]
+    }
+  },
+  "text.nbHyphen": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "text",
+      "expected": [
+        "A‑ha",
+        "Peer"
+      ]
+    }
+  },
+  "text.optionalHyphen": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "text",
+      "expected": [
+        "A­ha",
+        "Peer"
+      ]
+    }
+  },
+  "text.emDash": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "text",
+      "expected": [
+        "A—ha",
+        "Peer"
+      ]
+    }
+  },
+  "text.copyright": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "text",
+      "expected": [
+        "A©ha",
+        "Peer"
+      ]
+    }
+  },
+  "text.registered": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "text",
+      "expected": [
+        "A®ha",
+        "Peer"
+      ]
+    }
+  },
+  "text.trademark": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "text",
+      "expected": [
+        "A™ha",
+        "Peer"
+      ]
+    }
+  },
+  "text.ellipsis": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "text",
+      "expected": [
+        "A…ha",
+        "Peer"
+      ]
+    }
+  },
+  "text.deleteWordBack": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "text",
+      "expected": [
+        "Aha",
+        "Peer"
+      ]
+    }
+  },
+  "text.deleteWordForward": {
+    "params": {},
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "text",
+      "expected": [
+        "Aha",
+        "Peer"
+      ]
+    }
+  },
+  "para.bullets": {
+    "params": {
+      "kind": "bullet"
+    },
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "list",
+      "expected": {
+        "style": "ListParagraph",
+        "numbering": {
+          "num": 1,
+          "level": 0
+        }
+      },
+      "numbering": {
+        "abstracts": [
+          {
+            "id": 0,
+            "levels": [
+              {
+                "start": 1,
+                "format": "bullet",
+                "text": "•",
+                "align": "left",
+                "indent": 36,
+                "hanging": 18,
+                "suffix": "tab",
+                "chr": {
+                  "font": "Arial"
+                },
+                "restart": true,
+                "legal": false,
+                "style": null
+              },
+              {
+                "start": 1,
+                "format": "bullet",
+                "text": "○",
+                "align": "left",
+                "indent": 72,
+                "hanging": 18,
+                "suffix": "tab",
+                "chr": {
+                  "font": "Arial"
+                },
+                "restart": true,
+                "legal": false,
+                "style": null
+              },
+              {
+                "start": 1,
+                "format": "bullet",
+                "text": "▪",
+                "align": "left",
+                "indent": 108,
+                "hanging": 18,
+                "suffix": "tab",
+                "chr": {
+                  "font": "Arial"
+                },
+                "restart": true,
+                "legal": false,
+                "style": null
+              },
+              {
+                "start": 1,
+                "format": "bullet",
+                "text": "•",
+                "align": "left",
+                "indent": 144,
+                "hanging": 18,
+                "suffix": "tab",
+                "chr": {
+                  "font": "Arial"
+                },
+                "restart": true,
+                "legal": false,
+                "style": null
+              },
+              {
+                "start": 1,
+                "format": "bullet",
+                "text": "○",
+                "align": "left",
+                "indent": 180,
+                "hanging": 18,
+                "suffix": "tab",
+                "chr": {
+                  "font": "Arial"
+                },
+                "restart": true,
+                "legal": false,
+                "style": null
+              },
+              {
+                "start": 1,
+                "format": "bullet",
+                "text": "▪",
+                "align": "left",
+                "indent": 216,
+                "hanging": 18,
+                "suffix": "tab",
+                "chr": {
+                  "font": "Arial"
+                },
+                "restart": true,
+                "legal": false,
+                "style": null
+              },
+              {
+                "start": 1,
+                "format": "bullet",
+                "text": "•",
+                "align": "left",
+                "indent": 252,
+                "hanging": 18,
+                "suffix": "tab",
+                "chr": {
+                  "font": "Arial"
+                },
+                "restart": true,
+                "legal": false,
+                "style": null
+              },
+              {
+                "start": 1,
+                "format": "bullet",
+                "text": "○",
+                "align": "left",
+                "indent": 288,
+                "hanging": 18,
+                "suffix": "tab",
+                "chr": {
+                  "font": "Arial"
+                },
+                "restart": true,
+                "legal": false,
+                "style": null
+              },
+              {
+                "start": 1,
+                "format": "bullet",
+                "text": "▪",
+                "align": "left",
+                "indent": 324,
+                "hanging": 18,
+                "suffix": "tab",
+                "chr": {
+                  "font": "Arial"
+                },
+                "restart": true,
+                "legal": false,
+                "style": null
+              }
+            ],
+            "name": null
+          }
+        ],
+        "nums": [
+          {
+            "id": 1,
+            "abstractId": 0,
+            "startOverrides": []
+          }
+        ]
+      },
+      "allowedHeaderKeys": [
+        "numbering"
+      ]
+    }
+  },
+  "para.numbering": {
+    "params": {
+      "kind": "numbered"
+    },
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "list",
+      "expected": {
+        "style": "ListParagraph",
+        "numbering": {
+          "num": 1,
+          "level": 0
+        }
+      },
+      "numbering": {
+        "abstracts": [
+          {
+            "id": 0,
+            "levels": [
+              {
+                "start": 1,
+                "format": "decimal",
+                "text": "%1.",
+                "align": "left",
+                "indent": 36,
+                "hanging": 18,
+                "suffix": "tab",
+                "chr": {},
+                "restart": true,
+                "legal": false,
+                "style": null
+              },
+              {
+                "start": 1,
+                "format": "lowerLetter",
+                "text": "%2.",
+                "align": "left",
+                "indent": 72,
+                "hanging": 18,
+                "suffix": "tab",
+                "chr": {},
+                "restart": true,
+                "legal": false,
+                "style": null
+              },
+              {
+                "start": 1,
+                "format": "lowerRoman",
+                "text": "%3.",
+                "align": "left",
+                "indent": 108,
+                "hanging": 18,
+                "suffix": "tab",
+                "chr": {},
+                "restart": true,
+                "legal": false,
+                "style": null
+              },
+              {
+                "start": 1,
+                "format": "decimal",
+                "text": "%4.",
+                "align": "left",
+                "indent": 144,
+                "hanging": 18,
+                "suffix": "tab",
+                "chr": {},
+                "restart": true,
+                "legal": false,
+                "style": null
+              },
+              {
+                "start": 1,
+                "format": "lowerLetter",
+                "text": "%5.",
+                "align": "left",
+                "indent": 180,
+                "hanging": 18,
+                "suffix": "tab",
+                "chr": {},
+                "restart": true,
+                "legal": false,
+                "style": null
+              },
+              {
+                "start": 1,
+                "format": "lowerRoman",
+                "text": "%6.",
+                "align": "left",
+                "indent": 216,
+                "hanging": 18,
+                "suffix": "tab",
+                "chr": {},
+                "restart": true,
+                "legal": false,
+                "style": null
+              },
+              {
+                "start": 1,
+                "format": "decimal",
+                "text": "%7.",
+                "align": "left",
+                "indent": 252,
+                "hanging": 18,
+                "suffix": "tab",
+                "chr": {},
+                "restart": true,
+                "legal": false,
+                "style": null
+              },
+              {
+                "start": 1,
+                "format": "lowerLetter",
+                "text": "%8.",
+                "align": "left",
+                "indent": 288,
+                "hanging": 18,
+                "suffix": "tab",
+                "chr": {},
+                "restart": true,
+                "legal": false,
+                "style": null
+              },
+              {
+                "start": 1,
+                "format": "lowerRoman",
+                "text": "%9.",
+                "align": "left",
+                "indent": 324,
+                "hanging": 18,
+                "suffix": "tab",
+                "chr": {},
+                "restart": true,
+                "legal": false,
+                "style": null
+              }
+            ],
+            "name": null
+          }
+        ],
+        "nums": [
+          {
+            "id": 1,
+            "abstractId": 0,
+            "startOverrides": []
+          }
+        ]
+      },
+      "allowedHeaderKeys": [
+        "numbering"
+      ]
+    }
+  },
+  "list.define": {
+    "params": {
+      "levels": [
+        {
+          "format": "bullet",
+          "text": "•"
+        }
+      ]
+    },
+    "start": 1,
+    "end": 3,
+    "oracle": {
+      "kind": "list",
+      "expected": {
+        "style": "ListParagraph",
+        "numbering": {
+          "num": 1,
+          "level": 0
+        }
+      },
+      "numbering": {
+        "abstracts": [
+          {
+            "id": 0,
+            "levels": [
+              {
+                "start": 1,
+                "format": "bullet",
+                "text": "•",
+                "align": "left",
+                "indent": 36,
+                "hanging": 18,
+                "suffix": "tab",
+                "chr": {},
+                "restart": true,
+                "legal": false,
+                "style": null
+              },
+              {
+                "start": 1,
+                "format": "lowerLetter",
+                "text": "%2.",
+                "align": "left",
+                "indent": 72,
+                "hanging": 18,
+                "suffix": "tab",
+                "chr": {},
+                "restart": true,
+                "legal": false,
+                "style": null
+              },
+              {
+                "start": 1,
+                "format": "lowerRoman",
+                "text": "%3.",
+                "align": "left",
+                "indent": 108,
+                "hanging": 18,
+                "suffix": "tab",
+                "chr": {},
+                "restart": true,
+                "legal": false,
+                "style": null
+              },
+              {
+                "start": 1,
+                "format": "decimal",
+                "text": "%4.",
+                "align": "left",
+                "indent": 144,
+                "hanging": 18,
+                "suffix": "tab",
+                "chr": {},
+                "restart": true,
+                "legal": false,
+                "style": null
+              },
+              {
+                "start": 1,
+                "format": "lowerLetter",
+                "text": "%5.",
+                "align": "left",
+                "indent": 180,
+                "hanging": 18,
+                "suffix": "tab",
+                "chr": {},
+                "restart": true,
+                "legal": false,
+                "style": null
+              },
+              {
+                "start": 1,
+                "format": "lowerRoman",
+                "text": "%6.",
+                "align": "left",
+                "indent": 216,
+                "hanging": 18,
+                "suffix": "tab",
+                "chr": {},
+                "restart": true,
+                "legal": false,
+                "style": null
+              },
+              {
+                "start": 1,
+                "format": "decimal",
+                "text": "%7.",
+                "align": "left",
+                "indent": 252,
+                "hanging": 18,
+                "suffix": "tab",
+                "chr": {},
+                "restart": true,
+                "legal": false,
+                "style": null
+              },
+              {
+                "start": 1,
+                "format": "lowerLetter",
+                "text": "%8.",
+                "align": "left",
+                "indent": 288,
+                "hanging": 18,
+                "suffix": "tab",
+                "chr": {},
+                "restart": true,
+                "legal": false,
+                "style": null
+              },
+              {
+                "start": 1,
+                "format": "lowerRoman",
+                "text": "%9.",
+                "align": "left",
+                "indent": 324,
+                "hanging": 18,
+                "suffix": "tab",
+                "chr": {},
+                "restart": true,
+                "legal": false,
+                "style": null
+              }
+            ],
+            "name": null
+          }
+        ],
+        "nums": [
+          {
+            "id": 1,
+            "abstractId": 0,
+            "startOverrides": []
+          }
+        ]
+      },
+      "allowedHeaderKeys": [
+        "numbering"
+      ]
+    }
+  },
+  "para.listLevel": {
+    "params": {
+      "level": 1
+    },
+    "start": 1,
+    "end": 3,
+    "setup": [
+      {
+        "command": "para.numbering",
+        "params": {
+          "kind": "numbered"
+        }
+      }
+    ],
+    "oracle": {
+      "kind": "paragraph",
+      "expected": {
+        "numbering": {
+          "num": 1,
+          "level": 1
+        }
+      }
+    }
   }
 }
