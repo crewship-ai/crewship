@@ -18,7 +18,7 @@ func newObjectShareCommand(remove bool) *cobra.Command {
 		verb = "unshare"
 	}
 	cmd := &cobra.Command{
-		Use: verb + " <routine|project|crew> <resource-id>", Short: "Change one Guest's explicit shares on an object",
+		Use: verb + " <routine|project|crew> <resource-id>", Short: "Change one member's explicit shares on an object",
 		Long: "Edit only this object's requested operations while preserving all other grants and issuer provenance. Trusted workspace OWNER/ADMIN only. No account conversion or conflict retry. Routine Run still requires agent grants and an installed runtime.",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -32,7 +32,7 @@ func newObjectShareCommand(remove bool) *cobra.Command {
 		},
 	}
 	cmd.Flags().String("with", "", "Existing member ID, user ID or exact email")
-	cmd.Flags().StringSlice("operation", nil, "Operations to add/remove: routine view,results,run,edit,publish; project list,read,contribute,manage,delete_issues; crew view,use (repeatable or comma-separated)")
+	cmd.Flags().StringSlice("operation", nil, "Operations to add/remove: routine view,results,run,edit,publish; project list,read,contribute,manage,delete_issues; crew view,use for Guests or manage for trusted MEMBER/MANAGER (repeatable or comma-separated)")
 	_ = cmd.MarkFlagRequired("with")
 	_ = cmd.MarkFlagRequired("operation")
 	if !remove {
@@ -121,7 +121,7 @@ func changeObjectShare(kind, id, target string, operations []string, remove, rei
 	}
 	selected := map[access.Right]bool{}
 	for _, operation := range operations {
-		if (kind == "routine" && operation != "run" && operation != "view" && operation != "edit" && operation != "results" && operation != "publish") || (kind == "project" && operation != "list" && operation != "read" && operation != "contribute" && operation != "manage" && operation != "delete_issues") || (kind == "crew" && operation != "view" && operation != "use") {
+		if (kind == "routine" && operation != "run" && operation != "view" && operation != "edit" && operation != "results" && operation != "publish") || (kind == "project" && operation != "list" && operation != "read" && operation != "contribute" && operation != "manage" && operation != "delete_issues") || (kind == "crew" && operation != "view" && operation != "use" && operation != "manage") {
 			return fmt.Errorf("unsupported %s operation %q", kind, operation)
 		}
 		selected[access.Right{Kind: kind, ID: id, Operation: operation}] = true
@@ -155,7 +155,11 @@ func changeObjectShare(kind, id, target string, operations []string, remove, rei
 		return err
 	}
 	if policy.Mode != "restricted" {
-		return fmt.Errorf("trusted member access uses workspace roles; this command never changes account mode")
+		for right := range selected {
+			if policy.Mode != "trusted" || right.Kind != "crew" || right.Operation != "manage" {
+				return fmt.Errorf("trusted shares support only crew manage for MEMBER/MANAGER; this command never changes account mode")
+			}
+		}
 	}
 	rights := make([]access.Right, 0, len(policy.Rights)+len(selected))
 	present := map[access.Right]bool{}
@@ -228,7 +232,7 @@ func listObjectShares(kind, id string) error {
 	result := []objectShareRow{}
 	rows := [][]string{}
 	for _, member := range members {
-		if member.AccessMode != "restricted" {
+		if member.AccessMode != "restricted" && !(kind == "crew" && member.AccessMode == "trusted") {
 			continue
 		}
 		policy, _, err := sharingPolicy(client, workspace, member.ID)

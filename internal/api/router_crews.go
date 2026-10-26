@@ -237,8 +237,8 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// the devcontainer config or triggers a rebuild, so it needs no more
 	// than the read role every other GET here uses.
 	r.mux.Handle("GET /api/v1/crews/{crewId}/credential-readiness", authed(wsCtx(http.HandlerFunc(crews.CredentialReadiness))))
-	r.authedMut("PATCH", "/api/v1/crews/{crewId}", roleManage, crews.Update)
-	r.authedMut("PUT", "/api/v1/crews/{crewId}", roleManage, crews.Update)
+	r.authedMut("PATCH", "/api/v1/crews/{crewId}", roleInline, crews.Update)
+	r.authedMut("PUT", "/api/v1/crews/{crewId}", roleInline, crews.Update)
 	// Crew existence is checked inside the transactional mutation helper.
 	// openapi: responses 404
 	r.authedMut("DELETE", "/api/v1/crews/{crewId}", roleManage, crews.Delete)
@@ -261,9 +261,9 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 
 	// Crew members
 	r.mux.Handle("GET /api/v1/crews/{crewId}/members", authed(wsCtx(http.HandlerFunc(crews.ListMembers))))
-	r.authedMut("POST", "/api/v1/crews/{crewId}/members", roleCreate, crews.AddMember)
+	r.authedMut("POST", "/api/v1/crews/{crewId}/members", roleInline, crews.AddMember)
 	r.authedMut("PATCH", "/api/v1/crews/{crewId}/members/{memberId}", roleManage, crews.UpdateMemberRole)
-	r.authedMut("DELETE", "/api/v1/crews/{crewId}/members/{memberId}", roleManage, crews.RemoveMember)
+	r.authedMut("DELETE", "/api/v1/crews/{crewId}/members/{memberId}", roleInline, crews.RemoveMember)
 	r.authedMut("POST", "/api/v1/crews/{crewId}/apply-avatar-style", roleManage, crews.ApplyAvatarStyle)
 	r.mux.Handle("GET /api/v1/crews/{crewId}/container-status", authed(wsCtx(http.HandlerFunc(crews.ContainerStatus))))
 	// roleCreate, matching provision / rebuild / restart-agents: starting a

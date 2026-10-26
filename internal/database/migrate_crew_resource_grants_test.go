@@ -34,7 +34,7 @@ func TestCrewGrantUpgradePreservesAuthorityAndRollsBackDDL(t *testing.T) {
 		t.Run(map[bool]string{false: "populated upgrade", true: "copy target collision"}[fail], func(t *testing.T) {
 			db := migrationBoundaryDB(t, `PRAGMA foreign_keys=ON`)
 			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-			if err := MigrateSkipping(t.Context(), db, logger, "crew_resource_grants"); err != nil {
+			if err := migrateBeforeCrewGrantFoundation(t, db, logger); err != nil {
 				t.Fatal(err)
 			}
 			for _, q := range []string{
@@ -127,7 +127,7 @@ func TestCrewGrantUpgradeRefusesCaseInsensitiveIncomingForeignKeys(t *testing.T)
 		t.Run(parent, func(t *testing.T) {
 			db := migrationBoundaryDB(t, `PRAGMA foreign_keys=ON`)
 			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-			if err := MigrateSkipping(t.Context(), db, logger, "crew_resource_grants"); err != nil {
+			if err := migrateBeforeCrewGrantFoundation(t, db, logger); err != nil {
 				t.Fatal(err)
 			}
 			for _, q := range []string{
@@ -172,4 +172,20 @@ func TestCrewGrantUpgradeRefusesCaseInsensitiveIncomingForeignKeys(t *testing.T)
 			}
 		})
 	}
+}
+
+// Build the actual pre-foundation registry, excluding later dependent upgrades.
+// This keeps the populated upgrade test honest as new crew migrations append.
+func migrateBeforeCrewGrantFoundation(t *testing.T, db *sql.DB, logger *slog.Logger) error {
+	t.Helper()
+	if err := ensureMigrationsTable(t.Context(), db); err != nil {
+		return err
+	}
+	var before []migration
+	for _, m := range migrations {
+		if m.version < 20261025233100 {
+			before = append(before, m)
+		}
+	}
+	return applyRegistry(t.Context(), db, before, logger)
 }

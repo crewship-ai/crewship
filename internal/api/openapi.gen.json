@@ -11314,7 +11314,8 @@
           "operation": {
             "enum": [
               "view",
-              "use"
+              "use",
+              "manage"
             ],
             "type": "string"
           }
@@ -11363,6 +11364,7 @@
       },
       "MemberAccessPolicy": {
         "additionalProperties": false,
+        "description": "Trusted policies accept only crew manage shares for MEMBER/MANAGER recipients. Guest policies never accept Manage; revoke trusted-only shares before account downshift (422).",
         "properties": {
           "grant_details": {
             "items": {

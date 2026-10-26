@@ -10,7 +10,7 @@ func TestMemberAccessProjectRoutineAliasDocumentContract(t *testing.T) {
 	doc := buildDocument(nil)
 	schemas := doc["components"].(map[string]any)["schemas"].(map[string]any)
 	for name, operations := range map[string][]string{
-		"MemberAccessCrewRight":    {"view", "use"},
+		"MemberAccessCrewRight":    {"view", "use", "manage"},
 		"MemberAccessProjectRight": {"list", "read", "write", "delete", "contribute", "manage", "delete_issues"},
 		"MemberAccessRoutineRight": {"view", "results", "run", "edit", "publish"},
 	} {
