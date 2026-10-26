@@ -39,9 +39,15 @@ type Manifest struct {
 	SDK                map[string]string `json:"sdk"`
 	SDKPrefix          string            `json:"sdk_prefix"`
 	Tools              json.RawMessage   `json:"tools"`
+	Commands           *CommandsManifest `json:"commands,omitempty"`
 }
 
 func read(source fs.FS) (Manifest, []byte, error) {
+	manifest, binaries, err := readAssets(source)
+	return manifest, binaries["mooring-collab"], err
+}
+
+func readAssets(source fs.FS) (Manifest, map[string][]byte, error) {
 	var manifest Manifest
 	raw, err := fs.ReadFile(source, "embedded/generated/manifest.json")
 	if errors.Is(err, fs.ErrNotExist) {
@@ -81,7 +87,17 @@ func read(source fs.FS) (Manifest, []byte, error) {
 	if hex.EncodeToString(hash[:]) != manifest.BinarySHA256 {
 		return Manifest{}, nil, ErrIntegrity
 	}
-	return manifest, binary, nil
+	binaries := map[string][]byte{"mooring-collab": binary}
+	if manifest.Commands != nil {
+		commands, err := readCommands(source, manifest)
+		if err != nil {
+			return Manifest{}, nil, err
+		}
+		for name, body := range commands {
+			binaries[name] = body
+		}
+	}
+	return manifest, binaries, nil
 }
 
 // Inspect verifies embedded binary identity. It does not authorize an Artifact,
@@ -101,29 +117,35 @@ func editorPackages(source fs.FS) (fs.FS, error) {
 }
 
 type Prepared struct {
-	Manifest  Manifest
-	Path      string
-	directory string
-	ownedPath string
+	Manifest          Manifest
+	Path              string
+	CommandHostPath   string
+	CommandEnginePath string
+	directory         string
+	ownedPaths        []string
 }
 
-// Close removes only the exact file and private directory created here. The
-// caller must stop its runtime before cleanup; no other cache paths are owned.
+// Close removes only immutable internally recorded owned files and its exact
+// private directory. Public path changes can never retarget cleanup; unknown
+// files in the directory are retained and cause a nonempty-directory error.
 func (p *Prepared) Close() error {
-	if err := os.Remove(p.ownedPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return err
+	var failures []error
+	for _, name := range p.ownedPaths {
+		if err := os.Remove(name); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			failures = append(failures, err)
+		}
 	}
 	if err := os.Remove(p.directory); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return err
+		failures = append(failures, err)
 	}
-	return nil
+	return errors.Join(failures...)
 }
 
-// Prepare extracts a verified child into a new private directory. The host
-// supervisor separately checks versions, authority and its runtime lifecycle.
+// Prepare verifies ALL optional C1 assets before creating any private files.
+// Presence of a command path neither enables its feature nor grants authority.
 func Prepare(parent string) (*Prepared, error) { return prepare(embedded, parent) }
 func prepare(source fs.FS, parent string) (*Prepared, error) {
-	manifest, binary, err := read(source)
+	manifest, binaries, err := readAssets(source)
 	if err != nil {
 		return nil, err
 	}
@@ -131,24 +153,39 @@ func prepare(source fs.FS, parent string) (*Prepared, error) {
 	if err != nil {
 		return nil, err
 	}
-	path := filepath.Join(directory, "mooring-collab")
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o500)
-	if err != nil {
-		_ = os.Remove(directory)
-		return nil, err
+	p := &Prepared{Manifest: manifest, directory: directory}
+	for _, name := range []string{"mooring-collab", "command-host", "command-engine"} {
+		binary, present := binaries[name]
+		if !present {
+			continue
+		}
+		path := filepath.Join(directory, name)
+		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o500)
+		if err != nil {
+			_ = p.Close()
+			return nil, err
+		}
+		p.ownedPaths = append(p.ownedPaths, path)
+		_, writeErr := file.Write(binary)
+		if writeErr == nil {
+			writeErr = file.Sync()
+		}
+		closeErr := file.Close()
+		if writeErr == nil {
+			writeErr = closeErr
+		}
+		if writeErr != nil {
+			_ = p.Close()
+			return nil, writeErr
+		}
+		switch name {
+		case "mooring-collab":
+			p.Path = path
+		case "command-host":
+			p.CommandHostPath = path
+		case "command-engine":
+			p.CommandEnginePath = path
+		}
 	}
-	_, writeErr := file.Write(binary)
-	if writeErr == nil {
-		writeErr = file.Sync()
-	}
-	closeErr := file.Close()
-	if writeErr == nil {
-		writeErr = closeErr
-	}
-	if writeErr != nil {
-		_ = os.Remove(path)
-		_ = os.Remove(directory)
-		return nil, writeErr
-	}
-	return &Prepared{Manifest: manifest, Path: path, directory: directory, ownedPath: path}, nil
+	return p, nil
 }
