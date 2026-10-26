@@ -269,3 +269,34 @@ commits. Command JSON cannot change that policy. Read-only tasks cannot stage.
 Unknown outcome reconciliation reads canonical SQL and may restore confirmed
 state, never replaying a command. This adapter registers no HTTP or MCP surface
 and does not establish a live model run or sealed task-completion receipt.
+
+
+## Native command test documents
+
+`CREWSHIP_MOORING_COMMANDS_ENABLED=true` separately enables the native command
+profile and requires the enabled Mooring runtime plus verified command host,
+engine and renderer assets. Both flags default off in the product. Discovery
+reports `wordcraft_commands` only while the pinned command renderer is available.
+
+`POST /api/v1/pages/{slug}/mooring/command-session` uses normal authenticated
+workspace context, current Page rights, the restore fence and an exact same-origin
+`Origin`. Its closed JSON body accepts `action: "open"` with optional boolean
+`create` and `write`, or `action: "read" | "submit" | "outcome"` with the returned
+`view`; submit/outcome also require the exact original command string in `raw`.
+Unknown fields, duplicate keys and unbounded requests are refused. The view fences
+identity and authority; it is never an authentication credential.
+
+Creation initializes only a new empty Page using the immutable `wordcraft-c1-v2`
+profile and pinned engine revision. Existing text-pilot documents are neither
+converted nor opened through this profile. Authorized Page detail/list metadata
+returns `collaboration_format`; disabled or unknown profiles retain data and have
+no legacy-adapter fallback.
+
+Successful command responses contain `view`, `actor`, `format`, `engine`,
+`projection`, `outcome` and trusted `editor` metadata. The projection contains only
+confirmed native state and its SQL revision. Saved requires an exact original
+operation's durable SQL receipt, not merely a successful staging response.
+Unknown outcomes support lookup and confirmed-state recovery without automatic
+command replay. Commands pass the pinned generated server catalog before engine
+execution. Engine fixture qualification does not establish browser acceptance,
+participant undo qualification or completed multiuser collaboration.

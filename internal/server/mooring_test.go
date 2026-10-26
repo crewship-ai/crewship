@@ -88,3 +88,12 @@ func TestMooringServerInvalidLeaseFailsBeforeExtraction(t *testing.T) {
 		t.Fatalf("invalid lease startup: %v", err)
 	}
 }
+
+func TestMooringCommandsCannotBypassDisabledRuntime(t *testing.T) {
+	cfg := silentCfg()
+	cfg.Mooring.CommandsEnabled = true
+	s := &Server{cfg: cfg}
+	if opts := s.configureMooringHTTP(nil); len(opts) != 0 || s.mooringStartupErr == nil || s.mooringAssets != nil {
+		t.Fatal("command opt-in bypassed disabled verified runtime")
+	}
+}

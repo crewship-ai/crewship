@@ -553,6 +553,9 @@ func applyEnvOverrides(cfg *Config) {
 	if value, ok := os.LookupEnv("CREWSHIP_MOORING_ENABLED"); ok {
 		cfg.Mooring.Enabled = value == "true" || value == "1"
 	}
+	if value, ok := os.LookupEnv("CREWSHIP_MOORING_COMMANDS_ENABLED"); ok {
+		cfg.Mooring.CommandsEnabled = value == "true" || value == "1"
+	}
 	for name, target := range map[string]*int{
 		"CREWSHIP_MOORING_DELIVERY_LEASE_MS":             &cfg.Mooring.DeliveryLeaseMilliseconds,
 		"CREWSHIP_DOCUMENTS_MAX_DOCUMENTS_PER_WORKSPACE": &cfg.Documents.MaxDocumentsPerWorkspace,

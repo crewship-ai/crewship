@@ -11,6 +11,7 @@ const DefaultMooringDeliveryLease = 5 * time.Second
 // A shorter lease is permitted; the five-second revocation ceiling remains.
 type MooringConfig struct {
 	Enabled                   bool `yaml:"enabled"`
+	CommandsEnabled           bool `yaml:"commands_enabled"`
 	DeliveryLeaseMilliseconds int  `yaml:"delivery_lease_ms"`
 }
 
@@ -22,6 +23,9 @@ func (c MooringConfig) DeliveryLease() time.Duration {
 }
 
 func (c MooringConfig) validate() error {
+	if c.CommandsEnabled && !c.Enabled {
+		return fmt.Errorf("mooring.commands_enabled requires mooring.enabled")
+	}
 	if c.DeliveryLeaseMilliseconds != 0 && (c.DeliveryLeaseMilliseconds < 1 || c.DeliveryLeaseMilliseconds > 5000) {
 		return fmt.Errorf("mooring.delivery_lease_ms must be zero (default 5000) or between 1 and 5000")
 	}

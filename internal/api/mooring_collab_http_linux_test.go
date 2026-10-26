@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -45,6 +46,9 @@ func TestMooringHTTPAuthenticatesAndChecksPageBeforeBody(t *testing.T) {
 	}
 	sum := sha256.Sum256(fixture)
 	r := &Router{db: rig.db, pages: NewPageHandler(rig.db, nil, newTestLogger()), logger: newTestLogger(), mux: newRouteMux(), authMw: NewAuthMiddleware(v, store, rig.db, newTestLogger()), mooringHTTPConfig: MooringHTTPConfig{Enabled: true, Binary: path, BinarySHA256: hex.EncodeToString(sum[:])}}
+	r.mooringHTTPConfig.Commands = &MooringCommandHTTPConfig{Enabled: true, HostBinary: path, EngineBinary: path, HostSHA256: hex.EncodeToString(sum[:]), EngineSHA256: hex.EncodeToString(sum[:]), EditorBundle: func(*http.Request) (string, string) {
+		return hex.EncodeToString(sum[:]), "https://editor.example.test/index.html"
+	}}
 	r.registerMooringRoutes()
 	if r.mooringHTTP == nil {
 		t.Fatal("controller not registered")
@@ -52,11 +56,12 @@ func TestMooringHTTPAuthenticatesAndChecksPageBeforeBody(t *testing.T) {
 	defer r.mooringHTTP.Close()
 	registered := registeredPublicRoutes(r)
 	spec := loadGeneratedSpec(t)
-	if len(registered) != 5 {
-		t.Fatalf("enabled transport registered %d paths, want exactly five", len(registered))
+	if len(registered) != 6 {
+		t.Fatalf("enabled transport registered %d paths, want exactly six", len(registered))
 	}
 	for path, method := range map[string]string{
 		"/api/v1/pages/{slug}/mooring/session":             "POST",
+		"/api/v1/pages/{slug}/mooring/command-session":     "POST",
 		"/api/v1/pages/{slug}/mooring/session/reauthorize": "POST",
 		"/api/v1/pages/{slug}/mooring/ws":                  "GET",
 		"/api/v1/pages/{slug}/mooring/provenance":          "GET",
@@ -72,7 +77,7 @@ func TestMooringHTTPAuthenticatesAndChecksPageBeforeBody(t *testing.T) {
 		name, token string
 		want        int
 	}{{"missing-auth", "", 401}, {"foreign-private-page", tokens[rig.userID], 403}} {
-		for _, endpoint := range []string{"session", "session/reauthorize"} {
+		for _, endpoint := range []string{"session", "session/reauthorize", "command-session"} {
 			t.Run(tc.name+"/"+endpoint, func(t *testing.T) {
 				body := &collaborationUnreadBody{}
 				req := httptest.NewRequest("POST", "/api/v1/pages/http-private/mooring/"+endpoint+"?workspace_id="+rig.wsID, nil)
@@ -100,25 +105,26 @@ func TestMooringHTTPAuthenticatesAndChecksPageBeforeBody(t *testing.T) {
 	if len(r.mooringHTTP.docs) != 0 {
 		t.Fatal("negative request launched runtime")
 	}
-	if len(r.mutationRoutes) != 3 {
-		t.Fatal("missing explicit session/reauthorize/task mutation policies")
+	if len(r.mutationRoutes) != 4 {
+		t.Fatal("missing explicit session/reauthorize/command/task mutation policies")
 	}
 	policies := map[string]bool{
 		"/api/v1/pages/{slug}/mooring/session":             false,
+		"/api/v1/pages/{slug}/mooring/command-session":     false,
 		"/api/v1/pages/{slug}/mooring/session/reauthorize": false,
 		"/api/v1/pages/{slug}/mooring/tasks":               false,
 	}
 	for _, route := range r.mutationRoutes {
 		seen, expected := policies[route.Pattern]
 		if !expected || seen || route.Method != "POST" || route.Role != roleSelf || route.Scope != scopeSelf {
-			t.Fatal("incorrect or duplicate session/reauthorize/task mutation policy", route)
+			t.Fatal("incorrect or duplicate session/reauthorize/command/task mutation policy", route)
 		}
 		policies[route.Pattern] = true
 	}
 	// The route wrapper stamps before authentication; suspending the very same
 	// fence must reject even a still-valid signed human credential before decode.
 	r.mooringHTTP.fence.SuspendBeforeRestore()
-	for _, endpoint := range []string{"session", "session/reauthorize"} {
+	for _, endpoint := range []string{"session", "session/reauthorize", "command-session"} {
 		body := &collaborationUnreadBody{}
 		req := httptest.NewRequest("POST", "/api/v1/pages/http-private/mooring/"+endpoint+"?workspace_id="+rig.wsID, nil)
 		req.Body = body

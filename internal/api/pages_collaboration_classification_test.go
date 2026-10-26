@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -48,55 +49,63 @@ func TestCollaborationCustodyAndGenericDeletionRefusal(t *testing.T) {
 // Canonical SQL storage classification reaches authorized list/detail without
 // disclosing checkpoint bytes or relabeling the document as the pilot engine.
 func TestCollaborationPageMetadataUsesCanonicalStorage(t *testing.T) {
-	r := pagesTransferSetup(t)
-	r.seedPage(t, "metadata-collab", "metadata-collab", "Native", r.userID, "")
-	mustExec(t, r.db, `INSERT INTO mooring_collab_documents(page_id,workspace_id,application_id,revision,checkpoint_base64) VALUES('metadata-collab',?,'wordcraft','0','e30=')`, r.wsID)
-	h := NewPageHandler(r.db, nil, newTestLogger())
-	for _, index := range []bool{false, true} {
-		req := pagesRequest(t, "GET", "/api/v1/pages", r.wsID, r.userID, "MEMBER", "")
-		req.SetPathValue("slug", "metadata-collab")
-		response := httptest.NewRecorder()
-		if index {
-			h.List(response, req)
-		} else {
-			h.Get(response, req)
-		}
-		if response.Code != http.StatusOK {
-			t.Fatalf("index=%v: HTTP%d %s", index, response.Code, response.Body.String())
-		}
-		var body any
-		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
-			t.Fatal(err)
-		}
-		var find func(any) map[string]any
-		find = func(v any) map[string]any {
-			switch x := v.(type) {
-			case map[string]any:
-				if x["id"] == "metadata-collab" {
-					return x
+	for _, profile := range []string{"mooring-causal-v1", commandFormat} {
+		t.Run(profile, func(t *testing.T) {
+			r := pagesTransferSetup(t)
+			r.seedPage(t, "metadata-collab", "metadata-collab", "Native", r.userID, "")
+			engine, engineHash := "", ""
+			if profile == commandFormat {
+				engine, engineHash = commandEngineRevision, "sha256:"+strings.Repeat("a", 64)
+			}
+			mustExec(t, r.db, `INSERT INTO mooring_collab_documents(page_id,workspace_id,application_id,revision,checkpoint_base64,format_profile,engine_revision,engine_sha256) VALUES('metadata-collab',?,'wordcraft','0','e30=',?,?,?)`, r.wsID, profile, engine, engineHash)
+			h := NewPageHandler(r.db, nil, newTestLogger())
+			for _, index := range []bool{false, true} {
+				req := pagesRequest(t, "GET", "/api/v1/pages", r.wsID, r.userID, "MEMBER", "")
+				req.SetPathValue("slug", "metadata-collab")
+				response := httptest.NewRecorder()
+				if index {
+					h.List(response, req)
+				} else {
+					h.Get(response, req)
 				}
-				for _, child := range x {
-					if found := find(child); found != nil {
-						return found
+				if response.Code != http.StatusOK {
+					t.Fatalf("index=%v: HTTP%d %s", index, response.Code, response.Body.String())
+				}
+				var body any
+				if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+					t.Fatal(err)
+				}
+				var find func(any) map[string]any
+				find = func(v any) map[string]any {
+					switch x := v.(type) {
+					case map[string]any:
+						if x["id"] == "metadata-collab" {
+							return x
+						}
+						for _, child := range x {
+							if found := find(child); found != nil {
+								return found
+							}
+						}
+					case []any:
+						for _, child := range x {
+							if found := find(child); found != nil {
+								return found
+							}
+						}
 					}
+					return nil
 				}
-			case []any:
-				for _, child := range x {
-					if found := find(child); found != nil {
-						return found
+				page := find(body)
+				if page == nil || page["collaboration_format"] != profile || page["has_collaboration"] != true || page["has_mooring"] == true || page["has_document"] == true {
+					t.Fatalf("index=%v wrong classification: %v", index, page)
+				}
+				for _, key := range []string{"checkpoint_base64", "checkpoint", "state", "ticket", "origin"} {
+					if _, ok := page[key]; ok {
+						t.Fatalf("content/authority leaked in metadata: %s", key)
 					}
 				}
 			}
-			return nil
-		}
-		page := find(body)
-		if page == nil || page["has_collaboration"] != true || page["has_mooring"] == true || page["has_document"] == true {
-			t.Fatalf("index=%v wrong classification: %v", index, page)
-		}
-		for _, key := range []string{"checkpoint_base64", "checkpoint", "state", "ticket", "origin"} {
-			if _, ok := page[key]; ok {
-				t.Fatalf("content/authority leaked in metadata: %s", key)
-			}
-		}
+		})
 	}
 }

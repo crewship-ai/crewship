@@ -31,15 +31,16 @@ type commandProductStart func(open context.Context, runtime string) (commandProd
 // This registry is separate from the legacy adapter: a C1 failure never opens
 // the same document with the old runtime. Enablement is deliberately explicit.
 type commandProductFactory struct {
-	manager *collaborationHTTPManager
-	enabled bool
-	start   commandProductStart
-	ctx     context.Context
-	cancel  context.CancelFunc
-	mu      sync.Mutex
-	closed  bool
-	docs    map[mooring.SessionKey]*commandProductDocument
-	views   map[string]commandProductView
+	manager      *collaborationHTTPManager
+	enabled      bool
+	start        commandProductStart
+	editorBundle func(*http.Request) (digest, indexURL string)
+	ctx          context.Context
+	cancel       context.CancelFunc
+	mu           sync.Mutex
+	closed       bool
+	docs         map[mooring.SessionKey]*commandProductDocument
+	views        map[string]commandProductView
 }
 type commandProductDocument struct {
 	ready  chan struct{}

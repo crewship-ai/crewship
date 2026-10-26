@@ -36,6 +36,7 @@ type MooringHTTPConfig struct {
 	// The trusted loaded-bundle provider owns digest/URL verification and the
 	// per-request editor-origin gate. Requests cannot nominate this metadata.
 	EditorBundle func(*http.Request) (digest, indexURL string)
+	Commands     *MooringCommandHTTPConfig
 }
 
 func WithMooringHTTP(c MooringHTTPConfig) RouterOption {
@@ -49,22 +50,23 @@ const collaborationHTTPParticipantLimit = 128
 var errCollaborationHTTP = errors.New("Mooring session unavailable")
 
 type collaborationHTTPManager struct {
-	workers       sync.WaitGroup
-	stopped       chan struct{}
-	mu            sync.Mutex
-	pages         *PageHandler
-	config        MooringHTTPConfig
-	fence         *collaborationIngressFence
-	clock         mooring.OwnerClock
-	owners        *mooring.OwnerStore
-	schema        *mooring.WireSchema
-	ctx           context.Context
-	cancel        context.CancelFunc
-	closed        bool
-	docs          map[mooring.SessionKey]*collaborationHTTPDocument
-	usedOrigins   map[mooring.SessionKey]map[uint64]struct{}
-	agentMandates *collaborationAgentMandateStore
-	agentTasks    *collaborationAgentTaskController
+	workers        sync.WaitGroup
+	stopped        chan struct{}
+	mu             sync.Mutex
+	pages          *PageHandler
+	config         MooringHTTPConfig
+	fence          *collaborationIngressFence
+	clock          mooring.OwnerClock
+	owners         *mooring.OwnerStore
+	schema         *mooring.WireSchema
+	ctx            context.Context
+	cancel         context.CancelFunc
+	closed         bool
+	docs           map[mooring.SessionKey]*collaborationHTTPDocument
+	usedOrigins    map[mooring.SessionKey]map[uint64]struct{}
+	agentMandates  *collaborationAgentMandateStore
+	agentTasks     *collaborationAgentTaskController
+	commandFactory *commandProductFactory
 }
 type collaborationHTTPDocument struct {
 	manager     *collaborationHTTPManager
@@ -178,6 +180,9 @@ func (m *collaborationHTTPManager) Close() {
 		docs = append(docs, d)
 	}
 	m.mu.Unlock()
+	if m.commandFactory != nil {
+		m.commandFactory.Close()
+	}
 	for _, d := range docs {
 		d.close()
 	}

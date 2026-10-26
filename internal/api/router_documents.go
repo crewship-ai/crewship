@@ -45,6 +45,16 @@ func (r *Router) registerDocumentRoutes() {
 // operation continue through the existing Page and original-source authority.
 func (r *Router) documentAvailability(req *http.Request) DocumentAvailability {
 	status := DocumentAvailability{Enabled: r.pages.documentCall != nil}
+	if m := r.mooringHTTP; m != nil && m.commandFactory != nil && m.commandFactory.editorBundle != nil {
+		f := m.commandFactory
+		f.mu.Lock()
+		live := !f.closed && f.enabled
+		f.mu.Unlock()
+		if live {
+			digest, indexURL := f.editorBundle(req)
+			status.WordCraftCommands = commandDigestValid("sha256:"+digest) && indexURL != ""
+		}
+	}
 	if m := r.mooringHTTP; m != nil && m.config.Enabled && m.config.EditorBundle != nil {
 		m.mu.Lock()
 		closed := m.closed

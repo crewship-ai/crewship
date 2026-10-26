@@ -7,6 +7,7 @@ import "encoding/json"
 type DocumentAvailability struct {
 	Enabled            bool   `json:"enabled"`
 	WordCraftSDKPrefix string `json:"wordcraft_sdk_prefix,omitempty"`
+	WordCraftCommands  bool   `json:"wordcraft_commands,omitempty"`
 }
 type DocumentNode struct {
 	Type    string              `json:"type"`

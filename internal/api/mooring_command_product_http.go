@@ -20,6 +20,11 @@ type commandProductView struct {
 	original collaborationHumanAdmission
 }
 
+type commandProductEditor struct {
+	BundleDigest string `json:"bundle_digest"`
+	URL          string `json:"url"`
+}
+
 func commandSameView(original, fresh collaborationHumanAdmission) bool {
 	a, b := original.source, fresh.source
 	// JWT expiry belongs to each independent HTTP request. A view cannot
@@ -71,6 +76,15 @@ func (f *commandProductFactory) serve(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("Origin") != expected {
 		replyError(w, 403, "command origin denied")
 		return
+	}
+	var editor *commandProductEditor
+	if f.editorBundle != nil {
+		digest, indexURL := f.editorBundle(r)
+		if !commandDigestValid("sha256:"+digest) || indexURL == "" {
+			replyError(w, 403, "native command editor package unavailable")
+			return
+		}
+		editor = &commandProductEditor{BundleDigest: digest, URL: indexURL}
 	}
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, commandInputLimit+4096))
 	if err != nil {
@@ -192,13 +206,14 @@ func (f *commandProductFactory) serve(w http.ResponseWriter, r *http.Request) {
 			return errCommandStore
 		}
 		response, e := json.Marshal(struct {
-			View       string             `json:"view"`
-			Actor      string             `json:"actor"`
-			Format     string             `json:"format"`
-			Engine     string             `json:"engine"`
-			Projection json.RawMessage    `json:"projection"`
-			Outcome    *commandSQLOutcome `json:"outcome"`
-		}{input.View, actor.actor, commandFormat, commandEngineRevision, projection, outcome})
+			View       string                `json:"view"`
+			Actor      string                `json:"actor"`
+			Format     string                `json:"format"`
+			Engine     string                `json:"engine"`
+			Projection json.RawMessage       `json:"projection"`
+			Outcome    *commandSQLOutcome    `json:"outcome"`
+			Editor     *commandProductEditor `json:"editor,omitempty"`
+		}{input.View, actor.actor, commandFormat, commandEngineRevision, projection, outcome, editor})
 		if e != nil {
 			return e
 		}
