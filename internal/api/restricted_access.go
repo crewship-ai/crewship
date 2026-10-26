@@ -113,9 +113,12 @@ var restrictedRoutes = map[string]restrictedRule{
 	"GET /api/v1/chats/{chatId}/restricted-files/{fileId}/download": restrictedPass,
 
 	// Dedicated restricted directory projections expose granted metadata only.
-	"GET /api/v1/agents":           restrictedPass,
-	"GET /api/v1/agents/{agentId}": restrictedPass,
-	"GET /api/v1/workspaces":       restrictedPass,
+	"GET /api/v1/crews":                    restrictedPass,
+	"GET /api/v1/crews/{crewId}":           restrictedPass,
+	"GET /api/v1/crews/{crewId}/access/me": restrictedPass,
+	"GET /api/v1/agents":                   restrictedPass,
+	"GET /api/v1/agents/{agentId}":         restrictedPass,
+	"GET /api/v1/workspaces":               restrictedPass,
 
 	// The member's own sessions, CLI tokens and password.
 	"GET /api/v1/auth/sessions":                restrictedPass,

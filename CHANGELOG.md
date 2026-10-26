@@ -21,6 +21,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Restricted native scratch tools can fail on noatime-backed Docker storage.** The native image rebuilds bubblewrap with an atime-preserving remount fix while retaining the inner workspace sandbox and unchanged container security policies.
 
+- **Guests can read explicitly shared crews.** Crew View/Use now opens filtered crew list/detail with identities, agent counts and current agent statuses, while configuration, credentials, membership and activity stay hidden. `crewship crew access` explains the actor’s current Guest share; Use remains conditional on agent authority and runtime preflight. Revocation, crew retirement and issuer authority apply immediately to subsequent requests.
+
 - **Administrative security operations explicitly opt in to emergency audit fallback.** Only single/all-session revocation can use this fallback in the session handler; unlock remains chained-only, and unknown internal operations are rejected before any account or audit mutation. Web password changes and resets continue to fail closed on a broken audit chain.
 
 - **CLI object sharing accepts routine Publish.** `crewship share` and `unshare` now accept `--operation publish`, matching the Share dialog. The server still requires Edit in the resulting policy; unrelated grants and issuer provenance are preserved, and conflicts are never retried.
