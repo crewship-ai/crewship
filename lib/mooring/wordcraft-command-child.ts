@@ -7,10 +7,11 @@ export interface WordCraftCommandHandle {
   project_confirmed(native: string, ids: string, own: boolean, selection: string): void
   projection_pending(): boolean
   command_pending(): boolean
+  pause_typing(): void
   stop(): void
 }
 export interface WordCraftCommandNative {
-  start_c1_commands(native: string, ids: string, callbacks: { can_edit(): boolean; command(raw: string): boolean; failed(): void }): WordCraftCommandHandle
+  start_c1_commands(native: string, ids: string, callbacks: { can_edit(): boolean; can_type(): boolean; draft(raw: string): void; command(raw: string): boolean; failed(): void }): WordCraftCommandHandle
 }
 /** The same capability bootstrap as WordCraft, with a distinct namespace to
  * prevent either producer consuming the other protocol or host authority. */
@@ -54,6 +55,15 @@ export function startWordCraftCommandChild(native: WordCraftCommandNative, bundl
         projection = parseCommandProjection(v.projection); write = v.write; booted = true
         handle = native.start_c1_commands(projection.native_json, JSON.stringify(projection.ids), {
           can_edit: () => ready && write && !stopped && !pending && !paused && !applying,
+          can_type: () => ready && write && !stopped && !paused,
+          draft(raw) {
+            if (stopped || raw.length > 2 * COMMAND_INPUT_BYTES) return
+            try {
+              const draft = JSON.parse(raw)
+              if (!record(draft) || !exactCommandKeys(draft, ["count", "text", "error", "paused"]) || !Number.isSafeInteger(draft.count) || Number(draft.count) < 0 || Number(draft.count) > 256 || typeof draft.text !== "string" || new TextEncoder().encode(draft.text).length > COMMAND_INPUT_BYTES || typeof draft.error !== "string" || draft.error.length > 512 || typeof draft.paused !== "boolean") throw new Error("invalid_draft")
+              send("wordcraft-command:draft", draft)
+            } catch { stop() }
+          },
           command(raw) {
             if (!ready || stopped || !write || pending || paused || applying || !projection || raw.length > COMMAND_INPUT_BYTES || new TextEncoder().encode(raw).length > COMMAND_INPUT_BYTES) return false
             pending = true
@@ -73,7 +83,7 @@ export function startWordCraftCommandChild(native: WordCraftCommandNative, bundl
         handle.project_confirmed(next.native_json, JSON.stringify(next.ids), own, own ? v.selection as string : "")
         applying = { own, projection: next }; inspect()
       } else if (v.type === "wordcraft-command:pause" && exactCommandKeys(v, ["protocol", "type"])) {
-        paused = true
+        paused = true; handle?.pause_typing()
       } else if (v.type === "wordcraft-command:stop" && exactCommandKeys(v, ["protocol", "type"])) stop()
       else throw new Error("invalid_message")
     } catch { stop() }

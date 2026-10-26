@@ -14,7 +14,7 @@ function setup(write = true) {
   const port = { postMessage: (raw: string) => sent.push(raw), start: vi.fn(), close: vi.fn(), onmessage: null as ((e: { data: unknown }) => void) | null }
   let callbacks!: Parameters<WordCraftCommandNative["start_c1_commands"]>[2]
   let queued = false, pending = false
-  const handle = { project_confirmed: vi.fn(() => { queued = true }), projection_pending: () => queued, command_pending: () => pending, stop: vi.fn() }
+  const handle = { project_confirmed: vi.fn(() => { queued = true }), projection_pending: () => queued, command_pending: () => pending, pause_typing: vi.fn(), stop: vi.fn() }
   const native = { start_c1_commands: vi.fn((_raw: string, _ids: string, cb: typeof callbacks) => { callbacks = cb; return handle }) }
   const child = startWordCraftCommandChild(native, digest, async () => {}, window)
   connect({ source: parent, ports: [port], data: { type: "wordcraft-command:connect", protocol: 1, bundle: digest } } as unknown as MessageEvent)
@@ -79,5 +79,28 @@ it("stops on native apply failure rather than emitting completion", async () => 
   f.send({ type: "wordcraft-command:projection", projection: { ...projection, revision: 1 }, selection: "{}" })
   expect(f.handle.stop).toHaveBeenCalledOnce()
   expect(f.sent.map(s => JSON.parse(s).type)).not.toContain("wordcraft-command:applied")
+  f.child.close()
+})
+it("accepts local typing while a command is in flight, but pauses on unknown and reader admission", async () => {
+  const f = setup(); await Promise.resolve()
+  expect(f.callbacks().can_type()).toBe(true)
+  f.capture()
+  expect(f.callbacks().can_edit()).toBe(false)
+  expect(f.callbacks().can_type()).toBe(true)
+  f.callbacks().draft('{"count":2,"text":"ač\\nŽ","error":"","paused":false}')
+  expect(JSON.parse(f.sent.at(-1)!)).toMatchObject({ type: "wordcraft-command:draft", count: 2, text: "ač\nŽ" })
+  f.send({ type: "wordcraft-command:pause" })
+  expect(f.callbacks().can_type()).toBe(false)
+  expect(f.handle.pause_typing).toHaveBeenCalledOnce()
+  f.child.close()
+  const reader = setup(false); await Promise.resolve()
+  expect(reader.callbacks().can_type()).toBe(false)
+  reader.child.close()
+})
+it("rejects malformed or oversized draft reports without granting Saved", async () => {
+  const f = setup(); await Promise.resolve()
+  f.callbacks().draft('{"count":257,"text":"x","error":"","paused":false}')
+  expect(f.handle.stop).toHaveBeenCalledOnce()
+  expect(f.sent.some(raw => JSON.parse(raw).type === "wordcraft-command:draft")).toBe(false)
   f.child.close()
 })

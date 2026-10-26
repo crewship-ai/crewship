@@ -25,6 +25,18 @@ selection without optimistic document mutation. Unsupported registry commands
 show a refusal. Undo is explicitly refused before reserving pending input until
 its own receipt can supply a qualified native selection; it never runs local undo.
 
+The dedicated C1 product renderer enables a bounded local typing preview. It
+rebuilds that preview with the original engine using the same batch boundaries
+as the stateless server helper. Consecutive text is collected for about 120ms;
+Enter and formatting seal a batch and retain their position. Only one original
+is sent at a time. Limits are 64KiB of queued parameter data, 256 queued commands
+and 8KiB per action/batch; a refused input has an explicit message. Confirmed SQL
+state remains authoritative. Unknown/refused input stays available for copying;
+there is no blind mutation retry. Nonempty caret-only character formatting is
+explicitly unavailable because its transient typing properties are not part of
+the server checkpoint; select text to format it. The default test seam remains
+nonoptimistic unless its explicit fluid-typing option is enabled.
+
 The separate bundle starts attached mode only with `?mooring=1` and a single
 `start_c1_commands(native_json, ids_json, callbacks)` call. Callbacks are
 `can_edit`, `command` (returns true only if the proposal was captured), and

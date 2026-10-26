@@ -9,7 +9,7 @@ index ed1d671..f9b37ce 100644
 - "windows-sys 0.60.2",
 + "windows-sys 0.61.2",
  ]
- 
+
  [[package]]
 @@ -3516,7 +3516,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
@@ -18,7 +18,7 @@ index ed1d671..f9b37ce 100644
 - "windows-sys 0.60.2",
 + "windows-sys 0.61.2",
  ]
- 
+
  [[package]]
 @@ -4018,7 +4018,7 @@ dependencies = [
   "once_cell",
@@ -27,7 +27,7 @@ index ed1d671..f9b37ce 100644
 - "windows-sys 0.60.2",
 + "windows-sys 0.61.2",
  ]
- 
+
  [[package]]
 @@ -4395,7 +4395,7 @@ dependencies = [
   "errno",
@@ -36,7 +36,7 @@ index ed1d671..f9b37ce 100644
 - "windows-sys 0.60.2",
 + "windows-sys 0.61.2",
  ]
- 
+
  [[package]]
 @@ -4454,7 +4454,7 @@ dependencies = [
   "security-framework",
@@ -45,10 +45,10 @@ index ed1d671..f9b37ce 100644
 - "windows-sys 0.60.2",
 + "windows-sys 0.61.2",
  ]
- 
+
  [[package]]
 @@ -4612,9 +4612,9 @@ dependencies = [
- 
+
  [[package]]
  name = "serde_json"
 -version = "1.0.151"
@@ -66,7 +66,7 @@ index ed1d671..f9b37ce 100644
 - "windows-sys 0.60.2",
 + "windows-sys 0.61.2",
  ]
- 
+
  [[package]]
 @@ -5241,7 +5241,7 @@ dependencies = [
   "getrandom 0.4.3",
@@ -75,7 +75,7 @@ index ed1d671..f9b37ce 100644
 - "windows-sys 0.60.2",
 + "windows-sys 0.61.2",
  ]
- 
+
  [[package]]
 @@ -5607,7 +5607,7 @@ checksum = "f2f6fb2847f6742cd76af783a2a2c49e9375d0a111c7bef6f71cd9e738c72d6e"
  dependencies = [
@@ -84,7 +84,7 @@ index ed1d671..f9b37ce 100644
 - "windows-sys 0.60.2",
 + "windows-sys 0.61.2",
  ]
- 
+
  [[package]]
 @@ -6278,7 +6278,7 @@ version = "0.1.11"
  source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -93,7 +93,7 @@ index ed1d671..f9b37ce 100644
 - "windows-sys 0.60.2",
 + "windows-sys 0.61.2",
  ]
- 
+
  [[package]]
 diff --git a/Cargo.toml b/Cargo.toml
 index bedb555..44c9468 100644
@@ -110,10 +110,10 @@ index bedb555..44c9468 100644
  chrono = { version = "0.4.45", default-features = false, features = ["std"] }
 diff --git a/apps/wordcraft-web/src/c1.rs b/apps/wordcraft-web/src/c1.rs
 new file mode 100644
-index 0000000..df5be4e
+index 0000000..88fe157
 --- /dev/null
 +++ b/apps/wordcraft-web/src/c1.rs
-@@ -0,0 +1,113 @@
+@@ -0,0 +1,125 @@
 +//! LOCAL C1 display/command adapter only. The authenticated parent validates
 +//! actual SQL receipts; callbacks are never credentials or Saved authority.
 +use js_sys::Function;
@@ -170,6 +170,9 @@ index 0000000..df5be4e
 +            Some(Projection { raw: native_json.into(), ids: ids_json.into(), acknowledges_pending, selection: confirmed_selection_json.into() });
 +        Ok(())
 +    }
++    pub fn pause_typing(&self) {
++        self.state.bridge.pause_typing();
++    }
 +    pub fn stop(&self) {
 +        self.state.bridge.stop();
 +    }
@@ -220,6 +223,15 @@ index 0000000..df5be4e
 +        }),
 +    )
 +    .map_err(|_| JsValue::from_str("invalid C1 command bridge"))?;
++    let draft = callback(&callbacks, "draft")?;
++    let accepts = callback(&callbacks, "can_type")?;
++    bridge.enable_fluid_typing(
++        &initial,
++        Box::new(move |raw| {
++            let _ = draft.call1(&JsValue::NULL, &JsValue::from_str(raw));
++        }),
++        Box::new(move || accepts.call0(&JsValue::NULL).ok().and_then(|v| v.as_bool()) == Some(true)),
++    );
 +    let state = Rc::new(State { initial, bridge, pending: RefCell::new(None), failed, failure_reported: Cell::new(false) });
 +    if ATTACHED.with(|active| active.replace(true)) {
 +        return Err(JsValue::from_str("C1 already attached"));
@@ -234,20 +246,20 @@ index d959222..d8073cb 100644
 @@ -18,6 +18,8 @@ mod prefs;
  #[cfg(any(target_arch = "wasm32", test))]
  mod save_fallback;
- 
+
 +#[cfg(target_arch = "wasm32")]
 +mod c1;
  #[cfg(target_arch = "wasm32")]
  mod host;
  #[cfg(target_arch = "wasm32")]
 diff --git a/apps/wordcraft-web/src/web.rs b/apps/wordcraft-web/src/web.rs
-index 7fa947f..0f2185a 100644
+index 7fa947f..e6301bf 100644
 --- a/apps/wordcraft-web/src/web.rs
 +++ b/apps/wordcraft-web/src/web.rs
 @@ -16,9 +16,20 @@ mod font_store;
  const CANVAS_ID: &str = "wordcraft_canvas";
  const LOADING_ID: &str = "wordcraft_loading";
- 
+
 +pub fn c1_mode() -> bool {
 +    query_param("mooring").as_deref() == Some("1")
 +}
@@ -356,18 +368,22 @@ index 7fa947f..0f2185a 100644
      app: WordApp,
      inbox: Inbox,
      messages: Rc<RefCell<Vec<String>>>,
-@@ -150,13 +177,18 @@ impl eframe::App for WebShell {
+@@ -150,13 +177,22 @@ impl eframe::App for WebShell {
      /// then writes changed preferences to browser storage immediately, because a reload or closed
      /// tab never runs the exit path.
      fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
 +        if let Some(state) = &self.c1 {
 +            state.apply_projection(&mut self.app);
 +        }
++        self.app.tick_c1_typing(ctx.input(|i| i.time));
          let msgs = std::mem::take(&mut *self.messages.borrow_mut());
          for msg in msgs {
              self.app.status(msg);
          }
          self.app.logic(ctx);
++        if self.app.tick_c1_typing(ctx.input(|i| i.time)) {
++            ctx.request_repaint_after(std::time::Duration::from_millis(16));
++        }
          // Store changed preferences straight away: a reload or closed tab runs no exit code (#2132).
 -        if let Some(json) = self.prefs.changed(&self.app) {
 +        if self.c1.is_none()
@@ -376,7 +392,7 @@ index 7fa947f..0f2185a 100644
              match local_storage() {
                  Some(store) => {
                      if let Err(e) = store.set_item(crate::prefs::KEY, &json) {
-@@ -181,7 +213,7 @@ impl eframe::App for WebShell {
+@@ -181,7 +217,7 @@ impl eframe::App for WebShell {
          if ui.ctx().current_pass_index() == 0 {
              let ctx = ui.ctx().clone();
              let dropped = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
@@ -387,16 +403,17 @@ index 7fa947f..0f2185a 100644
                  wasm_bindgen_futures::spawn_local(async move {
 diff --git a/crates/ui-egui/src/c1_commands.rs b/crates/ui-egui/src/c1_commands.rs
 new file mode 100644
-index 0000000..f275c58
+index 0000000..fb7a70a
 --- /dev/null
 +++ b/crates/ui-egui/src/c1_commands.rs
-@@ -0,0 +1,272 @@
+@@ -0,0 +1,544 @@
 +//! Default-off C1 LOCAL command/render seam. Callers own SQL receipts, transport,
 +//! current permissions, operation identity and reconciliation. No local Saved.
 +use crate::WordApp;
 +use serde_json::{Value, json};
 +use std::{
 +    cell::{Cell, RefCell},
++    collections::VecDeque,
 +    rc::Rc,
 +};
 +use wordcraft_doc::{Document, StoryRef};
@@ -411,6 +428,24 @@ index 0000000..f275c58
 +    }
 +    Ok(())
 +}
++#[derive(Clone)]
++struct DraftCommand {
++    id: String,
++    params: Value,
++    selection: wordcraft_engine::Selection,
++    due: f64,
++}
++struct FluidTyping {
++    confirmed: Document,
++    queue: VecDeque<DraftCommand>,
++    preview_selection: wordcraft_engine::Selection,
++    paused: bool,
++    error: String,
++    notify: Box<dyn Fn(&str)>,
++    accepts_input: Box<dyn Fn() -> bool>,
++}
++const DRAFT_BYTES: usize = 65536;
++const DRAFT_COMMANDS: usize = 256;
 +type Capture = Box<dyn Fn(&str) -> Result<(), String>>;
 +pub struct CommandBridge {
 +    ids: RefCell<Vec<String>>,
@@ -419,6 +454,8 @@ index 0000000..f275c58
 +    pending: Cell<bool>,
 +    stopped: Cell<bool>,
 +    proposal: RefCell<Option<Value>>,
++    fluid: RefCell<Option<FluidTyping>>,
++    clock: Cell<f64>,
 +}
 +pub fn native_document(raw: &str) -> Result<Document, String> {
 +    if raw.is_empty() || raw.len() > MAX {
@@ -455,7 +492,43 @@ index 0000000..f275c58
 +            pending: Cell::new(false),
 +            stopped: Cell::new(false),
 +            proposal: RefCell::new(None),
++            fluid: RefCell::new(None),
++            clock: Cell::new(0.0),
 +        }))
++    }
++    /// Local preview/draft only. This grants no authority and emits no receipt.
++    pub fn enable_fluid_typing(&self, doc: &Document, notify: Box<dyn Fn(&str)>, accepts_input: Box<dyn Fn() -> bool>) {
++        *self.fluid.borrow_mut() = Some(FluidTyping {
++            confirmed: doc.clone(),
++            queue: VecDeque::new(),
++            preview_selection: wordcraft_engine::Selection::default(),
++            paused: false,
++            error: String::new(),
++            notify,
++            accepts_input,
++        });
++    }
++    pub fn pause_typing(&self) {
++        if let Some(f) = self.fluid.borrow_mut().as_mut() {
++            f.paused = true;
++            f.error = "Save not confirmed. Unsent text is retained; no automatic retry.".into();
++        }
++        self.notify_draft();
++    }
++    fn notify_draft(&self) {
++        let f = self.fluid.borrow();
++        if let Some(f) = f.as_ref() {
++            let text: String = f
++                .queue
++                .iter()
++                .filter_map(|q| match q.id.as_str() {
++                    "text.insert" => q.params.get("text").and_then(Value::as_str),
++                    "text.newParagraph" => Some("\n"),
++                    _ => None,
++                })
++                .collect();
++            (f.notify)(&json!({"count":f.queue.len(),"text":text,"error":f.error,"paused":f.paused}).to_string());
++        }
 +    }
 +    pub fn stopped(&self) -> bool {
 +        self.stopped.get()
@@ -477,9 +550,7 @@ index 0000000..f275c58
 +            return Err("Undo is not available in this test editor".into());
 +        }
 +        let command = if registry_id == "edit.undo" { "participant.undo" } else { registry_id };
-+        if (command != "document.read" && C1_QUALIFIED_COMMANDS.binary_search(&command).is_err())
-+            || session.registry.get(registry_id).is_none()
-+        {
++        if (command != "document.read" && C1_QUALIFIED_COMMANDS.binary_search(&command).is_err()) || session.registry.get(registry_id).is_none() {
 +            return Err("unsupported C1 command".into());
 +        }
 +        let target = if matches!(command, "document.read" | "participant.undo") {
@@ -561,7 +632,17 @@ index 0000000..f275c58
 +        if C1_QUALIFIED_COMMANDS.binary_search(&id).is_err() {
 +            return Some("This command is not available in this test editor");
 +        }
-+        if bridge.stopped() || bridge.pending() || !(bridge.can_edit)() {
++        if bridge.fluid.borrow().is_some()
++            && id.starts_with("format.")
++            && self.session.sel.is_collapsed()
++            && self.session.doc.para_at(&self.session.sel.focus).is_some_and(|p| !p.is_empty())
++        {
++            return Some("Select text before changing character formatting in this test editor");
++        }
++        if bridge.stopped() || bridge.fluid.borrow().as_ref().is_some_and(|f| f.paused || !(f.accepts_input)()) {
++            return Some("Saving is paused; unsaved input is retained");
++        }
++        if bridge.fluid.borrow().is_none() && (bridge.pending() || !(bridge.can_edit)()) {
 +            return Some("Waiting for the host command result or current permission");
 +        }
 +        None
@@ -576,6 +657,16 @@ index 0000000..f275c58
 +    }
 +    pub(crate) fn dispatch_c1(&mut self, id: &str, params: &Value) -> Option<Result<Value, String>> {
 +        let bridge = self.c1_commands.clone()?;
++        if bridge.fluid.borrow().is_some() {
++            if local_navigation(&self.session, id) {
++                if bridge.fluid.borrow().as_ref().is_some_and(|f| !f.queue.is_empty()) {
++                    self.status("Wait for Saving to finish before moving the selection.");
++                    return Some(Err("selection movement while typing is pending".into()));
++                }
++                return None;
++            }
++            return Some(self.queue_c1_draft(id, params));
++        }
 +        if local_navigation(&self.session, id) {
 +            return None;
 +        }
@@ -591,6 +682,128 @@ index 0000000..f275c58
 +            self.status("Waiting for the host command result.");
 +        }
 +        Some(result)
++    }
++    fn queue_c1_draft(&mut self, id: &str, params: &Value) -> Result<Value, String> {
++        let bridge = self.c1_commands.clone().ok_or("C1 unavailable")?;
++        if bridge.stopped() || C1_QUALIFIED_COMMANDS.binary_search(&id).is_err() {
++            self.status("This command is not available in collaborative mode.");
++            return Err("C1 command unavailable".into());
++        }
++        let mut fluid = bridge.fluid.borrow_mut();
++        let f = fluid.as_mut().ok_or("C1 draft unavailable")?;
++        let size: usize = f.queue.iter().map(|q| q.params.to_string().len()).sum();
++        let problem = if id.starts_with("format.")
++            && self.session.sel.is_collapsed()
++            && self.session.doc.para_at(&self.session.sel.focus).is_some_and(|p| !p.is_empty())
++        {
++            Some("Select text before changing character formatting in this test editor. This action was NOT accepted.")
++        } else if params.to_string().len() > 8192 {
++            Some("Input is too large for one typing action. This input was NOT accepted; paste a smaller part.")
++        } else if f.paused {
++            Some("Saving is paused. Unsent text is retained.")
++        } else if f.queue.len() >= DRAFT_COMMANDS || size + params.to_string().len() > DRAFT_BYTES {
++            Some("Typing queue is full. This input was NOT accepted. Wait for saving before continuing.")
++        } else if !f.queue.is_empty() && self.session.sel != f.preview_selection {
++            Some("Selection changed while saving. This input was NOT accepted; wait for saving.")
++        } else if !(f.accepts_input)() {
++            Some("Editing is currently unavailable. This input was NOT accepted.")
++        } else {
++            None
++        };
++        if let Some(problem) = problem {
++            f.error = problem.into();
++            self.status(problem);
++            drop(fluid);
++            bridge.notify_draft();
++            return Err(problem.into());
++        }
++        let before = self.session.sel.clone();
++        let confirmed = if f.queue.is_empty() { self.session.doc.clone() } else { f.confirmed.clone() };
++        let mut proposed = f.queue.clone();
++        let merge = id == "text.insert"
++            && params.as_object().is_some_and(|p| p.len() == 1)
++            && proposed.back().is_some_and(|q| {
++                q.id == id
++                    && q.params
++                        .get("text")
++                        .and_then(Value::as_str)
++                        .is_some_and(|text| text.len() + params["text"].as_str().unwrap_or("").len() <= 8192)
++            })
++            && (!bridge.pending() || proposed.len() > 1);
++        if merge {
++            let q = proposed.back_mut().unwrap();
++            q.params = json!({"text":q.params["text"].as_str().unwrap().to_owned() + params["text"].as_str().unwrap_or("")});
++        } else {
++            proposed.push_back(DraftCommand { id: id.into(), params: params.clone(), selection: before, due: bridge.clock.get() + 0.12 });
++        }
++        // Rebuild the display from P using exactly the queued batch boundaries.
++        // Per-character AutoCorrect may differ from a combined text.insert;
++        // preview and the stateless server helper must execute the same batches.
++        let first_selection = proposed.front().unwrap().selection.clone();
++        let mut preview = Session::new(confirmed.clone());
++        preview.sel = first_selection;
++        let mut result = Value::Null;
++        for q in &mut proposed {
++            let mut next = Session::new(preview.doc);
++            next.sel = preview.sel;
++            q.selection = next.sel.clone();
++            result = match next.run(&q.id, &q.params) {
++                Ok(value) => value,
++                Err(_) => {
++                    f.error = "This input could not be applied. It was NOT accepted; existing unsaved input is retained.".into();
++                    self.status(&f.error);
++                    drop(fluid);
++                    bridge.notify_draft();
++                    return Err("native typing preview refused".into());
++                }
++            };
++            preview = next;
++        }
++        f.confirmed = confirmed;
++        f.queue = proposed;
++        f.preview_selection = preview.sel.clone();
++        f.error.clear();
++        self.session.doc = preview.doc;
++        self.session.sel = preview.sel;
++        self.session.pending = preview.pending;
++        self.session.touch();
++        self.session.relayout();
++        self.status("Saving… typing is buffered locally.");
++        if let Some(ctx) = &self.ctx {
++            ctx.request_repaint();
++        }
++        drop(fluid);
++        bridge.notify_draft();
++        Ok(result)
++    }
++    /// Called on browser frames; one bounded original remains in flight.
++    pub fn tick_c1_typing(&mut self, now: f64) -> bool {
++        let Some(bridge) = self.c1_commands.clone() else { return false };
++        bridge.clock.set(now);
++        let next = {
++            let f = bridge.fluid.borrow();
++            f.as_ref()
++                .filter(|f| {
++                    !f.paused
++                        && !f.queue.is_empty()
++                        && !bridge.pending()
++                        && !bridge.stopped()
++                        && (bridge.can_edit)()
++                        && (f.queue.len() > 1
++                            || f.queue.front().is_some_and(|q| now >= q.due)
++                            || f.queue.front().is_some_and(|q| q.id != "text.insert"))
++                })
++                .map(|f| (f.confirmed.clone(), f.queue.front().unwrap().clone()))
++        };
++        if let Some((doc, q)) = next {
++            let mut confirmed = Session::new(doc);
++            confirmed.sel = q.selection;
++            if bridge.forward(&confirmed, &q.id, &q.params).is_err() {
++                bridge.pause_typing();
++            }
++        }
++        let waiting = bridge.fluid.borrow().as_ref().is_some_and(|f| !f.queue.is_empty() && !f.paused);
++        waiting && !bridge.stopped()
 +    }
 +    /// Render only after caller validated canonical native bytes and the original
 +    /// pending outcome. Peer-only data passes acknowledges_pending=false, retains
@@ -611,6 +824,81 @@ index 0000000..f275c58
 +        }
 +        let doc = native_document(native_json)?;
 +        let new_ids = validate_ids(stable_ids_json, &doc)?;
++        if bridge.fluid.borrow().is_some() {
++            let mut fluid = bridge.fluid.borrow_mut();
++            let f = fluid.as_mut().unwrap();
++            if !acknowledges_pending && !f.queue.is_empty() {
++                f.paused = true;
++                f.error = "Document changed while typing. Unsent text is retained; review before continuing.".into();
++                drop(fluid);
++                bridge.notify_draft();
++                return Err("peer change while local draft exists".into());
++            }
++            if acknowledges_pending && (!bridge.pending() || f.queue.is_empty()) {
++                return Err("missing original draft".into());
++            }
++            let mut preview = Session::new(doc.clone());
++            preview.sel = if acknowledges_pending {
++                serde_json::from_str(confirmed_selection_json).map_err(|_| "missing confirmed C1 selection")?
++            } else {
++                let old_ids = bridge.ids.borrow();
++                let map = |pos: &wordcraft_doc::Pos| -> Result<wordcraft_doc::Pos, String> {
++                    if pos.story != StoryRef::Body || pos.path.0.len() != 1 {
++                        return Err("invalid local selection".into());
++                    }
++                    let old = pos.path.0[0] as usize;
++                    let id = old_ids.get(old).ok_or("missing local block identity")?;
++                    let index = new_ids.iter().position(|next| next == id).ok_or("local target removed by peer")?;
++                    let mut mapped = pos.clone();
++                    mapped.path = wordcraft_doc::Path(vec![index as u32]);
++                    Ok(mapped)
++                };
++                wordcraft_engine::Selection { anchor: map(&self.session.sel.anchor)?, focus: map(&self.session.sel.focus)? }
++            };
++            for pos in [&preview.sel.anchor, &preview.sel.focus] {
++                if pos.story != StoryRef::Body
++                    || pos.path.0.len() != 1
++                    || !doc.body.get(pos.path.0[0] as usize).and_then(|p| p.as_para()).is_some_and(|p| p.text.is_char_boundary(pos.off))
++                {
++                    return Err("invalid confirmed C1 selection".into());
++                }
++            }
++            let mut remaining = f.queue.clone();
++            if acknowledges_pending {
++                remaining.pop_front();
++            }
++            for q in &mut remaining {
++                let mut next = Session::new(preview.doc);
++                next.sel = preview.sel;
++                q.selection = next.sel.clone();
++                next.run(&q.id, &q.params).map_err(|_| "cannot restore unsent draft")?;
++                preview = next;
++            }
++            // Install confirmed P and rebuild the visible local preview from it.
++            // Unsent commands keep their order; no network command is replayed here.
++            f.confirmed = doc;
++            f.queue = remaining;
++            if acknowledges_pending {
++                if f.paused {
++                    f.paused = false;
++                    f.error.clear();
++                }
++            }
++            f.preview_selection = preview.sel.clone();
++            self.session.doc = preview.doc;
++            self.session.sel = preview.sel;
++            self.session.pending = preview.pending;
++            self.session.touch();
++            self.session.relayout();
++            *bridge.ids.borrow_mut() = new_ids;
++            if acknowledges_pending {
++                bridge.proposal.borrow_mut().take();
++                bridge.pending.set(false);
++            }
++            drop(fluid);
++            bridge.notify_draft();
++            return Ok(());
++        }
 +        let old_ids = bridge.ids.borrow().clone();
 +        let previous = self.session.sel.clone();
 +        let map = |pos: &wordcraft_doc::Pos| {
@@ -663,7 +951,6 @@ index 0000000..f275c58
 +        Ok(())
 +    }
 +}
-
 diff --git a/crates/ui-egui/src/keys.rs b/crates/ui-egui/src/keys.rs
 index a3bfd58..218241d 100644
 --- a/crates/ui-egui/src/keys.rs
@@ -693,7 +980,7 @@ index a3bfd58..218241d 100644
 +    }
      delete_surrounding_common(app, before, after, wordcraft_doc::ime_text::DeleteUnit::Chars);
  }
- 
+
 @@ -1122,6 +1134,10 @@ fn delete_surrounding(app: &mut WordApp, before: usize, after: usize) {
  /// character leaves that character whole. The selection and paragraph marks stay outside the
  /// range.
@@ -704,7 +991,7 @@ index a3bfd58..218241d 100644
 +    }
      delete_surrounding_common(app, before, after, wordcraft_doc::ime_text::DeleteUnit::Bytes);
  }
- 
+
 diff --git a/crates/ui-egui/src/lib.rs b/crates/ui-egui/src/lib.rs
 index 3a77229..e208827 100644
 --- a/crates/ui-egui/src/lib.rs
@@ -712,7 +999,7 @@ index 3a77229..e208827 100644
 @@ -535,9 +535,12 @@ fn migrate_units(v: &mut Value) {
      }
  }
- 
+
 +pub mod c1_commands;
 +
  /// The application.
@@ -803,21 +1090,34 @@ index 3a77229..e208827 100644
          while let Ok(req) = rx.try_recv() {
              let reply = req.reply.clone();
 diff --git a/crates/ui-egui/src/widgets.rs b/crates/ui-egui/src/widgets.rs
+index 3a068c8..12671be 100644
 --- a/crates/ui-egui/src/widgets.rs
 +++ b/crates/ui-egui/src/widgets.rs
-@@ -138,3 +138,3 @@
+@@ -136,7 +136,7 @@ fn tooltip(app: &WordApp, resp: Response, label: &str, id: &str) -> Response {
+     } else if !app.has_document() && !crate::works_without_document(id) {
+         Some(tl!("Open a document first"))
      } else {
 -        Some(app.session.why_disabled(id).unwrap_or(""))
 +        Some(app.c1_command_disabled_reason(id).or_else(|| app.session.why_disabled(id)).unwrap_or(""))
      };
-@@ -175,2 +175,5 @@
+     let (title, notes) = tooltip_lines(label, &shortcut_text(app, id), &desc, reason);
+     show_hint(&resp, &title, &notes);
+@@ -173,6 +173,9 @@ fn keytip_badge(ui: &Ui, rect: Rect, id: &str, name: &str) {
+
+ /// Whether a command exists and is enabled.
  pub fn enabled(app: &WordApp, id: &str) -> bool {
 +    if app.c1_command_disabled_reason(id).is_some() {
 +        return false;
 +    }
      // No document open (#1129): only what opens one, Help and the settings.
-@@ -400,3 +403,3 @@
+     if !app.has_document() && !crate::works_without_document(id) {
+         return false;
+@@ -398,7 +401,7 @@ pub fn menu_button(
+         icons::paint(ui.painter(), Rect::from_center_size(pos2(r.max.x - 6.0, r.center().y), vec2(DROPDOWN, DROPDOWN)), "dropdown", c, c);
+         resp
      };
 -    let reason = if on { None } else { Some(app.session.why_disabled(id).unwrap_or("")) };
 +    let reason = if on { None } else { Some(app.c1_command_disabled_reason(id).or_else(|| app.session.why_disabled(id)).unwrap_or("")) };
      let (title, notes) = tooltip_lines(tip, &shortcut_text(app, id), "", reason);
+     show_hint(&resp, &title, &notes);
+     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, on, tip));

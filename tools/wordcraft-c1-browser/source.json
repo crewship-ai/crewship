@@ -1,7 +1,7 @@
 {
   "revision": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
   "engine_source_manifest_sha256": "c6a784cc85d7bce594a0f049e07af79ffa353694f32cde18d04f526c2af1e4dc",
-  "patch_sha256": "b2a2e06cc70260f0e6a5a84b8b53557e8da486179bd504abc0271070fdadceb3",
+  "patch_sha256": "6a9a4a7d65d93a12d71e3cfcf0369c7403a551495c296c0eafa6183fd9fb6c72",
   "files": {
     "Cargo.toml": {
       "before_sha256": "e7594df0f5f9556f465586bf752eef7fe743740422b6b7d5c4c4f7a97c8146c8",
@@ -13,7 +13,7 @@
     },
     "apps/wordcraft-web/src/c1.rs": {
       "before_sha256": null,
-      "after_sha256": "9afa52c5a883e72f462a767d4aadc06b94a55e5bd4f3f7ea74594c7b9ff93c44"
+      "after_sha256": "a9d43bdb575aaa01cfc352af97e0edddf206d6d233d2e35ccab578fbde7d81a7"
     },
     "apps/wordcraft-web/src/main.rs": {
       "before_sha256": "2732b5c95004f9273a2eb14b936cee1a0a1d77bc518f206920575285ccf0c5af",
@@ -21,11 +21,11 @@
     },
     "apps/wordcraft-web/src/web.rs": {
       "before_sha256": "4def4b970cc688e4e4996296fe5ac1fca945aa543f1d31aa2e856ffd449a943d",
-      "after_sha256": "deaa56f7fc0f0aaff25f73b7dcb86f33ab694b33854ebc36a3d78659d5d49d43"
+      "after_sha256": "8fa00dff60cdacf5969d3d1af257999892e9e03c0e5c941c229cae83d38de761"
     },
     "crates/ui-egui/src/c1_commands.rs": {
       "before_sha256": null,
-      "after_sha256": "8c80a87a1934cc7b0fc4102a14b61296431e11bccfbcdfbad2aa34639e5b69ba"
+      "after_sha256": "4e4dab2dda1bcb5b28f6a2a8cc025a28424e150eadb46cba81379d89f4fc9b54"
     },
     "crates/ui-egui/src/keys.rs": {
       "before_sha256": "4ee9013e16669b5ae41d738deda009a11f699a1abd59a14e82f6e055cd35bea7",
@@ -44,7 +44,7 @@
       "after_sha256": "aae5511fb6ab8d80c5f03988fa5c12d02f56ee973ba1d29065940da04b215830"
     }
   },
-  "scope": "Separate C1 renderer and local command seam only; legacy SDK recipe unchanged. No SQL/Saved/live UI qualification.",
+  "scope": "Separate C1 renderer with bounded optimistic typing preview, serialized batches and retained drafts. Host SQL receipts remain authoritative; legacy recipe unchanged.",
   "capabilities_sha256": "9f1cb61f8ffb8e4890001aab1a9a222e327a8e98f4531ef50a7b66e28cc0f0cb",
   "qualified_command_count": 72
 }

@@ -18,6 +18,7 @@ pub struct C1Harness {
     captured: Rc<RefCell<Vec<String>>>,
     capture_ok: Rc<Cell<bool>>,
     gate: Rc<Cell<bool>>,
+    drafts: Rc<RefCell<Vec<String>>>,
 }
 #[wasm_bindgen]
 impl C1Harness {
@@ -51,8 +52,17 @@ impl C1Harness {
             captured,
             capture_ok,
             gate,
+            drafts: Rc::new(RefCell::new(vec![])),
         })
     }
+    pub fn enable_fluid(&self) {
+        let drafts = self.drafts.clone(); let gate = self.gate.clone();
+        self.bridge.enable_fluid_typing(&self.app.session.doc,
+            Box::new(move |raw| drafts.borrow_mut().push(raw.into())), Box::new(move || gate.get()));
+    }
+    pub fn tick_typing(&mut self, now: f64) -> bool { self.app.tick_c1_typing(now) }
+    pub fn pause_typing(&self) { self.bridge.pause_typing(); }
+    pub fn drafts_json(&self) -> String { serde_json::to_string(&*self.drafts.borrow()).unwrap() }
     pub fn run_registry(&mut self, id: &str, params_json: &str) -> Result<String, String> {
         let params = serde_json::from_str(params_json).map_err(|_| "invalid harness params")?;
         serde_json::to_string(&self.app.run(id, params)?).map_err(|_| "harness encode".into())

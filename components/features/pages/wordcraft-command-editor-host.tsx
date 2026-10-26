@@ -17,16 +17,25 @@ export function WordCraftCommandEditorHost({ workspaceId, pageId, name, unavaila
   const session = useSessionSafe()
   const human = session.status === "authenticated" ? session.data?.user?.id : undefined
   const mount = React.useRef<HTMLDivElement>(null)
+  const boundIdentity = React.useRef<{ workspace: string; page: string; human: string } | undefined>(undefined)
   const control = React.useRef<ReturnType<typeof createCommandSession> | undefined>(undefined)
   const closeCurrent = React.useRef<(() => void) | undefined>(undefined)
   const unavailableRef = React.useRef(unavailable); unavailableRef.current = unavailable
   const callback = React.useRef(onUnavailable); callback.current = onUnavailable
   const [state, setState] = React.useState<CommandState>("connecting")
   const [error, setError] = React.useState<string>()
-  const dirty = state === "pending" || state === "unknown"
+  const [draft, setDraft] = React.useState({ count: 0, text: "", error: "", paused: false })
+  const dirty = state === "pending" || state === "unknown" || draft.count > 0
+  const label = draft.paused ? labels.unknown : draft.count > 0 && (state === "ready" || state === "saved") ? labels.pending : labels[state]
   useLeaveGuard(dirty)
   React.useEffect(() => { onDirtyChange?.(dirty) }, [dirty, onDirtyChange])
   React.useEffect(() => {
+    const bound = boundIdentity.current
+    if (bound && (bound.workspace !== workspaceId || bound.page !== pageId || bound.human !== human)) {
+      setState("stopped"); setError("Document or account changed. Unsaved input remains available for copying.")
+      return
+    }
+    if (human) boundIdentity.current = { workspace: workspaceId, page: pageId, human }
     const abort = new AbortController()
     let dead = false, loads = 0, connected = false, ready = false, bundle = ""
     let frame: HTMLIFrameElement | undefined, port: CapabilityPort | undefined
@@ -53,6 +62,9 @@ export function WordCraftCommandEditorHost({ workspaceId, pageId, name, unavaila
       const value = decodeMessage(raw, 2 * COMMAND_INPUT_BYTES + 4096)
       if (!value || JSON.stringify(value) !== raw) { stop(); return }
       if (value.type === "wordcraft-command:ready" && exactCommandKeys(value, ["protocol", "type"]) && !ready) { ready = true; clearTimeout(startupTimer); host?.start(); return }
+      if (value.type === "wordcraft-command:draft" && ready && exactCommandKeys(value, ["protocol", "type", "count", "text", "error", "paused"]) && Number.isSafeInteger(value.count) && Number(value.count) >= 0 && Number(value.count) <= 256 && typeof value.text === "string" && new TextEncoder().encode(value.text).length <= COMMAND_INPUT_BYTES && typeof value.error === "string" && value.error.length <= 512 && typeof value.paused === "boolean") {
+        setDraft({ count: Number(value.count), text: value.text, error: value.error, paused: value.paused }); return
+      }
       if (value.type === "wordcraft-command:command" && ready && exactCommandKeys(value, ["protocol", "type", "raw", "revision"]) && typeof value.raw === "string" && typeof value.revision === "number") {
         if (!host?.submit(value.raw, value.revision)) stop()
         return
@@ -112,8 +124,10 @@ export function WordCraftCommandEditorHost({ workspaceId, pageId, name, unavaila
   }, [workspaceId, pageId, human])
   React.useEffect(() => { if (unavailable) closeCurrent.current?.() }, [unavailable])
   return <section className="flex h-full min-h-0 flex-col" aria-label={`${name ?? "WordCraft"} command editor`}>
-    <div className="flex items-center gap-3 px-4 py-2 text-sm"><span role="status">{labels[state]}</span>{state === "unknown" && !error && <button type="button" className="underline" onClick={() => { void control.current?.reconcile() }}>Check original save</button>}</div>
-    <p className="px-4 pb-2 text-xs text-muted-foreground">Test editor: one command at a time. Undo and rapid typing are not available.</p>
+    <div className="flex items-center gap-3 px-4 py-2 text-sm"><span role="status">{label}</span>{state === "unknown" && !error && <button type="button" className="underline" onClick={() => { void control.current?.reconcile() }}>Check original save</button>}</div>
+    <p className="px-4 pb-2 text-xs text-muted-foreground">Test editor: typing is buffered locally until saved. Undo is not available.</p>
+    {draft.error && <p role="alert" className="px-4 py-2 text-sm">{draft.error}</p>}
+    {(state === "unknown" || state === "stopped" || Boolean(error) || Boolean(draft.error) || draft.paused) && draft.count > 0 && <label className="px-4 text-sm">Unsaved text — copy before leaving<textarea aria-label="Unsaved text" readOnly value={draft.text} className="mt-2 block w-full border p-2" /></label>}
     {error && <p role="alert" className="px-4 py-2 text-sm">{error}</p>}
     <div className="relative min-h-0 flex-1" ref={mount} />
   </section>
