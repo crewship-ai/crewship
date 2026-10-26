@@ -236,3 +236,12 @@ The current experiment clones and validates full CRDT state for candidate
 correctness. It retains action keys, retired IDs/blocks and local undo history;
 candidate cost, long-session memory and safe compaction remain unqualified.
 Rust tests do not measure browser input/render latency, IME or durable Saved.
+
+Only paragraphs that round-trip exactly through the pinned WordCraft paragraph
+model and its run normalization are projected into shared text. Zero-length
+formatting runs, explicit null properties, unknown properties and adjacent equal
+run segments remain exact opaque native JSON. They survive import/checkpoint/
+restore, and mutations or deletion of these opaque paragraphs are refused. This
+experiment does not normalize or migrate them to make them writable. Whole-model
+write validation can also refuse edits elsewhere in a document containing such
+noncanonical data.

@@ -308,20 +308,41 @@ fn validate_native(native: &Value) -> Result<(), Error> {
     Ok(())
 }
 fn editable(block: &Value) -> bool {
-    block["kind"] == "para"
-        && block["text"]
+    if block["kind"] != "para"
+        || !block["text"]
             .as_str()
-            .is_some_and(|s| !s.contains('\u{fffc}'))
-        && block.as_object().is_some_and(|b| {
-            b.keys()
-                .all(|k| ["kind", "text", "runs", "props", "mark"].contains(&k.as_str()))
+            .is_some_and(|text| !text.contains('\u{fffc}'))
+        || !block.as_object().is_some_and(|fields| {
+            fields
+                .keys()
+                .all(|key| ["kind", "text", "runs", "props", "mark"].contains(&key.as_str()))
         })
-        && block["runs"].as_array().is_some_and(|runs| {
+        || !block["runs"].as_array().is_some_and(|runs| {
             runs.iter().all(|run| {
-                run.as_object()
-                    .is_some_and(|r| r.keys().all(|k| ["len", "props"].contains(&k.as_str())))
+                run["len"].as_u64().is_some_and(|len| len > 0)
+                    && run.as_object().is_some_and(|fields| {
+                        fields
+                            .keys()
+                            .all(|key| ["len", "props"].contains(&key.as_str()))
+                    })
             })
         })
+    {
+        return false;
+    }
+    // Only exact canonical paragraphs can be projected through shared text.
+    // Zero-width run formatting, explicit nulls, unknown properties and native
+    // segmentation that the engine normalizes remain opaque original JSON.
+    // This is per paragraph: the production profile's boolean-only gate is not
+    // widened to qualify these general property actions.
+    let mut native = block.clone();
+    native.as_object_mut().unwrap().remove("kind");
+    let Ok(mut paragraph) = serde_json::from_value::<wordcraft_doc::Paragraph>(native.clone())
+    else {
+        return false;
+    };
+    paragraph.normalize();
+    serde_json::to_value(paragraph).is_ok_and(|roundtrip| roundtrip == native)
 }
 fn property_object(value: Option<&Value>) -> Result<JsonMap<String, Value>, Error> {
     let mut props = match value {
