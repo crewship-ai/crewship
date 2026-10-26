@@ -143,15 +143,6 @@ func TestPresetBindingAndUpgradePreserveCanonicalGrants(t *testing.T) {
 	if _, err := s.DB.Exec(string(migration)); err != nil {
 		t.Fatal(err)
 	}
-	for _, file := range []string{"20261022114610_access_preset_selection_versions.sql", "20261026100551_crew_access_preset_selections.sql"} {
-		migration, err := os.ReadFile("../database/migrations/" + file)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := s.DB.Exec(string(migration)); err != nil {
-			t.Fatal(err)
-		}
-	}
 	after, err := s.Policy(t.Context(), "owner", "h1", "w")
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatalf("upgrade changed policy: %v", err)
@@ -218,7 +209,7 @@ func TestPresetSelectionVersionMigrationPreservesRecords(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, file := range []string{"20261017074413_access_preset_selections.sql", "20261022114610_access_preset_selection_versions.sql", "20261026100551_crew_access_preset_selections.sql"} {
+	for _, file := range []string{"20261017074413_access_preset_selections.sql", "20261022114610_access_preset_selection_versions.sql"} {
 		migration, err := os.ReadFile("../database/migrations/" + file)
 		if err != nil {
 			t.Fatal(err)

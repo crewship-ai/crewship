@@ -11,8 +11,8 @@ import (
 )
 
 func TestCrewPresetHTTPConsentIsolationAndAtomicity(t *testing.T) {
-	for _, failAudit := range []bool{false, true} {
-		t.Run(map[bool]string{false: "apply", true: "audit-failure"}[failAudit], func(t *testing.T) {
+	for _, failure := range []string{"apply", "audit", "selection"} {
+		t.Run(failure, func(t *testing.T) {
 			f := newPresetApplyFixture(t)
 			execOrFatal(t, f.db, `INSERT INTO crews(id,workspace_id,name,slug) VALUES('preset-crew',?,'Preset crew','preset-crew')`, f.workspace)
 			seedAgentRow(t, f.db, "preset-agent", f.workspace, "preset-crew", "Agent", "preset-agent", "AGENT")
@@ -65,8 +65,12 @@ func TestCrewPresetHTTPConsentIsolationAndAtomicity(t *testing.T) {
 				t.Fatalf("audience: %+v", preview.Warnings)
 			}
 			want := 200
-			if failAudit {
+			if failure == "audit" {
 				execOrFatal(t, f.db, `CREATE TRIGGER reject_crew_preset_audit BEFORE INSERT ON journal_entries WHEN NEW.entry_type='member.access_changed' BEGIN SELECT RAISE(ABORT,'synthetic audit failure'); END`)
+				want = 500
+			}
+			if failure == "selection" {
+				execOrFatal(t, f.db, `CREATE TRIGGER reject_crew_preset_selection BEFORE INSERT ON crew_access_preset_selections BEGIN SELECT RAISE(ABORT,'synthetic selection failure'); END`)
 				want = 500
 			}
 			input := presetApplyRequest{Selection: preview.Selection, Digest: preview.Digest}
@@ -75,9 +79,15 @@ func TestCrewPresetHTTPConsentIsolationAndAtomicity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if failAudit {
+			if failure != "apply" {
 				if !reflect.DeepEqual(before, after) {
-					t.Fatal("audit failure partially committed")
+					t.Fatal("failed apply partially committed policy")
+				}
+				for _, table := range []string{"journal_entries", "crew_access_preset_selections"} {
+					var count int
+					if err := f.db.QueryRow(`SELECT count(*) FROM `+table+` WHERE workspace_id=?`, f.workspace).Scan(&count); err != nil || count != 0 {
+						t.Fatalf("partial %s commit: %d %v", table, count, err)
+					}
 				}
 				return
 			}

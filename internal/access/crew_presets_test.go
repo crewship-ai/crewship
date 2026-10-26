@@ -1,10 +1,65 @@
 package access
 
 import (
+	"database/sql"
 	"reflect"
 	"slices"
 	"testing"
 )
+
+func TestCrewPresetKeepsLegacyMetadataReaderSafe(t *testing.T) {
+	s := fixture(t)
+	member := policy(t, s, "h1", Right{"crew", "crew", "view"}, Right{"project", "p1", "list"}, Right{"project", "p1", "read"})
+	insertPreset(t, s, "m1", "project", "p1", "owner")
+	req := presetRequest(t, s, "crew", "crew", "view")
+	tx, err := s.DB.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordPresetSelectionIn(t.Context(), tx, "owner", "h1", "w", member, req); err != nil {
+		tx.Rollback()
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	// Exact baseline reader shape: an old binary must still read its known
+	// project/routine choices after this version has stored a crew choice.
+	rows, err := s.DB.Query(`SELECT id,resource_kind,COALESCE(project_id,routine_id),preset_id,preset_version,level,definition_hash,managed_operations,selected_by,selected_at FROM access_preset_selections WHERE workspace_id=? AND member_id=? ORDER BY resource_kind,COALESCE(project_id,routine_id)`, "w", "m1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for rows.Next() {
+		var id, kind, resource, preset, level, hash, managed, at string
+		var version int
+		var selector sql.NullString
+		if err := rows.Scan(&id, &kind, &resource, &preset, &version, &level, &hash, &managed, &selector, &at); err != nil {
+			rows.Close()
+			t.Fatalf("legacy policy reader broken: %v", err)
+		}
+		if id != "m1p1" || kind != "project" || resource != "p1" || at != "2026-10-16T00:00:00Z" {
+			rows.Close()
+			t.Fatal("old choice changed")
+		}
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		t.Fatal(err)
+	}
+	rows.Close()
+	if count != 1 {
+		t.Fatalf("legacy choices: %d", count)
+	}
+	p, err := s.Policy(t.Context(), "owner", "h1", "w")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(*p.PresetSelections) != 2 {
+		t.Fatalf("unified current choices: %+v", p.PresetSelections)
+	}
+}
 
 func TestCrewPresetV1IsImmutableAndWithinGuestCeiling(t *testing.T) {
 	d, ok := ResolvePreset("crew-levels", 1)
@@ -121,11 +176,11 @@ func TestCrewPresetMetadataBindingAndInvalidation(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, bad := range []string{
-				`UPDATE access_preset_selections SET workspace_id='other'`,
-				`UPDATE access_preset_selections SET crew_id=NULL`,
-				`UPDATE access_preset_selections SET project_id='p1'`,
-				`UPDATE access_preset_selections SET crew_id='missing'`,
-				`INSERT INTO access_preset_selections SELECT * FROM access_preset_selections`,
+				`UPDATE crew_access_preset_selections SET workspace_id='other'`,
+				`UPDATE crew_access_preset_selections SET crew_id=NULL`,
+				`UPDATE crew_access_preset_selections SET resource_kind='project'`,
+				`UPDATE crew_access_preset_selections SET crew_id='missing'`,
+				`INSERT INTO crew_access_preset_selections SELECT * FROM crew_access_preset_selections`,
 			} {
 				if _, err := s.DB.Exec(bad); err == nil {
 					t.Fatalf("invalid choice accepted: %s", bad)
@@ -135,7 +190,7 @@ func TestCrewPresetMetadataBindingAndInvalidation(t *testing.T) {
 				t.Fatal(err)
 			}
 			var count int
-			if err := s.DB.QueryRow(`SELECT count(*) FROM access_preset_selections`).Scan(&count); err != nil {
+			if err := s.DB.QueryRow(`SELECT count(*) FROM crew_access_preset_selections`).Scan(&count); err != nil {
 				t.Fatal(err)
 			}
 			want := 0

@@ -131,8 +131,9 @@ explains the current/future agent audience and individual execution preflight.
 Delegate, credential visibility, existing conversations, activity and crew
 administration stay outside the bundle. Independent agent/resource grants and
 inactive issuer provenance survive; lowering a crew preset does not revoke an
-independent agent grant. Existing project/routine selections survive the schema
-upgrade unchanged. Trusted crew Manage is outside this Guest preset.
+independent agent grant. Existing project/routine selections and their table stay unchanged; crew intent
+uses separate informational storage read into the same policy projection, so
+a prior crew-capable binary safely ignores the new metadata on rollback. Trusted crew Manage is outside this Guest preset.
 
 The immutable v1 catalog defines routine View (`view,results`), Run
 (`view,results,run`) and draft-only Edit (`view,results,run,edit`), plus project
