@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Crew sharing can create explicit trusted Manage grants.** The crew Share dialog and person Access editor offer Manage to trusted MEMBER/MANAGER recipients, preserves account mode and other grants, and keeps inactive shares visible for revocation after role changes. Guest shares remain View/Use; Manage does not assign roles or expose credentials.
+
 - **The opt-in WordCraft command editor can show silent connection loss without losing its draft.** A separate connection indicator stops claiming “Uloženo” after its configured server-silence limit and waits for authoritative server state on recovery, without replaying commands. The command host must explicitly wire this component before it affects an editor.
 
 - **Idle work polling avoids unnecessary writer transactions.** Empty or not-yet-eligible queues use a fresh read hint; capacity, deadlines and attempt ownership remain checked in the claiming transaction when work is present.

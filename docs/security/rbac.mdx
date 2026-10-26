@@ -234,3 +234,20 @@ Saved grants keep their issuer. An inactive share requires an explicit
 **Reissue as me** choice; a revision conflict requires reloading and reviewing
 the current policy. A Guest can see the crew source and an explanation of inherited agent capabilities in
 **Settings → Your access**, without receiving access to another person's policy.
+
+## Explicit trusted crew Manage shares
+
+The crew **Share** dialog also displays trusted recipients. OWNER/ADMIN can
+select **Manage crew** for a trusted MEMBER or MANAGER. The person Access
+editor also offers Crew / Manage for these trusted recipients, using the same versioned
+member-policy API and `crewship share crew --operation manage` CLI. The control
+preserves trusted mode and shares for other resources. It does not grant a crew
+role, agent Delegate, credential visibility or additional reveal scope.
+
+Manage permits that crew's profile/configuration and ordinary membership,
+without assigning/removing explicit crew roles, deleting the crew, changing
+budgets/policy or administering the workspace. Saved inactive shares remain
+visible after a recipient becomes VIEWER, ADMIN or OWNER: they can be removed,
+but a new or reissued Manage share requires a trusted MEMBER/MANAGER. The API
+rechecks current recipient and issuer authority on every save. Conflicts require
+an explicit reload, and account mode is never changed by the Share dialog.
