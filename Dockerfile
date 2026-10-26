@@ -66,6 +66,7 @@ COPY tools/pages-build/sdk.ts ./tools/pages-build/
 COPY tools/wordcraft-capabilities/ ./tools/wordcraft-capabilities/
 # Explicit C-E acceptance files participate in the root TypeScript graph.
 COPY e2e/wordcraft-ce/ ./e2e/wordcraft-ce/
+COPY tools/wordcraft-ce/ ./tools/wordcraft-ce/
 COPY playwright.wordcraft-ce.config.ts ./
 # The browser instantiates this shared closed model with its own pinned Yjs.
 # Copy only the schema source, without the separate Docs service runtime.
