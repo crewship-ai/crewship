@@ -191,3 +191,7 @@ runs `go vet -tags conformance ./...`, which compiles this test but does not
 execute Chromium. Executing either tagged test set requires the explicit browser
 environment and real static export; missing configuration fails rather than skips.
 `go test -tags conformance ./...` therefore also requires those prerequisites.
+
+`tools/wordcraft-capabilities/generate.mjs` exports the pinned compiled WordCraft
+registry into the shared JSON capability catalog. Its [README](../tools/wordcraft-capabilities/README.md)
+documents canonical inputs, qualification scope and drift checks.

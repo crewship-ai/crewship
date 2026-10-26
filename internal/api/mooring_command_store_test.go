@@ -109,7 +109,7 @@ func newCommandSQLRig(t *testing.T, writer bool) *commandSQLRig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := json.Marshal(map[string]any{"format": commandFormat, "document": "admission-page", "generation": "fixture-generation", "generations": []string{"fixture-generation"}, "revision": 0, "p": map[string]any{}, "history": []any{}, "seen": map[string]any{}, "engine_identity": map[string]any{"revision": commandEngineRevision, "patch_sha256": commandClockPatch, "catalog": "wordcraft-c1-10-v1"}})
+	raw, _ := json.Marshal(map[string]any{"format": commandFormat, "document": "admission-page", "generation": "fixture-generation", "generations": []string{"fixture-generation"}, "revision": 0, "p": map[string]any{}, "history": []any{}, "seen": map[string]any{}, "engine_identity": map[string]any{"revision": commandEngineRevision, "patch_sha256": commandClockPatch, "catalog": commandCatalogIdentity}})
 	p.p = append([]byte(nil), raw...)
 	req := httptest.NewRequest("POST", "/not-a-public-route", nil).WithContext(f.ctx)
 	if err = s.Create(req, commandSQLSnapshot{Checkpoint: raw}); err != nil {

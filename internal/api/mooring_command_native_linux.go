@@ -334,7 +334,7 @@ func nativeAdmission(a commandHostAdmission) map[string]any {
 func (p *commandNativePort) metadata(raw []byte) (commandNativeMetadata, error) {
 	var m commandNativeMetadata
 	e := commandNativeDecode(raw, &m, "runtime_ref", "format", "engine_revision", "engine_sha256", "patch_sha256", "catalog", "checkpoint_json", "revision", "generation")
-	if e != nil || m.RuntimeRef != p.runtime || m.Format != commandFormat || m.EngineRevision != commandEngineRevision || m.EngineSHA256 != p.engineSHA || m.PatchSHA256 != commandClockPatch || m.Catalog != "wordcraft-c1-10-v1" || !commandNativeID(m.Generation) || len(m.CheckpointJSON) == 0 || len(m.CheckpointJSON) > commandNativeFrameLimit || !json.Valid([]byte(m.CheckpointJSON)) {
+	if e != nil || m.RuntimeRef != p.runtime || m.Format != commandFormat || m.EngineRevision != commandEngineRevision || m.EngineSHA256 != p.engineSHA || m.PatchSHA256 != commandClockPatch || m.Catalog != commandCatalogIdentity || !commandNativeID(m.Generation) || len(m.CheckpointJSON) == 0 || len(m.CheckpointJSON) > commandNativeFrameLimit || !json.Valid([]byte(m.CheckpointJSON)) {
 		return m, errCommandStore
 	}
 	return m, nil
@@ -556,7 +556,7 @@ func commandNativeCheckpoint(raw []byte, document, generation string, revision u
 			IDs    []string        `json:"ids"`
 		} `json:"p"`
 	}
-	if json.Unmarshal(canonical, &cp) != nil || cp.Format != commandFormat || cp.Document != document || cp.Generation != generation || cp.Revision != revision || cp.EngineIdentity.Revision != commandEngineRevision || cp.EngineIdentity.Patch != commandClockPatch || cp.EngineIdentity.Catalog != "wordcraft-c1-10-v1" || len(cp.P.Native) > 4<<20 || len(cp.P.IDs) == 0 || len(cp.P.IDs) > 4096 {
+	if json.Unmarshal(canonical, &cp) != nil || cp.Format != commandFormat || cp.Document != document || cp.Generation != generation || cp.Revision != revision || cp.EngineIdentity.Revision != commandEngineRevision || cp.EngineIdentity.Patch != commandClockPatch || cp.EngineIdentity.Catalog != commandCatalogIdentity || len(cp.P.Native) > 4<<20 || len(cp.P.IDs) == 0 || len(cp.P.IDs) > 4096 {
 		return errCommandStore
 	}
 	var native struct {

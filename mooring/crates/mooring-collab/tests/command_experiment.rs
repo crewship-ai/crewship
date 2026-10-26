@@ -846,7 +846,7 @@ fn staged_checkpoint_is_immutable_until_trusted_ack_and_ack_is_idempotent() {
     assert_eq!(staged.document(), "document");
     assert_eq!(staged.generation(), "generation1");
     assert_eq!(staged.format(), "wordcraft-c1-v2");
-    assert_eq!(staged.engine_identity()["catalog"], "wordcraft-c1-10-v1");
+    assert_eq!(staged.engine_identity()["catalog"], "wordcraft-c1-qualified72-v5:9f1cb61f8ffb8e4890001aab1a9a222e327a8e98f4531ef50a7b66e28cc0f0cb");
     assert_ne!(staged.base_checkpoint_digest(), staged.checkpoint_digest());
     // This explicitly SIMULATES a trusted SQL-success callback. No SQL proof.
     let result = h.confirm_committed(&staged, &jana).unwrap();

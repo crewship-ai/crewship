@@ -18,6 +18,9 @@ import (
 	"github.com/crewship-ai/crewship/internal/mooring"
 )
 
+// Exact reviewed generated catalog pin; old-profile documents fail closed.
+const commandCatalogIdentity = "wordcraft-c1-qualified72-v5:9f1cb61f8ffb8e4890001aab1a9a222e327a8e98f4531ef50a7b66e28cc0f0cb"
+
 const commandFormat = "wordcraft-c1-v2"
 const commandEngineRevision = "7ef2633a7e84956522d1ca47b99fe6feef16c1db"
 const commandClockPatch = "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581"
@@ -324,7 +327,7 @@ func (s *collaborationCommandStore) validCheckpoint(snapshot commandSQLSnapshot,
 			Result json.RawMessage `json:"result"`
 		} `json:"seen"`
 	}
-	if json.Unmarshal(snapshot.Checkpoint, &header) != nil || header.Format != commandFormat || header.Document != s.owner.Key.ArtifactID || !mooring.ValidWireIdentifier(header.Generation) || header.Revision != snapshot.Revision || header.EngineIdentity.Revision != commandEngineRevision || header.EngineIdentity.Patch != commandClockPatch || header.EngineIdentity.Catalog != "wordcraft-c1-10-v1" {
+	if json.Unmarshal(snapshot.Checkpoint, &header) != nil || header.Format != commandFormat || header.Document != s.owner.Key.ArtifactID || !mooring.ValidWireIdentifier(header.Generation) || header.Revision != snapshot.Revision || header.EngineIdentity.Revision != commandEngineRevision || header.EngineIdentity.Patch != commandClockPatch || header.EngineIdentity.Catalog != commandCatalogIdentity {
 		return false
 	}
 	if op != "" {

@@ -129,7 +129,7 @@ impl Channel {
     fn metadata(&self) -> Result<Value> {
         let h = self.host.as_ref().ok_or("invalid_state")?;
         Ok(
-            json!({"runtime_ref":self.config.runtime_ref,"format":"wordcraft-c1-v2","engine_revision":expected_engine()["revision"],"engine_sha256":self.config.engine_sha256,"patch_sha256":expected_engine()["patch_sha256"],"catalog":"wordcraft-c1-10-v1","checkpoint_json":String::from_utf8(h.checkpoint()?).map_err(|_|"internal_failure")?,"revision":h.revision(),"generation":h.generation()}),
+            json!({"runtime_ref":self.config.runtime_ref,"format":"wordcraft-c1-v2","engine_revision":expected_engine()["revision"],"engine_sha256":self.config.engine_sha256,"patch_sha256":expected_engine()["patch_sha256"],"catalog":expected_engine()["catalog"],"checkpoint_json":String::from_utf8(h.checkpoint()?).map_err(|_|"internal_failure")?,"revision":h.revision(),"generation":h.generation()}),
         )
     }
     fn stage_value(&self) -> Answer {

@@ -164,11 +164,11 @@ func TestCommandNativeFixtureChild(t *testing.T) {
 }
 func stringFromRaw(raw []byte) string { var s string; _ = json.Unmarshal(raw, &s); return s }
 func fakeNativeCheckpoint(doc, gen string, revision uint64) []byte {
-	raw, _ := json.Marshal(map[string]any{"format": commandFormat, "document": doc, "generation": gen, "revision": revision, "p": map[string]any{"ids": []string{"block-one"}, "native": map[string]any{"body": []any{map[string]any{"type": "paragraph", "text": ""}}}}, "engine_identity": map[string]any{"revision": commandEngineRevision, "patch_sha256": commandClockPatch, "catalog": "wordcraft-c1-10-v1"}})
+	raw, _ := json.Marshal(map[string]any{"format": commandFormat, "document": doc, "generation": gen, "revision": revision, "p": map[string]any{"ids": []string{"block-one"}, "native": map[string]any{"body": []any{map[string]any{"type": "paragraph", "text": ""}}}}, "engine_identity": map[string]any{"revision": commandEngineRevision, "patch_sha256": commandClockPatch, "catalog": commandCatalogIdentity}})
 	return raw
 }
 func fakeNativeMetadata(cp []byte, gen string, revision uint64) map[string]any {
-	return map[string]any{"runtime_ref": "fake-runtime", "format": commandFormat, "engine_revision": commandEngineRevision, "engine_sha256": os.Getenv("C1_FAKE_ENGINE_SHA"), "patch_sha256": commandClockPatch, "catalog": "wordcraft-c1-10-v1", "checkpoint_json": string(cp), "generation": gen, "revision": revision}
+	return map[string]any{"runtime_ref": "fake-runtime", "format": commandFormat, "engine_revision": commandEngineRevision, "engine_sha256": os.Getenv("C1_FAKE_ENGINE_SHA"), "patch_sha256": commandClockPatch, "catalog": commandCatalogIdentity, "checkpoint_json": string(cp), "generation": gen, "revision": revision}
 }
 func fakeNativeConfig(t *testing.T, mode string) commandNativeConfig {
 	t.Helper()

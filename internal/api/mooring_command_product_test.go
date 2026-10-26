@@ -42,7 +42,7 @@ func (p *commandProductFixture) InitialSnapshot(ctx context.Context, document, g
 		<-ctx.Done()
 		return commandSQLSnapshot{}, ctx.Err()
 	}
-	raw, _ := json.Marshal(map[string]any{"format": commandFormat, "document": document, "generation": generation, "generations": []string{generation}, "revision": 0, "p": map[string]any{}, "history": []any{}, "seen": map[string]any{}, "engine_identity": map[string]any{"revision": commandEngineRevision, "patch_sha256": commandClockPatch, "catalog": "wordcraft-c1-10-v1"}})
+	raw, _ := json.Marshal(map[string]any{"format": commandFormat, "document": document, "generation": generation, "generations": []string{generation}, "revision": 0, "p": map[string]any{}, "history": []any{}, "seen": map[string]any{}, "engine_identity": map[string]any{"revision": commandEngineRevision, "patch_sha256": commandClockPatch, "catalog": commandCatalogIdentity}})
 	return commandSQLSnapshot{Checkpoint: raw}, nil
 }
 

@@ -374,3 +374,79 @@ func TestCommandNativeActualSQLSelectionInsertEnterRestore(t *testing.T) {
 		t.Fatal("sequential own offsets reversed text")
 	}
 }
+
+// Actual native engine and SQL, not a browser ribbon/renderer acceptance.
+func TestCommandNativeActualSQLQualified72FormattingAndEnter(t *testing.T) {
+	r := newActualCommandNativeRig(t)
+	req := httptest.NewRequest("POST", "/native-test-only", nil).WithContext(r.f.ctx)
+	steps := []struct {
+		command    string
+		params     map[string]any
+		start, end uint64
+	}{
+		{"text.insert", map[string]any{"text": "Alpha"}, 0, 0},
+		{"format.font", map[string]any{"name": "Arial"}, 1, 3},
+		{"format.size", map[string]any{"size": 18}, 1, 3},
+		{"format.bold", map[string]any{"value": true}, 1, 3},
+		{"para.align", map[string]any{"value": "center"}, 0, 5},
+		{"text.newParagraph", map[string]any{}, 5, 5},
+	}
+	for i, step := range steps {
+		raw, _ := json.Marshal(map[string]any{"op_id": r.generation + ":" + stringUint(uint64(i+1)), "generation": r.generation, "participant": r.actor.actor, "base_revision": uint64(i), "command": step.command, "params": step.params, "target": map[string]any{"block_id": r.block, "unit": "utf8_bytes", "start": step.start, "end": step.end}})
+		out, e := r.s.Submit(req, r.a, r.actor, raw)
+		if e != nil || out.Revision != uint64(i+1) {
+			t.Fatal("actual qualified SQL command", step.command, e)
+		}
+		cp := r.sqlSnapshot(t)
+		if _, e = commandReceiptSelection(out.Receipt, cp.Checkpoint, step.command); e != nil {
+			t.Fatal("native selection not bound to SQL receipt", step.command, e)
+		}
+	}
+	projection, e := r.p.Projection(context.Background())
+	if e != nil {
+		t.Fatal(e)
+	}
+	var native struct {
+		Body []struct {
+			Text  string         `json:"text"`
+			Props map[string]any `json:"props"`
+			Runs  []struct {
+				Len   int            `json:"len"`
+				Props map[string]any `json:"props"`
+			} `json:"runs"`
+		} `json:"body"`
+	}
+	if json.Unmarshal([]byte(projection.NativeJSON), &native) != nil || len(native.Body) != 2 || native.Body[0].Text != "Alpha" || native.Body[1].Text != "" || native.Body[0].Props["align"] != "center" || projection.IDs[0] != r.block || projection.IDs[1] == r.block {
+		t.Fatal("native text/Enter/alignment/IDs", projection.NativeJSON)
+	}
+	offset := 0
+	for _, run := range native.Body[0].Runs {
+		for j := 0; j < run.Len; j++ {
+			selected := offset >= 1 && offset < 3
+			if selected {
+				if run.Props["font"] != "Arial" || run.Props["fontCs"] != "Arial" || run.Props["size"] != float64(18) || run.Props["sizeCs"] != float64(18) || run.Props["bold"] != true || run.Props["boldCs"] != true {
+					t.Fatal("missing actual selected font/size/bold", offset, run.Props)
+				}
+			} else if run.Props["font"] == "Arial" || run.Props["size"] == float64(18) || run.Props["bold"] == true {
+				t.Fatal("format leaked outside selected bytes", offset, run.Props)
+			}
+			offset++
+		}
+	}
+	if offset != 5 {
+		t.Fatal("native runs do not cover text", offset)
+	}
+	cp := r.sqlSnapshot(t)
+	q, e := startCommandNativePort(context.Background(), r.config)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer q.Close()
+	if e = q.RestoreConfirmed(context.Background(), cp); e != nil {
+		t.Fatal(e)
+	}
+	restored, e := q.Projection(context.Background())
+	if e != nil || restored.NativeJSON != projection.NativeJSON || restored.Revision != 6 || restored.IDs[0] != projection.IDs[0] || restored.IDs[1] != projection.IDs[1] {
+		t.Fatal("actual canonical SQL reload changed formatted document", e)
+	}
+}

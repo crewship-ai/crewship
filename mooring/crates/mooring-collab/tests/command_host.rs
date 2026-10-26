@@ -134,7 +134,7 @@ fn actual_private_host_stages_confirms_rejects_and_keeps_status_pure() {
     let m = p.init();
     let before = p.projection();
     assert_eq!(m["format"], "wordcraft-c1-v2");
-    assert_eq!(m["catalog"], "wordcraft-c1-10-v1");
+    assert_eq!(m["catalog"], "wordcraft-c1-qualified72-v5:9f1cb61f8ffb8e4890001aab1a9a222e327a8e98f4531ef50a7b66e28cc0f0cb");
     let request = stage_request(&m, &before, "insert", "Ahoj");
     let stage = p.good(request.clone());
     assert_eq!(stage["state"], "staged");

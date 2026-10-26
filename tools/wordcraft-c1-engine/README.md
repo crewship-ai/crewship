@@ -139,3 +139,26 @@ strings (`{`, `[`, `,`, `:`). The canonical checkpoint bytes used for digest,
 SQL storage and compare-and-swap are never replaced by the validator's output.
 The legacy operation-envelope canonicalization remains unchanged at 1 MiB and
 32,768 structural delimiters; app-command input limits are also unchanged.
+
+
+### Explicit qualified-72 product test profile
+
+The default-off backend test profile imports the generated catalog v5 and permits
+only its 72 `engineQualification.status: qualified` IDs. Product qualification
+flags remain `unqualified`. Parameters use the reviewed closed bounded source
+schemas; fixture evidence covers only the recorded exact parameters/targets,
+not every admitted parameter combination, SQL or native UI behavior. Host controls
+`document.read` and `participant.undo` retain their existing authority paths.
+Unknown, unqualified, global and unresolved commands remain denied. No authority,
+staging, commit, undo or native selection result rule is replaced.
+
+Refresh from the exact reviewed canonical Git revision (working bytes must match):
+
+```sh
+crewship-heavy python3 tools/wordcraft-c1-engine/catalog_snapshot.py --source-root . --source-ref 8f6e907cdd826d3942e8310131b9cd0a219f6f5f
+crewship-heavy python3 tools/wordcraft-c1-engine/catalog_snapshot.py --check
+```
+
+The wire catalog remains a string, now `wordcraft-c1-qualified72-v5:9f1cb61f8ffb8e4890001aab1a9a222e327a8e98f4531ef50a7b66e28cc0f0cb`.
+The full generated catalog digest binds engine fixtures and parameter metadata.
+Old checkpoint identities are refused; there is no conversion or fallback.

@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Allow the 72 generated fixture-qualified WordCraft commands in the default-off C1 backend test profile, with closed parameters and a new exact catalog identity.
+
 - Add a disabled native WordCraft command HTTP controller with immutable viewer fences, confirmed SQL-only projections and bounded current-rights delivery; product startup registration remains separate.
 - Validate private C1 checkpoints and quoted RPC frames with their existing 4MiB/32MiB byte bounds and a fixed bounded JCS structure profile, preserving the legacy command-envelope limits.
 
