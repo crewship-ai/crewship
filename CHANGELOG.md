@@ -11,6 +11,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - WordCraft catalog records isolated C1 engine fixture evidence separately from product qualification. The complete first-group matrix retains unsupported commands as failing tests; engine evidence alone enables no editor command.
 
+- **Idle work polling avoids unnecessary writer transactions.** Empty or not-yet-eligible queues use a fresh read hint; capacity, deadlines and attempt ownership remain checked in the claiming transaction when work is present.
 - ⚠️ **Behaviour change: Host lifecycle hooks require instance administration.** Creating, editing or enabling host commands now requires an instance administrator and appropriate token scope. Existing host hooks are retained but disabled for explicit review after upgrade; restored hooks also require local review. UI and CLI explain how an administrator can review and re-enable them. Live host-hook changes commit atomically with their authorization audit. Shell output capture is bounded while retaining the existing truncation and exit-result behavior. Container hooks and the default lifecycle pause are unchanged.
 - **Guest agent access can inherit from an explicit crew share.** Administrators can share a crew with View or Use through the member-policy API and CLI. View discovers current crew agents; Use also permits Chat and Run, without Delegate or credential access. Revocation, crew retirement and agent moves fence existing attempts. Access screens preserve and display saved crew shares.
 

@@ -113,6 +113,16 @@ var ErrNoWork = errors.New("work: nothing claimable")
 // was just failed in the current transaction and the scan should move on.
 var errAttemptsExhausted = errors.New("work: attempts exhausted")
 
+// Both classes are exhaustive under work_items' schema CHECK. CASE skips the
+// overdue hint scan when eligible work already requires the write transaction.
+const claimPendingQuery = `SELECT CASE
+		WHEN EXISTS (SELECT 1 FROM work_items
+			WHERE state IN ('queued','retry_wait')
+			AND class IN ('chat','background') AND eligible_at <= ?) THEN 1
+		ELSE EXISTS (SELECT 1 FROM work_items
+			WHERE state IN ('queued','retry_wait')
+			AND deadline_at IS NOT NULL AND deadline_at <= ?) END`
+
 // Claim atomically reserves capacity and starts one attempt.
 //
 // Capacity is counted and the row is taken in ONE immediate transaction, so two
@@ -129,6 +139,21 @@ func (s *Store) Claim(ctx context.Context, opts ClaimOptions) (*Claimed, error) 
 	}
 	if opts.Limits == (Limits{}) {
 		opts.Limits = DefaultLimits()
+	}
+
+	// An empty poll need not take SQLite's single writer. This is a fresh,
+	// conservative hint only: overdue rows still require global maintenance,
+	// even when the caller's filters would exclude them. Positive hints take
+	// the unchanged immediate transaction and recheck everything below.
+	var pending bool
+	hintTime := tsformat.Format(s.now().UTC())
+	err := s.db.QueryRowContext(ctx, claimPendingQuery,
+		hintTime, hintTime).Scan(&pending)
+	if err != nil {
+		return nil, fmt.Errorf("work: check pending claim: %w", err)
+	}
+	if !pending {
+		return nil, ErrNoWork
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
