@@ -205,3 +205,34 @@ insert/format undo, both delivery orders, redo and cold restore. These tests use
 synthetic delivery context. Real HTTP/WebSocket admission, host-backed Saved,
 WordApp browser wiring and the two-human-plus-agent acceptance remain separate
 integration gates. Local Save, a candidate or a local role never implies Saved.
+
+## Default-off native-state binding experiment
+
+`experimental_binding::Binding` compares the original engine transaction's
+before/after native state by host-assigned stable block IDs. It reuses the
+existing Yrs header/block/order/text representation and keeps unsupported native
+blocks and document metadata opaque. Character and paragraph properties use
+independent action attributes, with participant-origin `UndoManager` tracking.
+The separately versioned experiment checkpoint is intentionally rejected by the
+production `Document::restore` path. No production adapter or editor default is
+changed.
+
+`reconcile` and `undo` return a `Change` containing the v1 update and its basis.
+`apply_remote` validates an isolated candidate. Concurrent text and formatting
+updates on the same structure can merge. Structural changes require the exact
+basis state, including deletions; every update must match a nonreused structure
+epoch. Concurrent split/join/delete is conservatively refused, leaving the
+original change available for host draft recovery. Moves are unsupported.
+Destructive undo after a remote change is also refused. This is a safety bound,
+not qualification of collaborative Enter or deletion ownership.
+
+The caller must authenticate the participant, qualify authorship and the basis,
+authorize actual effects, persist atomically, and retain rejected drafts.
+`validate_authorship` only checks newly allocated Yrs client IDs; it does not
+prove property-action history ownership or authenticate a delete-only update.
+This module is DATA-only and cannot enable a production wire profile.
+
+The current experiment clones and validates full CRDT state for candidate
+correctness. It retains action keys, retired IDs/blocks and local undo history;
+candidate cost, long-session memory and safe compaction remain unqualified.
+Rust tests do not measure browser input/render latency, IME or durable Saved.

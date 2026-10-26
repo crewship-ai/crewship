@@ -9,6 +9,7 @@ mod checkpoint_wire;
 pub mod command;
 mod core_fields;
 pub mod document_update;
+pub mod experimental_binding;
 pub mod experimental_draft;
 pub mod experimental_human_basis;
 pub mod experimental_human_current;

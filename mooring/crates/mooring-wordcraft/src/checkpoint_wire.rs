@@ -7,9 +7,23 @@ const MAX_ITEMS: u64 = 262_144;
 const MAX_U53: u64 = (1 << 53) - 1;
 
 pub(crate) fn preflight(bytes: &[u8]) -> Result<(), AdapterError> {
-    scan(bytes).ok_or(AdapterError::InvalidCheckpoint)
+    preflight_with_format(bytes, standard_attribute)
 }
-fn scan(bytes: &[u8]) -> Option<()> {
+pub(crate) fn preflight_with_format(
+    bytes: &[u8],
+    attribute: fn(&str, &str) -> bool,
+) -> Result<(), AdapterError> {
+    scan(bytes, attribute).ok_or(AdapterError::InvalidCheckpoint)
+}
+pub(crate) fn standard_attribute(key: &str, value: &str) -> bool {
+    (key == PROPS_PRESENT
+        || CHARACTER_FLAGS
+            .iter()
+            .any(|flag| key.strip_prefix(CHARACTER_PREFIX) == Some(*flag))
+        || format::parse_key(key).is_ok())
+        && matches!(value, "true" | "false" | "null" | "\"inherit\"")
+}
+fn scan(bytes: &[u8], attribute: fn(&str, &str) -> bool) -> Option<()> {
     let mut reader = Reader { bytes, at: 0 };
     let clients = reader.uint(MAX_CLIENTS)?;
     let mut total_items = 0_u64;
@@ -56,20 +70,7 @@ fn scan(bytes: &[u8]) -> Option<()> {
                         4 => u32::try_from(reader.string()?.encode_utf16().count()).ok()? as u64,
                         6 => {
                             let key = reader.string()?;
-                            if key != PROPS_PRESENT
-                                && !CHARACTER_FLAGS
-                                    .iter()
-                                    .any(|flag| key.strip_prefix(CHARACTER_PREFIX) == Some(*flag))
-                                && format::parse_key(key).is_err()
-                            {
-                                return None;
-                            }
-                            // Closed scalar JSON vocabulary: never recurse into
-                            // attacker-selected Any maps/arrays or JSON trees.
-                            if !matches!(
-                                reader.string()?,
-                                "true" | "false" | "null" | "\"inherit\""
-                            ) {
+                            if !attribute(key, reader.string()?) {
                                 return None;
                             }
                             1
