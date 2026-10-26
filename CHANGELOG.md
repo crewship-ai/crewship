@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Explain when a browser cannot support the isolated WordCraft command editor, including iPhone browsers.
+
 - Allow the 72 generated fixture-qualified WordCraft commands in the default-off C1 backend test profile, with closed parameters and a new exact catalog identity.
 - Keep native selection receipts valid when a WordCraft command also returns command-specific metadata.
 

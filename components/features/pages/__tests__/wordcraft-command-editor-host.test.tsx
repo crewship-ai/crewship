@@ -84,3 +84,14 @@ it("uses a distinct fresh reader admission after writer denial and never enables
   expect(mocks.factory.mock.calls[0][3]).toBe(false)
   expect(f.frame.isConnected).toBe(true)
 })
+
+it("explains unsupported isolation before opening a command session or mounting an editor", async () => {
+  delete (HTMLIFrameElement.prototype as { credentialless?: unknown }).credentialless
+  render(<WordCraftCommandEditorHost workspaceId="ws" pageId="page" />)
+  expect(await screen.findByRole("alert")).toHaveTextContent("Tento prohlížeč zatím není podporován")
+  expect(screen.getByRole("status")).toHaveTextContent("Editor unavailable")
+  expect(document.querySelector("iframe")).toBeNull()
+  expect(mocks.open).not.toHaveBeenCalled()
+  expect(mocks.factory).not.toHaveBeenCalled()
+  expect(screen.queryByText("Saved")).toBeNull()
+})
