@@ -1,7 +1,7 @@
 {
   "revision": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
   "engine_source_manifest_sha256": "c6a784cc85d7bce594a0f049e07af79ffa353694f32cde18d04f526c2af1e4dc",
-  "patch_sha256": "1e3169f5438585fc10e6c47725d3a4d84f3bb3f35865c056015f3182c62d4613",
+  "patch_sha256": "b2a2e06cc70260f0e6a5a84b8b53557e8da486179bd504abc0271070fdadceb3",
   "files": {
     "Cargo.toml": {
       "before_sha256": "e7594df0f5f9556f465586bf752eef7fe743740422b6b7d5c4c4f7a97c8146c8",
@@ -25,7 +25,7 @@
     },
     "crates/ui-egui/src/c1_commands.rs": {
       "before_sha256": null,
-      "after_sha256": "b093ce2b6bd9c74265cd0d7779f811ec843b72d7c5f31130223d3a64b6ccf23e"
+      "after_sha256": "8c80a87a1934cc7b0fc4102a14b61296431e11bccfbcdfbad2aa34639e5b69ba"
     },
     "crates/ui-egui/src/keys.rs": {
       "before_sha256": "4ee9013e16669b5ae41d738deda009a11f699a1abd59a14e82f6e055cd35bea7",
@@ -34,7 +34,17 @@
     "crates/ui-egui/src/lib.rs": {
       "before_sha256": "415dd04810687fb94d5738d720914f595fc5e2d3105dc0f0622a00fba4e4b524",
       "after_sha256": "29edd1c23dfd3528579eaeafa06c267418f058b1845308ec1192fd8aca1f0789"
+    },
+    "crates/ui-egui/src/c1_qualified_commands.rs": {
+      "before_sha256": null,
+      "after_sha256": "a8ea828a700892a67bb3abb77354c20b49e15a4434cc38c9755400b866e39dfc"
+    },
+    "crates/ui-egui/src/widgets.rs": {
+      "before_sha256": "0dd49f0179b580f8c6197b9afbc78d9ccd01f0cf899f37feb13de0cfde2ddea1",
+      "after_sha256": "aae5511fb6ab8d80c5f03988fa5c12d02f56ee973ba1d29065940da04b215830"
     }
   },
-  "scope": "Separate C1 renderer and local command seam only; legacy SDK recipe unchanged. No SQL/Saved/live UI qualification."
+  "scope": "Separate C1 renderer and local command seam only; legacy SDK recipe unchanged. No SQL/Saved/live UI qualification.",
+  "capabilities_sha256": "9f1cb61f8ffb8e4890001aab1a9a222e327a8e98f4531ef50a7b66e28cc0f0cb",
+  "qualified_command_count": 72
 }

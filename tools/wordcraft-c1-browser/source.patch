@@ -387,10 +387,10 @@ index 7fa947f..0f2185a 100644
                  wasm_bindgen_futures::spawn_local(async move {
 diff --git a/crates/ui-egui/src/c1_commands.rs b/crates/ui-egui/src/c1_commands.rs
 new file mode 100644
-index 0000000..5a0d054
+index 0000000..f275c58
 --- /dev/null
 +++ b/crates/ui-egui/src/c1_commands.rs
-@@ -0,0 +1,264 @@
+@@ -0,0 +1,272 @@
 +//! Default-off C1 LOCAL command/render seam. Callers own SQL receipts, transport,
 +//! current permissions, operation identity and reconciliation. No local Saved.
 +use crate::WordApp;
@@ -402,6 +402,7 @@ index 0000000..5a0d054
 +use wordcraft_doc::{Document, StoryRef};
 +use wordcraft_engine::{Session, io as native_io};
 +const MAX: usize = 4 * 1024 * 1024;
++include!("c1_qualified_commands.rs");
 +/// Validate the borrowed display input before any copy or selection parse.
 +/// Peer data has no authority to supply an own-operation selection.
 +pub fn validate_confirmed_selection_input(raw: &str, acknowledges_pending: bool) -> Result<(), String> {
@@ -476,19 +477,8 @@ index 0000000..5a0d054
 +            return Err("Undo is not available in this test editor".into());
 +        }
 +        let command = if registry_id == "edit.undo" { "participant.undo" } else { registry_id };
-+        if !matches!(
-+            command,
-+            "document.read"
-+                | "text.insert"
-+                | "text.delete"
-+                | "text.backspace"
-+                | "text.newParagraph"
-+                | "format.bold"
-+                | "format.font"
-+                | "format.size"
-+                | "para.align"
-+                | "participant.undo"
-+        ) || session.registry.get(registry_id).is_none()
++        if (command != "document.read" && C1_QUALIFIED_COMMANDS.binary_search(&command).is_err())
++            || session.registry.get(registry_id).is_none()
 +        {
 +            return Err("unsupported C1 command".into());
 +        }
@@ -558,6 +548,24 @@ index 0000000..5a0d054
 +        )
 +}
 +impl WordApp {
++    /// Existing ribbon widgets can explain unavailable C1 commands without
++    /// reserving input. No additional local dialog or file path is enabled.
++    pub(crate) fn c1_command_disabled_reason(&self, id: &str) -> Option<&'static str> {
++        let bridge = self.c1_commands.as_ref()?;
++        if id == "document.read" || local_navigation(&self.session, id) {
++            return None;
++        }
++        if matches!(id, "edit.undo" | "participant.undo") {
++            return Some("Undo is not available in this test editor");
++        }
++        if C1_QUALIFIED_COMMANDS.binary_search(&id).is_err() {
++            return Some("This command is not available in this test editor");
++        }
++        if bridge.stopped() || bridge.pending() || !(bridge.can_edit)() {
++            return Some("Waiting for the host command result or current permission");
++        }
++        None
++    }
 +    pub fn attach_c1_commands(&mut self, bridge: Rc<CommandBridge>) -> Result<(), String> {
 +        if self.c1_commands.is_some() || self.session.path.is_some() || self.session.dirty {
 +            return Err("C1 requires a fresh native session".into());
@@ -655,6 +663,7 @@ index 0000000..5a0d054
 +        Ok(())
 +    }
 +}
+
 diff --git a/crates/ui-egui/src/keys.rs b/crates/ui-egui/src/keys.rs
 index a3bfd58..218241d 100644
 --- a/crates/ui-egui/src/keys.rs
@@ -793,3 +802,22 @@ index 3a77229..e208827 100644
          let Some(rx) = self.control_rx.take() else { return };
          while let Ok(req) = rx.try_recv() {
              let reply = req.reply.clone();
+diff --git a/crates/ui-egui/src/widgets.rs b/crates/ui-egui/src/widgets.rs
+--- a/crates/ui-egui/src/widgets.rs
++++ b/crates/ui-egui/src/widgets.rs
+@@ -138,3 +138,3 @@
+     } else {
+-        Some(app.session.why_disabled(id).unwrap_or(""))
++        Some(app.c1_command_disabled_reason(id).or_else(|| app.session.why_disabled(id)).unwrap_or(""))
+     };
+@@ -175,2 +175,5 @@
+ pub fn enabled(app: &WordApp, id: &str) -> bool {
++    if app.c1_command_disabled_reason(id).is_some() {
++        return false;
++    }
+     // No document open (#1129): only what opens one, Help and the settings.
+@@ -400,3 +403,3 @@
+     };
+-    let reason = if on { None } else { Some(app.session.why_disabled(id).unwrap_or("")) };
++    let reason = if on { None } else { Some(app.c1_command_disabled_reason(id).or_else(|| app.session.why_disabled(id)).unwrap_or("")) };
+     let (title, notes) = tooltip_lines(tip, &shortcut_text(app, id), "", reason);

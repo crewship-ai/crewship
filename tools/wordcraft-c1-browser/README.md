@@ -2,7 +2,7 @@
 
 This opt-in source recipe prepares WordCraft 7ef2633 with the reviewed C1
 clock/author patch and a separate browser overlay. It does not change the legacy
-668d SDK, its build recipe, the C1 helper, the ten-command catalog, HTTP routes,
+668d SDK, its build recipe, the C1 helper, the canonical command catalog, HTTP routes,
 permissions or delivery authority. The original MIT notice is verified by the
 engine preparation recipe. No renderer artifact is embedded into the product.
 
@@ -10,7 +10,17 @@ The overlay uses the same engine `native_io::open_bytes/save_bytes` codec as the
 helper, with exact lossless validation. Native JSON travels as a string; parsing
 and reserializing it through JavaScript changes numeric representation. Stable
 colon block IDs are replaced with each confirmed projection, including Enter.
-The actual native registry forwards command, original params and UTF8 byte
+The build derives exactly 72 command names from the hash-pinned canonical
+`schemas/wordcraft/capabilities.json`: qualified engine fixtures, exact bounded
+schemas, document candidates and no permanent prohibition. It generates a Rust
+name table; no runtime catalog input or parameter validator is introduced.
+Unknown and unqualified commands are refused before pending input is reserved.
+Existing ribbon enabled/tooltip hooks also mark unavailable document commands
+inactive with a fixed explanation. Existing blocked `ui.*` dialogs are also
+inactive; no dialog/file/import path is newly enabled. Direct qualified
+controls remain subject to their existing native context conditions.
+This qualification allows forwarding; it does not establish browser acceptance
+of all 72 commands. The actual native registry forwards command, original params and UTF8 byte
 selection without optimistic document mutation. Unsupported registry commands
 show a refusal. Undo is explicitly refused before reserving pending input until
 its own receipt can supply a qualified native selection; it never runs local undo.
@@ -35,7 +45,10 @@ This is not a usable rapid-typing/IME/draft solution or live GUI qualification.
 The existing host projection currently omits write-command selection results;
 that integration and draft lifecycle need separate reviewed work.
 
-Prepare into a new owned directory. Run every build/test through the host's
+Prepare into a new owned directory. A source-only checkout without the canonical
+catalog may supply `--capabilities /absolute/catalog.json`; its exact pinned hash
+is still mandatory, and the file is only read during preparation.
+Run every build/test through the host's
 heavy wrapper; use the installed Rust and wasm-bindgen toolchain, never install
 or update tools as part of this recipe:
 
@@ -52,6 +65,7 @@ The fixture driver uses the real helper process over its private inherited FD.
 The Chromium harness loads actual WASM under a routed synthetic origin with no
 server, login or network access. It exercises native codec, registry forwarding,
 UTF8 selection, Enter IDs, no optimistic mutation, explicit pending refusal and
-peer isolation. It does not drive a rendered native canvas or real keyboard,
+peer isolation, and forwarding of all 72 qualified registry identities with
+their catalog fixture parameters. It does not execute those 72 mutations or drive a rendered native canvas or real keyboard,
 IME, SQL, Saved, model runs or human acceptance. Native history is retained but
 is not a qualified participant-undo or local draft implementation.

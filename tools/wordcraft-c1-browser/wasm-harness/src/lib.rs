@@ -57,6 +57,9 @@ impl C1Harness {
         let params = serde_json::from_str(params_json).map_err(|_| "invalid harness params")?;
         serde_json::to_string(&self.app.run(id, params)?).map_err(|_| "harness encode".into())
     }
+    pub fn command_enabled(&self, id: &str) -> bool {
+        wordcraft_ui_egui::widgets::enabled(&self.app, id)
+    }
     pub fn set_selection(&mut self, block: u32, start: usize, end: usize) {
         self.app.session.sel = Selection {
             anchor: Pos {

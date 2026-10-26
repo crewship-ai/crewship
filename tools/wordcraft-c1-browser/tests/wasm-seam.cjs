@@ -3,11 +3,25 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const { chromium } = require('@playwright/test');
 (async () => {
-  const [bindings, fixtureManifest, commandFixture] = process.argv.slice(2);
+  const [bindings, fixtureManifest, commandFixture, capabilitiesPath = path.resolve(__dirname, '../../../schemas/wordcraft/capabilities.json')] = process.argv.slice(2);
   const fixtures = JSON.parse(fs.readFileSync(fixtureManifest));
   const commands = JSON.parse(fs.readFileSync(commandFixture));
+  const spec = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../source.json')));
+  const rawCapabilities = fs.readFileSync(capabilitiesPath);
+  assert.equal(crypto.createHash('sha256').update(rawCapabilities).digest('hex'), spec.capabilities_sha256);
+  const capabilities = JSON.parse(rawCapabilities);
+  const qualified = capabilities.commands.filter(row => row.engineQualification?.status === 'qualified'
+    && row.engineQualification.scope === 'isolated-c1-fixture' && row.effect === 'document-candidate'
+    && row.schemaStatus === 'exact' && row.permanentlyForbidden === false)
+    .map(row => ({id:row.id,params:row.engineQualification.testedParameters}));
+  assert.equal(qualified.length, spec.qualified_command_count);
+  assert.equal(new Set(qualified.map(row => row.id)).size, 72);
+  const allowed = new Set(qualified.map(row => row.id));
+  const inactive = capabilities.commands.find(row => row.effect === 'document-candidate' && !allowed.has(row.id));
+  assert.ok(inactive, 'known unqualified native command required');
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage();
@@ -20,7 +34,7 @@ const { chromium } = require('@playwright/test');
       await route.fulfill({ contentType: basename.endsWith('.wasm') ? 'application/wasm' : 'text/javascript', body: fs.readFileSync(path.join(bindings, basename)) });
     });
     await page.goto('http://c1-fixture.invalid/');
-    const result = await page.evaluate(async ({ fixtures, commands }) => {
+    const result = await page.evaluate(async ({ fixtures, commands, qualified, inactive }) => {
       const { default: init, C1Harness } = await import('/harness.js');
       await init({ module_or_path: '/harness_bg.wasm' });
       const checks = [];
@@ -74,8 +88,28 @@ const { chromium } = require('@playwright/test');
         eq(h.document_identity(), identity, `native_identity_preserved_${i}`);
       }
       eq(JSON.parse(h.captured_json()).length, commands.items.length, 'pending_rejections_capture_nothing');
-      for (const command of ['file.open', 'format.italic', 'edit.redo', 'list.bullet', 'edit.undo']) {
+      yes(h.command_enabled('format.bold'), 'qualified_widget_enabled');
+      yes(h.command_enabled('caret.left'), 'local_navigation_widget_enabled');
+      for (const row of qualified) {
+        const f = new C1Harness(initial, ids(1));
+        const confirmed = f.native_json();
+        f.run_registry(row.id, JSON.stringify(row.params));
+        const captured = JSON.parse(f.captured_json());
+        eq(captured.length, 1, `qualified_capture_once_${row.id}`);
+        const proposal = JSON.parse(captured[0]);
+        eq([proposal.registry_id, proposal.command], [row.id, row.id], `qualified_native_identity_${row.id}`);
+        eq(proposal.params, row.params, `qualified_exact_params_${row.id}`);
+        eq(proposal.target, {block_id:'doc:g1:block:0',unit:'utf8_bytes',start:0,end:0}, `qualified_actual_target_${row.id}`);
+        eq(f.native_json(), confirmed, `qualified_no_optimistic_native_${row.id}`);
+        yes(f.pending(), `qualified_single_pending_${row.id}`);
+        yes(!f.command_enabled('format.bold'), `pending_widget_disabled_${row.id}`);
+        f.free();
+      }
+      for (const command of [...new Set(['file.open', 'edit.redo', 'list.bullet', 'edit.undo', 'ui.dialog', inactive.id, 'c1.unknown'])]) {
+        yes(!h.command_enabled(command), `inactive_widget_${command}`);
         refused(() => h.run_registry(command, '{}'), `closed_catalog_${command}`);
+        eq(JSON.parse(h.captured_json()).length, commands.items.length, `refused_no_capture_${command}`);
+        yes(!h.pending(), `refused_no_pending_${command}`);
       }
       const denied = new C1Harness(initial, ids(1));
       denied.set_allowed(false);
@@ -115,7 +149,7 @@ const { chromium } = require('@playwright/test');
       refused(() => u.run_registry('text.insert', '{"text":"x"}'), 'stopped_refused');
       h.free(); u.free();
       return { checks, count: checks.length, scope: 'actual pinned native registry/codec WASM in Chromium; no keyboard input, pending draft, IME, SQL, Saved or live UI qualification' };
-    }, { fixtures: fixtures.fixtures.map(f => ({ name: f.name, raw: fs.readFileSync(f.path, 'utf8') })), commands });
+    }, { fixtures: fixtures.fixtures.map(f => ({ name: f.name, raw: fs.readFileSync(f.path, 'utf8') })), commands, qualified, inactive });
     console.log(JSON.stringify(result));
   } finally { await browser.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });
