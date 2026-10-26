@@ -161,6 +161,18 @@ for setting in AUTHORITY_SOCKET=authority.sock SERVICE_SOCKET=service.sock SERVI
 done
 check "--documents teardown removes private state" "$([[ -e "$tmp/state/docsok" ]] && echo left || echo gone)" gone
 
+# Mooring is a feature opt-in; it must not replace the owned identity or paths.
+if (cmd_start mooringok --binary "$tmp/bin/fake-crewship" --port "$FAKE_PORT" \
+    --env CREWSHIP_MOORING_ENABLED=true) >"$tmp/mooring.out" 2>"$tmp/mooring.err"; then r=started; else r=refused; fi
+check "Mooring feature opt-in starts an owned throwaway" "$r" started
+if [[ "$r" == started ]]; then
+  check "Mooring opt-in reaches the isolated server" \
+    "$(grep -c '^CREWSHIP_MOORING_ENABLED=true$' "$FAKE_SERVER_ENV" || true)" 1
+  check "Mooring opt-in keeps owned data path" \
+    "$(grep -c "^CREWSHIP_DATA_DIR=$tmp/state/mooringok/data$" "$FAKE_SERVER_ENV" || true)" 1
+  cmd_stop mooringok >/dev/null
+fi
+
 cmd_start envok --binary "$tmp/bin/fake-crewship" --port "$FAKE_PORT" \
   --env CREWSHIP_PAGE_BUILD_IMAGE=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
   --env CREWSHIP_RATELIMIT_DISABLED=1 --env CREWSHIP_ALLOW_SIGNUP=true \
@@ -170,6 +182,8 @@ check "allowlisted --env reaches the server process" \
   "$(grep -c '^CREWSHIP_PAGE_BUILD_IMAGE=sha256:0000' "$FAKE_SERVER_ENV")" 1
 check "signup + public-URL feature settings reach the server process" \
   "$(grep -cE "^(CREWSHIP_ALLOW_SIGNUP=true|CREWSHIP_NEXTJS_URL=http://localhost:$FAKE_PORT)\$" "$FAKE_SERVER_ENV")" 2
+check "Mooring remains absent without explicit opt-in" \
+  "$(grep -c '^CREWSHIP_MOORING_ENABLED=' "$FAKE_SERVER_ENV" || true)" 0
 check "fixed identity keys still reach the server process" \
   "$(grep -c "^CREWSHIP_DATA_DIR=$tmp/state/envok/data" "$FAKE_SERVER_ENV")" 1
 check "--page-projects config lands under the instance dir" \
