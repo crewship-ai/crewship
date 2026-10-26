@@ -51,3 +51,20 @@ crewship-heavy env WORDCRAFT_SOURCE=/absolute/owned/pinned/source pnpm exec vite
 Run it for every engine or registry update. Ordinary offline CI checks cannot
 observe changes in an external engine checkout; they check the exported registry
 and catalog for internal consistency. Neither check qualifies a feature.
+
+Source-reviewed parameter profiles live in `parameter-profiles.json`. They are
+closed, bounded **catalog input profiles**, not a claim to describe every
+permissive/coercing input accepted upstream. The command inventory and original
+parameter descriptions still come only from the compiled registry. Each reviewed
+profile pins its descriptor digest and implementation-file digests; drift fails
+generation. `schemaStatus: exact` describes the emitted supported profile;
+`schemaCoverage: bounded-source-profile` makes its narrower scope explicit.
+For example, list level values that upstream silently clamps are rejected outside
+the emitted bounds, and nested unknown fields are rejected rather than ignored.
+
+Profiles do not qualify commands. In particular, list schemas are available while
+C1 still refuses the corresponding commands. Qualification must run the actual
+C1 host and must not substitute a direct engine call for host target/revision,
+rejected-commit restoration or participant undo. The existing frontend's small
+scalar validator also needs a real JSON Schema adapter before using enums, unions,
+nested objects or arrays; ignoring those constraints is not valid profile checking.

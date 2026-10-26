@@ -4,7 +4,7 @@
     "repository": "https://github.com/storytold/wordcraft",
     "sha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db"
   },
-  "version": "wordcraft:7ef2633a7e84956522d1ca47b99fe6feef16c1db:1",
+  "version": "wordcraft:7ef2633a7e84956522d1ca47b99fe6feef16c1db:2",
   "sourceIdentity": [
     {
       "path": "crates/doc/src/bidi.rs",
@@ -5221,8 +5221,161 @@
       "location": "Home › Paragraph › Multilevel List",
       "shortcut": "",
       "parameterDescriptor": "{\"levels\": [{\"format\"?: \"decimal|lowerLetter|upperLetter|lowerRoman|upperRoman|decimalZero|ordinal|bullet|none\", \"text\"?: \"%1.%2.\" (%n = level n's number; the bullet character for bullet), \"start\"?: n, \"restartAfter\"?: 0-8 (0 = never; omit = the level above), \"style\"?: paragraph style linked to the level | null, \"align\"?: \"left|center|right\", \"alignedAt\"?: pt, \"indentAt\"?: pt, \"follow\"?: \"tab|space|nothing\", \"tabAt\"?: pt | null, \"font\"?: string | null, \"bold\"?: bool, \"italic\"?: bool, \"color\"?: \"RRGGBB\" | null, \"legal\"?: bool}, …] (index = level, up to 9; fields left out keep the base list's), \"num\"?: list id to change in place (default: a new list), \"apply\"?: bool (default true: number the selected paragraphs), \"name\"?: string}",
-      "parameterSchema": false,
-      "schemaStatus": "unresolved",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "levels": {
+            "type": "array",
+            "maxItems": 9,
+            "items": {
+              "type": "object",
+              "properties": {
+                "format": {
+                  "type": "string",
+                  "enum": [
+                    "decimal",
+                    "lowerLetter",
+                    "upperLetter",
+                    "lowerRoman",
+                    "upperRoman",
+                    "decimalZero",
+                    "ordinal",
+                    "bullet",
+                    "none"
+                  ]
+                },
+                "text": {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                "start": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 32767
+                },
+                "restartAfter": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "style": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 253
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "align": {
+                  "type": "string",
+                  "enum": [
+                    "left",
+                    "center",
+                    "right"
+                  ]
+                },
+                "alignedAt": {
+                  "type": "number",
+                  "minimum": -1584,
+                  "maximum": 1584
+                },
+                "indentAt": {
+                  "type": "number",
+                  "minimum": -1584,
+                  "maximum": 1584
+                },
+                "follow": {
+                  "type": "string",
+                  "enum": [
+                    "tab",
+                    "space",
+                    "nothing"
+                  ]
+                },
+                "tabAt": {
+                  "anyOf": [
+                    {
+                      "type": "number",
+                      "minimum": -1584,
+                      "maximum": 1584
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "font": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 64
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "bold": {
+                  "type": "boolean"
+                },
+                "italic": {
+                  "type": "boolean"
+                },
+                "color": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[0-9A-Fa-f]{6}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "legal": {
+                  "type": "boolean"
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "num": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4294967295
+          },
+          "apply": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "levels"
+        ],
+        "additionalProperties": false
+      },
+      "schemaStatus": "exact",
+      "schemaCoverage": "bounded-source-profile",
+      "schemaEvidence": [
+        {
+          "path": "crates/engine/src/cmd/lists.rs",
+          "sha256": "1d13f6c42a219967bf482f80d6a5898ab2c488e965b3d576dd3b217fe5b9a4ae"
+        }
+      ],
       "group": "lists",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
@@ -5234,8 +5387,26 @@
       "location": "Home › Paragraph › Multilevel List",
       "shortcut": "",
       "parameterDescriptor": "{\"num\"?: list id (default: the caret's list)} → {\"num\", \"levels\": [as list.define]}",
-      "parameterSchema": false,
-      "schemaStatus": "unresolved",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "num": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4294967295
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "schemaStatus": "exact",
+      "schemaCoverage": "bounded-source-profile",
+      "schemaEvidence": [
+        {
+          "path": "crates/engine/src/cmd/lists.rs",
+          "sha256": "1d13f6c42a219967bf482f80d6a5898ab2c488e965b3d576dd3b217fe5b9a4ae"
+        }
+      ],
       "group": "lists",
       "effect": "non-document-unreviewed",
       "permanentlyForbidden": false,
@@ -5247,8 +5418,32 @@
       "location": "Home › Paragraph › Multilevel List",
       "shortcut": "",
       "parameterDescriptor": "{\"preset\": \"headings\" (1 / 1.1 / 1.1.1) | \"article\" (Article I. / Section 1.01 / (a)) | \"outlineHeadings\" (I. / A. / 1.) | \"chapter\" (Chapter 1, lower levels unnumbered)} — a new list whose nine levels are linked to Heading 1–9: every paragraph in those styles is numbered, selected paragraphs already in a Heading style keep it, and any other selected paragraph becomes Heading 1 (the first level)",
-      "parameterSchema": false,
-      "schemaStatus": "unresolved",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "preset": {
+            "type": "string",
+            "enum": [
+              "headings",
+              "article",
+              "outlineHeadings",
+              "chapter"
+            ]
+          }
+        },
+        "required": [
+          "preset"
+        ],
+        "additionalProperties": false
+      },
+      "schemaStatus": "exact",
+      "schemaCoverage": "bounded-source-profile",
+      "schemaEvidence": [
+        {
+          "path": "crates/engine/src/cmd/lists.rs",
+          "sha256": "1d13f6c42a219967bf482f80d6a5898ab2c488e965b3d576dd3b217fe5b9a4ae"
+        }
+      ],
       "group": "lists",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
@@ -6162,8 +6357,39 @@
       "location": "Home › Paragraph",
       "shortcut": "Mod+Shift+L",
       "parameterDescriptor": "{\"kind\"?: \"bullet\" | single char, \"off\"?: bool}",
-      "parameterSchema": false,
-      "schemaStatus": "unresolved",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "bullet"
+                ]
+              },
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1
+              }
+            ]
+          },
+          "off": {
+            "type": "boolean"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "schemaStatus": "exact",
+      "schemaCoverage": "bounded-source-profile",
+      "schemaEvidence": [
+        {
+          "path": "crates/engine/src/cmd/para.rs",
+          "sha256": "d7805f023406fc66830c7d0695c0a591797470ca5079e4d5ccc9b86b5fbaf3fd"
+        }
+      ],
       "group": "lists",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
@@ -6452,8 +6678,28 @@
       "location": "Home › Paragraph › Bullets",
       "shortcut": "",
       "parameterDescriptor": "{\"level\": 0-8}",
-      "parameterSchema": false,
-      "schemaStatus": "unresolved",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "level": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 8
+          }
+        },
+        "required": [
+          "level"
+        ],
+        "additionalProperties": false
+      },
+      "schemaStatus": "exact",
+      "schemaCoverage": "bounded-source-profile",
+      "schemaEvidence": [
+        {
+          "path": "crates/engine/src/cmd/para.rs",
+          "sha256": "d7805f023406fc66830c7d0695c0a591797470ca5079e4d5ccc9b86b5fbaf3fd"
+        }
+      ],
       "group": "lists",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
@@ -6542,8 +6788,35 @@
       "location": "Home › Paragraph",
       "shortcut": "",
       "parameterDescriptor": "{\"kind\"?: \"numbered|numberedParen|upperLetter|lowerLetter|lowerRoman|outline\", \"off\"?: bool}",
-      "parameterSchema": false,
-      "schemaStatus": "unresolved",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "numbered",
+              "numberedParen",
+              "upperLetter",
+              "lowerLetter",
+              "lowerRoman",
+              "outline"
+            ]
+          },
+          "off": {
+            "type": "boolean"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "schemaStatus": "exact",
+      "schemaCoverage": "bounded-source-profile",
+      "schemaEvidence": [
+        {
+          "path": "crates/engine/src/cmd/para.rs",
+          "sha256": "d7805f023406fc66830c7d0695c0a591797470ca5079e4d5ccc9b86b5fbaf3fd"
+        }
+      ],
       "group": "lists",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
@@ -6739,8 +7012,28 @@
       "location": "Home › Paragraph › Numbering",
       "shortcut": "",
       "parameterDescriptor": "{\"value\": n}",
-      "parameterSchema": false,
-      "schemaStatus": "unresolved",
+      "parameterSchema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "schemaStatus": "exact",
+      "schemaCoverage": "bounded-source-profile",
+      "schemaEvidence": [
+        {
+          "path": "crates/engine/src/cmd/tools.rs",
+          "sha256": "d15cbb9c8dfe62b4d5a0b838fdabcb8aa20c9fe52c50d9d814541584e445ec1a"
+        }
+      ],
       "group": "lists",
       "effect": "document-candidate",
       "permanentlyForbidden": false,
