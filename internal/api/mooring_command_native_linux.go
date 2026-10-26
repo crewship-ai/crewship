@@ -136,7 +136,9 @@ func startCommandNativePort(ctx context.Context, c commandNativeConfig) (*comman
 	}
 	p := &commandNativePort{conn: conn, cmd: cmd, done: make(chan struct{}), slot: make(chan struct{}, 1), runtime: c.RuntimeRef, engineSHA: c.EngineSHA256}
 	p.slot <- struct{}{}
+	finish := beginBackgroundWork()
 	go func() {
+		defer finish()
 		_ = cmd.Wait()
 		p.mu.Lock()
 		p.failed = true
