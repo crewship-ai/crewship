@@ -11,7 +11,10 @@ use mooring_text::yrs::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map as JsonMap, Value};
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::{
+    collections::{BTreeMap, BTreeSet, HashSet},
+    sync::Arc,
+};
 
 const FORMAT: &str = "wordcraft.yrs-binding-experiment.v1";
 const STRUCTURE: &str = "wordcraft.binding.structure";
@@ -126,7 +129,12 @@ impl Binding {
         let mut undo = UndoManager::with_options(mooring_text::yrs::undo::Options {
             capture_timeout_millis: 0,
             tracked_origins: HashSet::from([Origin::from(ClientID::new(origin))]),
-            ..Default::default()
+            capture_transaction: None,
+            // Every outer transaction is a separate undo item; no platform
+            // wall-clock implementation is required (including on WASM).
+            timestamp: Arc::new(|| 0_u64),
+            init_undo_stack: vec![],
+            init_redo_stack: vec![],
         });
         for name in ["wordcraft.blocks", "wordcraft.texts", PARAGRAPHS] {
             let root = document.doc.get_or_insert_map(name);
