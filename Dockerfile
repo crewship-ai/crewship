@@ -53,12 +53,15 @@ COPY public/ ./public/
 # Shared JSON contracts are imported by the UI; exclude their Go sources.
 COPY config/*.json ./config/
 COPY schemas/*.json ./schemas/
+COPY schemas/wordcraft/ ./schemas/wordcraft/
 COPY internal/pages/content_types.json ./internal/pages/
 COPY e2e/ ./e2e/
 COPY mooring/protocol/generated/ts/ ./mooring/protocol/generated/ts/
 COPY mooring/client/ ./mooring/client/
 COPY scripts/prepare-pdf-assets.mjs scripts/prepare-chat-workers.mjs scripts/check-control-accessibility.tsx ./scripts/
 COPY tools/pages-build/sdk.ts ./tools/pages-build/
+# Standalone registry tooling is also part of the root TypeScript input graph.
+COPY tools/wordcraft-capabilities/ ./tools/wordcraft-capabilities/
 # The browser instantiates this shared closed model with its own pinned Yjs.
 # Copy only the schema source, without the separate Docs service runtime.
 COPY tools/docs-service/schema-core.mjs ./tools/docs-service/
