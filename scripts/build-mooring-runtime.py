@@ -302,6 +302,39 @@ def prepare_editor_inputs(temp):
     return native, fonts, metadata
 
 
+def bundle_bindgen_snippets(native_output, output):
+    # Editor origins deliberately serve only flat, manifest-verified names.
+    # wasm-bindgen emits inline JS in snippets/; include those leaf modules and
+    # rewrite both static imports and the generated import map to their flat names.
+    module = (native_output / 'wordcraft_web.js').read_text()
+    imports = {name for _, name in re.findall(r'''(['"])(\./snippets/[^'"\r\n]+)\1''', module)}
+    if len(imports) > 512:
+        raise ValueError('too many wasm-bindgen snippets')
+    for name in sorted(imports):
+        parts = name[2:].split('/')
+        if (not name.endswith('.js') or any(part in ('.', '..') or
+                not re.fullmatch(r'[A-Za-z0-9_.-]+', part) for part in parts)):
+            raise ValueError('invalid wasm-bindgen snippet path')
+        source = native_output
+        for part in parts:
+            source = source / part
+            if source.is_symlink():
+                raise ValueError('linked wasm-bindgen snippet input')
+        if not source.is_file() or source.stat().st_size > 64 * 1024 * 1024:
+            raise ValueError('missing or oversized wasm-bindgen snippet')
+        body = source.read_bytes()
+        if re.search(r'''["']\.{1,2}/''', body.decode('utf-8')):
+            raise ValueError('non-leaf wasm-bindgen snippet')
+        flat = 'wasm-snippet-' + hashlib.sha256(name.encode() + b'\0' + body).hexdigest() + '.js'
+        (output / flat).write_bytes(body)
+        for quote in ("'", '"'):
+            module = module.replace(quote + name + quote, quote + './' + flat + quote)
+    if './snippets/' in module:
+        raise ValueError('unsupported wasm-bindgen snippet reference')
+    if imports:
+        (output / 'wordcraft_web.js').write_text(module)
+
+
 def assemble_editor(sha, native, fonts, metadata, native_output, sdk, child, licenses, output, config,
                     native_inventory=('wordcraft-native-inventory.json', 'wordcraft-native-license-inventory.json'),
                     additional_inventories=(), provenance_extra=None):
@@ -314,6 +347,7 @@ def assemble_editor(sha, native, fonts, metadata, native_output, sdk, child, lic
         shutil.copyfile(source, output / name)
     for name in ('wordcraft_web.js', 'wordcraft_web_bg.wasm'):
         copy(native_output / name, name)
+    bundle_bindgen_snippets(native_output, output)
     for name in ('mooring_wordcraft_client.js', 'mooring_wordcraft_client_bg.wasm'):
         copy(sdk / name, name)
     copy(child, 'child.js')

@@ -4,6 +4,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import tarfile
 import tempfile
@@ -219,6 +220,62 @@ class NativeLicenseTests(unittest.TestCase):
                 with patch.object(build, 'ROOT', Path(temp)):
                     with self.assertRaises(ValueError):
                         build.collect_native_licenses(destination, native, {'base':'b'*40,'patch_sha256':'c'*64}, metadata)
+
+
+class EditorAssemblyTests(unittest.TestCase):
+    def assemble(self, root, problem=None):
+        native, compiled, sdk, fonts, licenses = [root/name for name in ('native','compiled','sdk','fonts','licenses')]
+        files = {
+            'native/apps/wordcraft-web/index.html': '<body></body>',
+            'native/LICENSE-MIT': 'MIT', 'native/NOTICE': 'notice', 'native/ATTRIBUTION.md': 'authors',
+            'compiled/wordcraft_web.js': 'import * as a from "./snippets/eframe-pin/inline0.js";\nconst imports={"./snippets/eframe-pin/inline0.js":a};\n',
+            'compiled/wordcraft_web_bg.wasm': 'wasm',
+            'compiled/snippets/eframe-pin/inline0.js': 'export function activate() {}\n',
+            'sdk/mooring_wordcraft_client.js': 'sdk', 'sdk/mooring_wordcraft_client_bg.wasm': 'wasm',
+            'fonts/fonts/manifest.txt': 'fonts', 'fonts/provenance.json': '{"files":[]}',
+            'licenses/manifest.json': '[]', 'licenses/wordcraft-native-inventory.json': '{}',
+            'LICENSE': 'Apache', 'NOTICE': 'notice', 'mooring/licenses/inventory.json': '{}', 'child.js': 'child',
+        }
+        for name, content in files.items():
+            path = root/name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content)
+        snippet = compiled/'snippets/eframe-pin/inline0.js'
+        if problem == 'missing':
+            snippet.unlink()
+        elif problem == 'link':
+            snippet.unlink()
+            snippet.symlink_to(root/'LICENSE')
+        elif problem == 'traversal':
+            (compiled/'wordcraft_web.js').write_text('import "./snippets/../../LICENSE";')
+        elif problem == 'dependency':
+            snippet.write_text('export {x} from "./missing.js";')
+        with patch.object(build, 'ROOT', root):
+            bundle_digest = build.assemble_editor('a'*40, native, fonts,
+                {'base':'b'*40, 'patch_sha256':'c'*64, 'native_patch_commit':'d'*40},
+                compiled, sdk, root/'child.js', licenses, root/'bundle',
+                {'rust_version':'pinned', 'tools':{'wasm-bindgen':{'version':'pinned'}, 'binaryen':{'version':'pinned'}}})
+        return root/'bundle', bundle_digest
+
+    def test_compiled_module_imports_are_in_the_verified_flat_bundle(self):
+        with tempfile.TemporaryDirectory() as temp:
+            bundle, digest = self.assemble(Path(temp))
+            manifest = json.loads((bundle/'manifest.json').read_text())
+            self.assertEqual(build.digest(bundle/'manifest.json'), digest)
+            module = (bundle/'wordcraft_web.js').read_text()
+            self.assertNotIn('./snippets/', module)
+            imports = set(re.findall(r'["\']\./([^"\']+\.js)["\']', module))
+            self.assertEqual(len(imports), 1)
+            for name in imports:
+                self.assertNotIn('/', name)
+                self.assertEqual(manifest['files'][name], build.digest(bundle/name))
+                self.assertEqual((bundle/name).read_text(), 'export function activate() {}\n')
+
+    def test_incomplete_or_escaping_module_graph_is_not_released(self):
+        for problem in ('missing', 'link', 'traversal', 'dependency'):
+            with self.subTest(problem=problem), tempfile.TemporaryDirectory() as temp:
+                with self.assertRaises(ValueError):
+                    self.assemble(Path(temp), problem)
 
 
 class CommandAssetBuildTests(unittest.TestCase):
