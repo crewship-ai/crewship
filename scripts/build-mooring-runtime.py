@@ -305,9 +305,12 @@ def prepare_editor_inputs(temp):
 def bundle_bindgen_snippets(native_output, output):
     # Editor origins deliberately serve only flat, manifest-verified names.
     # wasm-bindgen emits inline JS in snippets/; include those leaf modules and
-    # rewrite both static imports and the generated import map to their flat names.
+    # rewrite only ES import URLs. The generated import-map keys are WASM ABI
+    # module names, not fetch URLs, and must remain byte-for-byte unchanged.
     module = (native_output / 'wordcraft_web.js').read_text()
-    imports = {name for _, name in re.findall(r'''(['"])(\./snippets/[^'"\r\n]+)\1''', module)}
+    import_pattern = re.compile(r'''(?m)^([ \t]*import[ \t]+(?:[^\r\n]*?\bfrom[ \t]+)?)(['"])(\./snippets/[^'"\r\n]+)\2''')
+    imports = {match.group(3) for match in import_pattern.finditer(module)}
+    replacements = {}
     if len(imports) > 512:
         raise ValueError('too many wasm-bindgen snippets')
     for name in sorted(imports):
@@ -327,9 +330,10 @@ def bundle_bindgen_snippets(native_output, output):
             raise ValueError('non-leaf wasm-bindgen snippet')
         flat = 'wasm-snippet-' + hashlib.sha256(name.encode() + b'\0' + body).hexdigest() + '.js'
         (output / flat).write_bytes(body)
-        for quote in ("'", '"'):
-            module = module.replace(quote + name + quote, quote + './' + flat + quote)
-    if './snippets/' in module:
+        replacements[name] = './' + flat
+    module = import_pattern.sub(lambda match: match.group(1) + match.group(2) +
+        replacements[match.group(3)] + match.group(2), module)
+    if re.search(r'''(?m)^[ \t]*import[^\r\n]*['"]\./snippets/''', module):
         raise ValueError('unsupported wasm-bindgen snippet reference')
     if imports:
         (output / 'wordcraft_web.js').write_text(module)
