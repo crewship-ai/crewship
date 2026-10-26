@@ -1,8 +1,12 @@
 package api
 
 import (
+	"bytes"
+	"os"
+
 	"encoding/json"
 	"fmt"
+	"github.com/santhosh-tekuri/jsonschema/v5"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -69,11 +73,43 @@ func TestCrewGrantHTTPReadsAreFilteredAndBounded(t *testing.T) {
 		}
 		return rr
 	}
+	raw, err := os.ReadFile("openapi.gen.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiler := jsonschema.NewCompiler()
+	if err := compiler.AddResource("spec.json", bytes.NewReader(raw)); err != nil {
+		t.Fatal(err)
+	}
+	schemas := map[string]*jsonschema.Schema{}
+	for _, name := range []string{"CrewList", "CrewRead", "CrewAccessMe"} {
+		schemas[name], err = compiler.Compile("spec.json#/components/schemas/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	checkSchema := func(name string, rr *httptest.ResponseRecorder) {
+		t.Helper()
+		var body any
+		if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if err := schemas[name].Validate(body); err != nil {
+			t.Fatalf("actual %s: %v", name, err)
+		}
+		if object, ok := body.(map[string]any); ok {
+			delete(object, map[string]string{"CrewRead": "id", "CrewAccessMe": "crew_id"}[name])
+			if err := schemas[name].Validate(object); err == nil {
+				t.Fatalf("%s accepted missing identity", name)
+			}
+		}
+	}
 	// Warm authentication once; compare complete HTTP query counts at 1 vs31.
 	call("crew-reader", "GET", "/api/v1/crews", 200)
 	counter.Reset()
 	rr := call("crew-reader", "GET", "/api/v1/crews", 200)
 	queries := counter.Count()
+	checkSchema("CrewList", rr)
 	if queries == 0 {
 		t.Fatal("SQL counter did not observe HTTP reads")
 	}
@@ -104,10 +140,12 @@ func TestCrewGrantHTTPReadsAreFilteredAndBounded(t *testing.T) {
 		t.Fatal("secret description affected search")
 	}
 	rr = call("crew-reader", "GET", "/api/v1/crews/crew-visible", 200)
+	checkSchema("CrewRead", rr)
 	if !strings.Contains(rr.Body.String(), "visible-agent") {
 		t.Fatal("missing safe agent identity")
 	}
 	rr = call("crew-reader", "GET", "/api/v1/crews/crew-visible/access/me", 200)
+	checkSchema("CrewAccessMe", rr)
 	var explanation struct {
 		Actions map[string]accessMeDecision `json:"actions"`
 	}

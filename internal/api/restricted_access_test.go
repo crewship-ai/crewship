@@ -85,6 +85,11 @@ func testRestrictedReadAuthority(t *testing.T, role string) {
 		if rr.Code != 200 || !strings.Contains(rr.Body.String(), user+"-private-canary") || strings.Contains(rr.Body.String(), other+"-private-canary") || rr.Header().Get("X-Total-Count") != "1" {
 			t.Fatalf("own list %s: %d %s", user, rr.Code, rr.Body.String())
 		}
+		// An agent share must not reveal its parent crew or other crews.
+		crews := request(user, "GET", "/api/v1/crews")
+		if crews.Code != 200 || strings.TrimSpace(crews.Body.String()) != "[]" || crews.Header().Get("X-Total-Count") != "0" {
+			t.Fatalf("ungranted crew list: %d %s", crews.Code, crews.Body.String())
+		}
 		for _, path := range []string{
 			"/api/v1/agents/access-b/chats", "/api/v1/agents/access-a/runs",
 			"/api/v1/agents/access-a/files", "/api/v1/agents/access-a/logs",
@@ -99,7 +104,7 @@ func testRestrictedReadAuthority(t *testing.T, role string) {
 			"/api/v1/workspaces/" + workspace + "/pipelines/hidden-routine",
 			"/api/v1/pages", "/api/v1/pages/hidden-page",
 			"/api/v1/credentials", "/api/v1/credentials/hidden-credential",
-			"/api/v1/crews", "/api/v1/agents/access-a/memory",
+			"/api/v1/crews/access-crew", "/api/v1/crews/access-crew/access/me", "/api/v1/agents/access-a/memory",
 		} {
 			rr = request(user, "GET", path)
 			if rr.Code != http.StatusNotFound {
