@@ -54,12 +54,13 @@ var conditionalSpecRoutes = map[string][]string{
 	// i.e. a real server boot, never a bare NewRouter.
 	"/api/v1/webhooks/{crewId}/{agentId}/trigger": {"POST"},
 	// router_mooring_collab.go: default-off and requires verified runtime assets.
-	// The enabled Linux fixture asserts all four exact registrations and the same
+	// The enabled Linux fixture asserts all five exact registrations and the same
 	// generated operations; disabled/startup-failure fixtures require zero routes.
-	"/api/v1/pages/{slug}/mooring/session":    {"POST"},
-	"/api/v1/pages/{slug}/mooring/ws":         {"GET"},
-	"/api/v1/pages/{slug}/mooring/provenance": {"GET"},
-	"/api/v1/pages/{slug}/mooring/tasks":      {"POST"},
+	"/api/v1/pages/{slug}/mooring/session":             {"POST"},
+	"/api/v1/pages/{slug}/mooring/session/reauthorize": {"POST"},
+	"/api/v1/pages/{slug}/mooring/ws":                  {"GET"},
+	"/api/v1/pages/{slug}/mooring/provenance":          {"GET"},
+	"/api/v1/pages/{slug}/mooring/tasks":               {"POST"},
 }
 
 // loadGeneratedSpec reads the embedded spec as path -> set of upper-case
