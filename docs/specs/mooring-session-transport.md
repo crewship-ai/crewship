@@ -234,3 +234,23 @@ checkpoints and operation receipts remain authoritative. Legacy payload
 adapters refuse this profile even when command support is disabled; they never
 convert or delete its bytes. The store interface alone registers no route and
 does not qualify a native engine, agent mandate or editor transport.
+
+The opt-in Go command port starts only an operator-selected host and exact
+engine executable over an inherited Unix stream, with a cleared environment
+and no listener. The closed protocol uses length-prefixed JSON up to 32 MiB,
+one bounded in-flight request, and exact correlation. The 30-second per-call
+ceiling never replaces the existing five-second total Open budget: the
+future factory must pass one shorter context across startup and init/restore.
+Expired caller contexts cannot obtain a fresh per-call budget. Transport/protocol
+uncertainty poisons the process; it never retries an RPC. Staged handles bind
+to that port and immutable candidate bytes. Confirmation requires the SQL
+bridge's actual commit, and restore accepts only canonical SQL state with a
+fresh generation. The SQL checkpoint cap remains 4 MiB; no history is trimmed
+to fit it. No public route or default-enabled process factory is registered.
+
+Native/SQL integration tests require explicit `CREWSHIP_C1_HOST_BINARY` and
+`CREWSHIP_C1_ENGINE_BINARY` public-source build outputs. Without both they
+self-skip, which supplies no native qualification evidence. Process-double
+fault tests are separate from these actual pinned-engine tests. A future
+factory must retain the per-document executable by its persisted digest, or
+refuse to open it; rebuilding the backend never upgrades a document's pin.
