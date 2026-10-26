@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **[Resource Access v1](docs/security/rbac.mdx#resource-access-v1)** delivers Guest/restricted mode, per-object agent/routine/project sharing, crew View/Use presets and trusted Manage with ordinary membership controls, existing Pages ACL, Publish in UI/API/CLI, and atomic chained audit with sealed keyring, rotation, verification and alerts. Credential grants, crew/workspace recipients, the complete inherited Access card/grid, universal GET/stream/query-count guards, unified Pages grants and Guest published-routine execution remain deferred to v1.1; the documented absence of a universal leak guard is an accepted release limitation.
+
 - **Explicit crew managers can use ordinary member controls.** A live trusted Manage share enables adding and removing ordinary crew members in Settings. Role editing and removal of explicit crew roles remain administrator controls. Failed access checks and context switches withdraw grant-based controls.
 
 - **Crew sharing can create explicit trusted Manage grants.** The crew Share dialog and person Access editor offer Manage to trusted MEMBER/MANAGER recipients, preserves account mode and other grants, and keeps inactive shares visible for revocation after role changes. Guest shares remain View/Use; Manage does not assign roles or expose credentials.
