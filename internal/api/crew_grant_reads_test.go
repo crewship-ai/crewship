@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/testutil"
@@ -54,6 +55,10 @@ func TestCrewGrantHTTPReadsAreFilteredAndBounded(t *testing.T) {
 		req.Header.Set("X-Workspace-ID", workspace)
 		rr := httptest.NewRecorder()
 		router.ServeHTTP(rr, req)
+		// Include the registered asynchronous token-use write in each sample.
+		if !waitForBackgroundWork(5 * time.Second) {
+			t.Fatal("token-use bookkeeping did not finish")
+		}
 		if rr.Code != want {
 			t.Fatalf("%s %s: got%d want%d %s", method, path, rr.Code, want, rr.Body.String())
 		}
