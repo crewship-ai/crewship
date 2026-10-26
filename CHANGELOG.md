@@ -9,7 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Crew sharing can create explicit trusted Manage grants.** The crew Share dialog offers Manage to trusted MEMBER/MANAGER recipients, preserves account mode and other grants, and keeps inactive shares visible for revocation after role changes. Guest shares remain View/Use; Manage does not assign roles or expose credentials.
+- **Crew sharing can create explicit trusted Manage grants.** The crew Share dialog and person Access editor offer Manage to trusted MEMBER/MANAGER recipients, preserves account mode and other grants, and keeps inactive shares visible for revocation after role changes. Guest shares remain View/Use; Manage does not assign roles or expose credentials.
 
 - **Idle work polling avoids unnecessary writer transactions.** Empty or not-yet-eligible queues use a fresh read hint; capacity, deadlines and attempt ownership remain checked in the claiming transaction when work is present.
 - **Trusted members can receive explicit crew management shares.** Administrators can grant crew Manage to trusted MEMBER/MANAGER recipients through the member-policy API and CLI, permitting crew profile/configuration and membership changes without explicit crew role overrides. Role assignment, crew deletion, private-network opt-in, budgets and workspace administration retain their existing guards. Account conversion requires deliberate revocation of trusted-only shares first; writes and audit remain atomic. Existing Access editors preserve and display these shares.

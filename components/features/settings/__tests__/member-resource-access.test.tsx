@@ -269,3 +269,30 @@ it("adds an explicit crew Use share from the person editor without widening othe
  const [,init]=fetchMock.mock.calls.find(([,init])=>init?.method==="PUT")!
  expect(JSON.parse(init.body)).toEqual({...policy,rights:[...policy.rights,{kind:"crew",id:"crew-1",operation:"use"}]})
 })
+
+  it.each(["MEMBER", "MANAGER"])("creates trusted Manage for %s from the person card without clearing other shares", async role => {
+    const trusted = {...policy, mode:"trusted",rights:[{kind:"crew",id:"crew-old",operation:"manage"}]};
+    fetchMock.mockImplementation(async (url:string,init?:RequestInit)=>{
+      if(init?.method === "PUT") return response({...JSON.parse(String(init.body)),revision:8});
+      if(url.includes("/members/")) return response(trusted);
+      return response([{id:"crew-new",name:"New managed crew"}]);
+    });
+    show(role);fireEvent.click(screen.getByRole("button",{name:"Edit resource access"}));
+    await screen.findByRole("option",{name:"New managed crew"});
+    expect(screen.getByLabelText("Resource kind")).toHaveValue("crew");
+    expect(screen.getByLabelText("Resource operation")).toHaveValue("manage");
+    fireEvent.change(screen.getByLabelText("Resource"),{target:{value:"crew-new"}});
+    fireEvent.click(screen.getByRole("button",{name:"Add grant"}));fireEvent.click(saveButton());
+    await waitFor(()=>expect(fetchMock.mock.calls.some(([,init])=>init?.method === "PUT")).toBe(true));
+    const [,init]=fetchMock.mock.calls.find(([,init])=>init?.method === "PUT")!;
+    expect(JSON.parse(init.body)).toEqual({membership_id:trusted.membership_id,revision:7,mode:"trusted",rights:[...trusted.rights,{kind:"crew",id:"crew-new",operation:"manage"}]});
+  });
+
+  it.each(["VIEWER", "ADMIN", "OWNER"])("keeps trusted creation/reissue unavailable to %s while showing saved shares",async role=>{
+    const right={kind:"crew",id:"crew-old",operation:"manage"};
+    fetchMock.mockImplementation(async()=>response({...policy,mode:"trusted",rights:[right],grant_details:[{...right,issuer_id:"old-admin",created_at:"old",live:false}]}));
+    show(role);fireEvent.click(screen.getByRole("button",{name:"Edit resource access"}));
+    await screen.findByRole("button",{name:"Remove crew crew-old manage"});
+    expect(screen.queryByLabelText("Resource kind")).toBeNull();
+    expect(screen.queryByRole("button",{name:"Reissue as me"})).toBeNull();
+  });
