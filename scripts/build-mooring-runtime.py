@@ -611,6 +611,10 @@ def build_commands(sha, temp, build_root, cargo, env, bindgen, binaryen, sdk, em
     common.update(CRAFT_FONTS_DIR=str(fonts), CARGO_NET_OFFLINE='false')
     helper_env = dict(common, CARGO_TARGET_DIR=str(build_root / 'command-engine-target'),
                       RUSTFLAGS=f'--remap-path-prefix={ROOT}=/crewship --remap-path-prefix={inputs}=/wordcraft-c1')
+    # Match the qualified native helper and the pinned WASM's empty optional
+    # craft-font profile; the release manifest contains no Georgian face.
+    helper_env.pop('CRAFT_FONTS_DIR', None)
+    helper_env.pop('CRAFT_FONTS_REQUIRED', None)
     command([cargo, 'build', '--release', '--locked'], cwd=inputs / 'helper', env=helper_env)
     helper = build_root / 'command-engine-target/release/wordcraft-c1-engine'
     engine_hash = verified_command_elf(helper)
@@ -641,7 +645,8 @@ def build_commands(sha, temp, build_root, cargo, env, bindgen, binaryen, sdk, em
     editor_hash = assemble_editor(sha, source, fonts, metadata, native_output, sdk, child, embedded / 'licenses', bundle, config,
         native_inventory=('wordcraft-command-renderer-inventory.json', 'wordcraft-command-renderer-inventory.json'),
         additional_inventories=('wordcraft-command-engine-inventory.json',),
-        provenance_extra={'format': COMMAND_FORMAT, 'clock_patch_sha256': COMMAND_CLOCK_PATCH, 'component': 'wordcraft-command-c1'})
+        provenance_extra={'format': COMMAND_FORMAT, 'clock_patch_sha256': COMMAND_CLOCK_PATCH, 'component': 'wordcraft-command-c1',
+                          'helper_optional_craft_fonts': 'none'})
     destination = embedded / 'editor' / editor_hash
     if destination.exists():
         raise ValueError('C1 editor must not replace an existing legacy bundle')

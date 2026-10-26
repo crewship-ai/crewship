@@ -242,6 +242,29 @@ class CommandAssetBuildTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 build.verified_command_elf(linked)
 
+    def test_helper_uses_qualified_optional_font_profile_despite_parent_environment(self):
+        class HelperReached(Exception):
+            pass
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            inputs = root/'command-engine-inputs'
+            inherited = {'PATH':'/test/bin', 'CRAFT_FONTS_DIR':'/untrusted/parent-fonts',
+                         'CRAFT_FONTS_REQUIRED':'1'}
+            def invoked(args, cwd=build.ROOT, env=None):
+                if cwd == inputs/'helper':
+                    self.assertNotIn('CRAFT_FONTS_DIR', env)
+                    self.assertNotIn('CRAFT_FONTS_REQUIRED', env)
+                    self.assertEqual(env['CARGO_TARGET_DIR'], str(root/'build/command-engine-target'))
+                    self.assertEqual(args, ['cargo','build','--release','--locked'])
+                    raise HelperReached()
+            with patch.object(build, 'command', side_effect=invoked), \
+                    patch.object(build, 'verified_command_elf', return_value='a'*64):
+                with self.assertRaises(HelperReached):
+                    build.build_commands('a'*40, root, root/'build', 'cargo', inherited,
+                        root/'bindgen', root/'binaryen', root/'sdk', root/'embedded', root/'fonts', {})
+            self.assertEqual(inherited['CRAFT_FONTS_DIR'], '/untrusted/parent-fonts')
+            self.assertEqual(inherited['CRAFT_FONTS_REQUIRED'], '1')
+
     def test_actual_command_closure_keeps_runtime_build_features_not_dev(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
