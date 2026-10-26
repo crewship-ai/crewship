@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Explicit crew managers can use ordinary member controls.** A live trusted Manage share enables adding and removing ordinary crew members in Settings. Role editing and removal of explicit crew roles remain administrator controls. Failed access checks and context switches withdraw grant-based controls.
+
 - **Crew sharing can create explicit trusted Manage grants.** The crew Share dialog and person Access editor offer Manage to trusted MEMBER/MANAGER recipients, preserves account mode and other grants, and keeps inactive shares visible for revocation after role changes. Guest shares remain View/Use; Manage does not assign roles or expose credentials.
 
 - **Idle work polling avoids unnecessary writer transactions.** Empty or not-yet-eligible queues use a fresh read hint; capacity, deadlines and attempt ownership remain checked in the claiming transaction when work is present.

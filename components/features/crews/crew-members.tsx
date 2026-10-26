@@ -47,6 +47,8 @@ interface CrewMembersProps {
    *  peer permissions because they could ladder up. The UI mirrors
    *  that gate so the role-edit chip only renders for admins. */
   canEdit: boolean
+  /** A live explicit Manage share permits only ordinary membership changes. */
+  canManage?: boolean
   onMembersChange: (members: CrewMember[]) => void
 }
 
@@ -74,7 +76,7 @@ const roleCls: Record<CrewMemberRole, string> = {
   VIEWER: "bg-muted text-muted-foreground border-border",
 }
 
-export function CrewMembers({ members, crewId, workspaceId, canEdit, onMembersChange }: CrewMembersProps) {
+export function CrewMembers({ members, crewId, workspaceId, canEdit, canManage = canEdit, onMembersChange }: CrewMembersProps) {
   const [addDialogOpen, setAddDialogOpen] = useState(false)
   const [removingId, setRemovingId] = useState<string | null>(null)
   // Inline-edit state for the role column. Holds the member id
@@ -160,7 +162,7 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, onMembersCh
     <div>
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-default font-semibold">Members</h2>
-        {canEdit && (
+        {canManage && (
           <Button variant="outline" size="sm" className="gap-2" onClick={() => setAddDialogOpen(true)}>
             <UserPlus className="h-3.5 w-3.5" />
             Add Member
@@ -180,7 +182,7 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, onMembersCh
                   <TableHead>Email</TableHead>
                   <TableHead className="w-48">Role in this crew</TableHead>
                   <TableHead>Joined</TableHead>
-                  {canEdit && <TableHead className="w-20" />}
+                  {(canEdit || canManage) && <TableHead className="w-20" />}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -272,7 +274,7 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, onMembersCh
                       <TableCell className="text-label text-muted-foreground">
                         {new Date(member.created_at).toLocaleDateString()}
                       </TableCell>
-                      {canEdit && (
+                      {(canEdit || canManage) && (
                         <TableCell>
                           {/* Actions column: Remove only. The role edit
                               affordance lives next to the role badge above
@@ -282,7 +284,7 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, onMembersCh
                               control. Hiding Remove during inline edit
                               avoids two competing destructive actions on
                               the same row. */}
-                          {!isEditing && (
+                          {!isEditing && (canEdit || (canManage && member.role == null)) && (
                             <div className="flex items-center gap-1">
                               <AlertDialog>
                                 <AlertDialogTrigger asChild>
