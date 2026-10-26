@@ -18,11 +18,14 @@ export const shareOperations = { crew: ["view", "use"], routine: ["view", "resul
 export const isResourceRight = (right: z.infer<typeof resourceRightSchema>, resource: SharedResource) =>
   right.kind === resource.kind && right.id === resource.id
 
+export const resourceShareOperations = (policy: ResourcePolicy, resource: SharedResource): readonly string[] =>
+  policy.mode === "trusted" ? (resource.kind === "crew" ? ["manage"] : []) : shareOperations[resource.kind]
+
 /** Preserve every other resource and unknown future operation; never convert accounts. */
 export function resourceShareReplacement(policy: ResourcePolicy, resource: SharedResource, operations: string[], reissue: string[]) {
-  if (policy.mode !== "restricted") throw new Error("Trusted access is managed through workspace roles")
+  if (policy.mode !== "restricted" && resource.kind !== "crew") throw new Error("Trusted access is managed through workspace roles")
   if (resource.kind === "routine" && operations.includes("publish") && !operations.includes("edit")) throw new Error("Publish requires Edit on the same routine")
-  const editable = new Set<string>(shareOperations[resource.kind])
+  const editable = new Set<string>(resourceShareOperations(policy, resource))
   if ([...operations, ...reissue].some(op => !editable.has(op)) || reissue.some(op => !operations.includes(op))) {
     throw new Error("Invalid resource operation")
   }
