@@ -89,6 +89,23 @@ func TestMooringReauthorizeIsOriginalConnectionAndNoContent(t *testing.T) {
 	if input["additionalProperties"] != false || len(properties) != 1 || properties["connection_ref"] == nil {
 		t.Fatal("reauthorize accepts authority overrides", input)
 	}
+	// RequireWorkspace accepts either the query or X-Workspace-ID header.
+	// The scope is mandatory; neither individual transport source is mandatory.
+	query, header, origin := false, false, false
+	for _, parameter := range op["parameters"].([]map[string]any) {
+		if parameter["name"] == "workspace_id" && parameter["in"] == "query" {
+			query = parameter["required"] == false
+		}
+		if parameter["name"] == "X-Workspace-ID" && parameter["in"] == "header" {
+			header = parameter["required"] == false
+		}
+		if parameter["name"] == "Origin" && parameter["in"] == "header" {
+			origin = parameter["required"] == true
+		}
+	}
+	if !query || !header || !origin {
+		t.Fatal("scope alternatives or exact Origin contract lost")
+	}
 	required := input["required"].([]string)
 	if len(required) != 1 || required[0] != "connection_ref" {
 		t.Fatal("original reference not required", required)

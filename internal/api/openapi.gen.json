@@ -131611,9 +131611,19 @@
             }
           },
           {
+            "description": "Workspace scope is required, supplied here or through X-Workspace-ID; query takes precedence.",
             "in": "query",
             "name": "workspace_id",
-            "required": true,
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace scope fallback when workspace_id query is absent; normal workspace membership checks apply.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
             "schema": {
               "type": "string"
             }

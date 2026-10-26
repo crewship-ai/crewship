@@ -54,7 +54,8 @@ func mooringSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		Request: ref("MooringReauthorizeRequest"), RequestRequired: true, SuccessStatuses: []string{"204"},
 		ErrorStatuses: []string{"400", "401", "403", "413", "500", "503"},
 		Parameters: []map[string]any{
-			{"name": "workspace_id", "in": "query", "required": true, "schema": map[string]any{"type": "string"}},
+			{"name": "workspace_id", "in": "query", "required": false, "schema": map[string]any{"type": "string"}, "description": "Workspace scope is required, supplied here or through X-Workspace-ID; query takes precedence."},
+			{"name": "X-Workspace-ID", "in": "header", "required": false, "schema": map[string]any{"type": "string"}, "description": "Workspace scope fallback when workspace_id query is absent; normal workspace membership checks apply."},
 			{"name": "Origin", "in": "header", "required": true, "schema": map[string]any{"type": "string"}, "description": "Must exactly match the configured trusted frontend origin."},
 		},
 		SuccessHeaders: map[string]any{"Cache-Control": map[string]any{"schema": map[string]any{"type": "string", "enum": []string{"no-store"}}}},

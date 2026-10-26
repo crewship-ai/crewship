@@ -289,8 +289,6 @@ func TestGeneratedSpecDoesNotBleedAnnotationsOntoNeighbouringRoutes(t *testing.T
 // the same two trimmed parameters as the DELETE fifty lines above it, joined by
 // && instead of ||, so either alone satisfies it and neither is required.
 var requiredQueryParametersInSpec = []string{
-	// Original connection continuity retains the exact workspace Page scope.
-	"POST /api/v1/pages/{slug}/mooring/session/reauthorize ?workspace_id",
 	"DELETE /api/v1/admin/backups ?path",
 	"DELETE /api/v1/crews/{crewId}/files/delete ?path",
 	"DELETE /api/v1/feedback ?message_id",
