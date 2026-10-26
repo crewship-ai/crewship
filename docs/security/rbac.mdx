@@ -10,6 +10,20 @@ tag: Experimental
 
 Crewship implements role-based access control at two levels: **workspace roles** (human users) and **agent roles** (AI agents within crews).
 
+## Guest routine execution in v1
+
+Guests can use explicitly shared View, Results, Edit and Publish rights on
+routines and drafts. Publishing saves the reviewed version; it never launches
+execution. Guest-initiated runs of published routines are deferred from the v1
+contract. Routine runs in the supported v1 flow are initiated by team members
+or crew triggers, subject to their existing authorization and publication rules.
+
+Guest execution requires a separately qualified private runtime. A default
+installation refuses Guest run requests with HTTP 503 and code
+`restricted_runtime_unavailable`, without queuing or starting work. An
+administrator must explicitly configure the qualified runtime; a Run share
+alone does not install it. See the [private workflow contract](../specs/restricted-workflows.md).
+
 ## Workspace Roles (Human Users)
 
 Users are assigned one of five roles within a workspace:
