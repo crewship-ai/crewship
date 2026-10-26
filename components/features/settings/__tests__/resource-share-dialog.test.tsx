@@ -27,7 +27,7 @@ function mockApi(writeStatus = 200) {
     return response(url.includes("/access?") ? policy : roster)
   })
 }
-function show(kind: "routine" | "project" = "routine") {
+function show(kind: "routine" | "project" | "crew" = "routine") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   render(<QueryClientProvider client={client}><ResourceShareDialog workspaceId="workspace-1" resource={{ ...resource, kind }} /></QueryClientProvider>)
   return client
@@ -143,4 +143,37 @@ it("preserves a saved crew share when editing an unrelated routine", () => {
   const changed = resourceShareReplacement(parsed,resource,["view"],[])
   expect(changed.rights).toContainEqual(crew)
   expect(changed.rights).toContainEqual(policy.rights[0])
+})
+
+
+describe("explicit crew Share", () => {
+  it("shares crew Use with explicit dynamic-audience consent and preserves unrelated rights", async () => {
+    mockApi(); show("crew")
+    fireEvent.click(screen.getByRole("button", { name: "Share" }))
+    expect(await screen.findByText(/current and future agents/)).toBeTruthy()
+    expect(screen.getByText(/never grants Delegate/)).toBeTruthy()
+    fireEvent.click(await screen.findByLabelText("Use"))
+    fireEvent.click(screen.getByRole("button", { name: "Save access for Client One" }))
+    await waitFor(() => expect(writes()).toHaveLength(1))
+    const body = JSON.parse(writes()[0][1].body)
+    expect(body.mode).toBe("restricted")
+    expect(body.revision).toBe(7)
+    expect(body.rights).toEqual(expect.arrayContaining([
+      {kind:"crew",id:"routine-1",operation:"use"},
+      {kind:"agent",id:"agent-1",operation:"run"},
+      {kind:"routine",id:"routine-1",operation:"run"},
+    ]))
+    expect(body.grant_details).toBeUndefined()
+    expect(body.rights.some((right: {kind:string;operation:string}) => right.kind==="crew" && ["manage","delegate"].includes(right.operation))).toBe(false)
+  })
+
+  it("does not turn crew sharing into a project intake or publication UI", async () => {
+    mockApi(); show("crew")
+    fireEvent.click(screen.getByRole("button", { name: "Share" }))
+    expect(await screen.findByLabelText("View")).toBeTruthy()
+    expect(screen.getByLabelText("Use")).toBeTruthy()
+    expect(screen.queryByLabelText("Manage")).toBeNull()
+    expect(screen.queryByLabelText("Publish")).toBeNull()
+    expect(h.fetch.mock.calls.some(([url])=>url.includes("guest-intake"))).toBe(false)
+  })
 })

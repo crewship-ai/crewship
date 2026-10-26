@@ -1421,3 +1421,22 @@ MANAGER or higher is required. The version must be nonnegative and match `crew s
 A conflict exits nonzero; reread current state before retrying. Success means intent was accepted,
 not that startup finished. Intent survives Crewship restart. Missing credentials block service
 startup, and agent wakeups do not override an explicit service stop.
+
+
+## Crew shares and the web controls
+
+Workspace OWNER/ADMIN users share View/Use with a Guest from crew Settings →
+Share or the person's Access editor → Crew. The equivalent CLI operations are:
+
+```bash
+crewship share crew <crew-id> --with <member> --operation view,use
+crewship unshare crew <crew-id> --with <member> --operation use
+```
+
+These use `PUT /api/v1/workspaces/{workspaceId}/members/{memberId}/access` with
+the saved membership ID and revision, preserving unrelated rights and account
+mode. Crew Use includes agent Chat/Run for the crew's current and future agents;
+agent authorization and execution preflight still apply. It never grants
+Delegate, credential visibility or crew administration. Existing grant issuers
+are retained unless an inactive grant is explicitly reissued; conflicts require
+reviewing the current policy, without a silent retry.

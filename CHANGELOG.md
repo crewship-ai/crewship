@@ -252,6 +252,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **One attachment queue for the chat composer.** Picked, dropped, pasted and camera files now share one queue per conversation and upload one at a time. A chip says Waiting, Uploading, Failed or Cancelled in words; a queued or running upload can be cancelled and retried without removing the chip, and files past a provisional client limit (10 per message, 25 MB each; not server-approved) are refused with a reason. Pasted files are now attached instead of being silently held back. A failed or cancelled file keeps Send off with a visible reason and Retry/Remove on the chip; uploads are kept per person and workspace, continue while you switch to another chat, and stop when you leave the chat page.
 
+- **Crew sharing is available from the web controls.** Workspace administrators can share View/Use from crew Settings or select Crew in a person’s resource Access editor. The dialog explains the current/future agent audience, conditional execution and the exclusion of Delegate, credential visibility and crew administration. Existing API/CLI authorization, issuer provenance, revision conflicts and account modes are preserved.
+
 ### Upgrade and recovery notes
 
 - Preserve the configured v1 audit/journal root in encrypted instance recovery kits after secret re-encryption; successful envelope conversion does not authorize retiring that root. ⚠️ **Behaviour change:** Instance backup now rejects an invalid `ENCRYPTION_KEY` instead of producing a recovery kit with an unusable audit root.

@@ -211,3 +211,26 @@ User authentication uses JWT tokens signed with `NEXTAUTH_SECRET`:
 - WebSocket connections use short-lived tokens (`ws_token_expiry`, default 5 minutes)
 - API requests use session-based JWT tokens
 - Token validation is handled by the middleware layer
+
+
+## Explicit Guest crew shares
+
+Workspace OWNER/ADMIN users can open **Share** in a crew's Settings profile,
+or select **Crew** in a person's resource Access editor. These controls use the
+same member-policy API as `crewship share crew` and `crewship unshare crew`.
+They change only explicit View/Use shares for Guest accounts and preserve all
+other resource operations. Saving a share never changes the person's account
+mode or grants a crew role.
+
+View shares crew identity and current agent identities/status. Use additionally
+shares Chat and Run for current and future agents in that crew, with each
+agent's authority and execution preflight still required. Newly added agents
+become discoverable. Neither choice grants Delegate, credential visibility,
+existing conversations, activity or crew administration. Execution can still use the
+crew's configured credentials after normal preflight. The sharing dialog states
+this dynamic audience before the administrator saves it.
+
+Saved grants keep their issuer. An inactive share requires an explicit
+**Reissue as me** choice; a revision conflict requires reloading and reviewing
+the current policy. A Guest can see the crew source and an explanation of inherited agent capabilities in
+**Settings → Your access**, without receiving access to another person's policy.
