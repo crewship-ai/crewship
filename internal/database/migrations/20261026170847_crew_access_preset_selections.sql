@@ -20,9 +20,11 @@ CREATE INDEX idx_crew_access_preset_workspace ON crew_access_preset_selections(w
 CREATE INDEX idx_crew_access_preset_crew ON crew_access_preset_selections(crew_id);
 CREATE INDEX idx_crew_access_preset_selector ON crew_access_preset_selections(selected_by);
 
+-- A restored historical label may reference a retired crew. Metadata grants no
+-- authority; live apply still checks resourceExists and update rebinding stays live-only.
 CREATE TRIGGER crew_access_preset_binding_insert BEFORE INSERT ON crew_access_preset_selections
 WHEN NOT EXISTS(SELECT 1 FROM workspace_members WHERE id=NEW.member_id AND workspace_id=NEW.workspace_id)
-  OR NOT EXISTS(SELECT 1 FROM crews WHERE id=NEW.crew_id AND workspace_id=NEW.workspace_id AND deleted_at IS NULL AND kind<>'setup')
+  OR NOT EXISTS(SELECT 1 FROM crews WHERE id=NEW.crew_id AND workspace_id=NEW.workspace_id AND kind<>'setup')
 BEGIN SELECT RAISE(ABORT,'crew preset selection workspace mismatch'); END;
 CREATE TRIGGER crew_access_preset_binding_update BEFORE UPDATE ON crew_access_preset_selections
 -- Historical actor cleanup (ON DELETE SET NULL) does not create a new share.

@@ -33,3 +33,33 @@ func TestCustomContentsDropsOnlyDanglingPresetLabels(t *testing.T) {
 		}
 	}
 }
+
+func TestCrewPresetCustomContentsDropsMissingParentsOnly(t *testing.T) {
+	for _, missing := range []string{"", "crews", "workspace_members", "workspaces", "users"} {
+		t.Run(missing, func(t *testing.T) {
+			canonical := []map[string]any{{"id": "grant", "crew_id": "crew"}}
+			dump := &DBDump{Tables: map[string][]map[string]any{
+				"workspaces": {{"id": "workspace"}}, "workspace_members": {{"id": "member"}}, "users": {{"id": "selector"}}, "crews": {{"id": "crew"}}, "access_grants": canonical,
+				"crew_access_preset_selections": {{"id": "choice", "resource_kind": "crew", "workspace_id": "workspace", "member_id": "member", "crew_id": "crew", "selected_by": "selector"}},
+			}}
+			if missing != "" {
+				delete(dump.Tables, missing)
+			}
+			filter, err := newCategoryFilter([]string{CategoryAgents})
+			if err != nil {
+				t.Fatal(err)
+			}
+			filter.filterDump(dump)
+			want := 0
+			if missing == "" {
+				want = 1
+			}
+			if len(dump.Tables["crew_access_preset_selections"]) != want {
+				t.Fatalf("wrong metadata survival: %+v", dump.Tables)
+			}
+			if !reflect.DeepEqual(dump.Tables["access_grants"], canonical) {
+				t.Fatal("canonical grants changed")
+			}
+		})
+	}
+}
