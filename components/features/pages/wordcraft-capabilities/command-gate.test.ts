@@ -2,13 +2,14 @@ import { describe, expect, it, vi } from "vitest"
 import { createWordCraftCommandGate, defaultWordCraftCatalog, DENIED_LABEL, wordCraftShortcutHandler, type CapabilityCatalog, type ParticipantCapabilities } from "./command-gate"
 
 const participant: ParticipantCapabilities = { engineSha: defaultWordCraftCatalog.engine.sha, catalogVersion: defaultWordCraftCatalog.version, allowedCommands: ["format.bold", "text.insert", "file.open"] }
-const qualified = (ids: string[]): CapabilityCatalog => ({ ...defaultWordCraftCatalog, commands: defaultWordCraftCatalog.commands.map(command => ids.includes(command.id) ? { ...command, qualification: "qualified" } : command) })
+const initialCatalog: CapabilityCatalog = { ...defaultWordCraftCatalog, commands: defaultWordCraftCatalog.commands.map(command => ({ ...command, qualification: "unqualified" })) }
+const qualified = (ids: string[]): CapabilityCatalog => ({ ...defaultWordCraftCatalog, commands: initialCatalog.commands.map(command => ids.includes(command.id) ? { ...command, qualification: "qualified" } : command) })
 const event = (overrides: object = {}) => ({ key: "b", ctrlKey: true, metaKey: false, altKey: false, shiftKey: false, preventDefault: vi.fn(), stopPropagation: vi.fn(), ...overrides })
 
 describe("WordCraft command gate", () => {
   it("denies the complete initial catalog even to a participant with every command", () => {
     const dispatch = vi.fn()
-    const gate = createWordCraftCommandGate({ participant: { ...participant, allowedCommands: defaultWordCraftCatalog.commands.map(command => command.id) }, dispatch })
+    const gate = createWordCraftCommandGate({ catalog: initialCatalog, participant: { ...participant, allowedCommands: initialCatalog.commands.map(command => command.id) }, dispatch })
     for (const command of defaultWordCraftCatalog.commands) {
       expect(gate.availability(command.id)).toEqual({ enabled: false, reason: DENIED_LABEL })
       expect(gate.execute(command.id)).toBe(false)
@@ -49,7 +50,7 @@ describe("WordCraft command gate", () => {
   })
   it("consumes denied shortcuts without sending a command", () => {
     const dispatch = vi.fn(), e = event()
-    const handler = wordCraftShortcutHandler({ gate: createWordCraftCommandGate({ participant, dispatch }) })
+    const handler = wordCraftShortcutHandler({ gate: createWordCraftCommandGate({ catalog: initialCatalog, participant, dispatch }) })
     expect(handler(e)).toBe(true)
     expect(e.preventDefault).toHaveBeenCalledOnce()
     expect(e.stopPropagation).toHaveBeenCalledOnce()
@@ -66,7 +67,7 @@ describe("WordCraft command gate", () => {
     expect(mac(event({ ctrlKey: false, metaKey: true }))).toBe(true)
   })
   it("consumes DOM arrow names and shifted glyphs for denied registry shortcuts", () => {
-    const dispatch = vi.fn(), handler = wordCraftShortcutHandler({ gate: createWordCraftCommandGate({ participant, dispatch }) })
+    const dispatch = vi.fn(), handler = wordCraftShortcutHandler({ gate: createWordCraftCommandGate({ catalog: initialCatalog, participant, dispatch }) })
     for (const overrides of [
       { key: "ArrowLeft", code: "ArrowLeft", ctrlKey: false },
       { key: "ArrowRight", code: "ArrowRight" },

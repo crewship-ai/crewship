@@ -46,3 +46,11 @@ crewship-heavy pnpm exec vitest run components/features/pages/wordcraft-capabili
 
 The separate [CLI/MCP acceptance suite](../../../../tools/wordcraft-capabilities/acceptance/README.md)
 requires a disposable server and fails when integration/configuration is absent.
+
+The parameter adapter supports the closed JSON Schema vocabulary emitted by the
+source-reviewed catalog profiles: enums, finite bounds, patterns, unions, nested
+objects and arrays. Unknown schema keywords fail closed. Every object node must
+reject additional properties, and an unresolved schema cannot enable a command.
+The adapter uses the existing Zod dependency; it does not add role authority or
+replace independent server validation. New schema vocabulary needs an explicit
+adapter update and tests before integration.

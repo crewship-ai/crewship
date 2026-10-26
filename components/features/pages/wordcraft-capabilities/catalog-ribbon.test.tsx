@@ -8,7 +8,7 @@ const participant: ParticipantCapabilities = { engineSha: defaultWordCraftCatalo
 
 it("shows unqualified catalog buttons disabled with the requested explanation", () => {
   const onCommand = vi.fn()
-  render(<WordCraftCatalogRibbon commandIds={commandIds} participant={participant} onCommand={onCommand} />)
+  render(<WordCraftCatalogRibbon catalog={{ ...defaultWordCraftCatalog, commands: defaultWordCraftCatalog.commands.map(command => ({ ...command, qualification: "unqualified" })) }} commandIds={commandIds} participant={participant} onCommand={onCommand} />)
   for (const button of screen.getAllByRole("button")) {
     expect(button).toBeDisabled()
     expect(button).toHaveAccessibleDescription("nemáte oprávnění")

@@ -1,12 +1,8 @@
+import { compileParameterValidator, type ParameterSchema } from './parameter-validator'
+export type { ParameterSchema } from './parameter-validator'
 import published from "@/schemas/wordcraft/capabilities.json"
 
 export type CommandParameters = Readonly<Record<string, unknown>>
-export interface ParameterSchema {
-  type: string
-  properties: Readonly<Record<string, { type: string }>>
-  required?: readonly string[]
-  additionalProperties: boolean
-}
 export interface CapabilityCommand {
   id: string
   label: string
@@ -37,23 +33,6 @@ export const defaultWordCraftCatalog = published as CapabilityCatalog
 const known = new Map(defaultWordCraftCatalog.commands.map(command => [command.id, command]))
 const denied: CommandAvailability = { enabled: false, reason: DENIED_LABEL }
 
-function validParameters(schema: false | ParameterSchema, value: CommandParameters): boolean {
-  if (!schema || schema.type !== "object" || schema.additionalProperties !== false || !value || Array.isArray(value)) return false
-  const prototype = Object.getPrototypeOf(value)
-  if (prototype !== Object.prototype && prototype !== null) return false
-  if (schema.required?.some(key => !Object.hasOwn(value, key))) return false
-  return Object.entries(value).every(([key, parameter]) => {
-    if (!Object.hasOwn(schema.properties, key)) return false
-    switch (schema.properties[key].type) {
-      case "string": return typeof parameter === "string"
-      case "boolean": return typeof parameter === "boolean"
-      case "number": return typeof parameter === "number" && Number.isFinite(parameter)
-      case "integer": return typeof parameter === "number" && Number.isSafeInteger(parameter)
-      default: return false
-    }
-  })
-}
-
 /** Client affordance only. The server must independently validate the same
  * catalog, role, parameters, target, revision and nested command effects. */
 export function createWordCraftCommandGate({ catalog = defaultWordCraftCatalog, participant, dispatch }: {
@@ -62,18 +41,19 @@ export function createWordCraftCommandGate({ catalog = defaultWordCraftCatalog, 
   dispatch: (id: string, parameters: CommandParameters) => void
 }) {
   const commands = new Map(catalog.commands.map(command => [command.id, command]))
+  const validators = new Map(catalog.commands.filter(command => command.qualification === 'qualified' && command.schemaStatus === 'exact' && !command.permanentlyForbidden).map(command => [command.id, compileParameterValidator(command.parameterSchema)]))
   const allowed = new Set(participant?.allowedCommands)
   const versionMatches = catalog.engine.sha === published.engine.sha && catalog.version === published.version
     && participant?.engineSha === catalog.engine.sha && participant.catalogVersion === catalog.version
   function availability(id: string): CommandAvailability {
     const original = known.get(id), command = commands.get(id)
     if (!versionMatches || !original || !command || original.permanentlyForbidden || command.permanentlyForbidden
-      || command.qualification !== "qualified" || command.schemaStatus !== "exact" || !command.parameterSchema || !allowed.has(id)) return denied
+      || command.qualification !== "qualified" || command.schemaStatus !== "exact" || !command.parameterSchema || !validators.get(id) || !allowed.has(id)) return denied
     return { enabled: true }
   }
   function execute(id: string, parameters: CommandParameters = {}): boolean {
     const command = commands.get(id)
-    if (!availability(id).enabled || !command || !validParameters(command.parameterSchema, parameters)) return false
+    if (!availability(id).enabled || !command || !validators.get(id)?.(parameters)) return false
     dispatch(id, parameters)
     return true
   }
