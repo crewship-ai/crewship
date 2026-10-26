@@ -13,7 +13,7 @@ import (
 // retaining dependent schema verbatim and leaving foreign_keys enabled.
 func migrationCrewResourceGrants(ctx context.Context, tx *sql.Tx, _ *slog.Logger) error {
 	var dependents int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_schema m JOIN pragma_foreign_key_list(m.name) f ON f."table"='access_grants' WHERE m.type='table'`).Scan(&dependents); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_schema m JOIN pragma_foreign_key_list(m.name) f ON f."table" COLLATE NOCASE='access_grants' WHERE m.type='table'`).Scan(&dependents); err != nil {
 		return err
 	}
 	if dependents != 0 {

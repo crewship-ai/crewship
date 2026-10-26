@@ -121,3 +121,55 @@ func TestCrewGrantUpgradePreservesAuthorityAndRollsBackDDL(t *testing.T) {
 		})
 	}
 }
+
+func TestCrewGrantUpgradeRefusesCaseInsensitiveIncomingForeignKeys(t *testing.T) {
+	for _, parent := range []string{"ACCESS_GRANTS", "AcCeSs_GrAnTs"} {
+		t.Run(parent, func(t *testing.T) {
+			db := migrationBoundaryDB(t, `PRAGMA foreign_keys=ON`)
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			if err := MigrateSkipping(t.Context(), db, logger, "crew_resource_grants"); err != nil {
+				t.Fatal(err)
+			}
+			for _, q := range []string{
+				`INSERT INTO users(id,email) VALUES('o','fk-owner@test.invalid'),('h','fk-guest@test.invalid')`,
+				`INSERT INTO workspaces(id,name,slug) VALUES('w','FK','fk')`,
+				`INSERT INTO workspace_members(id,user_id,workspace_id,role,access_mode) VALUES('o','o','w','OWNER','trusted'),('h','h','w','MEMBER','restricted')`,
+				`INSERT INTO crews(id,workspace_id,name,slug) VALUES('c','w','Crew','crew')`,
+				`INSERT INTO agents(id,workspace_id,crew_id,name,slug,agent_role) VALUES('a','w','c','Agent','agent','AGENT')`,
+				`INSERT INTO access_grants(id,member_id,resource_kind,agent_id,operation,created_by,created_at) VALUES('g','h','agent','a','run','o','preserved')`,
+				`CREATE TABLE grant_extension(id TEXT PRIMARY KEY, grant_id TEXT REFERENCES ` + parent + `(id) ON DELETE CASCADE)`,
+				`INSERT INTO grant_extension VALUES('child','g')`,
+			} {
+				if _, err := db.Exec(q); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before := crewGrantSchema(t, db)
+			var beforeRevision int64
+			if err := db.QueryRow(`SELECT access_revision FROM workspace_members WHERE id='h'`).Scan(&beforeRevision); err != nil {
+				t.Fatal(err)
+			}
+			err := Migrate(t.Context(), db, logger)
+			if err == nil {
+				t.Fatal("migration accepted an incoming foreign key")
+			}
+			if !reflect.DeepEqual(before, crewGrantSchema(t, db)) {
+				t.Fatal("refused migration changed dependent schema")
+			}
+			for _, query := range []string{`SELECT count(*) FROM grant_extension WHERE id='child' AND grant_id='g'`, `SELECT count(*) FROM access_grants WHERE id='g' AND created_at='preserved'`} {
+				var n int
+				if err = db.QueryRow(query).Scan(&n); err != nil || n != 1 {
+					t.Fatalf("lost populated foreign-key data: count=%d error=%v", n, err)
+				}
+			}
+			var afterRevision int64
+			if err = db.QueryRow(`SELECT access_revision FROM workspace_members WHERE id='h'`).Scan(&afterRevision); err != nil || afterRevision != beforeRevision {
+				t.Fatal("refused migration changed revision", beforeRevision, afterRevision, err)
+			}
+			var applied int
+			if err = db.QueryRow(`SELECT count(*) FROM _migrations WHERE name='crew_resource_grants'`).Scan(&applied); err != nil || applied != 0 {
+				t.Fatal("refused migration recorded", applied, err)
+			}
+		})
+	}
+}
