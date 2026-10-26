@@ -10,6 +10,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 - Execute a flat WordCraft editor package with a real WASM snippet import in the packaging regression, checking the original ABI identity and manifest hashes.
+- Keep an idle native WordCraft read alive when typing starts, ignoring its obsolete projection without resending the command.
 
 - Allow the 72 generated fixture-qualified WordCraft commands in the default-off C1 backend test profile, with closed parameters and a new exact catalog identity.
 - Keep native selection receipts valid when a WordCraft command also returns command-specific metadata.
