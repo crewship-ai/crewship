@@ -1,9 +1,8 @@
 "use client"
-import { useState } from "react"
 import { Check, ExternalLink, Lock, Pencil } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { useCraftAvailable, useCraftLease, useCraftLeaseActions } from "./use-craft-lease"
+import { useCraftLeaseState } from "./use-craft-lease"
 import type { CraftLeaseHolder } from "../projects/types"
 
 interface CraftLockBarProps { workspaceId: string; slug: string; onEdit: () => void }
@@ -20,25 +19,22 @@ const BTN = "coarse:min-h-[44px]"
 /**
  * Who holds the Craft edit lease, and the one action that makes sense from
  * here. Renders nothing until the lease surface is served, so a workspace
- * without it never sees a lock it cannot use. Release and Save version are
- * left out until the lease API offers them.
+ * without it never sees a lock it cannot use. Chat never takes the lease:
+ * Edit opens the editor, which acquires on its own admission. Release and
+ * Save version stay in the editor.
  */
 export function CraftLockBar({ workspaceId, slug, onEdit }: CraftLockBarProps) {
-  const available = useCraftAvailable(workspaceId, slug)
-  const lease = useCraftLease(workspaceId, available ? slug : null)
-  const { acquire, requestHandoff } = useCraftLeaseActions(workspaceId, slug)
+  const { status, requestHandoff, requestedGeneration, heldByMe, requestedByMe } = useCraftLeaseState(workspaceId, slug)
+  if (!status) return null
+
+  const { holder, can_write: canWrite } = status
+  const state = !holder ? "free" : heldByMe || status.mine ? "mine" : "held"
   // Keyed by generation: a new holder (or the same holder re-acquiring) is a
   // new lease, and the earlier request no longer applies to it.
-  const [requestedGeneration, setRequestedGeneration] = useState<number | null>(null)
-  const status = lease.data
-  if (!available || !status) return null
-
-  const { holder, mine, can_write: canWrite } = status
-  const state = !holder ? "free" : mine ? "mine" : "held"
-  const requested = requestedGeneration === status.generation
+  const requested = requestedByMe || (requestedGeneration !== null && requestedGeneration === status.generation)
   const title = state === "free" ? "Free" : state === "mine" ? "Editing: you" : `Editing: ${holderName(holder!)}`
   const detail = state === "free" ? "nobody is editing"
-    : state === "mine" ? `generation ${status.generation} · held while this tab stays connected`
+    : state === "mine" ? "in the editor"
     : requested ? `Request sent to ${holder!.display_name} · they can hand over or decline`
     : "you see a read-only preview"
 
@@ -52,18 +48,14 @@ export function CraftLockBar({ workspaceId, slug, onEdit }: CraftLockBarProps) {
       <small className="min-w-0 truncate text-xs text-muted-foreground">{detail}</small>
     </span>
     {!canWrite ? <span className="text-xs text-muted-foreground">Read only</span>
-      : state === "free" ? <>
-        {acquire.isError && <span className="text-xs text-destructive">Could not start editing</span>}
-        <Button type="button" size="sm" className={BTN} disabled={acquire.isPending}
-          onClick={() => acquire.mutate(undefined, { onSuccess: () => onEdit() })}><Pencil aria-hidden />Edit</Button>
-      </>
+      : state === "free" ? <Button type="button" size="sm" className={BTN} onClick={onEdit}><Pencil aria-hidden />Edit</Button>
       : state === "mine" ? <Button asChild size="sm" variant="ghost" className={BTN}>
         <a href={craftEditorHref(workspaceId, slug)} target="_blank" rel="noopener noreferrer"><ExternalLink aria-hidden />Open in new tab</a>
       </Button>
       : !requested && <>
         {requestHandoff.isError && <span className="text-xs text-destructive">Could not request edit</span>}
         <Button type="button" size="sm" variant="secondary" className={BTN} disabled={requestHandoff.isPending}
-          onClick={() => { const generation = status.generation; requestHandoff.mutate(undefined, { onSuccess: () => setRequestedGeneration(generation) }) }}>Request edit</Button>
+          onClick={() => requestHandoff.mutate()}>Request edit</Button>
       </>}
   </div>
 }

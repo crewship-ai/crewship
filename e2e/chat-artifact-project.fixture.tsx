@@ -75,7 +75,7 @@ const craft = createArtifactMockServer({
   slug: CRAFT_SLUG, name: "Partner brief", entrypoint: "brief.html", files: [html("brief.html", "<p>Partner brief</p>")],
   craft: {
     enabled: true,
-    lease: { holder: { actor_id: "u-pavel", display_name: "Pavel Srba", kind: "human" }, mine: false, generation: 3, can_write: true, handoff_requested_by: null },
+    lease: { holder: { actor_id: "user:u-pavel", display_name: "Pavel Srba", kind: "human" }, mine: false, generation: "3", can_write: true, requests: [] },
     proposals: [{ id: "p1", author: { actor_id: "agent-scout", display_name: "Scout", kind: "agent" }, base_version: 5, summary: "3 changes", created_at: "2026-10-27T09:30:00Z", state: "open" }],
   },
 })
