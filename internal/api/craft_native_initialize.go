@@ -88,7 +88,6 @@ func (m *craftNativeHTTP) initializeOwnerProof(ctx context.Context, tx *sql.Tx, 
 			return p, artifacts.ErrVersionConflict
 		}
 	}
-	p.application = "wordcraft"
 	p.record = rec
 	p.expiry = expiry
 	return p, nil
@@ -96,8 +95,7 @@ func (m *craftNativeHTTP) initializeOwnerProof(ctx context.Context, tx *sql.Tx, 
 
 func (d *craftNativeDocumentsHTTP) initialize(w http.ResponseWriter, r *http.Request) {
 	m := d.human
-	profile, qualified := d.applications["wordcraft"]
-	if m == nil || !m.enabled || m.clock == nil || m.pages == nil || !qualified {
+	if m == nil || !m.enabled || m.clock == nil || m.pages == nil {
 		craftNativeDocumentError(w, mooring.ErrNativeDisabled)
 		return
 	}
@@ -117,8 +115,13 @@ func (d *craftNativeDocumentsHTTP) initialize(w http.ResponseWriter, r *http.Req
 		return
 	}
 	var extra any
-	if decoder.Decode(&extra) != io.EOF || body.ApplicationID != "wordcraft" {
+	if decoder.Decode(&extra) != io.EOF || body.ApplicationID != "wordcraft" && body.ApplicationID != "gridcraft" {
 		replyError(w, 400, "invalid native initialization request")
+		return
+	}
+	profile, qualified := d.applications[body.ApplicationID]
+	if !qualified {
+		craftNativeDocumentError(w, mooring.ErrNativeDisabled)
 		return
 	}
 	tx, err := m.pages.db.BeginTx(r.Context(), nil)
@@ -162,7 +165,7 @@ func (d *craftNativeDocumentsHTTP) initialize(w http.ResponseWriter, r *http.Req
 		craftNativeDocumentError(w, errCraftNativeAccess)
 		return
 	}
-	entry := &craftNativeSession{id: id, tokenHash: sha256.Sum256([]byte(token)), source: source, scope: scope, application: "wordcraft", workspaceEpoch: proof.workspaceEpoch, memberID: proof.memberID, memberRevision: proof.memberRevision, boot: boot, deadline: now + cap}
+	entry := &craftNativeSession{id: id, tokenHash: sha256.Sum256([]byte(token)), source: source, scope: scope, application: body.ApplicationID, workspaceEpoch: proof.workspaceEpoch, memberID: proof.memberID, memberRevision: proof.memberRevision, boot: boot, deadline: now + cap}
 	if err = tx.Commit(); err != nil {
 		craftNativeDocumentError(w, err)
 		return
