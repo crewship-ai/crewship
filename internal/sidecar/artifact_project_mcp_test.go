@@ -85,3 +85,21 @@ func TestArtifactProjectMCPRejectsNullFileStringsBeforeNetwork(t *testing.T) {
 		t.Fatalf("valid empty content rejected: %v", err)
 	}
 }
+
+func TestArtifactProjectMCPAuthoringRequiresStableSelectionIDs(t *testing.T) {
+	for _, name := range []string{"artifact_create", "artifact_publish"} {
+		t.Run(name, func(t *testing.T) {
+			var description string
+			for _, definition := range artifactProjectMCPCatalog() {
+				if definition.Name == name {
+					description = definition.Description
+				}
+			}
+			for _, required := range []string{"stable unique", "artifact-", "sections", "cards", "headings", "buttons", "Do not rewrite"} {
+				if !strings.Contains(description, required) {
+					t.Errorf("%s description lacks authoring contract %q", name, required)
+				}
+			}
+		})
+	}
+}
