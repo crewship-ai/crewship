@@ -7148,6 +7148,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Routine script steps clean up completed control directories (#4003).** Cleanup checks invocation ownership and process-group state, and reports cleanup failures separately from the script result.
 
+- Preserve project feedback during upgrades and backups, keep private-history bundles owner-only, and erase legacy and native version attribution within the selected workspace.
+
 ## [1.0.0-rc.1] — 2026-07-12
 
 ### Security
