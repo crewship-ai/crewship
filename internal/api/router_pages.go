@@ -215,4 +215,5 @@ func (r *Router) registerPageRoutes() {
 	// Action dispatch (§8b.2) — router_pages_actions.go, which also argues why
 	// its POST declares a role floor where the mutations above declare roleSelf.
 	r.registerPageActionRoutes()
+	r.registerArtifactProjectFeedbackRoutes()
 }

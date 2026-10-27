@@ -402,6 +402,12 @@ func (h *PageHandler) RestoreArtifactProject(w http.ResponseWriter, r *http.Requ
 	}
 	writeJSON(w, 200, h.artifactProjectReceipt(r, k, out))
 }
+
+type artifactProjectShareResponse struct {
+	SharedVersion int64  `json:"shared_version"`
+	URL           string `json:"url"`
+}
+
 func (h *PageHandler) ShareArtifactProject(w http.ResponseWriter, r *http.Request) {
 	k, ok := h.artifactProjectStart(w, r)
 	if !ok {
@@ -457,7 +463,7 @@ func (h *PageHandler) ShareArtifactProject(w http.ResponseWriter, r *http.Reques
 	if notify != nil {
 		notify()
 	}
-	writeJSON(w, 200, map[string]any{"shared_version": p.Version, "url": "/pages/" + r.PathValue("slug") + "?artifact=1&version=" + strconv.FormatInt(p.Version, 10) + "&workspace_id=" + k.WorkspaceID})
+	writeJSON(w, 200, artifactProjectShareResponse{SharedVersion: p.Version, URL: "/pages/" + r.PathValue("slug") + "?artifact=1&version=" + strconv.FormatInt(p.Version, 10) + "&workspace_id=" + k.WorkspaceID})
 }
 func artifactProjectManifest(m artifacts.VersionManifest) map[string]any {
 	names := make([]string, 0, len(m.Files))

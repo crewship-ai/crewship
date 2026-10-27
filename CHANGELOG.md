@@ -7162,6 +7162,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Add default-off artifact project handlers with atomic versions, anchored feedback and immutable shared pins. Public routing follows separately.
 - Read retained artifact snapshots and publish atomic manifests with explicit version conflicts and credential-scoped write availability.
 
+- Add default-off artifact restore, shared-version selection and anchored feedback routes, plus a typed human CLI comment command.
+
 ## [1.0.0-rc.1] — 2026-07-12
 
 ### Security
