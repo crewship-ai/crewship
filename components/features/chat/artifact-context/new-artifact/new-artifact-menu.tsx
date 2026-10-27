@@ -32,7 +32,7 @@ export function NewArtifactPanel({ kinds, onPick, onClose, className, dialog = t
     <div className="flex items-center gap-2">
       <Sparkles aria-hidden className="size-4 text-muted-foreground" />
       <b className="font-semibold">New artifact</b>
-      {onClose && <Button type="button" size="icon" variant="ghost" aria-label="Close" className="ml-auto size-7 coarse:size-11" onClick={onClose}><X aria-hidden /></Button>}
+      {onClose && <Button type="button" size="icon" variant="ghost" aria-label="Close" className="ml-auto size-7 coarse:size-[44px]" onClick={onClose}><X aria-hidden /></Button>}
     </div>
     <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-[repeat(auto-fill,minmax(112px,1fr))]">
       {kinds.map(k => <button key={k.id} type="button" aria-pressed={k.id === kind.id} onClick={() => setSelected(k.id)}
