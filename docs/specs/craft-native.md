@@ -12,22 +12,28 @@ Ordinary authentication and workspace membership remain required.
 
 ## Routes
 
-All paths below start with `/api/v1/pages/{slug}/craft`. Supply the workspace
-through `?workspace_id=...`; `@<page-id>` is accepted in place of a slug.
+Authentication: ordinary human authentication and current workspace/Page access
+are required. Request headers: `Authorization` or a session cookie, plus
+`X-Craft-Session` after admission. Query parameters: `workspace_id`. The slug
+path parameter accepts a slug or `@<page-id>`. The private header never travels
+to an editor frame. Responses are JSON, except the explicitly documented SSE.
+Statuses: 401 for missing authentication, 403 for denied current authority,
+400 for malformed requests, 409 for competing/stale custody, and 503 when a
+mutation is disabled or unavailable. A generic denial does not prove read loss.
 
-| Method | Suffix | Operation |
-|---|---|---|
-| GET | `/availability` | `{enabled: boolean}`; no Craft admission required. |
-| POST | `/sessions` | Body `{}`; issue a new mounted human admission, status 201. |
-| POST | `/sessions/reauthorize` | Use independently refreshed authentication for the same live admission. |
-| GET | `/lease` | Current holder, generation and handoff requests. |
-| POST | `/lease` | Acquire when free. |
-| POST | `/lease/acquire` | Explicit alias for acquisition. |
-| POST | `/lease/renew` | Renew this admission's current generation. |
-| POST | `/lease/release` | Release this admission's current generation. |
-| POST | `/lease/request-handoff` | Request custody from the current holder, status 201. |
-| POST | `/lease/handoff` | Transfer to an existing public request ID. |
-| GET | `/events` | Authenticated SSE metadata and live-holder heartbeat. |
+| Method | Path | Request | Response / success status |
+|---|---|---|---|
+| GET | `/api/v1/pages/{slug}/craft/availability` | No Craft admission. | `{enabled: boolean}`, 200. |
+| POST | `/api/v1/pages/{slug}/craft/sessions` | `{}`. | `session_token`, public `session_id`, `application_id`, `page_id`, 201. |
+| POST | `/api/v1/pages/{slug}/craft/sessions/reauthorize` | Separately refreshed original authentication; no body consumed. | `{renewed: boolean}`, 200. |
+| GET | `/api/v1/pages/{slug}/craft/lease` | Craft admission header. | Lease status described below, 200. |
+| POST | `/api/v1/pages/{slug}/craft/lease` | `{}`; acquire when free. | Lease status, 200. |
+| POST | `/api/v1/pages/{slug}/craft/lease/acquire` | `{}`; explicit acquisition alias. | Lease status, 200. |
+| POST | `/api/v1/pages/{slug}/craft/lease/renew` | `{generation: "1"}`. | Lease status, 200. |
+| POST | `/api/v1/pages/{slug}/craft/lease/release` | `{generation: "1"}`. | Released lease status, 200. |
+| POST | `/api/v1/pages/{slug}/craft/lease/request-handoff` | `{}`. | `{request_id, generation}`, 201. |
+| POST | `/api/v1/pages/{slug}/craft/lease/handoff` | `{generation: "1", request_id: "public-request-id"}`. | New holder's lease status, 200. |
+| GET | `/api/v1/pages/{slug}/craft/events` | Craft admission header; keep the connection open. | `text/event-stream`: `lease` status or `session_retired` metadata; 200. |
 
 Except availability and initial session creation, send `X-Craft-Session` as well
 as ordinary authentication. Session creation returns `session_token`, the distinct

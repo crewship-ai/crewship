@@ -12474,6 +12474,225 @@
         ],
         "type": "object"
       },
+      "NativeCraftAvailability": {
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "NativeCraftEmptyRequest": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "NativeCraftGenerationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "generation": {
+            "description": "Canonical decimal int64 in1..9223372036854775807. Never convert to a JavaScript number.",
+            "maxLength": 19,
+            "nullable": false,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "generation"
+        ],
+        "type": "object"
+      },
+      "NativeCraftHandoffReceipt": {
+        "properties": {
+          "generation": {
+            "description": "Canonical decimal int64 in1..9223372036854775807. Never convert to a JavaScript number.",
+            "maxLength": 19,
+            "nullable": false,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "generation"
+        ],
+        "type": "object"
+      },
+      "NativeCraftHandoffRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "generation": {
+            "description": "Canonical decimal int64 in1..9223372036854775807. Never convert to a JavaScript number.",
+            "maxLength": 19,
+            "nullable": false,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "generation",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "NativeCraftHolder": {
+        "properties": {
+          "actor_id": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "human"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_id",
+          "display_name",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "NativeCraftLease": {
+        "properties": {
+          "acquired_at": {
+            "description": "Currently always null: acquisition wall time is not persisted.",
+            "nullable": true,
+            "type": "string"
+          },
+          "can_write": {
+            "type": "boolean"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "generation": {
+            "description": "Canonical decimal int64 in1..9223372036854775807. Never convert to a JavaScript number.",
+            "maxLength": 19,
+            "nullable": true,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "handoff_requested_by": {
+            "items": {
+              "$ref": "#/components/schemas/NativeCraftRequest"
+            },
+            "type": "array"
+          },
+          "handoff_requested_kind": {
+            "enum": [
+              "human",
+              null
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "holder": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NativeCraftHolder"
+              }
+            ],
+            "nullable": true
+          },
+          "mine": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "holder",
+          "mine",
+          "generation",
+          "expires_at",
+          "can_write",
+          "acquired_at",
+          "handoff_requested_kind",
+          "handoff_requested_by"
+        ],
+        "type": "object"
+      },
+      "NativeCraftRenewal": {
+        "properties": {
+          "renewed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "renewed"
+        ],
+        "type": "object"
+      },
+      "NativeCraftRequest": {
+        "properties": {
+          "actor_id": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "human"
+            ],
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "actor_id",
+          "display_name",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "NativeCraftSession": {
+        "properties": {
+          "application_id": {
+            "enum": [
+              "wordcraft",
+              "gridcraft"
+            ],
+            "type": "string"
+          },
+          "page_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "session_token": {
+            "description": "Private mounted host admission bearer; never deliver to an iframe or local draft.",
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_token",
+          "session_id",
+          "application_id",
+          "page_id"
+        ],
+        "type": "object"
+      },
       "NativeDocumentProvenance": {
         "properties": {
           "artifacts": {
@@ -127431,7 +127650,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/NativeCraftAvailability"
                 }
               }
             },
@@ -127504,14 +127723,25 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Private admission issued for this mounted original human credential and Page.",
+            "in": "header",
+            "name": "X-Craft-Session",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            }
           }
         ],
         "responses": {
           "200": {
             "content": {
-              "application/json": {
+              "text/event-stream": {
                 "schema": {
-                  "type": "object"
+                  "description": "SSE event: lease with NativeCraftLease JSON, or session_retired with delivery=stopped, reason=authority_changed and draft=retain|purge. Generic auth failures do not imply draft purge.",
+                  "type": "string"
                 }
               }
             },
@@ -127620,6 +127850,16 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Private admission issued for this mounted original human credential and Page.",
+            "in": "header",
+            "name": "X-Craft-Session",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -127627,7 +127867,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/NativeCraftLease"
                 }
               }
             },
@@ -127698,23 +127938,34 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Private admission issued for this mounted original human credential and Page.",
+            "in": "header",
+            "name": "X-Craft-Session",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/NativeCraftEmptyRequest"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/NativeCraftLease"
                 }
               }
             },
@@ -127841,23 +128092,34 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Private admission issued for this mounted original human credential and Page.",
+            "in": "header",
+            "name": "X-Craft-Session",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/NativeCraftEmptyRequest"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/NativeCraftLease"
                 }
               }
             },
@@ -127984,23 +128246,34 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Private admission issued for this mounted original human credential and Page.",
+            "in": "header",
+            "name": "X-Craft-Session",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/NativeCraftHandoffRequest"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/NativeCraftLease"
                 }
               }
             },
@@ -128127,23 +128400,34 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Private admission issued for this mounted original human credential and Page.",
+            "in": "header",
+            "name": "X-Craft-Session",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/NativeCraftGenerationRequest"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/NativeCraftLease"
                 }
               }
             },
@@ -128270,23 +128554,34 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Private admission issued for this mounted original human credential and Page.",
+            "in": "header",
+            "name": "X-Craft-Session",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/NativeCraftGenerationRequest"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/NativeCraftLease"
                 }
               }
             },
@@ -128413,33 +128708,34 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Private admission issued for this mounted original human credential and Page.",
+            "in": "header",
+            "name": "X-Craft-Session",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/NativeCraftEmptyRequest"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
-            "description": "OK"
-          },
           "201": {
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/NativeCraftHandoffReceipt"
                 }
               }
             },
@@ -128572,27 +128868,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/NativeCraftEmptyRequest"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
-            "description": "OK"
-          },
           "201": {
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/NativeCraftSession"
                 }
               }
             },
@@ -128701,23 +128988,24 @@
             "schema": {
               "type": "string"
             }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object"
-              }
+          },
+          {
+            "description": "Private admission issued for this mounted original human credential and Page.",
+            "in": "header",
+            "name": "X-Craft-Session",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
             }
           }
-        },
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/NativeCraftRenewal"
                 }
               }
             },
