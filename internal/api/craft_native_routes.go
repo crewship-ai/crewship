@@ -25,10 +25,10 @@ func (r *Router) registerCraftNativeRoutes() {
 	}
 	m := newCraftNativeHTTP(r.pages, r.craftNativeHTTPConfig.Enabled, clock)
 	r.craftNativeHTTP = m
-	authed, workspace := r.authMw.RequireAuth, r.authMw.RequireWorkspace
+	authed, wsCtx := r.authMw.RequireAuth, r.authMw.RequireWorkspace
 	// Availability is Page-scoped and never treats an old profile as native.
 	// openapi: responses 200,401,403
-	r.mux.Handle("GET /api/v1/pages/{slug}/craft/availability", authed(workspace(r.providerAccountPolicy(http.HandlerFunc(m.availability)))))
+	r.mux.Handle("GET /api/v1/pages/{slug}/craft/availability", authed(wsCtx(r.providerAccountPolicy(http.HandlerFunc(m.availability)))))
 	// Every mutation declares its per-object authority gate; the handler checks
 	// original credentials and Page rights, including CLI read/write scopes.
 	// openapi: responses 201,400,401,403,503
@@ -36,9 +36,9 @@ func (r *Router) registerCraftNativeRoutes() {
 	// openapi: responses 200,400,401,403,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/craft/sessions/reauthorize", roleSelf, m.reauthorize)
 	// openapi: responses 200,401,403
-	r.mux.Handle("GET /api/v1/pages/{slug}/craft/lease", authed(workspace(r.providerAccountPolicy(http.HandlerFunc(m.lease)))))
+	r.mux.Handle("GET /api/v1/pages/{slug}/craft/lease", authed(wsCtx(r.providerAccountPolicy(http.HandlerFunc(m.lease)))))
 	// openapi: responses 200,401,403,409,503
-	r.mux.Handle("GET /api/v1/pages/{slug}/craft/events", authed(workspace(r.providerAccountPolicy(http.HandlerFunc(m.events)))))
+	r.mux.Handle("GET /api/v1/pages/{slug}/craft/events", authed(wsCtx(r.providerAccountPolicy(http.HandlerFunc(m.events)))))
 	// openapi: responses 200,400,401,403,409,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/craft/lease", roleSelf, m.acquire)
 	// openapi: responses 200,400,401,403,409,503

@@ -32,9 +32,9 @@ func newCraftCommand() *cobra.Command {
 }
 
 type craftAction struct {
-	Action     string `json:"action"`
-	Generation string `json:"generation,omitempty"`
-	RequestID  string `json:"request_id,omitempty"`
+	Action     string `json:"action" yaml:"action"`
+	Generation string `json:"generation,omitempty" yaml:"generation,omitempty"`
+	RequestID  string `json:"request_id,omitempty" yaml:"request_id,omitempty"`
 }
 
 func craftConnect(cmd *cobra.Command, args []string) error {
@@ -56,8 +56,8 @@ func craftConnect(cmd *cobra.Command, args []string) error {
 		return e
 	}
 	var admission struct {
-		Token string `json:"session_token"`
-		ID    string `json:"session_id"`
+		Token string `json:"session_token" yaml:"session_token"`
+		ID    string `json:"session_id" yaml:"session_id"`
 	}
 	if e = json.Unmarshal(raw, &admission); e != nil || len(admission.Token) != 64 || admission.ID == "" || admission.ID == admission.Token {
 		return fmt.Errorf("invalid native session response")
@@ -171,7 +171,12 @@ func craftEmit(cmd *cobra.Command, raw json.RawMessage, secret string) error {
 		}
 		return v
 	}
-	return json.NewEncoder(cmd.OutOrStdout()).Encode(clean(value))
+	formatter := resolvedFormatter(cmd)
+	formatter.Writer = cmd.OutOrStdout()
+	if cmd.Name() == "availability" {
+		return formatter.Machine(clean(value))
+	}
+	return formatter.WriteStreamRow(clean(value))
 }
 func craftResponse(cmd *cobra.Command, r *http.Response, err error, secret string) error {
 	if err != nil {
@@ -223,8 +228,8 @@ func craftWatch(cmd *cobra.Command, c *cli.Client, page, secret string) error {
 				data.Reset()
 				if event == "session_retired" {
 					var retired struct {
-						Delivery string `json:"delivery"`
-						Draft    string `json:"draft"`
+						Delivery string `json:"delivery" yaml:"delivery"`
+						Draft    string `json:"draft" yaml:"draft"`
 					}
 					if json.Unmarshal(raw, &retired) != nil || retired.Delivery != "stopped" || (retired.Draft != "retain" && retired.Draft != "purge") {
 						return fmt.Errorf("invalid native retirement event")

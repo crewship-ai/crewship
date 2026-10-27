@@ -7,12 +7,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
 
 func TestCraftNativeRoutesTwoHumansSeeNamedHolderAndHandoff(t *testing.T) {
+	requireCraftNativeProductionClock(t)
 	f, _, _ := craftNativeHTTPFixture(t)
 	mustExec(t, f.db, `UPDATE users SET full_name='Pavel' WHERE id=?`, f.userID)
 	mustExec(t, f.db, `UPDATE users SET full_name='Jana' WHERE id=?`, f.adminID)
@@ -152,5 +154,28 @@ func TestCraftNativeAvailabilityPageAndDefaultOff(t *testing.T) {
 	m.availability(w, req)
 	if !strings.Contains(w.Body.String(), `"enabled":false`) {
 		t.Fatal("default-off availability enabled")
+	}
+}
+
+// Real-clock transport tests exercise Linux CLOCK_BOOTTIME. The remaining
+// authority tests use their deterministic clock and run on every platform.
+func requireCraftNativeProductionClock(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != "linux" {
+		t.Skip("native production owner leases require Linux CLOCK_BOOTTIME")
+	}
+}
+
+func TestCraftNativeUnsupportedPlatformFailsClosed(t *testing.T) {
+	if runtime.GOOS == "linux" {
+		t.Skip("unsupported-platform startup check runs on non-Linux")
+	}
+	f, _, _ := craftNativeHTTPFixture(t)
+	router, err := NewRouter(f.db, "native-route-fixture-secret-32chars", newTestLogger(), WithCraftNativeHTTP(CraftNativeHTTPConfig{Enabled: true}))
+	if router != nil {
+		router.Shutdown()
+	}
+	if err == nil || !strings.Contains(err.Error(), "Linux CLOCK_BOOTTIME") {
+		t.Fatalf("unsupported native owner clock was not refused: %v", err)
 	}
 }

@@ -21,7 +21,9 @@ crewship craft connect <page>
 creates one session with `POST /api/v1/pages/{slug}/craft/sessions`, prints only
 its public `session_id`, then reads one JSON action per stdin line. The private
 session token stays in process memory and is attached as `X-Craft-Session`.
-Responses are escaped NDJSON; authentication and workspace selection use the
+Responses default to escaped NDJSON. With `-f yaml`, each response is a YAML
+document separated by `---`; stdin actions remain NDJSON. Availability honors
+the same output format flag. Authentication and workspace selection use the
 normal CLI context. Server error bodies are not printed.
 
 | Action | Route |

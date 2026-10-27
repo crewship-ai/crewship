@@ -198,6 +198,7 @@ func TestCraftNativeHTTPPositiveInt64GenerationWire(t *testing.T) {
 }
 
 func TestCraftNativeHTTPHeartbeatRenewsServerSideAndStopsOnReadLoss(t *testing.T) {
+	requireCraftNativeProductionClock(t)
 	f, m, ctx := craftNativeHTTPFixture(t)
 	clock, err := mooring.NewBootOwnerClock()
 	if err != nil {
@@ -357,6 +358,7 @@ func TestCraftNativeHTTPLeaseDTOAndRequestDisplay(t *testing.T) {
 }
 
 func TestCraftNativeHTTPFreshCredentialExtendsEstablishedStream(t *testing.T) {
+	requireCraftNativeProductionClock(t)
 	f, m, ctx := craftNativeHTTPFixture(t)
 	clock, err := mooring.NewBootOwnerClock()
 	if err != nil {
