@@ -47,3 +47,12 @@ BEGIN SELECT RAISE(ABORT,'artifact message run binding is immutable'); END;
 CREATE TRIGGER artifact_project_message_revocation_terminal BEFORE UPDATE OF revoked_at ON artifact_project_message_intents
 WHEN OLD.revoked_at IS NOT NULL AND NEW.revoked_at IS NOT OLD.revoked_at
 BEGIN SELECT RAISE(ABORT,'artifact message intent revocation is terminal'); END;
+-- Keep live-authority cleanup bounded by each canonical parent identity.
+CREATE INDEX artifact_project_consents_chat ON artifact_project_run_consents(chat_id);
+CREATE INDEX artifact_project_consents_human ON artifact_project_run_consents(human_user_id);
+CREATE INDEX artifact_project_consents_message ON artifact_project_run_consents(message_id);
+CREATE INDEX artifact_project_consents_page ON artifact_project_run_consents(result_page_id);
+CREATE INDEX artifact_project_intents_chat ON artifact_project_message_intents(chat_id);
+CREATE INDEX artifact_project_intents_comment ON artifact_project_message_intents(comment_id);
+CREATE INDEX artifact_project_intents_human ON artifact_project_message_intents(human_user_id);
+CREATE INDEX artifact_project_intents_page ON artifact_project_message_intents(page_id);

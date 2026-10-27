@@ -164,6 +164,25 @@ func (h *PageHandler) artifactProjectComments(r *http.Request, k artifacts.Versi
 			if e != nil {
 				return e
 			}
+			if sharedOnly {
+				// A private answer cannot reveal a newer version or queue state
+				// to somebody entitled only to the selected shared pin.
+				out[i].AnsweredVersion = 0
+				out[i].TaskID = ""
+				out[i].Status = "comment"
+				for _, reply := range out[i].Replies {
+					if reply.NeedsClarification {
+						if out[i].AnsweredVersion == 0 {
+							out[i].Status = "needs_clarification"
+						}
+						continue
+					}
+					out[i].Status = "answered"
+					if reply.Version > out[i].AnsweredVersion {
+						out[i].AnsweredVersion = reply.Version
+					}
+				}
+			}
 		}
 		return nil
 	})

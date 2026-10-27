@@ -15,9 +15,12 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/featureflags"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/pages"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
+
+const journalArtifactProjectShared journal.EntryType = "artifact.project_shared"
 
 var errArtifactProjectAccess = errors.New("artifact project access denied")
 var errArtifactProjectAnchor = errors.New("artifact anchor no longer matches")
@@ -389,6 +392,7 @@ func (h *PageHandler) ShareArtifactProject(w http.ResponseWriter, r *http.Reques
 	}
 	auth := h.artifactProjectAuthority(r, k, true, true)
 	sharedOnce := false
+	var notify func()
 	err := h.artifactProjectStore(r.Context()).Share(r.Context(), k, *p.BaseVersion, p.Version, func(ctx context.Context, tx *sql.Tx) (string, error) {
 		actor, e := auth(ctx, tx)
 		if e != nil {
@@ -401,6 +405,13 @@ func (h *PageHandler) ShareArtifactProject(w http.ResponseWriter, r *http.Reques
 		if _, e = tx.ExecContext(ctx, `INSERT INTO audit_logs(id,workspace_id,user_id,action,entity_type,entity_id,metadata,created_at) VALUES(?,?,?,?,?,?,?,?)`, generateCUID(), k.WorkspaceID, actor, "artifact.project_shared", "page", k.PageID, fmt.Sprintf(`{"version":%d}`, p.Version), stamp); e != nil {
 			return "", e
 		}
+		notify, e = appendAuthorizationAudit(ctx, tx, h.journal, journal.Entry{
+			WorkspaceID: k.WorkspaceID, Type: journalArtifactProjectShared, ActorType: journal.ActorUser, ActorID: actor,
+			Summary: "Artifact project shared version selected", Payload: map[string]any{"page_id": k.PageID, "version": p.Version},
+		})
+		if e != nil {
+			return "", e
+		}
 		_, e = tx.ExecContext(ctx, `UPDATE pages SET private_audience=0,updated_at=? WHERE id=? AND workspace_id=?`, stamp, k.PageID, k.WorkspaceID)
 		if e == nil {
 			sharedOnce = true
@@ -410,6 +421,9 @@ func (h *PageHandler) ShareArtifactProject(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		artifactProjectError(w, err)
 		return
+	}
+	if notify != nil {
+		notify()
 	}
 	writeJSON(w, 200, map[string]any{"shared_version": p.Version, "url": "/pages/" + r.PathValue("slug") + "?artifact=1&version=" + strconv.FormatInt(p.Version, 10) + "&workspace_id=" + k.WorkspaceID})
 }

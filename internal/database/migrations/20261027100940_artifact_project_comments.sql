@@ -49,3 +49,12 @@ CREATE TABLE artifact_project_origins (
 INSERT INTO feature_flags(id,key,description,enabled,created_at,updated_at)
  VALUES('ff_artifact_projects','artifact_projects','Multi-screen HTML projects with immutable versions and anchored feedback',0,datetime('now'),datetime('now'))
  ON CONFLICT(key) DO NOTHING;
+-- Parent deletion and history lookup must not scan the whole feedback corpus.
+CREATE INDEX artifact_project_replies_comment ON artifact_project_comment_replies(comment_id,created_at,id);
+CREATE INDEX artifact_project_tasks_page ON artifact_project_comment_tasks(page_id);
+CREATE INDEX artifact_project_tasks_workspace ON artifact_project_comment_tasks(workspace_id);
+CREATE INDEX artifact_project_comments_page_id ON artifact_project_comments(page_id);
+CREATE INDEX artifact_project_comments_version ON artifact_project_comments(version);
+CREATE INDEX artifact_project_origins_agent ON artifact_project_origins(agent_id);
+CREATE INDEX artifact_project_origins_chat ON artifact_project_origins(chat_id);
+CREATE INDEX artifact_project_origins_workspace ON artifact_project_origins(workspace_id);

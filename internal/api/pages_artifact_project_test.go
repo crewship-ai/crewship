@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 func artifactProjectFixture(t *testing.T) (*PageHandler, string, string, func(string, string, string, string) *httptest.ResponseRecorder) {
@@ -279,4 +280,32 @@ func artifactProjectFullDurability(t *testing.T, db *sql.DB) *sql.DB {
 	}
 	t.Cleanup(func() { _ = full.Close() })
 	return full.DB
+}
+
+type artifactProjectUnchainedEmitter struct{ journal.Emitter }
+
+func TestArtifactProjectShareRequiresAtomicAudit(t *testing.T) {
+	h, _, owner, call := artifactProjectFixture(t)
+	body := strings.TrimPrefix(artifactProjectBody(0, "First"), "{")
+	if w := call(owner, "POST", "artifacts", `{"slug":"three-screens","name":"Project",`+body); w.Code != 201 {
+		t.Fatal(w.Code, w.Body)
+	}
+	emitter := h.journal
+	h.SetJournal(artifactProjectUnchainedEmitter{})
+	w := call(owner, "POST", "three-screens/artifact/share", `{"base_version":1,"version":1}`)
+	if w.Code != 500 {
+		t.Fatalf("unchained publication acknowledged %d %s", w.Code, w.Body)
+	}
+	var private, pin int
+	if err := h.db.QueryRow(`SELECT p.private_audience,v.shared_version FROM pages p JOIN artifact_version_heads v ON v.page_id=p.id WHERE p.slug='three-screens'`).Scan(&private, &pin); err != nil || private != 1 || pin != 0 {
+		t.Fatal("audit refusal committed audience/pin", private, pin, err)
+	}
+	h.SetJournal(emitter)
+	if w = call(owner, "POST", "three-screens/artifact/share", `{"base_version":1,"version":1}`); w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
+	var n int
+	if err := h.db.QueryRow(`SELECT count(*) FROM journal_entries WHERE entry_type='artifact.project_shared'`).Scan(&n); err != nil || n != 1 {
+		t.Fatal("share journal mismatch", n, err)
+	}
 }
