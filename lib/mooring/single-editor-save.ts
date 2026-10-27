@@ -27,7 +27,7 @@ export interface SingleEditorSaveOptions {
   sessionId: string
   journal: NativeDraftJournal
   engine: {
-    snapshot(signal: AbortSignal): Promise<{ bytes: Uint8Array; editorRevision: string }>
+    snapshot(signal: AbortSignal, requestId?: string): Promise<{ bytes: Uint8Array; editorRevision: string }>
     validate(draft: NativeDraft, signal: AbortSignal): Promise<void>
   }
   transport: {
@@ -35,6 +35,7 @@ export interface SingleEditorSaveOptions {
     reconcile?(request: NativeSaveRequest, signal: AbortSignal): Promise<unknown>
   }
   onState(state: NativeSaveState): void
+  onReceipt?(receipt: NativeSaveReceipt): void | Promise<unknown>
   idleMs?: number
   timeoutMs?: number
 }
@@ -43,14 +44,16 @@ interface Prepared { draft: NativeSaveRequest; epoch: number; sequence: number }
 /** One immutable editor/lease lifecycle. A new generation needs a new editor
  * loaded from its confirmed version, never an automatic replay of recovery. */
 export function createSingleEditorSave(options: SingleEditorSaveOptions) {
+  options = { ...options }
   if (![options.workspaceId, options.pageId].every(value => typeof value === "string" && value.length > 0 && value.length <= 256 && !value.includes("\0")) || !validNativeDraft({ ...options, editorRevision: "initial", bytes: new Uint8Array() })) throw new Error("invalid_native_session")
   const idleMs = options.idleMs ?? 300, timeoutMs = options.timeoutMs ?? 10_000
   if (!Number.isFinite(idleMs) || idleMs < 1 || idleMs > 5000 || !Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 60_000) throw new Error("invalid_save_deadline")
   let active = true, writable = true, dirty = false, edits = 0, baseVersion = options.baseVersion
   let blocked: string | undefined, latest: Prepared | undefined, unconfirmed: Prepared | undefined
-  let pending: { abort: AbortController } | undefined
+  let pending: { abort: AbortController; done: Promise<void> } | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
-  let preparations = Promise.resolve()
+  let preparations = Promise.resolve(), draftWrites = Promise.resolve()
+  let lastPersistedSequence = 0, manualCount = 0
   let preparingCount = 0
   let nextPreparation = 0, lastFailedPreparation = 0
   const lifetime = new AbortController()
@@ -67,6 +70,9 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   const unregister = options.journal.onRetire(stop)
   emit("idle")
   function schedule() { clearTimeout(timer); if (active) timer = setTimeout(() => { void save() }, idleMs) }
+  function scheduleIfNeeded() {
+    if (active && writable && dirty && !blocked && !unconfirmed && !pending && preparingCount === 0 && manualCount === 0) schedule()
+  }
   function validReceipt(raw: unknown, attempt: Prepared): raw is NativeSaveReceipt {
     if (!raw || typeof raw !== "object") return false
     const r = raw as Record<string, unknown>, d = attempt.draft
@@ -77,10 +83,14 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   }
   async function settle(raw: unknown, attempt: Prepared) {
     if (!active || !writable) return
-    if (!validReceipt(raw, attempt)) { unconfirmed = attempt; emit("uncertain", "invalid_receipt"); return }
-    baseVersion = raw.version
+    const receipt: unknown = raw && typeof raw === "object" ? { ...raw } : raw
+    if (!validReceipt(receipt, attempt)) { unconfirmed = attempt; emit("uncertain", "invalid_receipt"); return }
+    if (!active || !writable) return
+    baseVersion = receipt.version
     unconfirmed = undefined
     try { await options.journal.confirm(attempt.draft) } catch { blocked = "storage"; emit("draft", "storage"); return }
+    if (!active || !writable) return
+    try { void Promise.resolve(options.onReceipt?.(receipt)).catch(() => {}) } catch { /* Receipt observers cannot change persistence. */ }
     if (!active || !writable) return
     dirty = preparingCount > 0 || lastFailedPreparation > (latest?.sequence ?? 0) || edits !== attempt.epoch || latest?.draft.contentHash !== attempt.draft.contentHash || latest?.draft.editorRevision !== attempt.draft.editorRevision
     emit(dirty ? "dirty" : "saved")
@@ -99,7 +109,8 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   }
   async function transmit(attempt: Prepared, reconcile: boolean) {
     if (!active || !writable || pending) return
-    const operation = { abort: new AbortController() }; pending = operation
+    let complete!: () => void
+    const operation = { abort: new AbortController(), done: new Promise<void>(resolve => { complete = resolve }) }; pending = operation
     emit("saving")
     try {
       const result = await bounded(signal => reconcile ? options.transport.reconcile!(attempt.draft, signal) : options.transport.save(attempt.draft, signal), operation.abort)
@@ -115,10 +126,26 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       } else { unconfirmed = attempt; emit("uncertain", "unconfirmed") }
     } finally {
       if (pending === operation) pending = undefined
-      if (active && writable && dirty && !blocked && !unconfirmed) schedule()
+      complete()
+      scheduleIfNeeded()
     }
   }
-  function save(): Promise<void> {
+  // Preserve the newest durable recovery row when an older queued manual
+  // snapshot rebases. Test the sequence inside this queue, after prior writes.
+  function persistDraft(draft: NativeDraft, sequence: number): Promise<void> {
+    const writing = draftWrites.then(async () => {
+      if (!active || sequence < lastPersistedSequence) return
+      await options.journal.persist(draft)
+      lastPersistedSequence = sequence
+    })
+    draftWrites = writing.catch(() => {})
+    return writing
+  }
+  function save(requestId?: string): Promise<void> {
+    const manual = requestId !== undefined
+    if (manual && (typeof requestId !== "string" || !requestId || requestId.length > 128 || requestId.includes("\0"))) return Promise.reject(new Error("invalid_native_save_ticket"))
+    if (manual && manualCount >= 4) return Promise.reject(new Error("native_save_backpressure"))
+    if (manual) manualCount++
     clearTimeout(timer)
     preparingCount++
     const sequence = ++nextPreparation
@@ -128,12 +155,12 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       dirty = true
       let stage = "engine"
       try {
-        const snapshot = await options.engine.snapshot(lifetime.signal)
+        const snapshot = await options.engine.snapshot(lifetime.signal, requestId)
         if (!active) return
         const draft: NativeDraft = { applicationId: options.applicationId, enginePin: options.enginePin, sessionId: options.sessionId, generation: options.generation, baseVersion, editorRevision: snapshot.editorRevision, bytes: snapshot.bytes.slice() }
         if (!validNativeDraft(draft)) throw new Error("invalid_native_snapshot")
         stage = "storage"
-        await options.journal.persist(draft)
+        await persistDraft(draft, sequence)
         if (!active) return
         stage = "engine"
         await options.engine.validate({ ...draft, bytes: draft.bytes.slice() }, lifetime.signal)
@@ -151,17 +178,29 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     })
     const ready = preparing.finally(() => { preparingCount-- })
     preparations = ready.then(() => {}, () => {})
-    return ready.then(async attempt => {
-      if (!attempt || !active) return
-      if (!writable || blocked || unconfirmed || pending) { emit(!writable ? "read-only" : unconfirmed ? "uncertain" : "draft", blocked); return }
-      if (attempt.draft.baseVersion !== baseVersion) {
+    const sending = ready.then(async attempt => {
+      if (!attempt || !active) { if (manual) throw new Error(active ? "native_snapshot_failed" : "native_session_retired"); return }
+      // A manual ticket owns this exact prepared snapshot. Wait for the bounded
+      // transport, but never replay a queued ticket after an unknown ACK.
+      const unavailable = () => !active ? "native_session_retired" : !writable ? "write_revoked" : blocked ?? (unconfirmed ? "unconfirmed" : pending ? "pending" : undefined)
+      for (;;) {
+        if (manual) while (pending && active && writable && !blocked && !unconfirmed) await pending.done
+        if (unavailable()) {
+          emit(!writable ? "read-only" : unconfirmed ? "uncertain" : "draft", blocked)
+          if (manual) throw new Error(unavailable())
+          return
+        }
+        if (attempt.draft.baseVersion === baseVersion) break
         attempt = { ...attempt, draft: { ...attempt.draft, baseVersion } }
-        try { await options.journal.persist(attempt.draft) } catch { emit("draft", "storage"); return }
-        if (!active || !writable || blocked || unconfirmed || pending) return
-        latest = attempt
+        try { await persistDraft(attempt.draft, attempt.sequence) } catch { emit("draft", "storage"); if (manual) throw new Error("storage"); return }
+        if (latest?.sequence === attempt.sequence) latest = attempt
+        // Another manual operation may have started while this journal write
+        // awaited storage. Repeat both the transport fence and base sampling.
       }
       await transmit(attempt, false)
+      if (manual && unavailable()) throw new Error(unavailable())
     })
+    return manual ? sending.finally(() => { manualCount--; scheduleIfNeeded() }) : sending
   }
   function revokeWrite() {
     if (!active) return

@@ -53,9 +53,10 @@ function decode(snapshot: string): NativeDraft | null {
 /** Existing private IDB journal, with a separate row per mounted tab. Recovery
  * is data for compare/copy only; it never creates a write or adopts a lease. */
 export async function openNativeDraftJournal(scope: { human: string; workspace: string; page: string; applicationId: string }): Promise<NativeDraftJournal> {
+  scope = { ...scope }
   if (![scope.human, scope.workspace, scope.page, scope.applicationId].every(identifier)) throw fail()
   const id = `native:${crypto.randomUUID()}`
-  let active = true, closed = false
+  let active = true, closed = false, closing = false, revoking = false
   let current: string | undefined
   let store: Awaited<ReturnType<typeof openDocumentDrafts>> | undefined
   let opening: Promise<Awaited<ReturnType<typeof openDocumentDrafts>>> | undefined
@@ -67,27 +68,33 @@ export async function openNativeDraftJournal(scope: { human: string; workspace: 
   const retire = () => {
     if (retired) return retired
     active = false
-    for (const listener of listeners) { try { listener() } catch { /* Observer failures cannot block privacy retirement. */ } }
     unregister()
-    retired = Promise.resolve(opening).catch(() => {}).then(() => tail).then(closeStore)
+    retired = Promise.resolve(opening).catch(() => {}).then(() => tail)
+    for (const listener of listeners) { try { listener() } catch { /* Observer failures cannot block privacy retirement. */ } }
     return retired
   }
-  unregister = registerDocumentDraftWriter(scope.human, retire)
+  const close = () => {
+    if (revoking) return purged!
+    closing = true
+    return retire().then(closeStore)
+  }
+  unregister = registerDocumentDraftWriter(scope.human, close)
   try {
     if (!active) throw fail()
-    opening = openDocumentDrafts(scope.human, scope.workspace, scope.page, { maxDraftBytes: MAX_ENCODED_BYTES })
+    opening = openDocumentDrafts(scope.human, scope.workspace, scope.page, { maxDraftBytes: MAX_ENCODED_BYTES, requireExclusive: true })
     store = await opening
-    if (!active) { closeStore(); throw fail() }
+    if (!active || !store.exclusive) { closeStore(); throw fail() }
   } catch (error) { active = false; unregister(); closeStore(); throw error }
   const journal = store
   function enqueue<T>(fn: () => Promise<T>): Promise<T> {
+    if (!active) return Promise.reject(fail())
     const work = tail.then(async () => { if (!active) throw fail(); return fn() })
     tail = work.then(() => {}, () => {})
     return work.then(value => { if (!active) throw fail(); return value })
   }
   return {
     persist(draft) {
-      if (draft.applicationId !== scope.applicationId) return Promise.reject(fail())
+      if (!active || draft.applicationId !== scope.applicationId) return Promise.reject(fail())
       const snapshot = encode(draft)
       return enqueue(async () => {
         await journal.put({ id, schema: 1, epoch: "native-v1", update: "", attempted: true, snapshot })
@@ -95,6 +102,7 @@ export async function openNativeDraftJournal(scope: { human: string; workspace: 
       })
     },
     confirm(draft) {
+      if (!active) return Promise.reject(fail())
       const snapshot = encode(draft)
       return enqueue(async () => { if (current === snapshot) { await journal.remove(id); current = undefined } })
     },
@@ -115,7 +123,21 @@ export async function openNativeDraftJournal(scope: { human: string; workspace: 
       else listeners.add(listener)
       return () => { listeners.delete(listener) }
     },
-    close: retire,
-    revokeRead() { return purged ??= retire().then(() => purgeDocumentDrafts(scope.human, scope.workspace, scope.page)) },
+    close,
+    revokeRead() {
+      if (purged) return purged
+      // An old closed mount has no live admission to erase a fresh mount.
+      if (closing || !active) return Promise.reject(fail())
+      revoking = true
+      let complete!: () => void, reject!: (cause: unknown) => void
+      purged = new Promise<void>((resolve, fail) => { complete = resolve; reject = fail })
+      // Install the promise before observers run, so a reentrant close joins
+      // this purge and cannot release the exclusive Page lock prematurely.
+      void retire().then(() => purgeDocumentDrafts(scope.human, scope.workspace, scope.page)).then(
+        () => { closeStore(); complete() },
+        error => { closeStore(); reject(error) },
+      )
+      return purged
+    },
   }
 }

@@ -1,7 +1,7 @@
 import { webcrypto } from "node:crypto"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { createSingleEditorSave, NativeSaveError, type NativeSaveRequest } from "./single-editor-save"
-import type { NativeDraftJournal } from "./native-draft"
+import type { NativeDraft, NativeDraftJournal } from "./native-draft"
 
 beforeEach(() => vi.stubGlobal("crypto", webcrypto))
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
@@ -11,9 +11,10 @@ function rig(baseVersion = "1", generation = "1") {
   const journal = { persist: vi.fn().mockResolvedValue(undefined), confirm: vi.fn().mockResolvedValue(undefined), recovery: vi.fn().mockResolvedValue([]), onRetire: vi.fn(() => () => {}), close: vi.fn().mockResolvedValue(undefined), revokeRead: vi.fn().mockResolvedValue(undefined) } satisfies NativeDraftJournal
   const engine = { snapshot: vi.fn().mockResolvedValue({ bytes: new Uint8Array([1, 2]), editorRevision: "doc:1:0" }), validate: vi.fn().mockResolvedValue(undefined) }
   const transport = { save: vi.fn(async (r: NativeSaveRequest) => receipt(r)), reconcile: vi.fn(async (r: NativeSaveRequest) => receipt(r)) }
-  const state = vi.fn()
-  const controller = createSingleEditorSave({ workspaceId: "w", pageId: "p", applicationId: "wordcraft", enginePin: "engine-pin", generation, sessionId: "tab-a", baseVersion, journal, engine, transport, onState: state, idleMs: 20 })
-  return { journal, engine, transport, state, controller }
+  const state = vi.fn(), onReceipt = vi.fn()
+  const options = { workspaceId: "w", pageId: "p", applicationId: "wordcraft", enginePin: "engine-pin", generation, sessionId: "tab-a", baseVersion, journal, engine, transport, onState: state, onReceipt, idleMs: 20 }
+  const controller = createSingleEditorSave(options)
+  return { journal, engine, transport, state, onReceipt, options, controller }
 }
 
 it("durably journals whole native bytes before validating and sending a version", async () => {
@@ -258,4 +259,119 @@ it("rejects an ACK for a neighboring large generation without rounding", async (
 
 it.each(["0", "01", "-1", "9223372036854775808"])("rejects a noncanonical positive generation %s", generation => {
   expect(() => rig("1", generation)).toThrow()
+})
+
+it("publishes a receipt only after journal confirmation and keeps its validated metadata immutable", async () => {
+  const r = rig(), disk = deferred<void>()
+  const response = receipt({ applicationId: "wordcraft", enginePin: "engine-pin", bytes: new Uint8Array(), editorRevision: "doc:1:0", generation: "1", sessionId: "tab-a", baseVersion: "1", workspaceId: "w", pageId: "p", contentHash: "unused" })
+  r.transport.save.mockImplementationOnce(async req => { Object.assign(response, receipt(req)); return response })
+  r.journal.confirm.mockReturnValueOnce(disk.promise)
+  const saving = r.controller.save()
+  await vi.waitFor(() => expect(r.journal.confirm).toHaveBeenCalledOnce())
+  expect(r.onReceipt).not.toHaveBeenCalled()
+  const valid = { ...response }; response.contentHash = "changed-after-validation"; response.version = "999"
+  disk.resolve(); await saving
+  expect(r.onReceipt).toHaveBeenCalledExactlyOnceWith(valid)
+  await r.controller.close()
+})
+it("does not publish a receipt after read retirement during journal confirmation", async () => {
+  const r = rig(), disk = deferred<void>(); r.journal.confirm.mockReturnValueOnce(disk.promise)
+  const saving = r.controller.save(); await vi.waitFor(() => expect(r.journal.confirm).toHaveBeenCalledOnce())
+  await r.controller.revokeRead(); disk.resolve(); await saving
+  expect(r.onReceipt).not.toHaveBeenCalled()
+})
+
+it("pins immutable scope across an awaited snapshot even when host options are reused", async () => {
+  const r = rig(), snapshot = deferred<{ bytes: Uint8Array; editorRevision: string }>()
+  r.engine.snapshot.mockReturnValueOnce(snapshot.promise)
+  const saving = r.controller.save()
+  await vi.waitFor(() => expect(r.engine.snapshot).toHaveBeenCalledOnce())
+  Object.assign(r.options, { workspaceId: "foreign-workspace", pageId: "foreign-page", generation: "2", sessionId: "foreign-tab", applicationId: "gridcraft", enginePin: "other-pin", baseVersion: "90" })
+  snapshot.resolve({ bytes: new Uint8Array([1, 2]), editorRevision: "opaque-original" }); await saving
+  expect(r.transport.save).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ workspaceId: "w", pageId: "p", generation: "1", sessionId: "tab-a", applicationId: "wordcraft", enginePin: "engine-pin", baseVersion: "1" }), expect.any(AbortSignal))
+  await r.controller.close()
+})
+
+it("forwards two manual RPC ticket IDs to separate fresh snapshots", async () => {
+  const r = rig()
+  const first = r.controller.save("ticket-one"), second = r.controller.save("ticket-two")
+  await Promise.all([first, second])
+  expect(r.engine.snapshot).toHaveBeenNthCalledWith(1, expect.any(AbortSignal), "ticket-one")
+  expect(r.engine.snapshot).toHaveBeenNthCalledWith(2, expect.any(AbortSignal), "ticket-two")
+  await r.controller.close()
+})
+it("retains the second manual RPC snapshot through a delayed first ACK and ACKs each exact ticket", async () => {
+  const r = rig(), firstACK = deferred<ReturnType<typeof receipt>>()
+  r.engine.snapshot.mockImplementation(async (...args: unknown[]) => ({ bytes: new Uint8Array([1, 2]), editorRevision: `rpc:${args[1]}` }))
+  r.transport.save.mockReturnValueOnce(firstACK.promise)
+  const first = r.controller.save("ticket-one")
+  await vi.waitFor(() => expect(r.transport.save).toHaveBeenCalledOnce())
+  const second = r.controller.save("ticket-two")
+  await vi.waitFor(() => expect(r.journal.persist).toHaveBeenCalledTimes(2))
+  expect(r.transport.save).toHaveBeenCalledOnce()
+  firstACK.resolve(receipt(r.transport.save.mock.calls[0][0])); await Promise.all([first, second])
+  expect(r.transport.save).toHaveBeenCalledTimes(2)
+  expect(r.transport.save.mock.calls[0][0]).toMatchObject({ editorRevision: "rpc:ticket-one", baseVersion: "1" })
+  expect(r.transport.save.mock.calls[1][0]).toMatchObject({ editorRevision: "rpc:ticket-two", baseVersion: "2" })
+  expect(r.onReceipt.mock.calls.map(call => call[0].editorRevision)).toEqual(["rpc:ticket-one", "rpc:ticket-two"])
+  await r.controller.close()
+})
+it("bounds concurrent manual RPC saves without a lifetime save cap", async () => {
+  const r = rig(), firstACK = deferred<ReturnType<typeof receipt>>()
+  r.engine.snapshot.mockImplementation(async (...args: unknown[]) => ({ bytes: new Uint8Array([1, 2]), editorRevision: `rpc:${args[1]}` }))
+  r.transport.save.mockReturnValueOnce(firstACK.promise)
+  const saves = Array.from({ length: 4 }, (_, i) => r.controller.save(`ticket-${i}`))
+  saves.forEach(save => { void save.catch(() => {}) })
+  await vi.waitFor(() => expect(r.transport.save).toHaveBeenCalledOnce())
+  await expect(r.controller.save("ticket-overflow")).rejects.toThrow("native_save_backpressure")
+  firstACK.resolve(receipt(r.transport.save.mock.calls[0][0])); await Promise.all(saves)
+  await expect(r.controller.save("ticket-after-drain")).resolves.toBeUndefined()
+  expect(r.transport.save).toHaveBeenCalledTimes(5); await r.controller.close()
+})
+it("retains unsent manual RPC drafts after unknown ACK and requires explicit recovery", async () => {
+  const r = rig(), firstACK = deferred<ReturnType<typeof receipt>>()
+  r.engine.snapshot.mockImplementation(async (...args: unknown[]) => ({ bytes: new Uint8Array([1, 2]), editorRevision: `rpc:${args[1]}` }))
+  r.transport.save.mockImplementationOnce(async () => { await firstACK.promise; throw new Error("lost ACK") })
+  const first = r.controller.save("ticket-first"); void first.catch(() => {})
+  await vi.waitFor(() => expect(r.transport.save).toHaveBeenCalledOnce())
+  const second = r.controller.save("ticket-second"); void second.catch(() => {})
+  await vi.waitFor(() => expect(r.journal.persist).toHaveBeenCalledTimes(2))
+  firstACK.resolve(receipt(r.transport.save.mock.calls[0][0]))
+  await expect(first).rejects.toThrow("unconfirmed")
+  await expect(second).rejects.toThrow("unconfirmed")
+  expect(r.transport.save).toHaveBeenCalledOnce(); expect(r.onReceipt).not.toHaveBeenCalled()
+  expect(r.journal.confirm).not.toHaveBeenCalled(); await r.controller.close()
+})
+it("does not overwrite a newer durable draft when a waiting manual RPC snapshot rebases", async () => {
+  const r = rig(), firstACK = deferred<ReturnType<typeof receipt>>()
+  let recovery: { editorRevision: string; baseVersion: string } | undefined
+  r.engine.snapshot.mockImplementation(async (...args: unknown[]) => ({ bytes: new Uint8Array([1, 2]), editorRevision: `rpc:${args[1] ?? "newer-auto"}` }))
+  r.journal.persist.mockImplementation(async (draft: NativeDraft) => { recovery = { editorRevision: draft.editorRevision, baseVersion: draft.baseVersion } })
+  r.journal.confirm.mockImplementation(async (draft: NativeDraft) => { if (recovery?.editorRevision === draft.editorRevision && recovery.baseVersion === draft.baseVersion) recovery = undefined })
+  r.transport.save.mockReturnValueOnce(firstACK.promise)
+  const first = r.controller.save("first-ticket")
+  await vi.waitFor(() => expect(r.transport.save).toHaveBeenCalledOnce())
+  const second = r.controller.save("second-ticket")
+  await vi.waitFor(() => expect(r.journal.persist).toHaveBeenCalledTimes(2))
+  await r.controller.save()
+  expect(recovery?.editorRevision).toBe("rpc:newer-auto")
+  firstACK.resolve(receipt(r.transport.save.mock.calls[0][0])); await Promise.all([first, second])
+  expect(r.transport.save).toHaveBeenCalledTimes(2)
+  expect(recovery?.editorRevision).toBe("rpc:newer-auto")
+  await r.controller.close()
+})
+it("publishes a receipt without letting an asynchronous observer failure change Saved", async () => {
+  const r = rig(); r.onReceipt.mockRejectedValueOnce(new Error("UI observer failed"))
+  await r.controller.save(); await Promise.resolve()
+  expect(r.onReceipt).toHaveBeenCalledOnce()
+  expect(r.state).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "saved" }))
+  await r.controller.close()
+})
+
+it("does not overwrite readonly state when the receipt observer retires write authority", async () => {
+  const r = rig(); r.onReceipt.mockImplementationOnce(() => r.controller.revokeWrite())
+  await r.controller.save()
+  expect(r.state.mock.calls.map(call => call[0].phase)).not.toContain("saved")
+  expect(r.state).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "read-only" }))
+  await r.controller.close()
 })

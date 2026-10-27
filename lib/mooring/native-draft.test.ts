@@ -32,7 +32,7 @@ it("reuses the existing journal with bounded native opt-in and offers reload dra
   await first.close()
   const reloaded = await openNativeDraftJournal(scope)
   const recovered = await reloaded.recovery()
-  expect(mock.open).toHaveBeenCalledWith("h", "w", "p", { maxDraftBytes: 64 * 1024 * 1024 })
+  expect(mock.open).toHaveBeenCalledWith("h", "w", "p", { maxDraftBytes: 64 * 1024 * 1024, requireExclusive: true })
   expect(recovered).toHaveLength(1)
   expect(recovered[0].actions).toEqual(["compare", "copy"])
   expect(Buffer.from(recovered[0].draft.bytes).equals(Buffer.from(original.bytes))).toBe(true)
@@ -40,17 +40,10 @@ it("reuses the existing journal with bounded native opt-in and offers reload dra
   await reloaded.close()
 })
 
-it("cannot overwrite or acknowledge another tab's journal without Web Locks", async () => {
-  mock.open.mockImplementation(async () => storage(false))
-  const a = await openNativeDraftJournal(scope), b = await openNativeDraftJournal(scope)
-  await a.persist(draft())
-  await b.persist({ ...draft(), sessionId: "tab-b", editorRevision: "doc:2:0" })
-  expect(rows.size).toBe(2)
-  expect(await b.recovery()).toEqual([]) // no lock: live foreign rows are not proven orphans
-  await a.confirm(draft())
-  expect(rows.size).toBe(1)
-  expect([...rows.values()][0].snapshot).toContain("tab-b")
-  await a.close(); await b.close()
+it("refuses a native writer when the underlying journal did not acquire an exclusive lock", async () => {
+  const store = storage(false); mock.open.mockResolvedValue(store)
+  await expect(openNativeDraftJournal(scope)).rejects.toThrow()
+  expect(store.put).not.toHaveBeenCalled(); expect(store.close).toHaveBeenCalledOnce()
 })
 
 it("an old ACK never removes a newer durable native snapshot", async () => {
@@ -90,4 +83,30 @@ it("retires synchronously during sign-out even if IndexedDB opens late", async (
   await retirement; await rejected
   expect(store.close).toHaveBeenCalled()
   expect(store.put).not.toHaveBeenCalled()
+})
+
+it("captures immutable human and Page scope before the IndexedDB open awaits", async () => {
+  let finish!: (value: ReturnType<typeof storage>) => void
+  mock.open.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+  const mutableScope = { ...scope }
+  const opening = openNativeDraftJournal(mutableScope)
+  Object.assign(mutableScope, { human: "other", workspace: "other", page: "other", applicationId: "gridcraft" })
+  finish(storage()); const journal = await opening
+  await journal.persist(draft()); await journal.revokeRead()
+  expect(mock.purge).toHaveBeenCalledExactlyOnceWith("h", "w", "p")
+})
+
+it("keeps the exclusive store until a requested read purge completes and lets close join it", async () => {
+  let finish!: () => void
+  mock.purge.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve }))
+  const store = storage(); mock.open.mockResolvedValue(store)
+  const journal = await openNativeDraftJournal(scope)
+  const purging = journal.revokeRead()
+  await vi.waitFor(() => expect(mock.purge).toHaveBeenCalledOnce())
+  let closed = false
+  const closing = journal.close().then(() => { closed = true })
+  await Promise.resolve()
+  expect(closed).toBe(false); expect(store.close).not.toHaveBeenCalled()
+  finish(); await Promise.all([purging, closing])
+  expect(store.close).toHaveBeenCalledOnce()
 })

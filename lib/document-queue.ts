@@ -49,11 +49,15 @@ function boundDraftTransaction(tx: IDBTransaction, complete: () => void, reject:
   return abort
 }
 
-export async function openDocumentDrafts(human: string, workspace: string, page: string, options?: { maxDraftBytes?: number }): Promise<DocumentDraftStore> {
+export async function openDocumentDrafts(human: string, workspace: string, page: string, options?: { maxDraftBytes?: number; requireExclusive?: boolean }): Promise<DocumentDraftStore> {
   const maxDraftBytes = options?.maxDraftBytes ?? 4 * 1024 * 1024
+  const requireExclusive = options?.requireExclusive === true
   if (!Number.isSafeInteger(maxDraftBytes) || maxDraftBytes < 1 || maxDraftBytes > 64 * 1024 * 1024) throw new DocumentStorageError(message)
   if (!human || !workspace || !page || typeof indexedDB === "undefined") throw new DocumentStorageError(message)
   const owner = JSON.stringify([human, workspace, page])
+  // Native journals require a real non-queued lock. Legacy callers retain
+  // their remount wait and non-exclusive fallback.
+  if (requireExclusive && (typeof navigator === "undefined" || !navigator.locks)) throw new DocumentStorageError(message)
   // One live writer per Page: rows in a journal that is free are orphans of a
   // closed tab and may be offered as recovery; rows of an active tab never are.
   let releaseLock: (() => void) | undefined
@@ -61,17 +65,29 @@ export async function openDocumentDrafts(human: string, workspace: string, page:
     // Wait briefly: a same-tab remount releases its own lock a moment after the
     // new instance starts. Only a lock that stays held is another live tab.
     const wait = new AbortController()
-    const timer = setTimeout(() => wait.abort(), STORAGE_LOCK_WAIT_MS)
+    let accepting = true
     const outcome = await new Promise<{ release: () => void } | "busy" | "none">(resolve => {
+      const finish = (value: { release: () => void } | "busy" | "none") => {
+        if (!accepting) return
+        accepting = false; clearTimeout(timer); resolve(value)
+      }
+      const timer = setTimeout(() => { finish(requireExclusive ? "none" : "busy"); wait.abort() }, STORAGE_LOCK_WAIT_MS)
       const refused = (cause: unknown) => {
         // A refused request (SecurityError, ...) means no lock is available, not that another tab holds one.
-        resolve(cause instanceof DOMException && cause.name === "AbortError" ? "busy" : "none")
+        finish(cause instanceof DOMException && cause.name === "AbortError" ? "busy" : "none")
       }
-      try { navigator.locks.request(`crewship-document-drafts:${owner}`, { signal: wait.signal }, () => new Promise<void>(release => resolve({ release }))).catch(refused) } catch (cause) { refused(cause) }
+      try {
+        // The Web Locks specification forbids signal together with ifAvailable.
+        navigator.locks.request(`crewship-document-drafts:${owner}`, requireExclusive ? { ifAvailable: true } : { signal: wait.signal }, lock => {
+          if (!accepting) return Promise.resolve() // A late grant releases immediately after our deadline.
+          if (!lock) { finish("busy"); return Promise.resolve() }
+          return new Promise<void>(release => finish({ release }))
+        }).catch(refused)
+      } catch (cause) { refused(cause) }
     })
-    clearTimeout(timer)
     if (outcome === "busy") throw new DocumentStorageBusy("Another tab is editing this document; its local draft is not available here.")
     if (outcome !== "none") releaseLock = outcome.release
+    else if (requireExclusive) throw new DocumentStorageError(message)
   }
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
     let settled = false
