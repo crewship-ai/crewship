@@ -21,7 +21,7 @@ func TestArtifactManifestPreventsWorkbookContentTakeover(t *testing.T) {
 	}
 	engine := &fakeEngine{}
 	_, err = s.Execute(t.Context(), k, Request{MutationID: "takeover", MandateID: "human-import", Command: Command{Kind: "import", Snapshot: []byte(`{"sheets":[{}]}`)}}, a, engine)
-	if !errors.Is(err, ErrInvalid) || engine.calls.Load() != 0 {
+	if !errors.Is(err, ErrForbidden) || engine.calls.Load() != 0 {
 		t.Fatalf("manifest custody bypassed: %v, engine calls %d", err, engine.calls.Load())
 	}
 }
