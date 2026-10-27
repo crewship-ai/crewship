@@ -58,3 +58,30 @@ func TestArtifactProjectMCPForwardsOriginalRunAndCAS(t *testing.T) {
 		t.Fatalf("conflict retried or hidden: calls=%d error=%v response=%s", calls.Load(), isError, text)
 	}
 }
+
+func TestArtifactProjectMCPRejectsNullFileStringsBeforeNetwork(t *testing.T) {
+	for _, field := range []string{"path", "content", "media_type"} {
+		t.Run(field, func(t *testing.T) {
+			s, key := newRunIdentityServer(t)
+			token := internaltoken.DeriveAgentRunToken(key, "ws-1", "agent-boot", "run-boot")
+			var calls atomic.Int32
+			host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1) }))
+			defer host.Close()
+			s.ipc.BaseURL, s.ipc.Token = host.URL, "synthetic-crew-ipc"
+			file := map[string]any{"path": "index.html", "content": "", "media_type": "text/html"}
+			file[field] = nil
+			packet, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": "artifact_publish", "arguments": map[string]any{"slug": "demo", "base_version": 1, "entrypoint": "index.html", "files": []any{file}}}})
+			r := httptest.NewRequest("POST", "/mcp/routines", strings.NewReader(string(packet)))
+			r.Header.Set("Authorization", "Bearer "+token)
+			w := httptest.NewRecorder()
+			s.handleRoutinesMCP(w, r)
+			isError, _ := documentCreateMCPResult(t, w)
+			if !isError || calls.Load() != 0 {
+				t.Fatalf("null %s forwarded: calls=%d", field, calls.Load())
+			}
+		})
+	}
+	if _, _, err := artifactProjectMCPPacket("artifact_publish", []byte(`{"slug":"demo","base_version":1,"entrypoint":"index.html","files":[{"path":"index.html","content":"","media_type":"text/html"}]}`)); err != nil {
+		t.Fatalf("valid empty content rejected: %v", err)
+	}
+}

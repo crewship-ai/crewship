@@ -93,6 +93,12 @@ func artifactProjectMCPPacket(name string, raw []byte) ([]byte, bool, error) {
 				if len(object) != 3 || object["path"] == nil || object["content"] == nil || object["media_type"] == nil {
 					return nil, true, fmt.Errorf("file requires canonical path, content and media_type")
 				}
+				for _, field := range []string{"path", "content", "media_type"} {
+					var text string
+					if bytes.Equal(bytes.TrimSpace(object[field]), []byte("null")) || json.Unmarshal(object[field], &text) != nil {
+						return nil, true, fmt.Errorf("file %s must be a non-null string", field)
+					}
+				}
 			}
 			var files []struct {
 				Path      string `json:"path"`
