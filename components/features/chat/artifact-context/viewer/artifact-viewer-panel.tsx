@@ -53,7 +53,7 @@ const BANNER_TONE = {
 function ViewerBanner({ tone, icon, title, children, action }: { tone: keyof typeof BANNER_TONE; icon?: typeof Info; title?: string; children?: React.ReactNode; action?: React.ReactNode }) {
   const t = BANNER_TONE[tone]
   const Icon = icon ?? t.icon
-  return <div role={tone === "bad" ? "alert" : undefined} data-tone={tone} className={cn("flex flex-wrap items-start gap-3 rounded-[10px] px-3.5 py-2.5 text-sm text-foreground", t.box)}>
+  return <div role={tone === "bad" ? "alert" : undefined} data-tone={tone} className={cn("flex flex-wrap items-start gap-3 rounded-card px-3.5 py-2.5 text-sm text-foreground", t.box)}>
     <Icon className={cn("mt-0.5 size-4 shrink-0", t.iconClass)} aria-hidden />
     <div className="min-w-0 flex-[1_1_200px] space-y-1">{title && <b className="block font-semibold">{title}</b>}{children}</div>
     {action}
@@ -287,9 +287,9 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
     </ViewerBanner>}
   </>
 
-  const history = historyOpen && versions.length > 0 && <div ref={historyRef} tabIndex={-1} role="region" aria-label="Version history" className="rounded-[10px] border bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+  const history = historyOpen && versions.length > 0 && <div ref={historyRef} tabIndex={-1} role="region" aria-label="Version history" className="rounded-card border bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
     <ul>{versions.map(v => <li key={v.version} className="flex flex-wrap items-center gap-2.5 border-t px-3 py-2 first:border-t-0">
-      <span data-slot="version-number" className="shrink-0 rounded-[5px] border bg-muted px-[5px] font-mono text-[0.72rem] font-semibold text-foreground/80">v{v.version}</span>
+      <span data-slot="version-number" className="shrink-0 rounded-sm border bg-muted px-[5px] font-mono text-micro font-semibold text-foreground/80">v{v.version}</span>
       <div className="grid min-w-0 flex-[1_1_180px]">
         <b className="truncate text-sm font-semibold">{[v.actor, v.message].filter(Boolean).join(" · ") || `Version ${v.version}`}</b>
         <small className="text-xs text-muted-foreground">{[v.created_at && timeAgo(v.created_at), v.restored_from ? `Restored from v${v.restored_from}` : null].filter(Boolean).join(" · ")}</small>
@@ -303,7 +303,7 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
 
   const pinNumber = data.comments.length + 1
   const pinCard = (anchor || draft) && !viewingOld && <form aria-label="New comment" onSubmit={event => { event.preventDefault(); submit(true) }}
-    className="z-[2] mt-2.5 flex flex-wrap items-start gap-2 rounded-[10px] border bg-card px-2.5 py-2 shadow-md @md:absolute @md:right-[18px] @md:top-[18px] @md:mt-0 @md:max-w-[min(320px,calc(100%-36px))]">
+    className="z-[2] mt-2.5 flex flex-wrap items-start gap-2 rounded-card border bg-card px-2.5 py-2 shadow-md @md:absolute @md:right-[18px] @md:top-[18px] @md:mt-0 @md:max-w-[min(320px,calc(100%-36px))]">
     <span aria-hidden className={cn(PIN, "size-6 bg-primary text-xs text-primary-foreground")}>{pinNumber}</span>
     <div className="grid min-w-0 flex-[1_1_160px] gap-1.5">
       <b className="truncate text-xs font-semibold">{anchor ? `On ${anchor.selector}${anchor.quote ? ` · ${elementLabel(anchor.selector, anchor.quote)}` : ""} · v${anchor.version}` : "Select an element to attach this comment"}</b>
@@ -316,7 +316,7 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
     </div>
   </form>
 
-  const canvas = <div ref={canvasRef} className="relative rounded-[10px] bg-muted p-3.5">
+  const canvas = <div ref={canvasRef} className="relative rounded-card bg-muted p-3.5">
     <div className={cn("overflow-hidden rounded-md border bg-white", fullscreen ? "h-[max(320px,calc(100dvh-14rem))]" : "h-[min(70vh,560px)] min-h-[320px]")}>
       <ArtifactPreviewFrame html={html} screens={screens} path={screen} selectMode={selectMode && !viewingOld} title={`Preview of ${labelOf(screen)}`}
         highlight={highlight} onSelect={select} onNavigate={setScreenPath} />
@@ -324,7 +324,7 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
     {pinCard}
   </div>
 
-  const queue = <div ref={queueRef} tabIndex={-1} role="region" aria-label="Comment queue" className="rounded-[10px] border bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+  const queue = <div ref={queueRef} tabIndex={-1} role="region" aria-label="Comment queue" className="rounded-card border bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
     <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
       <MessageSquare className="size-4 text-muted-foreground" aria-hidden />
       <b className="text-sm font-semibold">Comments for agent</b>
@@ -336,7 +336,7 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
         const chip = commentQueueChip(c)
         return <li key={c.id} className="border-t first:border-t-0">
           <button type="button" className="flex w-full flex-wrap items-center gap-2.5 px-3 py-2 text-left hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" onClick={() => jumpTo(c)}>
-            <span aria-hidden className={cn(PIN, "size-5 bg-muted text-[0.68rem] text-foreground/80 ring-1 ring-border")}>{index + 1}</span>
+            <span aria-hidden className={cn(PIN, "size-5 bg-muted text-micro text-foreground/80 ring-1 ring-border")}>{index + 1}</span>
             <span className="grid min-w-0 flex-[1_1_180px]">
               <b className="text-sm font-semibold">{c.text}</b>
               <small className="truncate text-xs text-muted-foreground">{[c.author, labelOf(c.path), c.selector && elementLabel(c.selector, c.quote), c.created_at && timeAgo(c.created_at)].filter(Boolean).join(" · ")}</small>
