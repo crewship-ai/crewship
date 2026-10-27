@@ -9,10 +9,11 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- Add authenticated artifact project creation and workspace availability endpoints behind the disabled artifact projects flag.
-
+- Show agent artifact project steps in chat as cards with kind, version, Draft/Shared state and a running "Creating version n…" step that settles into "vn ready · Restore"; off by default behind `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
 - **Opening a new conversation logged three 404s.** A draft session no longer requests its execution profile, messages or participants before the first send creates it.
 - **Artifact authoring clients support complete project versions.** Add pilot MCP tools and `page artifact` commands for atomic manifests, explicit version conflicts, restore and anchored feedback on servers that enable the artifact project backend.
+
+- Add authenticated artifact project creation and workspace availability endpoints behind the disabled artifact projects flag.
 
 - Clear copied-command feedback timers when onboarding unmounts.
 
