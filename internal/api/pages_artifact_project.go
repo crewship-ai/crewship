@@ -75,6 +75,10 @@ func (h *PageHandler) artifactProjectEnabled(ctx context.Context) bool {
 }
 func (h *PageHandler) ArtifactProjectAvailability(w http.ResponseWriter, r *http.Request) {
 	artifactCommentHeaders(w)
+	if validateContentHumanCredential(r, h.pageAuthReader(r.Context()), "pages:read") != nil {
+		replyError(w, http.StatusForbidden, "current artifact project read authority required")
+		return
+	}
 	writeJSON(w, 200, artifactProjectAvailabilityResponse{Enabled: h.artifactProjectEnabled(r.Context())})
 }
 func (h *PageHandler) artifactProjectStore(ctx context.Context) *artifacts.VersionStore {
