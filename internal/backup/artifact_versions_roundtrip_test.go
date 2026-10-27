@@ -12,6 +12,7 @@ import (
 
 func TestArtifactVersionBackupPreservesHistoryPinAndBinaryAssets(t *testing.T) {
 	source := openMigratedDB(t)
+	requireArtifactBackupFullDurability(t, source)
 	ws := seedWorkspace(t, source)
 	page := "artifact-version-backup"
 	if _, err := source.Exec(`INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES(?,?,?,?,?,'{}')`, page, ws, page, "Artifact project", "u_admin"); err != nil {
@@ -44,6 +45,7 @@ func TestArtifactVersionBackupPreservesHistoryPinAndBinaryAssets(t *testing.T) {
 	for _, fork := range []bool{false, true} {
 		t.Run(map[bool]string{false: "same", true: "fork"}[fork], func(t *testing.T) {
 			target := openMigratedDB(t)
+			requireArtifactBackupFullDurability(t, target)
 			opts := backup.RestoreOptions{Path: bundle.Path, Passphrase: "artifact-version-roundtrip-passphrase", Actor: actor}
 			if fork {
 				opts.AsWorkspace = "artifact-version-fork"
@@ -83,5 +85,15 @@ func TestArtifactVersionBackupPreservesHistoryPinAndBinaryAssets(t *testing.T) {
 				t.Fatalf("binary storage changed %q %v", blobType, err)
 			}
 		})
+	}
+}
+
+// The shared migration-template fixture defaults to NORMAL for fast test setup.
+// These durable-store operations must use FULL on their actual pooled connection.
+func requireArtifactBackupFullDurability(t *testing.T, db *sql.DB) {
+	t.Helper()
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(`PRAGMA synchronous=FULL`); err != nil {
+		t.Fatal(err)
 	}
 }
