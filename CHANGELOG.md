@@ -7146,6 +7146,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Content inspection allocates less on repeated matches (#4006).** Redaction emits spans once per rule and encoded-content scanning collects only the existing first 256 candidates, preserving finding order and results.
 
 - **Routine script steps clean up completed control directories (#4003).** Cleanup checks invocation ownership and process-group state, and reports cleanup failures separately from the script result.
+- Prepare closed manifest and receipt schema producers for artifact API tooling.
 
 - Preserve project feedback during upgrades and backups, keep private-history bundles owner-only, and erase legacy and native version attribution within the selected workspace.
 
