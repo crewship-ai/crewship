@@ -143,7 +143,7 @@ func (h *PageHandler) GrantArtifactProjectRunConsent(w http.ResponseWriter, r *h
 		replyError(w, 500, "artifact permission outcome unavailable")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"run_id": a.RunID, "expires_at": expiry, "authorized": true, "page_id": existingPage.String})
+	writeJSON(w, 200, artifactProjectConsentResponse{RunID: a.RunID, ExpiresAt: expiry, Authorized: true, PageID: existingPage.String})
 }
 
 func decodeArtifactProjectToolJSON(w http.ResponseWriter, r *http.Request, target any, limit int64) bool {

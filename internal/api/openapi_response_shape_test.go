@@ -50,6 +50,13 @@ var responseShapeContracts = []struct {
 	// A zero value of the struct the handler serializes.
 	value any
 }{
+	{name: "ArtifactProjectAvailability", pointer: "/components/schemas/ArtifactProjectAvailability", value: artifactProjectAvailabilityResponse{}},
+	{name: "ArtifactProjectConsentResponse", pointer: "/components/schemas/ArtifactProjectConsentResponse", value: artifactProjectConsentResponse{}},
+	{name: "ArtifactProjectMutationResponse", pointer: "/components/schemas/ArtifactProjectMutationResponse", value: artifactProjectMutationResponse{}},
+	{name: "ArtifactProjectReply", pointer: "/components/schemas/ArtifactProjectReply", value: artifactProjectReply{}},
+	{name: "ArtifactProjectShareResponse", pointer: "/components/schemas/ArtifactProjectShareResponse", value: artifactProjectShareResponse{}},
+	{name: "ArtifactProjectSnapshot", pointer: "/components/schemas/ArtifactProjectSnapshot", value: artifactProjectSnapshotResponse{}},
+
 	{name: "MooringCommandSession", pointer: "/components/schemas/MooringCommandSession", value: commandProductHTTPResponse{}},
 	{name: "MooringSession", pointer: "/components/schemas/MooringSession", value: collaborationHTTPSessionResponse{}},
 	{name: "NativeArtifactEdit", pointer: "/components/schemas/NativeArtifactEdit", value: nativeArtifactEdit{}},
