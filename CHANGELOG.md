@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Artifact authoring clients support complete project versions.** Add pilot MCP tools and `page artifact` commands for atomic manifests, explicit version conflicts, restore and anchored feedback on servers that enable the artifact project backend.
+
 - Clear copied-command feedback timers when onboarding unmounts.
 
 - Create vendored WordCraft numeric test fixtures exclusively so a competing output file cannot be truncated.
@@ -220,6 +222,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Explicitly update an existing personal Document from its private chat with `run --document-target`, retaining the original human purpose and revision through agent drafting.
 - New Documents retain their initial confirmed version in history, so it remains readable after later edits.
 - Build releases with Go 1.27.3 to fix the reachable crypto/x509 certificate verification vulnerability GO-2026-6809.
+- Fix Document formatting updates with bounded position-history metadata and aligned browser/service editor dependencies (#3855).
 - **Chat says Stopping until the stop is confirmed.** After Stop on a live reply, the Stop button reads **Stopping…** and does nothing more until the server reports how the turn ended; pressing it again sends no second cancel. The partial reply stays on screen, and a turn that did not complete ends with one line in words: **Stopped**, **Interrupted** or **The run failed**, each noting that the reply above is partial or may be incomplete (or that it ended before any reply); the line stays after a reload. Applies to chats on the versioned event stream; older streams still return to ready at once.
 - **New Doc states who can open the document.** The dialog no longer calls a new Doc private: it says **Who can open it — you, and workspace owners and admins; others only after you share it**, which is what the server enforces for a Doc created there. The Pages guide says the same and notes that such a Doc is not listed in **My space**, which holds only Documents whose audience is you alone.
 - **Copy on a chat reply says what happened.** The reply's Copy button turns into a check and screen readers hear **Copied to clipboard** only after the browser confirmed the copy; when the clipboard refuses (permission, an insecure dev host without the fallback), it says **Copy failed. Select the text and copy it with your keyboard.** instead of failing silently. The same confirmed copy is used in the onboarding setup chat.
