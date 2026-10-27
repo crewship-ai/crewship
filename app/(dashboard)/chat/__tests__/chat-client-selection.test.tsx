@@ -49,10 +49,12 @@ vi.mock("@/components/features/chat/chat-panel", () => ({
     initialInput,
     autoSendInitial,
     pageContextSlug,
+    draft,
     onSend,
   }: {
     agentSlug: string
     sessionId: string
+    draft?: boolean
     initialInput?: string
     autoSendInitial?: boolean
     pageContextSlug?: string
@@ -65,6 +67,7 @@ vi.mock("@/components/features/chat/chat-panel", () => ({
       data-initial={initialInput ?? "(none)"}
       data-autosend={String(!!autoSendInitial)}
       data-page={pageContextSlug ?? "(none)"}
+      data-draft={String(!!draft)}
     >
       <button onClick={() => onSend?.(sessionId, initialInput ?? "")}>simulate sent message</button>
     </div>
@@ -253,12 +256,15 @@ describe("<ChatClient> — the ?prompt= handoff belongs to one conversation", ()
     expect(p.getAttribute("data-session")).not.toBe("riley-1")
     expect(p.getAttribute("data-initial")).toBe("Review the page")
     expect(p.getAttribute("data-autosend")).toBe("false")
+    // #4369 — a minted id has no row, so the panel must not read it yet.
+    expect(p.getAttribute("data-draft")).toBe("true")
     expect(apiFetchMock.mock.calls.some(([, options]) => options?.method === "POST")).toBe(false)
 
     setUrl("/chat/morgan", "?session=morgan-1")
     view.rerender(<ChatClient />)
     window.dispatchEvent(new Event("popstate"))
     await waitFor(() => expect(screen.getByTestId("chat-panel").getAttribute("data-session")).toBe("morgan-1"))
+    expect(screen.getByTestId("chat-panel").getAttribute("data-draft")).toBe("false")
     expect(screen.getByTestId("chat-panel").getAttribute("data-initial")).toBe("(none)")
     expect(screen.getByTestId("chat-panel").getAttribute("data-autosend")).toBe("false")
   })
