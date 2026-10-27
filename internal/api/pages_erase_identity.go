@@ -242,6 +242,12 @@ func (h *AdminGDPRHandler) erasePagesIdentity(ctx context.Context, actionID, act
 	out.WebhooksRevoked = int(n)
 	out.revoked = append(out.revoked, hooks...)
 
+	// Craft leases retain their generation tombstone while losing the erased
+	// holder and any pending handoff authority in this workspace.
+	if err := eraseCraftEditLeaseIdentity(ctx, tx, wsID, targetID); err != nil {
+		return pageIdentityErasure{}, err
+	}
+
 	if err := tx.Commit(); err != nil {
 		return pageIdentityErasure{}, fmt.Errorf("commit pages identity erasure: %w", err)
 	}
