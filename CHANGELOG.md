@@ -9,9 +9,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- Show agent artifact project work in chat as version cards with a side viewer for screens, anchored comments, history and restore; off by default behind `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
+- Show agent artifact project steps in chat as cards with kind, version, Draft/Shared state and a running "Creating version n…" step that settles into "vn ready · Restore"; off by default behind `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
+- Open an artifact card in a side viewer (full screen on phones) with screens, element select and anchored comments, the agent comment queue, version history and restore; off by default behind `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
 - Show the Craft edit-lock bar, agent proposal cards (Compare / Accept / Reject) and recovered local drafts in chat, and a "+ New artifact" composer menu offering only kinds with a backend; off by default behind `NEXT_PUBLIC_CHAT_CRAFT_LEASE` and `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
-
 - **Artifact authoring clients support complete project versions.** Add pilot MCP tools and `page artifact` commands for atomic manifests, explicit version conflicts, restore and anchored feedback on servers that enable the artifact project backend.
 
 - Clear copied-command feedback timers when onboarding unmounts.
