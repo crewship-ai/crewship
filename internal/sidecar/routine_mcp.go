@@ -266,6 +266,8 @@ var routineMCPTools = append(append([]memoryMCPToolDescriptor{
 	{Name: "save_routine_draft", Description: "Save unpublished routine edits using the exact revision envelope returned by get_routine_draft. Put slug, name, definition and the proposed trigger inside draft.document. Never changes the live recipe or activates schedules. Return the editor_url to the user for Recipe / Test / Publish. A conflict preserves the existing draft; do not reload and blindly overwrite it. Prefer this for authoring in Chat; legacy save_routine publishes directly.", InputSchema: routineMCPSaveDraftSchema},
 }, documentCreateMCPCatalog()...), documentDraftMCPCatalog()...)
 
+func init() { routineMCPTools = append(routineMCPTools, artifactProjectMCPCatalog()...) }
+
 // handleRoutinesMCP is the JSON-RPC 2.0 entry point in-container CLIs hit at
 // /mcp/routines. It mirrors handleMemoryMCP exactly — same envelope, same
 // localhost gate one level up in buildHandler — but serves the routine-
@@ -383,6 +385,9 @@ func (s *Server) respondRoutinesMCPToolsCall(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	if s.respondArtifactProjectMCPToolCall(w, r, req, params.Name, params.Arguments) {
+		return
+	}
 	if s.respondDocumentCreateMCPToolCall(w, r, req, params.Name, params.Arguments) {
 		return
 	}
