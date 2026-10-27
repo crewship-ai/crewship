@@ -64,6 +64,8 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"mooring_receipts":               IntentInclude,        // immutable history and idempotence evidence
 	"mooring_intents":                IntentExcludeRuntime, // live human/run mandates never survive restore
 
+	"craft_native_documents": IntentInclude, // immutable native compatibility pins, never runtime authority
+
 	"mooring_edit_leases":           IntentExcludeRuntime, // target-local editor generation tombstones; no portable capabilities
 	"mooring_edit_lease_workspaces": IntentExcludeRuntime, // issued target fences outlive Page deletion
 	"mooring_edit_lease_requests":   IntentExcludeRuntime,

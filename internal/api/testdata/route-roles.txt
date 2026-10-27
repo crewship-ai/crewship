@@ -343,6 +343,14 @@ POST /api/v1/pages roleInline
 POST /api/v1/pages/import roleInline
 POST /api/v1/pages/maintenance roleManage
 POST /api/v1/pages/{slug}/application/actions/{panelId}/{actionId} roleCreate
+POST /api/v1/pages/{slug}/craft/lease roleSelf
+POST /api/v1/pages/{slug}/craft/lease/acquire roleSelf
+POST /api/v1/pages/{slug}/craft/lease/handoff roleSelf
+POST /api/v1/pages/{slug}/craft/lease/release roleSelf
+POST /api/v1/pages/{slug}/craft/lease/renew roleSelf
+POST /api/v1/pages/{slug}/craft/lease/request-handoff roleSelf
+POST /api/v1/pages/{slug}/craft/sessions roleSelf
+POST /api/v1/pages/{slug}/craft/sessions/reauthorize roleSelf
 POST /api/v1/pages/{slug}/document/initialize roleInline
 POST /api/v1/pages/{slug}/document/patch roleInline
 POST /api/v1/pages/{slug}/document/restore roleInline
@@ -358,8 +366,8 @@ POST /api/v1/pages/{slug}/public roleSelf
 POST /api/v1/pages/{slug}/rollback roleSelf
 POST /api/v1/pages/{slug}/slides/initialize roleInline
 POST /api/v1/pages/{slug}/webhooks roleSelf
-POST /api/v1/pages/{slug}/workbook/edits roleInline
 POST /api/v1/pages/{slug}/workbook/editors roleInline
+POST /api/v1/pages/{slug}/workbook/edits roleInline
 POST /api/v1/pages/{slug}/workbook/mandates roleInline
 POST /api/v1/pages/{slug}/workbook/operations roleInline
 POST /api/v1/pages/{slug}/workbook/sessions roleInline
