@@ -9,6 +9,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Add a default-off whole-native WordCraft/GridCraft version store with immutable compatibility pins, engine validation, lease and CAS fencing, exact snapshot receipts and portable profile backups. Its visible 16 GiB history budget preserves versions on exhaustion; editor activation remains separate.
+
+- **Native single-editor documents gain a default-off edit lease boundary.** SQL-backed holder generations fence expired, handed-off and revoked writers; workspace erasure and user deletion remove retained holder identities while preserving the fence. Lease acknowledgements recheck authority after SQL; recovery retires source holders while retaining generations, and portable replacement refuses issued target fences. Runtime editor and version-store wiring remain disabled.
+
 - Clear copied-command feedback timers when onboarding unmounts.
 
 - Create vendored WordCraft numeric test fixtures exclusively so a competing output file cannot be truncated.
