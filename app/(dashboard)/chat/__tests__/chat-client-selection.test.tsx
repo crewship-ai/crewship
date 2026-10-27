@@ -269,6 +269,27 @@ describe("<ChatClient> — the ?prompt= handoff belongs to one conversation", ()
     expect(screen.getByTestId("chat-panel").getAttribute("data-autosend")).toBe("false")
   })
 
+  it("loads a sent draft like any chat when the reader comes back to it", async () => {
+    setUrl("/chat/riley", "?new=1")
+    const view = render(<ChatClient />)
+    const p = await panel()
+    const draftId = p.getAttribute("data-session")!
+    expect(p.getAttribute("data-draft")).toBe("true")
+    // The first send created the row, even before the thread list shows it.
+    fireEvent.click(screen.getByText("simulate sent message"))
+
+    setUrl("/chat/morgan", "?session=morgan-1")
+    view.rerender(<ChatClient />)
+    window.dispatchEvent(new Event("popstate"))
+    await waitFor(() => expect(screen.getByTestId("chat-panel").getAttribute("data-session")).toBe("morgan-1"))
+
+    setUrl("/chat/riley", `?session=${draftId}`)
+    view.rerender(<ChatClient />)
+    window.dispatchEvent(new Event("popstate"))
+    await waitFor(() => expect(screen.getByTestId("chat-panel").getAttribute("data-session")).toBe(draftId))
+    expect(screen.getByTestId("chat-panel").getAttribute("data-draft")).toBe("false")
+  })
+
   it("keeps a Page handoff in its new session and never auto-sends it", async () => {
     setUrl("/chat/riley", "?new=1&page=fleet-201")
     const view = render(<ChatClient />)
