@@ -530,26 +530,3 @@ only after application replay verifies the complete candidate checkpoint.
 Actual HTTP/WS/Rust/SQL tests cover two authenticated subjects, peer deletion,
 original-credential revocation, and exact SDK replay. Browser UI, real agent
 writing, performance, and restart/status recovery remain separate qualifications.
-
-
-## Disabled whole-native document boundary
-
-`NativeStore` stores one complete native `document.json` through the manifest
-VersionStore. It does not use collaboration checkpoints or change existing
-document profiles. Explicit initialization attaches compatibility pins and
-commits the first edit lease and manifest together on an authorized empty Page.
-Host callbacks establish the original principal and current rights in the SQL
-transaction; neither input bytes nor an editor revision confer authority.
-
-The host must provide the pinned engine validator. `NativeCLIValidator` checks
-the executable hash and rejects malformed models, diagnostics and silent loss
-of authored fields. It validates a copy and persists the original bytes. Native
-snapshot receipts bind an exact successor version and reconcile that immutable
-attempt rather than the current head. Versions and generations cross browser
-boundaries as decimal strings; application revisions remain opaque strings.
-
-The default byte budget is 16 GiB with visible quota and keep-all retention.
-There is no save-count cap or automatic deletion. Quota failure preserves all
-versions. `native_store_test.go`, `native_save_receipt_test.go` and
-`native_validator_test.go` exercise these boundaries; they do not qualify a
-hour-long editor session. Runtime registration and product activation are separate.

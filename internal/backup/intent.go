@@ -36,11 +36,7 @@ import "sort"
 // table. Drift detection catches the omission in tests so an oversight
 // surfaces before a bundle ships missing rows.
 var BackupTableIntent = map[string]ScopedTableIntent{
-	"craft_native_documents": IntentInclude, // immutable native compatibility pins, never runtime authority
-	"artifact_version_heads": IntentInclude, // immutable storage family and separate latest/shared pins
-	"artifact_version_blobs": IntentInclude, // binary project assets, encoded losslessly
-	"artifact_versions":      IntentInclude, // all retained whole-project manifests
-
+	"craft_native_documents":         IntentInclude,        // immutable native compatibility pins, never runtime authority
 	"mooring_edit_leases":            IntentExcludeRuntime, // target-local editor generation tombstones; no portable capabilities
 	"mooring_edit_lease_workspaces":  IntentExcludeRuntime, // issued target fences outlive Page deletion
 	"mooring_edit_lease_requests":    IntentExcludeRuntime,

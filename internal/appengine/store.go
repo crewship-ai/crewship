@@ -670,20 +670,13 @@ func PageHasNoContent(ctx context.Context, tx *sql.Tx, pageID string) (bool, err
 }
 
 func hasOtherContent(ctx context.Context, tx *sql.Tx, pageID string) (bool, error) {
-	for _, table := range []string{"documents", "slides_heads", "page_panels", "page_project_drafts", "page_project_live", "page_artifacts", "page_boards", "mooring_documents", "artifact_version_heads"} {
+	for _, table := range []string{"documents", "slides_heads", "page_panels", "page_project_drafts", "page_project_live", "page_artifacts", "page_boards", "mooring_documents"} {
 		var installed, occupied bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name=? COLLATE NOCASE)`, table).Scan(&installed); err != nil {
 			return false, err
 		}
 		if installed {
-			query := "SELECT EXISTS(SELECT 1 FROM " + table + " WHERE page_id=?)"
-			if table == "artifact_version_heads" {
-				// Native history is part of its existing workbook, never an
-				// alternative format. An orphaned or foreign-family head still
-				// blocks initialization and every operation on another engine.
-				query = `SELECT EXISTS(SELECT 1 FROM artifact_version_heads v WHERE v.page_id=? AND (v.content_type<>'gridcraft' OR NOT EXISTS(SELECT 1 FROM gridcraft_heads g WHERE g.page_id=v.page_id AND g.workspace_id=v.workspace_id)))`
-			}
-			if err := tx.QueryRowContext(ctx, query, pageID).Scan(&occupied); err != nil {
+			if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM "+table+" WHERE page_id=?)", pageID).Scan(&occupied); err != nil {
 				return false, err
 			}
 			if occupied {

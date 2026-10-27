@@ -6,13 +6,10 @@ import (
 	"math"
 )
 
-// Native document bytes and project assets are not necessarily UTF-8. Keep
-// their representation explicit rather
+// Document CRDT bytes are not UTF-8. Keep their representation explicit rather
 // than passing them through the legacy TEXT normalizer and JSON replacement.
 func documentBinaryColumn(table, column string) bool {
 	switch table {
-	case "artifact_version_blobs":
-		return column == "content"
 	case "documents", "document_checkpoints":
 		return column == "snapshot" || column == "projection"
 	case "document_updates":
