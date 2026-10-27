@@ -33,6 +33,8 @@ import { useSmoothText } from "@/hooks/use-smooth-text"
 import type { ChatTurn, TurnPart } from "@/hooks/use-chat"
 import { reasoningSeconds, safeThinking } from "@/lib/chat-event-contract"
 import { groupTurnParts, type ToolNode } from "./turn-grouping"
+import { useArtifactToolCardsEnabled } from "./artifact-context/projects/artifact-viewer-context"
+import { ArtifactToolCard, liftArtifactToolNodes, type ArtifactRenderNode } from "./artifact-context/projects/artifact-tool-card"
 import {
   ACTIVITY_STATE_LABEL,
   flattenSteps,
@@ -627,6 +629,7 @@ function TurnEndNote({ turn, empty }: { turn: ChatTurn; empty: boolean }) {
 }
 
 export function AssistantTurn({ turn, onCopy, onFileClick, agentId, chatId, workspaceId }: AssistantTurnProps) {
+  const artifactCards = useArtifactToolCardsEnabled()
   const visibleParts = turn.parts
     .map((part) => part.type === "text" ? { ...part, content: visibleAgentText(part.content) } : part)
     .filter((part) => part.type !== "text" || part.content !== "")
@@ -654,7 +657,10 @@ export function AssistantTurn({ turn, onCopy, onFileClick, agentId, chatId, work
   return (
     <Message from="assistant">
       {turn.streamIncomplete && <p role="status" className="text-sm text-muted-foreground">Partial response — stream recovery pending</p>}
-      {groupTurnParts(visibleParts).map((node) => {
+      {(artifactCards ? liftArtifactToolNodes(groupTurnParts(visibleParts)) : groupTurnParts(visibleParts) as ArtifactRenderNode[]).map((node) => {
+        if (node.kind === "artifact") {
+          return <ArtifactToolCard key={`art-${node.tool.call.id}`} call={node.tool.call} result={node.tool.result} turnStreaming={turn.isStreaming} />
+        }
         if (node.kind === "activity") {
           return <ActivityGroup key={`act-${node.tools[0].call.id}`} tools={node.tools} agentId={agentId} turnStreaming={turn.isStreaming} />
         }
