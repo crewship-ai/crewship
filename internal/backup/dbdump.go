@@ -327,6 +327,7 @@ var BackupTables = []string{
 	"artifact_project_comment_tasks",
 	"artifact_project_comment_replies",
 	"artifact_project_origins",
+	"craft_native_documents",
 	"documents",
 	"mooring_documents", // after Pages; owns receipts
 	"mooring_receipts",

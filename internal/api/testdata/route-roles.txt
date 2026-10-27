@@ -350,6 +350,14 @@ POST /api/v1/pages/{slug}/artifact/comments/{commentId}/reply roleInline
 POST /api/v1/pages/{slug}/artifact/restore roleInline
 POST /api/v1/pages/{slug}/artifact/share roleInline
 POST /api/v1/pages/{slug}/artifact/versions roleInline
+POST /api/v1/pages/{slug}/craft/lease roleSelf
+POST /api/v1/pages/{slug}/craft/lease/acquire roleSelf
+POST /api/v1/pages/{slug}/craft/lease/handoff roleSelf
+POST /api/v1/pages/{slug}/craft/lease/release roleSelf
+POST /api/v1/pages/{slug}/craft/lease/renew roleSelf
+POST /api/v1/pages/{slug}/craft/lease/request-handoff roleSelf
+POST /api/v1/pages/{slug}/craft/sessions roleSelf
+POST /api/v1/pages/{slug}/craft/sessions/reauthorize roleSelf
 POST /api/v1/pages/{slug}/document/initialize roleInline
 POST /api/v1/pages/{slug}/document/patch roleInline
 POST /api/v1/pages/{slug}/document/restore roleInline

@@ -346,6 +346,7 @@
               "cli/slides",
               "cli/workbook",
               "cli/mooring",
+              "cli/craft",
               "cli/pipeline",
               "cli/webhook",
               "cli/waitpoint",
