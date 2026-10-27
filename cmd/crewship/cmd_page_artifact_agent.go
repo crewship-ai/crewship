@@ -110,12 +110,12 @@ func artifactCLIRequestWithTransport(cmd *cobra.Command, method, path string, bo
 	raw = bytes.ReplaceAll(raw, []byte(token), []byte("[REDACTED]"))
 	var envelope struct {
 		Result struct {
-			IsError bool `json:"isError"`
+			IsError bool `json:"isError" yaml:"isError"`
 			Content []struct {
-				Text string `json:"text"`
-			} `json:"content"`
-		} `json:"result"`
-		Error json.RawMessage `json:"error"`
+				Text string `json:"text" yaml:"text"`
+			} `json:"content" yaml:"content"`
+		} `json:"result" yaml:"result"`
+		Error json.RawMessage `json:"error" yaml:"error"`
 	}
 	if response.StatusCode != 200 || json.Unmarshal(raw, &envelope) != nil || len(envelope.Error) != 0 || len(envelope.Result.Content) != 1 {
 		return errors.New("artifact tool outcome unavailable; inspect project before retrying")
