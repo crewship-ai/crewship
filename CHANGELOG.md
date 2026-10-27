@@ -9,13 +9,18 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- Expose a default-off native Craft human session and edit-lease HTTP API with Page-scoped availability, named holders, requested handoff and live connection renewal. Original credentials and current Page rights fence every action; existing document profiles are unchanged.
+- **Opening a new conversation logged three 404s.** A draft session no longer requests its execution profile, messages or participants before the first send creates it.
+- **Artifact authoring clients support complete project versions.** Add pilot MCP tools and `page artifact` commands for atomic manifests, explicit version conflicts, restore and anchored feedback on servers that enable the artifact project backend.
 
-- Add a default-off whole-native WordCraft/GridCraft version store with immutable compatibility pins, engine validation, lease and CAS fencing, exact snapshot receipts and portable profile backups. Its visible 16 GiB history budget preserves versions on exhaustion; editor activation remains separate.
+- Clear copied-command feedback timers when onboarding unmounts.
+
+- **Saved Slides pages could look empty.** Page detail and list responses now include native Slides presence and schema metadata, allowing the existing opt-in Slides viewer to recognize saved presentations.
 
 - **Native single-editor documents gain a default-off edit lease boundary.** SQL-backed holder generations fence expired, handed-off and revoked writers; workspace erasure and user deletion remove retained holder identities while preserving the fence. Lease acknowledgements recheck authority after SQL; recovery retires source holders while retaining generations, and portable replacement refuses issued target fences. A target-local workspace issuance marker preserves restore protection after Page deletion. Runtime editor and version-store wiring remain disabled.
 
-- Clear copied-command feedback timers when onboarding unmounts.
+- Expose a default-off native Craft human session and edit-lease HTTP API with Page-scoped availability, named holders, requested handoff and live connection renewal. Original credentials and current Page rights fence every action; existing document profiles are unchanged.
+
+- Add a default-off whole-native WordCraft/GridCraft version store with immutable compatibility pins, engine validation, lease and CAS fencing, exact snapshot receipts and portable profile backups. Its visible 16 GiB history budget preserves versions on exhaustion; editor activation remains separate.
 
 - Create vendored WordCraft numeric test fixtures exclusively so a competing output file cannot be truncated.
 
