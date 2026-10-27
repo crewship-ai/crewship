@@ -320,6 +320,9 @@ var BackupTables = []string{
 	"page_folders",    // pages.folder_id → page_folders, so folders land first; FK owner_crew_id → crews
 	"page_folder_acl", // FK folder_id → page_folders; nullable set_by_user_id → users
 	"pages",
+	"artifact_version_heads",
+	"artifact_version_blobs",
+	"artifact_versions",
 	"documents",
 	"mooring_documents", // after Pages; owns receipts
 	"mooring_receipts",
