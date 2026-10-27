@@ -37,7 +37,7 @@ export function ArtifactToolCard({ call, result, turnStreaming = true }: Artifac
   // A call left without a result on a finished turn shows no stale progress, just the project if known.
   return <div className="flex flex-col gap-2" data-testid="artifact-tool-card">
     {(!running || turnStreaming) && <ArtifactStepCard activity={activity} startedAt={running ? call.timestamp : undefined} source={source} />}
-    {activity.slug && projectExists && (!running || !turnStreaming) && <ArtifactChatCard slug={activity.slug} fallbackName={activity.name} activity={activity} source={source} />}}
+    {activity.slug && projectExists && (!running || !turnStreaming) && <ArtifactChatCard slug={activity.slug} fallbackName={activity.name} activity={activity} source={source} />}
   </div>
 }
 
