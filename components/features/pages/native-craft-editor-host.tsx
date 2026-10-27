@@ -149,7 +149,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   const unregisterPrivacy=registerDocumentDraftWriter(humanId,retirePrivacy)
   function wrapJournal(journal:NativeDraftJournal,r:Runtime):NativeDraftJournal{return {...journal,
    async persist(draft){await journal.persist(draft);if(live(r))r.capture={...draft,bytes:draft.bytes.slice()}},
-   async confirm(draft){await journal.confirm(draft);if(r.capture?.editorRevision===draft.editorRevision)r.capture=undefined},
+   confirm:async(draft)=>{await journal.confirm(draft);if(r.capture?.editorRevision===draft.editorRevision)r.capture=undefined},
   }}
   function retireWrite(r:Runtime,closeJournal=true):Promise<boolean>{
    if(r.retiring)return r.retiring
