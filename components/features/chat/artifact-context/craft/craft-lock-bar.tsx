@@ -7,9 +7,11 @@ import type { CraftLeaseHolder } from "../projects/types"
 
 interface CraftLockBarProps { workspaceId: string; slug: string; onEdit: () => void }
 
-/** The page route that mounts the WordCraft editor or the GridCraft workbook for this slug. */
+/** The route that mounts the editor: an `@<page id>` reference opens the native Craft editor, a slug its Page. */
 export function craftEditorHref(workspaceId: string, slug: string): string {
-  return `/pages/${encodeURIComponent(slug)}?${new URLSearchParams({ workspace_id: workspaceId })}`
+  return slug.startsWith("@")
+    ? `/pages/craft/editor?${new URLSearchParams({ page_id: slug.slice(1), workspace_id: workspaceId })}`
+    : `/pages/${encodeURIComponent(slug)}?${new URLSearchParams({ workspace_id: workspaceId })}`
 }
 
 const holderName = (holder: CraftLeaseHolder) => holder.kind === "agent" ? `${holder.display_name} (agent)` : holder.display_name
@@ -23,11 +25,18 @@ const BTN = "coarse:min-h-[44px]"
  * Edit opens the editor, which acquires on its own admission. Release and
  * Save version stay in the editor.
  */
-export function CraftLockBar({ workspaceId, slug, onEdit }: CraftLockBarProps) {
-  const { status, requestHandoff, requestedGeneration, heldByMe, requestedByMe } = useCraftLeaseState(workspaceId, slug)
+export function CraftLockBar(props: CraftLockBarProps) {
+  return <CraftLockBarView {...props} lease={useCraftLeaseState(props.workspaceId, props.slug)} />
+}
+
+/** The bar for a host that already reads the lease, so one surface keeps one admission. */
+export function CraftLockBarView({ workspaceId, slug, onEdit, lease }: CraftLockBarProps & { lease: ReturnType<typeof useCraftLeaseState> }) {
+  const { status, requestHandoff, requestedGeneration, heldByMe, requestedByMe } = lease
   if (!status) return null
 
-  const { holder, can_write: canWrite } = status
+  // can_write is true only for the admission holding the lease, never for this preview; the
+  // editor and the server decide who may write, so it does not gate the actions here.
+  const { holder } = status
   const state = !holder ? "free" : heldByMe || status.mine ? "mine" : "held"
   // Keyed by generation: a new holder (or the same holder re-acquiring) is a
   // new lease, and the earlier request no longer applies to it.
@@ -47,8 +56,7 @@ export function CraftLockBar({ workspaceId, slug, onEdit }: CraftLockBarProps) {
       <b className="font-semibold">{title}</b>
       <small className="min-w-0 truncate text-xs text-muted-foreground">{detail}</small>
     </span>
-    {!canWrite ? <span className="text-xs text-muted-foreground">Read only</span>
-      : state === "free" ? <Button type="button" size="sm" className={BTN} onClick={onEdit}><Pencil aria-hidden />Edit</Button>
+    {state === "free" ? <Button type="button" size="sm" className={BTN} onClick={onEdit}><Pencil aria-hidden />Edit</Button>
       : state === "mine" ? <Button asChild size="sm" variant="ghost" className={BTN}>
         <a href={craftEditorHref(workspaceId, slug)} target="_blank" rel="noopener noreferrer"><ExternalLink aria-hidden />Open in new tab</a>
       </Button>

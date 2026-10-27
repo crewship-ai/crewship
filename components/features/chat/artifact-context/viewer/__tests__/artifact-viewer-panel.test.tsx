@@ -348,3 +348,17 @@ it("lists the queue, focuses it for target.tab=comments and jumps to the comment
   fireEvent.click(within(queue).getByRole("button", { name: /Fix the title/ }))
   expect(within(screen.getByRole("radiogroup", { name: "Screen" })).getByRole("radio", { name: "About" })).toHaveAttribute("aria-checked", "true")
 })
+
+it.each([403, 404])("drops the cached project when a background refresh answers %i: no stale preview after access is lost", status => {
+  state.snapshot = { data: snap(), isLoading: false, error: err(status, "forbidden"), refetch: vi.fn() }
+  render(<ArtifactViewerPanel />)
+  expect(screen.getByText("You don’t have access to this project")).toBeInTheDocument()
+  expect(screen.queryByTitle(/Preview of/)).toBeNull()
+  expect(screen.queryByText("Launch site")).toBeNull()
+})
+
+it("keeps the last project through a transient refresh failure", () => {
+  state.snapshot = { data: snap(), isLoading: false, error: err(0, "unavailable"), refetch: vi.fn() }
+  render(<ArtifactViewerPanel />)
+  expect(screen.getByTitle(/Preview of/)).toBeInTheDocument()
+})

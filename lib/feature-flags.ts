@@ -122,7 +122,7 @@ export function chatArtifactProjects(): boolean {
 
 /**
  * Gates the Craft edit-lease bar, agent proposals and local draft recovery
- * in chat. Default OFF: the lease HTTP surface is only proposed.
+ * in chat. Default OFF: the native lease routes (#4374) are opt-in per Page.
  */
 export function chatCraftLease(): boolean {
   return process.env.NEXT_PUBLIC_CHAT_CRAFT_LEASE === "true"
