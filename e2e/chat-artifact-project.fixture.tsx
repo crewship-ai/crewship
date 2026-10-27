@@ -1,5 +1,5 @@
-// Browser component fixture: the real AssistantTurn, artifact cards and viewer,
-// with every artifact request answered by the in-memory mock server. No live backend,
+// Browser component fixture: the real AssistantTurn, artifact cards, viewer and Craft preview,
+// with every artifact and Craft request answered by the in-memory mock server. No live backend,
 // model or credentials. Driven by e2e/chat-artifact-project.browser.mjs.
 import React, { useState } from "react"
 import { createRoot } from "react-dom/client"
@@ -11,10 +11,16 @@ import { ArtifactViewerProvider, type ArtifactViewerTarget } from "../components
 import { ArtifactViewerPanel } from "../components/features/chat/artifact-context/viewer"
 import { createArtifactMockServer, type ArtifactMockServer } from "../components/features/chat/artifact-context/projects/mock-server"
 import type { ArtifactFile } from "../components/features/chat/artifact-context/projects/types"
+import { CraftPreview } from "../components/features/chat/artifact-context/craft/craft-preview"
+import { CraftProposalCard } from "../components/features/chat/artifact-context/craft/craft-proposal-card"
+import { LocalDraftBanner } from "../components/features/chat/artifact-context/craft/local-draft-banner"
+import { saveLocalDraft } from "../components/features/chat/artifact-context/craft/local-draft"
+import { useCraftProposals } from "../components/features/chat/artifact-context/craft/use-craft-lease"
 
 const WORKSPACE = "ws-fixture"
 const USER = "fixture-human"
 const SLUG = "pricing-site"
+const CRAFT_SLUG = "partner-brief"
 const TOOL_CREATE = "mcp__crewship-routines__artifact_create"
 const TOOL_PUBLISH = "mcp__crewship-routines__artifact_publish"
 
@@ -64,7 +70,15 @@ const FILES_V2 = [html("plans.html", plans(true)), html("compare.html", compare)
 // ----- mock backend behind window.fetch ----------------------------------------------------------
 
 const project = createArtifactMockServer({ slug: SLUG, name: "Pricing site", entrypoint: "plans.html", files: FILES_V1, message: "Plans, Compare and FAQ linked" })
-const mocks: Record<string, ArtifactMockServer> = { [SLUG]: project }
+const craft = createArtifactMockServer({
+  slug: CRAFT_SLUG, name: "Partner brief", entrypoint: "brief.html", files: [html("brief.html", "<p>Partner brief</p>")],
+  craft: {
+    enabled: true,
+    lease: { holder: { actor_id: "u-pavel", display_name: "Pavel Srba", kind: "human" }, mine: false, generation: 3, can_write: true, handoff_requested_by: null },
+    proposals: [{ id: "p1", author: { actor_id: "agent-scout", display_name: "Scout", kind: "agent" }, base_version: 5, summary: "3 changes", created_at: "2026-10-27T09:30:00Z", state: "open" }],
+  },
+})
+const mocks: Record<string, ArtifactMockServer> = { [SLUG]: project, [CRAFT_SLUG]: craft }
 // The project does not exist until the agent's create call returns.
 let created = false
 
@@ -75,7 +89,7 @@ const realFetch = window.fetch.bind(window)
 window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
   const path = new URL(url, location.href).pathname
-  const slug = /^\/api\/v1\/pages\/([^/]+)\/artifact\b/.exec(path)?.[1]
+  const slug = /^\/api\/v1\/pages\/([^/]+)\/(?:artifact|craft)\b/.exec(path)?.[1]
   const mock = slug ? mocks[decodeURIComponent(slug)] : path === "/api/v1/pages/artifacts/availability" ? project : undefined
   if (mock) {
     if (mock === project && slug && !created) return new Response(JSON.stringify({ error: "No such artifact.", code: "not_found" }), { status: 404, headers: { "content-type": "application/json" } })
@@ -86,6 +100,8 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   window.__unmocked.push(`${(init?.method ?? "GET").toUpperCase()} ${url}`)
   return new Response("not mocked", { status: 404 })
 }
+
+saveLocalDraft(USER, WORKSPACE, CRAFT_SLUG, { content: "Partner brief — draft intro paragraph.", baseVersion: 5, savedAt: "2026-10-27T10:14:00Z" })
 
 // ----- conversation ------------------------------------------------------------------------------
 
@@ -101,6 +117,22 @@ const publishCall = part("a2-call", "tool_call", TOOL_PUBLISH, { tool_name: TOOL
 const publishResult = part("a2-result", "tool_result", JSON.stringify({ page_id: `page-${SLUG}`, slug: SLUG, version: 2, url: `/p/${SLUG}` }), { tool_id: "toolu_publish" })
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+function CraftSection() {
+  const proposals = useCraftProposals(WORKSPACE, CRAFT_SLUG).data ?? []
+  return <section aria-label="Craft section" className="grid max-w-[560px] gap-2 px-4 py-4">
+    <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Craft document (second user holds the lease)</h2>
+    <CraftPreview workspaceId={WORKSPACE} slug={CRAFT_SLUG} kind="word" title="Partner brief">
+      <LocalDraftBanner userId={USER} workspaceId={WORKSPACE} slug={CRAFT_SLUG} holderName="Pavel Srba" onCompare={() => {}} />
+      {proposals.map(p => <CraftProposalCard key={p.id} workspaceId={WORKSPACE} slug={CRAFT_SLUG} proposal={p} onCompare={() => {}} />)}
+      <article className="rounded-lg border bg-background p-4 text-sm leading-relaxed">
+        <h3 className="mb-2 text-base font-semibold">Partner brief</h3>
+        <p>Crewship gives partner teams one place to run agents, review their work and share results with customers.</p>
+        <p className="mt-2 text-muted-foreground">Read-only preview · version 5</p>
+      </article>
+    </CraftPreview>
+  </section>
+}
 
 function Fixture() {
   const [turns, setTurns] = useState<ChatTurn[]>([
@@ -138,6 +170,7 @@ function Fixture() {
   const chat = <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto" style={mobile && viewerOpen ? { display: "none" } : undefined} inert={mobile && viewerOpen}>
     {controls}
     {conversation}
+    <div className="border-t border-dashed"><CraftSection /></div>
   </div>
 
   return <QueryClientProvider client={queryClient}>

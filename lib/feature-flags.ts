@@ -119,3 +119,11 @@ export function slidesEditorMount(): boolean {
 export function chatArtifactProjects(): boolean {
   return process.env.NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS === "true"
 }
+
+/**
+ * Gates the Craft edit-lease bar, agent proposals and local draft recovery
+ * in chat. Default OFF: the lease HTTP surface is only proposed.
+ */
+export function chatCraftLease(): boolean {
+  return process.env.NEXT_PUBLIC_CHAT_CRAFT_LEASE === "true"
+}
