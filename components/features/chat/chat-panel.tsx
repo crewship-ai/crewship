@@ -124,6 +124,10 @@ function getWsUrl(): string {
 interface ChatPanelProps {
   agentId: string
   sessionId: string
+  /** The caller minted `sessionId` itself and nothing has been sent into it,
+   *  so the server has no row for it yet. Read once, at mount: the panel then
+   *  requests nothing chat-scoped until its first send creates the row. */
+  draft?: boolean
   agentName?: string
   /** Canonical agent slug used to build URLs (`/chat/[agentSlug]`).
    *  Required because SlashPalette commands like /new-session navigate
@@ -206,7 +210,7 @@ export function ChatPanel(props: ChatPanelProps) {
   return parent ? <ChatPanelBody {...props} /> : <QueryClientProvider client={client}><ChatPanelBody {...props} /></QueryClientProvider>
 }
 
-function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, suggestedPrompts, askForms, sessionOrigin, agentMeta, sessionKind = "direct", initialInput, autoSendInitial, pageContextSlug, mobilePanel, onSend, onReplySettled, onNewConversation, onMobilePanelChange }: ChatPanelProps) {
+function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentRole, suggestedPrompts, askForms, sessionOrigin, agentMeta, sessionKind = "direct", initialInput, autoSendInitial, pageContextSlug, mobilePanel, onSend, onReplySettled, onNewConversation, onMobilePanelChange }: ChatPanelProps) {
   const suggestionPack = getSuggestions(agentRole, suggestedPrompts)
   const defaultSuggestions = suggestionPack.empty
   const followUpPrompts = suggestionPack.followUps
@@ -269,6 +273,10 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   // was memoised. Scoped keys prevent another viewer/workspace from reusing
   // existence evidence after the panel context changes.
   const confirmedRowsRef = useRef<Set<string>>(new Set())
+  // A draft the caller minted has no row, so every chat-scoped read of it
+  // would ask for a resource that does not exist (#4369). It stays a draft
+  // until ensureSession creates the row; the panel is remounted per session.
+  const [isDraft] = useState(!!draft)
   // In-flight create per viewer/workspace/session, so two sends in the same tick (a
   // suggestion chip plus a fast Enter) share one POST — and one re-subscribe.
   const createInFlightRef = useRef<Map<string, Promise<boolean>>>(new Map())
@@ -425,6 +433,9 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     setProfileProbeSettled(false)
     setSharedRestrictedChat(false)
     if (!sessionId || !workspaceId || !currentUserId) return
+    // Nothing to probe: the answer for a draft is known, and the first send
+    // reads the profile right after it creates the row (ensureSessionForSend).
+    if (isDraft) { setProfileProbeSettled(true); return }
     const sessionSegment = encodeApiPathSegment(sessionId)
     if (!sessionSegment) return
     const controller = new AbortController()
@@ -437,7 +448,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
       if (profile.mode === "trusted" || profile.mode === "restricted") {executionProfileRef.current = profile.mode;setExecutionProfile(profile.mode);setSharedRestrictedChat(profile.mode === "restricted" && profile.audience === "group")}
     }).catch(() => {}).finally(() => { if (!controller.signal.aborted && currentChatReadScopeRef.current === chatReadScope) setProfileProbeSettled(true) })
     return () => controller.abort()
-  }, [sessionId,workspaceId,currentUserId,chatReadScope])
+  }, [sessionId,workspaceId,currentUserId,chatReadScope,isDraft])
 
   const { turns, sendMessage, stopGeneration, stopping, regenerateLastTurn, editAndResend, loadHistory, markHistoryUnavailable, markHistoryDenied, historyDenied, resubscribeSession, isStreaming, connectionStatus, connectionReason, retryConnection } = useChat({
     canSend: canChat,
@@ -555,6 +566,14 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     // re-runs when workspaceId arrives) rather than firing a doomed request.
     historySignatureRef.current = null
     if (!sessionId || !workspaceId) return
+    // A draft's history is empty by definition. Settle it without asking; a
+    // reload requested after the first send has a row to read.
+    if (isDraft && !confirmedRowsRef.current.has(chatReadScope)) {
+      historySignatureRef.current = messagesSignature([])
+      loadHistory([])
+      setHistoryLoading(false)
+      return
+    }
     const sessionSegment = encodeApiPathSegment(sessionId)
     if (!sessionSegment) return
     let cancelled = false
@@ -660,7 +679,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
 
     void run()
     return () => { cancelled = true }
-  }, [sessionId, workspaceId, chatReadScope, loadHistory, markHistoryUnavailable, markHistoryDenied, historyReloadNonce])
+  }, [sessionId, workspaceId, chatReadScope, isDraft, loadHistory, markHistoryUnavailable, markHistoryDenied, historyReloadNonce])
 
   // No WebSocket for this chat — a restricted chat never opens one, and a
   // restricted account has none at all — so messages this tab did not send
@@ -683,6 +702,9 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   const [participantNames, setParticipantNames] = useState<Record<string, string>>({})
   // What this session's participants read said, for this session only. Nothing is assumed from a missing or failed read.
   const [participantsLoad, setParticipantsLoad] = useState<ParticipantsLoad | null>(null)
+  // A draft has participants once its first send has created the row and
+  // resolved the profile; until then there is nothing to read.
+  const participantsReadable = !isDraft || executionProfile !== "pending"
   const participantsScope = `${workspaceId ?? ""}:${sessionId ?? ""}`
   const privacyInput = { scope: participantsScope, sessionKind, sharedRestricted: sharedRestrictedChat, probeSettled: profileProbeSettled, profileKnown: executionProfile !== "pending", participants: participantsLoad, currentUserId }
   const privacyInputRef = useRef(privacyInput)
@@ -714,7 +736,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     // A different session never inherits the previous one's participants.
     setParticipantNames({})
     setParticipantsLoad(null)
-    if (!sessionId || !workspaceId) return
+    if (!sessionId || !workspaceId || !participantsReadable) return
     const sessionSegment = encodeApiPathSegment(sessionId)
     if (!sessionSegment) return
     let cancelled = false
@@ -739,7 +761,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     const interval = refreshParticipants ? window.setInterval(load, PARTICIPANTS_MAX_AGE_MS / 2) : null
     if (refreshParticipants) window.addEventListener("focus", load)
     return () => { cancelled = true; if (interval !== null) window.clearInterval(interval); window.removeEventListener("focus", load) }
-  }, [sessionId, workspaceId, refreshParticipants])
+  }, [sessionId, workspaceId, refreshParticipants, participantsReadable])
 
   const resolveAuthorName = useCallback(
     (userId: string): string | null => {
@@ -867,7 +889,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         else {
           const profile = await response.json() as {mode:string;audience?:string}
           if (currentChatReadScopeRef.current !== chatReadScope) return false
-          // A draft's mount probe answered 404, so this authoritative answer is
+          // A draft has no mount probe (or, for an older row, it 404ed), so this answer is
           // the first one for the scope; without it chat-scoped reads (linked
           // issues, proposals, decisions) stay off until a reload.
           if (profile.mode === "trusted") setVerifiedChatScope(chatReadScope)
