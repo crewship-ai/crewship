@@ -19,7 +19,7 @@ interface ArtifactChatCardProps {
 }
 
 const CARD = "flex w-full min-w-0 max-w-[520px] flex-wrap items-center gap-2.5 rounded-xl border bg-card py-2 pl-2 pr-2.5"
-const CHIP = "rounded-full px-1.5 text-[11px] font-semibold leading-[1.6]"
+const CHIP = "rounded-full px-1.5 text-micro font-semibold leading-[1.6]"
 
 function KindTile({ restricted }: { restricted?: boolean }) {
   const Icon = restricted ? Lock : AppWindow
@@ -87,7 +87,7 @@ export function ArtifactChatCard({ slug, fallbackName, activity, source }: Artif
     <div className="grid min-w-0 flex-[1_1_140px] gap-0.5">
       <p className="flex min-w-0 items-center gap-1.5 text-sm font-semibold">
         <span className="truncate">{title}</span>
-        <span className="shrink-0 rounded-[5px] border bg-muted px-[5px] font-mono text-[10px] font-semibold text-foreground/80">v{data.latest_version}</span>
+        <span className="shrink-0 rounded-sm border bg-muted px-[5px] font-mono text-micro font-semibold text-foreground/80">v{data.latest_version}</span>
       </p>
       <p className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground" data-testid="artifact-card-kind">
         <span>Project</span><StateChips snapshot={data} />
