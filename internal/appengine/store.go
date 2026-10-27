@@ -670,7 +670,7 @@ func PageHasNoContent(ctx context.Context, tx *sql.Tx, pageID string) (bool, err
 }
 
 func hasOtherContent(ctx context.Context, tx *sql.Tx, pageID string) (bool, error) {
-	for _, table := range []string{"documents", "slides_heads", "page_panels", "page_project_drafts", "page_project_live", "page_artifacts", "page_boards", "mooring_documents"} {
+	for _, table := range []string{"documents", "slides_heads", "page_panels", "page_project_drafts", "page_project_live", "page_artifacts", "page_boards", "mooring_documents", "artifact_version_heads"} {
 		var installed, occupied bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name=? COLLATE NOCASE)`, table).Scan(&installed); err != nil {
 			return false, err
