@@ -526,7 +526,8 @@ export function ChatComposer({
   const newArtifactKinds = chatArtifactProjects() ? availableArtifactKinds({ projects: false, documents: canCreateDocument }) : []
   const newArtifactMenu = <NewArtifactMenu kinds={newArtifactKinds} disabled={isStreaming || !canSend} onPick={(kind, prompt) => {
     if (kind === "word") { setCreationSelection(creationScope); creationPacket.current = null }
-    updateInput(prompt)
+    // The starter goes in front; text the person already typed stays.
+    updateInput(input.trim() ? `${prompt}\n\n${input}` : prompt)
   }} />
   const creationControl = canCreateDocument ? (
     <>
