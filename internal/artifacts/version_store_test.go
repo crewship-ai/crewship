@@ -229,3 +229,37 @@ func TestVersionStoreAtomicViewHidesUnsharedHistory(t *testing.T) {
 		t.Fatalf("owner view %+v %v", v, err)
 	}
 }
+
+func TestVersionStoreContentFamilyIsImmutableAndDoesNotConvertPages(t *testing.T) {
+	s, k, a, db := versionFixture(t, VersionOptions{})
+	if _, err := s.Apply(t.Context(), k, versionRequest(0, "HTML"), a); err != nil {
+		t.Fatal(err)
+	}
+	native := NewVersionStore(db.DB, VersionOptions{Enabled: true, ContentType: "wordcraft"})
+	if _, err := native.Read(t.Context(), k, a); !errors.Is(err, ErrVersionContentType) {
+		t.Fatalf("native read adopted project: %v", err)
+	}
+	if _, err := native.Apply(t.Context(), k, versionRequest(1, "native"), a); !errors.Is(err, ErrVersionContentType) {
+		t.Fatalf("native write converted project: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE artifact_version_heads SET content_type='wordcraft' WHERE page_id='page'`); err == nil {
+		t.Fatal("SQL changed immutable family")
+	}
+	if _, err := db.Exec(`INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES('native','ws','native','Native','owner','{}')`); err != nil {
+		t.Fatal(err)
+	}
+	nk := VersionKey{"ws", "native"}
+	// The native callback retains custody/lease validation in this transaction.
+	if _, err := native.Apply(t.Context(), nk, versionRequest(0, "native original"), a); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Read(t.Context(), nk, a); !errors.Is(err, ErrVersionContentType) {
+		t.Fatalf("project read adopted native history: %v", err)
+	}
+	if _, err := s.Apply(t.Context(), nk, versionRequest(1, "HTML"), a); !errors.Is(err, ErrVersionContentType) {
+		t.Fatalf("project write converted native: %v", err)
+	}
+	if v, err := native.Read(t.Context(), nk, a); err != nil || string(v.Manifest.Files["index.html"].Content) != "native original" {
+		t.Fatalf("native state changed: %+v %v", v, err)
+	}
+}

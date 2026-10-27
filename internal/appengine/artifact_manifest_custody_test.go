@@ -25,3 +25,32 @@ func TestArtifactManifestPreventsWorkbookContentTakeover(t *testing.T) {
 		t.Fatalf("manifest custody bypassed: %v, engine calls %d", err, engine.calls.Load())
 	}
 }
+
+func TestNativeGridCraftHistoryOnlyCoexistsWithItsOwnEngine(t *testing.T) {
+	for _, tc := range []struct {
+		name, contentType string
+		ownHead, allowed  bool
+	}{
+		{"own-native-history", "gridcraft", true, true},
+		{"orphan-native-history", "gridcraft", false, false},
+		{"foreign-project-history", "artifact_project", true, false},
+		{"foreign-wordcraft-history", "wordcraft", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, db, a, k := fixture(t)
+			if tc.ownHead {
+				imported(t, s, a, k, &fakeEngine{})
+			}
+			if _, err := db.Exec(`INSERT INTO artifact_version_heads(workspace_id,page_id,latest_version,content_type) VALUES('ws','page',1,?)`, tc.contentType); err != nil {
+				t.Fatal(err)
+			}
+			_, err := s.Read(t.Context(), k, a)
+			if tc.allowed && err != nil {
+				t.Fatalf("own native history blocked: %v", err)
+			}
+			if !tc.allowed && !errors.Is(err, ErrForbidden) {
+				t.Fatalf("foreign/orphan history admitted: %v", err)
+			}
+		})
+	}
+}
