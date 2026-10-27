@@ -33,6 +33,7 @@ var AllEntryTypes = []EntryType{
 	EntryType("artifact.mooring_created"),          // mooringCreated, internal/api/mooring.go:21:2
 	EntryType("artifact.mooring_mandate_admitted"), // mooringMandateAdmitted, internal/api/mooring.go:23:2
 	EntryType("artifact.mooring_mandate_revoked"),  // mooringMandateRevoked, internal/api/mooring.go:24:2
+	EntryType("artifact.project_shared"),           // journalArtifactProjectShared, internal/api/pages_artifact_project.go:23:7
 	EntryAssignmentCancel,
 	EntryAssignmentDone,
 	EntryAssignmentCreate,

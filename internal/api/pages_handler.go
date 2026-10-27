@@ -252,7 +252,10 @@ type pageSealedPanelWire struct {
 // Panels is []any because it is heterogeneous by design: a full panel or a
 // sealed placeholder, decided per panel and per viewer.
 type pageWire struct {
-	HasDocument bool `json:"has_document"`
+	HasDocument        bool `json:"has_document"`
+	HasArtifactProject bool `json:"has_artifact_project,omitempty"`
+	HasSlides          bool `json:"has_slides"`
+	SlidesSchema       int  `json:"slides_schema"`
 	// HasWorkbook marks a Page holding a GridCraft workbook, viewed read-only.
 	HasWorkbook bool `json:"has_workbook,omitempty"`
 	HasMooring  bool `json:"has_mooring,omitempty"`
@@ -328,6 +331,8 @@ type pageListWire struct {
 	// Explicit audience classification; unfiled human ownership is not privacy.
 	PrivateAudience     bool   `json:"private_audience"`
 	HasDocument         bool   `json:"has_document"`
+	HasSlides           bool   `json:"has_slides"`
+	SlidesSchema        int    `json:"slides_schema"`
 	HasWorkbook         bool   `json:"has_workbook,omitempty"`
 	HasMooring          bool   `json:"has_mooring,omitempty"`
 	HasCollaboration    bool   `json:"has_collaboration,omitempty"`
@@ -415,6 +420,8 @@ type pageWriteRequest struct {
 type pageRecord struct {
 	PrivateAudience     bool
 	HasDocument         bool
+	HasSlides           bool
+	SlidesSchema        int
 	HasMooring          bool
 	HasCollaboration    bool
 	CollaborationFormat string
@@ -565,7 +572,8 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 		       EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=p.id),
 		       COALESCE(l.published,0), COALESCE(l.version,0),
  EXISTS(SELECT 1 FROM documents WHERE page_id=p.id), p.private_audience,
- EXISTS(SELECT 1 FROM gridcraft_heads WHERE page_id=p.id), EXISTS(SELECT 1 FROM mooring_documents WHERE page_id=p.id), EXISTS(SELECT 1 FROM mooring_collab_documents WHERE page_id=p.id), COALESCE((SELECT format_profile FROM mooring_collab_documents WHERE page_id=p.id),'')
+ EXISTS(SELECT 1 FROM gridcraft_heads WHERE page_id=p.id), EXISTS(SELECT 1 FROM mooring_documents WHERE page_id=p.id), EXISTS(SELECT 1 FROM mooring_collab_documents WHERE page_id=p.id), COALESCE((SELECT format_profile FROM mooring_collab_documents WHERE page_id=p.id),''),
+ EXISTS(SELECT 1 FROM slides_heads WHERE page_id=p.id AND workspace_id=p.workspace_id), COALESCE((SELECT schema_version FROM slides_heads WHERE page_id=p.id AND workspace_id=p.workspace_id),0)
 		FROM pages p LEFT JOIN page_project_live l ON l.page_id=p.id
 		WHERE p.workspace_id = ? AND `+scope.where+`
 		ORDER BY p.updated_at DESC, p.slug ASC`, args...)
@@ -580,7 +588,7 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 		if err := rows.Scan(&p.ID, &p.Slug, &p.Name, &p.Description,
 			&p.OwnerUserID, &p.OwnerCrewID, &p.FolderID, &p.PagesVersion,
 			&p.Icon, &p.Color,
-			&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience, &p.HasWorkbook, &p.HasMooring, &p.HasCollaboration, &p.CollaborationFormat); err != nil {
+			&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience, &p.HasWorkbook, &p.HasMooring, &p.HasCollaboration, &p.CollaborationFormat, &p.HasSlides, &p.SlidesSchema); err != nil {
 			return nil, err
 		}
 		records = append(records, p)
@@ -683,7 +691,8 @@ func (h *PageHandler) pageListRow(row *pageIndexRow, folders map[string]*pageFol
 	rec := &row.rec
 	out := pageListWire{
 		PrivateAudience: rec.PrivateAudience,
-		HasDocument:     rec.HasDocument, HasWorkbook: rec.HasWorkbook, HasMooring: rec.HasMooring, HasCollaboration: rec.HasCollaboration, CollaborationFormat: rec.CollaborationFormat, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
+		HasSlides:       rec.HasSlides, SlidesSchema: rec.SlidesSchema,
+		HasDocument: rec.HasDocument, HasWorkbook: rec.HasWorkbook, HasMooring: rec.HasMooring, HasCollaboration: rec.HasCollaboration, CollaborationFormat: rec.CollaborationFormat, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 		ID:                  rec.ID,
 		Slug:                rec.Slug,
 		Name:                rec.Name,
@@ -1081,6 +1090,17 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if req.Panels != nil {
+		attached, e := h.artifactProjectAttached(r.Context(), rec.ID)
+		if e != nil {
+			replyInternalError(w, h.logger, "check artifact content", e)
+			return
+		}
+		if attached {
+			replyError(w, 409, "artifact project pages cannot contain panels")
+			return
+		}
+	}
 	if req.Panels != nil && rec.HasDocument {
 		replyError(w, 409, "document pages cannot contain panels")
 		return
@@ -1445,11 +1465,12 @@ func (h *PageHandler) loadPageWithPrivateAudience(ctx context.Context, wsID, slu
  EXISTS(SELECT 1 FROM page_project_live WHERE page_id=pages.id AND published=1),
  COALESCE((SELECT version FROM page_project_live WHERE page_id=pages.id),0),
  EXISTS(SELECT 1 FROM documents WHERE page_id=pages.id), private_audience,
- EXISTS(SELECT 1 FROM gridcraft_heads WHERE page_id=pages.id), EXISTS(SELECT 1 FROM mooring_documents WHERE page_id=pages.id), EXISTS(SELECT 1 FROM mooring_collab_documents WHERE page_id=pages.id), COALESCE((SELECT format_profile FROM mooring_collab_documents WHERE page_id=pages.id),'')
+ EXISTS(SELECT 1 FROM gridcraft_heads WHERE page_id=pages.id), EXISTS(SELECT 1 FROM mooring_documents WHERE page_id=pages.id), EXISTS(SELECT 1 FROM mooring_collab_documents WHERE page_id=pages.id), COALESCE((SELECT format_profile FROM mooring_collab_documents WHERE page_id=pages.id),''),
+ EXISTS(SELECT 1 FROM slides_heads WHERE page_id=pages.id AND workspace_id=pages.workspace_id), COALESCE((SELECT schema_version FROM slides_heads WHERE page_id=pages.id AND workspace_id=pages.workspace_id),0)
 		FROM pages WHERE workspace_id = ? AND `+column+` = ?`, wsID, slug).Scan(
 		&p.ID, &p.Slug, &p.Name, &p.Description, &p.OwnerUserID, &p.OwnerCrewID,
 		&p.FolderID, &p.PagesVersion, &p.Icon, &p.Color,
-		&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience, &p.HasWorkbook, &p.HasMooring, &p.HasCollaboration, &p.CollaborationFormat)
+		&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience, &p.HasWorkbook, &p.HasMooring, &p.HasCollaboration, &p.CollaborationFormat, &p.HasSlides, &p.SlidesSchema)
 	if err != nil {
 		return nil, err
 	}
@@ -1860,7 +1881,10 @@ func (h *PageHandler) pageDocument(ctx context.Context, rec *pageRecord, panels 
 // branch, because it was replaced by the placeholder above. A reader who
 // cannot edit still sees exactly what they saw before.
 func (h *PageHandler) pageDocumentFor(ctx context.Context, rec *pageRecord, panels []*panelRecord, viewer *pageViewer, authored bool) pageWire {
+	attached, _ := h.artifactProjectAttached(ctx, rec.ID)
 	out := pageWire{
+		HasArtifactProject: attached,
+		HasSlides:          rec.HasSlides, SlidesSchema: rec.SlidesSchema,
 		HasDocument: rec.HasDocument, HasWorkbook: rec.HasWorkbook, HasMooring: rec.HasMooring, HasCollaboration: rec.HasCollaboration, CollaborationFormat: rec.CollaborationFormat, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 		ID:          rec.ID,
 		Slug:        rec.Slug,

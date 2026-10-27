@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
@@ -323,7 +324,7 @@ func (r *IPCResolver) CreateRun(ctx context.Context, runID, agentID, chatID, wor
 		cleanMetadata := make(map[string]interface{}, len(metadata))
 		for k, v := range metadata {
 			switch k {
-			case "artifact_human_receipt", "artifact_human_message_id", "document_request_id", "artifact_request_id", "board_request_id", "slides_request_id", "document_creation_intent", "document_iteration_intent", "human_authority", "trigger_message_id", "chat_origin_id":
+			case "artifact_project_intent", "artifact_human_receipt", "artifact_human_message_id", "document_request_id", "artifact_request_id", "board_request_id", "slides_request_id", "document_creation_intent", "document_iteration_intent", "human_authority", "trigger_message_id", "chat_origin_id":
 			default:
 				cleanMetadata[k] = v
 			}
@@ -337,6 +338,11 @@ func (r *IPCResolver) CreateRun(ctx context.Context, runID, agentID, chatID, wor
 		iteration, ok := metadata["document_iteration_intent"].(*documents.IterationIntent)
 		if ok && iteration != nil && iteration.Validate() == nil && receipt != nil && receipt.UserID != "" && receipt.ChatID == chatID && receipt.AgentID == agentID && receipt.WorkspaceID == workspaceID && runauthority.TriggerMessageFromContext(ctx) != "" && runauthority.OriginIDFromContext(ctx) == "" {
 			payload["document_iteration_intent"] = iteration
+		}
+
+		project, ok := metadata[artifacts.ProjectIntentMetadataKey].(*artifacts.ProjectIntent)
+		if ok && project != nil && project.Validate() == nil && receipt != nil && receipt.UserID != "" && receipt.ChatID == chatID && receipt.AgentID == agentID && receipt.WorkspaceID == workspaceID && runauthority.TriggerMessageFromContext(ctx) != "" && runauthority.OriginIDFromContext(ctx) == "" {
+			payload[artifacts.ProjectIntentMetadataKey] = project
 		}
 	}
 	body, err := json.Marshal(payload)

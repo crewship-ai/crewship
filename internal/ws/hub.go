@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/net/websocket"
 
+	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"github.com/crewship-ai/crewship/internal/chataudience"
@@ -34,6 +35,7 @@ type ChatMessageOption struct {
 	OriginalTriggerMessageID string                     `json:"-"`
 	DocumentCreationIntent   *documents.CreationIntent  `json:"-"`
 	DocumentIterationIntent  *documents.IterationIntent `json:"-"`
+	ArtifactProjectIntent    *artifacts.ProjectIntent   `json:"-"`
 	// MaxTurns overrides the adapter agent-loop cap for this run. 0 = leave the
 	// adapter default in place.
 	MaxTurns int

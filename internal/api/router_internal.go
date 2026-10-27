@@ -68,6 +68,7 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	r.internalHandler = internal
 	internalAuth := func(next http.Handler) http.Handler { return internal.requireInternal(withHostChatOrigin(next)) }
 	r.registerMooringAgentTaskRoutes(internalAuth)
+	r.registerArtifactProjectToolRoutes(internalAuth)
 	r.mux.Handle("POST /api/v1/internal/documents/create", internalAuth(http.HandlerFunc(r.pages.CreateDocumentAgent)))
 	r.mux.Handle("GET /api/v1/internal/documents/draft", internalAuth(http.HandlerFunc(r.pages.GetDocumentDraftAgent)))
 	r.mux.Handle("POST /api/v1/internal/documents/draft", internalAuth(http.HandlerFunc(r.pages.MutateDocumentDraftAgent)))
