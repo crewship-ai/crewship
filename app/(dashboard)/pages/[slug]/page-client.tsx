@@ -51,7 +51,8 @@ export function PageDetailClient() {
   if (accessMode === "restricted") return <RestrictedPages key={workspaceId} workspaceId={workspaceId} access={access} />
   if (search.get("artifact") === "1") {
     const value = Number(search.get("version"))
-    return <ArtifactProject key={`${workspaceId}:${slug}`} workspaceId={workspaceId} slug={slug} initialVersion={Number.isSafeInteger(value) && value > 0 ? value : undefined} />
+    const initialVersion = Number.isSafeInteger(value) && value > 0 ? value : undefined
+    return <ArtifactProject key={`${workspaceId}:${slug}:${initialVersion ?? "latest"}`} workspaceId={workspaceId} slug={slug} initialVersion={initialVersion} />
   }
   return <PagesLayout workspaceId={workspaceId} slug={slug} />
 }
