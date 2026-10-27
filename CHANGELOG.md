@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Show agent artifact project work in chat as version cards with a side viewer for screens, anchored comments, history and restore, plus the Craft edit-lock bar and a "+ New artifact" composer menu; off by default behind `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS` and `NEXT_PUBLIC_CHAT_CRAFT_LEASE`.
+
 - **Artifact authoring clients support complete project versions.** Add pilot MCP tools and `page artifact` commands for atomic manifests, explicit version conflicts, restore and anchored feedback on servers that enable the artifact project backend.
 
 - Clear copied-command feedback timers when onboarding unmounts.
