@@ -171,6 +171,26 @@ if [[ "$r" == started ]]; then
     "$(grep -c '^CREWSHIP_MOORING_ENABLED=true$' "$FAKE_SERVER_ENV" || true)" 1
   check "Mooring opt-in keeps owned data path" \
     "$(grep -c "^CREWSHIP_DATA_DIR=$tmp/state/mooringok/data$" "$FAKE_SERVER_ENV" || true)" 1
+  mooring_prefix="$(manifest_get "$tmp/state/mooringok" prefix)"
+  echo committed-mooring-fixture >"$tmp/state/mooringok/data/crewship.db"
+  for restart_mode in --crash graceful; do
+    mooring_pid="$(manifest_get "$tmp/state/mooringok" pid)"
+    restart_options=()
+    [[ "$restart_mode" == --crash ]] && restart_options+=(--crash)
+    if (main restart mooringok "${restart_options[@]}") >"$tmp/mooring-restart.out" 2>"$tmp/mooring-restart.err"; then r=restarted; else r=failed; fi
+    check "Mooring $restart_mode restart succeeds" "$r" restarted
+    check "Mooring opt-in reaches $restart_mode replacement process" \
+      "$(grep -c '^CREWSHIP_MOORING_ENABLED=true$' "$FAKE_SERVER_ENV" || true)" 1
+    check "Mooring $restart_mode restart changes process" \
+      "$([[ "$(manifest_get "$tmp/state/mooringok" pid)" != "$mooring_pid" ]] && echo new || echo old)" new
+    check "Mooring $restart_mode restart retains owned data path" \
+      "$(grep -c "^CREWSHIP_DATA_DIR=$tmp/state/mooringok/data$" "$FAKE_SERVER_ENV" || true)" 1
+    check "Mooring $restart_mode restart preserves data" \
+      "$(cat "$tmp/state/mooringok/data/crewship.db")" committed-mooring-fixture
+    check "Mooring $restart_mode restart preserves prefix" \
+      "$(manifest_get "$tmp/state/mooringok" prefix)" "$mooring_prefix"
+  done
+  check "Mooring restarts are both recorded" "$(manifest_get "$tmp/state/mooringok" restart_count)" 2
   cmd_stop mooringok >/dev/null
 fi
 
@@ -219,6 +239,7 @@ check "restart count is recorded" "$(manifest_get "$tmp/state/envok" restart_cou
 check "restart launches a new process" "$([[ "$(manifest_get "$tmp/state/envok" pid)" != "$old_pid" ]] && echo new || echo old)" new
 check "restart never removes docker resources" "$(grep -cE '^(rm|volume rm)' "$FAKE_LOG" || true)" 0
 check "restart retains optional feature environment" "$(grep -c '^CREWSHIP_ALLOW_SIGNUP=true$' "$FAKE_SERVER_ENV")" 1
+check "Mooring remains default-off through abrupt restart" "$(grep -c '^CREWSHIP_MOORING_ENABLED=' "$FAKE_SERVER_ENV" || true)" 0
 
 check "retained launch settings are private" "$(stat -c %a "$tmp/state/envok/launch.env" 2>/dev/null || true)" 600
 check "optional environment values never enter manifest or diagnostics" \
@@ -226,6 +247,7 @@ check "optional environment values never enter manifest or diagnostics" \
 if (main restart envok) >"$tmp/graceful.out" 2>"$tmp/graceful.err"; then r=restarted; else r=failed; fi
 check "graceful retained restart succeeds" "$r" restarted
 check "graceful restart increments count" "$(manifest_get "$tmp/state/envok" restart_count)" 2
+check "Mooring remains default-off through graceful restart" "$(grep -c '^CREWSHIP_MOORING_ENABLED=' "$FAKE_SERVER_ENV" || true)" 0
 check "lifecycle records crash and graceful restart" \
   "$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print([x["event"] for x in d.get("lifecycle", [])].count("crashing"), [x["event"] for x in d.get("lifecycle", [])].count("restarting"))' "$tmp/state/envok/manifest.json")" "1 1"
 cp "$tmp/state/envok/manifest.json" "$tmp/original-manifest.json"
