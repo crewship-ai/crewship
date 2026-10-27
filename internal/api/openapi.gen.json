@@ -6922,6 +6922,9 @@
           "enabled": {
             "type": "boolean"
           },
+          "wordcraft_native": {
+            "type": "boolean"
+          },
           "wordcraft_sdk_prefix": {
             "pattern": "^/mooring-sdk/generated/[0-9a-f]{64}$",
             "type": "string"
@@ -121797,6 +121800,14 @@
                           "name": {
                             "type": "string"
                           },
+                          "native_craft_application": {
+                            "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
+                            "enum": [
+                              "wordcraft",
+                              "gridcraft"
+                            ],
+                            "type": "string"
+                          },
                           "owner": {
                             "type": "string"
                           },
@@ -123111,6 +123122,14 @@
                         "name": {
                           "type": "string"
                         },
+                        "native_craft_application": {
+                          "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
+                          "enum": [
+                            "wordcraft",
+                            "gridcraft"
+                          ],
+                          "type": "string"
+                        },
                         "owner": {
                           "type": "string"
                         },
@@ -123451,6 +123470,14 @@
                           "type": "string"
                         },
                         "name": {
+                          "type": "string"
+                        },
+                        "native_craft_application": {
+                          "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
+                          "enum": [
+                            "wordcraft",
+                            "gridcraft"
+                          ],
                           "type": "string"
                         },
                         "owner": {
@@ -123805,6 +123832,14 @@
                             "type": "string"
                           },
                           "name": {
+                            "type": "string"
+                          },
+                          "native_craft_application": {
+                            "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
+                            "enum": [
+                              "wordcraft",
+                              "gridcraft"
+                            ],
                             "type": "string"
                           },
                           "owner": {
@@ -124245,6 +124280,14 @@
                       "name": {
                         "type": "string"
                       },
+                      "native_craft_application": {
+                        "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
+                        "enum": [
+                          "wordcraft",
+                          "gridcraft"
+                        ],
+                        "type": "string"
+                      },
                       "owner": {
                         "type": "string"
                       },
@@ -124640,6 +124683,14 @@
                     "name": {
                       "type": "string"
                     },
+                    "native_craft_application": {
+                      "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
+                      "enum": [
+                        "wordcraft",
+                        "gridcraft"
+                      ],
+                      "type": "string"
+                    },
                     "owner": {
                       "description": "`user/\u003cid\u003e` or `crew/\u003cslug\u003e` — exactly one of the two (§7.1 rule 1).",
                       "type": "string"
@@ -124861,6 +124912,14 @@
                       "type": "string"
                     },
                     "name": {
+                      "type": "string"
+                    },
+                    "native_craft_application": {
+                      "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
+                      "enum": [
+                        "wordcraft",
+                        "gridcraft"
+                      ],
                       "type": "string"
                     },
                     "owner": {
@@ -125924,6 +125983,14 @@
                     "name": {
                       "type": "string"
                     },
+                    "native_craft_application": {
+                      "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
+                      "enum": [
+                        "wordcraft",
+                        "gridcraft"
+                      ],
+                      "type": "string"
+                    },
                     "owner": {
                       "description": "`user/\u003cid\u003e` or `crew/\u003cslug\u003e` — exactly one of the two (§7.1 rule 1).",
                       "type": "string"
@@ -126145,6 +126212,14 @@
                       "type": "string"
                     },
                     "name": {
+                      "type": "string"
+                    },
+                    "native_craft_application": {
+                      "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
+                      "enum": [
+                        "wordcraft",
+                        "gridcraft"
+                      ],
                       "type": "string"
                     },
                     "owner": {
@@ -126853,6 +126928,14 @@
                     "name": {
                       "type": "string"
                     },
+                    "native_craft_application": {
+                      "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
+                      "enum": [
+                        "wordcraft",
+                        "gridcraft"
+                      ],
+                      "type": "string"
+                    },
                     "owner": {
                       "description": "`user/\u003cid\u003e` or `crew/\u003cslug\u003e` — exactly one of the two (§7.1 rule 1).",
                       "type": "string"
@@ -127336,6 +127419,14 @@
                       "type": "string"
                     },
                     "name": {
+                      "type": "string"
+                    },
+                    "native_craft_application": {
+                      "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
+                      "enum": [
+                        "wordcraft",
+                        "gridcraft"
+                      ],
                       "type": "string"
                     },
                     "owner": {
@@ -143513,6 +143604,14 @@
                           "type": "string"
                         },
                         "name": {
+                          "type": "string"
+                        },
+                        "native_craft_application": {
+                          "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
+                          "enum": [
+                            "wordcraft",
+                            "gridcraft"
+                          ],
                           "type": "string"
                         },
                         "owner": {

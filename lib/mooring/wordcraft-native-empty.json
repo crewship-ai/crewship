@@ -1,0 +1,2464 @@
+{
+  "body": [
+    {
+      "kind": "para",
+      "text": "",
+      "runs": []
+    }
+  ],
+  "lastSection": {
+    "start": "nextPage",
+    "pageW": 612.0,
+    "pageH": 792.0,
+    "landscape": false,
+    "marginTop": 72.0,
+    "marginBottom": 72.0,
+    "marginLeft": 72.0,
+    "marginRight": 72.0,
+    "header": 36.0,
+    "footer": 36.0,
+    "gutter": 0.0,
+    "columns": {
+      "count": 1,
+      "space": 36.0,
+      "separator": false,
+      "widths": []
+    },
+    "headers": {
+      "default": null,
+      "first": null,
+      "even": null
+    },
+    "footers": {
+      "default": null,
+      "first": null,
+      "even": null
+    },
+    "titlePage": false,
+    "pageNumStart": null,
+    "pageNumFormat": "decimal",
+    "lineNumbers": null,
+    "valign": "top",
+    "pageBorders": null,
+    "rtl": false,
+    "docGrid": null
+  },
+  "parts": {},
+  "styles": {
+    "defaultChr": {
+      "font": "Aptos",
+      "size": 12.0,
+      "kern": 1.0,
+      "lang": "en-US"
+    },
+    "defaultPara": {
+      "spaceBefore": 0.0,
+      "spaceAfter": 8.0,
+      "lineSpacing": {
+        "rule": "multiple",
+        "value": 1.15
+      },
+      "widowControl": true
+    },
+    "defaultParaPresent": true,
+    "styles": [
+      {
+        "id": "Normal",
+        "name": "Normal",
+        "kind": "paragraph",
+        "basedOn": null,
+        "next": null,
+        "linked": null,
+        "para": {},
+        "chr": {},
+        "priority": 0,
+        "quick": true,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "DefaultParagraphFont",
+        "name": "Default Paragraph Font",
+        "kind": "character",
+        "basedOn": null,
+        "next": null,
+        "linked": null,
+        "para": {},
+        "chr": {},
+        "priority": 1,
+        "quick": false,
+        "hidden": true,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "NoSpacing",
+        "name": "No Spacing",
+        "kind": "paragraph",
+        "basedOn": "Normal",
+        "next": null,
+        "linked": null,
+        "para": {
+          "spaceAfter": 0.0,
+          "lineSpacing": {
+            "rule": "multiple",
+            "value": 1.0
+          }
+        },
+        "chr": {},
+        "priority": 1,
+        "quick": true,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "Heading1",
+        "name": "Heading 1",
+        "kind": "paragraph",
+        "basedOn": "Normal",
+        "next": "Normal",
+        "linked": "Heading1Char",
+        "para": {
+          "spaceBefore": 18.0,
+          "spaceAfter": 4.0,
+          "keepNext": true,
+          "keepLines": true,
+          "outlineLevel": 0
+        },
+        "chr": {
+          "font": "Aptos Display",
+          "size": 20.0,
+          "color": {
+            "Rgb": [
+              15,
+              71,
+              97
+            ]
+          }
+        },
+        "priority": 10,
+        "quick": true,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "Heading2",
+        "name": "Heading 2",
+        "kind": "paragraph",
+        "basedOn": "Normal",
+        "next": "Normal",
+        "linked": "Heading2Char",
+        "para": {
+          "spaceBefore": 8.0,
+          "spaceAfter": 4.0,
+          "keepNext": true,
+          "keepLines": true,
+          "outlineLevel": 1
+        },
+        "chr": {
+          "font": "Aptos Display",
+          "size": 16.0,
+          "color": {
+            "Rgb": [
+              15,
+              71,
+              97
+            ]
+          }
+        },
+        "priority": 11,
+        "quick": true,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "Heading3",
+        "name": "Heading 3",
+        "kind": "paragraph",
+        "basedOn": "Normal",
+        "next": "Normal",
+        "linked": "Heading3Char",
+        "para": {
+          "spaceBefore": 8.0,
+          "spaceAfter": 4.0,
+          "keepNext": true,
+          "keepLines": true,
+          "outlineLevel": 2
+        },
+        "chr": {
+          "font": "Aptos",
+          "size": 14.0,
+          "color": {
+            "Rgb": [
+              15,
+              71,
+              97
+            ]
+          }
+        },
+        "priority": 12,
+        "quick": true,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "Heading4",
+        "name": "Heading 4",
+        "kind": "paragraph",
+        "basedOn": "Normal",
+        "next": "Normal",
+        "linked": "Heading4Char",
+        "para": {
+          "spaceBefore": 4.0,
+          "spaceAfter": 2.0,
+          "keepNext": true,
+          "keepLines": true,
+          "outlineLevel": 3
+        },
+        "chr": {
+          "font": "Aptos",
+          "size": 12.0,
+          "italic": true,
+          "color": {
+            "Rgb": [
+              15,
+              71,
+              97
+            ]
+          }
+        },
+        "priority": 13,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "Heading5",
+        "name": "Heading 5",
+        "kind": "paragraph",
+        "basedOn": "Normal",
+        "next": "Normal",
+        "linked": "Heading5Char",
+        "para": {
+          "spaceBefore": 4.0,
+          "spaceAfter": 2.0,
+          "keepNext": true,
+          "keepLines": true,
+          "outlineLevel": 4
+        },
+        "chr": {
+          "font": "Aptos",
+          "size": 12.0,
+          "color": {
+            "Rgb": [
+              15,
+              71,
+              97
+            ]
+          }
+        },
+        "priority": 14,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "Heading6",
+        "name": "Heading 6",
+        "kind": "paragraph",
+        "basedOn": "Normal",
+        "next": "Normal",
+        "linked": "Heading6Char",
+        "para": {
+          "spaceBefore": 2.0,
+          "spaceAfter": 0.0,
+          "keepNext": true,
+          "keepLines": true,
+          "outlineLevel": 5
+        },
+        "chr": {
+          "font": "Aptos",
+          "size": 12.0,
+          "italic": true,
+          "color": {
+            "Rgb": [
+              89,
+              89,
+              89
+            ]
+          }
+        },
+        "priority": 15,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "Heading7",
+        "name": "Heading 7",
+        "kind": "paragraph",
+        "basedOn": "Normal",
+        "next": "Normal",
+        "linked": "Heading7Char",
+        "para": {
+          "spaceBefore": 2.0,
+          "spaceAfter": 0.0,
+          "keepNext": true,
+          "keepLines": true,
+          "outlineLevel": 6
+        },
+        "chr": {
+          "font": "Aptos",
+          "size": 12.0,
+          "color": {
+            "Rgb": [
+              89,
+              89,
+              89
+            ]
+          }
+        },
+        "priority": 16,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "Heading8",
+        "name": "Heading 8",
+        "kind": "paragraph",
+        "basedOn": "Normal",
+        "next": "Normal",
+        "linked": "Heading8Char",
+        "para": {
+          "spaceBefore": 0.0,
+          "spaceAfter": 0.0,
+          "keepNext": true,
+          "keepLines": true,
+          "outlineLevel": 7
+        },
+        "chr": {
+          "font": "Aptos",
+          "size": 12.0,
+          "italic": true,
+          "color": {
+            "Rgb": [
+              39,
+              39,
+              39
+            ]
+          }
+        },
+        "priority": 17,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "Heading9",
+        "name": "Heading 9",
+        "kind": "paragraph",
+        "basedOn": "Normal",
+        "next": "Normal",
+        "linked": "Heading9Char",
+        "para": {
+          "spaceBefore": 0.0,
+          "spaceAfter": 0.0,
+          "keepNext": true,
+          "keepLines": true,
+          "outlineLevel": 8
+        },
+        "chr": {
+          "font": "Aptos",
+          "size": 12.0,
+          "color": {
+            "Rgb": [
+              39,
+              39,
+              39
+            ]
+          }
+        },
+        "priority": 18,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "Title",
+        "name": "Title",
+        "kind": "paragraph",
+        "basedOn": "Normal",
+        "next": "Normal",
+        "linked": null,
+        "para": {
+          "spaceAfter": 4.0,
+          "lineSpacing": {
+            "rule": "multiple",
+            "value": 1.0
+          },
+          "contextualSpacing": true
+        },
+        "chr": {
+          "font": "Aptos Display",
+          "size": 28.0,
+          "spacing": -0.5,
+          "kern": 14.0
+        },
+        "priority": 10,
+        "quick": true,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "Subtitle",
+        "name": "Subtitle",
+        "kind": "paragraph",
+        "basedOn": "Normal",
+        "next": "Normal",
+        "linked": null,
+        "para": {},
+        "chr": {
+          "size": 14.0,
+          "color": {
+            "Rgb": [
+              89,
+              89,
+              89
+            ]
+          },
+          "spacing": 0.75
+        },
+        "priority": 11,
+        "quick": true,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "SubtleEmphasis",
+        "name": "Subtle Emphasis",
+        "kind": "character",
+        "basedOn": "DefaultParagraphFont",
+        "next": null,
+        "linked": null,
+        "para": {},
+        "chr": {
+          "italic": true,
+          "color": {
+            "Rgb": [
+              64,
+              64,
+              64
+            ]
+          }
+        },
+        "priority": 19,
+        "quick": true,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "Emphasis",
+        "name": "Emphasis",
+        "kind": "character",
+        "basedOn": "DefaultParagraphFont",
+        "next": null,
+        "linked": null,
+        "para": {},
+        "chr": {
+          "italic": true
+        },
+        "priority": 20,
+        "quick": true,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "IntenseEmphasis",
+        "name": "Intense Emphasis",
+        "kind": "character",
+        "basedOn": "DefaultParagraphFont",
+        "next": null,
+        "linked": null,
+        "para": {},
+        "chr": {
+          "italic": true,
+          "color": {
+            "Rgb": [
+              15,
+              71,
+              97
+            ]
+          }
+        },
+        "priority": 21,
+        "quick": true,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "Strong",
+        "name": "Strong",
+        "kind": "character",
+        "basedOn": "DefaultParagraphFont",
+        "next": null,
+        "linked": null,
+        "para": {},
+        "chr": {
+          "bold": true
+        },
+        "priority": 22,
+        "quick": true,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "Quote",
+        "name": "Quote",
+        "kind": "paragraph",
+        "basedOn": "Normal",
+        "next": "Normal",
+        "linked": null,
+        "para": {
+          "align": "center",
+          "spaceBefore": 8.0
+        },
+        "chr": {
+          "italic": true,
+          "color": {
+            "Rgb": [
+              64,
+              64,
+              64
+            ]
+          }
+        },
+        "priority": 29,
+        "quick": true,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "IntenseQuote",
+        "name": "Intense Quote",
+        "kind": "paragraph",
+        "basedOn": "Normal",
+        "next": "Normal",
+        "linked": null,
+        "para": {
+          "align": "center",
+          "indentLeft": 43.2,
+          "indentRight": 43.2,
+          "spaceBefore": 18.0,
+          "spaceAfter": 18.0,
+          "borders": {
+            "top": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                15,
+                71,
+                97
+              ],
+              "space": 10.0
+            },
+            "left": null,
+            "bottom": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                15,
+                71,
+                97
+              ],
+              "space": 10.0
+            },
+            "right": null,
+            "between": null,
+            "inside_v": null
+          }
+        },
+        "chr": {
+          "italic": true,
+          "color": {
+            "Rgb": [
+              15,
+              71,
+              97
+            ]
+          }
+        },
+        "priority": 30,
+        "quick": true,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "SubtleReference",
+        "name": "Subtle Reference",
+        "kind": "character",
+        "basedOn": "DefaultParagraphFont",
+        "next": null,
+        "linked": null,
+        "para": {},
+        "chr": {
+          "color": {
+            "Rgb": [
+              90,
+              90,
+              90
+            ]
+          },
+          "smallCaps": true
+        },
+        "priority": 31,
+        "quick": true,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "IntenseReference",
+        "name": "Intense Reference",
+        "kind": "character",
+        "basedOn": "DefaultParagraphFont",
+        "next": null,
+        "linked": null,
+        "para": {},
+        "chr": {
+          "bold": true,
+          "color": {
+            "Rgb": [
+              15,
+              71,
+              97
+            ]
+          },
+          "smallCaps": true,
+          "spacing": 0.25
+        },
+        "priority": 32,
+        "quick": true,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "BookTitle",
+        "name": "Book Title",
+        "kind": "character",
+        "basedOn": "DefaultParagraphFont",
+        "next": null,
+        "linked": null,
+        "para": {},
+        "chr": {
+          "bold": true,
+          "italic": true,
+          "spacing": 0.25
+        },
+        "priority": 33,
+        "quick": true,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "ListParagraph",
+        "name": "List Paragraph",
+        "kind": "paragraph",
+        "basedOn": "Normal",
+        "next": null,
+        "linked": null,
+        "para": {
+          "indentLeft": 36.0,
+          "contextualSpacing": true
+        },
+        "chr": {},
+        "priority": 34,
+        "quick": true,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "Hyperlink",
+        "name": "Hyperlink",
+        "kind": "character",
+        "basedOn": "DefaultParagraphFont",
+        "next": null,
+        "linked": null,
+        "para": {},
+        "chr": {
+          "underline": "single",
+          "color": {
+            "Rgb": [
+              70,
+              120,
+              134
+            ]
+          }
+        },
+        "priority": 99,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "Caption",
+        "name": "Caption",
+        "kind": "paragraph",
+        "basedOn": "Normal",
+        "next": "Normal",
+        "linked": null,
+        "para": {
+          "spaceAfter": 10.0,
+          "lineSpacing": {
+            "rule": "multiple",
+            "value": 1.0
+          }
+        },
+        "chr": {
+          "size": 9.0,
+          "italic": true,
+          "color": {
+            "Rgb": [
+              14,
+              40,
+              65
+            ]
+          }
+        },
+        "priority": 35,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "Header",
+        "name": "Header",
+        "kind": "paragraph",
+        "basedOn": "Normal",
+        "next": null,
+        "linked": null,
+        "para": {
+          "spaceAfter": 0.0,
+          "lineSpacing": {
+            "rule": "multiple",
+            "value": 1.0
+          },
+          "tabs": [
+            {
+              "pos": 234.0,
+              "align": "center",
+              "leader": "none"
+            },
+            {
+              "pos": 468.0,
+              "align": "right",
+              "leader": "none"
+            }
+          ]
+        },
+        "chr": {},
+        "priority": 99,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "Footer",
+        "name": "Footer",
+        "kind": "paragraph",
+        "basedOn": "Normal",
+        "next": null,
+        "linked": null,
+        "para": {
+          "spaceAfter": 0.0,
+          "lineSpacing": {
+            "rule": "multiple",
+            "value": 1.0
+          },
+          "tabs": [
+            {
+              "pos": 234.0,
+              "align": "center",
+              "leader": "none"
+            },
+            {
+              "pos": 468.0,
+              "align": "right",
+              "leader": "none"
+            }
+          ]
+        },
+        "chr": {},
+        "priority": 99,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "FootnoteText",
+        "name": "Footnote Text",
+        "kind": "paragraph",
+        "basedOn": "Normal",
+        "next": null,
+        "linked": null,
+        "para": {
+          "spaceAfter": 0.0,
+          "lineSpacing": {
+            "rule": "multiple",
+            "value": 1.0
+          }
+        },
+        "chr": {
+          "size": 10.0
+        },
+        "priority": 99,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "FootnoteReference",
+        "name": "Footnote Reference",
+        "kind": "character",
+        "basedOn": "DefaultParagraphFont",
+        "next": null,
+        "linked": null,
+        "para": {},
+        "chr": {
+          "vertAlign": "superscript"
+        },
+        "priority": 99,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "EndnoteText",
+        "name": "Endnote Text",
+        "kind": "paragraph",
+        "basedOn": "Normal",
+        "next": null,
+        "linked": null,
+        "para": {
+          "spaceAfter": 0.0,
+          "lineSpacing": {
+            "rule": "multiple",
+            "value": 1.0
+          }
+        },
+        "chr": {
+          "size": 10.0
+        },
+        "priority": 99,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "EndnoteReference",
+        "name": "Endnote Reference",
+        "kind": "character",
+        "basedOn": "DefaultParagraphFont",
+        "next": null,
+        "linked": null,
+        "para": {},
+        "chr": {
+          "vertAlign": "superscript"
+        },
+        "priority": 99,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "TOCHeading",
+        "name": "TOC Heading",
+        "kind": "paragraph",
+        "basedOn": "Heading1",
+        "next": "Normal",
+        "linked": null,
+        "para": {
+          "spaceBefore": 12.0,
+          "outlineLevel": 9
+        },
+        "chr": {},
+        "priority": 39,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "TOC1",
+        "name": "TOC 1",
+        "kind": "paragraph",
+        "basedOn": "Normal",
+        "next": "Normal",
+        "linked": null,
+        "para": {
+          "indentLeft": 0.0,
+          "spaceAfter": 5.0
+        },
+        "chr": {},
+        "priority": 39,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "TOC2",
+        "name": "TOC 2",
+        "kind": "paragraph",
+        "basedOn": "Normal",
+        "next": "Normal",
+        "linked": null,
+        "para": {
+          "indentLeft": 12.0,
+          "spaceAfter": 5.0
+        },
+        "chr": {},
+        "priority": 39,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "TOC3",
+        "name": "TOC 3",
+        "kind": "paragraph",
+        "basedOn": "Normal",
+        "next": "Normal",
+        "linked": null,
+        "para": {
+          "indentLeft": 24.0,
+          "spaceAfter": 5.0
+        },
+        "chr": {},
+        "priority": 39,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "TOC4",
+        "name": "TOC 4",
+        "kind": "paragraph",
+        "basedOn": "Normal",
+        "next": "Normal",
+        "linked": null,
+        "para": {
+          "indentLeft": 36.0,
+          "spaceAfter": 5.0
+        },
+        "chr": {},
+        "priority": 39,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "TOC5",
+        "name": "TOC 5",
+        "kind": "paragraph",
+        "basedOn": "Normal",
+        "next": "Normal",
+        "linked": null,
+        "para": {
+          "indentLeft": 48.0,
+          "spaceAfter": 5.0
+        },
+        "chr": {},
+        "priority": 39,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "TOC6",
+        "name": "TOC 6",
+        "kind": "paragraph",
+        "basedOn": "Normal",
+        "next": "Normal",
+        "linked": null,
+        "para": {
+          "indentLeft": 60.0,
+          "spaceAfter": 5.0
+        },
+        "chr": {},
+        "priority": 39,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "TOC7",
+        "name": "TOC 7",
+        "kind": "paragraph",
+        "basedOn": "Normal",
+        "next": "Normal",
+        "linked": null,
+        "para": {
+          "indentLeft": 72.0,
+          "spaceAfter": 5.0
+        },
+        "chr": {},
+        "priority": 39,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "TOC8",
+        "name": "TOC 8",
+        "kind": "paragraph",
+        "basedOn": "Normal",
+        "next": "Normal",
+        "linked": null,
+        "para": {
+          "indentLeft": 84.0,
+          "spaceAfter": 5.0
+        },
+        "chr": {},
+        "priority": 39,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "TOC9",
+        "name": "TOC 9",
+        "kind": "paragraph",
+        "basedOn": "Normal",
+        "next": "Normal",
+        "linked": null,
+        "para": {
+          "indentLeft": 96.0,
+          "spaceAfter": 5.0
+        },
+        "chr": {},
+        "priority": 39,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "TableGrid",
+        "name": "Table Grid",
+        "kind": "table",
+        "basedOn": null,
+        "next": null,
+        "linked": null,
+        "para": {
+          "spaceAfter": 0.0,
+          "lineSpacing": {
+            "rule": "multiple",
+            "value": 1.0
+          }
+        },
+        "chr": {},
+        "priority": 59,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": {
+          "borders": {
+            "top": {
+              "style": "single",
+              "width": 0.5,
+              "color": null,
+              "space": 0.0
+            },
+            "left": {
+              "style": "single",
+              "width": 0.5,
+              "color": null,
+              "space": 0.0
+            },
+            "bottom": {
+              "style": "single",
+              "width": 0.5,
+              "color": null,
+              "space": 0.0
+            },
+            "right": {
+              "style": "single",
+              "width": 0.5,
+              "color": null,
+              "space": 0.0
+            },
+            "between": {
+              "style": "single",
+              "width": 0.5,
+              "color": null,
+              "space": 0.0
+            },
+            "inside_v": {
+              "style": "single",
+              "width": 0.5,
+              "color": null,
+              "space": 0.0
+            }
+          },
+          "fill": null,
+          "cellMargins": null,
+          "headerFill": null,
+          "headerChr": {},
+          "headerBorders": null,
+          "bandFill": null,
+          "bandChr": {},
+          "bandBorders": null,
+          "bandSize": null,
+          "colBandSize": null,
+          "firstColChr": {},
+          "totalChr": {},
+          "totalBorderTop": null,
+          "firstColFill": null,
+          "firstColBorders": null,
+          "lastColFill": null,
+          "lastColChr": {},
+          "lastColBorders": null,
+          "totalFill": null,
+          "totalBorders": null,
+          "colBandFill": null,
+          "colBandChr": {},
+          "colBandBorders": null
+        }
+      },
+      {
+        "id": "TableNormal",
+        "name": "Normal Table",
+        "kind": "table",
+        "basedOn": null,
+        "next": null,
+        "linked": null,
+        "para": {},
+        "chr": {},
+        "priority": null,
+        "quick": false,
+        "hidden": true,
+        "builtin": true,
+        "table": null
+      },
+      {
+        "id": "PlainTable1",
+        "name": "Plain Table 1",
+        "kind": "table",
+        "basedOn": "TableNormal",
+        "next": null,
+        "linked": null,
+        "para": {
+          "spaceAfter": 0.0,
+          "lineSpacing": {
+            "rule": "multiple",
+            "value": 1.0
+          }
+        },
+        "chr": {},
+        "priority": 60,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": {
+          "borders": {
+            "top": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                191,
+                191,
+                191
+              ],
+              "space": 0.0
+            },
+            "left": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                191,
+                191,
+                191
+              ],
+              "space": 0.0
+            },
+            "bottom": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                191,
+                191,
+                191
+              ],
+              "space": 0.0
+            },
+            "right": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                191,
+                191,
+                191
+              ],
+              "space": 0.0
+            },
+            "between": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                191,
+                191,
+                191
+              ],
+              "space": 0.0
+            },
+            "inside_v": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                191,
+                191,
+                191
+              ],
+              "space": 0.0
+            }
+          },
+          "fill": null,
+          "cellMargins": null,
+          "headerFill": null,
+          "headerChr": {
+            "bold": true
+          },
+          "headerBorders": null,
+          "bandFill": [
+            242,
+            242,
+            242
+          ],
+          "bandChr": {},
+          "bandBorders": null,
+          "bandSize": 1,
+          "colBandSize": 1,
+          "firstColChr": {
+            "bold": true
+          },
+          "totalChr": {},
+          "totalBorderTop": null,
+          "firstColFill": null,
+          "firstColBorders": null,
+          "lastColFill": null,
+          "lastColChr": {},
+          "lastColBorders": null,
+          "totalFill": null,
+          "totalBorders": null,
+          "colBandFill": null,
+          "colBandChr": {},
+          "colBandBorders": null
+        }
+      },
+      {
+        "id": "GridTable1Light",
+        "name": "Grid Table 1 Light",
+        "kind": "table",
+        "basedOn": "TableNormal",
+        "next": null,
+        "linked": null,
+        "para": {
+          "spaceAfter": 0.0,
+          "lineSpacing": {
+            "rule": "multiple",
+            "value": 1.0
+          }
+        },
+        "chr": {},
+        "priority": 60,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": {
+          "borders": {
+            "top": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                153,
+                153,
+                153
+              ],
+              "space": 0.0
+            },
+            "left": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                153,
+                153,
+                153
+              ],
+              "space": 0.0
+            },
+            "bottom": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                153,
+                153,
+                153
+              ],
+              "space": 0.0
+            },
+            "right": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                153,
+                153,
+                153
+              ],
+              "space": 0.0
+            },
+            "between": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                153,
+                153,
+                153
+              ],
+              "space": 0.0
+            },
+            "inside_v": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                153,
+                153,
+                153
+              ],
+              "space": 0.0
+            }
+          },
+          "fill": null,
+          "cellMargins": null,
+          "headerFill": null,
+          "headerChr": {
+            "bold": true
+          },
+          "headerBorders": null,
+          "bandFill": null,
+          "bandChr": {},
+          "bandBorders": null,
+          "bandSize": 1,
+          "colBandSize": 1,
+          "firstColChr": {
+            "bold": true
+          },
+          "totalChr": {},
+          "totalBorderTop": null,
+          "firstColFill": null,
+          "firstColBorders": null,
+          "lastColFill": null,
+          "lastColChr": {},
+          "lastColBorders": null,
+          "totalFill": null,
+          "totalBorders": null,
+          "colBandFill": null,
+          "colBandChr": {},
+          "colBandBorders": null
+        }
+      },
+      {
+        "id": "GridTable4AccentBlue",
+        "name": "Grid Table 4 – Blue",
+        "kind": "table",
+        "basedOn": "TableNormal",
+        "next": null,
+        "linked": null,
+        "para": {
+          "spaceAfter": 0.0,
+          "lineSpacing": {
+            "rule": "multiple",
+            "value": 1.0
+          }
+        },
+        "chr": {},
+        "priority": 60,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": {
+          "borders": {
+            "top": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                193,
+                228,
+                245
+              ],
+              "space": 0.0
+            },
+            "left": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                193,
+                228,
+                245
+              ],
+              "space": 0.0
+            },
+            "bottom": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                193,
+                228,
+                245
+              ],
+              "space": 0.0
+            },
+            "right": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                193,
+                228,
+                245
+              ],
+              "space": 0.0
+            },
+            "between": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                193,
+                228,
+                245
+              ],
+              "space": 0.0
+            },
+            "inside_v": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                193,
+                228,
+                245
+              ],
+              "space": 0.0
+            }
+          },
+          "fill": null,
+          "cellMargins": null,
+          "headerFill": [
+            21,
+            96,
+            130
+          ],
+          "headerChr": {
+            "bold": true,
+            "color": {
+              "Rgb": [
+                255,
+                255,
+                255
+              ]
+            }
+          },
+          "headerBorders": null,
+          "bandFill": [
+            193,
+            228,
+            245
+          ],
+          "bandChr": {},
+          "bandBorders": null,
+          "bandSize": 1,
+          "colBandSize": 1,
+          "firstColChr": {
+            "bold": true
+          },
+          "totalChr": {},
+          "totalBorderTop": null,
+          "firstColFill": null,
+          "firstColBorders": null,
+          "lastColFill": null,
+          "lastColChr": {},
+          "lastColBorders": null,
+          "totalFill": null,
+          "totalBorders": null,
+          "colBandFill": null,
+          "colBandChr": {},
+          "colBandBorders": null
+        }
+      },
+      {
+        "id": "ListTable3AccentBlue",
+        "name": "List Table 3 – Blue",
+        "kind": "table",
+        "basedOn": "TableNormal",
+        "next": null,
+        "linked": null,
+        "para": {
+          "spaceAfter": 0.0,
+          "lineSpacing": {
+            "rule": "multiple",
+            "value": 1.0
+          }
+        },
+        "chr": {},
+        "priority": 60,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": {
+          "borders": {
+            "top": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                21,
+                96,
+                130
+              ],
+              "space": 0.0
+            },
+            "left": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                21,
+                96,
+                130
+              ],
+              "space": 0.0
+            },
+            "bottom": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                21,
+                96,
+                130
+              ],
+              "space": 0.0
+            },
+            "right": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                21,
+                96,
+                130
+              ],
+              "space": 0.0
+            },
+            "between": null,
+            "inside_v": null
+          },
+          "fill": null,
+          "cellMargins": null,
+          "headerFill": [
+            21,
+            96,
+            130
+          ],
+          "headerChr": {
+            "bold": true,
+            "color": {
+              "Rgb": [
+                255,
+                255,
+                255
+              ]
+            }
+          },
+          "headerBorders": null,
+          "bandFill": null,
+          "bandChr": {},
+          "bandBorders": null,
+          "bandSize": 1,
+          "colBandSize": 1,
+          "firstColChr": {},
+          "totalChr": {},
+          "totalBorderTop": {
+            "style": "single",
+            "width": 0.5,
+            "color": [
+              21,
+              96,
+              130
+            ],
+            "space": 0.0
+          },
+          "firstColFill": null,
+          "firstColBorders": null,
+          "lastColFill": null,
+          "lastColChr": {},
+          "lastColBorders": null,
+          "totalFill": null,
+          "totalBorders": null,
+          "colBandFill": null,
+          "colBandChr": {},
+          "colBandBorders": null
+        }
+      },
+      {
+        "id": "GridTable4AccentOrange",
+        "name": "Grid Table 4 – Orange",
+        "kind": "table",
+        "basedOn": "TableNormal",
+        "next": null,
+        "linked": null,
+        "para": {
+          "spaceAfter": 0.0,
+          "lineSpacing": {
+            "rule": "multiple",
+            "value": 1.0
+          }
+        },
+        "chr": {},
+        "priority": 60,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": {
+          "borders": {
+            "top": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                251,
+                226,
+                213
+              ],
+              "space": 0.0
+            },
+            "left": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                251,
+                226,
+                213
+              ],
+              "space": 0.0
+            },
+            "bottom": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                251,
+                226,
+                213
+              ],
+              "space": 0.0
+            },
+            "right": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                251,
+                226,
+                213
+              ],
+              "space": 0.0
+            },
+            "between": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                251,
+                226,
+                213
+              ],
+              "space": 0.0
+            },
+            "inside_v": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                251,
+                226,
+                213
+              ],
+              "space": 0.0
+            }
+          },
+          "fill": null,
+          "cellMargins": null,
+          "headerFill": [
+            233,
+            113,
+            50
+          ],
+          "headerChr": {
+            "bold": true,
+            "color": {
+              "Rgb": [
+                255,
+                255,
+                255
+              ]
+            }
+          },
+          "headerBorders": null,
+          "bandFill": [
+            251,
+            226,
+            213
+          ],
+          "bandChr": {},
+          "bandBorders": null,
+          "bandSize": 1,
+          "colBandSize": 1,
+          "firstColChr": {
+            "bold": true
+          },
+          "totalChr": {},
+          "totalBorderTop": null,
+          "firstColFill": null,
+          "firstColBorders": null,
+          "lastColFill": null,
+          "lastColChr": {},
+          "lastColBorders": null,
+          "totalFill": null,
+          "totalBorders": null,
+          "colBandFill": null,
+          "colBandChr": {},
+          "colBandBorders": null
+        }
+      },
+      {
+        "id": "ListTable3AccentOrange",
+        "name": "List Table 3 – Orange",
+        "kind": "table",
+        "basedOn": "TableNormal",
+        "next": null,
+        "linked": null,
+        "para": {
+          "spaceAfter": 0.0,
+          "lineSpacing": {
+            "rule": "multiple",
+            "value": 1.0
+          }
+        },
+        "chr": {},
+        "priority": 60,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": {
+          "borders": {
+            "top": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                233,
+                113,
+                50
+              ],
+              "space": 0.0
+            },
+            "left": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                233,
+                113,
+                50
+              ],
+              "space": 0.0
+            },
+            "bottom": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                233,
+                113,
+                50
+              ],
+              "space": 0.0
+            },
+            "right": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                233,
+                113,
+                50
+              ],
+              "space": 0.0
+            },
+            "between": null,
+            "inside_v": null
+          },
+          "fill": null,
+          "cellMargins": null,
+          "headerFill": [
+            233,
+            113,
+            50
+          ],
+          "headerChr": {
+            "bold": true,
+            "color": {
+              "Rgb": [
+                255,
+                255,
+                255
+              ]
+            }
+          },
+          "headerBorders": null,
+          "bandFill": null,
+          "bandChr": {},
+          "bandBorders": null,
+          "bandSize": 1,
+          "colBandSize": 1,
+          "firstColChr": {},
+          "totalChr": {},
+          "totalBorderTop": {
+            "style": "single",
+            "width": 0.5,
+            "color": [
+              233,
+              113,
+              50
+            ],
+            "space": 0.0
+          },
+          "firstColFill": null,
+          "firstColBorders": null,
+          "lastColFill": null,
+          "lastColChr": {},
+          "lastColBorders": null,
+          "totalFill": null,
+          "totalBorders": null,
+          "colBandFill": null,
+          "colBandChr": {},
+          "colBandBorders": null
+        }
+      },
+      {
+        "id": "GridTable4AccentGreen",
+        "name": "Grid Table 4 – Green",
+        "kind": "table",
+        "basedOn": "TableNormal",
+        "next": null,
+        "linked": null,
+        "para": {
+          "spaceAfter": 0.0,
+          "lineSpacing": {
+            "rule": "multiple",
+            "value": 1.0
+          }
+        },
+        "chr": {},
+        "priority": 60,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": {
+          "borders": {
+            "top": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                193,
+                240,
+                200
+              ],
+              "space": 0.0
+            },
+            "left": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                193,
+                240,
+                200
+              ],
+              "space": 0.0
+            },
+            "bottom": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                193,
+                240,
+                200
+              ],
+              "space": 0.0
+            },
+            "right": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                193,
+                240,
+                200
+              ],
+              "space": 0.0
+            },
+            "between": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                193,
+                240,
+                200
+              ],
+              "space": 0.0
+            },
+            "inside_v": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                193,
+                240,
+                200
+              ],
+              "space": 0.0
+            }
+          },
+          "fill": null,
+          "cellMargins": null,
+          "headerFill": [
+            25,
+            107,
+            36
+          ],
+          "headerChr": {
+            "bold": true,
+            "color": {
+              "Rgb": [
+                255,
+                255,
+                255
+              ]
+            }
+          },
+          "headerBorders": null,
+          "bandFill": [
+            193,
+            240,
+            200
+          ],
+          "bandChr": {},
+          "bandBorders": null,
+          "bandSize": 1,
+          "colBandSize": 1,
+          "firstColChr": {
+            "bold": true
+          },
+          "totalChr": {},
+          "totalBorderTop": null,
+          "firstColFill": null,
+          "firstColBorders": null,
+          "lastColFill": null,
+          "lastColChr": {},
+          "lastColBorders": null,
+          "totalFill": null,
+          "totalBorders": null,
+          "colBandFill": null,
+          "colBandChr": {},
+          "colBandBorders": null
+        }
+      },
+      {
+        "id": "ListTable3AccentGreen",
+        "name": "List Table 3 – Green",
+        "kind": "table",
+        "basedOn": "TableNormal",
+        "next": null,
+        "linked": null,
+        "para": {
+          "spaceAfter": 0.0,
+          "lineSpacing": {
+            "rule": "multiple",
+            "value": 1.0
+          }
+        },
+        "chr": {},
+        "priority": 60,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": {
+          "borders": {
+            "top": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                25,
+                107,
+                36
+              ],
+              "space": 0.0
+            },
+            "left": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                25,
+                107,
+                36
+              ],
+              "space": 0.0
+            },
+            "bottom": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                25,
+                107,
+                36
+              ],
+              "space": 0.0
+            },
+            "right": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                25,
+                107,
+                36
+              ],
+              "space": 0.0
+            },
+            "between": null,
+            "inside_v": null
+          },
+          "fill": null,
+          "cellMargins": null,
+          "headerFill": [
+            25,
+            107,
+            36
+          ],
+          "headerChr": {
+            "bold": true,
+            "color": {
+              "Rgb": [
+                255,
+                255,
+                255
+              ]
+            }
+          },
+          "headerBorders": null,
+          "bandFill": null,
+          "bandChr": {},
+          "bandBorders": null,
+          "bandSize": 1,
+          "colBandSize": 1,
+          "firstColChr": {},
+          "totalChr": {},
+          "totalBorderTop": {
+            "style": "single",
+            "width": 0.5,
+            "color": [
+              25,
+              107,
+              36
+            ],
+            "space": 0.0
+          },
+          "firstColFill": null,
+          "firstColBorders": null,
+          "lastColFill": null,
+          "lastColChr": {},
+          "lastColBorders": null,
+          "totalFill": null,
+          "totalBorders": null,
+          "colBandFill": null,
+          "colBandChr": {},
+          "colBandBorders": null
+        }
+      },
+      {
+        "id": "GridTable4AccentPurple",
+        "name": "Grid Table 4 – Purple",
+        "kind": "table",
+        "basedOn": "TableNormal",
+        "next": null,
+        "linked": null,
+        "para": {
+          "spaceAfter": 0.0,
+          "lineSpacing": {
+            "rule": "multiple",
+            "value": 1.0
+          }
+        },
+        "chr": {},
+        "priority": 60,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": {
+          "borders": {
+            "top": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                229,
+                210,
+                238
+              ],
+              "space": 0.0
+            },
+            "left": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                229,
+                210,
+                238
+              ],
+              "space": 0.0
+            },
+            "bottom": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                229,
+                210,
+                238
+              ],
+              "space": 0.0
+            },
+            "right": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                229,
+                210,
+                238
+              ],
+              "space": 0.0
+            },
+            "between": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                229,
+                210,
+                238
+              ],
+              "space": 0.0
+            },
+            "inside_v": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                229,
+                210,
+                238
+              ],
+              "space": 0.0
+            }
+          },
+          "fill": null,
+          "cellMargins": null,
+          "headerFill": [
+            113,
+            46,
+            141
+          ],
+          "headerChr": {
+            "bold": true,
+            "color": {
+              "Rgb": [
+                255,
+                255,
+                255
+              ]
+            }
+          },
+          "headerBorders": null,
+          "bandFill": [
+            229,
+            210,
+            238
+          ],
+          "bandChr": {},
+          "bandBorders": null,
+          "bandSize": 1,
+          "colBandSize": 1,
+          "firstColChr": {
+            "bold": true
+          },
+          "totalChr": {},
+          "totalBorderTop": null,
+          "firstColFill": null,
+          "firstColBorders": null,
+          "lastColFill": null,
+          "lastColChr": {},
+          "lastColBorders": null,
+          "totalFill": null,
+          "totalBorders": null,
+          "colBandFill": null,
+          "colBandChr": {},
+          "colBandBorders": null
+        }
+      },
+      {
+        "id": "ListTable3AccentPurple",
+        "name": "List Table 3 – Purple",
+        "kind": "table",
+        "basedOn": "TableNormal",
+        "next": null,
+        "linked": null,
+        "para": {
+          "spaceAfter": 0.0,
+          "lineSpacing": {
+            "rule": "multiple",
+            "value": 1.0
+          }
+        },
+        "chr": {},
+        "priority": 60,
+        "quick": false,
+        "hidden": false,
+        "builtin": true,
+        "table": {
+          "borders": {
+            "top": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                113,
+                46,
+                141
+              ],
+              "space": 0.0
+            },
+            "left": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                113,
+                46,
+                141
+              ],
+              "space": 0.0
+            },
+            "bottom": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                113,
+                46,
+                141
+              ],
+              "space": 0.0
+            },
+            "right": {
+              "style": "single",
+              "width": 0.5,
+              "color": [
+                113,
+                46,
+                141
+              ],
+              "space": 0.0
+            },
+            "between": null,
+            "inside_v": null
+          },
+          "fill": null,
+          "cellMargins": null,
+          "headerFill": [
+            113,
+            46,
+            141
+          ],
+          "headerChr": {
+            "bold": true,
+            "color": {
+              "Rgb": [
+                255,
+                255,
+                255
+              ]
+            }
+          },
+          "headerBorders": null,
+          "bandFill": null,
+          "bandChr": {},
+          "bandBorders": null,
+          "bandSize": 1,
+          "colBandSize": 1,
+          "firstColChr": {},
+          "totalChr": {},
+          "totalBorderTop": {
+            "style": "single",
+            "width": 0.5,
+            "color": [
+              113,
+              46,
+              141
+            ],
+            "space": 0.0
+          },
+          "firstColFill": null,
+          "firstColBorders": null,
+          "lastColFill": null,
+          "lastColChr": {},
+          "lastColBorders": null,
+          "totalFill": null,
+          "totalBorders": null,
+          "colBandFill": null,
+          "colBandChr": {},
+          "colBandBorders": null
+        }
+      }
+    ]
+  },
+  "numbering": {
+    "abstracts": [],
+    "nums": []
+  },
+  "comments": {},
+  "revisions": [],
+  "settings": {
+    "trackChanges": false,
+    "trackMoves": true,
+    "defaultTab": 36.0,
+    "evenOddHeaders": false,
+    "mirrorMargins": false,
+    "autoHyphenation": false,
+    "hyphenationZone": 18.0,
+    "hyphenateCaps": true,
+    "consecutiveHyphenLimit": 0,
+    "pageColor": null,
+    "pagePicture": null,
+    "watermark": null,
+    "majorFont": "Aptos Display",
+    "minorFont": "Aptos",
+    "themeColors": [
+      [
+        0,
+        0,
+        0
+      ],
+      [
+        255,
+        255,
+        255
+      ],
+      [
+        14,
+        40,
+        65
+      ],
+      [
+        232,
+        232,
+        232
+      ],
+      [
+        21,
+        96,
+        130
+      ],
+      [
+        233,
+        113,
+        50
+      ],
+      [
+        25,
+        107,
+        36
+      ],
+      [
+        15,
+        158,
+        213
+      ],
+      [
+        160,
+        43,
+        147
+      ],
+      [
+        78,
+        167,
+        46
+      ],
+      [
+        70,
+        120,
+        134
+      ],
+      [
+        150,
+        96,
+        125
+      ]
+    ],
+    "themeName": "Craft",
+    "footnoteFormat": "decimal",
+    "endnoteFormat": "lowerRoman",
+    "protection": null,
+    "compatMode": 15,
+    "allowSpaceOfSameStyleInTable": false,
+    "gridH": 9.0,
+    "gridV": 9.0,
+    "linkStyles": false
+  },
+  "core": {
+    "title": "",
+    "subject": "",
+    "creator": "",
+    "keywords": "",
+    "description": "",
+    "category": "",
+    "lastModifiedBy": "WordCraft User",
+    "created": "2026-10-27T23:33:26Z",
+    "modified": "2026-10-27T23:33:26Z",
+    "revision": 1
+  },
+  "sources": [],
+  "customProps": []
+}

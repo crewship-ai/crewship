@@ -22,8 +22,9 @@ vi.mock("@/hooks/use-workspace", async (importOriginal) => ({
   useWorkspace: () => ({...access, workspaceId: "ws-1", workspaces: [{id:"ws-1",currentUserRole:access.role}], workspace:{id:"ws-1"}}),
 }))
 const push = vi.fn()
+const replace = vi.fn()
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push, replace: vi.fn(), prefetch: vi.fn(), back: vi.fn() }),
+  useRouter: () => ({ push, replace, prefetch: vi.fn(), back: vi.fn() }),
   usePathname: () => "/pages",
   useSearchParams: () => new URLSearchParams(),
   useParams: () => ({}),
@@ -479,4 +480,11 @@ it("offers New Doc and WordCraft when native collaboration is available without 
  expect(await screen.findByLabelText("Format")).toHaveValue("wordcraft")
  expect(screen.queryByText("Document creation is unavailable.")).not.toBeInTheDocument()
  view.qc.clear()
+})
+
+it("reopens an explicit native Craft Page in the full editor instead of an empty legacy view",async()=>{
+ cleanup();window.history.replaceState(null,"","/pages/native-word")
+ const {qc}=renderLayout([{id:"native-id",slug:"native-word",name:"Native Word",panels:[],native_craft_application:"wordcraft"} as WirePage],"native-word")
+ await waitFor(()=>expect(replace).toHaveBeenCalledWith("/pages/craft/editor?workspace_id=ws-1&page_id=native-id"))
+ qc.clear()
 })
