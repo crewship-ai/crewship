@@ -208,6 +208,7 @@ func (m *craftNativeHTTP) mutateLease(w http.ResponseWriter, r *http.Request, op
 		}
 		m.requests[id] = request
 		m.mu.Unlock()
+		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, 201, map[string]any{"request_id": id, "generation": strconv.FormatInt(l.Generation, 10)})
 		return
 	case "handoff":
