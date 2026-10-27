@@ -75,6 +75,7 @@ import { ArtifactContextCards, type OpenLinked } from "./artifact-context/artifa
 import { ArtifactLibraryHost } from "./artifact-context/artifact-library-host"
 import { LinkedArtifactPanel, type LinkedActive } from "./artifact-context/linked-artifact-panel"
 import { ArtifactViewerProvider, type ArtifactViewerTarget } from "./artifact-context/projects/artifact-viewer-context"
+import { artifactCommentMessage, type ArtifactAgentRequest } from "./artifact-context/viewer/agent-dispatch"
 import { ArtifactViewerPanel } from "./artifact-context/viewer"
 import { chatArtifactProjects } from "@/lib/feature-flags"
 import { ComposerArtifactContextStrip } from "./artifact-context/composer/composer-artifact-context"
@@ -1167,10 +1168,15 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   }, [artifactScope])
   // Opening a saved document or linked item replaces the project in the one side pane.
   useEffect(() => { if (documentPreview || linked) setProject(null) }, [documentPreview, linked])
+  // A comment saved for the agent starts its run here, in the chat that holds the project.
+  const sendCommentToAgent = useCallback(async ({ pageId, comment }: ArtifactAgentRequest) => {
+    const { text, metadata } = artifactCommentMessage(pageId, comment)
+    return (await sendMessageWithPage(text, metadata)) !== false
+  }, [sendMessageWithPage])
   // The provider stays mounted under the build flag: toggling it with access
   // would change the root element and remount the whole chat (composer, scroll).
   const withProjects = (node: ReactNode) => chatArtifactProjects()
-    ? <ArtifactViewerProvider workspaceId={workspaceId ?? ""} enabled={artifactProjectsOn} target={projectTarget} onTargetChange={changeProject}>{node}</ArtifactViewerProvider>
+    ? <ArtifactViewerProvider workspaceId={workspaceId ?? ""} enabled={artifactProjectsOn} target={projectTarget} onTargetChange={changeProject} sendToAgent={sendCommentToAgent}>{node}</ArtifactViewerProvider>
     : node
   const viewerOpen = Boolean(documentTarget || linkedTarget || projectTarget)
   const viewerPanel = projectTarget

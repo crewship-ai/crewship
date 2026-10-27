@@ -140,6 +140,9 @@ try {
     await viewer.getByText("Comment sent to the agent").waitFor()
     const posted = await page.evaluate(() => window.__mock.state.comments.map(c => ({ selector: c.selector, quote: c.quote, status: c.status, path: c.path, version: c.version })))
     assert.deepEqual(posted, [{ selector: "#plan-team", quote: "Team$24Unlimited agents, shared crews", status: "pending", path: "plans.html", version: 1 }])
+    const dispatched = await page.evaluate(() => window.__dispatched)
+    assert.equal(dispatched.length, 1, "Send to agent starts the agent once")
+    assert.equal(dispatched[0].artifact_project_intent.base_version, 1)
     await queue.scrollIntoViewIfNeeded()
     await shot("05-comment")
 

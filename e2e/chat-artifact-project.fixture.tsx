@@ -8,6 +8,7 @@ import type { ChatTurn, TurnPart } from "@/hooks/use-chat"
 import { Message, MessageContent } from "@/components/ai-elements/message"
 import { AssistantTurn } from "../components/features/chat/assistant-turn"
 import { ArtifactViewerProvider, type ArtifactViewerTarget } from "../components/features/chat/artifact-context/projects/artifact-viewer-context"
+import { artifactCommentMessage, type ArtifactAgentRequest } from "../components/features/chat/artifact-context/viewer/agent-dispatch"
 import { ArtifactViewerPanel } from "../components/features/chat/artifact-context/viewer"
 import { createArtifactMockServer, type ArtifactMockServer } from "../components/features/chat/artifact-context/projects/mock-server"
 import type { ArtifactFile } from "../components/features/chat/artifact-context/projects/types"
@@ -82,8 +83,14 @@ const mocks: Record<string, ArtifactMockServer> = { [SLUG]: project, [CRAFT_SLUG
 // The project does not exist until the agent's create call returns.
 let created = false
 
-declare global { interface Window { __unmocked: string[]; __mock: typeof project } }
+declare global { interface Window { __unmocked: string[]; __mock: typeof project; __dispatched: Record<string, unknown>[] } }
 window.__unmocked = []
+// What the chat would send to start the agent on a comment (the real chat sends it over its socket).
+window.__dispatched = []
+const sendToAgent = async ({ pageId, comment }: ArtifactAgentRequest) => {
+  window.__dispatched.push(artifactCommentMessage(pageId, comment).metadata)
+  return true
+}
 window.__mock = project
 const realFetch = window.fetch.bind(window)
 window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -174,7 +181,7 @@ function Fixture() {
   </div>
 
   return <QueryClientProvider client={queryClient}>
-    <ArtifactViewerProvider workspaceId={WORKSPACE} target={target} onTargetChange={setTarget}>
+    <ArtifactViewerProvider workspaceId={WORKSPACE} target={target} onTargetChange={setTarget} sendToAgent={sendToAgent}>
       {mobile
         ? <div className="relative flex h-dvh flex-col bg-background text-foreground">
           {chat}

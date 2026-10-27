@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea"
 import type { StatusTone } from "@/lib/format-status"
 import { fmtSize } from "@/lib/file-format"
 import { timeAgo } from "@/lib/time"
+import { useSessionSafe } from "@/hooks/use-auth"
 import { cn } from "@/lib/utils"
 import { useArtifactViewer, type ArtifactViewerTarget } from "../projects/artifact-viewer-context"
 import { useArtifactProjectMutations, useArtifactProjectSnapshot } from "../projects/use-artifact-project-data"
@@ -63,6 +64,14 @@ function ViewerBanner({ tone, icon, title, children, action }: { tone: keyof typ
 function truncate(text: string, max: number) { return text.length > max ? `${text.slice(0, max - 1)}…` : text }
 /** What a person calls the element: its text when it has some, otherwise its id. */
 function elementLabel(selector: string, quote: string) { return quote ? `“${truncate(quote, 40)}”` : selector }
+
+/** The server sends the author's account id; a person reads "You" for their own and no opaque id for others. */
+const OPAQUE_ID = /^c[a-z0-9]{20,}$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+function authorLabel(author: string | undefined, me: string | undefined): string | null {
+  if (!author) return null
+  if (me && author === me) return "You"
+  return OPAQUE_ID.test(author) ? null : author
+}
 
 const PIN = "inline-flex shrink-0 items-center justify-center rounded-[999px_999px_999px_4px] font-semibold tabular-nums"
 
@@ -127,7 +136,11 @@ interface LoadedProps {
 }
 
 function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, fullscreen }: LoadedProps) {
+  const me = useSessionSafe()?.data?.user?.id
+  const sendToAgent = useArtifactViewer()?.sendToAgent
   const { restore, share, comment } = useArtifactProjectMutations(workspaceId, target.slug)
+  // A comment saved for the agent whose chat message did not go out; Retry sends it again.
+  const [undispatched, setUndispatched] = useState<ArtifactComment | null>(null)
   const [historyOpen, setHistoryOpen] = useState(target.tab === "versions")
   // A card asking for another section of the same project keeps the viewer (and an unsent comment).
   const [seenTab, setSeenTab] = useState(target.tab)
@@ -188,9 +201,21 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
   const submit = (send: boolean) => {
     if (!anchor || !draft.trim()) return
     comment.mutate({ version: anchor.version, path: anchor.path, selector: anchor.selector, quote: anchor.quote, text: draft.trim(), send_to_agent: send }, {
-      onSuccess: () => { resetComposer(); setBanner(null); setNotice({ text: send ? "Comment sent to the agent" : "Comment saved", commentOn: anchor.version }) },
+      onSuccess: saved => {
+        resetComposer(); setBanner(null)
+        if (send && sendToAgent) void dispatch(saved)
+        // Without a chat to start it, a comment for the agent waits as its task.
+        else setNotice({ text: send ? "Comment saved for the agent" : "Comment saved", commentOn: anchor.version })
+      },
       onError: fail,
     })
+  }
+  // The comment is saved as the agent's task; the run starts with a chat message bound to it.
+  const dispatch = async (saved: ArtifactComment) => {
+    setUndispatched(null)
+    const started = await sendToAgent!({ pageId: data.page_id, comment: saved }).catch(() => false)
+    if (started) setNotice({ text: "Comment sent to the agent", commentOn: saved.version })
+    else setUndispatched(saved)
   }
   const jumpTo = (c: ArtifactComment) => {
     if (screens.includes(c.path)) setScreenPath(c.path)
@@ -278,6 +303,8 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
     </ViewerBanner>}
     {banner === "anchor" && <ViewerBanner tone="info">This element changed. Select it again.</ViewerBanner>}
     {banner === "failed" && <ViewerBanner tone="bad">That did not go through. Nothing was changed; try again.</ViewerBanner>}
+    {undispatched && <ViewerBanner tone="warn" title="The agent did not start" action={<Button type="button" size="sm" variant="secondary" className="h-7 shrink-0" onClick={() => void dispatch(undispatched)}>Retry</Button>}>
+      The comment is saved. Sending it to the agent in this chat did not go through.</ViewerBanner>}
     {viewingOld && shown === sharedVersion && <ViewerBanner tone="info" icon={Eye}
       action={data.can_write && <Button type="button" size="sm" variant="secondary" className="h-7 shrink-0" disabled={share.isPending} onClick={() => doShare(latest)}>Share v{latest}</Button>}>
       You see the shared version v{shown}, the one people with the link get. Latest is v{latest}.
@@ -318,7 +345,7 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
 
   const canvas = <div ref={canvasRef} className="relative rounded-card bg-muted p-3.5">
     <div className={cn("overflow-hidden rounded-md border bg-white", fullscreen ? "h-[max(320px,calc(100dvh-14rem))]" : "h-[min(70vh,560px)] min-h-[320px]")}>
-      <ArtifactPreviewFrame html={html} screens={screens} path={screen} selectMode={selectMode && !viewingOld} title={`Preview of ${labelOf(screen)}`}
+      <ArtifactPreviewFrame html={html} files={data.manifest.files} screens={screens} path={screen} selectMode={selectMode && !viewingOld} title={`Preview of ${labelOf(screen)}`}
         highlight={highlight} onSelect={select} onNavigate={setScreenPath} />
     </div>
     {pinCard}
@@ -339,12 +366,12 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
             <span aria-hidden className={cn(PIN, "size-5 bg-muted text-micro text-foreground/80 ring-1 ring-border")}>{index + 1}</span>
             <span className="grid min-w-0 flex-[1_1_180px]">
               <b className="text-sm font-semibold">{c.text}</b>
-              <small className="truncate text-xs text-muted-foreground">{[c.author, labelOf(c.path), c.selector && elementLabel(c.selector, c.quote), c.created_at && timeAgo(c.created_at)].filter(Boolean).join(" · ")}</small>
+              <small className="truncate text-xs text-muted-foreground">{[authorLabel(c.author, me), labelOf(c.path), c.selector && elementLabel(c.selector, c.quote), c.created_at && timeAgo(c.created_at)].filter(Boolean).join(" · ")}</small>
             </span>
             {chip && <StatusPill tone={chip.tone} label={chip.label} live={chip.live} />}
           </button>
           {!!c.replies?.length && <ul className="space-y-1 px-3 pb-2 pl-[42px]">{c.replies.map((reply, i) => <li key={i} className="text-xs">
-            <span className="text-muted-foreground">{[reply.author, reply.version > 0 && `v${reply.version}`].filter(Boolean).join(" · ")}{(reply.author || reply.version > 0) && ": "}</span>{reply.text}
+            <span className="text-muted-foreground">{[authorLabel(reply.author, me), reply.version > 0 && `v${reply.version}`].filter(Boolean).join(" · ")}{(authorLabel(reply.author, me) || reply.version > 0) && ": "}</span>{reply.text}
           </li>)}</ul>}
         </li>
       })}</ul>}

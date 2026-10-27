@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { ANCHOR_QUOTE_MAX, ANCHOR_QUOTE_SOURCE, anchorSelectorForId, buildPreviewDocument, isValidAnchorSelector, normalizeQuote, screenLabel, screenLabels, screensOf } from "../element-select"
+import { ANCHOR_QUOTE_MAX, ANCHOR_QUOTE_SOURCE, anchorSelectorForId, buildPreviewDocument, inlineProjectAssets, isValidAnchorSelector, normalizeQuote, screenLabel, screenLabels, screensOf } from "../element-select"
 
 const page = "<!doctype html><html><head><title>x</title></head><body><h1 id=\"hero\">Hi</h1></body></html>"
 
@@ -24,6 +24,36 @@ describe("buildPreviewDocument", () => {
   it("cannot be broken out of through a screen name", () => {
     const doc = buildPreviewDocument(page, { selectMode: false, screens: ["</script><script>alert(1)</script>.html"] })
     expect(doc).not.toContain("</script><script>alert(1)")
+  })
+})
+
+describe("inlineProjectAssets", () => {
+  const files = [
+    { path: "index.html", content: "", media_type: "text/html" },
+    { path: "styles.css", content: "h1{color:red}", media_type: "text/css" },
+    { path: "script.js", content: "window.ran=1", media_type: "text/javascript" },
+    { path: "pages/sub.css", content: ".sub{}", media_type: "text/css" },
+  ]
+  const page = '<!doctype html><html><head><link rel="stylesheet" href="styles.css"><link rel="stylesheet" href="https://cdn.example/x.css"></head><body><h1 id="hero">Hi</h1><script src="script.js" defer></script></body></html>'
+
+  it("puts the project's own stylesheets and scripts into the document, as a sandboxed frame cannot fetch them", () => {
+    const out = inlineProjectAssets(page, "index.html", files)
+    expect(out).toMatch(/^<!DOCTYPE html>/i)
+    expect(out).toContain("<style>h1{color:red}</style>")
+    expect(out).toContain("window.ran=1</script>")
+    expect(out).not.toContain('src="script.js"')
+    expect(out).not.toContain('href="styles.css"')
+    // Not part of the project: left for the browser to handle.
+    expect(out).toContain('href="https://cdn.example/x.css"')
+    expect(out).toContain('<h1 id="hero">Hi</h1>')
+  })
+  it("resolves paths relative to the screen", () => {
+    expect(inlineProjectAssets('<link rel="stylesheet" href="sub.css">', "pages/a.html", files)).toContain("<style>.sub{}</style>")
+    expect(inlineProjectAssets('<link rel="stylesheet" href="../styles.css">', "pages/a.html", files)).toContain("<style>h1{color:red}</style>")
+  })
+  it("leaves a document without project assets untouched", () => {
+    const plain = "<p id=a>x</p>"
+    expect(inlineProjectAssets(plain, "index.html", files)).toBe(plain)
   })
 })
 
