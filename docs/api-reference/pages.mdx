@@ -2494,7 +2494,9 @@ request; 422 invalid content; 429 temporary operation limit; 500 storage failure
 `Cache-Control: no-store`. CLI: `crewship doc patch <page-slug> --file <request.json>`.
 
 Page read and list responses include `has_document`, which identifies saved native
-document content. Page creation accepts `allow_empty: true` to stage a human-owned
+document content. They also include `has_slides` and `slides_schema`: saved Slides
+content is reported even for an unknown schema, so a viewer can refuse unsupported
+content explicitly. Pages without a saved deck return `false` and `0`. Page creation accepts `allow_empty: true` to stage a human-owned
 Page without panels; combining this flag with panels or a crew owner is refused.
 
 ## Saved documents from a chat
