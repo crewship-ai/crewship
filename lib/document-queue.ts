@@ -49,7 +49,9 @@ function boundDraftTransaction(tx: IDBTransaction, complete: () => void, reject:
   return abort
 }
 
-export async function openDocumentDrafts(human: string, workspace: string, page: string): Promise<DocumentDraftStore> {
+export async function openDocumentDrafts(human: string, workspace: string, page: string, options?: { maxDraftBytes?: number }): Promise<DocumentDraftStore> {
+  const maxDraftBytes = options?.maxDraftBytes ?? 4 * 1024 * 1024
+  if (!Number.isSafeInteger(maxDraftBytes) || maxDraftBytes < 1 || maxDraftBytes > 64 * 1024 * 1024) throw new DocumentStorageError(message)
   if (!human || !workspace || !page || typeof indexedDB === "undefined") throw new DocumentStorageError(message)
   const owner = JSON.stringify([human, workspace, page])
   // One live writer per Page: rows in a journal that is free are orphans of a
@@ -117,7 +119,8 @@ export async function openDocumentDrafts(human: string, workspace: string, page:
     },
     async put(draft) {
       // Bound each journal row before structured cloning large editor state.
-      if (JSON.stringify(draft).length > 4 * 1024 * 1024) throw new DocumentStorageError(message)
+      const serialized = JSON.stringify(draft)
+      if (serialized.length > maxDraftBytes || (options?.maxDraftBytes !== undefined && new TextEncoder().encode(serialized).byteLength > maxDraftBytes)) throw new DocumentStorageError(message)
       const key: [string,string] = [owner,JSON.stringify([draft.schema,draft.epoch,draft.id])]
       await transaction("readwrite", store => store.put({ key, draft }))
       keys.set(draft.id,key)
