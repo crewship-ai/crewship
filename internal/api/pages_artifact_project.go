@@ -149,6 +149,12 @@ func (h *PageHandler) artifactProjectAuthority(r *http.Request, k artifacts.Vers
 			return "", artifacts.ErrVersionNotFound
 		}
 		if run, _ := ctx.Value(artifactRunKey{}).(*artifactRunAuthority); run != nil {
+			// The authenticated run may not enumerate other projects belonging to its
+			// human. Recheck the retained Page binding in this same fenced transaction.
+			bound, scopeErr := h.artifactProjectRunPage(ctx, run)
+			if scopeErr != nil || !bound.Valid || bound.String != k.PageID {
+				return "", artifacts.ErrVersionNotFound
+			}
 			if share || run.WorkspaceID != k.WorkspaceID || run.HumanUserID != rec.OwnerUserID || h.checkOriginalUserArtifactRunPrincipal(ctx, run) != nil || !h.artifactAgentPolicyAllows(ctx, k.WorkspaceID, run.CrewID) {
 				return "", errArtifactProjectAccess
 			}

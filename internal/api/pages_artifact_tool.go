@@ -43,6 +43,17 @@ func (h *PageHandler) checkArtifactProjectRunConsent(ctx context.Context, a *art
 	return nil
 }
 
+// artifactProjectRunPage reads the retained scope without replacing it with a
+// caller-provided slug. A NULL binding authorizes creation, not another Page.
+func (h *PageHandler) artifactProjectRunPage(ctx context.Context, a *artifactRunAuthority) (sql.NullString, error) {
+	var page sql.NullString
+	if a == nil {
+		return page, errArtifactProjectAccess
+	}
+	err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT result_page_id FROM artifact_project_run_consents WHERE run_id=? AND workspace_id=?`, a.RunID, a.WorkspaceID).Scan(&page)
+	return page, err
+}
+
 // GrantArtifactProjectRunConsent is a human-only deliberate authorization. The
 // client may select a run, but cannot nominate its human/chat/message identity.
 func (h *PageHandler) GrantArtifactProjectRunConsent(w http.ResponseWriter, r *http.Request) {
@@ -159,6 +170,14 @@ func (h *PageHandler) ArtifactProjectTool(w http.ResponseWriter, r *http.Request
 	r = checked
 	if !h.artifactProjectEnabled(r.Context()) {
 		replyError(w, 404, "artifact projects are disabled")
+		return
+	}
+	// Reject missing, revoked or expired consent before looking up any requested
+	// Page. This is a uniform run-level denial, independent of slug existence.
+	run, _ := r.Context().Value(artifactRunKey{}).(*artifactRunAuthority)
+	bound, err := h.artifactProjectRunPage(r.Context(), run)
+	if err != nil || h.checkArtifactProjectRunConsent(r.Context(), run, bound.String) != nil {
+		replyError(w, http.StatusForbidden, "current exact-run artifact permission required")
 		return
 	}
 	var body struct {
