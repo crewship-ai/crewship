@@ -175,9 +175,6 @@ func (h *PageHandler) artifactProjectAuthority(r *http.Request, k artifacts.Vers
 		if rec.OwnerUserID == user.ID {
 			return user.ID, nil
 		}
-		if write || share {
-			return "", errArtifactProjectAccess
-		}
 		// A reader sees only the selected shared version. Private history stays with
 		// its owner, even for an administrator or a holder of an ordinary write grant.
 		if rec.PrivateAudience {
@@ -195,6 +192,11 @@ func (h *PageHandler) artifactProjectAuthority(r *http.Request, k artifacts.Vers
 		var pin int64
 		if tx.QueryRowContext(ctx, `SELECT shared_version FROM artifact_version_heads WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&pin) != nil || pin == 0 {
 			return "", artifacts.ErrVersionNotFound
+		}
+		// Only a reader entitled to this shared pin may learn that a write
+		// was denied. An ungranted Page remains indistinguishable from absent.
+		if write || share {
+			return "", errArtifactProjectAccess
 		}
 		return user.ID, nil
 	}

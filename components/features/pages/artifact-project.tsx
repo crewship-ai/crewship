@@ -6,7 +6,7 @@ import { useArtifactAgentDispatch } from "@/hooks/use-artifact-agent-dispatch"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { Button } from "@/components/ui/button"
 import { useArtifactProject, type ArtifactAnchor } from "@/hooks/use-artifact-project"
-import { artifactProjectDocument } from "@/lib/pages/artifact-project-preview"
+import { artifactProjectDocument, artifactProjectQuote } from "@/lib/pages/artifact-project-preview"
 
 export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspaceId: string; slug: string; initialVersion?: number }) {
  const session = useSessionSafe()
@@ -41,7 +41,7 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
    if (event.origin !== "null" || event.source !== frame.current?.contentWindow || event.data?.token !== token || !manifest) return
    if (typeof event.data.screen === "string" && manifest.files.some(file => file.path === event.data.screen && file.media_type === "text/html")) { setScreenPath(event.data.screen); setAnchor(undefined); return }
    if (!selecting || !data?.can_write || typeof event.data.selector !== "string" || event.data.selector.length > 2000 || typeof event.data.quote !== "string") return
-   setAnchor({ version: manifest.version, path, selector: event.data.selector, quote: event.data.quote.slice(0,500) })
+   setAnchor({ version: manifest.version, path, selector: event.data.selector, quote: artifactProjectQuote(event.data.quote) })
    setSelecting(false)
   }
   window.addEventListener("message", receive)
