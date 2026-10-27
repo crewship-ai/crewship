@@ -43,7 +43,7 @@ function Running({ activity, startedAt }: { activity: ArtifactToolActivity; star
 }
 
 /** Restore is offered only while this step's version is still the latest one, so it never undoes a newer version. */
-function DoneActions({ workspaceId, slug, version }: { workspaceId: string; slug: string; version: number }) {
+function DoneActions({ workspaceId, slug, version, source }: { workspaceId: string; slug: string; version: number; source?: string }) {
   const viewer = useArtifactViewer()
   const snapshot = useArtifactProjectSnapshot(workspaceId, slug)
   const { restore } = useArtifactProjectMutations(workspaceId, slug)
@@ -68,12 +68,17 @@ function DoneActions({ workspaceId, slug, version }: { workspaceId: string; slug
           {restore.isPending && <Spinner />}Restore v{version - 1}
         </Button>}
     {restore.error && !conflict && <span className="text-destructive">{restore.error.message}</span>}
-    {viewer && <Button type="button" size="xs" variant="secondary" onClick={() => viewer.open({ slug })}>Open</Button>}
+    {viewer && <Button type="button" size="xs" variant="secondary" onClick={() => viewer.open(source === undefined ? { slug } : { slug, source })}>Open</Button>}
   </>
 }
 
 /** The agent's artifact step: a progress card while it runs, then one row with what came out of it. */
-export function ArtifactStepCard({ activity, startedAt }: { activity: ArtifactToolActivity; startedAt?: Date }) {
+export function ArtifactStepCard({ activity, startedAt, source }: {
+  activity: ArtifactToolActivity
+  startedAt?: Date
+  /** Passed on to the viewer so the project card of the same step shows as open. */
+  source?: string
+}) {
   const viewer = useArtifactViewer()
   if (activity.state === "running") return <Running activity={activity} startedAt={startedAt} />
   if (activity.state === "failed") {
@@ -86,7 +91,7 @@ export function ArtifactStepCard({ activity, startedAt }: { activity: ArtifactTo
     <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
       <CheckCircle2 className="size-[15px] shrink-0 text-success" aria-hidden="true" />
       <b className="font-semibold">{version !== undefined ? `v${version} ready` : "Ready"}</b>
-      {viewer && slug && version !== undefined && <DoneActions workspaceId={viewer.workspaceId} slug={slug} version={version} />}
+      {viewer && slug && version !== undefined && <DoneActions workspaceId={viewer.workspaceId} slug={slug} version={version} source={source} />}
     </div>
   </div>
 }

@@ -4,7 +4,13 @@ import { useArtifactProjectsAvailable } from "./use-artifact-project-data"
 
 export type ArtifactViewerTab = "preview" | "comments" | "versions"
 
-export interface ArtifactViewerTarget { slug: string; version?: number; tab?: ArtifactViewerTab }
+export interface ArtifactViewerTarget {
+  slug: string
+  version?: number
+  tab?: ArtifactViewerTab
+  /** What opened the viewer (a chat card's tool call id), so only that card shows as open when several show one project. */
+  source?: string
+}
 
 export interface ArtifactViewerValue {
   workspaceId: string

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { anchorSelectorForId, buildPreviewDocument, isValidAnchorSelector, normalizeQuote, screenLabel, screensOf } from "../element-select"
+import { ANCHOR_QUOTE_MAX, ANCHOR_QUOTE_SOURCE, anchorSelectorForId, buildPreviewDocument, isValidAnchorSelector, normalizeQuote, screenLabel, screenLabels, screensOf } from "../element-select"
 
 const page = "<!doctype html><html><head><title>x</title></head><body><h1 id=\"hero\">Hi</h1></body></html>"
 
@@ -41,9 +41,33 @@ describe("anchors", () => {
   it.each(["", "#", "hero", ".hero", "#a #b", "#a,#b", "#a#b", "#a.b", "#a>b", "#a[x]", "div#a", "#a:hover"])("rejects %j", selector => {
     expect(isValidAnchorSelector(selector)).toBe(false)
   })
-  it("normalizes quotes like the server", () => {
+  it("normalizes quotes like the server (Go strings.Fields), without truncating", () => {
     expect(normalizeQuote("  Hello\n\t  world  ")).toBe("Hello world")
-    expect(normalizeQuote("x".repeat(600))).toHaveLength(500)
+    expect(normalizeQuote("x".repeat(600))).toHaveLength(600)
+    // Go's unicode.IsSpace: NEL and NBSP are spaces, U+FEFF is not (JS \\s disagrees on both).
+    expect(normalizeQuote("\u00a0a\u0085b\u3000c\ufeff")).toBe("a b c\ufeff")
+  })
+})
+
+describe("anchor quote inside the frame", () => {
+  const quoteOf = new Function(`${ANCHOR_QUOTE_SOURCE};return quoteOf`)() as (el: Element) => string
+  const el = (markup: string) => {
+    document.body.innerHTML = markup
+    return document.getElementById("t")!
+  }
+  it("joins text nodes with no separator between tags, like the server", () => {
+    expect(quoteOf(el(`<div id="t"><h3>Team</h3><p>$24</p></div>`))).toBe("Team$24")
+    expect(quoteOf(el(`<div id="t">\n  <h3>Team</h3>\n  <p>$24</p>\n</div>`))).toBe("Team $24")
+  })
+  it("skips script and style subtrees", () => {
+    expect(quoteOf(el(`<div id="t">A<script>var x = 1</script><style>p{}</style><b>B</b></div>`))).toBe("AB")
+  })
+  it("never truncates", () => {
+    expect(quoteOf(el(`<p id="t">${"y".repeat(800)}</p>`))).toHaveLength(800)
+  })
+  it("sets a limit the select script enforces", () => {
+    expect(ANCHOR_QUOTE_MAX).toBe(5000)
+    expect(buildPreviewDocument(page, { selectMode: true, screens: [] })).toContain(String(ANCHOR_QUOTE_MAX))
   })
 })
 
@@ -56,5 +80,18 @@ describe("screens", () => {
       { path: "pages/pricing.HTML", content: "", media_type: "text/html" },
     ] })).toEqual(["home.html", "about.html", "pages/pricing.HTML"])
     expect(screenLabel("pages/pricing-plans.html")).toBe("Pricing-plans")
+  })
+  it("uppercases short names and prefers a short, unique <title>", () => {
+    expect(screenLabel("faq.html")).toBe("FAQ")
+    expect(screenLabel("pricing.html")).toBe("Pricing")
+    expect(screenLabel("faq.html", "<html><head><title>\n Questions &amp; answers </title></head></html>")).toBe("Questions & answers")
+    expect(screenLabel("faq.html", "<title>A title that is much too long for a tab</title>")).toBe("FAQ")
+    expect(screenLabel("faq.html", "<title>  </title>")).toBe("FAQ")
+    const file = (path: string, title: string) => ({ path, content: `<title>${title}</title>`, media_type: "text/html" })
+    expect(screenLabels({ entrypoint: "a.html", files: [file("a.html", "Plans"), file("b.html", "Compare")] }))
+      .toEqual(new Map([["a.html", "Plans"], ["b.html", "Compare"]]))
+    // Every page titled "Acme" would make the switcher useless: fall back to file names.
+    expect(screenLabels({ entrypoint: "a.html", files: [file("a.html", "Acme"), file("faq.html", "Acme")] }))
+      .toEqual(new Map([["a.html", "A"], ["faq.html", "FAQ"]]))
   })
 })

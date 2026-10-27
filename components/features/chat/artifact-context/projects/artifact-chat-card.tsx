@@ -14,6 +14,8 @@ interface ArtifactChatCardProps {
   fallbackName?: string
   /** The tool step that produced this card; a newer version than the cached snapshot triggers a refetch. */
   activity?: ArtifactToolActivity | null
+  /** Stable id of this card (its tool call id); the viewer rings only the card that opened it. */
+  source?: string
 }
 
 const CARD = "flex w-full min-w-0 max-w-[520px] flex-wrap items-center gap-2.5 rounded-xl border bg-card py-2 pl-2 pr-2.5"
@@ -38,7 +40,7 @@ function StateChips({ snapshot }: { snapshot: ArtifactProjectSnapshot }) {
 }
 
 /** Chat card for an artifact project. Everything shown comes from the live snapshot, never from tool text. */
-export function ArtifactChatCard({ slug, fallbackName, activity }: ArtifactChatCardProps) {
+export function ArtifactChatCard({ slug, fallbackName, activity, source }: ArtifactChatCardProps) {
   const viewer = useArtifactViewer()
   const query = useArtifactProjectSnapshot(viewer?.workspaceId ?? "", slug)
   const { data, error, isPending, refetch } = query
@@ -49,7 +51,8 @@ export function ArtifactChatCard({ slug, fallbackName, activity }: ArtifactChatC
   }, [stepVersion, cachedVersion, refetch])
 
   if (!viewer) return null
-  const isOpen = viewer.target?.slug === slug
+  const isOpen = viewer.target?.slug === slug && viewer.target.source === source
+  const from = source === undefined ? {} : { source }
 
   if (isPending) {
     return <div className={CARD} aria-busy="true" aria-label="Loading project">
@@ -92,9 +95,9 @@ export function ArtifactChatCard({ slug, fallbackName, activity }: ArtifactChatC
     </div>
     <div className="flex flex-none items-center gap-1">
       <Button type="button" size="xs" variant="ghost" aria-label={`Comment on ${title}`}
-        onClick={() => viewer.open({ slug, tab: "comments" })}><MessageSquare />Comment</Button>
+        onClick={() => viewer.open({ slug, tab: "comments", ...from })}><MessageSquare />Comment</Button>
       <Button type="button" size="xs" variant="secondary" aria-label={`Open ${title}`}
-        onClick={() => viewer.open({ slug })}>Open</Button>
+        onClick={() => viewer.open({ slug, ...from })}>Open</Button>
     </div>
   </article>
 }

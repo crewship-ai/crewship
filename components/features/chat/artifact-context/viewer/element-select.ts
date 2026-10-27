@@ -11,15 +11,36 @@ export const SELECT_MESSAGE = "crewship-artifact-select"
 export const NAVIGATE_MESSAGE = "crewship-artifact-navigate"
 export const HIGHLIGHT_MESSAGE = "crewship-artifact-highlight"
 
-const QUOTE_LIMIT = 500
+/**
+ * Longest anchor quote the frame sends. The quote is never truncated (the
+ * server compares it with the element's full text), so a larger element is
+ * shown as not commentable instead; a smaller part inside it is.
+ */
+export const ANCHOR_QUOTE_MAX = 5000
 
-/** Whitespace collapsed and trimmed, as the server normalizes an anchor's quote. */
+// Go's unicode.IsSpace, which strings.Fields splits on. JS `\s` differs: it
+// includes U+FEFF and lacks U+0085.
+const SPACE = "[\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]+"
+const SPACES = new RegExp(SPACE, "g")
+const EDGES = new RegExp(`^${SPACE}|${SPACE}$`, "g")
+
+/** strings.Join(strings.Fields(text), " "), as the server normalizes an anchor's text. */
 export function normalizeQuote(text: string): string {
-  const collapsed = text.replace(/\s+/g, " ").trim()
-  // Code points, not UTF-16 units, so the cap never splits a surrogate pair.
-  const chars = Array.from(collapsed)
-  return chars.length > QUOTE_LIMIT ? chars.slice(0, QUOTE_LIMIT).join("") : collapsed
+  return text.replace(SPACES, " ").replace(EDGES, "")
 }
+
+/**
+ * The server's anchor text, as source for the frame: every descendant text
+ * node in document order, skipping <script> and <style> subtrees, joined with
+ * nothing (no space between adjacent tags), then normalized. Not textContent,
+ * which includes script and style text. Exported so tests run the same code.
+ */
+export const ANCHOR_QUOTE_SOURCE = `function quoteOf(root){
+var parts=[],sp=${JSON.stringify(SPACE)};
+(function walk(n){for(var c=n.firstChild;c;c=c.nextSibling){
+  if(c.nodeType===3)parts.push(c.nodeValue);
+  else if(c.nodeType===1&&c.localName!=="script"&&c.localName!=="style")walk(c)}})(root);
+return parts.join("").replace(new RegExp(sp,"g")," ").replace(new RegExp("^"+sp+"|"+sp+"$","g"),"")}`
 
 /** `CSS.escape` per CSSOM, inlined: jsdom and older engines lack it, and the selector must match what the frame posts. */
 function cssEscape(value: string): string {
@@ -50,10 +71,39 @@ export function screensOf(manifest: Pick<ArtifactManifest, "entrypoint" | "files
   return html.includes(manifest.entrypoint) ? [manifest.entrypoint, ...html.filter(path => path !== manifest.entrypoint)] : html
 }
 
-/** "pages/pricing.html" → "Pricing". */
-export function screenLabel(path: string): string {
+const TITLE_MAX = 24
+const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: "\u00a0" }
+const decode = (text: string) => text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (whole, name: string) => {
+  if (name[0] !== "#") return ENTITIES[name.toLowerCase()] ?? whole
+  const code = name[1] === "x" || name[1] === "X" ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10)
+  return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole
+})
+
+/** The document's <title>, when it is short enough for a tab. */
+function titleOf(html: string): string | null {
+  const raw = /<title\b[^>]*>([\s\S]*?)<\/title\s*>/i.exec(html)?.[1]
+  const title = raw === undefined ? "" : normalizeQuote(decode(raw))
+  return title && title.length <= TITLE_MAX ? title : null
+}
+
+/** "pages/pricing.html" → "Pricing", "faq.html" → "FAQ". */
+function fileLabel(path: string): string {
   const name = (path.split("/").pop() ?? path).replace(/\.[^.]+$/, "")
-  return name ? name.charAt(0).toUpperCase() + name.slice(1) : path
+  if (!name) return path
+  return name.length <= 3 && /^[a-z]+$/i.test(name) ? name.toUpperCase() : name.charAt(0).toUpperCase() + name.slice(1)
+}
+
+/** A screen's name: its short <title> when the HTML is given and has one, otherwise the file name. */
+export function screenLabel(path: string, html?: string): string {
+  return (html !== undefined ? titleOf(html) : null) ?? fileLabel(path)
+}
+
+/** Labels for every screen. Titles count only when they tell the screens apart; one shared site title would not. */
+export function screenLabels(manifest: Pick<ArtifactManifest, "entrypoint" | "files">): Map<string, string> {
+  const paths = screensOf(manifest)
+  const titles = paths.map(path => titleOf(manifest.files.find(file => file.path === path)?.content ?? ""))
+  const distinct = titles.every(Boolean) && new Set(titles).size === titles.length
+  return new Map(paths.map((path, i) => [path, distinct ? titles[i]! : fileLabel(path)]))
 }
 
 /** JSON safe inside a <script>: no "</script", no HTML comment openers, no line separators. */
@@ -88,25 +138,30 @@ window.addEventListener("message",function(e){
 
 // Only in select mode: elements with an id (or inside one) are pickable and
 // dashed; the rest show not-allowed, because the server anchors by #id only.
+// An element whose text exceeds the quote limit is not pickable either.
 // The picked element stays solid while the pin card is open.
 const SELECT_SCRIPT = `(function(){
+${ANCHOR_QUOTE_SOURCE}
+var quotes=new WeakMap();
+function quote(el){if(!quotes.has(el))quotes.set(el,quoteOf(el));return quotes.get(el)}
+function pickable(el){return quote(el).length<=${ANCHOR_QUOTE_MAX}}
 var st=document.createElement("style");
 st.textContent="*{cursor:not-allowed!important}[id],[id] *{cursor:crosshair!important}body [id]{outline:1px dashed rgba(59,130,246,.55);outline-offset:2px}[data-crewship-hover]{outline:2px solid #3b82f6!important;background-color:rgba(59,130,246,.06)}[data-crewship-picked]{outline:2px solid #3b82f6!important}";
 (document.head||document.documentElement).appendChild(st);
 var hovered=null;
 function target(n){return n&&n.closest?n.closest("[id]"):null}
 document.addEventListener("mouseover",function(e){
-  var el=target(e.target);if(hovered&&hovered!==el)hovered.removeAttribute("data-crewship-hover");
+  var el=target(e.target);if(el&&!pickable(el)){if(!el.hasAttribute("title"))el.setAttribute("title","Too much text to comment on; select a smaller part");el.style.setProperty("cursor","not-allowed","important");el=null}
+  if(hovered&&hovered!==el)hovered.removeAttribute("data-crewship-hover");
   hovered=el;if(el)el.setAttribute("data-crewship-hover","");
-  else if(e.target&&e.target.setAttribute&&!e.target.hasAttribute("title"))e.target.setAttribute("title","This element cannot be commented on");
+  else if(!target(e.target)&&e.target&&e.target.setAttribute&&!e.target.hasAttribute("title"))e.target.setAttribute("title","This element cannot be commented on");
 },true);
 document.addEventListener("click",function(e){
   e.preventDefault();e.stopPropagation();
-  var el=target(e.target);if(!el)return;
+  var el=target(e.target);if(!el||!pickable(el))return;
   var was=document.querySelectorAll("[data-crewship-picked]");for(var i=0;i<was.length;i++)was[i].removeAttribute("data-crewship-picked");
   el.setAttribute("data-crewship-picked","");
-  var q=(el.textContent||"").replace(/\\s+/g," ").trim();if(q.length>${QUOTE_LIMIT})q=Array.from(q).slice(0,${QUOTE_LIMIT}).join("");
-  parent.postMessage({type:"${SELECT_MESSAGE}",selector:"#"+CSS.escape(el.id),quote:q},"*");
+  parent.postMessage({type:"${SELECT_MESSAGE}",selector:"#"+CSS.escape(el.id),quote:quote(el)},"*");
 },true);
 })();`
 

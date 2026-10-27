@@ -73,6 +73,29 @@ describe("artifact mock server", () => {
     expect(error).toMatchObject({ status: 409, code: "artifact_anchor_mismatch" })
   })
 
+  describe("anchor quote rule (same as the backend)", () => {
+    const page = (body: string) => server({ files: [{ path: "index.html", content: `<body>${body}</body>`, media_type: "text/html" }] })
+    const send = (selector: string, quote: string) => createArtifactComment("w", "deck", { version: 1, path: "index.html", selector, quote, text: "x", send_to_agent: false })
+      .then(() => "ok", (e: ArtifactRequestError) => e.code)
+
+    it("concatenates text nodes without inserting spaces between tags", async () => {
+      page(`<div id="plan-team"><h3>Team</h3><p>$24</p></div>`)
+      expect(await send("#plan-team", "Team$24")).toBe("ok")
+      expect(await send("#plan-team", "Team $24")).toBe("artifact_anchor_mismatch")
+    })
+    it("skips script and style, decodes entities and counts nested tags of the same name", async () => {
+      page(`<div id="box">Q&amp;A<script>var a = "<div>"</script><style>b{}</style><div>in</div> out</div><div>after</div>`)
+      expect(await send("#box", "Q&Ain out")).toBe("ok")
+    })
+    it("accepts a 500-byte prefix only at exactly 500 bytes", async () => {
+      const long = "é".repeat(400) // 800 bytes in UTF-8
+      page(`<p id="long">${long}</p>`)
+      expect(await send("#long", long)).toBe("ok")
+      expect(await send("#long", "é".repeat(250))).toBe("ok")
+      expect(await send("#long", "é".repeat(249))).toBe("artifact_anchor_mismatch")
+    })
+  })
+
   it("a comment not sent to the agent has no queue status", async () => {
     server()
     const comment = await createArtifactComment("w", "deck", { version: 1, path: "index.html", selector: "", quote: "", text: "Nice", send_to_agent: false })

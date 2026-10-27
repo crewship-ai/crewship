@@ -16,7 +16,7 @@ import { useArtifactViewer, type ArtifactViewerTarget } from "../projects/artifa
 import { useArtifactProjectMutations, useArtifactProjectSnapshot } from "../projects/use-artifact-project-data"
 import type { ArtifactComment, ArtifactProjectSnapshot } from "../projects/types"
 import { ArtifactPreviewFrame, type PreviewSelection } from "./artifact-preview-frame"
-import { isValidAnchorSelector, screenLabel, screensOf } from "./element-select"
+import { isValidAnchorSelector, screenLabel, screenLabels } from "./element-select"
 
 export type ArtifactViewerVariant = "pane" | "fullscreen"
 
@@ -134,7 +134,8 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
   const [anchor, setAnchor] = useState<Anchor | null>(null)
   const [draft, setDraft] = useState("")
   const [banner, setBanner] = useState<Banner | null>(null)
-  const [notice, setNotice] = useState("")
+  // A comment notice belongs to the version it was sent on and to that selection; see below.
+  const [notice, setNotice] = useState<{ text: string; commentOn?: number }>({ text: "" })
   const [highlight, setHighlight] = useState<{ selector: string; seq: number } | null>(null)
   const [confirmShare, setConfirmShare] = useState(false)
   const historyRef = useRef<HTMLDivElement>(null)
@@ -153,10 +154,17 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
   const shown = data.manifest.version
   const viewingOld = shown !== latest
   const isShared = sharedVersion > 0 && sharedVersion === latest
-  const screens = useMemo(() => screensOf(data.manifest), [data.manifest])
+  const labels = useMemo(() => screenLabels(data.manifest), [data.manifest])
+  const screens = useMemo(() => [...labels.keys()], [labels])
+  const labelOf = (path: string) => labels.get(path) ?? screenLabel(path)
   const screen = screenPath && screens.includes(screenPath) ? screenPath : screens[0] ?? ""
   const html = data.manifest.files.find(file => file.path === screen)?.content ?? ""
   const versions = useMemo(() => [...data.versions].sort((a, b) => b.version - a.version), [data.versions])
+
+  // "Comment sent" is stale once another version is shown (the agent published) or a new selection starts.
+  // Adjusted during render rather than in an effect, so the stale notice never paints.
+  if (notice.commentOn !== undefined && notice.commentOn !== shown) setNotice({ text: "" })
+  const clearCommentNotice = () => { if (notice.commentOn !== undefined) setNotice({ text: "" }) }
 
   const fail = (error: unknown) => {
     const { status, code } = errorOf(error)
@@ -168,6 +176,7 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
 
   const select = (selection: PreviewSelection) => {
     setAnchor({ ...selection, version: shown, path: screen })
+    clearCommentNotice()
     if (banner === "anchor") setBanner(null)
   }
   const resetComposer = () => { setAnchor(null); setDraft(""); setSelectMode(false) }
@@ -176,7 +185,7 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
   const submit = (send: boolean) => {
     if (!anchor || !draft.trim()) return
     comment.mutate({ version: anchor.version, path: anchor.path, selector: anchor.selector, quote: anchor.quote, text: draft.trim(), send_to_agent: send }, {
-      onSuccess: () => { resetComposer(); setBanner(null); setNotice(send ? "Comment sent to the agent" : "Comment saved") },
+      onSuccess: () => { resetComposer(); setBanner(null); setNotice({ text: send ? "Comment sent to the agent" : "Comment saved", commentOn: anchor.version }) },
       onError: fail,
     })
   }
@@ -186,11 +195,11 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
     canvasRef.current?.scrollIntoView?.({ block: "nearest" })
   }
   const doRestore = (version: number) => restore.mutate({ base_version: latest, version }, {
-    onSuccess: result => { setNotice(`Restored v${version} as v${result.version} · nothing deleted`); setViewing(undefined) },
+    onSuccess: result => { setNotice({ text: `Restored v${version} as v${result.version} · nothing deleted` }); setViewing(undefined) },
     onError: fail,
   })
   const doShare = (version: number) => share.mutate({ base_version: latest, version }, {
-    onSuccess: result => { setConfirmShare(false); setNotice(`Shared v${result.shared_version}`) },
+    onSuccess: result => { setConfirmShare(false); setNotice({ text: `Shared v${result.shared_version}` }) },
     onError: error => { setConfirmShare(false); fail(error) },
   })
 
@@ -230,19 +239,23 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
     </Popover>}
   </div>
 
+  const compactScreens = screens.length > 4
   const subToolbar = <div className="flex shrink-0 items-center gap-1.5 border-b px-3 py-2">
     {screens.length > 1 && <>
-      <div className="hidden min-w-0 @md:block">
-        <Segmented ariaLabel="Screen" size="xs" value={screen} onChange={setScreenPath} options={screens.map(path => ({ value: path, label: screenLabel(path), title: path }))} />
+      {/* Up to four screens stay a segmented control at every width (labels truncate, as in the design);
+          only more than that falls back to a select on a narrow pane. */}
+      <div className={cn("min-w-0", compactScreens && "hidden @md:block")}>
+        <Segmented ariaLabel="Screen" size="xs" value={screen} onChange={setScreenPath} className="shrink [&>button]:min-w-0 [&>button]:shrink"
+          options={screens.map(path => ({ value: path, label: <span className="truncate">{labelOf(path)}</span>, title: path }))} />
       </div>
-      <select aria-label="Screen (compact)" value={screen} onChange={event => setScreenPath(event.target.value)}
+      {compactScreens && <select aria-label="Screen (compact)" value={screen} onChange={event => setScreenPath(event.target.value)}
         className="h-7 min-w-0 rounded-md border bg-card px-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring @md:hidden">
-        {screens.map(path => <option key={path} value={path}>{screenLabel(path)}</option>)}
-      </select>
+        {screens.map(path => <option key={path} value={path}>{labelOf(path)}</option>)}
+      </select>}
     </>}
     <div className="flex-1" />
     {!viewingOld && <Button type="button" size="sm" variant={selectMode ? "secondary" : "ghost"} className="h-7 gap-1.5" aria-pressed={selectMode}
-      onClick={() => { if (selectMode) setAnchor(null); setSelectMode(on => !on) }}>
+      onClick={() => { if (selectMode) setAnchor(null); else clearCommentNotice(); setSelectMode(on => !on) }}>
       <MousePointerClick className="size-3.5" aria-hidden />Select
     </Button>}
   </div>
@@ -302,7 +315,7 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
 
   const canvas = <div ref={canvasRef} className="relative rounded-[10px] bg-muted p-3.5">
     <div className={cn("overflow-hidden rounded-md border bg-white", fullscreen ? "h-[max(320px,calc(100dvh-14rem))]" : "h-[min(70vh,560px)] min-h-[320px]")}>
-      <ArtifactPreviewFrame html={html} screens={screens} path={screen} selectMode={selectMode && !viewingOld} title={`Preview of ${screenLabel(screen)}`}
+      <ArtifactPreviewFrame html={html} screens={screens} path={screen} selectMode={selectMode && !viewingOld} title={`Preview of ${labelOf(screen)}`}
         highlight={highlight} onSelect={select} onNavigate={setScreenPath} />
     </div>
     {pinCard}
@@ -323,7 +336,7 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
             <span aria-hidden className={cn(PIN, "size-5 bg-muted text-[0.68rem] text-foreground/80 ring-1 ring-border")}>{index + 1}</span>
             <span className="grid min-w-0 flex-[1_1_180px]">
               <b className="text-sm font-semibold">{c.text}</b>
-              <small className="truncate text-xs text-muted-foreground">{[c.author, screenLabel(c.path), c.selector && elementLabel(c.selector, c.quote), c.created_at && timeAgo(c.created_at)].filter(Boolean).join(" · ")}</small>
+              <small className="truncate text-xs text-muted-foreground">{[c.author, labelOf(c.path), c.selector && elementLabel(c.selector, c.quote), c.created_at && timeAgo(c.created_at)].filter(Boolean).join(" · ")}</small>
             </span>
             {chip && <StatusPill tone={chip.tone} label={chip.label} live={chip.live} />}
           </button>
@@ -340,7 +353,7 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
     <div className="min-h-0 flex-1 overflow-auto">
       <div className="grid content-start gap-3 p-3">
         {banners}
-        <p role="status" aria-live="polite" className="text-xs text-muted-foreground empty:hidden">{notice}</p>
+        <p role="status" aria-live="polite" className="text-xs text-muted-foreground empty:hidden">{notice.text}</p>
         {history}
         {selectMode && !anchor && !viewingOld && <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><MousePointerClick className="size-3.5" aria-hidden />Click a part of the screen. The comment stays anchored to that element and version.</p>}
         {canvas}
