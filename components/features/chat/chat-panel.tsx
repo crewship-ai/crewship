@@ -1,5 +1,7 @@
 "use client"
 
+import { useArtifactProjectAvailability } from "@/hooks/use-artifact-project-availability"
+
 import Link from "next/link"
 import { useAttachmentScope } from "@/hooks/use-attachment-scope"
 import { ChatSessionSource } from "./chat-session-source"
@@ -353,6 +355,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
   const session = useSession()
   const currentUserId = session.data?.user?.id ?? null
   const documentsAvailability = useDocumentsAvailability(currentUserId ? workspaceId ?? "" : "")
+  const artifactProjectAvailable = useArtifactProjectAvailability(currentUserId ? workspaceId ?? "" : "")
   const artifactScope = JSON.stringify([currentUserId, workspaceId, agentId, sessionId])
   const artifactContextNonce = useRef(0)
   const [artifactContext, setArtifactContext] = useState<{ id: number; text: string; scope: string } | null>(null)
@@ -1572,6 +1575,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
           sessionId={sessionId}
           agentName={agentName}
           documentCreationEnabled={documentsAvailability.data === true && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
+          artifactCreationEnabled={artifactProjectAvailable && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
           variant="mobile"
           mentionMembers={mentionMembers}
           isStreaming={isStreaming}
@@ -1711,6 +1715,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
           sessionId={sessionId}
           agentName={agentName}
           documentCreationEnabled={documentsAvailability.data === true && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
+          artifactCreationEnabled={artifactProjectAvailable && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
           variant="desktop"
           isStreaming={isStreaming}
           connectionStatus={connectionStatus}
