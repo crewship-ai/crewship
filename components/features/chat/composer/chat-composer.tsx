@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react"
 import { AlertTriangle, FilePlus2 } from "lucide-react"
+import { NewArtifactMenu } from "../artifact-context/new-artifact/new-artifact-menu"
+import { availableArtifactKinds } from "../artifact-context/new-artifact/new-artifact-kinds"
+import { chatArtifactProjects } from "@/lib/feature-flags"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 
@@ -517,6 +520,14 @@ export function ChatComposer({
         },
       }
     : {}
+  // "+" › New artifact lists only kinds with a backend. Projects join once the
+  // composer carries the explicit project-creation intent; until then a project
+  // starter would reach an agent without consent to create it.
+  const newArtifactKinds = chatArtifactProjects() ? availableArtifactKinds({ projects: false, documents: canCreateDocument }) : []
+  const newArtifactMenu = <NewArtifactMenu kinds={newArtifactKinds} disabled={isStreaming || !canSend} onPick={(kind, prompt) => {
+    if (kind === "word") { setCreationSelection(creationScope); creationPacket.current = null }
+    updateInput(prompt)
+  }} />
   const creationControl = canCreateDocument ? (
     <>
     <Button
@@ -570,6 +581,7 @@ export function ChatComposer({
               <div className="flex items-center gap-1">
                 <CameraButton agentId={agentId} sessionId={sessionId} />
                 <AttachmentButton agentId={agentId} sessionId={sessionId} />
+                {newArtifactMenu}
                 {creationControl}
               </div>
               <PromptInputSubmit disabled={submitDisabled} {...submitBlockProps} status={chatStatus} stopping={stopping} onStop={stopGeneration} />
@@ -604,6 +616,7 @@ export function ChatComposer({
           <PromptInputFooter className="justify-between p-2 gap-2">
             <div className="flex items-center gap-1">
               <AttachmentButton agentId={agentId} sessionId={sessionId} />
+              {newArtifactMenu}
               {creationControl}
             </div>
             <PromptInputSubmit disabled={submitDisabled} {...submitBlockProps} status={chatStatus} stopping={stopping} onStop={stopGeneration} />
