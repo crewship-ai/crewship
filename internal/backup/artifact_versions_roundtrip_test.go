@@ -8,11 +8,11 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/backup"
+	"github.com/crewship-ai/crewship/internal/database"
 )
 
 func TestArtifactVersionBackupPreservesHistoryPinAndBinaryAssets(t *testing.T) {
-	source := openMigratedDB(t)
-	requireArtifactBackupFullDurability(t, source)
+	source := openDurableArtifactBackupDB(t)
 	ws := seedWorkspace(t, source)
 	page := "artifact-version-backup"
 	if _, err := source.Exec(`INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES(?,?,?,?,?,'{}')`, page, ws, page, "Artifact project", "u_admin"); err != nil {
@@ -44,8 +44,7 @@ func TestArtifactVersionBackupPreservesHistoryPinAndBinaryAssets(t *testing.T) {
 	}
 	for _, fork := range []bool{false, true} {
 		t.Run(map[bool]string{false: "same", true: "fork"}[fork], func(t *testing.T) {
-			target := openMigratedDB(t)
-			requireArtifactBackupFullDurability(t, target)
+			target := openDurableArtifactBackupDB(t)
 			opts := backup.RestoreOptions{Path: bundle.Path, Passphrase: "artifact-version-roundtrip-passphrase", Actor: actor}
 			if fork {
 				opts.AsWorkspace = "artifact-version-fork"
@@ -88,12 +87,26 @@ func TestArtifactVersionBackupPreservesHistoryPinAndBinaryAssets(t *testing.T) {
 	}
 }
 
-// The shared migration-template fixture defaults to NORMAL for fast test setup.
-// These durable-store operations must use FULL on their actual pooled connection.
-func requireArtifactBackupFullDurability(t *testing.T, db *sql.DB) {
+// The template uses NORMAL for fast setup. Reopen through the production
+// constructor so every pooled connection is FULL; collectors need nested reads.
+func openDurableArtifactBackupDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(`PRAGMA synchronous=FULL`); err != nil {
+	fixture := openMigratedDB(t)
+	var seq int
+	var name, filename string
+	if err := fixture.QueryRow(`PRAGMA database_list`).Scan(&seq, &name, &filename); err != nil {
 		t.Fatal(err)
 	}
+	if filename == "" {
+		t.Fatal("durable fixture requires an on-disk database")
+	}
+	if err := fixture.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := database.Open(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return db.DB
 }
