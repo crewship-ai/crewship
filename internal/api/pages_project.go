@@ -50,6 +50,15 @@ func (h *PageHandler) projectPage(w http.ResponseWriter, r *http.Request) (*page
 		replyInternalError(w, h.logger, "load project page", err)
 		return nil, false
 	}
+	attached, e := h.artifactProjectAttached(r.Context(), rec.ID)
+	if e != nil {
+		replyInternalError(w, h.logger, "check artifact content", e)
+		return nil, false
+	}
+	if attached {
+		replyError(w, 409, "use artifact project versions to edit this Page")
+		return nil, false
+	}
 	allowed := false
 	if actor := projectAgentFrom(r.Context()); actor != nil {
 		allowed = actor.WorkspaceID == WorkspaceIDFromContext(r.Context()) && actor.OwnerCrewID != "" && rec.OwnerCrewID == actor.OwnerCrewID

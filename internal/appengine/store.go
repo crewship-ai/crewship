@@ -676,7 +676,14 @@ func hasOtherContent(ctx context.Context, tx *sql.Tx, pageID string) (bool, erro
 			return false, err
 		}
 		if installed {
-			if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM "+table+" WHERE page_id=?)", pageID).Scan(&occupied); err != nil {
+			query := "SELECT EXISTS(SELECT 1 FROM " + table + " WHERE page_id=?)"
+			if table == "artifact_version_heads" {
+				// Native history is part of its existing workbook, never an
+				// alternative format. An orphaned or foreign-family head still
+				// blocks initialization and every operation on another engine.
+				query = `SELECT EXISTS(SELECT 1 FROM artifact_version_heads v WHERE v.page_id=? AND (v.content_type<>'gridcraft' OR NOT EXISTS(SELECT 1 FROM gridcraft_heads g WHERE g.page_id=v.page_id AND g.workspace_id=v.workspace_id)))`
+			}
+			if err := tx.QueryRowContext(ctx, query, pageID).Scan(&occupied); err != nil {
 				return false, err
 			}
 			if occupied {

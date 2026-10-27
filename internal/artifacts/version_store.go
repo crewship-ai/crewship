@@ -14,18 +14,26 @@ import (
 )
 
 var (
-	ErrVersionNotFound = errors.New("artifact version not found")
-	ErrVersionConflict = errors.New("artifact base_version conflict; reload current version before publishing")
-	ErrVersionQuota    = errors.New("artifact history quota exceeded; existing history retained")
-	ErrVersionInvalid  = errors.New("invalid artifact manifest")
+	ErrVersionAuthority   = errors.New("artifact authority changed before publication")
+	ErrVersionDurability  = errors.New("artifact versions require FULL synchronous durability")
+	ErrVersionContentType = errors.New("artifact content family does not match installed version store")
+	ErrVersionNotFound    = errors.New("artifact version not found")
+	ErrVersionConflict    = errors.New("artifact base_version conflict; reload current version before publishing")
+	ErrVersionQuota       = errors.New("artifact history quota exceeded; existing history retained")
+	ErrVersionInvalid     = errors.New("invalid artifact manifest")
 )
 
 type VersionKey struct{ WorkspaceID, PageID string }
 
 // VersionAuthorize must check current authority, and any lease/mandate, in the
-// supplied transaction. The returned actor is the sole persisted audit identity.
+// supplied transaction. It is called before work and again immediately before
+// commit, and must return the same actor. Initialization/audit side effects must
+// be idempotent within this transaction. The returned actor is the sole persisted
+// audit identity.
 type VersionAuthorize func(context.Context, *sql.Tx) (string, error)
 type VersionOptions struct {
+	// ContentType is host configuration. It is pinned on first publication.
+	ContentType                      string
 	Enabled                          bool
 	MaxHistoryBytes, MaxVersionBytes int64
 	MaxFiles                         int
@@ -80,6 +88,9 @@ type VersionStore struct {
 }
 
 func NewVersionStore(db *sql.DB, opts VersionOptions) *VersionStore {
+	if opts.ContentType == "" {
+		opts.ContentType = "artifact_project"
+	}
 	if opts.MaxHistoryBytes <= 0 {
 		opts.MaxHistoryBytes = 256 << 20
 	}
@@ -98,6 +109,11 @@ func (s *VersionStore) transaction(ctx context.Context, k VersionKey, a VersionA
 	if s == nil || s.db == nil || !s.opts.Enabled {
 		return ErrDisabled
 	}
+	switch s.opts.ContentType {
+	case "artifact_project", "wordcraft", "gridcraft":
+	default:
+		return fmt.Errorf("%w: unsupported content family", ErrVersionInvalid)
+	}
 	if k.WorkspaceID == "" || k.PageID == "" || a == nil {
 		return fmt.Errorf("%w: page, workspace and authority required", ErrVersionInvalid)
 	}
@@ -106,6 +122,13 @@ func (s *VersionStore) transaction(ctx context.Context, k VersionKey, a VersionA
 		return err
 	}
 	defer tx.Rollback()
+	var synchronous int
+	if err = tx.QueryRowContext(ctx, "PRAGMA synchronous").Scan(&synchronous); err != nil {
+		return err
+	}
+	if synchronous < 2 {
+		return ErrVersionDurability
+	}
 	// Establish the existing database writer fence before checking live authority.
 	if _, err = tx.ExecContext(ctx, `UPDATE document_writer_fence SET seq=seq WHERE id=1`); err != nil {
 		return err
@@ -124,8 +147,23 @@ func (s *VersionStore) transaction(ctx context.Context, k VersionKey, a VersionA
 	if exists != 1 {
 		return ErrVersionNotFound
 	}
+	var installedType string
+	err = tx.QueryRowContext(ctx, `SELECT content_type FROM artifact_version_heads WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&installedType)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if err == nil && installedType != s.opts.ContentType {
+		return ErrVersionContentType
+	}
 	if err = fn(tx, actor); err != nil {
 		return err
+	}
+	finalActor, err := a(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if finalActor != actor {
+		return ErrVersionAuthority
 	}
 	return tx.Commit()
 }
@@ -282,7 +320,7 @@ func (s *VersionStore) publish(ctx context.Context, tx *sql.Tx, k VersionKey, r 
 	if _, err = tx.ExecContext(ctx, `INSERT INTO artifact_versions(workspace_id,page_id,version,manifest_json,message,actor,created_at,restored_from) VALUES(?,?,?,?,?,?,?,?)`, k.WorkspaceID, k.PageID, version, string(raw), r.Message, actor, createdAt, restored); err != nil {
 		return VersionReceipt{}, err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO artifact_version_heads(workspace_id,page_id,latest_version,shared_version) VALUES(?,?,?,0) ON CONFLICT(workspace_id,page_id) DO UPDATE SET latest_version=excluded.latest_version`, k.WorkspaceID, k.PageID, version)
+	_, err = tx.ExecContext(ctx, `INSERT INTO artifact_version_heads(workspace_id,page_id,latest_version,shared_version,content_type) VALUES(?,?,?,0,?) ON CONFLICT(workspace_id,page_id) DO UPDATE SET latest_version=excluded.latest_version`, k.WorkspaceID, k.PageID, version, s.opts.ContentType)
 	return VersionReceipt{version, actor}, err
 }
 func (s *VersionStore) Restore(ctx context.Context, k VersionKey, base, target int64, a VersionAuthorize) (out VersionReceipt, err error) {
@@ -374,10 +412,19 @@ func (s *VersionStore) View(ctx context.Context, k VersionKey, a VersionViewAuth
 		return VersionView{}, fmt.Errorf("%w: view authority required", ErrVersionInvalid)
 	}
 	var selection VersionSelection
+	selectedOnce := false
 	authorize := func(ctx context.Context, tx *sql.Tx) (string, error) {
 		actor, chosen, e := a(ctx, tx)
+		if e != nil {
+			return "", e
+		}
+		// A same-actor downgrade must not release an earlier owner's snapshot.
+		if selectedOnce && chosen != selection {
+			return "", ErrVersionAuthority
+		}
 		selection = chosen
-		return actor, e
+		selectedOnce = true
+		return actor, nil
 	}
 	err = s.transaction(ctx, k, authorize, func(tx *sql.Tx, _ string) error {
 		var e error

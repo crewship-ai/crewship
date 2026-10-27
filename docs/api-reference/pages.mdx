@@ -2526,3 +2526,50 @@ The index accepts `audience=personal` for explicitly private Pages owned by the 
 Optional `limit` and `offset` apply after authorization and audience filtering. The default limit is 100 when either paging parameter is present, the maximum is 500, and negative offsets become zero. With neither paging parameter the existing unpaged JSON array is preserved. `crewship api request GET /api/v1/pages --query audience=personal --query limit=20 --format json` requests a personal catalog page.
 
 The private-chat document composer shows the target personal space and its audience before submission. This view and label do not publish a Document, change its audience, enable shared-chat creation, or provide a work-folder sharing operation.
+
+## Artifact project pilot
+
+The `artifact_projects` feature flag is off by default. It can be enabled through
+the existing instance/workspace feature flag administration. The environment
+switch `CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true` also enables the pilot for an
+isolated test installation. Existing Page ACLs govern access; only the human
+owner may mutate project content or select the shared version. Agent operations
+require an explicit host-bound original chat request and a live exact-Page run
+consent; they use the internal MCP transport rather than human impersonation.
+
+| Method | Route | Behavior |
+| --- | --- | --- |
+| GET | `/api/v1/pages/artifacts/availability` | Effective workspace pilot availability |
+| POST | `/api/v1/pages/artifacts` | Atomically create a private human-owned Page and version 1 |
+| GET | `/api/v1/pages/{slug}/artifact` | Authorized snapshot; optional `version` selects retained owner history |
+| GET | `/api/v1/pages/{slug}/artifact/versions` | Snapshot with retained owner versions; readers receive only the shared pin |
+| POST | `/api/v1/pages/{slug}/artifact/versions` | Publish a complete manifest with `base_version` |
+| POST | `/api/v1/pages/{slug}/artifact/restore` | Append `{base_version,version}` as a new version |
+| POST | `/api/v1/pages/{slug}/artifact/share` | Pin `{base_version,version}` for the ordinary Page audience |
+| GET | `/api/v1/pages/{slug}/artifact/comments` | Authorized snapshot with version-bound feedback |
+| POST | `/api/v1/pages/{slug}/artifact/comments` | Add `{version,path,selector,quote,text,send_to_agent}` |
+| POST | `/api/v1/pages/{slug}/artifact/comments/{commentId}/reply` | Reply with `{version,text}` after a confirmed change; `needs_clarification:true` permits a question on the original version |
+| POST | `/api/v1/pages/artifacts/consent` | Human approval for one exact existing live chat run; optional `page_id` selects one owned project |
+
+Create takes `slug`, `name`, `entrypoint`, `files` and optional `message`.
+Publish takes `base_version`, `entrypoint`, `files` and optional `message`.
+Each file is `{path,content,media_type}` with UTF-8 content. The entire file set
+commits together; a missing/unsafe path, stale base or exceeded quota leaves
+both the head and history unchanged. HTTP 409 includes a readable conflict
+without acknowledging the candidate. HTTP 413 with `artifact_history_quota`
+retains history and asks the caller to keep its draft or save a copy.
+
+Owner snapshots include `latest_version`, `shared_version`, `manifest`,
+`versions`, `quota` and `comments`. The storage defaults are 32 MiB/256 files per
+manifest and 256 MiB of retained history per Page, with a warning at 80 percent.
+The keep-all policy performs no automatic history deletion. Restoring version
+1 after version 2 creates version 3, preserving both earlier versions. A reader
+cannot request an unshared latest/historical version, see its quota or mutate
+content. Sharing selects the current pinned version for the existing Page ACL;
+it does not create an anonymous public link.
+
+The preview sanitizes source HTML and runs only the host selection/navigation
+bridge in an opaque sandbox. It supports linked HTML screens and local styles;
+untrusted scripts and network calls are disabled. Stable, unique element IDs
+bind comments to exact versioned content. A missing, changed or ambiguous anchor
+returns 409 and asks for a new selection instead of guessing at another element.

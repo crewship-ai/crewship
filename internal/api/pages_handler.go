@@ -252,7 +252,8 @@ type pageSealedPanelWire struct {
 // Panels is []any because it is heterogeneous by design: a full panel or a
 // sealed placeholder, decided per panel and per viewer.
 type pageWire struct {
-	HasDocument bool `json:"has_document"`
+	HasDocument        bool `json:"has_document"`
+	HasArtifactProject bool `json:"has_artifact_project,omitempty"`
 	// HasWorkbook marks a Page holding a GridCraft workbook, viewed read-only.
 	HasWorkbook bool `json:"has_workbook,omitempty"`
 	HasMooring  bool `json:"has_mooring,omitempty"`
@@ -1081,6 +1082,17 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if req.Panels != nil {
+		attached, e := h.artifactProjectAttached(r.Context(), rec.ID)
+		if e != nil {
+			replyInternalError(w, h.logger, "check artifact content", e)
+			return
+		}
+		if attached {
+			replyError(w, 409, "artifact project pages cannot contain panels")
+			return
+		}
+	}
 	if req.Panels != nil && rec.HasDocument {
 		replyError(w, 409, "document pages cannot contain panels")
 		return
@@ -1860,8 +1872,9 @@ func (h *PageHandler) pageDocument(ctx context.Context, rec *pageRecord, panels 
 // branch, because it was replaced by the placeholder above. A reader who
 // cannot edit still sees exactly what they saw before.
 func (h *PageHandler) pageDocumentFor(ctx context.Context, rec *pageRecord, panels []*panelRecord, viewer *pageViewer, authored bool) pageWire {
+	attached, _ := h.artifactProjectAttached(ctx, rec.ID)
 	out := pageWire{
-		HasDocument: rec.HasDocument, HasWorkbook: rec.HasWorkbook, HasMooring: rec.HasMooring, HasCollaboration: rec.HasCollaboration, CollaborationFormat: rec.CollaborationFormat, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
+		HasArtifactProject: attached, HasDocument: rec.HasDocument, HasWorkbook: rec.HasWorkbook, HasMooring: rec.HasMooring, HasCollaboration: rec.HasCollaboration, CollaborationFormat: rec.CollaborationFormat, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 		ID:          rec.ID,
 		Slug:        rec.Slug,
 		Name:        rec.Name,

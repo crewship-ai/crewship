@@ -190,3 +190,24 @@ controls, independent drafts, reload, identical-key retry and access loss.
 It uses no authentication, shared application or live data; install the locked
 Playwright Chromium browser first. This is component evidence, not real A2 API
 or agent integration acceptance.
+
+## Artifact project pilot fixture
+
+`artifact-project.browser.mjs` is driven by the opt-in
+`TestArtifactProjectBrowser` Go test after a production frontend build. It uses
+an owned temporary SQLite database, real HTTP authentication and Router, and
+synthetic owner/reader sessions. It creates three linked HTML screens, selects
+an element, queues feedback, publishes a second version through the owner API,
+restores version 1 as version 3, pins a shared version, rejects reader writes
+and stale saves, and reloads after recreating the Router. It starts no containers,
+contacts no model provider and must not target a shared development instance.
+This fixture does not claim a live-agent chat roundtrip.
+
+```bash
+CREWSHIP_ARTIFACT_PROJECT_BROWSER=1 PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright" go test -tags artifact_project_browser ./internal/api -run '^TestArtifactProjectBrowser$' -count=1 -timeout 8m
+```
+
+`CREWSHIP_ARTIFACT_PROJECT_OUTPUT` optionally chooses the screenshot directory;
+the default is a temporary directory. Synthetic tokens remain in a mode-0600
+fixture file removed with the test. The harness is Linux-only and compiles under
+`conformance`; an explicit tagged invocation fails if prerequisites are missing.

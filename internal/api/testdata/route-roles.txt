@@ -340,9 +340,16 @@ POST /api/v1/page-folders roleCreate
 POST /api/v1/page-folders/{slug}/pages roleSelf
 POST /api/v1/page-folders/{slug}/pages:batch roleSelf
 POST /api/v1/pages roleInline
+POST /api/v1/pages/artifacts roleInline
+POST /api/v1/pages/artifacts/consent roleSelf
 POST /api/v1/pages/import roleInline
 POST /api/v1/pages/maintenance roleManage
 POST /api/v1/pages/{slug}/application/actions/{panelId}/{actionId} roleCreate
+POST /api/v1/pages/{slug}/artifact/comments roleInline
+POST /api/v1/pages/{slug}/artifact/comments/{commentId}/reply roleInline
+POST /api/v1/pages/{slug}/artifact/restore roleInline
+POST /api/v1/pages/{slug}/artifact/share roleInline
+POST /api/v1/pages/{slug}/artifact/versions roleInline
 POST /api/v1/pages/{slug}/document/initialize roleInline
 POST /api/v1/pages/{slug}/document/patch roleInline
 POST /api/v1/pages/{slug}/document/restore roleInline
@@ -358,8 +365,8 @@ POST /api/v1/pages/{slug}/public roleSelf
 POST /api/v1/pages/{slug}/rollback roleSelf
 POST /api/v1/pages/{slug}/slides/initialize roleInline
 POST /api/v1/pages/{slug}/webhooks roleSelf
-POST /api/v1/pages/{slug}/workbook/edits roleInline
 POST /api/v1/pages/{slug}/workbook/editors roleInline
+POST /api/v1/pages/{slug}/workbook/edits roleInline
 POST /api/v1/pages/{slug}/workbook/mandates roleInline
 POST /api/v1/pages/{slug}/workbook/operations roleInline
 POST /api/v1/pages/{slug}/workbook/sessions roleInline

@@ -36,6 +36,17 @@ import "sort"
 // table. Drift detection catches the omission in tests so an oversight
 // surfaces before a bundle ships missing rows.
 var BackupTableIntent = map[string]ScopedTableIntent{
+	"artifact_project_comments":        IntentInclude,
+	"artifact_project_comment_tasks":   IntentInclude,
+	"artifact_project_comment_replies": IntentInclude,
+	"artifact_project_origins":         IntentInclude,
+	"artifact_project_run_consents":    IntentExcludeRuntime,
+	"artifact_project_message_intents": IntentExcludeRuntime,
+
+	"artifact_version_heads": IntentInclude, // immutable storage family and separate latest/shared pins
+	"artifact_version_blobs": IntentInclude, // binary project assets, encoded losslessly
+	"artifact_versions":      IntentInclude, // all retained whole-project manifests
+
 	"mooring_authority_generations":  IntentExcludeRuntime, // target-local non-ABA tombstones never travel or reset in portable restore
 	"mooring_delivery_gates":         IntentExcludeRuntime,
 	"mooring_delivery_barriers":      IntentExcludeRuntime,
