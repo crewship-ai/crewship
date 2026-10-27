@@ -882,7 +882,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
         else {
           const profile = await response.json() as {mode:string;audience?:string}
           if (currentChatReadScopeRef.current !== chatReadScope) return false
-          // A draft's mount probe answered 404, so this authoritative answer is
+          // A draft has no mount probe (or, for an older row, it 404ed), so this answer is
           // the first one for the scope; without it chat-scoped reads (linked
           // issues, proposals, decisions) stay off until a reload.
           if (profile.mode === "trusted") setVerifiedChatScope(chatReadScope)
