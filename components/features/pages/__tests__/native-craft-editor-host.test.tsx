@@ -51,6 +51,34 @@ describe('native Word host authority and persistence',()=>{
  it('never hands off an uncertain final save and retains the original private draft',async()=>{mount();await ready();await acquire();client.save.mockRejectedValueOnce(Error('lost ACK'));act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}));fireEvent.click(await screen.findByRole('button',{name:'Předat uživateli Jana'}));await screen.findByRole('alert');expect(client.leaseAction.mock.calls.some(c=>c[0]==='handoff')).toBe(false);expect(journal.revokeRead).not.toHaveBeenCalled();expect(document.querySelector('iframe')).not.toBeNull();expect(screen.queryByText('Uloženo')).not.toBeInTheDocument()})
  it('a failed durable capture keeps the guarded native frame and never transfers custody',async()=>{mount();await ready();await acquire();journal.persist.mockResolvedValueOnce(undefined).mockRejectedValueOnce(Error('disk full'));act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}));fireEvent.click(await screen.findByRole('button',{name:'Předat uživateli Jana'}));await screen.findByText('Koncept nelze bezpečně zachytit. Předání neproběhlo.');expect(client.leaseAction.mock.calls.some(c=>c[0]==='handoff')).toBe(false);expect(document.querySelector('iframe')).not.toBeNull();expect(ports.at(-1)!.setReadOnly).toHaveBeenCalledWith(true,expect.any(AbortSignal));expect(journal.close).not.toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled()})
  it('explicit read retirement immediately removes content and purges without awaiting a hung native capture',async()=>{mount();await ready();await acquire();ports.at(-1)!.snapshot.mockReturnValueOnce(new Promise(()=>{}));act(()=>stream?.('lease',{...ownedLease,can_write:false}));await waitFor(()=>expect(ports.at(-1)!.snapshot).toHaveBeenCalledOnce());act(()=>stream?.('session_retired',{delivery:'stopped',draft:'purge',reason:'read_revoked'}));await waitFor(()=>expect(document.querySelector('iframe')).toBeNull());expect(journal.revokeRead).toHaveBeenCalledOnce();expect(client.save).not.toHaveBeenCalled()})
+ it('waits for the running idle save and commits its own final snapshot before handoff',async()=>{
+  vi.useFakeTimers({shouldAdvanceTime:true})
+  try{
+   vi.stubGlobal('crypto',{randomUUID:webcrypto.randomUUID.bind(webcrypto),getRandomValues:webcrypto.getRandomValues.bind(webcrypto),subtle:{digest:vi.fn(async()=>new Uint8Array(32).buffer)}})
+   const idle=deferred<ReturnType<typeof receipt>>()
+   client.save.mockReturnValueOnce(idle.promise)
+   mount();await ready();await acquire()
+   const p=ports.at(-1)!
+   p.snapshot.mockResolvedValueOnce({bytes:new TextEncoder().encode('{"body":[1]}'),editorRevision:'idle-snapshot',documentId:'doc'}).mockResolvedValue({bytes:new TextEncoder().encode('{"body":[2]}'),editorRevision:'final-snapshot',documentId:'doc'})
+   act(()=>portOptions.at(-1)!.onChanged('pending-idle','doc'))
+   await act(async()=>{await vi.advanceTimersByTimeAsync(300)})
+   await waitFor(()=>expect(client.save).toHaveBeenCalledOnce())
+   client.leaseAction.mockImplementationOnce(async()=>{client.lease.mockResolvedValue({...ownedLease,mine:false,can_write:false,holder:{actor_id:'user:other',display_name:'Jana',kind:'human'},generation:'9007199254740996'});return emptyLease})
+   act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}))
+   fireEvent.click(await screen.findByRole('button',{name:'Předat uživateli Jana'}))
+   await waitFor(()=>expect(p.validate).toHaveBeenCalledTimes(2))
+   await act(async()=>{})
+   expect(client.leaseAction.mock.calls.some(c=>c[0]==='handoff')).toBe(false)
+   expect(client.save).toHaveBeenCalledOnce()
+   await act(async()=>idle.resolve(receipt(client.save.mock.calls[0][0])))
+   await waitFor(()=>expect(client.leaseAction.mock.calls.some(c=>c[0]==='handoff')).toBe(true))
+   expect(client.save).toHaveBeenCalledTimes(2)
+   expect(client.save.mock.calls[1][0]).toMatchObject({baseVersion:'2',editorRevision:'final-snapshot'})
+   const handoff=client.leaseAction.mock.calls.findIndex(c=>c[0]==='handoff')
+   expect(client.save.mock.invocationCallOrder[1]).toBeLessThan(client.leaseAction.mock.invocationCallOrder[handoff])
+   expect(p.ack).toHaveBeenCalledTimes(2)
+  }finally{vi.useRealTimers()}
+ })
  it('keeps the current editor and completes handoff when the 30-second reauthorization is a valid no-op',async()=>{
   vi.useFakeTimers({shouldAdvanceTime:true})
   try{

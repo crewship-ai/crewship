@@ -240,7 +240,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    // An editor that was never unlocked has no native draft to publish.
    if(!r.coordinator)return r.nativeReadOnly&&!r.writable&&!r.capture
    freezeInput(r);r.ackedVersion=undefined;r.receiptAck=undefined;r.receiptVersion=undefined;setSavedVersion(undefined)
-   await r.coordinator.save()
+   await r.coordinator.flush()
    const acknowledgement=r.receiptAck,version=r.receiptVersion
    if(!acknowledgement||!version||!await acknowledgement)return false
    return live(r)&&r.writable&&r.phase?.phase==='saved'&&!r.phase.dirty&&r.ackedVersion===version&&r.receiptAck===acknowledgement
