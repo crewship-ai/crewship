@@ -43,14 +43,16 @@ import (
 // either add it to BackupTables (FK-safe order, plus BackupTableIntent) or
 // write its reason here. "It is not important" is not a reason; see #1437.
 var workspaceTablesNotBundled = map[string]string{
-	"mooring_authority_generations": "target-local non-ABA author generations must survive logical replacement; portable bundles cannot reset them",
-	"mooring_delivery_gates":        "runtime delivery admission requires fresh identity after portable restore",
-	"mooring_delivery_barriers":     "runtime read-revocation barriers belong to source installation",
-	"mooring_session_owners":        "process-bound owner capability must not travel in a portable backup",
-	"gridcraft_heads":               "experimental workbook portability is unavailable; dumping a workspace with workbooks is refused",
-	"gridcraft_operations":          "experimental workbook portability is unavailable; dumping a workspace with workbooks is refused",
-	"gridcraft_intents":             "run-bound permission cannot travel in a portable backup",
-	"gridcraft_sessions":            "editor sessions are bound to a live credential and expire within hours",
+	"artifact_project_message_intents": "original-message run authority requires fresh admission after restore",
+	"artifact_project_run_consents":    "live original-run Page permissions cannot travel in a bundle",
+	"mooring_authority_generations":    "target-local non-ABA author generations must survive logical replacement; portable bundles cannot reset them",
+	"mooring_delivery_gates":           "runtime delivery admission requires fresh identity after portable restore",
+	"mooring_delivery_barriers":        "runtime read-revocation barriers belong to source installation",
+	"mooring_session_owners":           "process-bound owner capability must not travel in a portable backup",
+	"gridcraft_heads":                  "experimental workbook portability is unavailable; dumping a workspace with workbooks is refused",
+	"gridcraft_operations":             "experimental workbook portability is unavailable; dumping a workspace with workbooks is refused",
+	"gridcraft_intents":                "run-bound permission cannot travel in a portable backup",
+	"gridcraft_sessions":               "editor sessions are bound to a live credential and expire within hours",
 
 	"document_iteration_intents":        "targeted human-message authority requires fresh admission after recovery",
 	"document_creation_consents":        "one-use human creation permission is bound to the original installation and run",

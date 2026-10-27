@@ -9,6 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Show agent artifact project steps in chat as cards with kind, version, Draft/Shared state and a running "Creating version n…" step that settles into "vn ready · Restore"; off by default behind `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
 - **Opening a new conversation logged three 404s.** A draft session no longer requests its execution profile, messages or participants before the first send creates it.
 - **Artifact authoring clients support complete project versions.** Add pilot MCP tools and `page artifact` commands for atomic manifests, explicit version conflicts, restore and anchored feedback on servers that enable the artifact project backend.
 
@@ -7148,6 +7149,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Content inspection allocates less on repeated matches (#4006).** Redaction emits spans once per rule and encoded-content scanning collects only the existing first 256 candidates, preserving finding order and results.
 
 - **Routine script steps clean up completed control directories (#4003).** Cleanup checks invocation ownership and process-group state, and reports cleanup failures separately from the script result.
+
+- Preserve project feedback during upgrades and backups, keep private-history bundles owner-only, and erase legacy and native version attribution within the selected workspace.
 
 ## [1.0.0-rc.1] — 2026-07-12
 

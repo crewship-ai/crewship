@@ -324,6 +324,10 @@ var BackupTables = []string{
 	"artifact_version_heads",
 	"artifact_version_blobs",
 	"artifact_versions",
+	"artifact_project_comments",
+	"artifact_project_comment_tasks",
+	"artifact_project_comment_replies",
+	"artifact_project_origins",
 	"documents",
 	"mooring_documents", // after Pages; owns receipts
 	"mooring_receipts",
@@ -433,6 +437,8 @@ func tableHasColumn(ctx context.Context, tx *sql.Tx, table, col string) (bool, e
 // are followed up with custom queries below.
 func workspaceFilterSQL(table, workspaceID string) (string, []any, bool) {
 	switch table {
+	case "artifact_project_comment_replies":
+		return "comment_id IN (SELECT id FROM artifact_project_comments WHERE workspace_id=?)", []any{workspaceID}, true
 	case "workspaces":
 		return "id = ?", []any{workspaceID}, true
 	case "users":
