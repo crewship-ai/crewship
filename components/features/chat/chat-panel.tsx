@@ -5,7 +5,7 @@ import { useArtifactProjectAvailability } from "@/hooks/use-artifact-project-ava
 import Link from "next/link"
 import { useAttachmentScope } from "@/hooks/use-attachment-scope"
 import { ChatSessionSource } from "./chat-session-source"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { AnimatePresence } from "motion/react"
 import {
   Bot,
@@ -76,6 +76,9 @@ import { useDocumentsAvailability } from "@/hooks/use-documents-availability"
 import { ArtifactContextCards, type OpenLinked } from "./artifact-context/artifact-context-cards"
 import { ArtifactLibraryHost } from "./artifact-context/artifact-library-host"
 import { LinkedArtifactPanel, type LinkedActive } from "./artifact-context/linked-artifact-panel"
+import { ArtifactViewerProvider, type ArtifactViewerTarget } from "./artifact-context/projects/artifact-viewer-context"
+import { ArtifactViewerPanel } from "./artifact-context/viewer"
+import { chatArtifactProjects } from "@/lib/feature-flags"
 import { ComposerArtifactContextStrip } from "./artifact-context/composer/composer-artifact-context"
 import { useComposerArtifactState } from "./artifact-context/use-composer-artifact-state"
 import { useServerConfirmedPrivate } from "./artifact-context/use-server-chat-visibility"
@@ -1157,8 +1160,23 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     setDocumentExpanded(false)
     setLinked({ target, title, scope: artifactScope, activation: ++documentActivation.current })
   }, [artifactContextOn, workspaceId, artifactScope])
-  const viewerOpen = Boolean(documentTarget || linkedTarget)
-  const viewerPanel = linkedTarget && workspaceId && sessionId && currentUserId
+  // Artifact project cards and their side viewer (build flag + server availability, both default off).
+  const artifactProjectsOn = chatArtifactProjects() && verifiedChatReadScope && Boolean(workspaceId && currentUserId)
+  const [project, setProject] = useState<{ target: ArtifactViewerTarget; scope: string } | null>(null)
+  const projectTarget = artifactProjectsOn && project?.scope === artifactScope ? project.target : null
+  const changeProject = useCallback((target: ArtifactViewerTarget | null) => {
+    if (target) { setDocumentPreview(null); setLinked(null) }
+    setProject(target ? { target, scope: artifactScope } : null)
+  }, [artifactScope])
+  // Opening a saved document or linked item replaces the project in the one side pane.
+  useEffect(() => { if (documentPreview || linked) setProject(null) }, [documentPreview, linked])
+  const withProjects = (node: ReactNode) => artifactProjectsOn && workspaceId
+    ? <ArtifactViewerProvider workspaceId={workspaceId} target={projectTarget} onTargetChange={changeProject}>{node}</ArtifactViewerProvider>
+    : node
+  const viewerOpen = Boolean(documentTarget || linkedTarget || projectTarget)
+  const viewerPanel = projectTarget
+    ? <ArtifactViewerPanel variant={mobilePanel === "chat" ? "fullscreen" : "pane"} />
+    : linkedTarget && workspaceId && sessionId && currentUserId
     ? <LinkedArtifactPanel workspaceId={workspaceId} chatId={sessionId} currentUserId={currentUserId} active={linkedTarget} links={conversationLinks.links}
       layout={mobilePanel === "chat" ? "mobile" : "side"} expanded={documentExpanded} onExpandedChange={setDocumentExpanded} openerRef={documentOpener}
       onSwitch={(target, title) => setLinked(previous => previous && { ...previous, target, title, activation: ++documentActivation.current })}
@@ -1493,7 +1511,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   }
 
   if (mobilePanel === "chat") {
-    return (
+    return withProjects(
       <div className="relative flex flex-col h-full">
         <div className="flex min-h-0 flex-1 flex-col" style={{ display: viewerOpen ? "none" : undefined }} inert={viewerOpen}>
         {mobileIssuePanel}{mobileProposalPanel}{mobileDecisionPanel}
@@ -1602,7 +1620,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
 
   // Desktop: chat + icon rail; drawer overlays (or pushes) when open
   const pushOpen = drawerOpen && drawerMode === "push"
-  return (
+  return withProjects(
     <div className="relative flex h-full">
       <div className={cn("flex flex-col overflow-hidden min-w-0", (viewerOpen ? documentExpanded : executionProfile === "trusted" && artifactFocus && artifactOpen) ? "hidden" : "flex-1")}>
         <ReconnectBanner status={connectionStatus} reason={connectionReason} onRetry={retryConnection} />
@@ -1715,7 +1733,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         /> : <p role="status" className="border-t px-4 py-4 text-sm text-muted-foreground">You can discover this agent. Ask your administrator for chat access to send messages.</p>}
       </div>
 
-      <aside aria-label={viewerOpen ? "Saved document panel" : undefined} hidden={!viewerOpen}
+      <aside aria-label={projectTarget ? "Artifact viewer" : viewerOpen ? "Saved document panel" : undefined} hidden={!viewerOpen}
         className={cn("min-h-0 min-w-0 shrink-0", documentExpanded ? "w-full" : "w-[45%] min-w-[20rem] max-w-full")}>{viewerPanel}</aside>
       <div style={{ display: viewerOpen ? "none" : "contents" }} inert={viewerOpen}>
       {executionProfile === "trusted" && <ArtifactPane scopeKey={artifactScope} onAskSelection={askArtifactSelection} agentId={agentId} expanded={artifactFocus} />}

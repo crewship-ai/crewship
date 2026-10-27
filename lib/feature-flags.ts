@@ -107,3 +107,25 @@ export function chatSidebarViews(): boolean {
 export function slidesEditorMount(): boolean {
   return process.env.NEXT_PUBLIC_SLIDES_EDITOR === "true"
 }
+
+/**
+ * Gates artifact project cards and the side viewer in chat (multi-screen
+ * HTML projects with versions and anchored comments).
+ *
+ * Default OFF: the `/pages/{slug}/artifact` routes are still in review. Even
+ * with the flag on, nothing renders until the server reports the feature
+ * available for the workspace.
+ */
+export function chatArtifactProjects(): boolean {
+  // DEMO BRANCH ONLY (never merged): on for the dev3 walkthrough; the server availability still gates.
+  return process.env.NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS !== "false"
+}
+
+/**
+ * Gates the Craft edit-lease bar, agent proposals and local draft recovery
+ * in chat. Default OFF: the lease HTTP surface is only proposed.
+ */
+export function chatCraftLease(): boolean {
+  // DEMO BRANCH ONLY (never merged).
+  return process.env.NEXT_PUBLIC_CHAT_CRAFT_LEASE !== "false"
+}
