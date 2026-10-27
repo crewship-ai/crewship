@@ -1,4 +1,4 @@
-# Native Craft human sessions and edit leases
+# Native Craft human sessions, leases and whole-document API
 
 The separate whole-native WordCraft/GridCraft profile is experimental and off by
 default. `craft_native.enabled: true` or `CREWSHIP_CRAFT_NATIVE_ENABLED=true`
@@ -34,8 +34,14 @@ mutation is disabled or unavailable. A generic denial does not prove read loss.
 | POST | `/api/v1/pages/{slug}/craft/lease/request-handoff` | `{}`. | `{request_id, generation}`, 201. |
 | POST | `/api/v1/pages/{slug}/craft/lease/handoff` | `{generation: "1", request_id: "public-request-id"}`. | New holder's lease status, 200. |
 | GET | `/api/v1/pages/{slug}/craft/events` | Craft admission header; keep the connection open. | `text/event-stream`: `lease` status or `session_retired` metadata; 200. |
+| POST | `/api/v1/pages/{slug}/craft/initialize` | Existing empty personal Page owner, original human `pages:write`; Word native bytes only. | Atomic native profile, lease and version1, with private admission, 201. |
+| GET | `/api/v1/pages/{slug}/craft/document` | Craft admission header. | Complete base64 native bytes, version and pinned editor/engine metadata, 200. |
+| POST | `/api/v1/pages/{slug}/craft/document/save` | Bound whole snapshot described below. | Exact committed snapshot receipt, 200. |
+| POST | `/api/v1/pages/{slug}/craft/document/import` | Same whole snapshot contract; existing explicit native Page only. | Exact committed snapshot receipt, 200. |
+| POST | `/api/v1/pages/{slug}/craft/document/reconcile` | Exact original snapshot binding and hash; no blind retry. | Original pinned commit receipt,200; never an arbitrary latest head. |
+| POST | `/api/v1/pages/{slug}/craft/document/restore` | Current binding and targetVersion. | New committed version and node durability, 200. |
 
-Except availability and initial session creation, send `X-Craft-Session` as well
+Except availability, initialization and initial session creation, send `X-Craft-Session` as well
 as ordinary authentication. Session creation returns `session_token`, the distinct
 public `session_id`, `application_id`, and `page_id`. Keep the token only in the
 mounted host closure, never in editor messages, local drafts, URLs or public DTOs.
@@ -79,9 +85,79 @@ reauthorization accepts only a separately authenticated newer expiry for the sam
 still-live identity and epoch. It never extends an already exhausted boot-time
 cap or adopts another source identity.
 
+## Whole-document configuration and receipts
+
+`craft_native.editor_bundle_dir` names the operator-owned bundle directory.
+The existing editor-origin handler verifies each profile digest against its
+manifest before serving it under `/_editor/b/<digest>/index.html`, or under
+`<configured-editor-origin>/b/<digest>/index.html` when an existing dedicated
+editor origin is configured. The profile URL must match that exact mount. Native-only
+mode activates no legacy editor or transport. When a legacy mount is also
+active, both must explicitly name the same directory; its existing allowlist
+order is preserved and native pins are appended. Incompatible configuration
+fails closed. Native bundle requests carrying credentials are refused; the
+opaque sandbox and credentialless frame policy remain unchanged.
+
+`craft_native.profiles` is a trusted startup map keyed by application. Each
+profile has `application`, `engine_revision` (40 lower-hex), `cli_path` (absolute
+operator-owned executable), `cli_sha256`, `editor_bundle` (both 64 lower-hex), and
+`editor_url`. The operator must qualify the exact source, executable and WASM
+bundle together. Startup rejects malformed profiles or a different CLI hash.
+Each validation invokes the real `NativeCLIValidator`, hashes its opened file
+descriptor again, and rejects repair warnings or lossy roundtrips. Requests never
+choose an executable, validator callback or profile. A missing application
+profile returns 503. Availability never converts an old Page into this profile.
+
+Initialization accepts only `application_id: "wordcraft"` and base64 `bytes`.
+It requires an existing empty personal Page owned by the authenticated human,
+current folder policy and live membership. Crew-owned Pages, existing content,
+read-only credentials, reinitialization and client-supplied pins are refused.
+The server captures immutable original authority epochs, validates with its
+qualified CLI, and commits profile, initial lease and version1 atomically with
+final authorization. It publishes the private admission only after commit;
+validation or final authorization failure leaves no partial native state.
+Ordinary Page creation remains separate.
+
+The native-only operator environment overrides are
+`CREWSHIP_CRAFT_NATIVE_EDITOR_BUNDLE_DIR`,
+`CREWSHIP_CRAFT_NATIVE_WORD_ENGINE_REVISION`,
+`CREWSHIP_CRAFT_NATIVE_WORD_CLI_PATH`,
+`CREWSHIP_CRAFT_NATIVE_WORD_CLI_SHA256`,
+`CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_BUNDLE` and
+`CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_URL`. These override corresponding YAML
+fields without enabling the product flag or any legacy profile. Explicit empty
+values remain empty and fail qualification; every startup/manifest/hash check
+still applies.
+
+Save and import accept `workspaceId`, `pageId`, `applicationId`, `enginePin`,
+public `sessionId`, `generation`, `baseVersion`, opaque `editorRevision`,
+`contentHash` in `sha256:<hex>` form, and complete native `bytes` as base64.
+Versions and generations are canonical positive int64 decimal **strings**.
+Native bytes are bounded to 32 MiB; the encoded JSON body is bounded to 45 MiB.
+The lease and current original credential/Page rights are checked in publication
+transactions, and pins must match the Page's immutable native profile. No HTML
+or partial patch stands in for the native model.
+
+A snapshot receipt repeats the exact scope/session/generation/revision/hash and
+base binding, gives the exact successor `version`, matching `candidateHash`,
+`issuedBy: "crewship"`, `durability: "node"` and `phase: "committed"`. Only this
+receipt acknowledges Saved. Reconcile sends the original attempt metadata; it
+may return that same pinned commit after another version exists. A lost ACK
+does not authorize replaying a save. Restore supplies the current binding and
+`targetVersion`, producing a new version rather than replacing history.
+
+Read returns `version`, base64 `bytes`, `applicationId`, `enginePin`,
+`editorBundle`, `editorURL` and quota (`usedBytes`, `limitBytes`, `warning`,
+`retention`). Quota byte counters are strings. Quota exhaustion returns 413;
+conflict or stale custody 409; invalid native data 422. Existing versions remain
+available. Generic denied writes retain the local draft; only proven read loss
+requires its erasure.
+
 ## Current implementation boundary
 
 The backend has direct-handler and real-Router two-human regression coverage.
-Native whole-document storage, pinned engine validation and receipts are a
-separate disabled boundary. Full editor mounting, proposals and agent execution,
+Whole-document routes require an already explicit native Page and a trusted
+qualified profile; only the explicit owner-only Word initializer may create
+that profile on an existing empty Page. Page creation, full editor mounting,
+proposals and agent execution,
 one-hour browser acceptance and 2,000 changing saves remain separate work.

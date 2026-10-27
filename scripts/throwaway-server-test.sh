@@ -214,4 +214,37 @@ if (STATE_ROOT="$tmp/state/../state" cmd_start docreject --binary /bin/true --do
 check "--documents refuses unclean paths" "$r" refused
 check "unclean paths create no instance state" "$([[ -e "$tmp/state/docreject" ]] && echo created || echo absent)" absent
 
+# --- native qualification env: exactly seven operator bindings, no identity ---
+# Transport fixture only: real native server startup still verifies CLI/bundles.
+native_bindings=(
+  CREWSHIP_CRAFT_NATIVE_ENABLED=true
+  "CREWSHIP_CRAFT_NATIVE_EDITOR_BUNDLE_DIR=$tmp/qualified-native-bundles"
+  CREWSHIP_CRAFT_NATIVE_WORD_ENGINE_REVISION=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  "CREWSHIP_CRAFT_NATIVE_WORD_CLI_PATH=$tmp/qualified-wordcraft"
+  CREWSHIP_CRAFT_NATIVE_WORD_CLI_SHA256=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_BUNDLE=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+  CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_URL=/_editor/b/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/index.html
+)
+native_args=()
+for binding in "${native_bindings[@]}"; do native_args+=(--env "$binding"); done
+check "native operator binding fixture contains exactly seven names" "${#native_bindings[@]}" 7
+if (cmd_start nativeenv --binary "$tmp/bin/fake-crewship" --port "$FAKE_PORT" "${native_args[@]}") >/dev/null 2>"$tmp/native-env.err"; then native_started=yes; else native_started=no; fi
+check "native env allowlist accepts exactly seven qualified operator bindings" "$native_started" yes
+if [[ "$native_started" == yes ]]; then
+  for binding in "${native_bindings[@]}"; do
+    check "native env exact value ${binding%%=*}" "$(grep -Fxc -- "$binding" "$FAKE_SERVER_ENV" || true)" 1
+  done
+  check "only seven native settings reached the isolated child" "$(grep -c '^CREWSHIP_CRAFT_NATIVE_' "$FAKE_SERVER_ENV" || true)" 7
+  check "native feature passthrough kept owned data identity" "$(grep -Fxc -- "CREWSHIP_DATA_DIR=$tmp/state/nativeenv/data" "$FAKE_SERVER_ENV" || true)" 1
+  cmd_stop nativeenv >/dev/null 2>&1 || true
+  check "native fake server teardown removed only its own state" "$([[ -e "$tmp/state/nativeenv" ]] && echo left || echo gone)" gone
+  if (exec 3<>/dev/tcp/127.0.0.1/"$FAKE_PORT") 2>/dev/null; then native_port=still-listening; else native_port=closed; fi
+  check "native fake server teardown leaves no orphan" "$native_port" closed
+  if [[ -f "$FAKE_SERVER_PID" ]]; then kill "$(cat "$FAKE_SERVER_PID")" 2>/dev/null || true; fi
+fi
+for bad_native in CREWSHIP_CRAFT_NATIVE_WORD_ACTOR_ID=forged CREWSHIP_CRAFT_NATIVE_WORD_SESSION_TOKEN=forged; do
+  if (cmd_start nativebad --binary /bin/true --env "$bad_native") >/dev/null 2>&1; then r=started; else r=refused; fi
+  check "native prefix does not admit arbitrary ${bad_native%%=*}" "$r" refused
+ done
+
 exit "$fail"

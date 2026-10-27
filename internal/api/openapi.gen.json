@@ -12485,6 +12485,84 @@
         ],
         "type": "object"
       },
+      "NativeCraftDocument": {
+        "additionalProperties": false,
+        "properties": {
+          "applicationId": {
+            "enum": [
+              "wordcraft",
+              "gridcraft"
+            ],
+            "type": "string"
+          },
+          "bytes": {
+            "description": "Base64 of the complete native document, at most 32 MiB decoded; never an HTML export.",
+            "format": "byte",
+            "maxLength": 44739244,
+            "type": "string"
+          },
+          "editorBundle": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "editorURL": {
+            "type": "string"
+          },
+          "enginePin": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "quota": {
+            "$ref": "#/components/schemas/NativeCraftDocumentQuota"
+          },
+          "version": {
+            "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
+            "maxLength": 19,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "bytes",
+          "applicationId",
+          "enginePin",
+          "editorBundle",
+          "editorURL",
+          "quota"
+        ],
+        "type": "object"
+      },
+      "NativeCraftDocumentQuota": {
+        "additionalProperties": false,
+        "properties": {
+          "limitBytes": {
+            "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
+            "maxLength": 19,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "retention": {
+            "type": "string"
+          },
+          "usedBytes": {
+            "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
+            "maxLength": 19,
+            "pattern": "^(0|[1-9][0-9]{0,18})$",
+            "type": "string"
+          },
+          "warning": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "usedBytes",
+          "limitBytes",
+          "warning",
+          "retention"
+        ],
+        "type": "object"
+      },
       "NativeCraftEmptyRequest": {
         "additionalProperties": false,
         "properties": {},
@@ -12567,6 +12645,71 @@
         ],
         "type": "object"
       },
+      "NativeCraftInitializeReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "application_id": {
+            "enum": [
+              "wordcraft"
+            ],
+            "type": "string"
+          },
+          "generation": {
+            "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
+            "maxLength": 19,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "page_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "session_token": {
+            "description": "Private process-local human admission, issued only after atomic initialization. Never send to the editor iframe or local journal.",
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "version": {
+            "enum": [
+              "1"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_token",
+          "session_id",
+          "application_id",
+          "page_id",
+          "generation",
+          "version"
+        ],
+        "type": "object"
+      },
+      "NativeCraftInitializeRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "application_id": {
+            "enum": [
+              "wordcraft"
+            ],
+            "type": "string"
+          },
+          "bytes": {
+            "description": "Base64 of the complete native document, at most 32 MiB decoded; never an HTML export.",
+            "format": "byte",
+            "maxLength": 44739244,
+            "type": "string"
+          }
+        },
+        "required": [
+          "application_id",
+          "bytes"
+        ],
+        "type": "object"
+      },
       "NativeCraftLease": {
         "properties": {
           "acquired_at": {
@@ -12627,6 +12770,77 @@
         ],
         "type": "object"
       },
+      "NativeCraftReconcileRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "applicationId": {
+            "enum": [
+              "wordcraft",
+              "gridcraft"
+            ],
+            "type": "string"
+          },
+          "baseVersion": {
+            "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
+            "maxLength": 19,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "bytes": {
+            "description": "Base64 of the complete native document, at most 32 MiB decoded; never an HTML export.",
+            "format": "byte",
+            "maxLength": 44739244,
+            "type": "string"
+          },
+          "contentHash": {
+            "pattern": "^sha256:[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "editorRevision": {
+            "description": "Opaque snapshot revision/RPC correlation binding, at most 256 UTF-8 bytes.",
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "enginePin": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "generation": {
+            "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
+            "maxLength": 19,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "pageId": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "targetVersion": {
+            "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
+            "maxLength": 19,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "workspaceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "pageId",
+          "applicationId",
+          "enginePin",
+          "sessionId",
+          "generation",
+          "baseVersion",
+          "editorRevision",
+          "contentHash"
+        ],
+        "type": "object"
+      },
       "NativeCraftRenewal": {
         "properties": {
           "renewed": {
@@ -12664,6 +12878,112 @@
         ],
         "type": "object"
       },
+      "NativeCraftRestoreReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "durability": {
+            "enum": [
+              "node"
+            ],
+            "type": "string"
+          },
+          "issuedBy": {
+            "enum": [
+              "crewship"
+            ],
+            "type": "string"
+          },
+          "phase": {
+            "enum": [
+              "committed"
+            ],
+            "type": "string"
+          },
+          "version": {
+            "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
+            "maxLength": 19,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "durability",
+          "issuedBy",
+          "phase"
+        ],
+        "type": "object"
+      },
+      "NativeCraftRestoreRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "applicationId": {
+            "enum": [
+              "wordcraft",
+              "gridcraft"
+            ],
+            "type": "string"
+          },
+          "baseVersion": {
+            "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
+            "maxLength": 19,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "bytes": {
+            "description": "Base64 of the complete native document, at most 32 MiB decoded; never an HTML export.",
+            "format": "byte",
+            "maxLength": 44739244,
+            "type": "string"
+          },
+          "contentHash": {
+            "pattern": "^sha256:[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "editorRevision": {
+            "description": "Opaque snapshot revision/RPC correlation binding, at most 256 UTF-8 bytes.",
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "enginePin": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "generation": {
+            "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
+            "maxLength": 19,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "pageId": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "targetVersion": {
+            "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
+            "maxLength": 19,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "workspaceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "pageId",
+          "applicationId",
+          "enginePin",
+          "sessionId",
+          "generation",
+          "baseVersion",
+          "targetVersion"
+        ],
+        "type": "object"
+      },
       "NativeCraftSession": {
         "properties": {
           "application_id": {
@@ -12690,6 +13010,170 @@
           "session_id",
           "application_id",
           "page_id"
+        ],
+        "type": "object"
+      },
+      "NativeCraftSnapshotReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "applicationId": {
+            "enum": [
+              "wordcraft",
+              "gridcraft"
+            ],
+            "type": "string"
+          },
+          "baseVersion": {
+            "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
+            "maxLength": 19,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "candidateHash": {
+            "pattern": "^sha256:[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "contentHash": {
+            "pattern": "^sha256:[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "durability": {
+            "enum": [
+              "node"
+            ],
+            "type": "string"
+          },
+          "editorRevision": {
+            "description": "Opaque snapshot revision/RPC correlation binding, at most 256 UTF-8 bytes.",
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "enginePin": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "generation": {
+            "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
+            "maxLength": 19,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "issuedBy": {
+            "enum": [
+              "crewship"
+            ],
+            "type": "string"
+          },
+          "pageId": {
+            "type": "string"
+          },
+          "phase": {
+            "enum": [
+              "committed"
+            ],
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "version": {
+            "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
+            "maxLength": 19,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "workspaceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "pageId",
+          "applicationId",
+          "enginePin",
+          "sessionId",
+          "generation",
+          "baseVersion",
+          "editorRevision",
+          "contentHash",
+          "version",
+          "candidateHash",
+          "durability",
+          "issuedBy",
+          "phase"
+        ],
+        "type": "object"
+      },
+      "NativeCraftSnapshotRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "applicationId": {
+            "enum": [
+              "wordcraft",
+              "gridcraft"
+            ],
+            "type": "string"
+          },
+          "baseVersion": {
+            "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
+            "maxLength": 19,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "bytes": {
+            "description": "Base64 of the complete native document, at most 32 MiB decoded; never an HTML export.",
+            "format": "byte",
+            "maxLength": 44739244,
+            "type": "string"
+          },
+          "contentHash": {
+            "pattern": "^sha256:[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "editorRevision": {
+            "description": "Opaque snapshot revision/RPC correlation binding, at most 256 UTF-8 bytes.",
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "enginePin": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "generation": {
+            "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
+            "maxLength": 19,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "pageId": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "targetVersion": {
+            "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
+            "maxLength": 19,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "workspaceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "pageId",
+          "applicationId",
+          "enginePin",
+          "sessionId",
+          "generation",
+          "baseVersion",
+          "editorRevision",
+          "contentHash",
+          "bytes"
         ],
         "type": "object"
       },
@@ -127738,6 +128222,919 @@
         "x-crewship-read-only": true
       }
     },
+    "/api/v1/pages/{slug}/craft/document": {
+      "get": {
+        "description": "Get page craft document (GET /api/v1/pages/{slug}/craft/document).",
+        "operationId": "get_api_v1_pages_slug_craft_document",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Private original-human admission for this exact Page; sessionId in JSON is the distinct public connection ID.",
+            "in": "header",
+            "name": "X-Craft-Session",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeCraftDocument"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get page craft document",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/pages/{slug}/craft/document/import": {
+      "post": {
+        "description": "Import page craft document (POST /api/v1/pages/{slug}/craft/document/import).",
+        "operationId": "post_api_v1_pages_slug_craft_document_import",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Private original-human admission for this exact Page; sessionId in JSON is the distinct public connection ID.",
+            "in": "header",
+            "name": "X-Craft-Session",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativeCraftSnapshotRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeCraftSnapshotReceipt"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Import page craft document",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/craft/document/reconcile": {
+      "post": {
+        "description": "Submit page craft document reconcile (POST /api/v1/pages/{slug}/craft/document/reconcile).",
+        "operationId": "post_api_v1_pages_slug_craft_document_reconcile",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Private original-human admission for this exact Page; sessionId in JSON is the distinct public connection ID.",
+            "in": "header",
+            "name": "X-Craft-Session",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativeCraftReconcileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeCraftSnapshotReceipt"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit page craft document reconcile",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/craft/document/restore": {
+      "post": {
+        "description": "Restore page craft document (POST /api/v1/pages/{slug}/craft/document/restore).",
+        "operationId": "post_api_v1_pages_slug_craft_document_restore",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Private original-human admission for this exact Page; sessionId in JSON is the distinct public connection ID.",
+            "in": "header",
+            "name": "X-Craft-Session",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativeCraftRestoreRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeCraftRestoreReceipt"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Restore page craft document",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/craft/document/save": {
+      "post": {
+        "description": "Save page craft document (POST /api/v1/pages/{slug}/craft/document/save).",
+        "operationId": "post_api_v1_pages_slug_craft_document_save",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Private original-human admission for this exact Page; sessionId in JSON is the distinct public connection ID.",
+            "in": "header",
+            "name": "X-Craft-Session",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativeCraftSnapshotRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeCraftSnapshotReceipt"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Save page craft document",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
     "/api/v1/pages/{slug}/craft/events": {
       "get": {
         "description": "List page craft events (GET /api/v1/pages/{slug}/craft/events).",
@@ -127890,6 +129287,186 @@
           "pages"
         ],
         "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/pages/{slug}/craft/initialize": {
+      "post": {
+        "description": "Submit page craft initialize (POST /api/v1/pages/{slug}/craft/initialize).",
+        "operationId": "post_api_v1_pages_slug_craft_initialize",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativeCraftInitializeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeCraftInitializeReceipt"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit page craft initialize",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
       }
     },
     "/api/v1/pages/{slug}/craft/lease": {

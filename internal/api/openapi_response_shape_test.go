@@ -50,11 +50,17 @@ var responseShapeContracts = []struct {
 	// A zero value of the struct the handler serializes.
 	value any
 }{
+
 	{name: "NativeCraftAvailability", pointer: "/components/schemas/NativeCraftAvailability", value: craftNativeAvailabilityResponse{}},
 	{name: "NativeCraftRenewal", pointer: "/components/schemas/NativeCraftRenewal", value: craftNativeRenewalResponse{}},
 	{name: "NativeCraftLease", pointer: "/components/schemas/NativeCraftLease", value: craftNativeLeaseResponse{}},
 	{name: "NativeCraftHolder", pointer: "/components/schemas/NativeCraftHolder", value: craftNativeHolderResponse{}},
 	{name: "NativeCraftRequest", pointer: "/components/schemas/NativeCraftRequest", value: craftNativeRequestResponse{}},
+	{name: "NativeCraftInitializeReceipt", pointer: "/components/schemas/NativeCraftInitializeReceipt", value: craftNativeInitializeResponse{}},
+	{name: "NativeCraftDocument", pointer: "/components/schemas/NativeCraftDocument", value: craftNativeDocumentResponse{}},
+	{name: "NativeCraftDocumentQuota", pointer: "/components/schemas/NativeCraftDocumentQuota", value: craftNativeDocumentQuotaResponse{}},
+	{name: "NativeCraftSnapshotReceipt", pointer: "/components/schemas/NativeCraftSnapshotReceipt", value: mooring.NativeSaveReceipt{}},
+	{name: "NativeCraftRestoreReceipt", pointer: "/components/schemas/NativeCraftRestoreReceipt", value: craftNativeRestoreResponse{}},
 	{name: "MooringCommandSession", pointer: "/components/schemas/MooringCommandSession", value: commandProductHTTPResponse{}},
 	{name: "MooringSession", pointer: "/components/schemas/MooringSession", value: collaborationHTTPSessionResponse{}},
 	{name: "NativeArtifactEdit", pointer: "/components/schemas/NativeArtifactEdit", value: nativeArtifactEdit{}},
