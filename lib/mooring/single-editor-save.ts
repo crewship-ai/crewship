@@ -56,6 +56,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   let lastPersistedSequence = 0, manualCount = 0
   let preparingCount = 0
   let nextPreparation = 0, lastFailedPreparation = 0, nextAutosave = 0
+  let writeRetirement: Promise<boolean> | undefined
   const lifetime = new AbortController()
   const emit = (phase: NativeSaveState["phase"], reason?: string) => {
     if (!active && phase !== "stopped") return
@@ -209,11 +210,29 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     })
     return manual ? sending.finally(() => { manualCount--; scheduleIfNeeded() }) : sending
   }
-  function revokeWrite() {
-    if (!active) return
+  function revokeWrite(): Promise<boolean> {
+    if (!active) return Promise.resolve(false)
+    if (writeRetirement) return writeRetirement
+    // Revoke sending synchronously. The host must first suspend input, then
+    // await this fresh durable capture before closing the editor or journal.
+    // A failed capture retains the native frame; it never grants a handoff.
     writable = false; blocked = "write_revoked"; clearTimeout(timer); pending?.abort.abort()
+    const sequence = nextPreparation + 1
+    writeRetirement = new Promise<boolean>(resolve => {
+      let finished = false
+      const finish = (captured: boolean) => {
+        if (finished) return
+        finished = true; clearTimeout(deadline); lifetime.signal.removeEventListener("abort", abort)
+        resolve(captured)
+      }
+      const abort = () => finish(false)
+      const deadline = setTimeout(() => finish(false), timeoutMs)
+      lifetime.signal.addEventListener("abort", abort, { once: true })
+      if (lifetime.signal.aborted) { abort(); return }
+      void save().then(() => finish(active && lastPersistedSequence >= sequence), () => finish(false))
+    })
     emit("read-only", "write_revoked")
-    if (dirty) void save()
+    return writeRetirement
   }
   function revokeRead() { stop(); unregister(); return options.journal.revokeRead() }
   return {
