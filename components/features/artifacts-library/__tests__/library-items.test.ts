@@ -31,6 +31,15 @@ describe("library items", () => {
     expect(priv.private).toBe(true)
   })
 
+  it("names a crew owner and the caller, never a raw account id", () => {
+    const [crew, mine, other] = libraryItems([
+      page({ slug: "a", artifact_kind: "project", owner: "crew/research", owner_crew_name: "Research crew", reach: ["crew:research"], updated_at: "2026-10-27T12:00:00Z" } as Partial<WirePage>),
+      page({ slug: "b", artifact_kind: "project", owner: "user/cmuxw95k60027db59c6f2", reach: ["owner"], updated_at: "2026-10-27T11:00:00Z" }),
+      page({ slug: "c", artifact_kind: "project", owner: "user/cmuxother0000000000000", reach: ["grant"], updated_at: "2026-10-27T10:00:00Z" }),
+    ].map(toPageView))
+    expect([crew.ownerLabel, mine.ownerLabel, other.ownerLabel]).toEqual(["Research crew", "You", null])
+  })
+
   it("counts kinds for the filter, leaving out kinds with no items", () => {
     const items = libraryItems([page({ slug: "a", artifact_kind: "project" }), page({ slug: "b", artifact_kind: "project" }), page({ slug: "c", has_workbook: true })].map(toPageView))
     expect(kindCounts(items)).toEqual([["project", 2], ["sheet", 1]])

@@ -38,6 +38,12 @@ function kindOf(page: PageView): LibraryKind | null {
   return null
 }
 
+/** A crew by name and the caller as You; another person's account id is not a name, so it is left out. */
+function ownerOf(page: PageView): string | null {
+  if (page.ownerRef?.startsWith("crew/")) return page.ownerLabel
+  return page.reach?.includes("owner") ? "You" : null
+}
+
 export function libraryItems(pages: PageView[]): LibraryItem[] {
   const items: LibraryItem[] = []
   for (const page of pages) {
@@ -50,7 +56,7 @@ export function libraryItems(pages: PageView[]): LibraryItem[] {
       native: Boolean(page.artifactKind) && kind !== "project",
       // Only the server's explicit classification; ownership or a missing folder is not privacy.
       private: page.privateAudience === true,
-      ownerLabel: page.ownerLabel,
+      ownerLabel: ownerOf(page),
       updatedAt: page.updatedAt,
     })
   }

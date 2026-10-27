@@ -71,7 +71,7 @@ function LibraryTable({ items, onOpen }: { items: LibraryItem[]; onOpen: (slug: 
             </button>
           </td>
           <td className="px-3 py-2"><KindBadge kind={item.kind} /></td>
-          <td className="px-3 py-2 font-mono text-xs">{versioned(item) ? item.sharedVersion ? `v${item.sharedVersion}` : "Not shared" : "—"}</td>
+          <td className="px-3 py-2 text-xs">{versioned(item) ? item.sharedVersion ? <span className="font-mono">v{item.sharedVersion}</span> : <span className="text-muted-foreground">Not shared</span> : "—"}</td>
           <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">{item.updatedAt ? formatRelativeShort(item.updatedAt.toISOString()) : "—"}</td>
         </tr>)}
       </tbody>
@@ -109,6 +109,9 @@ function ArtifactDetail({ workspaceId, item, onBack }: { workspaceId: string; it
             onEdit={() => window.open(craftEditorHref(workspaceId, "@" + item.pageId), "_blank", "noopener,noreferrer")} />
         </div>
         : null}
+    {item.kind !== "project" && <p className="text-sm text-muted-foreground">
+      {item.kind === "word" || item.kind === "sheet" ? "Read and edit it in its editor; Open in Pages shows the saved document." : "Open in Pages shows it with everything it contains."}
+    </p>}
   </div>
 }
 
@@ -164,16 +167,17 @@ export function ArtifactsLibrary({ workspaceId, item, onSelect }: ArtifactsLibra
     {!items.length
       ? <p className="rounded-card border border-dashed p-6 text-sm text-muted-foreground">No artifacts yet. Ask an agent in Chat to make a project, or create a document in Pages.</p>
       : <>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex min-w-0 flex-[1_1_240px] flex-wrap gap-1.5" aria-label="Kind">
+        <div className="grid min-w-0 gap-2 sm:flex sm:flex-wrap sm:items-center">
+          {/* One scrolling row on a phone: wrapped 44px chips would push the gallery off the first screen. */}
+          <div className="flex min-w-0 flex-[1_1_240px] gap-1.5 overflow-x-auto [scrollbar-width:none] sm:flex-wrap sm:overflow-visible" role="group" aria-label="Kind">
             {[["all", "All", items.length] as const, ...counts.map(([k, n]) => [k, LIBRARY_KINDS.find(entry => entry.kind === k)!.plural, n] as const)].map(([key, label, n]) =>
               <button key={key} type="button" aria-pressed={kind === key} onClick={() => setKind(key)}
-                className={cn("inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs coarse:min-h-[44px]",
+                className={cn("inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-xs coarse:min-h-[44px]",
                   kind === key ? "border-primary/40 bg-primary/10 text-primary" : "bg-card text-muted-foreground hover:text-foreground")}>
                 {label} <span className="font-mono text-micro">{n}</span>
               </button>)}
           </div>
-          <div role="radiogroup" aria-label="View" className="inline-flex rounded-md border bg-muted p-0.5">
+          <div role="radiogroup" aria-label="View" className="inline-flex w-fit rounded-md border bg-muted p-0.5">
             {(["gallery", "table"] as const).map(option => <button key={option} type="button" role="radio" aria-checked={view === option} onClick={() => setView(option)}
               className={cn("rounded-sm px-2.5 py-0.5 text-xs coarse:min-h-[44px]", view === option ? "bg-card font-medium shadow-sm" : "text-muted-foreground")}>
               {option === "gallery" ? "Gallery" : "Table"}
