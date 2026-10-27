@@ -1,0 +1,90 @@
+---
+title: "Craft Commands"
+description: "Use a process-local human session for an explicitly native Page."
+icon: "file-pen"
+stability: experimental
+tag: Experimental
+---
+
+# crewship craft
+
+This experimental human CLI uses the separate native profile. The server flag
+is off by default. Existing documents are never converted. Agent mandates,
+proposals are separate surfaces. Whole-document actions operate only on an
+existing explicit native Page and its qualified startup profile.
+
+```bash
+crewship craft availability <page>
+crewship craft connect <page>
+```
+
+`availability` reads `GET /api/v1/pages/{slug}/craft/availability`. `connect`
+creates one session with `POST /api/v1/pages/{slug}/craft/sessions`, prints only
+its public `session_id`, then reads one JSON action per stdin line. The private
+session token stays in process memory and is attached as `X-Craft-Session`.
+Responses are escaped NDJSON; authentication and workspace selection use the
+normal CLI context. Server error bodies are not printed.
+
+| Action | Route |
+|---|---|
+| `status` | `GET /api/v1/pages/{slug}/craft/lease` |
+| `acquire` | `POST /api/v1/pages/{slug}/craft/lease` |
+| `acquire-explicit` | `POST /api/v1/pages/{slug}/craft/lease/acquire` |
+| `renew` | `POST /api/v1/pages/{slug}/craft/lease/renew` |
+| `release` | `POST /api/v1/pages/{slug}/craft/lease/release` |
+| `request-handoff` | `POST /api/v1/pages/{slug}/craft/lease/request-handoff` |
+| `handoff` | `POST /api/v1/pages/{slug}/craft/lease/handoff` |
+| `reauthorize` | `POST /api/v1/pages/{slug}/craft/sessions/reauthorize` |
+| `watch` | `GET /api/v1/pages/{slug}/craft/events` |
+| `read` | `GET /api/v1/pages/{slug}/craft/document` |
+| `save` | `POST /api/v1/pages/{slug}/craft/document/save` |
+| `import` | `POST /api/v1/pages/{slug}/craft/document/import` |
+| `restore` | `POST /api/v1/pages/{slug}/craft/document/restore` |
+| `reconcile` | `POST /api/v1/pages/{slug}/craft/document/reconcile` |
+
+```json
+{"action":"status"}
+{"action":"acquire"}
+{"action":"renew","generation":"9007199254740993"}
+{"action":"handoff","generation":"9007199254740993","request_id":"server-issued-target-request"}
+{"action":"watch"}
+```
+
+Use the actual generation returned by the server; it is a canonical positive
+int64 decimal **string**. Handoff targets an opaque server-issued request ID,
+never an actor supplied by the CLI. Unknown fields, including a different Page
+or session, are rejected. Lease/control action lines are limited to 16 KiB. Document mutation lines use
+`{"action":"save","snapshot":{...}}` (or import/restore/reconcile) with the exact
+[whole-document binding](/specs/craft-native); the decoded native bytes are
+bounded to 32 MiB and the encoded NDJSON line to45MiB. A document `read` response
+may also use 45 MiB; other responses and SSE events remain bounded to 64 KiB. A
+connection accepts at most 4096 actions. Native bytes are base64, never HTML
+exports. The snapshot public session ID must match this connection; private
+admission tokens never belong in the snapshot. No automatic mutation retry
+occurs after a conflict or unknown ACK.
+
+`watch` consumes the server's live SSE stream until cancellation or stream end;
+it does not process later stdin actions. Only a valid `session_retired` event
+is a confirmed clean end; unexpected EOF reports an unconfirmed disconnect.
+The server heartbeat renews the
+current holder while connected. Other actions have the normal CLI request
+timeout. A failed mutation stops processing without an automatic retry or
+reacquisition. EOF does not save content or release/reacquire a lease; send an
+explicit `release` when wanted. Reauthorization uses the current CLI credential
+and cannot revive an expired admission or replace its original authority.
+
+## Initialize one owned Word Page
+
+`crewship craft initialize <page> --file <native.json>` calls
+`POST /api/v1/pages/{slug}/craft/initialize` with Word native bytes (at most
+32 MiB). The Page must already exist, be empty, and be personally owned by the
+current human with `pages:write`. The server chooses all qualified pins and
+atomically creates its initial native version and lease. This does not convert
+legacy content or create a Page.
+
+The command retains the issued private admission in its process and prints only
+public session, Page, application, generation and version strings. Subsequent
+NDJSON actions use that admission exactly as `connect`; there is no implicit
+second session or lease acquisition. EOF does not release or commit content.
+Use an explicit `release` action when required. `--file -` consumes stdin as
+raw native bytes and ends without subsequent NDJSON actions.
