@@ -73,6 +73,21 @@ describe("native authorized metadata stream",()=>{
   const send=vi.fn().mockResolvedValueOnce(admission()).mockResolvedValueOnce(new Response(stream,{headers:{'Content-Type':'text/event-stream'}}))
   const client=createNativeDocumentClient({workspaceId:"ws",pageId:"page",fetch:send});await client.open(signal());await expect(client.events(signal(),()=>{})).rejects.toThrow('invalid_native_stream')
  })
+ it("accepts a valid reauthorization no-op without changing the mounted admission",async()=>{
+  const send=vi.fn().mockResolvedValueOnce(admission()).mockResolvedValueOnce(new Response('{"renewed":false}'))
+  const client=createNativeDocumentClient({workspaceId:"ws",pageId:"page",fetch:send});await client.open(signal())
+  await expect(client.reauthorize(signal())).resolves.toBe(false)
+  expect(send).toHaveBeenCalledTimes(2)
+  expect(new Headers(send.mock.calls[1][1]?.headers).get("X-Craft-Session")).toBe("b".repeat(64))
+ })
+ it.each(["401","403","invalid","network"])("rejects failed reauthorization %s instead of treating it as a valid no-op",async reason=>{
+  const send=vi.fn().mockResolvedValueOnce(admission())
+  if(reason==="network")send.mockRejectedValueOnce(Error("network unavailable"))
+  else send.mockResolvedValueOnce(new Response(reason==="invalid"?'{"renewed":"false"}':'{}',{status:reason==="invalid"?200:Number(reason)}))
+  const client=createNativeDocumentClient({workspaceId:"ws",pageId:"page",fetch:send});await client.open(signal())
+  await expect(client.reauthorize(signal())).rejects.toThrow()
+  expect(send).toHaveBeenCalledTimes(2)
+ })
  it("reauthorizes explicitly without creating or replacing the mounted session",async()=>{
   const send=vi.fn().mockResolvedValueOnce(admission()).mockResolvedValueOnce(new Response('{"renewed":true}'))
   const client=createNativeDocumentClient({workspaceId:"ws",pageId:"page",fetch:send});await client.open(signal());await expect(client.reauthorize(signal())).resolves.toBe(true)
