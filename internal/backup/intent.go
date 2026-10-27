@@ -36,12 +36,9 @@ import "sort"
 // table. Drift detection catches the omission in tests so an oversight
 // surfaces before a bundle ships missing rows.
 var BackupTableIntent = map[string]ScopedTableIntent{
-	"mooring_edit_leases":           IntentExcludeRuntime, // target-local editor generation tombstones; no portable capabilities
-	"mooring_edit_lease_workspaces": IntentExcludeRuntime, // issued target fences outlive Page deletion
-	"mooring_edit_lease_requests":   IntentExcludeRuntime,
-	"artifact_version_heads":        IntentInclude, // immutable storage family and separate latest/shared pins
-	"artifact_version_blobs":        IntentInclude, // binary project assets, encoded losslessly
-	"artifact_versions":             IntentInclude, // all retained whole-project manifests
+	"artifact_version_heads": IntentInclude, // immutable storage family and separate latest/shared pins
+	"artifact_version_blobs": IntentInclude, // binary project assets, encoded losslessly
+	"artifact_versions":      IntentInclude, // all retained whole-project manifests
 
 	"mooring_authority_generations":  IntentExcludeRuntime, // target-local non-ABA tombstones never travel or reset in portable restore
 	"mooring_delivery_gates":         IntentExcludeRuntime,
@@ -59,6 +56,10 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"mooring_documents":              IntentInclude,        // durable generic application state
 	"mooring_receipts":               IntentInclude,        // immutable history and idempotence evidence
 	"mooring_intents":                IntentExcludeRuntime, // live human/run mandates never survive restore
+
+	"mooring_edit_leases":           IntentExcludeRuntime, // target-local editor generation tombstones; no portable capabilities
+	"mooring_edit_lease_workspaces": IntentExcludeRuntime, // issued target fences outlive Page deletion
+	"mooring_edit_lease_requests":   IntentExcludeRuntime,
 
 	// Portable workbook backup is unavailable in the experimental pilot. Dump
 	// refuses a workspace containing workbooks instead of silently omitting them.
