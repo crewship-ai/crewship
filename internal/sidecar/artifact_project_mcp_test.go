@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
@@ -26,9 +27,9 @@ func TestArtifactProjectMCPRejectsMissingCASAndSpoofedIdentity(t *testing.T) {
 func TestArtifactProjectMCPForwardsOriginalRunAndCAS(t *testing.T) {
 	s, key := newRunIdentityServer(t)
 	token := internaltoken.DeriveAgentRunToken(key, "ws-1", "agent-boot", "run-boot")
-	calls := 0
+	var calls atomic.Int32
 	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
+		calls.Add(1)
 		if r.URL.Path != "/api/v1/internal/pages/artifact-tool" || r.Method != "POST" || r.Header.Get("Authorization") != "Bearer "+token || r.Header.Get("X-Internal-Token") != "synthetic-crew-ipc" {
 			t.Error("lost immutable run transport")
 		}
@@ -53,7 +54,7 @@ func TestArtifactProjectMCPForwardsOriginalRunAndCAS(t *testing.T) {
 	w := httptest.NewRecorder()
 	s.handleRoutinesMCP(w, r)
 	isError, text := documentCreateMCPResult(t, w)
-	if !isError || !strings.Contains(text, "keep draft") || calls != 1 {
-		t.Fatalf("conflict retried or hidden: calls=%d error=%v response=%s", calls, isError, text)
+	if !isError || !strings.Contains(text, "keep draft") || calls.Load() != 1 {
+		t.Fatalf("conflict retried or hidden: calls=%d error=%v response=%s", calls.Load(), isError, text)
 	}
 }
