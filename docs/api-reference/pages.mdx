@@ -2496,7 +2496,10 @@ request; 422 invalid content; 429 temporary operation limit; 500 storage failure
 Page read and list responses include `has_document`, which identifies saved native
 document content. They also include `has_slides` and `slides_schema`: saved Slides
 content is reported even for an unknown schema, so a viewer can refuse unsupported
-content explicitly. Pages without a saved deck return `false` and `0`. Page creation accepts `allow_empty: true` to stage a human-owned
+content explicitly. Pages without a saved deck return `false` and `0`. The list also carries `artifact_kind`
+(`project`, `word` or `sheet`) for a Page with a version head and `artifact_shared_version`
+for the version shared with readers; both are omitted otherwise. The latest version is not
+in the list: a reader sees only the shared version, and the artifact read decides who sees more. Page creation accepts `allow_empty: true` to stage a human-owned
 Page without panels; combining this flag with panels or a crew owner is refused.
 
 ## Saved documents from a chat
