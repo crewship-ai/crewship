@@ -182,7 +182,15 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   async function refreshReader(){
    if(dead||networkRetired||transition||current?.writable||current?.blocked||current&&(!current.nativeReadOnly||current.retiring&&!current.retirementFinished))return
    if(readerRefresh)return readerRefresh
-   readerRefresh=(async()=>{const snapshot=await client.read(lifetime.signal);if(dead||networkRetired||transition||current?.writable||current?.blocked||current&&(!current.nativeReadOnly||current.retiring&&!current.retirementFinished))return;if(snapshot.version!==current?.version)await mountEditor(snapshot,viewNow.generation??'1')})().finally(()=>{readerRefresh=undefined})
+   readerRefresh=(async()=>{
+    const snapshot=await client.read(lifetime.signal)
+    if(dead||networkRetired||transition||current?.writable||current?.blocked||current&&(!current.nativeReadOnly||current.retiring&&!current.retirementFinished))return
+    if(snapshot.version!==current?.version){
+     setBusy(true)
+     try{await mountEditor(snapshot,viewNow.generation??'1')}
+     finally{if(!dead&&!networkRetired&&!transition)setBusy(false)}
+    }
+   })().finally(()=>{readerRefresh=undefined})
    return readerRefresh
   }
   async function observeLease(raw:unknown){

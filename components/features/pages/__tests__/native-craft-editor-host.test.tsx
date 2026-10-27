@@ -27,6 +27,25 @@ async function ready(){await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenC
 async function acquire(){fireEvent.click(screen.getByRole('button',{name:'Převzít úpravy'}));await waitFor(()=>expect(ports.at(-1)?.setReadOnly).toHaveBeenCalledWith(false,expect.any(AbortSignal)))}
 
 describe('native Word host authority and persistence',()=>{
+ it.each(['free','handed'])('disables takeover while a newer readonly snapshot bootstraps, then acquires on one click (%s)',async(leaseState)=>{
+  mount();await ready()
+  const newer=await client.read(new AbortController().signal)
+  client.read.mockResolvedValue({...newer,version:'2'})
+  const opening=deferred<{bytes:Uint8Array;editorRevision:string;documentId:string}>()
+  m.createPort.mockImplementationOnce((o:NativeEditorPortOptions)=>{
+   const p=portRig();p.bootstrap.mockReturnValueOnce(opening.promise);ports.push(p);portOptions.push(o);queueMicrotask(()=>o.onReady?.('qualified'));return p
+  })
+  act(()=>stream?.('lease',leaseState==='handed'?ownedLease:emptyLease))
+  await waitFor(()=>expect(ports[1]?.bootstrap).toHaveBeenCalledOnce())
+  expect(screen.getByRole('button',{name:'Převzít úpravy'})).toBeDisabled()
+  fireEvent.click(screen.getByRole('button',{name:'Převzít úpravy'}))
+  expect(client.leaseAction).not.toHaveBeenCalled()
+  await act(async()=>opening.resolve({bytes:newer.bytes,editorRevision:'reader:2',documentId:'doc'}))
+  await waitFor(()=>expect(screen.getByRole('button',{name:'Převzít úpravy'})).toBeEnabled())
+  await acquire()
+  expect(client.leaseAction).toHaveBeenCalledExactlyOnceWith('acquire',{},expect.any(AbortSignal))
+ })
+
  it('is default-off and never admits or mounts an editor',()=>{render(<NativeCraftEditorHost workspaceId="w" pageId="p" humanId="human"/>);expect(m.createClient).not.toHaveBeenCalled();expect(document.querySelector('iframe')).toBeNull()})
  it('opens one shared human session, boots an isolated read-only Word frame and never auto-acquires',async()=>{mount();await ready();expect(client.open).toHaveBeenCalledOnce();expect(m.createClient).toHaveBeenCalledOnce();expect(client.leaseAction).not.toHaveBeenCalled();expect(portOptions[0].requireAccessProtocol).toBe(true);expect(portOptions[0].applicationId).toBe('wordcraft');expect(document.querySelector('iframe')).toHaveAttribute('sandbox','allow-scripts');expect(document.querySelector('iframe')).toHaveAttribute('credentialless');expect(document.querySelector('iframe')?.src).toContain('readonly=1');expect(journal.persist).not.toHaveBeenCalled();expect(client.save).not.toHaveBeenCalled()})
  it('shows the exact named editor to another human without acquiring a write',async()=>{client.lease.mockResolvedValue({...ownedLease,mine:false,can_write:false});mount();await screen.findByText('Upravuje Pavel');expect(screen.getByRole('button',{name:'Požádat o předání'})).toBeEnabled();expect(client.leaseAction).not.toHaveBeenCalled();expect(m.openJournal).not.toHaveBeenCalled();expect(ports.some(p=>p.setReadOnly.mock.calls.some(c=>c[0]===false))).toBe(false)})
