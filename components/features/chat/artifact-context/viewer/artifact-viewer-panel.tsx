@@ -109,11 +109,12 @@ function ViewerBody({ workspaceId, target, onClose, className, variant }: BodyPr
       {body}
     </section>
 
+  const status = errorOf(snapshot.error).status
+  // Lost access wins over the cached copy: a background 403/404 must not leave the old preview on screen.
+  if (snapshot.error && (status === 403 || status === 404)) {
+    return shell(<div className="flex-1" />, <p className="p-6 text-sm text-muted-foreground">You don’t have access to this project</p>)
+  }
   if (!data) {
-    const status = errorOf(snapshot.error).status
-    if (snapshot.error && (status === 403 || status === 404)) {
-      return shell(<div className="flex-1" />, <p className="p-6 text-sm text-muted-foreground">You don’t have access to this project</p>)
-    }
     if (snapshot.error) {
       return shell(<div className="flex-1" />, <div className="space-y-2 p-6 text-sm">
         <p className="text-muted-foreground">This project could not be loaded.</p>

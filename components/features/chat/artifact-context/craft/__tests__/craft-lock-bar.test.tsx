@@ -21,7 +21,7 @@ vi.mock("../use-craft-lease", () => ({
   }),
 }))
 
-import { CraftLockBar } from "../craft-lock-bar"
+import { CraftLockBar, craftEditorHref } from "../craft-lock-bar"
 import { CraftPreview } from "../craft-preview"
 import { CraftStateChip } from "../craft-state-chip"
 
@@ -107,11 +107,18 @@ it("labels an agent holder", () => {
   expect(screen.getByText("Editing: Writer (agent)")).toBeTruthy()
 })
 
-it("is read only without write access", () => {
+it("can_write only says whether this admission holds the lease, so chat still offers its actions", () => {
   state.lease = lease({ can_write: false, holder: pavel })
-  render(<CraftLockBar workspaceId="w" slug="doc" onEdit={() => {}} />)
-  expect(screen.getByText("Read only")).toBeTruthy()
-  expect(screen.queryByRole("button")).toBeNull()
+  const { rerender } = render(<CraftLockBar workspaceId="w" slug="doc" onEdit={() => {}} />)
+  expect(screen.queryByText("Read only")).toBeNull()
+  expect(screen.getByRole("button", { name: "Request edit" })).toBeTruthy()
+  state.lease = lease({ can_write: false })
+  rerender(<CraftLockBar workspaceId="w" slug="doc" onEdit={() => {}} />)
+  expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy()
+})
+
+it("a Page reference opens the native Craft editor", () => {
+  expect(craftEditorHref("ws 1", "@page1")).toBe("/pages/craft/editor?page_id=page1&workspace_id=ws+1")
 })
 
 it("announces holder changes politely", () => {
