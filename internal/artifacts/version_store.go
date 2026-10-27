@@ -14,6 +14,8 @@ import (
 )
 
 var (
+	ErrVersionAuthority   = errors.New("artifact authority changed before publication")
+	ErrVersionDurability  = errors.New("artifact versions require FULL synchronous durability")
 	ErrVersionContentType = errors.New("artifact content family does not match installed version store")
 	ErrVersionNotFound    = errors.New("artifact version not found")
 	ErrVersionConflict    = errors.New("artifact base_version conflict; reload current version before publishing")
@@ -24,7 +26,10 @@ var (
 type VersionKey struct{ WorkspaceID, PageID string }
 
 // VersionAuthorize must check current authority, and any lease/mandate, in the
-// supplied transaction. The returned actor is the sole persisted audit identity.
+// supplied transaction. It is called before work and again immediately before
+// commit, and must return the same actor. Initialization/audit side effects must
+// be idempotent within this transaction. The returned actor is the sole persisted
+// audit identity.
 type VersionAuthorize func(context.Context, *sql.Tx) (string, error)
 type VersionOptions struct {
 	// ContentType is host configuration. It is pinned on first publication.
@@ -117,6 +122,13 @@ func (s *VersionStore) transaction(ctx context.Context, k VersionKey, a VersionA
 		return err
 	}
 	defer tx.Rollback()
+	var synchronous int
+	if err = tx.QueryRowContext(ctx, "PRAGMA synchronous").Scan(&synchronous); err != nil {
+		return err
+	}
+	if synchronous < 2 {
+		return ErrVersionDurability
+	}
 	// Establish the existing database writer fence before checking live authority.
 	if _, err = tx.ExecContext(ctx, `UPDATE document_writer_fence SET seq=seq WHERE id=1`); err != nil {
 		return err
@@ -145,6 +157,13 @@ func (s *VersionStore) transaction(ctx context.Context, k VersionKey, a VersionA
 	}
 	if err = fn(tx, actor); err != nil {
 		return err
+	}
+	finalActor, err := a(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if finalActor != actor {
+		return ErrVersionAuthority
 	}
 	return tx.Commit()
 }
@@ -393,10 +412,19 @@ func (s *VersionStore) View(ctx context.Context, k VersionKey, a VersionViewAuth
 		return VersionView{}, fmt.Errorf("%w: view authority required", ErrVersionInvalid)
 	}
 	var selection VersionSelection
+	selectedOnce := false
 	authorize := func(ctx context.Context, tx *sql.Tx) (string, error) {
 		actor, chosen, e := a(ctx, tx)
+		if e != nil {
+			return "", e
+		}
+		// A same-actor downgrade must not release an earlier owner's snapshot.
+		if selectedOnce && chosen != selection {
+			return "", ErrVersionAuthority
+		}
 		selection = chosen
-		return actor, e
+		selectedOnce = true
+		return actor, nil
 	}
 	err = s.transaction(ctx, k, authorize, func(tx *sql.Tx, _ string) error {
 		var e error

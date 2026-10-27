@@ -176,6 +176,13 @@ func TestVersionStoreDisabledAndAtomicPageCreation(t *testing.T) {
 		if _, err := a(ctx, tx); err != nil {
 			return "", err
 		}
+		var exists int
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM pages WHERE id='created' AND workspace_id='ws' AND owner_user_id='owner'`).Scan(&exists); err != nil {
+			return "", err
+		}
+		if exists == 1 {
+			return "owner", nil
+		}
 		_, err := tx.ExecContext(ctx, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES('created','ws','created','Created','owner','{}')`)
 		return "owner", err
 	}
