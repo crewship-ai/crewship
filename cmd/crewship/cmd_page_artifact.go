@@ -33,8 +33,8 @@ func newPageArtifactCommand() *cobra.Command {
 				endpoint = "/api/v1/pages/artifacts"
 			} else {
 				base, _ := cmd.Flags().GetInt64("base-version")
-				if base < 0 || !cmd.Flags().Changed("base-version") {
-					return fmt.Errorf("--base-version is required (0 initializes an existing Page)")
+				if base < 1 || !cmd.Flags().Changed("base-version") {
+					return fmt.Errorf("--base-version must be the exact positive latest version; use create for a new project")
 				}
 				body["base_version"] = base
 			}

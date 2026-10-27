@@ -344,6 +344,7 @@ POST /api/v1/pages/artifacts roleInline
 POST /api/v1/pages/import roleInline
 POST /api/v1/pages/maintenance roleManage
 POST /api/v1/pages/{slug}/application/actions/{panelId}/{actionId} roleCreate
+POST /api/v1/pages/{slug}/artifact/versions roleInline
 POST /api/v1/pages/{slug}/craft/document/import roleSelf
 POST /api/v1/pages/{slug}/craft/document/reconcile roleSelf
 POST /api/v1/pages/{slug}/craft/document/restore roleSelf

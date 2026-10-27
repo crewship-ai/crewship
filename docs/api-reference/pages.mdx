@@ -2560,3 +2560,33 @@ authentication, 403 missing current authority, 404 disabled feature, 409 occupie
 address, 413 request/history limit, 500 internal failure, 503 unavailable durable
 storage. Retain the candidate after a refusal. CLI:
 `crewship page artifact create demo --name "Demo" --file manifest.json`.
+
+## Artifact project versions
+
+| Method | Route | Behavior |
+| --- | --- | --- |
+| GET | `/api/v1/pages/{slug}/artifact` | Authorized snapshot; optional `version` selects retained content |
+| GET | `/api/v1/pages/{slug}/artifact/versions` | Snapshot with the authorized retained version list |
+| POST | `/api/v1/pages/{slug}/artifact/versions` | Atomically publish a complete successor manifest |
+
+**Auth:** reads apply the current Page ACL and require CLI `pages:read` scope.
+Publication requires the human owner and current `pages:write` authority.
+A read-scoped owner can read history with `can_write: false`. Other authorized
+readers receive only the shared pin and no private history or quota usage.
+**Request:** reads take a Page slug or `@page_id`, workspace selection and an
+optional positive `version` query. Publication takes the exact positive latest
+`base_version`, `entrypoint`, complete `files` and optional `message`. Every file
+requires `path`, UTF-8 `content` and `media_type`; omitted files are absent from
+the successor. Existing versions remain retained.
+**Response:** reads return `page_id`, `name`, `slug`, `origin`, `enabled`,
+`can_write`, `latest_version`, `shared_version`, `manifest`, `versions`, `quota`
+and `comments`. Publication returns `{page_id,slug,version,url,actor}` and leaves
+the shared pin unchanged. It does not retry a conflicting candidate.
+**Statuses:** 200 success; 400 invalid request or version; 401 invalid credential;
+403 missing current authority; 404 disabled, missing or inaccessible content;
+409 stale publication base; 413 publication quota/request limit; 500 internal
+failure; 503 unavailable durable storage. Keep a refused candidate locally.
+
+CLI: `crewship page artifact get demo --version 1`,
+`crewship page artifact versions demo`, and
+`crewship page artifact publish demo --base-version 1 --file manifest.json`.

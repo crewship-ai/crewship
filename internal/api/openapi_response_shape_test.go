@@ -94,6 +94,8 @@ var responseShapeContracts = []struct {
 	{name: "CrewPolicyResponseV1", pointer: "/components/schemas/CrewPolicyResponseV1", value: crewPolicyResponse{}},
 	{name: "DocumentAvailability", pointer: "/components/schemas/DocumentAvailability", value: DocumentAvailability{}},
 	{name: "ArtifactProjectAvailability", pointer: "/components/schemas/ArtifactProjectAvailability", value: artifactProjectAvailabilityResponse{}},
+	{name: "ArtifactProjectSnapshot", pointer: "/components/schemas/ArtifactProjectSnapshot", value: artifactProjectSnapshotResponse{}},
+	{name: "ArtifactProjectMutationResponse", pointer: "/components/schemas/ArtifactProjectMutationResponse", value: artifactProjectMutationResponse{}},
 	{name: "DocumentChatResultsResponse", pointer: "/components/schemas/DocumentChatResults", value: DocumentChatResultsResponse{}},
 	{name: "DocumentChatResult", pointer: "/components/schemas/DocumentChatResults/properties/results/items", value: DocumentChatResult{}},
 	{name: "DocumentStateResponse", pointer: "/components/schemas/DocumentState", value: DocumentStateResponse{}},

@@ -1381,6 +1381,78 @@
         ],
         "type": "object"
       },
+      "ArtifactProjectComment": {
+        "additionalProperties": false,
+        "properties": {
+          "answered_version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "author": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "path": {
+            "description": "Canonical relative project path, at most512 UTF8 bytes; absolute paths, traversal, backslashes, query strings and fragments are refused.",
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          },
+          "quote": {
+            "type": "string"
+          },
+          "replies": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactProjectReply"
+            },
+            "type": "array"
+          },
+          "selector": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "comment",
+              "pending",
+              "working",
+              "answered",
+              "needs_clarification"
+            ],
+            "type": "string"
+          },
+          "task_id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "path",
+          "selector",
+          "quote",
+          "text",
+          "author",
+          "created_at",
+          "status",
+          "replies"
+        ],
+        "type": "object"
+      },
       "ArtifactProjectCreateRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1470,6 +1542,29 @@
         ],
         "type": "object"
       },
+      "ArtifactProjectFile": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "media_type": {
+            "type": "string"
+          },
+          "path": {
+            "description": "Canonical relative project path, at most512 UTF8 bytes; absolute paths, traversal, backslashes, query strings and fragments are refused.",
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "content",
+          "media_type"
+        ],
+        "type": "object"
+      },
       "ArtifactProjectFileInput": {
         "additionalProperties": false,
         "properties": {
@@ -1492,6 +1587,306 @@
           "path",
           "content",
           "media_type"
+        ],
+        "type": "object"
+      },
+      "ArtifactProjectManifest": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "entrypoint": {
+            "description": "Canonical relative project path, at most512 UTF8 bytes; absolute paths, traversal, backslashes, query strings and fragments are refused.",
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          },
+          "files": {
+            "description": "Complete atomic file set; omitted files are not in the new version. Paths must be unique. The default server version limit is32MiB of content.",
+            "items": {
+              "$ref": "#/components/schemas/ArtifactProjectFile"
+            },
+            "maxItems": 256,
+            "minItems": 1,
+            "type": "array"
+          },
+          "message": {
+            "type": "string"
+          },
+          "restored_from": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "entrypoint",
+          "files",
+          "created_at",
+          "message",
+          "restored_from"
+        ],
+        "type": "object"
+      },
+      "ArtifactProjectMutationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "page_id": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "page_id",
+          "slug",
+          "version",
+          "url",
+          "actor"
+        ],
+        "type": "object"
+      },
+      "ArtifactProjectOrigin": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "chat_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "chat_id",
+          "agent_id"
+        ],
+        "type": "object"
+      },
+      "ArtifactProjectPublishRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "base_version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "entrypoint": {
+            "description": "Canonical relative project path, at most512 UTF8 bytes; absolute paths, traversal, backslashes, query strings and fragments are refused.",
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          },
+          "files": {
+            "description": "Complete atomic file set; omitted files are not in the new version. Paths must be unique. The default server version limit is32MiB of content.",
+            "items": {
+              "$ref": "#/components/schemas/ArtifactProjectFileInput"
+            },
+            "maxItems": 256,
+            "minItems": 1,
+            "type": "array"
+          },
+          "message": {
+            "description": "The server additionally enforces this bound in UTF-8 bytes.",
+            "maxLength": 4096,
+            "type": "string"
+          }
+        },
+        "required": [
+          "base_version",
+          "entrypoint",
+          "files"
+        ],
+        "type": "object"
+      },
+      "ArtifactProjectQuota": {
+        "additionalProperties": false,
+        "properties": {
+          "limit_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "retention": {
+            "description": "Visible keep-all policy; the server never silently deletes retained versions. Quota refusal preserves existing data.",
+            "type": "string"
+          },
+          "used_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "warning": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "used_bytes",
+          "limit_bytes",
+          "warning",
+          "retention"
+        ],
+        "type": "object"
+      },
+      "ArtifactProjectReply": {
+        "additionalProperties": false,
+        "properties": {
+          "author": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "needs_clarification": {
+            "type": "boolean"
+          },
+          "text": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "text",
+          "version",
+          "author",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "ArtifactProjectSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "can_write": {
+            "type": "boolean"
+          },
+          "comments": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactProjectComment"
+            },
+            "type": "array"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "latest_version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/ArtifactProjectManifest"
+          },
+          "name": {
+            "type": "string"
+          },
+          "origin": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ArtifactProjectOrigin"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "page_id": {
+            "type": "string"
+          },
+          "quota": {
+            "$ref": "#/components/schemas/ArtifactProjectQuota"
+          },
+          "shared_version": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactProjectVersion"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "page_id",
+          "name",
+          "slug",
+          "origin",
+          "enabled",
+          "can_write",
+          "latest_version",
+          "shared_version",
+          "manifest",
+          "versions",
+          "quota",
+          "comments"
+        ],
+        "type": "object"
+      },
+      "ArtifactProjectVersion": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "entrypoint": {
+            "description": "Canonical relative project path, at most512 UTF8 bytes; absolute paths, traversal, backslashes, query strings and fragments are refused.",
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "restored_from": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "entrypoint",
+          "message",
+          "actor",
+          "created_at",
+          "restored_from"
         ],
         "type": "object"
       },
@@ -128448,6 +128843,364 @@
           "pages"
         ],
         "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/pages/{slug}/artifact": {
+      "get": {
+        "description": "Get page artifact (GET /api/v1/pages/{slug}/artifact).",
+        "operationId": "get_api_v1_pages_slug_artifact",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectSnapshot"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get page artifact",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/pages/{slug}/artifact/versions": {
+      "get": {
+        "description": "List page artifact versions (GET /api/v1/pages/{slug}/artifact/versions).",
+        "operationId": "get_api_v1_pages_slug_artifact_versions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectSnapshot"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "List page artifact versions",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      },
+      "post": {
+        "description": "Create page artifact versions (POST /api/v1/pages/{slug}/artifact/versions).",
+        "operationId": "post_api_v1_pages_slug_artifact_versions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtifactProjectPublishRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectMutationResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Create page artifact versions",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
       }
     },
     "/api/v1/pages/{slug}/craft/availability": {
