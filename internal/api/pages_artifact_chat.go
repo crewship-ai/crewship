@@ -47,13 +47,16 @@ func (h *PageHandler) RecordArtifactProjectIntent(ctx context.Context, receipt *
 	if err != nil {
 		return err
 	}
+	if err = sealDocumentIterationChat(ctx, tx, receipt); err != nil {
+		return err
+	}
+	if err = h.artifactProjectMessageAuthority(ctx, tx, receipt, message, intent, originalRun.String); err != nil {
+		return err
+	}
 	var same int
 	err = tx.QueryRowContext(ctx, `SELECT count(*) FROM artifact_project_message_intents WHERE message_id=? AND workspace_id=? AND human_user_id=? AND chat_id=? AND submission_id=? AND COALESCE(page_id,'')=? AND COALESCE(comment_id,'')=? AND base_version=? AND revoked_at IS NULL`, message, receipt.WorkspaceID, receipt.UserID, receipt.ChatID, intent.SubmissionID, intent.PageID, intent.CommentID, intent.BaseVersion).Scan(&same)
 	if err != nil || same != 1 {
 		return errArtifactProjectAccess
-	}
-	if err = sealDocumentIterationChat(ctx, tx, receipt); err != nil {
-		return err
 	}
 	return tx.Commit()
 }
@@ -165,6 +168,14 @@ func (h *InternalHandler) admitArtifactProjectStart(r *http.Request, entry journ
 		if n, e := result.RowsAffected(); e != nil || n != 1 {
 			return 403, errArtifactProjectAccess
 		}
+	}
+	// Task assignment is the final write and can change the source mandate.
+	// Revalidate the complete original authority before any run becomes visible.
+	if err = pages.artifactProjectMessageAuthority(ctx, tx, receipt, message, intent, entry.TraceID); err != nil {
+		return 403, err
+	}
+	if err = pages.checkArtifactProjectRunConsent(ctx, a, intent.PageID); err != nil {
+		return 403, err
 	}
 	if err = tx.Commit(); err != nil {
 		return 500, err
