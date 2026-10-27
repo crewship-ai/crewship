@@ -34,6 +34,10 @@
 # schedule trigger, deleting the step) leaves every check here green. Guarding
 # that belongs in branch protection or a workflow-level lint, not here.
 #
+# The OSV section also executes the real lockfile-scan step with a synthetic
+# scanner, checking its invocation and keeping scanner failures distinct from
+# accepted low-severity findings. It does not replace a real scanner run.
+#
 # Usage: bash scripts/security-yml-test.sh
 set -uo pipefail
 
@@ -59,6 +63,7 @@ job_body() {
 
 JOB_SRC="$(job_body scheduled-report)"
 VULN_JOB_SRC="$(job_body govulncheck)"
+OSV_JOB_SRC="$(job_body osv-scan)"
 
 # Called at top level ON PURPOSE. Folding this into a `$(job_body ...)` wrapper
 # puts the `exit 1` inside a command substitution, where it kills the subshell
@@ -74,6 +79,7 @@ require_job_found() {
 
 require_job_found scheduled-report "$JOB_SRC"
 require_job_found govulncheck "$VULN_JOB_SRC"
+require_job_found osv-scan "$OSV_JOB_SRC"
 
 # Print the lines between `# <name>:begin` and `# <name>:end` within a job
 # body, dedented out of the YAML block scalar. Empty if the markers are absent.
@@ -507,6 +513,64 @@ expect_allowlist "allowlist entry does not match by prefix" \
 expect_allowlist "as committed: an ID outside the allowlist is reported" \
   0 'GO-2026-9999' 'Vulnerability #1: GO-2026-9999
 '
+
+# Exercise the entire real OSV step, including its scanner invocation. Only
+# the log destination is relocated to an owned directory; the result gate
+# is never copied into the test. A panic is a scanner failure even if a
+# valid low-severity summary happened to be printed before it.
+OSV_RUN_SRC="$(printf '%s\n' "$OSV_JOB_SRC" | awk '
+  /- name: Run osv-scanner against lockfiles/ { step = 1; next }
+  step && /^        run: \|$/ { inside = 1; next }
+  inside && /^          / { sub(/^          /, ""); print; next }
+  inside && /^[[:space:]]*$/ { print; next }
+  inside { exit }
+')"
+if [ -z "$OSV_RUN_SRC" ]; then
+  echo "FATAL: could not extract the OSV lockfile scan step" >&2
+  exit 1
+fi
+OSV_TMP="$(mktemp -d)"
+trap 'rm -rf -- "$OSV_TMP"' EXIT
+OSV_RUN_SRC="${OSV_RUN_SRC//\/tmp\/osv.log/$OSV_TMP/osv.log}"
+
+expect_osv() {
+  local label="$1" want="$2" scanner_exit="$3" fixture="$4" rc args
+  rm -f "$OSV_TMP/args"
+  OSV_TEST_ARGS="$OSV_TMP/args" OSV_TEST_EXIT="$scanner_exit" \
+    OSV_TEST_OUTPUT="$fixture" bash -c '
+    osv-scanner() {
+      printf "%s\n" "$@" > "$OSV_TEST_ARGS"
+      printf "%s\n" "$OSV_TEST_OUTPUT"
+      return "$OSV_TEST_EXIT"
+    }
+    '"$OSV_RUN_SRC" > "$OSV_TMP/result" 2>&1
+  rc=$?
+  args="$(cat "$OSV_TMP/args" 2>/dev/null)"
+  if [ "$args" != $'--lockfile=go.mod\n--lockfile=pnpm-lock.yaml\n--lockfile=tools/pages-build/pnpm-lock.yaml' ]; then
+    fail "$label (scanner missing, lockfiles changed, or analysis disabled)"
+  elif [ "$rc" -ne "$want" ]; then
+    fail "$label (want gate exit $want, got $rc)"
+    cat "$OSV_TMP/result"
+  else
+    pass "$label"
+  fi
+}
+
+echo
+echo "OSV scanner gate (findings and scanner failures stay distinct):"
+OSV_MEDIUM='Total 1 package affected by 1 known vulnerability (0 Critical, 0 High, 1 Medium, 0 Low, 0 Unknown)'
+expect_osv "clean executed scan -> green" 0 0 'No vulnerabilities found'
+expect_osv "medium-only findings exit 1 -> green" 0 1 "$OSV_MEDIUM"
+expect_osv "high finding -> fail" 1 1 \
+  'Total 1 package affected by 1 known vulnerability (0 Critical, 1 High, 0 Medium, 0 Low, 0 Unknown)'
+expect_osv "critical finding -> fail" 1 1 \
+  'Total 1 package affected by 1 known vulnerability (1 Critical, 0 High, 0 Medium, 0 Low, 0 Unknown)'
+expect_osv "SSA panic without summary -> fail" 1 2 'panic: unexpected expr: *ast.KeyValueExpr'
+expect_osv "missing scanner -> fail" 1 127 'osv-scanner: command not found'
+expect_osv "unparseable findings -> fail" 1 1 'unexpected output format'
+expect_osv "SSA panic after valid low summary -> fail" 1 2 \
+  "$OSV_MEDIUM"$'\npanic: unexpected expr: *ast.KeyValueExpr'
+expect_osv "network error after valid low summary -> fail" 1 129 "$OSV_MEDIUM"
 
 echo
 if [ "$FAILURES" -eq 0 ]; then
