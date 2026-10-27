@@ -48,7 +48,7 @@ it.each(["wordcraft", "gridcraft"] as const)("binds %s only after correlated asy
   expect(request.type).toBe(applicationId === "wordcraft" ? "wordcraft:snapshot" : "gridcraft:export-native")
   expect(request.requestId).toMatch(/^[0-9a-f-]{36}$/)
   reply(r, request)
-  expect(await snapshot).toEqual({ bytes, documentId: "bound", editorRevision: expect.stringContaining(`snapshot:${request.requestId}:`) })
+  expect(await snapshot).toEqual({ bytes, documentId: "bound", editorRevision: expect.stringContaining(`snapshot:${request.requestId}:`), ...(applicationId === "wordcraft" ? { nativeState: expect.stringMatching(/^[a-f0-9]{64}$/) } : {}) })
   expect(r.frame.postMessage).toHaveBeenCalledTimes(1); r.adapter.close()
 })
 it("rejects snapshots before bootstrap and does not treat changed as import completion", async () => {
@@ -274,5 +274,17 @@ it("keeps a Word manual save ticket when a failure message exceeds the native UT
   expect(r.port.postMessage).not.toHaveBeenCalled()
   expect(r.adapter.saveFailed("utf8-ticket", "storage unavailable")).toBe(true)
   expect(latest(r)).toEqual({ type: "wordcraft:save-failed", requestId: "utf8-ticket", error: "storage unavailable" })
+  r.adapter.close()
+})
+
+
+it("exposes stable Word native state separately from distinct RPC receipt identities", async () => {
+  const r = rig(); const first = await bootstrap(r)
+  const secondPending = r.adapter.snapshot(signal()); reply(r, latest(r)); const second = await secondPending
+  expect(first).toHaveProperty("nativeState", expect.stringMatching(/^[a-f0-9]{64}$/))
+  expect(second).toHaveProperty("nativeState", first.nativeState)
+  expect(second.editorRevision).not.toBe(first.editorRevision)
+  const changedPending = r.adapter.snapshot(signal()); reply(r, latest(r), "bound", "changed-wire-revision", new Uint8Array([5])); const changed = await changedPending
+  expect(changed.nativeState).not.toBe(first.nativeState)
   r.adapter.close()
 })

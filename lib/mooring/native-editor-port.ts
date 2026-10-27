@@ -37,7 +37,7 @@ export interface NativeEditorPort {
 }
 export function createNativeEditorPort(options: NativeEditorPortOptions): NativeEditorPort { return buildNativeEditorPort(options) }
 
-export interface NativeEditorSnapshot { bytes: Uint8Array; editorRevision: string; documentId: string }
+export interface NativeEditorSnapshot { bytes: Uint8Array; editorRevision: string; documentId: string; nativeState?: string }
 interface SnapshotProof { requestId: string; revision: string; editorRevision: string; document: string; hash: Promise<string>; wordBytes?: Uint8Array }
 interface PendingRPC { kind: "snapshot" | "validate" | "open" | "access"; readOnly?: boolean; resolve(value: unknown): void; reject(error: Error): void; finish(): void }
 const MAX_NATIVE_BYTES = 32 * 1024 * 1024
@@ -125,7 +125,7 @@ function buildNativeEditorPort(options: NativeEditorPortOptions): NativeEditorPo
       const expired = [...proofs.keys()].find(key => !tickets.has(key) && key !== id)
       if (expired !== undefined) proofs.delete(expired)
     }
-    request.finish(); request.resolve({ bytes, editorRevision, documentId: document })
+    request.finish(); request.resolve({ bytes, editorRevision, documentId: document, ...(app === "wordcraft" ? { nativeState: hex(identityDigest) } : {}) })
   }
   function receive(raw: unknown) {
     if (closed) return

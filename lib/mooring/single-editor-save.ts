@@ -27,7 +27,7 @@ export interface SingleEditorSaveOptions {
   sessionId: string
   journal: NativeDraftJournal
   engine: {
-    snapshot(signal: AbortSignal, requestId?: string): Promise<{ bytes: Uint8Array; editorRevision: string }>
+    snapshot(signal: AbortSignal, requestId?: string): Promise<{ bytes: Uint8Array; editorRevision: string; nativeState?: string }>
     validate(draft: NativeDraft, signal: AbortSignal): Promise<void>
   }
   transport: {
@@ -39,7 +39,7 @@ export interface SingleEditorSaveOptions {
   idleMs?: number
   timeoutMs?: number
 }
-interface Prepared { draft: NativeSaveRequest; epoch: number; sequence: number }
+interface Prepared { draft: NativeSaveRequest; epoch: number; sequence: number; nativeState?: string }
 
 /** One immutable editor/lease lifecycle. A new generation needs a new editor
  * loaded from its confirmed version, never an automatic replay of recovery. */
@@ -50,6 +50,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   if (!Number.isFinite(idleMs) || idleMs < 1 || idleMs > 5000 || !Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 60_000) throw new Error("invalid_save_deadline")
   let active = true, writable = true, dirty = false, edits = 0, baseVersion = options.baseVersion
   let blocked: string | undefined, latest: Prepared | undefined, unconfirmed: Prepared | undefined
+  let confirmed: { nativeState: string; contentHash: string; version: string } | undefined
   let pending: { abort: AbortController; done: Promise<void> } | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
   let preparations = Promise.resolve(), draftWrites = Promise.resolve()
@@ -65,7 +66,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   const stop = () => {
     if (!active) return
     active = false; clearTimeout(timer); lifetime.abort(); pending?.abort.abort()
-    latest = undefined; unconfirmed = undefined
+    latest = undefined; unconfirmed = undefined; confirmed = undefined
     emit("stopped")
   }
   const unregister = options.journal.onRetire(stop)
@@ -95,6 +96,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     unconfirmed = undefined
     try { await options.journal.confirm(attempt.draft) } catch { blocked = "storage"; emit("draft", "storage"); return }
     if (!active || !writable) return
+    confirmed = attempt.nativeState === undefined ? undefined : { nativeState: attempt.nativeState, contentHash: attempt.draft.contentHash, version: receipt.version }
     try { void Promise.resolve(options.onReceipt?.(receipt)).catch(() => {}) } catch { /* Receipt observers cannot change persistence. */ }
     if (!active || !writable) return
     dirty = preparingCount > 0 || lastFailedPreparation > (latest?.sequence ?? 0) || edits !== attempt.epoch || latest?.draft.contentHash !== attempt.draft.contentHash || latest?.draft.editorRevision !== attempt.draft.editorRevision
@@ -177,7 +179,8 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
         if (!active) return
         const contentHash = `sha256:${Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("")}`
         if (latest && draft.editorRevision === latest.draft.editorRevision && contentHash !== latest.draft.contentHash) throw new Error("unstable_editor_revision")
-        latest = { draft: { ...draft, workspaceId: options.workspaceId, pageId: options.pageId, contentHash }, epoch, sequence }
+        const nativeState = options.applicationId === "wordcraft" && typeof snapshot.nativeState === "string" && snapshot.nativeState.length > 0 && snapshot.nativeState.length <= 256 && !snapshot.nativeState.includes("\0") ? snapshot.nativeState : undefined
+        latest = { nativeState, draft: { ...draft, workspaceId: options.workspaceId, pageId: options.pageId, contentHash }, epoch, sequence }
         return latest
       } catch {
         lastFailedPreparation = sequence
@@ -204,6 +207,24 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
         if (latest?.sequence === attempt.sequence) latest = attempt
         // Another manual operation may have started while this journal write
         // awaited storage. Repeat both the transport fence and base sampling.
+      }
+      // A timer can capture a second RPC for the exact state already committed
+      // by the server. Retire only its local recovery row; the RPC-bound receipt
+      // and native ACK remain exclusive to the original request. Explicit saves
+      // (including transfer flushes without a native ticket) always transmit.
+      if (autosaveToken !== undefined && attempt.nativeState !== undefined && confirmed?.nativeState === attempt.nativeState && confirmed.contentHash === attempt.draft.contentHash && confirmed.version === baseVersion) {
+        const baseline = confirmed
+        try { await options.journal.confirm(attempt.draft) } catch {
+          if (!unavailable() && confirmed === baseline && baseVersion === baseline.version) { blocked = "storage"; emit("draft", "storage") }
+          return
+        }
+        // Another save can finish, fail, or retire authority during storage.
+        // Its state and receipt baseline always supersede this older idle RPC.
+        if (unavailable() || confirmed !== baseline || baseVersion !== baseline.version) return
+        dirty = preparingCount > 0 || lastFailedPreparation > (latest?.sequence ?? 0) || edits !== attempt.epoch || latest?.draft.contentHash !== attempt.draft.contentHash || latest?.nativeState !== attempt.nativeState
+        emit(dirty ? "dirty" : "saved")
+        scheduleIfNeeded()
+        return
       }
       await transmit(attempt, false)
       if (manual && unavailable()) throw new Error(unavailable())
