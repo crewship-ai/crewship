@@ -49,10 +49,12 @@ vi.mock("@/components/features/chat/chat-panel", () => ({
     initialInput,
     autoSendInitial,
     pageContextSlug,
+    draft,
     onSend,
   }: {
     agentSlug: string
     sessionId: string
+    draft?: boolean
     initialInput?: string
     autoSendInitial?: boolean
     pageContextSlug?: string
@@ -65,6 +67,7 @@ vi.mock("@/components/features/chat/chat-panel", () => ({
       data-initial={initialInput ?? "(none)"}
       data-autosend={String(!!autoSendInitial)}
       data-page={pageContextSlug ?? "(none)"}
+      data-draft={String(!!draft)}
     >
       <button onClick={() => onSend?.(sessionId, initialInput ?? "")}>simulate sent message</button>
     </div>
@@ -253,14 +256,38 @@ describe("<ChatClient> — the ?prompt= handoff belongs to one conversation", ()
     expect(p.getAttribute("data-session")).not.toBe("riley-1")
     expect(p.getAttribute("data-initial")).toBe("Review the page")
     expect(p.getAttribute("data-autosend")).toBe("false")
+    // #4369 — a minted id has no row, so the panel must not read it yet.
+    expect(p.getAttribute("data-draft")).toBe("true")
     expect(apiFetchMock.mock.calls.some(([, options]) => options?.method === "POST")).toBe(false)
 
     setUrl("/chat/morgan", "?session=morgan-1")
     view.rerender(<ChatClient />)
     window.dispatchEvent(new Event("popstate"))
     await waitFor(() => expect(screen.getByTestId("chat-panel").getAttribute("data-session")).toBe("morgan-1"))
+    expect(screen.getByTestId("chat-panel").getAttribute("data-draft")).toBe("false")
     expect(screen.getByTestId("chat-panel").getAttribute("data-initial")).toBe("(none)")
     expect(screen.getByTestId("chat-panel").getAttribute("data-autosend")).toBe("false")
+  })
+
+  it("loads a sent draft like any chat when the reader comes back to it", async () => {
+    setUrl("/chat/riley", "?new=1")
+    const view = render(<ChatClient />)
+    const p = await panel()
+    const draftId = p.getAttribute("data-session")!
+    expect(p.getAttribute("data-draft")).toBe("true")
+    // The first send created the row, even before the thread list shows it.
+    fireEvent.click(screen.getByText("simulate sent message"))
+
+    setUrl("/chat/morgan", "?session=morgan-1")
+    view.rerender(<ChatClient />)
+    window.dispatchEvent(new Event("popstate"))
+    await waitFor(() => expect(screen.getByTestId("chat-panel").getAttribute("data-session")).toBe("morgan-1"))
+
+    setUrl("/chat/riley", `?session=${draftId}`)
+    view.rerender(<ChatClient />)
+    window.dispatchEvent(new Event("popstate"))
+    await waitFor(() => expect(screen.getByTestId("chat-panel").getAttribute("data-session")).toBe(draftId))
+    expect(screen.getByTestId("chat-panel").getAttribute("data-draft")).toBe("false")
   })
 
   it("keeps a Page handoff in its new session and never auto-sends it", async () => {
