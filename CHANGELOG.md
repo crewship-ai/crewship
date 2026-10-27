@@ -10,6 +10,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 - Show agent artifact project steps in chat as cards with kind, version, Draft/Shared state and a running "Creating version n…" step that settles into "vn ready · Restore"; off by default behind `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
+- Add an opt-in private native-document draft journal and whole-snapshot save coordinator. Recovery offers compare or copy, stale generations cannot replay drafts, and only an exact durable receipt confirms a save. Existing editor profiles remain unchanged.
+
 - **Opening a new conversation logged three 404s.** A draft session no longer requests its execution profile, messages or participants before the first send creates it.
 - **Artifact authoring clients support complete project versions.** Add pilot MCP tools and `page artifact` commands for atomic manifests, explicit version conflicts, restore and anchored feedback on servers that enable the artifact project backend.
 

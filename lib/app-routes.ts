@@ -48,6 +48,7 @@ export const APP_ROUTE_PATTERNS = [
   "/orchestration/projects/[projectId]",
   "/p/[token]",
   "/pages",
+  "/pages/craft/editor",
   "/pages/[slug]",
   "/paymaster",
   "/reset-password",
