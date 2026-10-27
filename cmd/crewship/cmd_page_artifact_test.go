@@ -82,3 +82,26 @@ func TestPageArtifactAvailabilityAndHumanConsent(t *testing.T) {
 		})
 	}
 }
+
+func TestPageArtifactManifestRejectsAmbiguousJSONBeforeNetwork(t *testing.T) {
+	for _, raw := range []string{
+		`{"entrypoint":"index.html","entrypoint":"other.html","files":[]}`,
+		`{"entrypoint":"index.html","files":[{"path":"index.html","content":"first","content":"last","media_type":"text/html"}]}`,
+		"{\"entrypoint\":\"index.html\",\"files\":[{\"path\":\"index.html\",\"content\":\"" + string([]byte{255}) + "\",\"media_type\":\"text/html\"}]}",
+	} {
+		t.Run(raw, func(t *testing.T) {
+			stub := pageStub(t)
+			cmd := newPageArtifactCommand()
+			cmd.PersistentPreRun = rootCmd.PersistentPreRun
+			cmd.SetOut(&bytes.Buffer{})
+			cmd.SetArgs([]string{"publish", "demo", "--base-version", "1", "--file", "-"})
+			cmd.SetIn(strings.NewReader(raw))
+			if err := cmd.Execute(); err == nil {
+				t.Fatal("accepted ambiguous manifest")
+			}
+			if len(stub.CallsFor("POST", "/api/v1/pages/demo/artifact/versions")) != 0 {
+				t.Fatal("invalid JSON reached server")
+			}
+		})
+	}
+}

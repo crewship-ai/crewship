@@ -271,7 +271,7 @@ func decodeArtifactProjectJSONBytes(raw []byte, out any) error {
 			return err
 		case json.Delim('['):
 			for d.More() {
-				if err := walk(0); err != nil {
+				if err := walk(depth + 1); err != nil {
 					return err
 				}
 			}
