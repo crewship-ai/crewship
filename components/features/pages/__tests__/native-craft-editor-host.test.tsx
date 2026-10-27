@@ -51,6 +51,39 @@ describe('native Word host authority and persistence',()=>{
  it('never hands off an uncertain final save and retains the original private draft',async()=>{mount();await ready();await acquire();client.save.mockRejectedValueOnce(Error('lost ACK'));act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}));fireEvent.click(await screen.findByRole('button',{name:'Předat uživateli Jana'}));await screen.findByRole('alert');expect(client.leaseAction.mock.calls.some(c=>c[0]==='handoff')).toBe(false);expect(journal.revokeRead).not.toHaveBeenCalled();expect(document.querySelector('iframe')).not.toBeNull();expect(screen.queryByText('Uloženo')).not.toBeInTheDocument()})
  it('a failed durable capture keeps the guarded native frame and never transfers custody',async()=>{mount();await ready();await acquire();journal.persist.mockResolvedValueOnce(undefined).mockRejectedValueOnce(Error('disk full'));act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}));fireEvent.click(await screen.findByRole('button',{name:'Předat uživateli Jana'}));await screen.findByText('Koncept nelze bezpečně zachytit. Předání neproběhlo.');expect(client.leaseAction.mock.calls.some(c=>c[0]==='handoff')).toBe(false);expect(document.querySelector('iframe')).not.toBeNull();expect(ports.at(-1)!.setReadOnly).toHaveBeenCalledWith(true,expect.any(AbortSignal));expect(journal.close).not.toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled()})
  it('explicit read retirement immediately removes content and purges without awaiting a hung native capture',async()=>{mount();await ready();await acquire();ports.at(-1)!.snapshot.mockReturnValueOnce(new Promise(()=>{}));act(()=>stream?.('lease',{...ownedLease,can_write:false}));await waitFor(()=>expect(ports.at(-1)!.snapshot).toHaveBeenCalledOnce());act(()=>stream?.('session_retired',{delivery:'stopped',draft:'purge',reason:'read_revoked'}));await waitFor(()=>expect(document.querySelector('iframe')).toBeNull());expect(journal.revokeRead).toHaveBeenCalledOnce();expect(client.save).not.toHaveBeenCalled()})
+ it('keeps the current editor and completes handoff when the 30-second reauthorization is a valid no-op',async()=>{
+  vi.useFakeTimers({shouldAdvanceTime:true})
+  try{
+   client.reauthorize.mockResolvedValue(false)
+   mount();await ready();await acquire()
+   const p=ports.at(-1)!,frame=document.querySelector('iframe'),acknowledgement=deferred<boolean>()
+   p.ack.mockReturnValueOnce(acknowledgement.promise)
+   client.leaseAction.mockImplementationOnce(async()=>{client.lease.mockResolvedValue({...ownedLease,mine:false,can_write:false,holder:{actor_id:'user:other',display_name:'Jana',kind:'human'},generation:'9007199254740996'});return emptyLease})
+   act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}))
+   fireEvent.click(await screen.findByRole('button',{name:'Předat uživateli Jana'}))
+   await waitFor(()=>expect(p.ack).toHaveBeenCalledOnce())
+   await act(async()=>{await vi.advanceTimersByTimeAsync(30000)})
+   expect(client.reauthorize).toHaveBeenCalledOnce()
+   expect(client.close).not.toHaveBeenCalled()
+   expect(document.querySelector('iframe')).toBe(frame)
+   expect(p.close).not.toHaveBeenCalled()
+   expect(client.leaseAction.mock.calls.some(c=>c[0]==='handoff')).toBe(false)
+   await act(async()=>acknowledgement.resolve(true))
+   await waitFor(()=>expect(client.leaseAction.mock.calls.some(c=>c[0]==='handoff')).toBe(true))
+  }finally{vi.useRealTimers()}
+ })
+ it('still retires the editor when the 30-second reauthorization rejects',async()=>{
+  vi.useFakeTimers({shouldAdvanceTime:true})
+  try{
+   client.reauthorize.mockRejectedValue(Error('native_session_unavailable'))
+   mount();await ready()
+   await act(async()=>{await vi.advanceTimersByTimeAsync(30000)})
+   expect(client.reauthorize).toHaveBeenCalledOnce()
+   expect(client.close).toHaveBeenCalled()
+   expect(document.querySelector('iframe')).toBeNull()
+   expect(screen.getByRole('alert')).toHaveTextContent('Spojení bylo ukončeno')
+  }finally{vi.useRealTimers()}
+ })
  it('a generic write refusal retains private journal rows and cannot claim Saved',async()=>{mount();await ready();await acquire();client.save.mockRejectedValueOnce(new NativeSaveError('write_revoked'));act(()=>portOptions.at(-1)!.onChanged('r2','doc'));await waitFor(()=>expect(client.save).toHaveBeenCalledOnce());await waitFor(()=>expect(ports.at(-1)!.setReadOnly).toHaveBeenCalledWith(true,expect.any(AbortSignal)));expect(journal.revokeRead).not.toHaveBeenCalled();expect(screen.queryByText('Uloženo')).not.toBeInTheDocument()})
 
 })
