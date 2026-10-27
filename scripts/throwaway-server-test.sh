@@ -433,6 +433,46 @@ printf iid-original >"$dir/data/installations/default"
 ownership "$dir" record
 cmd_stop "$name" >/dev/null 2>&1
 
+# Matching JSON snapshots cannot authorize replacement after the established
+# installation file alone changes or disappears: refuse before stopping PID.
+for damage in changed missing; do
+  name="established-$damage"
+  dir="$STATE_ROOT/$name"
+  cmd_start "$name" --binary "$tmp/bin/fake-crewship" --port "$FAKE_PORT" >/dev/null 2>&1
+  mkdir -p "$dir/data/installations"
+  printf iid-established >"$dir/data/installations/default"
+  manifest_set "$dir" instance_id iid-established
+  ownership "$dir" record
+  echo committed-established-fixture >"$dir/data/crewship.db"
+  if (main restart "$name") >/dev/null 2>&1; then r=restarted; else r=refused; fi
+  check "healthy established identity restarts before $damage case" "$r" restarted
+  previous_pid="$(manifest_get "$dir" pid)"
+  if [[ "$damage" == changed ]]; then
+    printf iid-other >"$dir/data/installations/default"
+  else
+    rm "$dir/data/installations/default"
+  fi
+  : >"$FAKE_LOG"
+  if (main restart "$name" --crash) >"$tmp/$damage-id.out" 2>"$tmp/$damage-id.err"; then r=restarted; else r=refused; fi
+  check "$damage established identity refuses restart" "$r" refused
+  check "$damage identity keeps original manifest PID" "$(manifest_get "$dir" pid)" "$previous_pid"
+  check "$damage identity starts no replacement process" "$(cat "$FAKE_SERVER_PID")" "$previous_pid"
+  alive="$(python3 - "$previous_pid" <<'PYALIVE'
+import os, select, sys
+try:
+    fd = os.pidfd_open(int(sys.argv[1])); poll = select.poll(); poll.register(fd, select.POLLIN)
+    print('exited' if poll.poll(0) else 'alive'); os.close(fd)
+except ProcessLookupError:
+    print('exited')
+PYALIVE
+)"
+  check "$damage identity leaves original process alive" "$alive" alive
+  check "$damage identity preserves committed fixture" "$(cat "$dir/data/crewship.db")" committed-established-fixture
+  check "$damage identity issues no Docker operation" "$(wc -l <"$FAKE_LOG")" 0
+  printf iid-established >"$dir/data/installations/default"
+  cmd_stop "$name" >/dev/null 2>&1
+done
+
 # --- --page-projects rejects escape attempts ---
 for bad_pp in ../escape /abs/path "a/b" data server.log manifest.json cli-config.yaml server.pid; do
   if (cmd_start ppreject --binary /bin/true --page-projects "$bad_pp") >/dev/null 2>&1; then r=started; else r=refused; fi

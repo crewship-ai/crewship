@@ -233,6 +233,9 @@ if action == 'verify':
         raise SystemExit('throwaway-server: retained ownership record is missing')
     if path.exists():
         recorded = json.load(open(path))
+        established = recorded.get('instance_id', '') or current['instance_id']
+        if established and actual_iid != established:
+            raise SystemExit('throwaway-server: established installation identity changed or missing')
         if recorded != current:
             # Publishing a newly discovered ID touches two atomic JSON files.
             # Either rename may be interrupted. Recover only the empty -> known
