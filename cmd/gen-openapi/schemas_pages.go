@@ -169,9 +169,10 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	}
 
 	page := obj(map[string]any{
-		"has_document": boolean(),
-		"has_workbook": map[string]any{"type": "boolean", "description": "This Page holds a workbook (read through GET /api/v1/pages/{slug}/workbook). A workbook Page carries no panels."},
-		"has_project":  map[string]any{"type": "boolean", "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for."}, "has_application": boolean(), "publication_version": integer(),
+		"has_document":             boolean(),
+		"native_craft_application": map[string]any{"type": "string", "enum": []string{"wordcraft", "gridcraft"}, "description": "Existing whole-native Craft profile; open through the native editor and its independent admission."},
+		"has_workbook":             map[string]any{"type": "boolean", "description": "This Page holds a workbook (read through GET /api/v1/pages/{slug}/workbook). A workbook Page carries no panels."},
+		"has_project":              map[string]any{"type": "boolean", "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for."}, "has_application": boolean(), "publication_version": integer(),
 		"id": str(), "slug": str(), "name": str(), "description": str(),
 		"owner": map[string]any{"type": "string",
 			"description": "`user/<id>` or `crew/<slug>` — exactly one of the two (§7.1 rule 1)."},
@@ -184,12 +185,13 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	})
 
 	pageRow := obj(map[string]any{
-		"private_audience":       map[string]any{"type": "boolean", "readOnly": true, "description": "Explicit private-audience classification of this authorized index row. A personal view also requires that the caller is its owner; workspace OWNER custody is separate. This read-only field does not grant permission to publish, move or change an audience."},
-		"has_document":           boolean(),
-		"has_workbook":           map[string]any{"type": "boolean", "description": "This Page holds a workbook (read through GET /api/v1/pages/{slug}/workbook). A workbook Page carries no panels."},
-		"can_move":               map[string]any{"type": "boolean", "description": "The caller may initiate movement as page owner or workspace administrator; the destination must also accept them."},
-		"can_remove_from_folder": map[string]any{"type": "boolean", "description": "The page is filed and the caller is its owner, workspace administrator, or a live folder ACL writer."},
-		"has_project":            map[string]any{"type": "boolean", "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for."}, "has_application": boolean(), "publication_version": integer(),
+		"private_audience":         map[string]any{"type": "boolean", "readOnly": true, "description": "Explicit private-audience classification of this authorized index row. A personal view also requires that the caller is its owner; workspace OWNER custody is separate. This read-only field does not grant permission to publish, move or change an audience."},
+		"has_document":             boolean(),
+		"native_craft_application": map[string]any{"type": "string", "enum": []string{"wordcraft", "gridcraft"}, "description": "Existing whole-native Craft profile; open through the native editor and its independent admission."},
+		"has_workbook":             map[string]any{"type": "boolean", "description": "This Page holds a workbook (read through GET /api/v1/pages/{slug}/workbook). A workbook Page carries no panels."},
+		"can_move":                 map[string]any{"type": "boolean", "description": "The caller may initiate movement as page owner or workspace administrator; the destination must also accept them."},
+		"can_remove_from_folder":   map[string]any{"type": "boolean", "description": "The page is filed and the caller is its owner, workspace administrator, or a live folder ACL writer."},
+		"has_project":              map[string]any{"type": "boolean", "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for."}, "has_application": boolean(), "publication_version": integer(),
 		"id": str(), "slug": str(), "name": str(), "description": str(),
 		"owner": str(), "owner_crew_slug": str(),
 		"panel_count": map[string]any{"type": "integer",

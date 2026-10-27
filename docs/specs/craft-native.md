@@ -3,8 +3,14 @@
 The separate whole-native WordCraft/GridCraft profile is experimental and off by
 default. `craft_native.enabled: true` or `CREWSHIP_CRAFT_NATIVE_ENABLED=true`
 enables its human session and EditLease HTTP API. It requires a Linux boot-aware
-clock. This does not activate New Doc, convert existing documents, enable agent
-proposals, or qualify the complete editor acceptance.
+clock. A qualified Word profile is advertised as `wordcraft_native` by the authenticated
+workspace document status endpoint. New Doc then creates a fresh empty personal
+Page, initializes its native Word model and releases the initial lease before
+opening the full editor. An ambiguous initialization is never blindly replayed. Native format metadata on
+Page reads reopens an existing native Page through that same fresh admission.
+A lost creation-release response cannot erase or reinitialize its confirmed data.
+This does not convert existing documents, enable agent proposals, or qualify the
+complete editor acceptance.
 
 Availability requires a readable Page with an explicit `craft_native_documents`
 profile. Other profiles, inaccessible Pages and absent Pages report disabled.
@@ -158,6 +164,13 @@ requires its erasure.
 The backend has direct-handler and real-Router two-human regression coverage.
 Whole-document routes require an already explicit native Page and a trusted
 qualified profile; only the explicit owner-only Word initializer may create
-that profile on an existing empty Page. Page creation, full editor mounting,
-proposals and agent execution,
+that profile on an existing empty Page. New Doc uses that initializer for a fresh personal Word Page.
+Proposals and agent execution,
 one-hour browser acceptance and 2,000 changing saves remain separate work.
+
+The native blank Word asset is serialized by the original engine separately from
+the older checkpoint blank. To qualify it against a real binary, set
+`CREWSHIP_TEST_WORDCRAFT_CLI` and `CREWSHIP_TEST_WORDCRAFT_CLI_SHA256`, then run
+`go test ./internal/mooring -run ^TestNativeCLIValidatorCanonicalWordCreation$`.
+The explicit run must pass; ordinary unit runs skip it when no binary is supplied.
+It also verifies that the old lossy float promotion is still rejected.
