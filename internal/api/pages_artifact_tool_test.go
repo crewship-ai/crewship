@@ -104,15 +104,22 @@ func TestArtifactProjectToolsConsentCreatePublishReplyAndRevocation(t *testing.T
 	if read.Code != 200 || !strings.Contains(read.Body.String(), "details.html") || !strings.Contains(read.Body.String(), "settings.html") {
 		t.Fatalf("read three screens %d %s", read.Code, read.Body)
 	}
+	if forged := human("/api/v1/pages/agent-screens/artifact/comments", `{"version":1,"path":"index.html","selector":"#hero","quote":"First","text":"Forged attribution","author_kind":"agent"}`, f.pages.CreateArtifactProjectComment); forged.Code != 400 {
+		t.Fatalf("caller-selected comment attribution accepted: %d %s", forged.Code, forged.Body)
+	}
 	comment := human("/api/v1/pages/agent-screens/artifact/comments", `{"version":1,"path":"index.html","selector":"#hero","quote":"First","text":"Change heading","send_to_agent":true}`, f.pages.CreateArtifactProjectComment)
 	if comment.Code != 201 {
 		t.Fatalf("comment %d %s", comment.Code, comment.Body)
 	}
 	var commentBody struct {
-		ID string `json:"id"`
+		ID         string `json:"id"`
+		AuthorKind string `json:"author_kind"`
 	}
 	if json.Unmarshal(comment.Body.Bytes(), &commentBody) != nil {
 		t.Fatal("invalid comment response")
+	}
+	if commentBody.AuthorKind != "human" {
+		t.Errorf("human comment attribution: %s", comment.Body)
 	}
 	if commentBody.ID == "" {
 		if err := f.rig.db.QueryRow(`SELECT id FROM artifact_project_comments WHERE page_id=?`, page).Scan(&commentBody.ID); err != nil {
@@ -122,8 +129,31 @@ func TestArtifactProjectToolsConsentCreatePublishReplyAndRevocation(t *testing.T
 	if w := tool("artifact_publish", "agent-screens", artifactProjectBody(1, "Second")); w.Code != 200 {
 		t.Fatalf("publish v2 %d %s", w.Code, w.Body)
 	}
+	if forged := tool("artifact_reply", "agent-screens", fmt.Sprintf(`{"comment_id":%q,"version":2,"text":"Forged reply","author_kind":"human"}`, commentBody.ID)); forged.Code != 400 {
+		t.Fatalf("caller-selected reply attribution accepted: %d %s", forged.Code, forged.Body)
+	}
 	if w := tool("artifact_reply", "agent-screens", fmt.Sprintf(`{"comment_id":%q,"version":2,"text":"Changed the heading"}`, commentBody.ID)); w.Code != 201 && w.Code != 200 {
 		t.Fatalf("reply %d %s", w.Code, w.Body)
+	}
+	thread := tool("artifact_comments", "agent-screens", `{}`)
+	var feedback struct {
+		Comments []struct {
+			AuthorKind string `json:"author_kind"`
+			Replies    []struct {
+				AuthorKind string `json:"author_kind"`
+			} `json:"replies"`
+		} `json:"comments"`
+	}
+	if err := json.Unmarshal(thread.Body.Bytes(), &feedback); thread.Code != 200 || err != nil {
+		t.Fatalf("feedback read: %d %s (%v)", thread.Code, thread.Body, err)
+	}
+	if len(feedback.Comments) != 1 || feedback.Comments[0].AuthorKind != "human" || len(feedback.Comments[0].Replies) != 1 || feedback.Comments[0].Replies[0].AuthorKind != "agent" {
+		t.Errorf("retained human/agent attribution: %s", thread.Body)
+	}
+	mustExec(t, f.rig.db, `UPDATE artifact_project_comments SET author='erased' WHERE id=?`, commentBody.ID)
+	mustExec(t, f.rig.db, `UPDATE artifact_project_comment_replies SET author='erased' WHERE comment_id=?`, commentBody.ID)
+	if erased := tool("artifact_comments", "agent-screens", `{}`); erased.Code != 200 || strings.Contains(erased.Body.String(), `"author_kind"`) {
+		t.Errorf("erased attribution must remain unknown: %d %s", erased.Code, erased.Body)
 	}
 	if w := tool("artifact_publish", "agent-screens", artifactProjectBody(1, "Stale")); w.Code != 409 {
 		t.Fatalf("stale manifest %d %s", w.Code, w.Body)

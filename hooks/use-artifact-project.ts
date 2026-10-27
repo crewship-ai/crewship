@@ -6,7 +6,8 @@ import { useSessionSafe } from "@/hooks/use-auth"
 import { apiFetch } from "@/lib/api-fetch"
 
 export interface ArtifactFile { path: string; content: string; media_type: string }
-export interface ArtifactComment { id: string; version: number; path: string; selector: string; quote: string; text: string; task_id?: string; replies?: { text: string; version: number }[] }
+export type ArtifactAuthorKind = "human" | "agent"
+export interface ArtifactComment { id: string; version: number; path: string; selector: string; quote: string; text: string; author_kind?: ArtifactAuthorKind; task_id?: string; replies?: { text: string; version: number; author_kind?: ArtifactAuthorKind }[] }
 export interface ArtifactProjectSnapshot {
  page_id: string
  origin?: ArtifactOrigin

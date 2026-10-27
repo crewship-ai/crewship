@@ -24,6 +24,7 @@ const journalArtifactProjectShared journal.EntryType = "artifact.project_shared"
 
 var errArtifactProjectAccess = errors.New("artifact project access denied")
 var errArtifactProjectAnchor = errors.New("artifact anchor no longer matches")
+var errArtifactProjectSlugTaken = errors.New("artifact slug already in use")
 
 type artifactProjectFile struct {
 	Path      string `json:"path"`
@@ -101,6 +102,8 @@ func artifactProjectError(w http.ResponseWriter, err error) {
 		replyError(w, 404, "artifact project or selected version not found")
 	case errors.Is(err, errArtifactProjectAnchor):
 		writeJSON(w, 409, map[string]any{"error": "The selected element no longer matches this version. Select it again using a stable element ID or ask the agent for clarification. Your comment draft is preserved.", "code": "artifact_anchor_mismatch"})
+	case errors.Is(err, errArtifactProjectSlugTaken):
+		writeJSON(w, 409, map[string]any{"error": "This address is already in use. Choose another slug.", "code": "artifact_slug_taken"})
 	case errors.Is(err, artifacts.ErrVersionConflict):
 		writeJSON(w, 409, map[string]any{"error": "This project changed. Read the current version and compare your changes before publishing again. Your draft has not been discarded.", "code": "artifact_version_conflict"})
 	case errors.Is(err, artifacts.ErrVersionQuota):
@@ -309,7 +312,13 @@ func (h *PageHandler) CreateArtifactProject(w http.ResponseWriter, r *http.Reque
 		stamp := tsformat.Format(h.clock.Now())
 		if _, e = tx.ExecContext(ctx, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json,created_at,updated_at,private_audience) VALUES(?,?,?,?,?,?,?,?,1)`, k.PageID, k.WorkspaceID, p.Slug, p.Name, user.ID, string(raw), stamp, stamp); e != nil {
 			if isUniqueViolation(e) {
-				return "", artifacts.ErrVersionConflict
+				var taken bool
+				if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pages WHERE workspace_id=? AND slug=?)`, k.WorkspaceID, p.Slug).Scan(&taken); err != nil {
+					return "", err
+				}
+				if taken {
+					return "", errArtifactProjectSlugTaken
+				}
 			}
 			return "", e
 		}

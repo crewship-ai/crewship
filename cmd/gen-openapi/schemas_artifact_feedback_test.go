@@ -49,3 +49,41 @@ func TestArtifactProjectFeedbackSchemasAcceptOwnerAndSharedSnapshots(t *testing.
 		t.Fatal("caller-supplied reply author accepted")
 	}
 }
+
+func TestArtifactFeedbackAuthorKindIsOptionalAndClosed(t *testing.T) {
+	doc := buildDocument(nil)
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"ArtifactProjectReply", "ArtifactProjectComment"} {
+		t.Run(name, func(t *testing.T) {
+			schema := compileAt(t, raw, "/components/schemas/"+name)
+			body := map[string]any{"text": "Comment", "version": float64(1), "author": "erased", "created_at": "2026-10-27T00:00:00Z"}
+			if name == "ArtifactProjectComment" {
+				for k, v := range map[string]any{"id": "comment", "path": "index.html", "selector": "#hero", "quote": "Hello", "status": "comment", "replies": []any{}} {
+					body[k] = v
+				}
+			}
+			if err := schema.Validate(body); err != nil {
+				t.Fatal("unattributed erased identity refused", err)
+			}
+			for _, kind := range []string{"human", "agent"} {
+				body["author_kind"] = kind
+				if err := schema.Validate(body); err != nil {
+					t.Fatal(kind, err)
+				}
+			}
+			body["author_kind"] = "erased"
+			if schema.Validate(body) == nil {
+				t.Fatal("unknown attribution accepted")
+			}
+		})
+	}
+	for _, name := range []string{"ArtifactProjectCommentRequest", "ArtifactProjectReplyRequest"} {
+		props := artifactProjectFeedbackComponents()[name].(map[string]any)["properties"].(map[string]any)
+		if _, ok := props["author_kind"]; ok {
+			t.Fatal("request permits caller attribution", name)
+		}
+	}
+}

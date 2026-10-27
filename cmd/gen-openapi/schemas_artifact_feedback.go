@@ -22,10 +22,10 @@ func artifactProjectFeedbackComponents() map[string]any {
 	schemas := map[string]any{}
 	schemas["ArtifactProjectOrigin"] = object(map[string]any{"chat_id": str(), "agent_id": str()}, "chat_id", "agent_id")
 	schemas["ArtifactProjectReply"] = object(map[string]any{
-		"text": str(), "version": integer(1), "needs_clarification": boolean(), "author": str(), "created_at": stamp(),
+		"text": str(), "version": integer(1), "needs_clarification": boolean(), "author": str(), "author_kind": map[string]any{"type": "string", "enum": []string{"human", "agent"}}, "created_at": stamp(),
 	}, "text", "version", "author", "created_at")
 	schemas["ArtifactProjectComment"] = object(map[string]any{
-		"id": str(), "version": integer(1), "path": path(), "selector": str(), "quote": str(), "text": str(), "author": str(), "task_id": str(), "created_at": stamp(),
+		"id": str(), "version": integer(1), "path": path(), "selector": str(), "quote": str(), "text": str(), "author": str(), "author_kind": map[string]any{"type": "string", "enum": []string{"human", "agent"}}, "task_id": str(), "created_at": stamp(),
 		"status":           map[string]any{"type": "string", "enum": []string{"comment", "pending", "working", "answered", "needs_clarification"}},
 		"answered_version": integer(1), "replies": array(ref("ArtifactProjectReply")),
 	}, "id", "version", "path", "selector", "quote", "text", "author", "created_at", "status", "replies")

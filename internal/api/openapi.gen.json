@@ -1392,6 +1392,13 @@
           "author": {
             "type": "string"
           },
+          "author_kind": {
+            "enum": [
+              "human",
+              "agent"
+            ],
+            "type": "string"
+          },
           "created_at": {
             "format": "date-time",
             "type": "string"
@@ -1793,6 +1800,13 @@
         "additionalProperties": false,
         "properties": {
           "author": {
+            "type": "string"
+          },
+          "author_kind": {
+            "enum": [
+              "human",
+              "agent"
+            ],
             "type": "string"
           },
           "created_at": {

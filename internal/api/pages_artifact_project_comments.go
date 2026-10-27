@@ -19,6 +19,7 @@ type artifactProjectReply struct {
 	Version            int64  `json:"version"`
 	NeedsClarification bool   `json:"needs_clarification,omitempty"`
 	Author             string `json:"author"`
+	AuthorKind         string `json:"author_kind,omitempty"`
 	CreatedAt          string `json:"created_at"`
 }
 type artifactProjectComment struct {
@@ -31,9 +32,22 @@ type artifactProjectComment struct {
 	Quote           string                 `json:"quote"`
 	Text            string                 `json:"text"`
 	Author          string                 `json:"author"`
+	AuthorKind      string                 `json:"author_kind,omitempty"`
 	TaskID          string                 `json:"task_id,omitempty"`
 	CreatedAt       string                 `json:"created_at"`
 	Replies         []artifactProjectReply `json:"replies"`
+}
+
+// Attribution comes from the authenticated actor, never from request fields.
+// Erased identities have no remaining human/agent attribution to display.
+func artifactProjectAuthorKind(actor string) string {
+	if actor == "" || actor == "erased" {
+		return ""
+	}
+	if strings.HasPrefix(actor, "agent:") {
+		return "agent"
+	}
+	return "human"
 }
 
 // The first pilot accepts stable element IDs. A positional or ambiguous anchor
@@ -155,6 +169,7 @@ func (h *PageHandler) artifactProjectComments(r *http.Request, k artifacts.Versi
 				rows.Close()
 				return e
 			}
+			c.AuthorKind = artifactProjectAuthorKind(c.Author)
 			out = append(out, c)
 		}
 		e = rows.Err()
@@ -173,6 +188,7 @@ func (h *PageHandler) artifactProjectComments(r *http.Request, k artifacts.Versi
 					replies.Close()
 					return e
 				}
+				reply.AuthorKind = artifactProjectAuthorKind(reply.Author)
 				out[i].Replies = append(out[i].Replies, reply)
 			}
 			e = replies.Err()
@@ -266,6 +282,7 @@ func (h *PageHandler) CreateArtifactProjectComment(w http.ResponseWriter, r *htt
 			return errArtifactProjectAnchor
 		}
 		out.Author = actor
+		out.AuthorKind = artifactProjectAuthorKind(actor)
 		if p.SendToAgent {
 			out.TaskID = generateCUID()
 			out.Status = "pending"
@@ -329,6 +346,7 @@ func (h *PageHandler) ReplyArtifactProjectComment(w http.ResponseWriter, r *http
 			}
 		}
 		p.Author = actor
+		p.AuthorKind = artifactProjectAuthorKind(actor)
 		p.CreatedAt = tsformat.Format(h.clock.Now())
 		_, err := tx.ExecContext(ctx, `INSERT INTO artifact_project_comment_replies(id,comment_id,version,text,author,created_at,needs_clarification) VALUES(?,?,?,?,?,?,?)`, generateCUID(), r.PathValue("commentId"), p.Version, p.Text, p.Author, p.CreatedAt, p.NeedsClarification)
 		if err != nil {
