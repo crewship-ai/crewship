@@ -31,11 +31,13 @@ export function ArtifactToolCard({ call, result, turnStreaming = true }: Artifac
   if (!activity) return null
   const running = activity.state === "running"
   const source = toolIdOf(call) ?? call.id
+  // A create that did not report a version never made a project; a card would only fetch a missing one.
+  const projectExists = activity.tool !== "create" || activity.state === "done"
   // While the agent works only the progress card shows; the project card joins once the step settled.
   // A call left without a result on a finished turn shows no stale progress, just the project if known.
   return <div className="flex flex-col gap-2" data-testid="artifact-tool-card">
     {(!running || turnStreaming) && <ArtifactStepCard activity={activity} startedAt={running ? call.timestamp : undefined} source={source} />}
-    {activity.slug && (!running || !turnStreaming) && <ArtifactChatCard slug={activity.slug} fallbackName={activity.name} activity={activity} source={source} />}
+    {activity.slug && projectExists && (!running || !turnStreaming) && <ArtifactChatCard slug={activity.slug} fallbackName={activity.name} activity={activity} source={source} />}}
   </div>
 }
 

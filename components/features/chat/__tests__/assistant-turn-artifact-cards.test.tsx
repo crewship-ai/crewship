@@ -153,4 +153,23 @@ describe("artifact tool card composition", () => {
     expect(screen.getByText("v2 ready")).toBeTruthy()
     expect(screen.getByLabelText("Loading project")).toBeTruthy()
   })
+
+  // A refused create (dev3: "artifact projects are disabled") never made a project:
+  // a card would only fetch a missing project and show "Restricted item".
+  const create = (id: string) => part("tool_call", { tool_id: id, tool_name: "mcp__crewship__artifact_create", input: { slug: "pricing-site", name: "Pricing site" } }, "mcp__crewship__artifact_create")
+  it("shows no project card for a create the server refused", () => {
+    withProvider(turn([create("a"), part("tool_result", { tool_id: "a", is_error: true }, JSON.stringify({ error: "artifact projects are disabled" }))]))
+    expect(screen.getByText(/artifact projects are disabled/)).toBeTruthy()
+    expect(screen.queryByLabelText("Loading project")).toBeNull()
+  })
+
+  it("shows no project card for a create that ended without a result", () => {
+    withProvider(turn([create("a")], false))
+    expect(screen.queryByLabelText("Loading project")).toBeNull()
+  })
+
+  it("keeps the project card when a publish to an existing project failed", () => {
+    withProvider(turn([publish("a"), part("tool_result", { tool_id: "a", is_error: true }, JSON.stringify({ error: "conflict" }))]))
+    expect(screen.getByLabelText("Loading project")).toBeTruthy()
+  })
 })
