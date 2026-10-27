@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Add default-off artifact project handlers with atomic versions, anchored feedback and immutable shared pins. Public routing follows separately.
+
 - Clear copied-command feedback timers when onboarding unmounts.
 
 - Create vendored WordCraft numeric test fixtures exclusively so a competing output file cannot be truncated.
