@@ -274,6 +274,21 @@ it("Save only never starts the agent", async () => {
   expect(sendToAgent).not.toHaveBeenCalled()
 })
 
+it("says so when the screen has nothing a comment can anchor to", () => {
+  const bare = { path: "home.html", content: "<body><h1>No ids here</h1></body>", media_type: "text/html" }
+  state.snapshot.data = snap({ manifest: { ...snap().manifest, entrypoint: "home.html", files: [bare] } })
+  render(<ArtifactViewerPanel />)
+  expect(screen.queryByText(/nothing on this screen can take a comment/i)).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "Select" }))
+  expect(screen.getByText(/nothing on this screen can take a comment/i)).toBeInTheDocument()
+})
+
+it("does not warn on a screen with anchorable parts", () => {
+  render(<ArtifactViewerPanel />)
+  fireEvent.click(screen.getByRole("button", { name: "Select" }))
+  expect(screen.queryByText(/nothing on this screen can take a comment/i)).toBeNull()
+})
+
 it("shares only when the viewer can write, after confirming", () => {
   render(<ArtifactViewerPanel />)
   fireEvent.click(screen.getByRole("button", { name: "Share" }))
