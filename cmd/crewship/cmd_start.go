@@ -511,6 +511,7 @@ var startCmd = &cobra.Command{
 			resolver,
 			chatbridge.BridgeConfig{
 				DocumentCreationEnabled: cfg.Documents.Enabled,
+				ArtifactProjectsEnabled: true, // authoritative recorder checks the workspace feature flag for every send
 				DefaultMemoryMB:         cfg.Container.DefaultMemoryMB,
 				DefaultCPUs:             cfg.Container.DefaultCPUs,
 			},
@@ -520,6 +521,7 @@ var startCmd = &cobra.Command{
 		if apiRouter := srv.APIRouter(); apiRouter != nil {
 			bridge.SetPageChatContextResolver(apiRouter.Pages())
 			bridge.SetDocumentIterationRecorder(apiRouter.Pages())
+			bridge.SetArtifactProjectIntentRecorder(apiRouter.Pages())
 		}
 
 		// Wire mid-turn steering: the API's POST /chats/{id}/steer route

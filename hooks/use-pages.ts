@@ -142,6 +142,7 @@ export interface WirePage {
   collaboration_format?: string | null
   /** A published application exists. See `has_project` for source that is not published yet. */
   has_application?: boolean
+  has_artifact_project?: boolean
   /**
    * Application source exists — a draft, whether or not anything has been
    * published from it. The two are different questions, and the review

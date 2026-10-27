@@ -9,7 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Artifact authoring clients support complete project versions.** Add pilot MCP tools and `page artifact` commands for atomic manifests, explicit version conflicts, restore and anchored feedback on servers that enable the artifact project backend.
+- **Artifact projects can retain three linked HTML screens and their feedback.** The default-off pilot adds atomic file versions, visible history quotas, conflict-safe publishing, append-only restore, a separately pinned shared version, and element comments addressed to the agent through the original private chat.
 
 - Clear copied-command feedback timers when onboarding unmounts.
 

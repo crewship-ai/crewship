@@ -33,8 +33,8 @@ func newPageArtifactCommand() *cobra.Command {
 				endpoint = "/api/v1/pages/artifacts"
 			} else {
 				base, _ := cmd.Flags().GetInt64("base-version")
-				if base < 0 || !cmd.Flags().Changed("base-version") {
-					return fmt.Errorf("--base-version is required (0 initializes an existing Page)")
+				if base < 1 || !cmd.Flags().Changed("base-version") {
+					return fmt.Errorf("--base-version must be the exact positive latest version; use create for a new project")
 				}
 				body["base_version"] = base
 			}
@@ -97,7 +97,19 @@ func newPageArtifactCommand() *cobra.Command {
 	reply.Flags().Bool("needs-clarification", false, "Ask for a fresh selection without claiming an edit")
 	reply.Flags().String("text", "", "Describe the change or ask for a fresh selection")
 	reply.Flags().Int64("version", 0, "Version addressed by this reply")
-	cmd.AddCommand(reply)
+	availability := &cobra.Command{Use: "availability", Args: cobra.NoArgs, Short: "Read whether this workspace enables artifact projects", RunE: func(cmd *cobra.Command, _ []string) error {
+		return artifactCLIRequest(cmd, "GET", "/api/v1/pages/artifacts/availability", nil)
+	}}
+	consent := &cobra.Command{Use: "consent <run-id>", Args: cobra.ExactArgs(1), Short: "Authorize one exact private chat run as its human owner", RunE: func(cmd *cobra.Command, args []string) error {
+		body := map[string]any{"run_id": args[0]}
+		page, _ := cmd.Flags().GetString("page-id")
+		if page != "" {
+			body["page_id"] = page
+		}
+		return artifactCLIRequest(cmd, "POST", "/api/v1/pages/artifacts/consent", body)
+	}}
+	consent.Flags().String("page-id", "", "Optional immutable ID of one existing artifact project; omit to permit one new project")
+	cmd.AddCommand(reply, availability, consent)
 	return cmd
 }
 

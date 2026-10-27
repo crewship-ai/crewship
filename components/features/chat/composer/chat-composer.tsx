@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react"
 import { AlertTriangle, FilePlus2 } from "lucide-react"
+import { NewArtifactMenu } from "../artifact-context/new-artifact/new-artifact-menu"
+import { availableArtifactKinds } from "../artifact-context/new-artifact/new-artifact-kinds"
+import { chatArtifactProjects } from "@/lib/feature-flags"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 
@@ -41,6 +44,8 @@ interface ChatComposerProps {
   agentName?: string
   /** Confirmed support in this private chat with no selected Page. */
   documentCreationEnabled?: boolean
+  /** Server-confirmed support for explicit, private artifact creation. */
+  artifactCreationEnabled?: boolean
   /** "desktop" wraps the input in AttachmentZone + mention autocomplete +
    *  attachment button; "mobile" renders the bare input, matching the two
    *  historical branches of ChatPanel. */
@@ -144,6 +149,7 @@ export function ChatComposer({
   sessionId,
   agentName,
   documentCreationEnabled = false,
+  artifactCreationEnabled = false,
   variant,
   isStreaming,
   connectionStatus,
@@ -171,15 +177,18 @@ export function ChatComposer({
   const inputScope = draftKey ?? JSON.stringify(["anonymous", sessionId])
   const creationScope = JSON.stringify([userId, agentId, sessionId])
   const canCreateDocument = documentCreationEnabled && Boolean(userId)
+  const canCreateArtifact = artifactCreationEnabled && Boolean(userId)
+  const artifactScope = creationScope + ":artifact"
   const [creationSelection, setCreationSelection] = useState<string | null>(null)
   const createDocument = canCreateDocument && creationSelection === creationScope
+  const createArtifact = canCreateArtifact && creationSelection === artifactScope
   const creationPacket = useRef<{ scope: string; content: string; submissionId: string } | null>(null)
   // Consent is ephemeral and belongs to one identity and conversation. It is
   // neither a persisted composer draft nor a preference for future messages.
   useEffect(() => {
     setCreationSelection(null)
     creationPacket.current = null
-  }, [creationScope, canCreateDocument])
+  }, [creationScope, canCreateDocument, canCreateArtifact])
   const restoreInput = () => {
     const saved = draftKey ? useComposerStore.getState().drafts[draftKey] : undefined
     return saved?.trim() ? saved : initialInput ?? ""
@@ -363,14 +372,15 @@ export function ChatComposer({
         throw new Error("send blocked: attachment not attached")
       }
       let outgoing = message
-      if (createDocument) {
+      if (createDocument || createArtifact) {
         const content = composeMessageWithAttachments(message.text, sessionAttachments)
         if (creationPacket.current?.scope !== creationScope || creationPacket.current.content !== content) {
           creationPacket.current = { scope: creationScope, content, submissionId: crypto.randomUUID() }
         }
-        outgoing = { ...message, metadata: { ...message.metadata, document_creation_intent: {
-          submission_id: creationPacket.current.submissionId, drafting: true,
-        } } }
+        const intent = createArtifact
+          ? { artifact_project_intent: { submission_id: creationPacket.current.submissionId } }
+          : { document_creation_intent: { submission_id: creationPacket.current.submissionId, drafting: true } }
+        outgoing = { ...message, metadata: { ...message.metadata, ...intent } }
       }
       await handleSubmit(outgoing)
       if (!sentRef.current) return
@@ -379,7 +389,7 @@ export function ChatComposer({
       setInput("")
       if (draftKey) clearDraft(draftKey)
     },
-    [handleSubmit, clearDraft, draftKey, setInput, createDocument, creationScope, sessionAttachments, sendBlocked, announceBlocked],
+    [handleSubmit, clearDraft, draftKey, setInput, createDocument, createArtifact, creationScope, sessionAttachments, sendBlocked, announceBlocked],
   )
 
   /** Submitting a form is submitting a message. Same hook, same guards, same
@@ -517,6 +527,31 @@ export function ChatComposer({
         },
       }
     : {}
+  const artifactCreationControl = canCreateArtifact ? (
+    <>
+      <Button
+        type="button"
+        variant={createArtifact ? "secondary" : "ghost"}
+        size="sm"
+        aria-label="Create artifact project"
+        aria-pressed={createArtifact}
+        disabled={isStreaming || !canSend}
+        className="coarse:min-h-[44px]"
+        onClick={() => {
+          setCreationSelection(createArtifact ? null : artifactScope)
+          creationPacket.current = null
+        }}
+      >Create artifact project</Button>
+      {createArtifact && <span role="status" className="text-xs text-muted-foreground">Private project · Sharing requires your approval</span>}
+    </>
+  ) : null
+  // "+" › New artifact lists only kinds with a backend; a project starter carries the same explicit project consent.
+  const newArtifactKinds = chatArtifactProjects() ? availableArtifactKinds({ projects: canCreateArtifact, documents: canCreateDocument }) : []
+  const newArtifactMenu = <NewArtifactMenu kinds={newArtifactKinds} disabled={isStreaming || !canSend} onPick={(kind, prompt) => {
+    setCreationSelection(kind === "word" ? creationScope : artifactScope); creationPacket.current = null
+    // The starter goes in front; text the person already typed stays.
+    updateInput(input.trim() ? `${prompt}\n\n${input}` : prompt)
+  }} />
   const creationControl = canCreateDocument ? (
     <>
     <Button
@@ -570,7 +605,9 @@ export function ChatComposer({
               <div className="flex items-center gap-1">
                 <CameraButton agentId={agentId} sessionId={sessionId} />
                 <AttachmentButton agentId={agentId} sessionId={sessionId} />
+                {newArtifactMenu}
                 {creationControl}
+              {artifactCreationControl}
               </div>
               <PromptInputSubmit disabled={submitDisabled} {...submitBlockProps} status={chatStatus} stopping={stopping} onStop={stopGeneration} />
             </PromptInputFooter>
@@ -604,7 +641,9 @@ export function ChatComposer({
           <PromptInputFooter className="justify-between p-2 gap-2">
             <div className="flex items-center gap-1">
               <AttachmentButton agentId={agentId} sessionId={sessionId} />
+              {newArtifactMenu}
               {creationControl}
+              {artifactCreationControl}
             </div>
             <PromptInputSubmit disabled={submitDisabled} {...submitBlockProps} status={chatStatus} stopping={stopping} onStop={stopGeneration} />
           </PromptInputFooter>

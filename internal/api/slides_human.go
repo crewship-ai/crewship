@@ -82,7 +82,7 @@ func (h *slidesHumanHTTP) authorize(r *http.Request, key slides.Key, initialize 
 		if tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM page_panels WHERE page_id=?) OR EXISTS(SELECT 1 FROM page_project_live WHERE page_id=?)`, key.PageID, key.PageID).Scan(&occupied) != nil || occupied {
 			return "", errSlidesHumanAccess
 		}
-		for _, table := range []string{"page_artifacts", "page_boards", "gridcraft_heads", "mooring_documents"} {
+		for _, table := range []string{"artifact_version_heads", "page_artifacts", "page_boards", "gridcraft_heads", "mooring_documents"} {
 			var installed, attached bool
 			if tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name=? COLLATE NOCASE)`, table).Scan(&installed) != nil {
 				return "", errSlidesHumanAccess
