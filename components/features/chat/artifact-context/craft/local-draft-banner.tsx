@@ -53,6 +53,6 @@ export function LocalDraftBanner({ userId, workspaceId, slug, holderName, onComp
     <span role="status" className="text-xs text-muted-foreground">{copy === "copied" ? "Copied" : copy === "failed" ? "Could not copy" : ""}</span>
     <Button type="button" size="sm" variant="ghost" className={BTN} onClick={() => onCompare(draft)}><Layers aria-hidden />Compare</Button>
     <Button type="button" size="sm" variant="secondary" className={BTN} onClick={() => void copyDraft()}>Copy text</Button>
-    <Button type="button" size="icon" variant="ghost" aria-label="Discard draft" className="size-8 coarse:size-11" onClick={discard}><X aria-hidden /></Button>
+    <Button type="button" size="icon" variant="ghost" aria-label="Discard draft" className="size-8 coarse:size-[44px]" onClick={discard}><X aria-hidden /></Button>
   </div>
 }

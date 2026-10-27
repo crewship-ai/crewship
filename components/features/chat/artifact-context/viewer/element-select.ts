@@ -185,16 +185,17 @@ function projectPath(from: string, ref: string): string | null {
 export function inlineProjectAssets(html: string, path: string, files: Pick<ArtifactFile, "path" | "content" | "media_type">[]): string {
   if (typeof DOMParser === "undefined") return html
   const byPath = new Map(files.map(file => [file.path, file]))
-  const fileFor = (ref: string | null, kind: RegExp) => {
+  // A file counts by its media type or its extension, never by a word somewhere in its name.
+  const fileFor = (ref: string | null, mediaType: RegExp, extension: RegExp) => {
     const target = ref == null ? null : projectPath(path, ref)
     const file = target == null ? undefined : byPath.get(target)
-    return file && (kind.test(file.media_type) || kind.test(file.path)) ? file : undefined
+    return file && (mediaType.test(file.media_type) || extension.test(file.path)) ? file : undefined
   }
   const doc = new DOMParser().parseFromString(html, "text/html")
   let changed = false
   for (const link of doc.querySelectorAll("link[href]")) {
     if (!/(^|\s)stylesheet(\s|$)/i.test(link.getAttribute("rel") ?? "")) continue
-    const file = fileFor(link.getAttribute("href"), /css/i)
+    const file = fileFor(link.getAttribute("href"), /^text\/css\s*(;|$)/i, /\.css$/i)
     if (!file) continue
     const style = doc.createElement("style")
     style.textContent = file.content
@@ -202,7 +203,7 @@ export function inlineProjectAssets(html: string, path: string, files: Pick<Arti
     changed = true
   }
   for (const script of doc.querySelectorAll("script[src]")) {
-    const file = fileFor(script.getAttribute("src"), /javascript|ecmascript|\.m?js$/i)
+    const file = fileFor(script.getAttribute("src"), /^(text|application)\/(javascript|ecmascript)\s*(;|$)/i, /\.m?js$/i)
     if (!file) continue
     const inline = doc.createElement("script")
     for (const attr of script.attributes) if (attr.name !== "src" && attr.name !== "defer" && attr.name !== "async") inline.setAttribute(attr.name, attr.value)

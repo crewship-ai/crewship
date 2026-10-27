@@ -99,6 +99,18 @@ describe("anchor quote inside the frame", () => {
     expect(ANCHOR_QUOTE_MAX).toBe(5000)
     expect(buildPreviewDocument(page, { selectMode: true, screens: [] })).toContain(String(ANCHOR_QUOTE_MAX))
   })
+  it("inlines only real scripts and stylesheets, not files whose name merely mentions them", () => {
+    const page = '<head><link rel="stylesheet" href="css-notes.txt"></head><body><script src="javascript-notes.txt"></script><script src="app.mjs"></script></body>'
+    const out = inlineProjectAssets(page, "index.html", [
+      { path: "javascript-notes.txt", content: "notes()", media_type: "text/plain" },
+      { path: "css-notes.txt", content: "body{}", media_type: "text/plain" },
+      { path: "app.mjs", content: "run()", media_type: "application/octet-stream" },
+    ])
+    expect(out).toContain('<script src="javascript-notes.txt"></script>')
+    expect(out).toContain('href="css-notes.txt"')
+    expect(out).not.toContain("notes()")
+    expect(out).toContain("run()")
+  })
 })
 
 describe("screens", () => {
