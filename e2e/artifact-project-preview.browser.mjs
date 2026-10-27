@@ -19,7 +19,7 @@ try {
  await page.addScriptTag({ content: await readFile(bundle, "utf8") })
  await page.evaluate(() => {
   window.messages = []
-  window.addEventListener("message", event => window.messages.push(event.data))
+  window.addEventListener("message", event => { if (event.origin === "null" && event.source === document.querySelector("iframe").contentWindow) window.messages.push(event.data) })
   window.files = [
    { path: "index.html", media_type: "text/html", content: '<h1 id="hero-heading" onclick="parent.postMessage(\'bad\',\'*\')">Overview</h1><a href="details.html">Details</a><script>parent.postMessage("bad","*")</script><iframe src="https://escape.invalid"></iframe><style>@import "https://escape.invalid/style";</style>' },
    { path: "details.html", media_type: "text/html", content: '<h1>Details</h1><a href="contact.html">Contact</a>' },
