@@ -118,6 +118,44 @@ it.each([["Send to agent", true], ["Save comment", false]] as const)("%s posts t
   expect(screen.queryByRole("textbox", { name: "Comment" })).toBeNull()
 })
 
+it("keeps the segmented screen switch for up to four screens and adds a compact select only beyond", () => {
+  render(<ArtifactViewerPanel />)
+  expect(screen.getByRole("radiogroup", { name: "Screen" }).parentElement!.className).not.toContain("hidden")
+  expect(screen.queryByRole("combobox", { name: "Screen (compact)" })).toBeNull()
+  cleanup()
+  const five = ["home.html", "a.html", "b.html", "c.html", "d.html"].map(html)
+  state.snapshot.data = snap({ manifest: { version: 3, entrypoint: "home.html", files: five } })
+  render(<ArtifactViewerPanel />)
+  expect(screen.getByRole("combobox", { name: "Screen (compact)" })).toBeInTheDocument()
+})
+
+it("labels screens by their <title>", () => {
+  const titled = (path: string, title: string) => ({ path, content: `<title>${title}</title><body>x</body>`, media_type: "text/html" })
+  state.snapshot.data = snap({ manifest: { version: 3, entrypoint: "plans.html", files: [titled("plans.html", "Our plans"), titled("faq.html", "Questions")] } })
+  render(<ArtifactViewerPanel />)
+  expect(within(screen.getByRole("radiogroup", { name: "Screen" })).getAllByRole("radio").map(el => el.textContent)).toEqual(["Our plans", "Questions"])
+  expect(screen.getByTitle("Preview of Our plans")).toBeInTheDocument()
+})
+
+it("drops the sent notice when a new version arrives or a new selection starts", () => {
+  const send = () => {
+    selectHero()
+    fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Bolder" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
+    act(() => state.comment.mock.calls.at(-1)![1].onSuccess({}))
+    expect(screen.getByText("Comment sent to the agent")).toBeInTheDocument()
+  }
+  const { rerender } = render(<ArtifactViewerPanel />)
+  send()
+  fireEvent.click(screen.getByRole("button", { name: "Select" }))
+  expect(screen.queryByText("Comment sent to the agent")).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "Select" }))
+  send()
+  state.snapshot = { ...state.snapshot, data: snap({ latest_version: 4, manifest: { ...snap().manifest, version: 4 } }) }
+  rerender(<ArtifactViewerPanel />)
+  expect(screen.queryByText("Comment sent to the agent")).toBeNull()
+})
+
 it("keeps the draft and shows one conflict banner on a version conflict", () => {
   render(<ArtifactViewerPanel />)
   selectHero()

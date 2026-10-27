@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { afterEach, expect, it, vi } from "vitest"
 import { ArtifactRequestError } from "../client"
@@ -60,6 +60,20 @@ it("Open and Comment open the viewer on the right tab and highlight the card", (
   expect(JSON.parse(screen.getByTestId("target").textContent!)).toEqual({ slug: "onboarding" })
   expect(screen.getByRole("article").getAttribute("data-open")).toBe("true")
   expect(screen.getByRole("article").className).toContain("ring-2 ring-primary")
+})
+
+it("rings only the card that opened the viewer when several show the same project", () => {
+  h.result = query({ data: snapshot() })
+  renderCard(<><ArtifactChatCard slug="onboarding" source="toolu_a" /><ArtifactChatCard slug="onboarding" source="toolu_b" /></>)
+  const [first, second] = screen.getAllByRole("article")
+  fireEvent.click(within(second).getByRole("button", { name: "Open Onboarding flow" }))
+  expect(JSON.parse(screen.getByTestId("target").textContent!)).toEqual({ slug: "onboarding", source: "toolu_b" })
+  expect(first.getAttribute("data-open")).toBeNull()
+  expect(first.className).not.toContain("ring-2")
+  expect(second.getAttribute("data-open")).toBe("true")
+  fireEvent.click(within(first).getByRole("button", { name: "Comment on Onboarding flow" }))
+  expect(first.getAttribute("data-open")).toBe("true")
+  expect(second.getAttribute("data-open")).toBeNull()
 })
 
 it.each([403, 404])("a %s shows a restricted card without the name", (status) => {
