@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Preserve project feedback during upgrades and backups, keep private-history bundles owner-only, and erase legacy and native version attribution within the selected workspace.
+
 - **Artifact authoring clients support complete project versions.** Add pilot MCP tools and `page artifact` commands for atomic manifests, explicit version conflicts, restore and anchored feedback on servers that enable the artifact project backend.
 
 - Clear copied-command feedback timers when onboarding unmounts.
