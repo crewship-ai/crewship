@@ -98,16 +98,20 @@ export type ArtifactCardStatus = "draft" | "shared"
 
 export interface CraftLeaseHolder { actor_id: string; display_name: string; kind: "human" | "agent" }
 
+/** A pending request to take over the lease. */
+export interface CraftLeaseRequest { request_id: string; actor_id: string; display_name: string; kind: "human" | "agent" }
+
 export interface CraftLeaseStatus {
   /** null when the document is free. */
   holder: CraftLeaseHolder | null
-  /** True when the holder is this session. */
+  /** True only for the admission that holds the lease; a chat preview is its own admission, so never there. */
   mine: boolean
-  generation: number
+  /** Canonical decimal string; null before the first acquisition. */
+  generation: string | null
   expires_at?: string
-  /** Display name of whoever asked the holder to hand over, if any. */
-  handoff_requested_by?: string | null
   can_write: boolean
+  /** Pending handoff requests (wire name handoff_requested_by). */
+  requests: CraftLeaseRequest[]
 }
 
 export interface CraftProposal {

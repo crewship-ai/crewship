@@ -1,7 +1,7 @@
 // Isolated production-component browser test of the chat artifact project flow: the real
 // AssistantTurn with artifact tool cards, the side viewer (screens, anchored comment, agent
-// publish, restore). Every artifact request goes to the in-memory mock server; anything else
-// fails the run.
+// publish, restore) and the Craft preview with a lease held by another person. Every artifact
+// and Craft request goes to the in-memory mock server; anything else fails the run.
 // No live instance, provider or credentials are used.
 // Run: crewship-heavy node e2e/chat-artifact-project.browser.mjs
 // Screenshots: $CHAT_ARTIFACT_SCREENS or a fresh temporary directory
@@ -24,7 +24,7 @@ const VIEWPORTS = [
 ]
 const TIMEOUT = 15_000
 
-// Neighbours of AssistantTurn that need an app shell (auth, workspace, router,
+// Neighbours of AssistantTurn and CraftPreview that need an app shell (auth, workspace, router,
 // reactions feed). They are replaced by inert stand-ins; the components under test stay real.
 const STUBS = {
   "use-auth": 'export const useSessionSafe = () => ({ data: { user: { id: "fixture-human", name: "Fixture Human", email: "h@example.test" } }, status: "authenticated" }); export const useSession = useSessionSafe;',
@@ -44,7 +44,7 @@ try {
   await build({
     entryPoints: ["e2e/chat-artifact-project.fixture.tsx"], bundle: true, outfile: join(output, "bundle.js"), platform: "browser", format: "esm", jsx: "automatic",
     alias: { "@": process.cwd() }, logLevel: "error",
-    define: { "process.env": JSON.stringify({ NODE_ENV: "test", NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS: "true" }) },
+    define: { "process.env": JSON.stringify({ NODE_ENV: "test", NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS: "true", NEXT_PUBLIC_CHAT_CRAFT_LEASE: "true" }) },
     plugins: [{ name: "fixture-neighbours", setup(b) {
       b.onResolve({ filter: /(?:^@\/hooks\/use-auth$|\/hooks\/use-auth(?:\.tsx?)?$|^@\/hooks\/use-workspace$|^next\/navigation$|\/reactions\/turn-reactions$)/ }, args => ({ path: stubOf(args.path), namespace: "fixture" }))
       b.onLoad({ filter: /.*/, namespace: "fixture" }, args => ({ loader: "js", contents: STUBS[args.path] }))
@@ -187,8 +187,22 @@ try {
     await versions.scrollIntoViewIfNeeded()
     await shot("07-restored")
 
+    // 7. Craft: a Word document held by another person.
+    await backToChat()
+    const craft = page.getByRole("region", { name: "Craft section" })
+    await craft.scrollIntoViewIfNeeded()
+    await craft.getByText("Editing: Pavel Srba").waitFor()
+    await craft.getByText("you see a read-only preview").waitFor()
+    await craft.getByRole("button", { name: "Request edit" }).waitFor()
+    await craft.getByText("Recovered local draft").waitFor()
+    await craft.getByText("Scout prepared a proposal on v5").waitFor()
+    await shot("08-craft-locked", craft)
+    await craft.getByRole("button", { name: "Request edit" }).click()
+    await craft.getByText("Request sent to Pavel Srba · they can hand over or decline").waitFor()
+    await shot("09-craft-requested", craft)
+
     const unmocked = await page.evaluate(() => window.__unmocked)
-    assert.deepEqual(unmocked, [], `requests outside the mocked artifact routes: ${unmocked.join(", ")}`)
+    assert.deepEqual(unmocked, [], `requests outside the mocked artifact/Craft routes: ${unmocked.join(", ")}`)
     assert.deepEqual(errors, [], `page errors: ${errors.join(" | ")}`)
     const requests = await page.evaluate(() => [...new Set(window.__mock.state.requests)])
     step("viewport-pass", { viewport: vp.name, requests })

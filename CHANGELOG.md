@@ -13,6 +13,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Add an opt-in private native-document draft journal and whole-snapshot save coordinator. Recovery offers compare or copy, stale generations cannot replay drafts, and only an exact durable receipt confirms a save. Existing editor profiles remain unchanged.
 
 - Open an artifact card in a side viewer (full screen on phones) with screens, element select and anchored comments, the agent comment queue, version history and restore; off by default behind `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
+- Show the Craft edit-lock bar, agent proposal cards (Compare / Accept / Reject) and recovered local drafts in chat, and a "+ New artifact" composer menu offering only kinds with a backend; off by default behind `NEXT_PUBLIC_CHAT_CRAFT_LEASE` and `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
 - **Opening a new conversation logged three 404s.** A draft session no longer requests its execution profile, messages or participants before the first send creates it.
 - **Artifact authoring clients support complete project versions.** Add pilot MCP tools and `page artifact` commands for atomic manifests, explicit version conflicts, restore and anchored feedback on servers that enable the artifact project backend.
 
