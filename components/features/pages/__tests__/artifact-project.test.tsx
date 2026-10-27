@@ -1,11 +1,11 @@
 import React from "react"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
-const state = vi.hoisted(() => ({ user: "owner", data: { can_write: true, latest_version: 2, shared_version: 1, manifest: { version: 2, entrypoint: "index.html", files: [{ path: "index.html", content: "<h1>Hello</h1>", media_type: "text/html" }, { path: "details.html", content: "<h1>Details</h1>", media_type: "text/html" }] }, versions: [{ version: 2 }, { version: 1 }], quota: { used_bytes: 10, limit_bytes: 100, warning: false }, comments: [] }, restore: vi.fn(), share: vi.fn() }))
+const state = vi.hoisted(() => ({ user: "owner", token: "", comment: vi.fn(), data: { can_write: true, latest_version: 2, shared_version: 1, manifest: { version: 2, entrypoint: "index.html", files: [{ path: "index.html", content: "<h1>Hello</h1>", media_type: "text/html" }, { path: "details.html", content: "<h1>Details</h1>", media_type: "text/html" }] }, versions: [{ version: 2 }, { version: 1 }], quota: { used_bytes: 10, limit_bytes: 100, warning: false }, comments: [] }, restore: vi.fn(), share: vi.fn() }))
 vi.mock("@/hooks/use-artifact-agent-dispatch", () => ({ useArtifactAgentDispatch: () => ({ dispatch: vi.fn(), ready: false }) }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: state.user } } }) }))
-vi.mock("@/hooks/use-artifact-project", () => ({ useArtifactProject: () => ({ query: { data: state.data }, restore: { mutate: state.restore }, share: { mutate: state.share }, comment: { mutate: vi.fn() } }) }))
-vi.mock("@/lib/pages/artifact-project-preview", () => ({ artifactProjectDocument: () => "safe document" }))
+vi.mock("@/hooks/use-artifact-project", () => ({ useArtifactProject: () => ({ query: { data: state.data }, restore: { mutate: state.restore }, share: { mutate: state.share }, comment: { mutate: state.comment } }) }))
+vi.mock("@/lib/pages/artifact-project-preview", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/pages/artifact-project-preview")>(), artifactProjectDocument: (_files: unknown, _path: string, token: string) => { state.token = token; return "safe document" } }))
 import { ArtifactProject } from "../artifact-project"
 afterEach(() => { cleanup(); vi.clearAllMocks(); state.data.can_write = true; state.user = "owner"; localStorage.clear() })
 it("switches screens, restores with the latest base and shares only the selected version", () => {
@@ -39,4 +39,16 @@ it("never moves an unsent draft into another user browser scope", () => {
  view.rerender(<ArtifactProject workspaceId="w" slug="demo" />)
  expect(screen.getByLabelText("Comment for agent")).toHaveValue("")
  expect(localStorage.getItem("artifact-comment:reader:w:demo")).toBeNull()
+})
+
+it("retains 500 Unicode codepoints in a normalized selected quote sent to the agent", () => {
+ render(<ArtifactProject workspaceId="w" slug="demo" />)
+ fireEvent.click(screen.getByRole("button", { name: "Select an element" }))
+ const frame = screen.getByTitle("Artifact preview") as HTMLIFrameElement
+ const quote = "  \ufeffŽluťoučký\u0085  kůň\u00a0pěl\nďábelské\tódy  " + "🙂".repeat(520)
+ fireEvent(window, new MessageEvent("message", { origin: "null", source: frame.contentWindow, data: { token: state.token, selector: "#artifact-unicode-quote", quote } }))
+ fireEvent.change(screen.getByLabelText("Comment for agent"), { target: { value: "Uprav nadpis" } })
+ fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
+ const expected = Array.from("\ufeffŽluťoučký kůň pěl ďábelské ódy " + "🙂".repeat(520)).slice(0,500).join("")
+ expect(state.comment.mock.calls[0][0].quote).toBe(expected)
 })

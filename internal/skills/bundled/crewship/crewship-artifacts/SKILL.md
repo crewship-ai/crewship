@@ -22,7 +22,10 @@ for linked screens and assets. A three-screen prototype can use `index.html`,
 `details.html` and `settings.html` with ordinary relative links. Include every
 file needed by the preview in one manifest. File paths must be relative,
 non-traversing and unique. Keep selection targets stable with explicit element
-IDs. The first preview executes no authored JavaScript. Use three HTML files with
+IDs on every meaningful selectable element. Prefix them, for example
+`artifact-hero-heading` or `artifact-primary-action`; the sanitizer removes
+reserved IDs such as `title`, and positional selectors cannot authorize edits.
+The first preview executes no authored JavaScript. Use three HTML files with
 inline CSS or `text/css` files and ordinary local links, rather than relying on
 a React bundle or runtime script. The trusted preview bridge handles navigation
 and selection.

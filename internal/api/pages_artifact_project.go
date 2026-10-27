@@ -30,6 +30,26 @@ type artifactProjectFile struct {
 	Content   string `json:"content"`
 	MediaType string `json:"media_type"`
 }
+
+// Presence is significant: JSON null or a missing content field is not an
+// intentional empty file. The outer decoder also rejects duplicate fields.
+func (f *artifactProjectFile) UnmarshalJSON(raw []byte) error {
+	var fields map[string]json.RawMessage
+	if err := decodeArtifactProjectJSONBytes(raw, &fields); err != nil {
+		return err
+	}
+	if len(fields) != 3 || fields["path"] == nil || fields["content"] == nil || fields["media_type"] == nil {
+		return fmt.Errorf("file requires path, content and media_type strings")
+	}
+	type wire artifactProjectFile
+	var value wire
+	if err := decodeArtifactProjectJSONBytes(raw, &value); err != nil {
+		return err
+	}
+	*f = artifactProjectFile(value)
+	return nil
+}
+
 type artifactProjectPublish struct {
 	BaseVersion *int64                `json:"base_version"`
 	EntryPoint  string                `json:"entrypoint"`
@@ -155,9 +175,6 @@ func (h *PageHandler) artifactProjectAuthority(r *http.Request, k artifacts.Vers
 		if rec.OwnerUserID == user.ID {
 			return user.ID, nil
 		}
-		if write || share {
-			return "", errArtifactProjectAccess
-		}
 		// A reader sees only the selected shared version. Private history stays with
 		// its owner, even for an administrator or a holder of an ordinary write grant.
 		if rec.PrivateAudience {
@@ -175,6 +192,11 @@ func (h *PageHandler) artifactProjectAuthority(r *http.Request, k artifacts.Vers
 		var pin int64
 		if tx.QueryRowContext(ctx, `SELECT shared_version FROM artifact_version_heads WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&pin) != nil || pin == 0 {
 			return "", artifacts.ErrVersionNotFound
+		}
+		// Only a reader entitled to this shared pin may learn that a write
+		// was denied. An ungranted Page remains indistinguishable from absent.
+		if write || share {
+			return "", errArtifactProjectAccess
 		}
 		return user.ID, nil
 	}

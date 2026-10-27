@@ -10,7 +10,7 @@ const directory = await mkdtemp(join(tmpdir(), "artifact-project-preview-"))
 let browser
 try {
  const bundle = join(directory, "preview.js")
- await build({ entryPoints: ["lib/pages/artifact-project-preview.ts"], bundle: true, format: "iife", globalName: "ArtifactPreview", platform: "browser", outfile: bundle })
+ await build({ entryPoints: ["lib/pages/artifact-project-preview.ts"], bundle: true, minify: true, format: "iife", globalName: "ArtifactPreview", platform: "browser", outfile: bundle })
  browser = await chromium.launch({ headless: true })
  const page = await browser.newPage()
  const requests = []
@@ -19,7 +19,7 @@ try {
  await page.addScriptTag({ content: await readFile(bundle, "utf8") })
  await page.evaluate(() => {
   window.messages = []
-  window.addEventListener("message", event => window.messages.push(event.data))
+  window.addEventListener("message", event => { if (event.origin === "null" && event.source === document.querySelector("iframe").contentWindow) window.messages.push(event.data) })
   window.files = [
    { path: "index.html", media_type: "text/html", content: '<h1 id="hero-heading" onclick="parent.postMessage(\'bad\',\'*\')">Overview</h1><a href="details.html">Details</a><script>parent.postMessage("bad","*")</script><iframe src="https://escape.invalid"></iframe><style>@import "https://escape.invalid/style";</style>' },
    { path: "details.html", media_type: "text/html", content: '<h1>Details</h1><a href="contact.html">Contact</a>' },
@@ -44,6 +44,27 @@ try {
  await frame.getByRole("heading", { name: "Overview" }).click()
  await page.waitForFunction(() => window.messages.some(message => message.selector === "#hero-heading" && message.quote === "Overview"))
  assert.equal(await page.evaluate(() => window.messages.includes("bad")), false)
+ const text = "  \ufeffŽluťoučký\u0085  kůň\u00a0pěl\nďábelské\tódy  " + "🙂".repeat(520)
+ const expected = Array.from("\ufeffŽluťoučký kůň pěl ďábelské ódy " + "🙂".repeat(520)).slice(0, 500).join("")
+ await page.evaluate(text => {
+  window.files[0].content = `<div id="artifact-unicode-quote"><style>.invisible{color:blue}</style>${text}</div>`
+  window.openScreen("index.html", true)
+ }, text)
+ await frame.locator("#artifact-unicode-quote").click()
+ await page.waitForFunction(() => window.messages.some(message => message.selector === "#artifact-unicode-quote"))
+ const quote = await page.evaluate(() => window.messages.find(message => message.selector === "#artifact-unicode-quote").quote)
+ assert.equal(quote, expected)
+ assert.equal(Array.from(quote).length, 500)
+ assert.equal(Array.from(quote).at(-1), "🙂")
+ assert.ok(Buffer.byteLength(quote) <= 2000)
+ await page.evaluate(() => {
+  window.files[0].content = `<div id="artifact-boundary-quote">${"x".repeat(499)} y</div>`
+  window.openScreen("index.html", true)
+ })
+ await frame.locator("#artifact-boundary-quote").click()
+ await page.waitForFunction(() => window.messages.some(message => message.selector === "#artifact-boundary-quote"))
+ const boundary = await page.evaluate(() => window.messages.find(message => message.selector === "#artifact-boundary-quote").quote)
+ assert.equal(boundary, "x".repeat(499)) // trailing canonical separator is not part of the anchor
  assert.deepEqual(requests, [])
- console.log("PASS: three linked screens, exact stable-id selection, author scripts/network blocked, opaque origin")
+ console.log("PASS: three linked screens, exact stable-id and Czech/emoji quotes, author scripts/network blocked, opaque origin")
 } finally { await browser?.close(); await rm(directory, { recursive: true, force: true }) }

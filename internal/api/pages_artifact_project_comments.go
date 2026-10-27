@@ -82,7 +82,23 @@ func artifactProjectAnchor(content []byte, selector, quote string) bool {
 	collect(selected)
 	normalized := strings.Join(strings.Fields(text.String()), " ")
 	want := strings.Join(strings.Fields(quote), " ")
-	return want != "" && (normalized == want || len(want) == 500 && strings.HasPrefix(normalized, want))
+	if want == "" {
+		return false
+	}
+	if normalized == want {
+		return true
+	}
+	// The trusted browser quotes 500 Unicode codepoints after normalization.
+	// Normalize the canonical prefix again when its last codepoint is a space.
+	// Stop at that boundary rather than allocating runes for the entire file.
+	prefixRunes := 0
+	for offset := range normalized {
+		if prefixRunes == 500 {
+			return want == strings.TrimSpace(normalized[:offset])
+		}
+		prefixRunes++
+	}
+	return false
 }
 func (h *PageHandler) artifactProjectCommentTx(r *http.Request, k artifacts.VersionKey, write bool, fn func(context.Context, *sql.Tx, string) error) error {
 	tx, err := h.db.BeginTx(r.Context(), nil)

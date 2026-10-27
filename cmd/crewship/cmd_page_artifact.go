@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"strconv"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 )
@@ -129,6 +131,9 @@ func readArtifactCLIManifest(cmd *cobra.Command) (map[string]any, error) {
 	if err != nil || len(raw) > 9<<20 {
 		return nil, fmt.Errorf("cannot read artifact manifest within 9 MiB")
 	}
+	if err := validateArtifactManifestJSON(raw); err != nil {
+		return nil, err
+	}
 	var body map[string]any
 	if err := json.Unmarshal(raw, &body); err != nil || body == nil {
 		return nil, fmt.Errorf("manifest must be a JSON object")
@@ -142,3 +147,60 @@ func readArtifactCLIManifest(cmd *cobra.Command) (map[string]any, error) {
 }
 
 func init() { pageCmd.AddCommand(newPageArtifactCommand()) }
+
+// Check the original input before map decoding can normalize duplicate keys or UTF-8.
+func validateArtifactManifestJSON(raw []byte) error {
+	if !utf8.Valid(raw) {
+		return fmt.Errorf("manifest must be valid UTF-8")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	var value func(int) error
+	value = func(depth int) error {
+		if depth > 128 {
+			return fmt.Errorf("manifest JSON nesting exceeds 128 levels")
+		}
+		token, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		delimiter, container := token.(json.Delim)
+		if !container {
+			return nil
+		}
+		switch delimiter {
+		case '{':
+			seen := make(map[string]bool)
+			for decoder.More() {
+				token, err := decoder.Token()
+				if err != nil {
+					return err
+				}
+				key, ok := token.(string)
+				if !ok || seen[key] {
+					return fmt.Errorf("duplicate or invalid manifest field %q", key)
+				}
+				seen[key] = true
+				if err := value(depth + 1); err != nil {
+					return err
+				}
+			}
+		case '[':
+			for decoder.More() {
+				if err := value(depth + 1); err != nil {
+					return err
+				}
+			}
+		default:
+			return fmt.Errorf("invalid manifest JSON delimiter")
+		}
+		_, err = decoder.Token()
+		return err
+	}
+	if err := value(0); err != nil {
+		return fmt.Errorf("invalid manifest JSON: %w", err)
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return fmt.Errorf("manifest must contain exactly one JSON value")
+	}
+	return nil
+}

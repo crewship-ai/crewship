@@ -2,6 +2,12 @@ import DOMPurify from "dompurify"
 import { staticCSS } from "./artifact-raster"
 import type { ArtifactFile } from "@/hooks/use-artifact-project"
 
+/** Match Go strings.Fields and count Unicode codepoints, preserving opaque text such as BOM.
+ * Keep this closure-free: the same function runs inside the sandboxed bridge. */
+export function artifactProjectQuote(text: string): string {
+ return Array.from(text.split(/\p{White_Space}+/u).filter(Boolean).join(" ")).slice(0,500).join("").replace(/ $/, "")
+}
+
 /** Preview source is inert. Only the host-owned selection bridge may execute. */
 export function artifactProjectDocument(files: ArtifactFile[], path: string, token: string, selecting: boolean): string {
  const file = files.find(file => file.path === path)
@@ -23,7 +29,7 @@ export function artifactProjectDocument(files: ArtifactFile[], path: string, tok
  const safeProjectCSS = staticCSS(projectCSS) ? projectCSS : ""
  const nonce = Array.from(crypto.getRandomValues(new Uint8Array(16)), value => value.toString(16).padStart(2, "0")).join("")
  const payload = JSON.stringify({ token, selecting }).replaceAll("<", "\\u003c")
- const bridge = `const config=${payload};document.addEventListener('click',event=>{event.preventDefault();const element=event.target instanceof Element?event.target:null;if(!element)return;if(!config.selecting){const link=element.closest('[data-artifact-screen]');if(link)parent.postMessage({token:config.token,screen:link.getAttribute('data-artifact-screen')},'*');return;}const parts=[];let current=element;while(current&&current!==document.body){const parent=current.parentElement;if(!parent)break;parts.unshift(current.tagName.toLowerCase()+':nth-child('+(Array.from(parent.children).indexOf(current)+1)+')');current=parent;}parent.postMessage({token:config.token,selector:element.id?'#'+CSS.escape(element.id):'body > '+parts.join(' > '),quote:(element.textContent||'').trim().slice(0,500)},'*');},true);`
+ const bridge = `const config=${payload};const quote=${artifactProjectQuote.toString()};document.addEventListener('click',event=>{event.preventDefault();const element=event.target instanceof Element?event.target:null;if(!element||element.matches('script,style'))return;if(!config.selecting){const link=element.closest('[data-artifact-screen]');if(link)parent.postMessage({token:config.token,screen:link.getAttribute('data-artifact-screen')},'*');return;}const content=element.cloneNode(true);content.querySelectorAll('script,style').forEach(node=>node.remove());const parts=[];let current=element;while(current&&current!==document.body){const parent=current.parentElement;if(!parent)break;parts.unshift(current.tagName.toLowerCase()+':nth-child('+(Array.from(parent.children).indexOf(current)+1)+')');current=parent;}parent.postMessage({token:config.token,selector:element.id?'#'+CSS.escape(element.id):'body > '+parts.join(' > '),quote:quote(content.textContent||'')},'*');},true);`
  const policy = `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'`
  return `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${policy}"><meta name="referrer" content="no-referrer"><style>body{font-family:system-ui,sans-serif;margin:24px;overflow-wrap:anywhere}a,button{cursor:pointer}${selecting ? "body *:hover{outline:2px solid #2563eb;cursor:crosshair}" : ""}</style></head><body>${safeProjectCSS ? `<style>${safeProjectCSS.replaceAll("<", "\\3c ")}</style>` : ""}${holder.innerHTML}<script nonce="${nonce}">${bridge}</script></body></html>`
 }

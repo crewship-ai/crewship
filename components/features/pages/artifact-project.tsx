@@ -6,7 +6,7 @@ import { useArtifactAgentDispatch } from "@/hooks/use-artifact-agent-dispatch"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { Button } from "@/components/ui/button"
 import { useArtifactProject, type ArtifactAnchor } from "@/hooks/use-artifact-project"
-import { artifactProjectDocument } from "@/lib/pages/artifact-project-preview"
+import { artifactProjectDocument, artifactProjectQuote } from "@/lib/pages/artifact-project-preview"
 
 export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspaceId: string; slug: string; initialVersion?: number }) {
  const session = useSessionSafe()
@@ -38,10 +38,10 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
  }, [draftState, draftKey])
  useEffect(() => {
   const receive = (event: MessageEvent) => {
-   if (event.source !== frame.current?.contentWindow || event.data?.token !== token || !manifest) return
+   if (event.origin !== "null" || event.source !== frame.current?.contentWindow || event.data?.token !== token || !manifest) return
    if (typeof event.data.screen === "string" && manifest.files.some(file => file.path === event.data.screen && file.media_type === "text/html")) { setScreenPath(event.data.screen); setAnchor(undefined); return }
    if (!selecting || !data?.can_write || typeof event.data.selector !== "string" || event.data.selector.length > 2000 || typeof event.data.quote !== "string") return
-   setAnchor({ version: manifest.version, path, selector: event.data.selector, quote: event.data.quote.slice(0,500) })
+   setAnchor({ version: manifest.version, path, selector: event.data.selector, quote: artifactProjectQuote(event.data.quote) })
    setSelecting(false)
   }
   window.addEventListener("message", receive)
@@ -59,10 +59,10 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
  }
  return <main className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] min-h-0 flex-col">
   <header className="flex flex-wrap items-center gap-3 border-b p-4">
-   <Link href={`/pages/${encodeURIComponent(slug)}?workspace_id=${encodeURIComponent(workspaceId)}`} className="text-sm underline">Back to Page</Link>
+   <Link href={`/pages/${encodeURIComponent(slug)}?workspace_id=${encodeURIComponent(workspaceId)}`} className="inline-flex items-center text-sm underline coarse:min-h-[44px]">Back to Page</Link>
    <h1 className="mr-auto text-lg font-semibold">{slug} · Artifact project</h1>
    {!data.can_write && <span className="text-sm text-muted-foreground">Read only</span>}
-   <label className="flex items-center gap-2 text-sm">Version<select aria-label="Version" className="rounded border bg-background p-2" value={viewedVersion} onChange={event => selectVersion(Number(event.target.value))}>{data.versions.map(item => <option key={item.version} value={item.version}>Version {item.version}{item.version === data.shared_version ? " · shared" : ""}</option>)}</select></label>
+   <label className="flex items-center gap-2 text-sm">Version<select aria-label="Version" className="rounded border bg-background p-2 coarse:min-h-[44px]" value={viewedVersion} onChange={event => selectVersion(Number(event.target.value))}>{data.versions.map(item => <option key={item.version} value={item.version}>Version {item.version}{item.version === data.shared_version ? " · shared" : ""}</option>)}</select></label>
    {data.can_write && <><Button variant="outline" disabled={restore.isPending} onClick={() => restore.mutate({ version: viewedVersion, base_version: data.latest_version }, { onSuccess: () => { setVersion(undefined); setAnchor(undefined) } })}>Restore version {viewedVersion}</Button><Button variant="outline" disabled={share.isPending} onClick={() => share.mutate({ version: viewedVersion, base_version: data.latest_version })}>Share version {viewedVersion}</Button></>}
   </header>
   {data.can_write && <div className="border-b px-4 py-2 text-xs text-muted-foreground" role="status">Storage: {data.quota.used_bytes.toLocaleString()} / {data.quota.limit_bytes.toLocaleString()} bytes. All versions retained; history is never deleted automatically.{data.quota.warning && <strong className="ml-2 text-destructive">Storage is nearly full. Existing versions remain safe.</strong>}</div>}
@@ -75,8 +75,8 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
    <aside className="w-full overflow-auto border-t p-4 md:w-80 md:border-l md:border-t-0" aria-label="Comments">
     <h2 className="mb-3 font-semibold">Comments</h2>
     {data.can_write && <div className="mb-4 space-y-2">{anchor ? <blockquote className="rounded border p-2 text-sm">Version {anchor.version} · {anchor.path}<p>{anchor.quote || anchor.selector}</p></blockquote> : <p className="text-sm text-muted-foreground">Select an element in the preview to give the agent an exact location.</p>}<textarea aria-label="Comment for agent" value={draft} onChange={event => setDraft(event.target.value)} className="min-h-24 w-full rounded border bg-background p-2 text-sm" placeholder="What should change?" /><p className="text-xs text-muted-foreground">{storageError ? "Browser storage unavailable. Copy your draft before leaving." : "Your unsent comment is saved in this browser."}</p><Button disabled={!anchor || !draft.trim() || comment.isPending} onClick={send}>Send to agent</Button></div>}
-    {data.comments.map(item => <article key={item.id} className="mb-3 rounded border p-3 text-sm"><p className="mb-1 text-xs text-muted-foreground">Version {item.version} · {item.path}</p><blockquote className="mb-2 border-l-2 pl-2">{item.quote}</blockquote><p>{item.text}</p>{item.task_id && <p className="mt-2 text-xs">{item.replies?.length ? "Agent replied" : delivery[item.id] ?? "Queued for agent"}</p>}{data.can_write && data.origin && item.task_id && !item.replies?.length && <Button size="sm" variant="ghost" disabled={!agent.ready} onClick={async () => { const accepted = await agent.dispatch(item); setDelivery(previous => ({...previous,[item.id]:accepted ? "Sent to agent" : "Comment saved. Agent delivery could not be confirmed."})) }}>Retry agent delivery</Button>}{item.replies?.map((reply, index) => <p key={index} className="mt-2 border-t pt-2">Version {reply.version}: {reply.text}</p>)}</article>)}
-    {data.shared_version > 0 && <Link className="text-sm underline" href={`/pages/${encodeURIComponent(slug)}?artifact=1&version=${data.shared_version}&workspace_id=${encodeURIComponent(workspaceId)}`}>Open shared version {data.shared_version}</Link>}
+    {data.comments.map(item => <article key={item.id} className="mb-3 rounded border p-3 text-sm"><p className="mb-1 text-xs text-muted-foreground">Version {item.version} · {item.path}</p><blockquote className="mb-2 border-l-2 pl-2">{item.quote}</blockquote><p>{item.text}</p>{item.task_id && <p className="mt-2 text-xs">{item.replies?.length ? "Answered" : delivery[item.id] ?? "Queued for agent"}</p>}{data.can_write && data.origin && item.task_id && !item.replies?.length && <Button size="sm" variant="ghost" disabled={!agent.ready} onClick={async () => { const accepted = await agent.dispatch(item); setDelivery(previous => ({...previous,[item.id]:accepted ? "Sent to agent" : "Comment saved. Agent delivery could not be confirmed."})) }}>Retry agent delivery</Button>}{item.replies?.map((reply, index) => <p key={index} className="mt-2 border-t pt-2">Version {reply.version}: {reply.text}</p>)}</article>)}
+    {data.shared_version > 0 && <Link className="inline-flex items-center text-sm underline coarse:min-h-[44px]" href={`/pages/${encodeURIComponent(slug)}?artifact=1&version=${data.shared_version}&workspace_id=${encodeURIComponent(workspaceId)}`}>Open shared version {data.shared_version}</Link>}
    </aside>
   </div>
  </main>
