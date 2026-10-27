@@ -70,6 +70,8 @@ const OPAQUE_ID = /^c[a-z0-9]{20,}$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 function authorLabel(author: string | undefined, me: string | undefined): string | null {
   if (!author) return null
   if (me && author === me) return "You"
+  // A version the agent published carries its run, e.g. agent:<id>:msg_<id>.
+  if (/^agent:/i.test(author)) return "Agent"
   return OPAQUE_ID.test(author) ? null : author
 }
 
@@ -319,8 +321,8 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
   const history = historyOpen && versions.length > 0 && <div ref={historyRef} tabIndex={-1} role="region" aria-label="Version history" className="rounded-card border bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
     <ul>{versions.map(v => <li key={v.version} className="flex flex-wrap items-center gap-2.5 border-t px-3 py-2 first:border-t-0">
       <span data-slot="version-number" className="shrink-0 rounded-sm border bg-muted px-[5px] font-mono text-micro font-semibold text-foreground/80">v{v.version}</span>
-      <div className="grid min-w-0 flex-[1_1_180px]">
-        <b className="truncate text-sm font-semibold">{[v.actor, v.message].filter(Boolean).join(" · ") || `Version ${v.version}`}</b>
+      <div className="grid min-w-0 flex-[1_1_180px] grid-cols-[minmax(0,1fr)]">
+        <b className="truncate text-sm font-semibold">{[authorLabel(v.actor, me), v.message].filter(Boolean).join(" · ") || `Version ${v.version}`}</b>
         <small className="text-xs text-muted-foreground">{[v.created_at && timeAgo(v.created_at), v.restored_from ? `Restored from v${v.restored_from}` : null].filter(Boolean).join(" · ")}</small>
       </div>
       {v.version === latest && <StatusPill tone="muted" label="Latest" />}
@@ -366,7 +368,7 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
         return <li key={c.id} className="border-t first:border-t-0">
           <button type="button" className="flex w-full flex-wrap items-center gap-2.5 px-3 py-2 text-left hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" onClick={() => jumpTo(c)}>
             <span aria-hidden className={cn(PIN, "size-5 bg-muted text-micro text-foreground/80 ring-1 ring-border")}>{index + 1}</span>
-            <span className="grid min-w-0 flex-[1_1_180px]">
+            <span className="grid min-w-0 flex-[1_1_180px] grid-cols-[minmax(0,1fr)]">
               <b className="text-sm font-semibold">{c.text}</b>
               <small className="truncate text-xs text-muted-foreground">{[authorLabel(c.author, me), labelOf(c.path), c.selector && elementLabel(c.selector, c.quote), c.created_at && timeAgo(c.created_at)].filter(Boolean).join(" · ")}</small>
             </span>
