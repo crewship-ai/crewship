@@ -329,14 +329,20 @@ type pageWire struct {
 // were conflated. They answer different questions.
 type pageListWire struct {
 	// Explicit audience classification; unfiled human ownership is not privacy.
-	PrivateAudience     bool   `json:"private_audience"`
-	HasDocument         bool   `json:"has_document"`
-	HasSlides           bool   `json:"has_slides"`
-	SlidesSchema        int    `json:"slides_schema"`
-	HasWorkbook         bool   `json:"has_workbook,omitempty"`
-	HasMooring          bool   `json:"has_mooring,omitempty"`
-	HasCollaboration    bool   `json:"has_collaboration,omitempty"`
-	CollaborationFormat string `json:"collaboration_format,omitempty"`
+	PrivateAudience bool `json:"private_audience"`
+	HasDocument     bool `json:"has_document"`
+	HasSlides       bool `json:"has_slides"`
+	SlidesSchema    int  `json:"slides_schema"`
+	// ArtifactKind names a versioned artifact (project, word, sheet) for the
+	// Artifacts library; ArtifactSharedVersion is the version shared with
+	// readers. The latest version is left out on purpose: a reader sees only
+	// the shared pin, and the snapshot read decides who sees more.
+	ArtifactKind          string `json:"artifact_kind,omitempty"`
+	ArtifactSharedVersion int    `json:"artifact_shared_version,omitempty"`
+	HasWorkbook           bool   `json:"has_workbook,omitempty"`
+	HasMooring            bool   `json:"has_mooring,omitempty"`
+	HasCollaboration      bool   `json:"has_collaboration,omitempty"`
+	CollaborationFormat   string `json:"collaboration_format,omitempty"`
 	// See pageWire.HasProject: source that exists versus source that is live.
 	HasProject         bool   `json:"has_project"`
 	HasApplication     bool   `json:"has_application"`
@@ -418,29 +424,33 @@ type pageWriteRequest struct {
 // ── Internal records ───────────────────────────────────────────────────────
 
 type pageRecord struct {
-	PrivateAudience     bool
-	HasDocument         bool
-	HasSlides           bool
-	SlidesSchema        int
-	HasMooring          bool
-	HasCollaboration    bool
-	CollaborationFormat string
-	HasWorkbook         bool
-	HasProject          bool
-	HasApplication      bool
-	PublicationVersion  int64
-	ID                  string
-	Slug                string
-	Name                string
-	Description         string
-	OwnerUserID         string
-	OwnerCrewID         string
-	FolderID            string
-	PagesVersion        int64
-	Icon                string
-	Color               string
-	CreatedAt           string
-	UpdatedAt           string
+	PrivateAudience bool
+	HasDocument     bool
+	HasSlides       bool
+	SlidesSchema    int
+	// ArtifactContentType and ArtifactSharedVersion come from the version head
+	// (artifact_version_heads); empty and 0 for a Page without one.
+	ArtifactContentType   string
+	ArtifactSharedVersion int
+	HasMooring            bool
+	HasCollaboration      bool
+	CollaborationFormat   string
+	HasWorkbook           bool
+	HasProject            bool
+	HasApplication        bool
+	PublicationVersion    int64
+	ID                    string
+	Slug                  string
+	Name                  string
+	Description           string
+	OwnerUserID           string
+	OwnerCrewID           string
+	FolderID              string
+	PagesVersion          int64
+	Icon                  string
+	Color                 string
+	CreatedAt             string
+	UpdatedAt             string
 }
 
 type panelRecord struct {
@@ -573,8 +583,10 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 		       COALESCE(l.published,0), COALESCE(l.version,0),
  EXISTS(SELECT 1 FROM documents WHERE page_id=p.id), p.private_audience,
  EXISTS(SELECT 1 FROM gridcraft_heads WHERE page_id=p.id), EXISTS(SELECT 1 FROM mooring_documents WHERE page_id=p.id), EXISTS(SELECT 1 FROM mooring_collab_documents WHERE page_id=p.id), COALESCE((SELECT format_profile FROM mooring_collab_documents WHERE page_id=p.id),''),
- EXISTS(SELECT 1 FROM slides_heads WHERE page_id=p.id AND workspace_id=p.workspace_id), COALESCE((SELECT schema_version FROM slides_heads WHERE page_id=p.id AND workspace_id=p.workspace_id),0)
+ EXISTS(SELECT 1 FROM slides_heads WHERE page_id=p.id AND workspace_id=p.workspace_id), COALESCE((SELECT schema_version FROM slides_heads WHERE page_id=p.id AND workspace_id=p.workspace_id),0),
+ COALESCE(h.content_type,''), COALESCE(h.shared_version,0)
 		FROM pages p LEFT JOIN page_project_live l ON l.page_id=p.id
+		LEFT JOIN artifact_version_heads h ON h.workspace_id=p.workspace_id AND h.page_id=p.id
 		WHERE p.workspace_id = ? AND `+scope.where+`
 		ORDER BY p.updated_at DESC, p.slug ASC`, args...)
 	if err != nil {
@@ -588,7 +600,7 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 		if err := rows.Scan(&p.ID, &p.Slug, &p.Name, &p.Description,
 			&p.OwnerUserID, &p.OwnerCrewID, &p.FolderID, &p.PagesVersion,
 			&p.Icon, &p.Color,
-			&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience, &p.HasWorkbook, &p.HasMooring, &p.HasCollaboration, &p.CollaborationFormat, &p.HasSlides, &p.SlidesSchema); err != nil {
+			&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience, &p.HasWorkbook, &p.HasMooring, &p.HasCollaboration, &p.CollaborationFormat, &p.HasSlides, &p.SlidesSchema, &p.ArtifactContentType, &p.ArtifactSharedVersion); err != nil {
 			return nil, err
 		}
 		records = append(records, p)
@@ -687,11 +699,26 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 
 // pageListRow renders one index row for this viewer. It costs no statement:
 // everything it reads was loaded in bulk by loadPageIndex.
+// artifactListKind maps a version head's content type to the library's kind;
+// an unknown type is not listed as an artifact at all.
+func artifactListKind(contentType string) string {
+	switch contentType {
+	case "artifact_project":
+		return "project"
+	case "wordcraft":
+		return "word"
+	case "gridcraft":
+		return "sheet"
+	}
+	return ""
+}
+
 func (h *PageHandler) pageListRow(row *pageIndexRow, folders map[string]*pageFolderRecord, viewer *pageViewer) pageListWire {
 	rec := &row.rec
 	out := pageListWire{
 		PrivateAudience: rec.PrivateAudience,
 		HasSlides:       rec.HasSlides, SlidesSchema: rec.SlidesSchema,
+		ArtifactKind: artifactListKind(rec.ArtifactContentType), ArtifactSharedVersion: rec.ArtifactSharedVersion,
 		HasDocument: rec.HasDocument, HasWorkbook: rec.HasWorkbook, HasMooring: rec.HasMooring, HasCollaboration: rec.HasCollaboration, CollaborationFormat: rec.CollaborationFormat, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 		ID:                  rec.ID,
 		Slug:                rec.Slug,
