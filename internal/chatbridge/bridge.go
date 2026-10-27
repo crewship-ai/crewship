@@ -318,9 +318,10 @@ type Bridge struct {
 	// unified inbox for users who aren't watching the session live.
 	// Optional (nil = disabled); wired via SetReplyNotifier. See
 	// notify.go.
-	replyNotifier             ReplyNotifier
-	pageContextResolver       PageChatContextResolver
-	documentIterationRecorder DocumentIterationRecorder
+	replyNotifier                 ReplyNotifier
+	pageContextResolver           PageChatContextResolver
+	documentIterationRecorder     DocumentIterationRecorder
+	artifactProjectIntentRecorder ArtifactProjectIntentRecorder
 }
 
 // SetPageChatContextResolver enables server-verified Page references in chat.
@@ -341,6 +342,7 @@ func (b *Bridge) SetProvisioningEnqueuer(p ProvisioningEnqueuer) {
 // Document creation is disabled unless explicitly enabled by the host.
 type BridgeConfig struct {
 	DocumentCreationEnabled bool
+	ArtifactProjectsEnabled bool
 	DefaultMemoryMB         int
 	DefaultCPUs             float64
 }
@@ -579,6 +581,14 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		return errors.New("Document iteration is unavailable")
 	}
 	msgOpt.DocumentIterationIntent = documentIteration
+	artifactProject, err := artifactProjectForSend(b.cfg.ArtifactProjectsEnabled, msgOpt, info, userID, chatID, hasPage, documentCreation != nil || documentIteration != nil)
+	if err != nil {
+		return err
+	}
+	if artifactProject != nil && b.artifactProjectIntentRecorder == nil {
+		return errors.New("artifact project admission unavailable")
+	}
+	msgOpt.ArtifactProjectIntent = artifactProject
 	// Replay the original human submission after provisioning; server Page
 	// context is rebuilt only after current form and access checks run again.
 	originalContent := content
@@ -692,6 +702,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		}
 		if err := b.convStore.SyncSession(ctx, chatID); err != nil {
 			return err
+		}
+		if artifactProject != nil {
+			return b.artifactProjectIntentRecorder.RecordArtifactProjectIntent(ctx, info.HumanAuthority, triggerMessageID, *artifactProject)
 		}
 		if documentIteration != nil {
 			return b.documentIterationRecorder.RecordDocumentIteration(ctx, info.HumanAuthority, triggerMessageID, *documentIteration)
@@ -1260,6 +1273,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	if documentIteration != nil {
 		req.UserMessage = documentIterationRunPrompt(content, documentIteration)
 	}
+	if artifactProject != nil {
+		req.UserMessage = artifactProjectRunPrompt(content, artifactProject)
+	}
 	req.RunID = runID
 	runMeta := map[string]interface{}{
 		"cli_adapter": info.CLIAdapter,
@@ -1273,6 +1289,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 	if documentIteration != nil {
 		runMeta["document_iteration_intent"] = documentIteration
+	}
+	if artifactProject != nil {
+		runMeta["artifact_project_intent"] = artifactProject
 	}
 	ctx = runauthority.WithTriggerMessage(ctx, triggerMessageID)
 	ctx = chataudience.WithReceipt(ctx, info.HumanAuthority)
