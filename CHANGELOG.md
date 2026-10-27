@@ -9,7 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Native single-editor documents gain a default-off edit lease boundary.** SQL-backed holder generations fence expired, handed-off and revoked writers; workspace erasure and user deletion remove retained holder identities while preserving the fence. Runtime editor and version-store wiring remain disabled.
+- **Native single-editor documents gain a default-off edit lease boundary.** SQL-backed holder generations fence expired, handed-off and revoked writers; workspace erasure and user deletion remove retained holder identities while preserving the fence. Lease acknowledgements recheck authority after SQL; recovery retires source holders while retaining generations, and portable replacement refuses issued target fences. Runtime editor and version-store wiring remain disabled.
 
 - Clear copied-command feedback timers when onboarding unmounts.
 

@@ -69,6 +69,7 @@ func rejectPrivateArtifactTargetReplacement(ctx context.Context, target privateA
 // Runtime delivery metadata is deliberately absent from portable bundles.
 // Dropping the target's rows cannot withdraw a lease already held by a runtime,
 // and would erase the expiry evidence needed by subsequent revocation barriers.
+// Editor lease rows also retain non-ABA generation tombstones after release.
 // Refuse replacement until a qualified retirement protocol can prove it safe.
 var ErrMooringDeliveryTargetReplacement = errors.New("backup: target contains issued Mooring delivery metadata; restore into a separate empty target")
 
@@ -81,7 +82,7 @@ func rejectMooringDeliveryTargetReplacement(ctx context.Context, target privateA
 			args[i] = id
 		}
 	}
-	for _, table := range []string{"mooring_delivery_gates", "mooring_delivery_barriers"} {
+	for _, table := range []string{"mooring_delivery_gates", "mooring_delivery_barriers", "mooring_edit_leases"} {
 		var exists bool
 		if err := target.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?)`, table).Scan(&exists); err != nil {
 			return err

@@ -153,11 +153,13 @@ func TestReviewEditLeaseAcquireUsesPostAuthorityFreshness(t *testing.T) {
 		t.Run(map[bool]string{false: "elapsed", true: "reboot"}[reboot], func(t *testing.T) {
 			s, db, clock, scope, principal := editLeaseFixture(t)
 			original := s.config.Authority
+			slowFirstAuthorization := true
 			s.config.Authority = func(ctx context.Context, tx *sql.Tx, access EditLeaseAccess) error {
 				if err := original(ctx, tx, access); err != nil {
 					return err
 				}
-				if access.Intent == "acquire" {
+				if access.Intent == "acquire" && slowFirstAuthorization {
+					slowFirstAuthorization = false
 					clock.advance(s.config.TTL + time.Second)
 					if reboot {
 						clock.mu.Lock()

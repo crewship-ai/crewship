@@ -38,6 +38,9 @@ func editWrite(t *testing.T, s *EditLeaseStore, db *sql.DB, l EditLease) error {
 	if err != nil {
 		return err
 	}
+	if err = s.CheckWrite(t.Context(), tx, l); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 func TestEditLeaseDefaultOff(t *testing.T) {

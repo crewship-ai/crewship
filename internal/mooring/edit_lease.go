@@ -47,6 +47,8 @@ type EditLeaseConfig struct {
 // restoring permissions must not revive a credential that was revoked. Renew
 // requires the same live authenticated editor connection, not a claimed actor.
 // Revoke intent is a trusted rights-management operation, never a reader grant.
+// The callback can run repeatedly, including after SQL and immediately before
+// commit; it must be idempotent and validate current original authority each time.
 type EditLeaseStore struct {
 	db     *sql.DB
 	config EditLeaseConfig
@@ -102,12 +104,8 @@ func (s *EditLeaseStore) transaction(ctx context.Context, fn func(*sql.Tx) error
 	if err = ownerFence(ctx, tx); err != nil {
 		return err
 	}
-	var synchronous int
-	if err = tx.QueryRowContext(ctx, "PRAGMA synchronous").Scan(&synchronous); err != nil {
+	if err = editLeaseDurable(ctx, tx); err != nil {
 		return err
-	}
-	if synchronous < 2 {
-		return ErrInvalid
 	}
 	if _, _, err = s.clock(); err != nil {
 		return err
@@ -116,6 +114,18 @@ func (s *EditLeaseStore) transaction(ctx context.Context, fn func(*sql.Tx) error
 		return err
 	}
 	return tx.Commit()
+}
+
+// Caller-owned transactions must provide the same durable fencing as the store wrapper.
+func editLeaseDurable(ctx context.Context, tx *sql.Tx) error {
+	var synchronous int
+	if err := tx.QueryRowContext(ctx, "PRAGMA synchronous").Scan(&synchronous); err != nil {
+		return err
+	}
+	if synchronous < 2 {
+		return ErrInvalid
+	}
+	return nil
 }
 func editLeaseRow(ctx context.Context, tx *sql.Tx, scope EditLeaseScope) (l EditLease, boot string, expires int64, err error) {
 	l.Scope = scope
@@ -158,7 +168,8 @@ func (s *EditLeaseStore) check(ctx context.Context, tx *sql.Tx, l EditLease, int
 }
 
 // CheckWrite MUST run in the SAME authoritative transaction as native version
-// CAS and publication, after engine validation. Caller must roll back on error.
+// CAS and publication, after engine validation AND again after the final SQL
+// publication immediately before commit. Caller must roll back on either error.
 // No preflight response, holder label or client-provided deadline substitutes.
 func (s *EditLeaseStore) CheckWrite(ctx context.Context, tx *sql.Tx, l EditLease) error {
 	if err := s.ready(); err != nil {
@@ -168,6 +179,9 @@ func (s *EditLeaseStore) CheckWrite(ctx context.Context, tx *sql.Tx, l EditLease
 		return ErrInvalid
 	}
 	if err := ownerFence(ctx, tx); err != nil {
+		return err
+	}
+	if err := editLeaseDurable(ctx, tx); err != nil {
 		return err
 	}
 	_, _, err := s.check(ctx, tx, l, "write")
@@ -203,9 +217,14 @@ func (s *EditLeaseStore) Acquire(ctx context.Context, scope EditLeaseScope, p Ed
 				return ErrEditLeaseBusy
 			}
 			result = presentEditLease(old, expires, now)
-			return nil
+			_, _, e = s.check(ctx, tx, result, "acquire")
+			return e
 		}
 		result, e = s.install(ctx, tx, scope, p, old.Generation, boot, now)
+		if e != nil {
+			return e
+		}
+		_, _, e = s.check(ctx, tx, result, "acquire")
 		return e
 	})
 	if err != nil {
@@ -225,6 +244,10 @@ func (s *EditLeaseStore) Renew(ctx context.Context, l EditLease) (result EditLea
 		expires := now + int64(s.config.TTL)
 		_, e = tx.ExecContext(ctx, `UPDATE mooring_edit_leases SET expires_ns=? WHERE page_id=?`, expires, l.Scope.ArtifactID)
 		result = presentEditLease(l, expires, now)
+		if e != nil {
+			return e
+		}
+		_, _, e = s.check(ctx, tx, result, "renew")
 		return e
 	})
 	if err != nil {
@@ -241,7 +264,10 @@ func (s *EditLeaseStore) Release(ctx context.Context, l EditLease) error {
 		if e == nil {
 			_, e = tx.ExecContext(ctx, `DELETE FROM mooring_edit_lease_requests WHERE page_id=?`, l.Scope.ArtifactID)
 		}
-		return e
+		if e != nil {
+			return e
+		}
+		return s.authorize(ctx, tx, l.Scope, l.Holder, "release")
 	})
 }
 func (s *EditLeaseStore) RequestHandoff(ctx context.Context, scope EditLeaseScope, p EditLeasePrincipal) error {
@@ -264,7 +290,24 @@ func (s *EditLeaseStore) RequestHandoff(ctx context.Context, scope EditLeaseScop
 			return ErrEditLeaseStale
 		}
 		_, e = tx.ExecContext(ctx, `INSERT INTO mooring_edit_lease_requests(page_id,actor_id,session_id,generation) VALUES(?,?,?,?) ON CONFLICT(page_id,actor_id,session_id) DO UPDATE SET generation=excluded.generation`, scope.ArtifactID, p.ActorID, p.SessionID, l.Generation)
-		return e
+		if e != nil {
+			return e
+		}
+		if e = s.authorize(ctx, tx, scope, p, "request"); e != nil {
+			return e
+		}
+		current, currentBoot, currentExpiry, e := editLeaseRow(ctx, tx, scope)
+		if e != nil {
+			return e
+		}
+		boot, now, e = s.clock()
+		if e != nil {
+			return e
+		}
+		if current.Generation != l.Generation || current.Holder != l.Holder || !editLeaseLive(current, currentBoot, currentExpiry, boot, now) {
+			return ErrEditLeaseStale
+		}
+		return nil
 	})
 }
 
@@ -292,6 +335,15 @@ func (s *EditLeaseStore) Handoff(ctx context.Context, l EditLease, target EditLe
 			return e
 		}
 		result, e = s.install(ctx, tx, l.Scope, target, l.Generation, boot, now)
+		if e != nil {
+			return e
+		}
+		// The old generation has been replaced: recheck its principal authority,
+		// then validate the new holder, never check the retired generation again.
+		if e = s.authorize(ctx, tx, l.Scope, l.Holder, "handoff"); e != nil {
+			return e
+		}
+		_, _, e = s.check(ctx, tx, result, "acquire")
 		return e
 	})
 	if err != nil {
@@ -310,7 +362,7 @@ func (s *EditLeaseStore) Read(ctx context.Context, scope EditLeaseScope, p EditL
 		l, storedBoot, expires, e := editLeaseRow(ctx, tx, scope)
 		if errors.Is(e, sql.ErrNoRows) {
 			result.Scope = scope
-			return nil
+			return s.authorize(ctx, tx, scope, p, "read")
 		}
 		if e != nil {
 			return e
@@ -326,7 +378,7 @@ func (s *EditLeaseStore) Read(ctx context.Context, scope EditLeaseScope, p EditL
 		} else {
 			result = presentEditLease(l, expires, now)
 		}
-		return nil
+		return s.authorize(ctx, tx, scope, p, "read")
 	})
 	if err != nil {
 		return EditLease{}, err
@@ -349,6 +401,9 @@ func (s *EditLeaseStore) Revoke(ctx context.Context, tx *sql.Tx, scope EditLease
 	if err := ownerFence(ctx, tx); err != nil {
 		return err
 	}
+	if err := editLeaseDurable(ctx, tx); err != nil {
+		return err
+	}
 	if err := s.authorize(ctx, tx, scope, by, "revoke"); err != nil {
 		return err
 	}
@@ -366,5 +421,8 @@ func (s *EditLeaseStore) Revoke(ctx context.Context, tx *sql.Tx, scope EditLease
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `DELETE FROM mooring_edit_lease_requests WHERE page_id=?`, scope.ArtifactID)
-	return err
+	if err != nil {
+		return err
+	}
+	return s.authorize(ctx, tx, scope, by, "revoke")
 }
