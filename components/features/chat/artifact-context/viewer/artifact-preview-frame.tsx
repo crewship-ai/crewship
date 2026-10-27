@@ -1,12 +1,15 @@
 "use client"
 import { useEffect, useMemo, useRef } from "react"
 import { cn } from "@/lib/utils"
-import { HIGHLIGHT_MESSAGE, NAVIGATE_MESSAGE, SELECT_MESSAGE, buildPreviewDocument, isValidAnchorSelector, normalizeQuote } from "./element-select"
+import type { ArtifactFile } from "../projects/types"
+import { HIGHLIGHT_MESSAGE, NAVIGATE_MESSAGE, SELECT_MESSAGE, buildPreviewDocument, inlineProjectAssets, isValidAnchorSelector, normalizeQuote } from "./element-select"
 
 export interface PreviewSelection { selector: string; quote: string }
 
 interface Props {
   html: string
+  /** The project's files, so the screen's own stylesheets and scripts can be written into it. */
+  files?: ArtifactFile[]
   screens: string[]
   /** The screen being shown. */
   path: string
@@ -25,9 +28,9 @@ interface Props {
  * without forms/popups/top-navigation they cannot leave the frame. The only
  * channel back is postMessage, accepted solely from this frame's window.
  */
-export function ArtifactPreviewFrame({ html, screens, path, selectMode, title, highlight, onSelect, onNavigate, className }: Props) {
+export function ArtifactPreviewFrame({ html, files, screens, path, selectMode, title, highlight, onSelect, onNavigate, className }: Props) {
   const ref = useRef<HTMLIFrameElement>(null)
-  const srcDoc = useMemo(() => buildPreviewDocument(html, { selectMode, screens, path }), [html, selectMode, screens, path])
+  const srcDoc = useMemo(() => buildPreviewDocument(files ? inlineProjectAssets(html, path, files) : html, { selectMode, screens, path }), [html, files, selectMode, screens, path])
   const latest = useRef({ onSelect, onNavigate, screens, selectMode })
   useEffect(() => { latest.current = { onSelect, onNavigate, screens, selectMode } })
 

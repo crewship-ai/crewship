@@ -9,10 +9,12 @@ const state = vi.hoisted(() => ({
   snapshot: { data: undefined as unknown, isLoading: false, error: null as unknown, refetch: vi.fn() },
   versionArg: [] as (number | undefined)[],
   restore: vi.fn(), share: vi.fn(), comment: vi.fn(),
+  sendToAgent: undefined as undefined | ((request: unknown) => Promise<boolean>),
 }))
 
+vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "user-me" } } }) }))
 vi.mock("../../projects/artifact-viewer-context", () => ({
-  useArtifactViewer: () => ({ workspaceId: "ws1", target: state.target, open: vi.fn(), close: state.close }),
+  useArtifactViewer: () => ({ workspaceId: "ws1", target: state.target, open: vi.fn(), close: state.close, sendToAgent: state.sendToAgent }),
 }))
 vi.mock("../../projects/use-artifact-project-data", () => ({
   useArtifactProjectSnapshot: (_ws: string, _slug: string | null, version?: number) => { state.versionArg.push(version); return state.snapshot },
@@ -46,6 +48,7 @@ beforeEach(() => {
   state.snapshot = { data: snap(), isLoading: false, error: null, refetch: vi.fn() }
   state.versionArg = []
   for (const fn of [state.restore, state.share, state.comment, state.close]) fn.mockReset()
+  state.sendToAgent = undefined
 })
 afterEach(cleanup)
 
@@ -143,17 +146,17 @@ it("drops the sent notice when a new version arrives or a new selection starts",
     fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Bolder" } })
     fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
     act(() => state.comment.mock.calls.at(-1)![1].onSuccess({}))
-    expect(screen.getByText("Comment sent to the agent")).toBeInTheDocument()
+    expect(screen.getByText("Comment saved for the agent")).toBeInTheDocument()
   }
   const { rerender } = render(<ArtifactViewerPanel />)
   send()
   fireEvent.click(screen.getByRole("button", { name: "Select" }))
-  expect(screen.queryByText("Comment sent to the agent")).toBeNull()
+  expect(screen.queryByText("Comment saved for the agent")).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: "Select" }))
   send()
   state.snapshot = { ...state.snapshot, data: snap({ latest_version: 4, manifest: { ...snap().manifest, version: 4 } }) }
   rerender(<ArtifactViewerPanel />)
-  expect(screen.queryByText("Comment sent to the agent")).toBeNull()
+  expect(screen.queryByText("Comment saved for the agent")).toBeNull()
 })
 
 it("keeps the draft and shows one conflict banner on a version conflict", () => {
@@ -230,6 +233,45 @@ it("keeps an unsent comment when a card asks for the comments or history of the 
   rerender(<ArtifactViewerPanel />)
   expect(screen.getByRole("region", { name: "Version history" })).toHaveFocus()
   expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Bolder")
+})
+
+it("names the reader's own comments You and never shows a raw account id", () => {
+  state.snapshot.data = snap({ comments: [
+    comment({ id: "c1", path: "home.html", text: "Mine", author: "user-me" }),
+    comment({ id: "c2", path: "home.html", text: "Theirs", author: "cmuxw94hh0001de39519d" }),
+  ] })
+  render(<ArtifactViewerPanel />)
+  const queue = within(screen.getByLabelText("Comment queue"))
+  expect(queue.getByText(/^You · /)).toBeInTheDocument()
+  expect(queue.queryByText(/cmuxw94hh0001de39519d|user-me/)).toBeNull()
+})
+
+it("Send to agent starts the agent in this chat for the saved comment and offers a retry when it does not start", async () => {
+  const sendToAgent = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true)
+  state.sendToAgent = sendToAgent
+  render(<ArtifactViewerPanel />)
+  selectHero()
+  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Bolder" } })
+  fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
+  const saved = { id: "cm9", version: 3, path: "home.html", selector: "#hero", quote: "Big idea", text: "Bolder", task_id: "t9" }
+  await act(async () => { state.comment.mock.calls.at(-1)![1].onSuccess(saved) })
+  expect(sendToAgent).toHaveBeenCalledWith({ pageId: "p1", comment: saved })
+  expect(await screen.findByText(/agent did not start/i)).toBeInTheDocument()
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Retry" })) })
+  expect(sendToAgent).toHaveBeenCalledTimes(2)
+  expect(await screen.findByText("Comment sent to the agent")).toBeInTheDocument()
+  expect(screen.queryByText(/agent did not start/i)).toBeNull()
+})
+
+it("Save only never starts the agent", async () => {
+  const sendToAgent = vi.fn().mockResolvedValue(true)
+  state.sendToAgent = sendToAgent
+  render(<ArtifactViewerPanel />)
+  selectHero()
+  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Later" } })
+  fireEvent.click(screen.getByRole("button", { name: "Save comment" }))
+  await act(async () => { state.comment.mock.calls.at(-1)![1].onSuccess({ id: "cm8", version: 3, path: "home.html", selector: "#hero", quote: "Big idea", text: "Later" }) })
+  expect(sendToAgent).not.toHaveBeenCalled()
 })
 
 it("shares only when the viewer can write, after confirming", () => {

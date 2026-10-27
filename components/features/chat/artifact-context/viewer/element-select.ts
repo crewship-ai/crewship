@@ -1,4 +1,4 @@
-import type { ArtifactManifest } from "../projects/types"
+import type { ArtifactFile, ArtifactManifest } from "../projects/types"
 
 /**
  * The preview runs the artifact's own HTML in an opaque-origin sandbox
@@ -164,6 +164,57 @@ document.addEventListener("click",function(e){
   parent.postMessage({type:"${SELECT_MESSAGE}",selector:"#"+CSS.escape(el.id),quote:quote(el)},"*");
 },true);
 })();`
+
+/** A relative reference from the screen at `from`, as a manifest path; null when it leaves the project. */
+function projectPath(from: string, ref: string): string | null {
+  if (/^[a-z][a-z0-9+.-]*:|^\/\//i.test(ref) || ref.startsWith("/")) return null
+  const parts = from.split("/").slice(0, -1)
+  for (const segment of ref.split(/[?#]/)[0].split("/")) {
+    if (segment === "..") { if (!parts.length) return null; parts.pop() }
+    else if (segment && segment !== ".") parts.push(segment)
+  }
+  return parts.join("/")
+}
+
+/**
+ * The screen with the project's own stylesheets and scripts written into it.
+ * The frame has an opaque origin and no URL of its own, so a relative
+ * `styles.css` or `script.js` could never load. References outside the
+ * project stay as they are.
+ */
+export function inlineProjectAssets(html: string, path: string, files: Pick<ArtifactFile, "path" | "content" | "media_type">[]): string {
+  if (typeof DOMParser === "undefined") return html
+  const byPath = new Map(files.map(file => [file.path, file]))
+  const fileFor = (ref: string | null, kind: RegExp) => {
+    const target = ref == null ? null : projectPath(path, ref)
+    const file = target == null ? undefined : byPath.get(target)
+    return file && (kind.test(file.media_type) || kind.test(file.path)) ? file : undefined
+  }
+  const doc = new DOMParser().parseFromString(html, "text/html")
+  let changed = false
+  for (const link of doc.querySelectorAll("link[href]")) {
+    if (!/(^|\s)stylesheet(\s|$)/i.test(link.getAttribute("rel") ?? "")) continue
+    const file = fileFor(link.getAttribute("href"), /css/i)
+    if (!file) continue
+    const style = doc.createElement("style")
+    style.textContent = file.content
+    link.replaceWith(style)
+    changed = true
+  }
+  for (const script of doc.querySelectorAll("script[src]")) {
+    const file = fileFor(script.getAttribute("src"), /javascript|ecmascript|\.m?js$/i)
+    if (!file) continue
+    const inline = doc.createElement("script")
+    for (const attr of script.attributes) if (attr.name !== "src" && attr.name !== "defer" && attr.name !== "async") inline.setAttribute(attr.name, attr.value)
+    inline.textContent = file.content
+    // An inline script ignores defer; running it after the parsed body keeps the order it expects.
+    if (script.hasAttribute("defer") && !script.hasAttribute("async")) { script.remove(); doc.body.append(inline) }
+    else script.replaceWith(inline)
+    changed = true
+  }
+  if (!changed) return html
+  return (/^\s*<!doctype/i.test(html) ? "<!DOCTYPE html>\n" : "") + doc.documentElement.outerHTML
+}
 
 export interface PreviewDocumentOptions {
   selectMode: boolean
