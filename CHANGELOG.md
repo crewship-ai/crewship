@@ -11,6 +11,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Native Sheet documents can use the full GridCraft editor.** The experimental, default-off native profile now initializes qualified Grid workbooks with the same edit lease, local draft and confirmed whole-document save flow as Word.
 
+- **New Doc was unavailable with only the native Word profile enabled.** The qualified, default-off native profile now offers Word creation through the existing whole-document initializer and opens the full editor after releasing creation custody. Ambiguous initialization never creates another Page or blindly retries a write.
+
 - Add an opt-in Artifacts library at `/artifacts` (`NEXT_PUBLIC_ARTIFACTS_LIBRARY`): a gallery or table of projects, Word, Sheet, Slides and dashboards with kind and shared version, a project detail on its version history and the edit lock of a native Word; the Pages list reports `artifact_kind` and `artifact_shared_version`.
 - Show agent artifact project steps in chat as cards with kind, version, Draft/Shared state and a running "Creating version n…" step that settles into "vn ready · Restore"; off by default behind `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
 - Add an opt-in private native-document draft journal and whole-snapshot save coordinator. Recovery offers compare or copy, stale generations cannot replay drafts, and only an exact durable receipt confirms a save. Existing editor profiles remain unchanged.

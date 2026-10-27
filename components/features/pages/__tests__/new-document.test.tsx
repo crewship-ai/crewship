@@ -2,14 +2,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
 import { NewDocumentDialog } from "../new-document-dialog"
-const mocks=vi.hoisted(()=>({fetch:vi.fn(),allowed:true,enabled:true,commands:false,sdkPrefix:undefined as string|undefined,checkpoint:vi.fn(),openNative:vi.fn(),openCommand:vi.fn()}))
+const mocks=vi.hoisted(()=>({fetch:vi.fn(),allowed:true,enabled:true,commands:false,native:false,sdkPrefix:undefined as string|undefined,checkpoint:vi.fn(),openNative:vi.fn(),openCommand:vi.fn()}))
 vi.mock("@/lib/api-fetch",()=>({apiFetch:mocks.fetch,broadcastSessionExpired:vi.fn()}))
 vi.mock("@/hooks/use-page-creation-access",()=>({usePageCreationAccess:()=>mocks.allowed}))
-vi.mock("@/hooks/use-documents-availability",()=>({useDocumentsAvailability:()=>({data:mocks.enabled,wordcraftSDKPrefix:mocks.sdkPrefix,wordcraftCommands:mocks.commands})}))
+vi.mock("@/hooks/use-documents-availability",()=>({useDocumentsAvailability:()=>({data:mocks.enabled,wordcraftSDKPrefix:mocks.sdkPrefix,wordcraftCommands:mocks.commands,wordcraftNative:mocks.native})}))
 vi.mock("@/lib/mooring/wordcraft-create",()=>({createEmptyWordCraftCheckpoint:mocks.checkpoint}))
 vi.mock("@/lib/mooring/wordcraft-host-session",()=>({openWordCraftSession:mocks.openNative}))
 vi.mock("@/lib/mooring/wordcraft-command-session",()=>({commandRequest:mocks.openCommand}))
-afterEach(()=>{cleanup();mocks.fetch.mockReset();mocks.allowed=true;mocks.enabled=true;mocks.commands=false;mocks.sdkPrefix=undefined;mocks.checkpoint.mockReset();mocks.openNative.mockReset();mocks.openCommand.mockReset()})
+afterEach(()=>{cleanup();mocks.fetch.mockReset();mocks.allowed=true;mocks.enabled=true;mocks.commands=false;mocks.native=false;mocks.sdkPrefix=undefined;mocks.checkpoint.mockReset();mocks.openNative.mockReset();mocks.openCommand.mockReset()})
 function mount(){const client=new QueryClient({defaultOptions:{queries:{retry:false,gcTime:0},mutations:{retry:false}}});const created=vi.fn();render(<QueryClientProvider client={client}><NewDocumentDialog workspaceId="workspace" onClose={vi.fn()} onCreated={created} /></QueryClientProvider>);fireEvent.change(screen.getByLabelText("Name"),{target:{value:"Notes"}});return {created,client}}
 const response=(value:unknown,status=200)=>Promise.resolve({ok:status<400,status,json:async()=>value})
 it("retries numeric initialization with the original Page and schema3 payload",async()=>{
@@ -108,4 +108,35 @@ it("does not offer command creation while its availability is off",()=>{
   const {client}=mount()
   expect(screen.queryByRole("option",{name:"WordCraft (test příkazů)"})).toBeNull()
   expect(mocks.openCommand).not.toHaveBeenCalled();client.clear()
+})
+
+it("creates whole-native Word without invoking checkpoint or command engines",async()=>{
+  mocks.native=true;mocks.enabled=false
+  mocks.fetch.mockImplementation((url:string)=>url.includes("/craft/initialize")?response({application_id:"wordcraft",page_id:"native-page",session_token:"a".repeat(64),generation:"1",version:"1"},201):url.includes("/lease/release")?response({holder:null}):response({id:"native-page",slug:"notes"},201))
+  const {created,client}=mount();fireEvent.click(screen.getByRole("button",{name:"Create Doc"}))
+  await waitFor(()=>expect(created).toHaveBeenCalledWith("notes","native-page"))
+  expect(mocks.openNative).not.toHaveBeenCalled();expect(mocks.openCommand).not.toHaveBeenCalled()
+  const call=mocks.fetch.mock.calls.find(([url])=>url.includes("/craft/initialize"))!
+  expect(JSON.parse(call[1].body).application_id).toBe("wordcraft")
+  expect(JSON.parse(atob(JSON.parse(call[1].body).bytes)).body).toBeDefined()
+  expect(mocks.fetch.mock.calls.find(([url])=>url.includes("/lease/release"))![1].headers["X-Craft-Session"]).toBe("a".repeat(64))
+  client.clear()
+})
+it("never retries an ambiguous native initialization against the original Page",async()=>{
+  mocks.native=true;mocks.enabled=false
+  mocks.fetch.mockImplementation((url:string)=>url.includes("/craft/initialize")?response({},503):response({id:"native-page",slug:"notes"},201))
+  const {created,client}=mount();fireEvent.click(screen.getByRole("button",{name:"Create Doc"}));await screen.findByRole("alert")
+  fireEvent.click(screen.getByRole("button",{name:"Retry initialization"}));await waitFor(()=>expect(screen.getByRole("alert")).toHaveTextContent("could not be confirmed"))
+  expect(mocks.fetch.mock.calls.filter(([url])=>url.includes("/craft/initialize"))).toHaveLength(1)
+  expect(mocks.fetch.mock.calls.filter(([url])=>!url.includes("/craft/"))).toHaveLength(1)
+  expect(created).not.toHaveBeenCalled();client.clear()
+})
+
+it.each(["lost release acknowledgment","expired creation lease"])("opens the confirmed native document after %s without initializing again",async(mode)=>{
+ mocks.native=true;mocks.enabled=false
+ mocks.fetch.mockImplementation((url:string)=>url.includes("/craft/initialize")?response({application_id:"wordcraft",page_id:"native-page",session_token:"a".repeat(64),generation:"1",version:"1"},201):url.includes("/lease/release")?mode.startsWith("lost")?Promise.reject(new TypeError("connection lost")):response({},409):url.includes("/craft/availability")?response({enabled:true}):response({id:"native-page",slug:"notes"},201))
+ const {created,client}=mount();fireEvent.click(screen.getByRole("button",{name:"Create Doc"}))
+ await waitFor(()=>expect(created).toHaveBeenCalledWith("notes","native-page"))
+ expect(mocks.fetch.mock.calls.filter(([url])=>url.includes("/craft/initialize"))).toHaveLength(1)
+ client.clear()
 })
