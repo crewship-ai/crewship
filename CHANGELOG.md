@@ -14,6 +14,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Native single-editor documents gain a default-off edit lease boundary.** SQL-backed holder generations fence expired, handed-off and revoked writers; workspace erasure and user deletion remove retained holder identities while preserving the fence. Lease acknowledgements recheck authority after SQL; recovery retires source holders while retaining generations, and portable replacement refuses issued target fences. A target-local workspace issuance marker preserves restore protection after Page deletion. Runtime editor and version-store wiring remain disabled.
 
+- Add an opt-in private native-document draft journal and whole-snapshot save coordinator. Recovery offers compare or copy, stale generations cannot replay drafts, and only an exact durable receipt confirms a save. Existing editor profiles remain unchanged.
+
 - Clear copied-command feedback timers when onboarding unmounts.
 
 - Create vendored WordCraft numeric test fixtures exclusively so a competing output file cannot be truncated.
