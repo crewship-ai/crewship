@@ -1167,8 +1167,10 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   }, [artifactScope])
   // Opening a saved document or linked item replaces the project in the one side pane.
   useEffect(() => { if (documentPreview || linked) setProject(null) }, [documentPreview, linked])
-  const withProjects = (node: ReactNode) => artifactProjectsOn && workspaceId
-    ? <ArtifactViewerProvider workspaceId={workspaceId} target={projectTarget} onTargetChange={changeProject}>{node}</ArtifactViewerProvider>
+  // The provider stays mounted under the build flag: toggling it with access
+  // would change the root element and remount the whole chat (composer, scroll).
+  const withProjects = (node: ReactNode) => chatArtifactProjects()
+    ? <ArtifactViewerProvider workspaceId={workspaceId ?? ""} enabled={artifactProjectsOn} target={projectTarget} onTargetChange={changeProject}>{node}</ArtifactViewerProvider>
     : node
   const viewerOpen = Boolean(documentTarget || linkedTarget || projectTarget)
   const viewerPanel = projectTarget

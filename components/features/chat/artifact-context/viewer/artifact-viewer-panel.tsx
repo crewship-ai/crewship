@@ -72,7 +72,7 @@ export function ArtifactViewerPanel({ className, variant = "pane" }: { className
   const target = viewer?.target
   if (!viewer || !target) return null
   // A new target starts clean: no draft, banner or old version carries over to another project.
-  return <ViewerBody key={`${target.slug}:${target.version ?? ""}:${target.tab ?? ""}`} workspaceId={viewer.workspaceId} target={target} onClose={viewer.close} className={className} variant={variant} />
+  return <ViewerBody key={`${target.slug}:${target.version ?? ""}`} workspaceId={viewer.workspaceId} target={target} onClose={viewer.close} className={className} variant={variant} />
 }
 
 interface BodyProps { workspaceId: string; target: ArtifactViewerTarget; onClose: () => void; className?: string; variant: ArtifactViewerVariant }
@@ -129,6 +129,9 @@ interface LoadedProps {
 function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, fullscreen }: LoadedProps) {
   const { restore, share, comment } = useArtifactProjectMutations(workspaceId, target.slug)
   const [historyOpen, setHistoryOpen] = useState(target.tab === "versions")
+  // A card asking for another section of the same project keeps the viewer (and an unsent comment).
+  const [seenTab, setSeenTab] = useState(target.tab)
+  if (seenTab !== target.tab) { setSeenTab(target.tab); if (target.tab === "versions") setHistoryOpen(true) }
   const [screenPath, setScreenPath] = useState<string | null>(null)
   const [selectMode, setSelectMode] = useState(false)
   const [anchor, setAnchor] = useState<Anchor | null>(null)

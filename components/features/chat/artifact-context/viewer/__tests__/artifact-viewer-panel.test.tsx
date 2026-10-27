@@ -219,6 +219,19 @@ it("opens history for target.tab=versions", () => {
   expect(screen.getByRole("region", { name: "Version history" })).toHaveFocus()
 })
 
+it("keeps an unsent comment when a card asks for the comments or history of the same project", () => {
+  const { rerender } = render(<ArtifactViewerPanel />)
+  selectHero()
+  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Bolder" } })
+  state.target = { slug: "launch", tab: "comments" }
+  rerender(<ArtifactViewerPanel />)
+  expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Bolder")
+  state.target = { slug: "launch", tab: "versions" }
+  rerender(<ArtifactViewerPanel />)
+  expect(screen.getByRole("region", { name: "Version history" })).toHaveFocus()
+  expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Bolder")
+})
+
 it("shares only when the viewer can write, after confirming", () => {
   render(<ArtifactViewerPanel />)
   fireEvent.click(screen.getByRole("button", { name: "Share" }))
