@@ -1838,3 +1838,54 @@ the existing panel API/`page.write` path independently of source edits.
 
 
 Private Page custodians retain version, export and project read access when restricted elsewhere. Other workspace OWNER reads remain audited; grants do not widen private audiences.
+
+
+## Artifact projects (disabled by default)
+
+The `artifact_projects` feature flag enables a private multi-screen HTML pilot.
+An artifact project has its own atomic file history; it does not convert an
+existing Page, document or application. Every publish supplies all files and
+checks the latest manifest version. Conflicts preserve the existing versions;
+the CLI does not retry with a newer base automatically.
+
+```bash
+crewship page artifact create demo --name "Demo" --file manifest.json
+crewship page artifact get demo
+crewship page artifact get demo --version 1
+crewship page artifact versions demo
+crewship page artifact publish demo --base-version 1 --file manifest.json
+crewship page artifact restore demo --base-version 2 --version 1
+crewship page artifact share demo --base-version 3 --version 1
+crewship page artifact comments demo
+crewship page artifact comments demo --version 1
+crewship page artifact reply demo COMMENT_ID --version 2 --text "Updated the selected heading"
+```
+
+A manifest is JSON with `entrypoint`, `files` and optional `message`. Each file
+contains `path`, UTF-8 `content` and `media_type`; for example:
+
+```json
+{"entrypoint":"index.html","files":[{"path":"index.html","media_type":"text/html","content":"<h1 id=hero>Home</h1><a href=details.html>Details</a>"},{"path":"details.html","media_type":"text/html","content":"<h1 id=details>Details</h1><a href=settings.html>Settings</a>"},{"path":"settings.html","media_type":"text/html","content":"<h1 id=settings>Settings</h1><a href=index.html>Home</a>"}]}
+```
+
+Restore appends a new version. Share selects an existing immutable version and
+leaves the latest version unchanged; an ordinary Page read grant reaches only
+the current shared pin. Readers cannot publish, comment, restore or share.
+Storage usage and the keep-all policy are returned with the owner snapshot.
+Quota rejection retains every prior version; keep the candidate manifest file
+until publication is acknowledged.
+
+For an agent, enable **Create artifact project** in the original private chat.
+The host binds that explicit request to the actual human credential and one
+live run. Comment dispatch binds a selected Page, version and comment to the
+follow-up run. Agent MCP tools are `artifact_create`, `artifact_publish`,
+`artifact_versions`, `artifact_restore`, `artifact_comments` and `artifact_reply`.
+They cannot choose an owner or publish a shared version. Under an admitted
+agent run the CLI uses the same scoped sidecar transport and server authority.
+
+
+For a clarification reply against the original comment version:
+
+```bash
+crewship page artifact reply demo COMMENT_ID --version 1 --text "Please select the current heading again" --needs-clarification
+```
