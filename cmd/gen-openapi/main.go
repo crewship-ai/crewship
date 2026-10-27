@@ -359,11 +359,11 @@ func buildDocument(routes []route) map[string]any {
 		schemas[name] = schema
 	}
 	artifactCore := artifactProjectCoreComponents()
-	for _, name := range []string{"ArtifactProjectCreateRequest", "ArtifactProjectFileInput", "ArtifactProjectCreateResponse", "ArtifactProjectAvailability", "ArtifactProjectError", "ArtifactProjectFile", "ArtifactProjectManifest", "ArtifactProjectVersion", "ArtifactProjectQuota", "ArtifactProjectPublishRequest", "ArtifactProjectMutationResponse"} {
+	for _, name := range []string{"ArtifactProjectCreateRequest", "ArtifactProjectFileInput", "ArtifactProjectCreateResponse", "ArtifactProjectAvailability", "ArtifactProjectError", "ArtifactProjectFile", "ArtifactProjectManifest", "ArtifactProjectVersion", "ArtifactProjectQuota", "ArtifactProjectPublishRequest", "ArtifactProjectMutationResponse", "ArtifactProjectVersionRequest", "ArtifactProjectShareResponse"} {
 		schemas[name] = artifactCore[name]
 	}
 	artifactFeedback := artifactProjectFeedbackComponents()
-	for _, name := range []string{"ArtifactProjectOrigin", "ArtifactProjectReply", "ArtifactProjectComment", "ArtifactProjectSnapshot"} {
+	for _, name := range []string{"ArtifactProjectOrigin", "ArtifactProjectReply", "ArtifactProjectComment", "ArtifactProjectSnapshot", "ArtifactProjectCommentRequest", "ArtifactProjectReplyRequest"} {
 		schemas[name] = artifactFeedback[name]
 	}
 	_, providerLoginComponents := providerLoginSchemaCatalog()
@@ -710,6 +710,9 @@ func routeSchemaCatalog() map[string]DomainSchema {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	for key, schema := range artifactProjectVersionSchemaCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	for key, schema := range artifactProjectFeedbackSchemaCatalog() {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	providerLoginRoutes, _ := providerLoginSchemaCatalog()

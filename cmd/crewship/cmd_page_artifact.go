@@ -101,6 +101,7 @@ func newPageArtifactCommand() *cobra.Command {
 		return artifactCLIRequest(cmd, "GET", "/api/v1/pages/artifacts/availability", nil)
 	}}
 	cmd.AddCommand(reply, availability)
+	cmd.AddCommand(newPageArtifactCommentCommand())
 	return cmd
 }
 

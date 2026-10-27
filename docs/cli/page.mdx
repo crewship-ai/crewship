@@ -1911,3 +1911,16 @@ A conflict leaves the candidate available for deliberate reconciliation.
 ```bash
 crewship page artifact publish demo --base-version 1 --file manifest.json
 ```
+
+### `crewship page artifact comment <slug>`
+
+Create an anchored comment as the human owner, using the exact selected version
+and element text. This request preserves `409` without retrying a newer version:
+
+```bash
+crewship page artifact comment demo --version 1 --path index.html --selector '#artifact-heading' --quote 'Current title' --text 'Make this title shorter' --send-to-agent
+```
+
+Omit `--send-to-agent` to store only the comment. Queuing a task does not confirm
+agent delivery. A protected agent invocation cannot fall back to a saved human
+profile to create the comment. `page artifact comments` remains the read command.

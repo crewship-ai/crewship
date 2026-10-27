@@ -344,6 +344,10 @@ POST /api/v1/pages/artifacts roleInline
 POST /api/v1/pages/import roleInline
 POST /api/v1/pages/maintenance roleManage
 POST /api/v1/pages/{slug}/application/actions/{panelId}/{actionId} roleCreate
+POST /api/v1/pages/{slug}/artifact/comments roleInline
+POST /api/v1/pages/{slug}/artifact/comments/{commentId}/reply roleInline
+POST /api/v1/pages/{slug}/artifact/restore roleInline
+POST /api/v1/pages/{slug}/artifact/share roleInline
 POST /api/v1/pages/{slug}/artifact/versions roleInline
 POST /api/v1/pages/{slug}/document/initialize roleInline
 POST /api/v1/pages/{slug}/document/patch roleInline
