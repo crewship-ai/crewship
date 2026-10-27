@@ -78,7 +78,7 @@ jobs:
           echo "image=$image" >> "$GITHUB_OUTPUT"
           echo "tag=$image:responses-text-v1-$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
