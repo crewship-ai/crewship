@@ -1,6 +1,7 @@
 "use client"
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useArtifactProjectsAvailable } from "./use-artifact-project-data"
+import type { ArtifactComment } from "./types"
 
 export type ArtifactViewerTab = "preview" | "comments" | "versions"
 
@@ -17,6 +18,8 @@ export interface ArtifactViewerValue {
   target: ArtifactViewerTarget | null
   open(target: ArtifactViewerTarget): void
   close(): void
+  /** Set by a host chat: starts its agent on a comment saved with send_to_agent; false when it did not start. */
+  sendToAgent?: (request: { pageId: string; comment: ArtifactComment }) => Promise<boolean>
 }
 
 const ArtifactViewerContext = createContext<ArtifactViewerValue | null>(null)
@@ -26,7 +29,7 @@ const ArtifactViewerContext = createContext<ArtifactViewerValue | null>(null)
 const ArtifactCardsAvailableContext = createContext(false)
 
 /** Mounting the provider is the feature switch for artifact project cards in chat. */
-export function ArtifactViewerProvider({ workspaceId, enabled = true, children, target: controlled, onTargetChange }: {
+export function ArtifactViewerProvider({ workspaceId, enabled = true, children, target: controlled, onTargetChange, sendToAgent }: {
   workspaceId: string
   /** Off hides the feature without unmounting children, so a host can keep the provider mounted while access settles. */
   enabled?: boolean
@@ -34,6 +37,7 @@ export function ArtifactViewerProvider({ workspaceId, enabled = true, children, 
   /** Controlled mode: the chat panel owns the target because it lays out the side pane. */
   target?: ArtifactViewerTarget | null
   onTargetChange?: (target: ArtifactViewerTarget | null) => void
+  sendToAgent?: ArtifactViewerValue["sendToAgent"]
 }) {
   const [own, setOwn] = useState<ArtifactViewerTarget | null>(null)
   const target = controlled === undefined ? own : controlled
@@ -69,7 +73,7 @@ export function ArtifactViewerProvider({ workspaceId, enabled = true, children, 
     if (el?.isConnected) el.focus()
   }, [setTarget])
 
-  const value = useMemo(() => enabled ? { workspaceId, target, open, close } : null, [enabled, workspaceId, target, open, close])
+  const value = useMemo(() => enabled ? { workspaceId, target, open, close, sendToAgent } : null, [enabled, workspaceId, target, open, close, sendToAgent])
   return <ArtifactViewerContext.Provider value={value}>
     <ArtifactCardsAvailableContext.Provider value={available}>{children}</ArtifactCardsAvailableContext.Provider>
   </ArtifactViewerContext.Provider>

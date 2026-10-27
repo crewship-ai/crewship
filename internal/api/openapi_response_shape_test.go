@@ -50,6 +50,17 @@ var responseShapeContracts = []struct {
 	// A zero value of the struct the handler serializes.
 	value any
 }{
+
+	{name: "NativeCraftAvailability", pointer: "/components/schemas/NativeCraftAvailability", value: craftNativeAvailabilityResponse{}},
+	{name: "NativeCraftRenewal", pointer: "/components/schemas/NativeCraftRenewal", value: craftNativeRenewalResponse{}},
+	{name: "NativeCraftLease", pointer: "/components/schemas/NativeCraftLease", value: craftNativeLeaseResponse{}},
+	{name: "NativeCraftHolder", pointer: "/components/schemas/NativeCraftHolder", value: craftNativeHolderResponse{}},
+	{name: "NativeCraftRequest", pointer: "/components/schemas/NativeCraftRequest", value: craftNativeRequestResponse{}},
+	{name: "NativeCraftInitializeReceipt", pointer: "/components/schemas/NativeCraftInitializeReceipt", value: craftNativeInitializeResponse{}},
+	{name: "NativeCraftDocument", pointer: "/components/schemas/NativeCraftDocument", value: craftNativeDocumentResponse{}},
+	{name: "NativeCraftDocumentQuota", pointer: "/components/schemas/NativeCraftDocumentQuota", value: craftNativeDocumentQuotaResponse{}},
+	{name: "NativeCraftSnapshotReceipt", pointer: "/components/schemas/NativeCraftSnapshotReceipt", value: mooring.NativeSaveReceipt{}},
+	{name: "NativeCraftRestoreReceipt", pointer: "/components/schemas/NativeCraftRestoreReceipt", value: craftNativeRestoreResponse{}},
 	{name: "MooringCommandSession", pointer: "/components/schemas/MooringCommandSession", value: commandProductHTTPResponse{}},
 	{name: "MooringSession", pointer: "/components/schemas/MooringSession", value: collaborationHTTPSessionResponse{}},
 	{name: "NativeArtifactEdit", pointer: "/components/schemas/NativeArtifactEdit", value: nativeArtifactEdit{}},
@@ -82,6 +93,12 @@ var responseShapeContracts = []struct {
 	{name: "AgentReleasedV1", pointer: "/components/schemas/AgentReleasedV1", value: agentReleasedResponse{}},
 	{name: "CrewPolicyResponseV1", pointer: "/components/schemas/CrewPolicyResponseV1", value: crewPolicyResponse{}},
 	{name: "DocumentAvailability", pointer: "/components/schemas/DocumentAvailability", value: DocumentAvailability{}},
+	{name: "ArtifactProjectAvailability", pointer: "/components/schemas/ArtifactProjectAvailability", value: artifactProjectAvailabilityResponse{}},
+	{name: "ArtifactProjectSnapshot", pointer: "/components/schemas/ArtifactProjectSnapshot", value: artifactProjectSnapshotResponse{}},
+	{name: "ArtifactProjectMutationResponse", pointer: "/components/schemas/ArtifactProjectMutationResponse", value: artifactProjectMutationResponse{}},
+	{name: "ArtifactProjectShareResponse", pointer: "/components/schemas/ArtifactProjectShareResponse", value: artifactProjectShareResponse{}},
+	{name: "ArtifactProjectReply", pointer: "/components/schemas/ArtifactProjectReply", value: artifactProjectReply{}},
+	{name: "ArtifactProjectComment", pointer: "/components/schemas/ArtifactProjectComment", value: artifactProjectComment{}},
 	{name: "DocumentChatResultsResponse", pointer: "/components/schemas/DocumentChatResults", value: DocumentChatResultsResponse{}},
 	{name: "DocumentChatResult", pointer: "/components/schemas/DocumentChatResults/properties/results/items", value: DocumentChatResult{}},
 	{name: "DocumentStateResponse", pointer: "/components/schemas/DocumentState", value: DocumentStateResponse{}},

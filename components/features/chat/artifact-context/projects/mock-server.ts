@@ -58,13 +58,14 @@ export interface ArtifactMockServer {
   setProposals(proposals: CraftProposal[]): void
 }
 
-const FREE_LEASE: CraftLeaseStatus = { holder: null, mine: false, generation: 0, can_write: true, handoff_requested_by: null }
-const YOU = { actor_id: "you", display_name: "You", kind: "human" as const }
+const FREE_LEASE: CraftLeaseStatus = { holder: null, mine: false, generation: null, can_write: true, requests: [] }
+const YOU = { actor_id: "user:you", display_name: "You", kind: "human" as const }
+const SESSION_TOKEN = "mock-craft-session"
 
 // Regex literals keep this helper out of the frontend route registry scan, which reads quoted path strings.
 const AVAILABILITY = /^\/api\/v1\/pages\/artifacts\/availability$/
 const ARTIFACT = /^\/api\/v1\/pages\/([^/]+)\/artifact(?:\/(restore|share|comments))?$/
-const CRAFT = /^\/api\/v1\/pages\/([^/]+)\/craft\/(availability|lease|lease\/request-handoff|proposals|proposals\/([^/]+)\/(accept|reject))$/
+const CRAFT = /^\/api\/v1\/pages\/([^/]+)\/craft\/(availability|sessions|lease|lease\/request-handoff|proposals|proposals\/([^/]+)\/(accept|reject))$/
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
 const fail = (status: number, code: string, error: string) => json(status, { error, code })
@@ -205,18 +206,22 @@ export function createArtifactMockServer(initial: ArtifactMockInitial): Artifact
     return json(201, stored)
   }
 
-  function craft(method: string, route: string, proposalId: string | undefined, decision: string | undefined): Response {
+  // The #4374 wire shape: pending requests travel as handoff_requested_by.
+  const wireLease = ({ requests, ...lease }: CraftLeaseStatus) => ({ ...lease, handoff_requested_by: requests })
+
+  function craft(method: string, route: string, proposalId: string | undefined, decision: string | undefined, admission: string | null): Response {
     if (!state.craftEnabled) return missing()
     if (route === "availability" && method === "GET") return json(200, { enabled: true })
-    if (route === "lease" && method === "GET") return json(200, state.lease)
-    if (route === "lease" && method === "POST") {
-      if (state.lease.holder && !state.lease.mine) return fail(409, "lease_held", `${state.lease.holder.display_name} is editing.`)
-      state.lease = { ...state.lease, holder: YOU, mine: true, generation: state.lease.generation + 1, handoff_requested_by: null }
-      return json(200, state.lease)
-    }
-    if (route === "lease/request-handoff" && method === "POST") {
-      state.lease = { ...state.lease, handoff_requested_by: "You" }
-      return json(200, state.lease)
+    if (route === "sessions" && method === "POST") return json(201, { session_token: SESSION_TOKEN, session_id: "mock-session", application_id: "mock-app", page_id: `page-${state.slug}` })
+    if (route === "lease" || route === "lease/request-handoff") {
+      if (admission !== SESSION_TOKEN) return fail(403, "forbidden", "native Craft access denied")
+      if (route === "lease" && method === "GET") return json(200, wireLease(state.lease))
+      if (route === "lease/request-handoff" && method === "POST") {
+        if (!state.lease.holder || state.lease.generation === null) return fail(409, "conflict", "native editor lease changed")
+        const request = { request_id: `r${state.lease.requests.length + 1}`, ...YOU }
+        state.lease = { ...state.lease, requests: [...state.lease.requests.filter(entry => entry.actor_id !== YOU.actor_id), request] }
+        return json(201, { request_id: request.request_id, generation: state.lease.generation })
+      }
     }
     if (route === "proposals" && method === "GET") return json(200, state.proposals)
     if (proposalId && decision && method === "POST") {
@@ -247,13 +252,13 @@ export function createArtifactMockServer(initial: ArtifactMockInitial): Artifact
     if (crafted) {
       state.requests.push(`${method} ${path}`)
       if (decodeURIComponent(crafted[1]) !== state.slug) return missing()
-      return craft(method, crafted[2], crafted[3], crafted[4])
+      return craft(method, crafted[2], crafted[3], crafted[4], new Headers(init?.headers).get("X-Craft-Session"))
     }
     return null
   }
 
   function agentPublish(files: ArtifactFile[], message?: string, reply?: string): number {
-    const next = append({ entrypoint: latest().entrypoint, files, message, actor: "agent", restored_from: null })
+    const next = append({ entrypoint: latest().entrypoint, files, message, actor: "agent:cmuxw95k60027db59c6f2:msg_1793118136200864661_c3b6aa1c9005c313", restored_from: null })
     if (!next) throw new Error("history quota reached")
     for (const entry of state.comments) {
       if (entry.status !== "pending" && entry.status !== "working") continue

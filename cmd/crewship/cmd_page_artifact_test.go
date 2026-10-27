@@ -68,3 +68,39 @@ func TestPageArtifactManifestRejectsAmbiguousJSONBeforeNetwork(t *testing.T) {
 		})
 	}
 }
+
+func TestPageArtifactAvailabilityUsesAuthenticatedWorkspaceTransport(t *testing.T) {
+	stub := pageStub(t)
+	route := "/api/v1/pages/artifacts/availability"
+	stub.OnGet(route, func(r *http.Request, _ []byte) (int, []byte, string) {
+		if r.Header.Get("Authorization") != "Bearer page-acceptance-token" || r.URL.Query().Get("workspace_id") != covWSCli3 {
+			t.Errorf("lost authenticated workspace transport")
+		}
+		return 200, []byte(`{"enabled":false}`), "application/json"
+	})
+	cmd := newPageArtifactCommand()
+	cmd.PersistentPreRun = rootCmd.PersistentPreRun
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetArgs([]string{"availability"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if len(stub.CallsFor("GET", route)) != 1 {
+		t.Fatal("availability did not use the authenticated Page client")
+	}
+}
+
+func TestPageArtifactPublishRequiresPositiveBaseBeforeNetwork(t *testing.T) {
+	stub := pageStub(t)
+	file := pageBundleFile(t, `{"entrypoint":"index.html","files":[{"path":"index.html","content":"<h1>Draft</h1>","media_type":"text/html"}]}`)
+	cmd := newPageArtifactCommand()
+	cmd.PersistentPreRun = rootCmd.PersistentPreRun
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetArgs([]string{"publish", "demo", "--base-version", "0", "--file", file})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "positive") {
+		t.Fatalf("wrong base refusal: %v", err)
+	}
+	if len(stub.CallsFor("POST", "/api/v1/pages/demo/artifact/versions")) != 0 {
+		t.Fatal("zero base reached server")
+	}
+}

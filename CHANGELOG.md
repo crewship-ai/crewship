@@ -9,15 +9,27 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Add an opt-in Artifacts library at `/artifacts` (`NEXT_PUBLIC_ARTIFACTS_LIBRARY`): a gallery or table of projects, Word, Sheet, Slides and dashboards with kind and shared version, a project detail on its version history and the edit lock of a native Word; the Pages list reports `artifact_kind` and `artifact_shared_version`.
 - Show agent artifact project steps in chat as cards with kind, version, Draft/Shared state and a running "Creating version n…" step that settles into "vn ready · Restore"; off by default behind `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
+- Add an opt-in private native-document draft journal and whole-snapshot save coordinator. Recovery offers compare or copy, stale generations cannot replay drafts, and only an exact durable receipt confirms a save. Existing editor profiles remain unchanged.
+
+- Open an artifact card in a side viewer (full screen on phones) with screens, element select and anchored comments, the agent comment queue, version history and restore; off by default behind `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
+- Show the Craft edit-lock bar, agent proposal cards (Compare / Accept / Reject) and recovered local drafts in chat, and a "+ New artifact" composer menu offering only kinds with a backend; off by default behind `NEXT_PUBLIC_CHAT_CRAFT_LEASE` and `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
 - **Opening a new conversation logged three 404s.** A draft session no longer requests its execution profile, messages or participants before the first send creates it.
 - **Artifact authoring clients support complete project versions.** Add pilot MCP tools and `page artifact` commands for atomic manifests, explicit version conflicts, restore and anchored feedback on servers that enable the artifact project backend.
+- Artifact project feedback exposes verified human/agent attribution, occupied addresses have a distinct error, and authoring tools require stable selection IDs.
+
+- Add authenticated artifact project creation and workspace availability endpoints behind the disabled artifact projects flag.
 
 - Clear copied-command feedback timers when onboarding unmounts.
 
 - **Saved Slides pages could look empty.** Page detail and list responses now include native Slides presence and schema metadata, allowing the existing opt-in Slides viewer to recognize saved presentations.
 
 - **Native single-editor documents gain a default-off edit lease boundary.** SQL-backed holder generations fence expired, handed-off and revoked writers; workspace erasure and user deletion remove retained holder identities while preserving the fence. Lease acknowledgements recheck authority after SQL; recovery retires source holders while retaining generations, and portable replacement refuses issued target fences. A target-local workspace issuance marker preserves restore protection after Page deletion. Runtime editor and version-store wiring remain disabled.
+
+- Expose a default-off native Craft human session and edit-lease HTTP API with Page-scoped availability, named holders, requested handoff and live connection renewal. Original credentials and current Page rights fence every action; existing document profiles are unchanged.
+
+- Add a default-off whole-native WordCraft/GridCraft version store with immutable compatibility pins, engine validation, lease and CAS fencing, exact snapshot receipts and portable profile backups. Its visible 16 GiB history budget preserves versions on exhaustion; editor activation remains separate.
 
 - Create vendored WordCraft numeric test fixtures exclusively so a competing output file cannot be truncated.
 
@@ -7147,8 +7159,18 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Content inspection allocates less on repeated matches (#4006).** Redaction emits spans once per rule and encoded-content scanning collects only the existing first 256 candidates, preserving finding order and results.
 
 - **Routine script steps clean up completed control directories (#4003).** Cleanup checks invocation ownership and process-group state, and reports cleanup failures separately from the script result.
+- Prepare closed manifest and receipt schema producers for artifact API tooling.
 
 - Preserve project feedback during upgrades and backups, keep private-history bundles owner-only, and erase legacy and native version attribution within the selected workspace.
+
+- Add default-off artifact project handlers with atomic versions, anchored feedback and immutable shared pins. Public routing follows separately.
+- Read retained artifact snapshots and publish atomic manifests with explicit version conflicts and credential-scoped write availability.
+
+- Add default-off artifact restore, shared-version selection and anchored feedback routes, plus a typed human CLI comment command.
+
+- Bind artifact requests to explicit human chat intent and one signed run, preserving the original Page and version authority. Recheck live original authority and exact consent after the final chat or task write before committing admission.
+
+- Add optional artifact project previews, versioned element comments, shared-version navigation and explicit chat creation intent behind backend availability.
 
 ## [1.0.0-rc.1] — 2026-07-12
 

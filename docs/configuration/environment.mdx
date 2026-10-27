@@ -22,6 +22,14 @@ All Crewship configuration can be set via environment variables. These override 
 | `CREWSHIP_HOST` | `0.0.0.0` | Server listen address |
 | `CREWSHIP_PORT` | `8080` | Server listen port |
 
+## Native Craft edit lease
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_CRAFT_NATIVE_ENABLED` | `false` | Enable the separate whole-native profile's human session and EditLease HTTP API. Requires a Linux boot-aware clock. Availability is checked per Page; existing profiles are never converted. This does not enable the new editor, proposals, or New Doc. |
+
+See the [native Craft lease contract](/specs/craft-native) for admission and handoff.
+
 ## Mooring session profile
 
 | Variable | Default | Description |
@@ -948,3 +956,9 @@ Above budget, previews return 413 with an explicit too-large message. If both
 slots are occupied, they immediately return 429 and `Retry-After: 1`; there is no
 waiting queue. A canceled caller does not release a slot while synchronous
 computation is still running. Limits are per process, not shared across replicas.
+
+## Artifact project pilot
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_ARTIFACT_PROJECTS_ENABLED` | `false` | Enable the artifact project pilot for an isolated installation. Workspace `artifact_projects` feature flags also enable it. Existing creation policy, current credentials and Page access still apply. |

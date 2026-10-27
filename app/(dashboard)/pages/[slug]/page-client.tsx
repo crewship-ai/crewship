@@ -1,6 +1,8 @@
 "use client"
 
 
+import { useSearchParams } from "next/navigation"
+import { ArtifactProject } from "@/components/features/pages/artifact-project"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useUrlSegment } from "@/lib/use-url-segment"
 import { usePageWorkspace } from "@/hooks/use-page-workspace"
@@ -19,6 +21,7 @@ const PAGE_PATH_RE = /^\/pages\/([^/]+)\/?$/
 export function PageDetailClient() {
   const { workspaceId, loading: wsLoading, linkUnavailable } = usePageWorkspace()
   const access = useAccessContext()
+  const search = useSearchParams()
   // The slug comes from the URL, never from useParams(). Under
   // `output: "export"` this route is exported once, as /pages/_/index.html,
   // and the Go binary serves that file for every real slug — so useParams()
@@ -46,5 +49,10 @@ export function PageDetailClient() {
   }
 
   if (accessMode === "restricted") return <RestrictedPages key={workspaceId} workspaceId={workspaceId} access={access} />
+  if (search.get("artifact") === "1") {
+    const value = Number(search.get("version"))
+    const initialVersion = Number.isSafeInteger(value) && value > 0 ? value : undefined
+    return <ArtifactProject key={`${workspaceId}:${slug}:${initialVersion ?? "latest"}`} workspaceId={workspaceId} slug={slug} initialVersion={initialVersion} />
+  }
   return <PagesLayout workspaceId={workspaceId} slug={slug} />
 }

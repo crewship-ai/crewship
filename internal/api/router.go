@@ -63,6 +63,10 @@ func (b *keeperWSBroadcaster) BroadcastInboxUpdated(workspaceID string, source s
 }
 
 type Router struct {
+	craftNativeHTTPConfig  CraftNativeHTTPConfig
+	craftNativeStartupErr  error
+	craftNativeHTTP        *craftNativeHTTP
+	craftNativeDocuments   *craftNativeDocumentsHTTP
 	mooringStartupErr      error
 	mooringHTTPConfig      MooringHTTPConfig
 	mooringHTTP            *collaborationHTTPManager
@@ -933,6 +937,10 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	}
 	r.diffs = newDiffComputeBudget(limits)
 	r.registerRoutes()
+	if r.craftNativeStartupErr != nil {
+		r.Shutdown()
+		return nil, fmt.Errorf("new router: native Craft initialization failed: %w", r.craftNativeStartupErr)
+	}
 	if r.mooringStartupErr != nil {
 		r.Shutdown()
 		return nil, fmt.Errorf("new router: Mooring initialization failed: %w", r.mooringStartupErr)

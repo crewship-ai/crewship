@@ -289,6 +289,7 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "artifact.mooring_committed",
       "artifact.mooring_mandate_admitted",
       "artifact.mooring_mandate_revoked",
+      "artifact.project_shared",
       "artifact.orphaned_workbook_deleted",
       "artifact.private_output_published",
       "page.published",

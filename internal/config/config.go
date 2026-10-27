@@ -46,24 +46,25 @@ func envBool(name string) (val, ok bool) {
 type Config struct {
 	pathSources map[string]string // effective explicit path origins, populated while loading
 
-	Skills    httpsafe.GitImportPolicy `yaml:"skills"`
-	Server    ServerConfig             `yaml:"server"`
-	IPC       IPCConfig                `yaml:"ipc"`
-	Container ContainerConfig          `yaml:"container"`
-	Storage   StorageConfig            `yaml:"storage"`
-	State     StateConfig              `yaml:"state"`
-	Logging   LoggingConfig            `yaml:"logging"`
-	Auth      AuthConfig               `yaml:"auth"`
-	LLMProxy  LLMProxyConfig           `yaml:"llm_proxy"`
-	Keeper    KeeperConfig             `yaml:"keeper"`
-	License   LicenseConfig            `yaml:"license"`
-	Composio  ComposioConfig           `yaml:"composio"`
-	Documents DocumentsConfig          `yaml:"documents"`
-	Diff      DiffConfig               `yaml:"diff"`
-	Slides    SlidesConfig             `yaml:"slides"`
-	GridCraft GridCraftConfig          `yaml:"gridcraft"`
-	Mooring   MooringConfig            `yaml:"mooring"`
-	Audit     AuditConfig              `yaml:"audit"`
+	Skills      httpsafe.GitImportPolicy `yaml:"skills"`
+	Server      ServerConfig             `yaml:"server"`
+	IPC         IPCConfig                `yaml:"ipc"`
+	Container   ContainerConfig          `yaml:"container"`
+	Storage     StorageConfig            `yaml:"storage"`
+	State       StateConfig              `yaml:"state"`
+	Logging     LoggingConfig            `yaml:"logging"`
+	Auth        AuthConfig               `yaml:"auth"`
+	LLMProxy    LLMProxyConfig           `yaml:"llm_proxy"`
+	Keeper      KeeperConfig             `yaml:"keeper"`
+	License     LicenseConfig            `yaml:"license"`
+	Composio    ComposioConfig           `yaml:"composio"`
+	Documents   DocumentsConfig          `yaml:"documents"`
+	Diff        DiffConfig               `yaml:"diff"`
+	Slides      SlidesConfig             `yaml:"slides"`
+	GridCraft   GridCraftConfig          `yaml:"gridcraft"`
+	Mooring     MooringConfig            `yaml:"mooring"`
+	CraftNative CraftNativeConfig        `yaml:"craft_native"`
+	Audit       AuditConfig              `yaml:"audit"`
 
 	LocalModels  LocalModelsConfig  `yaml:"local_models"`
 	Orchestrator OrchestratorConfig `yaml:"orchestrator"`
@@ -434,6 +435,9 @@ var (
 // Validate checks that all configuration values are within acceptable ranges
 // and required fields are set. Returns an error describing the first invalid value.
 func (c *Config) Validate() error {
+	if _, _, err := c.CraftNative.ResolveEditorBundles(c.GridCraft, (c.GridCraft.Enabled && c.GridCraft.EditorEnabled) || c.Mooring.Enabled); err != nil {
+		return err
+	}
 	if err := c.Mooring.validate(); err != nil {
 		return err
 	}
@@ -563,6 +567,10 @@ func loadFromFile(cfg *Config, path string) error {
 }
 
 func applyEnvOverrides(cfg *Config) {
+	applyCraftNativeEnv(&cfg.CraftNative)
+	if value, ok := os.LookupEnv("CREWSHIP_CRAFT_NATIVE_ENABLED"); ok {
+		cfg.CraftNative.Enabled = value == "true" || value == "1"
+	}
 	if value, ok := os.LookupEnv("CREWSHIP_MOORING_ENABLED"); ok {
 		cfg.Mooring.Enabled = value == "true" || value == "1"
 	}
