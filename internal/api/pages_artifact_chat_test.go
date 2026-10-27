@@ -213,3 +213,100 @@ func TestArtifactProjectOriginalCLIScopeCannotWidenThroughChat(t *testing.T) {
 		t.Fatal("publication writer failed to recheck original CLI write scope")
 	}
 }
+
+func TestArtifactProjectAdmissionFinalTaskWriteRevocation(t *testing.T) {
+	for _, change := range []string{"original_credential", "typed_message_intent"} {
+		t.Run(change, func(t *testing.T) {
+			t.Setenv("CREWSHIP_ARTIFACT_PROJECTS_ENABLED", "true")
+			f := artifactProjectOriginalRunFixture(t)
+			token := mintTokenFor(t, f.rig.db, f.a.HumanUserID, "artifact-task-owner")
+			human := func(body string, slug string, handler func(http.ResponseWriter, *http.Request)) *httptest.ResponseRecorder {
+				r := pagesRequest(t, "POST", "/api/v1/pages/"+slug, f.a.WorkspaceID, f.a.HumanUserID, "OWNER", body)
+				r = r.WithContext(context.WithValue(r.Context(), ctxAuthKind, AuthKindCLIToken))
+				r.Header.Set("Authorization", "Bearer "+token)
+				r.SetPathValue("slug", slug)
+				w := httptest.NewRecorder()
+				handler(w, r)
+				return w
+			}
+			create := `{"slug":"task-project","name":"Task project",` + strings.TrimPrefix(artifactProjectBody(0, "First"), "{")
+			if w := human(create, "task-project", f.pages.CreateArtifactProject); w.Code != 201 {
+				t.Fatalf("project %d %s", w.Code, w.Body)
+			}
+			comment := human(`{"version":1,"path":"index.html","selector":"#hero","quote":"First","text":"Change the heading","send_to_agent":true}`, "task-project", f.pages.CreateArtifactProjectComment)
+			if comment.Code != 201 {
+				t.Fatalf("comment %d %s", comment.Code, comment.Body)
+			}
+			var c struct {
+				ID string `json:"id"`
+			}
+			if json.Unmarshal(comment.Body.Bytes(), &c) != nil || c.ID == "" {
+				t.Fatal("comment ID absent")
+			}
+			var page string
+			if f.rig.db.QueryRow(`SELECT id FROM pages WHERE slug='task-project'`).Scan(&page) != nil {
+				t.Fatal("project ID absent")
+			}
+			intent := artifacts.ProjectIntent{SubmissionID: "original-comment-request", PageID: page, CommentID: c.ID, BaseVersion: 1}
+			if err := f.pages.RecordArtifactProjectIntent(t.Context(), f.receipt, f.a.MessageID, intent); err != nil {
+				t.Fatal("record original task", err)
+			}
+			writer := journal.NewWriter(f.rig.db, newTestLogger(), journal.WriterOptions{ChainKey: []byte("synthetic-artifact-task-chain"), FlushSize: 1})
+			t.Cleanup(func() { _ = writer.Close() })
+			h := NewInternalHandler(f.rig.db, "synthetic-task-master", newTestLogger())
+			h.SetJournal(writer)
+			call := func(run, message string, purpose artifacts.ProjectIntent) *httptest.ResponseRecorder {
+				raw, _ := json.Marshal(map[string]any{"id": run, "workspace_id": f.a.WorkspaceID, "agent_id": f.a.AgentID, "chat_id": f.a.ChatID, "trigger_type": "USER", "human_authority": f.receipt, "trigger_message_id": message, "artifact_project_intent": purpose})
+				w := httptest.NewRecorder()
+				h.CreateRun(w, httptest.NewRequest("POST", "/api/v1/internal/runs", bytes.NewReader(raw)))
+				return w
+			}
+			changeSQL := `UPDATE user_sessions SET revoked_at='2026-10-27T00:00:00Z' WHERE id='original-session';`
+			if change == "typed_message_intent" {
+				changeSQL = `UPDATE artifact_project_message_intents SET revoked_at='2026-10-27T00:00:00Z';`
+			}
+			mustExec(t, f.rig.db, `CREATE TRIGGER review_revoke_after_task_assignment AFTER UPDATE OF status ON artifact_project_comment_tasks WHEN NEW.status='working' BEGIN `+changeSQL+` END`)
+			if w := call(f.a.RunID, f.a.MessageID, intent); w.Code < 400 {
+				t.Errorf("admission committed after authority revoked by final task write: %d %s", w.Code, w.Body)
+			}
+			for _, query := range []string{`SELECT count(*) FROM journal_entries WHERE entry_type='run.started'`, `SELECT count(*) FROM artifact_run_principals`, `SELECT count(*) FROM artifact_project_run_consents`} {
+				var n int
+				if err := f.rig.db.QueryRow(query).Scan(&n); err != nil || n != 0 {
+					t.Fatalf("refused admission partly committed: %s count%d err%v", query, n, err)
+				}
+			}
+
+		})
+	}
+}
+
+func TestArtifactProjectIntentRecorderFinalSealRevocation(t *testing.T) {
+	for _, change := range []string{"accepted", "original_credential", "typed_message_intent"} {
+		t.Run(change, func(t *testing.T) {
+			t.Setenv("CREWSHIP_ARTIFACT_PROJECTS_ENABLED", "true")
+			f := artifactProjectOriginalRunFixture(t)
+			intent := artifacts.ProjectIntent{SubmissionID: "review-original-create"}
+			if change != "accepted" {
+				changeSQL := `UPDATE user_sessions SET revoked_at='2026-10-27T00:00:00Z' WHERE id='original-session';`
+				if change == "typed_message_intent" {
+					changeSQL = `UPDATE artifact_project_message_intents SET revoked_at='2026-10-27T00:00:00Z';`
+				}
+				mustExec(t, f.rig.db, `CREATE TRIGGER review_revoke_after_chat_seal AFTER UPDATE OF private_artifact_author_user_id ON chats BEGIN `+changeSQL+` END`)
+			}
+			err := f.pages.RecordArtifactProjectIntent(t.Context(), f.receipt, f.a.MessageID, intent)
+			if change == "accepted" {
+				if err != nil {
+					t.Fatal("positive recorder calibration", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Error("recorder committed after final chat seal revoked original authority")
+			}
+			var n int
+			if err := f.rig.db.QueryRow(`SELECT count(*) FROM artifact_project_message_intents`).Scan(&n); err != nil || n != 0 {
+				t.Fatalf("refused recorder retained intent: count%d err%v", n, err)
+			}
+		})
+	}
+}

@@ -7155,7 +7155,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Add default-off artifact restore, shared-version selection and anchored feedback routes, plus a typed human CLI comment command.
 
-- Bind artifact requests to explicit human chat intent and one signed run, preserving the original Page and version authority.
+- Bind artifact requests to explicit human chat intent and one signed run, preserving the original Page and version authority. Recheck live original authority and exact consent after the final chat or task write before committing admission.
 
 ## [1.0.0-rc.1] — 2026-07-12
 
