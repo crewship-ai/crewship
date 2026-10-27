@@ -24,6 +24,40 @@ use `schema.mjs`; browser consumers must use their own matching types to avoid
 mixing separate Yjs installations. Keep dependency versions and the lockfile
 together when updating the engine.
 
+## Position history compatibility
+
+The browser and service pin `@tiptap/y-tiptap` 3.0.10 and Yjs 13.6.33 together.
+Alongside `default`, validation admits only the upstream position-history map
+`__tiptap_position_migrations:root:default`. Its version 1 records contain numeric
+client/clock identities, causal vectors and position transfers; references must
+resolve to retained document intervals (including payload-free GC intervals).
+Unknown fields,
+arbitrary roots, nested shared values and nonnumeric payloads remain rejected.
+This metadata never supplies permissions or authorizes an agent request.
+
+The same limits include deleted and overwritten retained records: 256 records,
+4096 transfers, 128 causal pairs per record, 500000 total transferred positions,
+and 64 KiB of JSON metadata per Document, within the existing 1 MiB binary limit.
+A limit refuses the update without discarding confirmed content. Metadata is not
+silently pruned: history and comment identities must survive an explicit future
+compaction contract. Existing snapshots without this map need no rewrite. Deploy the compatible
+service before the new browser build. Once new snapshots contain this map, an
+older validator will refuse them: a rollback must retain this compatibility
+reader even if the editor dependency is downgraded. Do not strip metadata or
+rebuild CRDT identities as a rollback shortcut.
+
+`position-migrations-node-test.mjs` covers retained malformed/oversized payloads
+and previous-binding snapshots. The actual editor formatting test sends heading,
+Enter, list, table, undo and redo updates through the production Unix service with a
+controlled Go authority; it does not qualify Go authorization or model authoring.
+The separate Dependabot `document-editor` group covers both manifests; its
+packages are excluded from the broad dependency groups. Major and security
+updates retain the existing separate-review policy.
+
+Upstream format: [3.0.10 release sources](https://registry.npmjs.org/@tiptap/y-tiptap/-/y-tiptap-3.0.10.tgz).
+The npm registry `latest` tag was verified as 3.0.10 on 2026-10-21; the manifests
+and lockfiles pin the release rather than following that moving tag.
+
 ## Private service boundary
 
 `service.mjs` talks to a separate Go authority over a Unix socket. The service
