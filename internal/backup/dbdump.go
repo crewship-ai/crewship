@@ -329,6 +329,11 @@ var BackupTables = []string{
 	"artifact_project_comment_replies",
 	"artifact_project_origins",
 	"documents",
+	"gridcraft_heads",
+	"gridcraft_revisions",
+	"gridcraft_operations",
+	"gridcraft_audit",
+	"gridcraft_outbox",
 	"mooring_documents", // after Pages; owns receipts
 	"mooring_receipts",
 	"mooring_collab_documents",
@@ -602,21 +607,6 @@ func DumpWorkspace(ctx context.Context, db *sql.DB, workspaceID string) (*DBDump
 		return nil, fmt.Errorf("backup: begin dump tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	// Until portable workbook backup is supported, never return a successful
-	// bundle which silently drops experimental user content.
-	var hasWorkbookTable bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='gridcraft_heads')`).Scan(&hasWorkbookTable); err != nil {
-		return nil, err
-	}
-	if hasWorkbookTable {
-		var hasWorkbook bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM gridcraft_heads WHERE workspace_id=?)`, workspaceID).Scan(&hasWorkbook); err != nil {
-			return nil, err
-		}
-		if hasWorkbook {
-			return nil, fmt.Errorf("backup: portable backup of experimental workbooks is unavailable")
-		}
-	}
 
 	dump := &DBDump{
 		WorkspaceID: workspaceID,
@@ -1122,10 +1112,8 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 	if err := rejectMooringCollaborationCollision(ctx, db, dump); err != nil {
 		return RestoreStats{}, err
 	}
-	for table, rows := range dump.Tables {
-		if strings.HasPrefix(table, "gridcraft_") && len(rows) > 0 {
-			return RestoreStats{}, fmt.Errorf("backup: portable restore of experimental workbooks is unavailable")
-		}
+	if err := rejectGridCraftHistoryCollision(ctx, db, dump); err != nil {
+		return RestoreStats{}, err
 	}
 
 	if hooks == nil {
@@ -1156,6 +1144,10 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 		return stats, fmt.Errorf("backup: begin restore tx: %w", err)
 	}
 	if err := rejectMooringCollaborationCollision(ctx, tx, dump); err != nil {
+		_ = tx.Rollback()
+		return stats, err
+	}
+	if err := rejectGridCraftHistoryCollision(ctx, tx, dump); err != nil {
 		_ = tx.Rollback()
 		return stats, err
 	}
@@ -1295,6 +1287,24 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			// copies whatever row is current — has to come after it or its
 			// CANCELLED status would be thrown away.
 			row := safeConversationRestoreRow(table, originalRow, conversationAssignments)
+			row, err = safeGridCraftRestoreRow(table, row)
+			if err != nil {
+				return stats, err
+			}
+			if table == "gridcraft_heads" {
+				if err = fenceGridCraftTarget(ctx, tx, row["workspace_id"].(string), row["page_id"].(string), false); err != nil {
+					return stats, err
+				}
+				if _, err = tx.ExecContext(ctx, `DELETE FROM gridcraft_intents WHERE workspace_id=? AND page_id=?`, row["workspace_id"], row["page_id"]); err != nil {
+					return stats, err
+				}
+				if _, err = tx.ExecContext(ctx, `DELETE FROM gridcraft_sessions WHERE workspace_id=? AND page_id=?`, row["workspace_id"], row["page_id"]); err != nil {
+					return stats, err
+				}
+				if _, err = tx.ExecContext(ctx, `UPDATE gridcraft_heads SET generation=MAX(generation,?) WHERE workspace_id=? AND page_id=?`, row["generation"], row["workspace_id"], row["page_id"]); err != nil {
+					return stats, err
+				}
+			}
 			if table == "hooks_config" {
 				copy := make(map[string]any, len(row)+1)
 				for k, v := range row {

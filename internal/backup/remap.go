@@ -428,6 +428,7 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 			}
 		}
 	}
+	remapGridCraft(dump, idMap)
 	if err := remapSlides(dump, idMap); err != nil {
 		return err
 	}
