@@ -435,6 +435,9 @@ var (
 // Validate checks that all configuration values are within acceptable ranges
 // and required fields are set. Returns an error describing the first invalid value.
 func (c *Config) Validate() error {
+	if _, _, err := c.CraftNative.ResolveEditorBundles(c.GridCraft, (c.GridCraft.Enabled && c.GridCraft.EditorEnabled) || c.Mooring.Enabled); err != nil {
+		return err
+	}
 	if err := c.Mooring.validate(); err != nil {
 		return err
 	}
@@ -564,6 +567,7 @@ func loadFromFile(cfg *Config, path string) error {
 }
 
 func applyEnvOverrides(cfg *Config) {
+	applyCraftNativeEnv(&cfg.CraftNative)
 	if value, ok := os.LookupEnv("CREWSHIP_CRAFT_NATIVE_ENABLED"); ok {
 		cfg.CraftNative.Enabled = value == "true" || value == "1"
 	}

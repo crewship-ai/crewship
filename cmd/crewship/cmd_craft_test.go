@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
 	"io"
@@ -111,8 +112,12 @@ func TestCraftCLIAvailabilityAndHTTPFailureNoRetry(t *testing.T) {
 	stub.OnGet(base+"/availability", func(*http.Request, []byte) (int, []byte, string) {
 		return 200, []byte(`{"enabled":true}`), "application/json"
 	})
-	if out, err := runPageCLI(t, "", "craft", "availability", "health"); err != nil || !strings.Contains(out, `"enabled":true`) {
-		t.Fatalf("availability %s %v", out, err)
+	{
+		out, err := runPageCLI(t, "", "craft", "availability", "health")
+		var availability map[string]bool
+		if err != nil || json.Unmarshal([]byte(out), &availability) != nil || !availability["enabled"] {
+			t.Fatalf("availability %s %v", out, err)
+		}
 	}
 	secret := strings.Repeat("d", 64)
 	stub.OnPost(base+"/sessions", func(*http.Request, []byte) (int, []byte, string) {
@@ -204,5 +209,37 @@ func TestCraftCLIPrivateTokenNeverFollowsCrossOriginRedirect(t *testing.T) {
 	}
 	if calls.Load() != 0 {
 		t.Fatal("destination contacted")
+	}
+}
+
+func TestCraftCLIAvailabilityYAMLHonorsFormat(t *testing.T) {
+	stub := pageStub(t)
+	stub.OnGet("/api/v1/pages/health/craft/availability", func(*http.Request, []byte) (int, []byte, string) {
+		return 200, []byte(`{"enabled":true}`), "application/json"
+	})
+	out, err := runPageCLI(t, "", "craft", "availability", "health", "-f", "yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "enabled: true") || strings.Contains(out, `"enabled"`) {
+		t.Fatalf("not YAML: %s", out)
+	}
+}
+
+func TestCraftCLIConnectYAMLIsSeparatedStreamWithoutBearer(t *testing.T) {
+	stub := pageStub(t)
+	secret := strings.Repeat("a", 64)
+	stub.OnPost("/api/v1/pages/health/craft/sessions", func(*http.Request, []byte) (int, []byte, string) {
+		return 201, []byte(`{"session_token":"` + secret + `","session_id":"public-tab"}`), "application/json"
+	})
+	stub.OnGet("/api/v1/pages/health/craft/lease", func(*http.Request, []byte) (int, []byte, string) {
+		return 200, []byte(`{"generation":"9007199254740993"}`), "application/json"
+	})
+	out, err := runPageCLI(t, "{\"action\":\"status\"}\n", "craft", "connect", "health", "-f", "yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(out, "---\n") != 2 || !strings.Contains(out, "session_id: public-tab") || !strings.Contains(out, "9007199254740993") || strings.Contains(out, secret) || strings.Contains(out, "session_token") {
+		t.Fatalf("not a private YAML stream: %s", out)
 	}
 }

@@ -12,6 +12,35 @@ import (
 	"github.com/crewship-ai/crewship/internal/mooring"
 )
 
+type craftNativeAvailabilityResponse struct {
+	Enabled bool `json:"enabled"`
+}
+type craftNativeRenewalResponse struct {
+	Renewed bool `json:"renewed"`
+}
+type craftNativeHolderResponse struct {
+	ActorID     string `json:"actor_id"`
+	DisplayName string `json:"display_name"`
+	Kind        string `json:"kind"`
+}
+type craftNativeRequestResponse struct {
+	RequestID   string `json:"request_id"`
+	ActorID     string `json:"actor_id"`
+	DisplayName string `json:"display_name"`
+	Kind        string `json:"kind"`
+}
+type craftNativeLeaseResponse struct {
+	Draft                string                       `json:"draft,omitempty"`
+	Holder               *craftNativeHolderResponse   `json:"holder"`
+	Mine                 bool                         `json:"mine"`
+	Generation           *string                      `json:"generation"`
+	ExpiresAt            *string                      `json:"expires_at"`
+	CanWrite             bool                         `json:"can_write"`
+	AcquiredAt           *string                      `json:"acquired_at"`
+	HandoffRequestedKind *string                      `json:"handoff_requested_kind"`
+	HandoffRequestedBy   []craftNativeRequestResponse `json:"handoff_requested_by"`
+}
+
 type craftNativeLeaseBody struct {
 	Generation string `json:"generation"`
 	RequestID  string `json:"request_id"`
@@ -43,7 +72,7 @@ func (m *craftNativeHTTP) availability(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, 200, map[string]bool{"enabled": enabled})
+	writeJSON(w, 200, craftNativeAvailabilityResponse{Enabled: enabled})
 }
 func craftNativeHTTPError(w http.ResponseWriter, err error) {
 	if errors.Is(err, mooring.ErrEditLeaseBusy) || errors.Is(err, mooring.ErrEditLeaseStale) {
@@ -52,15 +81,15 @@ func craftNativeHTTPError(w http.ResponseWriter, err error) {
 	}
 	replyError(w, 403, "native Craft access denied")
 }
-func (m *craftNativeHTTP) leaseView(r *http.Request, entry *craftNativeSession, l mooring.EditLease) map[string]any {
-	var holder any
+func (m *craftNativeHTTP) leaseView(r *http.Request, entry *craftNativeSession, l mooring.EditLease) craftNativeLeaseResponse {
+	var holder *craftNativeHolderResponse
 	if l.Holder.ActorID != "" {
 		var name string
 		_ = m.pages.db.QueryRowContext(r.Context(), `SELECT COALESCE(NULLIF(full_name,''),'User') FROM users WHERE id=?`, strings.TrimPrefix(l.Holder.ActorID, "user:")).Scan(&name)
-		holder = map[string]any{"actor_id": l.Holder.ActorID, "display_name": name, "kind": "human"}
+		holder = &craftNativeHolderResponse{ActorID: l.Holder.ActorID, DisplayName: name, Kind: "human"}
 	}
 	mine := l.Holder == craftNativePrincipal(entry)
-	requests := make([]map[string]any, 0)
+	requests := make([]craftNativeRequestResponse, 0)
 	type candidate struct {
 		request craftNativeRequest
 		target  *craftNativeSession
@@ -85,22 +114,25 @@ func (m *craftNativeHTTP) leaseView(r *http.Request, entry *craftNativeSession, 
 		if err != nil {
 			continue
 		}
-		requests = append(requests, map[string]any{"request_id": request.id, "actor_id": "user:" + target.source.UserID, "display_name": name, "kind": "human"})
+		requests = append(requests, craftNativeRequestResponse{RequestID: request.id, ActorID: "user:" + target.source.UserID, DisplayName: name, Kind: "human"})
 	}
-	var expiry, generation any
+	var expiry, generation *string
 	if !l.ExpiresAt.IsZero() {
-		expiry = l.ExpiresAt.UTC().Format(time.RFC3339Nano)
+		value := l.ExpiresAt.UTC().Format(time.RFC3339Nano)
+		expiry = &value
 	}
 	if l.Generation > 0 {
-		generation = strconv.FormatInt(l.Generation, 10)
+		value := strconv.FormatInt(l.Generation, 10)
+		generation = &value
 	}
-	var requestedKind any
+	var requestedKind *string
 	if len(requests) > 0 {
-		requestedKind = "human"
+		value := "human"
+		requestedKind = &value
 	}
 	// The lease core has no durable acquisition timestamp. Renewal time would
 	// falsely describe custody age, so the dormant API reports unknown explicitly.
-	return map[string]any{"acquired_at": nil, "handoff_requested_kind": requestedKind, "holder": holder, "mine": mine, "generation": generation, "expires_at": expiry, "can_write": mine, "handoff_requested_by": requests}
+	return craftNativeLeaseResponse{Holder: holder, Mine: mine, Generation: generation, ExpiresAt: expiry, CanWrite: mine, HandoffRequestedKind: requestedKind, HandoffRequestedBy: requests}
 }
 func (m *craftNativeHTTP) lease(w http.ResponseWriter, r *http.Request) {
 	entry, err := m.bound(r)

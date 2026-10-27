@@ -88,8 +88,8 @@ func (m *craftNativeHTTP) events(w http.ResponseWriter, r *http.Request) {
 		}
 		view := m.leaseView(r, entry, lease)
 		if readonly {
-			view["can_write"] = false
-			view["draft"] = "retain"
+			view.CanWrite = false
+			view.Draft = "retain"
 		}
 		freshEntry, e = m.bound(r)
 		if e != nil {

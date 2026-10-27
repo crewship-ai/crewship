@@ -69,5 +69,12 @@ func craftNativeSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	d.Response = map[string]any{"type": "string", "description": "SSE event: lease with NativeCraftLease JSON, or session_retired with delivery=stopped, reason=authority_changed and draft=retain|purge. Generic auth failures do not imply draft purge."}
 	d.ResponseMedia = []string{"text/event-stream"}
 	routes["GET "+prefix+"/events"] = d
+	documentRoutes, documentSchemas := craftNativeDocumentSchemaCatalog()
+	for key, value := range documentRoutes {
+		routes[key] = value
+	}
+	for key, value := range documentSchemas {
+		schemas[key] = value
+	}
 	return routes, schemas
 }

@@ -57,5 +57,5 @@ func (m *craftNativeHTTP) reauthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, 200, map[string]bool{"renewed": renewed})
+	writeJSON(w, 200, craftNativeRenewalResponse{Renewed: renewed})
 }

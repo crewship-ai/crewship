@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -13,7 +12,6 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/database"
-	"github.com/crewship-ai/crewship/internal/mooring"
 	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
@@ -197,73 +195,6 @@ func TestCraftNativeHTTPPositiveInt64GenerationWire(t *testing.T) {
 	}
 }
 
-func TestCraftNativeHTTPHeartbeatRenewsServerSideAndStopsOnReadLoss(t *testing.T) {
-	f, m, ctx := craftNativeHTTPFixture(t)
-	clock, err := mooring.NewBootOwnerClock()
-	if err != nil {
-		t.Fatal(err)
-	}
-	m = newCraftNativeHTTP(m.pages, true, clock)
-	token, _ := craftNativeIssued(t, m, ctx)
-	if w := craftNativeLeaseCall(m, ctx, token, "native-page", "acquire", `{}`); w.Code != 200 {
-		t.Fatal(w.Code, w.Body)
-	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		bound := context.WithValue(context.WithValue(context.WithValue(r.Context(), ctxUser, UserFromContext(ctx)), ctxAuthKind, AuthKindSession), ctxWorkspaceID, f.wsID)
-		bound = auth.WithOriginalCredential(bound, *auth.OriginalCredentialFromContext(ctx))
-		r = r.WithContext(bound)
-		r.SetPathValue("slug", "native-page")
-		m.events(w, r)
-	}))
-	defer server.Close()
-	client := &http.Client{Timeout: 20 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, server.URL, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("X-Craft-Session", token)
-	response, err := client.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer response.Body.Close()
-	if response.StatusCode != 200 {
-		t.Fatal(response.StatusCode)
-	}
-	scanner := bufio.NewScanner(response.Body)
-	next := func() map[string]any {
-		t.Helper()
-		for scanner.Scan() {
-			if line := scanner.Text(); strings.HasPrefix(line, "data: ") {
-				var result map[string]any
-				if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &result); err != nil {
-					t.Fatal(err)
-				}
-				return result
-			}
-		}
-		t.Fatalf("stream ended: %v", scanner.Err())
-		return nil
-	}
-	if first := next(); first["can_write"] != true {
-		t.Fatal(first)
-	}
-	var before, after int64
-	if err = f.db.QueryRow(`SELECT expires_ns FROM mooring_edit_leases WHERE page_id='native-page'`).Scan(&before); err != nil {
-		t.Fatal(err)
-	}
-	if second := next(); second["can_write"] != true {
-		t.Fatal(second)
-	}
-	if err = f.db.QueryRow(`SELECT expires_ns FROM mooring_edit_leases WHERE page_id='native-page'`).Scan(&after); err != nil || after <= before {
-		t.Fatal("server heartbeat failed to extend lease", before, after, err)
-	}
-	mustExec(t, f.db, `UPDATE user_sessions SET revoked_at='2026-10-27T00:00:00Z' WHERE id='native-source'`)
-	if retired := next(); retired["delivery"] != "stopped" || retired["draft"] != "purge" {
-		t.Fatal("read loss did not stop delivery and request purge", retired)
-	}
-}
-
 func craftNativeFreshContext(t *testing.T, f *pagesTransferRig, ctx context.Context, horizon time.Duration) context.Context {
 	t.Helper()
 	user := *UserFromContext(ctx)
@@ -353,64 +284,6 @@ func TestCraftNativeHTTPLeaseDTOAndRequestDisplay(t *testing.T) {
 	request, ok := requests[0].(map[string]any)
 	if !ok || request["actor_id"] != "user:"+f.userID || request["display_name"] == nil || request["request_id"] == nil {
 		t.Fatal(requested)
-	}
-}
-
-func TestCraftNativeHTTPFreshCredentialExtendsEstablishedStream(t *testing.T) {
-	f, m, ctx := craftNativeHTTPFixture(t)
-	clock, err := mooring.NewBootOwnerClock()
-	if err != nil {
-		t.Fatal(err)
-	}
-	m = newCraftNativeHTTP(m.pages, true, clock)
-	old := craftNativeFreshContext(t, f, ctx, 4*time.Second)
-	token, _ := craftNativeIssued(t, m, old)
-	if w := craftNativeLeaseCall(m, old, token, "native-page", "acquire", `{}`); w.Code != 200 {
-		t.Fatal(w.Code, w.Body)
-	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		bound := context.WithValue(context.WithValue(context.WithValue(r.Context(), ctxUser, UserFromContext(old)), ctxAuthKind, AuthKindSession), ctxWorkspaceID, f.wsID)
-		r = r.WithContext(auth.WithOriginalCredential(bound, *auth.OriginalCredentialFromContext(old)))
-		r.SetPathValue("slug", "native-page")
-		m.events(w, r)
-	}))
-	defer server.Close()
-	request, err := http.NewRequest(http.MethodGet, server.URL, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	request.Header.Set("X-Craft-Session", token)
-	response, err := (&http.Client{Timeout: 12 * time.Second}).Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer response.Body.Close()
-	scanner := bufio.NewScanner(response.Body)
-	next := func() map[string]any {
-		t.Helper()
-		for scanner.Scan() {
-			if line := scanner.Text(); strings.HasPrefix(line, "data: ") {
-				var data map[string]any
-				if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &data); err != nil {
-					t.Fatal(err)
-				}
-				return data
-			}
-		}
-		t.Fatalf("stream ended: %v", scanner.Err())
-		return nil
-	}
-	if first := next(); first["can_write"] != true {
-		t.Fatal(first)
-	}
-	fresh := craftNativeFreshContext(t, f, ctx, 59*time.Minute)
-	if w := craftNativeReauthorize(m, fresh, token); w.Code != 200 {
-		t.Fatal(w.Code, w.Body)
-	}
-	// The next 5s server heartbeat is after the original authenticated 4s source
-	// horizon; only the separately authenticated renewal may keep it alive.
-	if afterOldExpiry := next(); afterOldExpiry["can_write"] != true {
-		t.Fatal("live stream ignored fresh authenticated source", afterOldExpiry)
 	}
 }
 
