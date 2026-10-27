@@ -58,6 +58,8 @@ func (r *Router) registerPageRoutes() {
 	// create/update/delete paths that write wake-gate rules, and the freshness
 	// sweeper has to run against the same clock and journal.
 	r.pages = p
+	r.registerArtifactProjectCreateRoutes()
+	r.registerArtifactProjectVersionRoutes()
 	if r.pageProjectsPath != "" {
 		p.SetProjectStore(&pages.ProjectStore{Directory: r.pageProjectsPath})
 	}
@@ -213,4 +215,5 @@ func (r *Router) registerPageRoutes() {
 	// Action dispatch (§8b.2) — router_pages_actions.go, which also argues why
 	// its POST declares a role floor where the mutations above declare roleSelf.
 	r.registerPageActionRoutes()
+	r.registerArtifactProjectFeedbackRoutes()
 }

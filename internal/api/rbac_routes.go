@@ -103,6 +103,9 @@ const scopeSelf = "self"
 // enumeration test fails the build, and requireRoleScopeMW denies scoped
 // tokens at runtime.
 func scopeForRoute(pattern string) string {
+	if pattern == "/api/v1/pages/artifacts" || strings.HasPrefix(pattern, "/api/v1/pages/{slug}/artifact/") {
+		return "pages:write"
+	}
 	if strings.HasPrefix(pattern, "/api/v1/pages/{slug}/document/") ||
 		strings.HasPrefix(pattern, "/api/v1/pages/{slug}/slides/") {
 		return "pages:write"

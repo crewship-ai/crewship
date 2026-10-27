@@ -1889,3 +1889,38 @@ For a clarification reply against the original comment version:
 ```bash
 crewship page artifact reply demo COMMENT_ID --version 1 --text "Please select the current heading again" --needs-clarification
 ```
+
+### `crewship page artifact availability`
+
+Read whether the current workspace enables artifact projects. An unavailable or
+disabled service does not authorize project creation.
+
+```bash
+crewship page artifact availability
+```
+
+Returns `{ "enabled": false }` when the workspace feature is disabled. The
+command uses the same authenticated workspace client as other Page commands.
+
+### `crewship page artifact publish <slug>`
+
+Supply `--base-version` with the exact positive latest project version and
+`--file` with the complete manifest. Use `artifact create` for a new project.
+A conflict leaves the candidate available for deliberate reconciliation.
+
+```bash
+crewship page artifact publish demo --base-version 1 --file manifest.json
+```
+
+### `crewship page artifact comment <slug>`
+
+Create an anchored comment as the human owner, using the exact selected version
+and element text. This request preserves `409` without retrying a newer version:
+
+```bash
+crewship page artifact comment demo --version 1 --path index.html --selector '#artifact-heading' --quote 'Current title' --text 'Make this title shorter' --send-to-agent
+```
+
+Omit `--send-to-agent` to store only the comment. Queuing a task does not confirm
+agent delivery. A protected agent invocation cannot fall back to a saved human
+profile to create the comment. `page artifact comments` remains the read command.
