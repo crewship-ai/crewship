@@ -48,12 +48,12 @@ const pagePath = (slug: string, rest: string, params: Record<string, string>) =>
   `/api/v1/pages/${encodeURIComponent(slug)}/artifact${rest}?${new URLSearchParams(params)}`
 
 /** Shared by the Craft lease client: same error envelope, same typed failure. */
-export async function artifactRequest<T>(url: string, parse: (body: unknown) => T | null, init: { method?: "GET" | "POST"; body?: unknown; signal?: AbortSignal } = {}): Promise<T> {
+export async function artifactRequest<T>(url: string, parse: (body: unknown) => T | null, init: { method?: "GET" | "POST"; body?: unknown; signal?: AbortSignal; headers?: Record<string, string> } = {}): Promise<T> {
   let response: Response
   try {
     response = await apiFetch(url, init.method === "POST"
-      ? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(init.body), signal: init.signal }
-      : { method: "GET", cache: "no-store", signal: init.signal })
+      ? { method: "POST", headers: { ...init.headers, "content-type": "application/json" }, body: JSON.stringify(init.body), signal: init.signal }
+      : { method: "GET", cache: "no-store", ...(init.headers ? { headers: init.headers } : {}), signal: init.signal })
   } catch (error) {
     if ((error as { name?: string })?.name === "AbortError") throw error
     throw new ArtifactRequestError(0, "unavailable", GENERIC.unavailable)

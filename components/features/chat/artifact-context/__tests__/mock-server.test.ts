@@ -108,15 +108,19 @@ describe("artifact mock server", () => {
     expect(mock.handle("/api/v1/pages/deck/artifact/share", post({ base_version: 1, version: 1 }))!.status).toBe(403)
   })
 
-  it("craft routes 404 until enabled, then follow the lease", async () => {
+  it("craft routes 404 until enabled, then need the admission header and record a handoff request", async () => {
     const mock = createArtifactMockServer({ slug: "deck", files: [] })
     expect(mock.handle("/api/v1/pages/deck/craft/availability")!.status).toBe(404)
     mock.state.craftEnabled = true
-    mock.setLease({ holder: { actor_id: "a", display_name: "Ada", kind: "agent" }, mine: false, generation: 2, can_write: true })
-    expect(mock.handle("/api/v1/pages/deck/craft/lease", post({}))!.status).toBe(409)
-    await mock.handle("/api/v1/pages/deck/craft/lease/request-handoff", post({}))!.json()
-    expect(mock.state.lease.handoff_requested_by).toBe("You")
-    mock.setLease({ holder: null, mine: false, generation: 3, can_write: true })
-    expect(await mock.handle("/api/v1/pages/deck/craft/lease", post({}))!.json()).toMatchObject({ mine: true, generation: 4 })
+    mock.setLease({ holder: { actor_id: "user:ada", display_name: "Ada", kind: "human" }, mine: false, generation: "2", can_write: true, requests: [] })
+    expect(mock.handle("/api/v1/pages/deck/craft/lease")!.status).toBe(403)
+    const { session_token: token } = await mock.handle("/api/v1/pages/deck/craft/sessions", post({}))!.json()
+    const admitted = { headers: { "X-Craft-Session": token } }
+    expect(await mock.handle("/api/v1/pages/deck/craft/lease", admitted)!.json()).toMatchObject({ generation: "2", handoff_requested_by: [] })
+    const handoff = mock.handle("/api/v1/pages/deck/craft/lease/request-handoff", { ...post({}), ...admitted })!
+    expect(handoff.status).toBe(201)
+    expect(await handoff.json()).toEqual({ request_id: "r1", generation: "2" })
+    expect(mock.state.lease.requests).toMatchObject([{ actor_id: "user:you" }])
+    expect(mock.handle("/api/v1/pages/deck/craft/lease", { ...post({}), ...admitted })!.status).toBe(405)
   })
 })
