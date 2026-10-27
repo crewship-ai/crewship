@@ -136,6 +136,10 @@ export interface WirePage {
   has_slides?: boolean
   /** The Page stores a GridCraft workbook (read-only preview in the browser). */
   has_workbook?: boolean
+  /** The Page carries a version head: project, word or sheet (list only). */
+  artifact_kind?: string
+  /** The version shared with readers; absent when nothing is shared. */
+  artifact_shared_version?: number
   has_mooring?: boolean
   /** Protocol-backed collaboration storage; never infer the legacy pilot. */
   has_collaboration?: boolean
@@ -492,6 +496,10 @@ export interface PageView {
   hasSlides?: boolean
   /** Confirmed GridCraft workbook storage; the Page renders the read-only workbook preview. */
   hasWorkbook?: boolean
+  /** Versioned artifact kind from the version head; undefined for any other Page. */
+  artifactKind?: "project" | "word" | "sheet"
+  /** The version readers see; undefined when nothing is shared. */
+  artifactSharedVersion?: number
   hasMooring?: boolean
   hasCollaboration?: boolean
   collaborationFormat?: string | null
@@ -645,6 +653,8 @@ export function toPageView(raw: WirePage): PageView {
     privateAudience: typeof raw.private_audience === "boolean" ? raw.private_audience : undefined,
     hasSlides: raw.has_slides === true,
     hasWorkbook: raw.has_workbook === true,
+    ...(raw.artifact_kind === "project" || raw.artifact_kind === "word" || raw.artifact_kind === "sheet" ? { artifactKind: raw.artifact_kind } : {}),
+    ...(Number.isSafeInteger(raw.artifact_shared_version) && raw.artifact_shared_version! > 0 ? { artifactSharedVersion: raw.artifact_shared_version } : {}),
     hasMooring: raw.has_mooring === true,
     hasCollaboration: raw.has_collaboration === true,
     collaborationFormat: raw.collaboration_format,

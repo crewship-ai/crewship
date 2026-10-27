@@ -127,3 +127,12 @@ export function chatArtifactProjects(): boolean {
 export function chatCraftLease(): boolean {
   return process.env.NEXT_PUBLIC_CHAT_CRAFT_LEASE === "true"
 }
+
+/**
+ * Gates the Artifacts library at /artifacts: a gallery of versioned projects,
+ * Word, Sheet, Slides and dashboards with their shared version and a project
+ * history detail. Default OFF; /artifacts sends saved links to /pages.
+ */
+export function artifactsLibrary(): boolean {
+  return process.env.NEXT_PUBLIC_ARTIFACTS_LIBRARY === "true"
+}
