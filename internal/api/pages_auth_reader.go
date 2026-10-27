@@ -43,6 +43,8 @@ func privatePageOwnershipSQLForInitialization(ctx context.Context, q pageAuthQue
 		// waits for an explicit human successor instead of going to a crew.
 		{"gridcraft_heads", "workbook"}, {"mooring_documents", "mooring"},
 		{"mooring_collab_documents", "mooring_collaboration"},
+		// Native engine identity wins when its history uses VersionStore.
+		{"artifact_version_heads", "artifact_project"},
 	} {
 		var schemaType string
 		err := q.QueryRowContext(ctx, `SELECT type FROM sqlite_schema WHERE name=? COLLATE NOCASE AND type IN ('table','view')`, extension.table).Scan(&schemaType)

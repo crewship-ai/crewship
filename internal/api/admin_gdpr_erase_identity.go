@@ -476,6 +476,10 @@ func (h *AdminGDPRHandler) eraseSubjectIdentity(ctx context.Context, actionID, a
 		return zeroIdentityErasure(), fmt.Errorf("read keeper security contact: %w", err)
 	}
 
+	if err := anonymiseArtifactProjectIdentity(ctx, tx, wsID, targetID); err != nil {
+		return zeroIdentityErasure(), err
+	}
+
 	bound := map[identityArg]any{argSubject: targetID, argWorkspace: wsID, argCustodian: custodian}
 	for _, step := range identitySteps {
 		args := make([]any, len(step.args))
