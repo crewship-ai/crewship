@@ -785,6 +785,9 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 		if _, err := db.ExecContext(ctx, `UPDATE mooring_delivery_gates SET closed=1,blocked=0`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "no such table") {
 			return fmt.Errorf("backup: close source Mooring delivery gates: %w", err)
 		}
+		if err := resetRecoveredCraftEditLeases(ctx, db.DB); err != nil {
+			return err
+		}
 		// Physical instance bundles include document bytes and their source leases.
 		// Preserve content/history, fence every source engine before first boot.
 		var documentsExist bool

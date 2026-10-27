@@ -67,6 +67,10 @@ var workspaceTablesNotBundled = map[string]string{
 	"access_attempts":                   "execution capabilities and generations must be issued anew on a restored instance",
 	"restricted_preflight_reservations": "live private issue source authority must not replay on a copied instance",
 	"attempt_project_inputs":            "attempt-specific native input capabilities must not replay after restore",
+
+	"mooring_edit_leases":           "editor capabilities belong to their installation; retain target-local generation tombstones",
+	"mooring_edit_lease_workspaces": "target-local issuance fences survive Page deletion; restore must not replace their workspace",
+
 	// --- Migration artefacts / archives (derived, never read by the app) ---
 	"agent_runs_archive":       "one-off snapshot taken by v61 drop_agent_runs; the live data was folded into journal_entries, which rides the bundle",
 	"journal_entries_archived": "compaction archive; BLOB/vector shape would corrupt under the TEXT-only round-trip path (see dbdump.go)",

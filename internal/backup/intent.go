@@ -64,6 +64,10 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"mooring_receipts":               IntentInclude,        // immutable history and idempotence evidence
 	"mooring_intents":                IntentExcludeRuntime, // live human/run mandates never survive restore
 
+	"mooring_edit_leases":           IntentExcludeRuntime, // target-local editor generation tombstones; no portable capabilities
+	"mooring_edit_lease_workspaces": IntentExcludeRuntime, // issued target fences outlive Page deletion
+	"mooring_edit_lease_requests":   IntentExcludeRuntime,
+
 	// Portable workbook backup is unavailable in the experimental pilot. Dump
 	// refuses a workspace containing workbooks instead of silently omitting them.
 	"gridcraft_heads":        IntentExcludeOperational,
