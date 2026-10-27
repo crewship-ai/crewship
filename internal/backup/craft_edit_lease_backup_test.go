@@ -55,7 +55,7 @@ func TestCraftEditLeaseBackupExcludesCapabilitiesAndProtectsTarget(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, table := range []string{"mooring_edit_leases", "mooring_edit_lease_requests"} {
+	for _, table := range []string{"mooring_edit_leases", "mooring_edit_lease_requests", "mooring_edit_lease_workspaces"} {
 		if len(dump.Tables[table]) != 0 {
 			t.Fatalf("portable backup leaked runtime authority: %s", table)
 		}

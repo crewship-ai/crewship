@@ -44,6 +44,7 @@ import (
 // write its reason here. "It is not important" is not a reason; see #1437.
 var workspaceTablesNotBundled = map[string]string{
 	"mooring_edit_leases":           "editor capabilities belong to their installation; retain target-local generation tombstones",
+	"mooring_edit_lease_workspaces": "target-local issuance fences survive Page deletion; restore must not replace their workspace",
 	"mooring_authority_generations": "target-local non-ABA author generations must survive logical replacement; portable bundles cannot reset them",
 	"mooring_delivery_gates":        "runtime delivery admission requires fresh identity after portable restore",
 	"mooring_delivery_barriers":     "runtime read-revocation barriers belong to source installation",
