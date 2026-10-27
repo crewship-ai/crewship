@@ -365,9 +365,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: changes
-    # PR: only when dependency manifests changed — osv-scanner reads
-    # lockfiles, nothing else in a diff can move its result. Full runs on
-    # main pushes + daily schedule.
+    # PR: dependency changes request this complementary scan. Go call
+    # analysis is enabled by default and also reads source; merge groups,
+    # main pushes and the daily schedule always run the complete scan.
     if: github.event_name != 'pull_request' || needs.changes.outputs.deps == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -377,7 +377,9 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
 
       - name: Install osv-scanner
-        run: go install github.com/google/osv-scanner/v2/cmd/osv-scanner@v2.2.4
+        # v2.6.0 supports Go 1.27 call analysis (upstream #3046); older
+        # x/tools panics on promoted fields in Go 1.27 struct literals.
+        run: go install github.com/google/osv-scanner/v2/cmd/osv-scanner@v2.6.0
 
       # Phase 2: blocking on Critical/High, promoted from Phase 1 warn-only
       # once the High baseline (deepmerge-ts GHSA-ggr8-5vv4-36mx, nanoid
@@ -414,6 +416,13 @@ jobs:
 
           if [ "$exit_code" -eq 0 ]; then
             exit 0
+          fi
+
+          # Only exit 1 denotes findings. A panic/network/tool failure must
+          # stay red even if a low-severity summary preceded the failure.
+          if [ "$exit_code" -ne 1 ]; then
+            echo "::error::osv-scanner failed with exit $exit_code — analysis incomplete. See run log."
+            exit 1
           fi
 
           # Fail SAFE, not fail green: if the summary line's shape ever
