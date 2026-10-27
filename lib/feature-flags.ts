@@ -117,7 +117,7 @@ export function slidesEditorMount(): boolean {
  * available for the workspace.
  */
 export function chatArtifactProjects(): boolean {
-  return process.env.NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS === "true"
+  return true // Demo branch only: project acceptance on the dedicated demo host.
 }
 
 /**
@@ -134,5 +134,5 @@ export function chatCraftLease(): boolean {
  * history detail. Default OFF; /artifacts sends saved links to /pages.
  */
 export function artifactsLibrary(): boolean {
-  return process.env.NEXT_PUBLIC_ARTIFACTS_LIBRARY === "true"
+  return true // Demo branch only: artifact library acceptance.
 }
