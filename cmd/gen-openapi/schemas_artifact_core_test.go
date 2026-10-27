@@ -7,7 +7,11 @@ import (
 
 func TestArtifactProjectCoreComponentsAreClosedAndRetainEmptyFiles(t *testing.T) {
 	doc := buildDocument(nil)
-	components := doc["components"].(map[string]any)["schemas"].(map[string]any)
+	components := artifactProjectCoreComponents()
+	fixtureSchemas := doc["components"].(map[string]any)["schemas"].(map[string]any)
+	for name, schema := range components {
+		fixtureSchemas[name] = schema
+	}
 	for _, name := range []string{"ArtifactProjectFileInput", "ArtifactProjectFile", "ArtifactProjectManifest", "ArtifactProjectVersion", "ArtifactProjectQuota", "ArtifactProjectCreateRequest", "ArtifactProjectPublishRequest", "ArtifactProjectVersionRequest", "ArtifactProjectCreateResponse", "ArtifactProjectMutationResponse", "ArtifactProjectShareResponse", "ArtifactProjectError", "ArtifactProjectAvailability", "ArtifactProjectConsentRequest", "ArtifactProjectConsentResponse"} {
 		schema, ok := components[name].(map[string]any)
 		if !ok {

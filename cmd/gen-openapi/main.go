@@ -358,9 +358,6 @@ func buildDocument(routes []route) map[string]any {
 	for name, schema := range policyComponents {
 		schemas[name] = schema
 	}
-	for name, schema := range artifactProjectCoreComponents() {
-		schemas[name] = schema
-	}
 	_, providerLoginComponents := providerLoginSchemaCatalog()
 	for name, schema := range providerLoginComponents {
 		schemas[name] = schema
