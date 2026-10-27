@@ -22,6 +22,14 @@ All Crewship configuration can be set via environment variables. These override 
 | `CREWSHIP_HOST` | `0.0.0.0` | Server listen address |
 | `CREWSHIP_PORT` | `8080` | Server listen port |
 
+## Native Craft edit lease
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_CRAFT_NATIVE_ENABLED` | `false` | Enable the separate whole-native profile's human session and EditLease HTTP API. Requires a Linux boot-aware clock. Availability is checked per Page; existing profiles are never converted. This does not enable the new editor, proposals, or New Doc. |
+
+See the [native Craft lease contract](/specs/craft-native) for admission and handoff.
+
 ## Mooring session profile
 
 | Variable | Default | Description |
