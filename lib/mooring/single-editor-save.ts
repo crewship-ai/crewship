@@ -59,9 +59,14 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   let nextPreparation = 0, lastFailedPreparation = 0, nextAutosave = 0
   let writeRetirement: Promise<boolean> | undefined
   const lifetime = new AbortController()
+  let lastState: NativeSaveState = { phase: "idle", dirty: false }
+  const stateWaiters = new Set<() => void>()
+  const notifyStateWaiters = () => { for (const check of [...stateWaiters]) check() }
   const emit = (phase: NativeSaveState["phase"], reason?: string) => {
     if (!active && phase !== "stopped") return
-    try { options.onState({ phase, dirty, ...(reason ? { reason } : {}) }) } catch { /* UI observers cannot alter persistence or privacy fences. */ }
+    lastState = { phase, dirty, ...(reason ? { reason } : {}) }
+    try { options.onState({ ...lastState }) } catch { /* UI observers cannot alter persistence or privacy fences. */ }
+    notifyStateWaiters()
   }
   const stop = () => {
     if (!active) return
@@ -135,6 +140,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       if (pending === operation) pending = undefined
       complete()
       scheduleIfNeeded()
+      notifyStateWaiters()
     }
   }
   // Preserve the newest durable recovery row when an older queued manual
@@ -229,7 +235,28 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       await transmit(attempt, false)
       if (manual && unavailable()) throw new Error(unavailable())
     })
-    return manual ? sending.finally(() => { manualCount--; scheduleIfNeeded() }) : sending
+    return manual ? sending.finally(() => { manualCount--; scheduleIfNeeded(); notifyStateWaiters() }) : sending
+  }
+  function waitForCleanSaved(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      let finished = false
+      const finish = (error?: Error) => {
+        if (finished) return
+        finished = true; clearTimeout(deadline); stateWaiters.delete(check)
+        lifetime.signal.removeEventListener("abort", check)
+        if (error) reject(error); else resolve()
+      }
+      const check = () => {
+        if (!active || lifetime.signal.aborted) { finish(new Error("native_session_retired")); return }
+        if (!writable || blocked || unconfirmed || lastState.phase === "uncertain" || lastState.phase === "read-only" || lastState.phase === "stopped" || lastState.phase === "draft" && lastState.reason) {
+          finish(new Error(!writable ? "write_revoked" : blocked ?? (unconfirmed ? "unconfirmed" : lastState.reason ?? "native_save_unconfirmed"))); return
+        }
+        if (lastState.phase === "saved" && !lastState.dirty && !dirty && !pending && preparingCount === 0 && manualCount === 0) finish()
+      }
+      const deadline = setTimeout(() => finish(new Error("native_flush_timeout")), timeoutMs)
+      stateWaiters.add(check); lifetime.signal.addEventListener("abort", check, { once: true })
+      check()
+    })
   }
   function revokeWrite(): Promise<boolean> {
     if (!active) return Promise.resolve(false)
@@ -260,7 +287,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     edited() { if (!active) return; edits++; dirty = true; emit(writable ? "dirty" : "read-only"); schedule() },
     save: (requestId?: string) => save(requestId),
     // Host transfer flush waits for pending transport without claiming a native Ctrl+S ticket.
-    flush: () => save(undefined, undefined, true),
+    async flush() { await save(undefined, undefined, true); await waitForCleanSaved() },
     async reconcile() { if (active && writable && unconfirmed && !pending && options.transport.reconcile) await transmit(unconfirmed, true) },
     revokeWrite,
     revokeRead,
