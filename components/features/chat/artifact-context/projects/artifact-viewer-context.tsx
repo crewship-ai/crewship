@@ -1,5 +1,5 @@
 "use client"
-import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react"
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useArtifactProjectsAvailable } from "./use-artifact-project-data"
 
 export type ArtifactViewerTab = "preview" | "comments" | "versions"
@@ -26,8 +26,10 @@ const ArtifactViewerContext = createContext<ArtifactViewerValue | null>(null)
 const ArtifactCardsAvailableContext = createContext(false)
 
 /** Mounting the provider is the feature switch for artifact project cards in chat. */
-export function ArtifactViewerProvider({ workspaceId, children, target: controlled, onTargetChange }: {
+export function ArtifactViewerProvider({ workspaceId, enabled = true, children, target: controlled, onTargetChange }: {
   workspaceId: string
+  /** Off hides the feature without unmounting children, so a host can keep the provider mounted while access settles. */
+  enabled?: boolean
   children: ReactNode
   /** Controlled mode: the chat panel owns the target because it lays out the side pane. */
   target?: ArtifactViewerTarget | null
@@ -43,7 +45,10 @@ export function ArtifactViewerProvider({ workspaceId, children, target: controll
   }, [])
   const opener = useRef<HTMLElement | null>(null)
   const isOpen = useRef(false)
-  const available = useArtifactProjectsAvailable(workspaceId)
+  const available = useArtifactProjectsAvailable(enabled ? workspaceId : null)
+  // A target cleared by the host (another pane opened, scope changed) ends this
+  // open, so the next one records its own opener.
+  useEffect(() => { if (!target) { isOpen.current = false; opener.current = null } }, [target])
 
   const open = useCallback((next: ArtifactViewerTarget) => {
     // Keep the first opener while the viewer is already open: switching tabs or
@@ -64,7 +69,7 @@ export function ArtifactViewerProvider({ workspaceId, children, target: controll
     if (el?.isConnected) el.focus()
   }, [setTarget])
 
-  const value = useMemo(() => ({ workspaceId, target, open, close }), [workspaceId, target, open, close])
+  const value = useMemo(() => enabled ? { workspaceId, target, open, close } : null, [enabled, workspaceId, target, open, close])
   return <ArtifactViewerContext.Provider value={value}>
     <ArtifactCardsAvailableContext.Provider value={available}>{children}</ArtifactCardsAvailableContext.Provider>
   </ArtifactViewerContext.Provider>
