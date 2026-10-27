@@ -148,9 +148,9 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     draftWrites = writing.catch(() => {})
     return writing
   }
-  function save(requestId?: string, autosaveToken?: number): Promise<void> {
-    const manual = requestId !== undefined
-    if (manual && (typeof requestId !== "string" || !requestId || requestId.length > 128 || requestId.includes("\0"))) return Promise.reject(new Error("invalid_native_save_ticket"))
+  function save(requestId?: string, autosaveToken?: number, hostFlush = false): Promise<void> {
+    const manual = requestId !== undefined || hostFlush
+    if (requestId !== undefined && (typeof requestId !== "string" || !requestId || requestId.length > 128 || requestId.includes("\0"))) return Promise.reject(new Error("invalid_native_save_ticket"))
     if (manual && manualCount >= 4) return Promise.reject(new Error("native_save_backpressure"))
     if (manual) manualCount++
     clearTimeout(timer)
@@ -259,6 +259,8 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   return {
     edited() { if (!active) return; edits++; dirty = true; emit(writable ? "dirty" : "read-only"); schedule() },
     save: (requestId?: string) => save(requestId),
+    // Host transfer flush waits for pending transport without claiming a native Ctrl+S ticket.
+    flush: () => save(undefined, undefined, true),
     async reconcile() { if (active && writable && unconfirmed && !pending && options.transport.reconcile) await transmit(unconfirmed, true) },
     revokeWrite,
     revokeRead,
