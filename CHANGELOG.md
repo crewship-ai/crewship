@@ -13,6 +13,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Clear copied-command feedback timers when onboarding unmounts.
 
+- **Saved Slides pages could look empty.** Page detail and list responses now include native Slides presence and schema metadata, allowing the existing opt-in Slides viewer to recognize saved presentations.
+
 - Create vendored WordCraft numeric test fixtures exclusively so a competing output file cannot be truncated.
 
 - Execute a flat WordCraft editor package with a real WASM snippet import in the packaging regression, checking the original ABI identity and manifest hashes.
