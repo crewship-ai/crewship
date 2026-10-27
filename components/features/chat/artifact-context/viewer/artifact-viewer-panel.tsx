@@ -175,6 +175,8 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
   const labelOf = (path: string) => labels.get(path) ?? screenLabel(path)
   const screen = screenPath && screens.includes(screenPath) ? screenPath : screens[0] ?? ""
   const html = data.manifest.files.find(file => file.path === screen)?.content ?? ""
+  // The server anchors comments by a unique #id only; a screen without ids has nothing to select.
+  const anchorable = useMemo(() => typeof DOMParser === "undefined" || new DOMParser().parseFromString(html, "text/html").querySelector("body [id]") !== null, [html])
   const versions = useMemo(() => [...data.versions].sort((a, b) => b.version - a.version), [data.versions])
 
   // "Comment sent" is stale once another version is shown (the agent published) or a new selection starts.
@@ -385,7 +387,9 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
         {banners}
         <p role="status" aria-live="polite" className="text-xs text-muted-foreground empty:hidden">{notice.text}</p>
         {history}
-        {selectMode && !anchor && !viewingOld && <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><MousePointerClick className="size-3.5" aria-hidden />Click a part of the screen. The comment stays anchored to that element and version.</p>}
+        {selectMode && !anchor && !viewingOld && (anchorable
+          ? <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><MousePointerClick className="size-3.5" aria-hidden />Click a part of the screen. The comment stays anchored to that element and version.</p>
+          : <p role="status" className="flex items-center gap-1.5 text-xs text-muted-foreground"><Info className="size-3.5" aria-hidden />Nothing on this screen can take a comment yet: comments anchor to parts with an id, and this screen has none. Ask the agent in chat to add them.</p>)}
         {canvas}
         {queue}
         <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Info className="size-3.5 shrink-0" aria-hidden />A comment starts the agent only when you choose Send to agent.</p>
