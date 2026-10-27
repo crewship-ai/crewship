@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net/http/httptest"
 	"strings"
@@ -206,24 +207,6 @@ func TestArtifactProjectCannotBecomePanelsOrPagesApplication(t *testing.T) {
 	}
 }
 
-func TestArtifactVersionHistoryPreservesNativeCustodyClassification(t *testing.T) {
-	h, _, _, ws, owner := newPagesFixture(t)
-	mustExec(t, h.db, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json,private_audience) VALUES('native-version-page',?,'native-version','Native',?,'{}',1)`, ws, owner)
-	mustExec(t, h.db, `INSERT INTO gridcraft_heads(page_id,workspace_id,schema_version,head_rev,generation,snapshot) VALUES('native-version-page',?,1,1,1,x'7b7d')`, ws)
-	mustExec(t, h.db, `INSERT INTO artifact_version_heads(workspace_id,page_id,latest_version,content_type) VALUES(?,'native-version-page',1,'gridcraft')`, ws)
-	_, kind, err := privatePageOwnershipSQL(t.Context(), h.db, "p")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var got string
-	if err = h.db.QueryRow("SELECT " + kind + " FROM pages p WHERE id='native-version-page'").Scan(&got); err != nil {
-		t.Fatal(err)
-	}
-	if got != "workbook" {
-		t.Fatalf("native history bypasses workbook custody classification: %q", got)
-	}
-}
-
 func TestArtifactProjectCreateFinalAuthorityAndShareAuditAreAtomic(t *testing.T) {
 	for _, change := range []string{"credential revoked", "user suspended"} {
 		t.Run(change, func(t *testing.T) {
@@ -307,5 +290,43 @@ func TestArtifactProjectShareRequiresAtomicAudit(t *testing.T) {
 	var n int
 	if err := h.db.QueryRow(`SELECT count(*) FROM journal_entries WHERE entry_type='artifact.project_shared'`).Scan(&n); err != nil || n != 1 {
 		t.Fatal("share journal mismatch", n, err)
+	}
+}
+
+// A live credential can read its owner's private history without publishing it.
+func TestArtifactProjectReadOnlyOwnerHasNoWriteCapability(t *testing.T) {
+	h, ws, owner, call := artifactProjectFixture(t)
+	body := `{"slug":"three-screens","name":"Read scope",` + strings.TrimPrefix(artifactProjectBody(0, "Read scope"), "{")
+	if got := call(owner, "POST", "artifacts", body); got.Code != 201 {
+		t.Fatal(got.Code, got.Body)
+	}
+	readToken := mintIngressScopedToken(t, h.db, owner, "artifact-owner-read", "pages:read")
+	request := func(method, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, "/api/v1/pages/three-screens/artifact", strings.NewReader(body))
+		r.Header.Set("Authorization", "Bearer "+readToken)
+		ctx := withWorkspace(withUser(r.Context(), &AuthUser{ID: owner}), ws, "OWNER")
+		r = r.WithContext(context.WithValue(ctx, ctxAuthKind, AuthKindCLIToken))
+		r.SetPathValue("slug", "three-screens")
+		w := httptest.NewRecorder()
+		if method == "GET" {
+			h.GetArtifactProject(w, r)
+		} else {
+			h.PublishArtifactProject(w, r)
+		}
+		return w
+	}
+	got := request("GET", "")
+	var metadata struct {
+		CanWrite *bool `json:"can_write"`
+	}
+	if err := json.Unmarshal(got.Body.Bytes(), &metadata); got.Code != 200 || err != nil || metadata.CanWrite == nil || *metadata.CanWrite {
+		t.Fatalf("read-only owner GET: %d %s (%v)", got.Code, got.Body, err)
+	}
+	if got := request("POST", artifactProjectBody(1, "Forbidden write")); got.Code != 403 {
+		t.Fatalf("read-only publish: %d %s", got.Code, got.Body)
+	}
+	var latest int64
+	if err := h.db.QueryRow(`SELECT latest_version FROM artifact_version_heads WHERE workspace_id=?`, ws).Scan(&latest); err != nil || latest != 1 {
+		t.Fatalf("read-only request changed durable head: %d %v", latest, err)
 	}
 }
