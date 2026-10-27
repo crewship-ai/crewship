@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative } from "node:path"
 import { describe, expect, it } from "vitest"
+import * as ts from "typescript"
 
 // Harbor 2 forbids the browser's own dialogs: they cannot be styled, tested
 // or read as part of the page. Use ConfirmDialog (component state) or
@@ -37,13 +38,23 @@ function stripComments(src: string): string {
 export function nativeDialogCalls(src: string): string[] {
   const code = stripComments(src)
   const hits: string[] = []
-  for (const m of code.matchAll(/(?:window\.|globalThis\.)(?:confirm|alert)\s*\(/g)) hits.push(m[0])
-  // A bare confirm( is a native call unless the file binds its own `confirm`.
+  // Method declarations also contain `confirm(`, but only CallExpressions invoke it.
+  const source = ts.createSourceFile("dialog-guard.tsx", src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
   const localConfirm = /(?:const|let|var|function)\s+confirm\b/.test(code)
-  for (const m of code.matchAll(/(?<![\w.$])(confirm|alert)\s*\(/g)) {
-    if (m[1] === "confirm" && localConfirm) continue
-    hits.push(m[0])
+  function visit(node: ts.Node) {
+    if (ts.isCallExpression(node) && !node.questionDotToken) {
+      const callee = node.expression
+      if (ts.isIdentifier(callee) && (callee.text === "alert" || (callee.text === "confirm" && !localConfirm))) {
+        hits.push(callee.getText(source) + "(")
+      } else if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression)
+        && (callee.expression.text === "window" || callee.expression.text === "globalThis")
+        && (callee.name.text === "confirm" || callee.name.text === "alert")) {
+        hits.push(callee.getText(source) + "(")
+      }
+    }
+    ts.forEachChild(node, visit)
   }
+  visit(source)
   return hits
 }
 
@@ -54,6 +65,12 @@ describe("no native browser dialogs", () => {
     expect(nativeDialogCalls("alert('x')")).toHaveLength(1)
     expect(nativeDialogCalls("const confirm = f(); confirm(1)")).toHaveLength(0)
     expect(nativeDialogCalls("// window.confirm('x')\n/* alert('y') */")).toHaveLength(0)
+  })
+
+  it("distinguishes method definitions from native calls without hiding calls inside methods", () => {
+    expect(nativeDialogCalls("const recovery = { async confirm(draft) { await journal.confirm(draft) } }")).toEqual([])
+    expect(nativeDialogCalls("const recovery = { confirm() { confirm('x'); window.confirm('y'); globalThis.confirm('z') } }")).toHaveLength(3)
+    expect(nativeDialogCalls("const recovery = { alert() { alert('x') } }")).toHaveLength(1)
   })
 
   it("production code calls confirm()/alert() only where allowed", () => {
