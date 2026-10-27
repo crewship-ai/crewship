@@ -1,5 +1,5 @@
-# Regenerate with: go test ./internal/api -run TestMutationRouteRolesMatchManifest -update-route-roles
 # Reviewed mutation-route authorization contract.
+# Regenerate with: go test ./internal/api -run TestMutationRouteRolesMatchManifest -update-route-roles
 DELETE /api/v1/admin/backups roleManage
 DELETE /api/v1/admin/backups/status roleManage
 DELETE /api/v1/admin/instance/admins/{userId} roleInstance

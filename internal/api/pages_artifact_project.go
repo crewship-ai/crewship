@@ -478,6 +478,8 @@ func (h *PageHandler) GetArtifactProject(w http.ResponseWriter, r *http.Request)
 	}
 	auth := h.artifactProjectAuthority(r, k, false, false)
 	owner := false
+	canWrite := false
+	var origin any
 	var name, slug string
 	view, err := h.artifactProjectStore(r.Context()).View(r.Context(), k, func(ctx context.Context, tx *sql.Tx) (string, artifacts.VersionSelection, error) {
 		actor, e := auth(ctx, tx)
@@ -491,43 +493,37 @@ func (h *PageHandler) GetArtifactProject(w http.ResponseWriter, r *http.Request)
 		if e = tx.QueryRowContext(ctx, `SELECT owner_user_id=?,name,slug FROM pages WHERE id=? AND workspace_id=?`, user.ID, k.PageID, k.WorkspaceID).Scan(&owner, &name, &slug); e != nil {
 			return "", artifacts.VersionSelection{}, e
 		}
+		// Private provenance uses the same fresh owner check and fenced transaction
+		// as the version selection, including the final authorization recheck.
+		origin = nil
+		canWrite = false
+		if owner {
+			_, writeErr := h.artifactProjectAuthority(r, k, true, false)(ctx, tx)
+			if writeErr != nil && !errors.Is(writeErr, errArtifactProjectAccess) {
+				return "", artifacts.VersionSelection{}, writeErr
+			}
+			canWrite = writeErr == nil
+			var chat, agent sql.NullString
+			e = tx.QueryRowContext(ctx, `SELECT chat_id,agent_id FROM artifact_project_origins WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&chat, &agent)
+			if e == nil && chat.Valid && agent.Valid {
+				origin = map[string]string{"chat_id": chat.String, "agent_id": agent.String}
+			}
+			if e != nil && !errors.Is(e, sql.ErrNoRows) {
+				return "", artifacts.VersionSelection{}, e
+			}
+		}
 		return actor, artifacts.VersionSelection{Version: selected, SharedOnly: !owner, IncludeHistory: owner}, nil
 	})
 	if err != nil {
 		artifactProjectError(w, err)
 		return
 	}
-	var origin any
-	if owner {
-		tx, e := h.db.BeginTx(r.Context(), nil)
-		if e != nil {
-			artifactProjectError(w, e)
-			return
-		}
-		defer tx.Rollback()
-		if _, e = h.artifactProjectAuthority(r, k, true, false)(r.Context(), tx); e != nil {
-			artifactProjectError(w, e)
-			return
-		}
-		var chat, agent sql.NullString
-		if e = tx.QueryRowContext(r.Context(), `SELECT chat_id,agent_id FROM artifact_project_origins WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&chat, &agent); e == nil && chat.Valid && agent.Valid {
-			origin = map[string]string{"chat_id": chat.String, "agent_id": agent.String}
-		}
-		if e != nil && !errors.Is(e, sql.ErrNoRows) {
-			artifactProjectError(w, e)
-			return
-		}
-		if e = tx.Commit(); e != nil {
-			artifactProjectError(w, e)
-			return
-		}
-	}
 	comments, err := h.artifactProjectComments(r, k, view.State.Manifest.Version, !owner)
 	if err != nil {
 		artifactProjectError(w, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"page_id": k.PageID, "name": name, "slug": slug, "origin": origin, "enabled": true, "can_write": owner, "latest_version": view.State.LatestVersion, "shared_version": view.State.SharedVersion, "manifest": artifactProjectManifest(view.State.Manifest), "versions": artifactProjectVersionInfos(view.Versions), "quota": view.State.Quota, "comments": comments})
+	writeJSON(w, 200, map[string]any{"page_id": k.PageID, "name": name, "slug": slug, "origin": origin, "enabled": true, "can_write": canWrite, "latest_version": view.State.LatestVersion, "shared_version": view.State.SharedVersion, "manifest": artifactProjectManifest(view.State.Manifest), "versions": artifactProjectVersionInfos(view.Versions), "quota": view.State.Quota, "comments": comments})
 }
 
 func (h *PageHandler) artifactProjectAttached(ctx context.Context, page string) (bool, error) {

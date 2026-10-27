@@ -250,7 +250,8 @@ func TestArtifactProjectAgentBrowser(t *testing.T) {
 
 func TestArtifactProjectSyntheticAgentProcess(t *testing.T) {
 	if os.Getenv("CREWSHIP_ARTIFACT_SYNTHETIC_CHILD") != "1" {
-		t.Skip("subprocess helper")
+		// Helper assertions run only in the child selected by the parent via env.
+		return
 	}
 	token := os.Getenv("CREWSHIP_AGENT_TOKEN")
 	if !strings.HasPrefix(token, "agtv2.") {
