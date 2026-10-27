@@ -8,15 +8,29 @@ import (
 
 // CraftNativeHTTPConfig is trusted startup policy for the separate native profile.
 // Its zero value keeps the profile and every lease mutation unavailable.
-type CraftNativeHTTPConfig struct{ Enabled bool }
+type CraftNativeHTTPConfig struct {
+	Enabled  bool
+	Profiles map[string]CraftNativeDocumentProfile
+}
 
 func WithCraftNativeHTTP(c CraftNativeHTTPConfig) RouterOption {
+	profiles := make(map[string]CraftNativeDocumentProfile, len(c.Profiles))
+	for key, profile := range c.Profiles {
+		profiles[key] = profile
+	}
+	c.Profiles = profiles
 	return func(r *Router) { r.craftNativeHTTPConfig = c }
 }
 func (r *Router) registerCraftNativeRoutes() {
 	var clock mooring.OwnerClock
+	var applications map[string]craftNativeApplication
 	if r.craftNativeHTTPConfig.Enabled {
 		var err error
+		applications, err = qualifyCraftNativeProfiles(r.craftNativeHTTPConfig.Profiles)
+		if err != nil {
+			r.craftNativeStartupErr = err
+			return
+		}
 		clock, err = mooring.NewBootOwnerClock()
 		if err != nil {
 			r.craftNativeStartupErr = err
@@ -25,6 +39,8 @@ func (r *Router) registerCraftNativeRoutes() {
 	}
 	m := newCraftNativeHTTP(r.pages, r.craftNativeHTTPConfig.Enabled, clock)
 	r.craftNativeHTTP = m
+	d := newCraftNativeDocumentsHTTP(m, applications)
+	r.craftNativeDocuments = d
 	authed, wsCtx := r.authMw.RequireAuth, r.authMw.RequireWorkspace
 	// Availability is Page-scoped and never treats an old profile as native.
 	// openapi: responses 200,401,403
@@ -51,4 +67,17 @@ func (r *Router) registerCraftNativeRoutes() {
 	r.authedMut("POST", "/api/v1/pages/{slug}/craft/lease/request-handoff", roleSelf, m.requestHandoff)
 	// openapi: responses 200,400,401,403,409,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/craft/lease/handoff", roleSelf, m.handoff)
+	// openapi: responses 201,400,401,403,409,413,422,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/craft/initialize", roleSelf, d.initialize)
+	// openapi: responses 200,401,403,409,422,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/craft/document", authed(wsCtx(r.providerAccountPolicy(http.HandlerFunc(d.readSnapshot)))))
+	// openapi: responses 200,400,401,403,409,413,422,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/craft/document/save", roleSelf, d.saveSnapshot)
+	// openapi: responses 200,400,401,403,409,413,422,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/craft/document/import", roleSelf, d.importSnapshot)
+	// openapi: responses 200,400,401,403,409,413,422,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/craft/document/restore", roleSelf, d.restoreSnapshot)
+	// openapi: responses 200,400,401,403,409,422,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/craft/document/reconcile", roleSelf, d.reconcileSnapshot)
+
 }

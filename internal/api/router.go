@@ -66,6 +66,7 @@ type Router struct {
 	craftNativeHTTPConfig  CraftNativeHTTPConfig
 	craftNativeStartupErr  error
 	craftNativeHTTP        *craftNativeHTTP
+	craftNativeDocuments   *craftNativeDocumentsHTTP
 	mooringStartupErr      error
 	mooringHTTPConfig      MooringHTTPConfig
 	mooringHTTP            *collaborationHTTPManager

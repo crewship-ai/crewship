@@ -25,7 +25,14 @@ import (
 // editor answers only there.
 func newEditorOrigin(cfg *config.Config, logger *slog.Logger) *editororigin.Handler {
 	g := cfg.GridCraft
-	enabled := (g.Enabled && g.EditorEnabled) || cfg.Mooring.Enabled
+	legacyEnabled := (g.Enabled && g.EditorEnabled) || cfg.Mooring.Enabled
+	dir, bundles, resolveErr := cfg.CraftNative.ResolveEditorBundles(g, legacyEnabled)
+	if resolveErr != nil {
+		logger.Error("native editor bundle configuration refused", "error", resolveErr)
+		return editororigin.Deny()
+	}
+	g.EditorBundleDir, g.EditorBundles = dir, bundles
+	enabled := legacyEnabled || nativeCraftEditorEnabled(cfg)
 	var applicationPackages fs.FS
 	if cfg.Mooring.Enabled {
 		var err error
@@ -82,7 +89,7 @@ func loopbackBind(host string) bool {
 // request's Studio origin, never the bare Studio origin.
 func editorHeaderOptions(cfg *config.Config, editor *editororigin.Handler) securityHeaderOptions {
 	o := securityHeaderOptions{pageRuntimeOrigin: cfg.Storage.PageRuntimeOrigin}
-	if ((cfg.GridCraft.Enabled && cfg.GridCraft.EditorEnabled) || cfg.Mooring.Enabled) && editor != nil {
+	if ((cfg.GridCraft.Enabled && cfg.GridCraft.EditorEnabled) || cfg.Mooring.Enabled || nativeCraftEditorEnabled(cfg)) && editor != nil {
 		o.editorFrameSrc = editor.FrameSourceFor
 		o.editorPerRequest = cfg.GridCraft.EditorOrigin == ""
 	}
