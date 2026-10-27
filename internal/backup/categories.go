@@ -183,6 +183,10 @@ const categoryWorkOnly = ""
 // TableCategory maps every table in BackupTables to its category. A table
 // missing here fails TestTableCategory_CoversEveryBackupTable.
 var TableCategory = map[string]string{
+	"artifact_version_heads": CategoryPages,
+	"artifact_version_blobs": CategoryPages,
+	"artifact_versions":      CategoryPages,
+
 	"mooring_collab_documents":       CategoryPages,
 	"mooring_collab_tasks":           CategoryPages,
 	"mooring_collab_changes":         CategoryPages,
