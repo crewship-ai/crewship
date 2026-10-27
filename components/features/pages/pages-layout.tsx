@@ -377,6 +377,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               onClick={() => setPersonalSpace(value => !value)}
               title="Show your private Documents in this workspace"
             >My space</SubBarSecondary>}
+            {selectedSlug && !editing && detail.raw?.has_artifact_project && <SubBarSecondary icon={AppWindow} onClick={() => { window.location.href = `/pages/${encodeURIComponent(selectedSlug)}?artifact=1&workspace_id=${encodeURIComponent(workspaceId)}` }}>Open artifact project</SubBarSecondary>}
             {selectedSlug && !editing && applicationAvailable && (
               <div
                 role="group"
