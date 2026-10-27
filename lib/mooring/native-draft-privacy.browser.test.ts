@@ -23,7 +23,7 @@ async function withBrowser(run: (a: Page, b: Page) => Promise<void>) {
 }
 it("fails native storage closed without Web Locks while preserving the legacy fallback", () => withBrowser(async a => {
   const result = await a.evaluate(async ({ scope, fixture }) => {
-    const w = window as NativeWindow
+    const w = window as unknown as NativeWindow
     Object.defineProperty(navigator, "locks", { configurable: true, value: undefined })
     let first: Journal | undefined, peer: Journal | undefined, peerLateWrite = false
     try { first = await w.nativeDraft.openNativeDraftJournal(scope) } catch { /* Native-only fail closed. */ }
@@ -45,15 +45,15 @@ it("fails native storage closed without Web Locks while preserving the legacy fa
   expect(result).toEqual({ nativeRefused: true, peerLateWrite: false, legacyWorks: true })
 }))
 it("rejects old queued native openers and holds the Page lock throughout privacy purge", () => withBrowser(async (a, b) => {
-  await a.evaluate(async scope => { const w = window as NativeWindow; w.journal = await w.nativeDraft.openNativeDraftJournal(scope) }, scope)
+  await a.evaluate(async scope => { const w = window as unknown as NativeWindow; w.journal = await w.nativeDraft.openNativeDraftJournal(scope) }, scope)
   await b.evaluate(scope => {
-    const w = window as NativeWindow
+    const w = window as unknown as NativeWindow
     w.status = "pending"
     w.opening = w.nativeDraft.openNativeDraftJournal(scope).then(journal => { w.journal = journal; return w.status = "opened" }, () => w.status = "refused")
   }, scope)
-  await expect.poll(() => b.evaluate(async () => (window as NativeWindow).status === "refused" || (await navigator.locks.query()).pending!.length > 0)).toBe(true)
+  await expect.poll(() => b.evaluate(async () => (window as unknown as NativeWindow).status === "refused" || (await navigator.locks.query()).pending!.length > 0)).toBe(true)
   await a.evaluate(() => {
-    const w = window as NativeWindow, original = indexedDB.open.bind(indexedDB)
+    const w = window as unknown as NativeWindow, original = indexedDB.open.bind(indexedDB)
     indexedDB.open = (...args: Parameters<IDBFactory["open"]>) => {
       const request = original(...args)
       Object.defineProperty(request, "onsuccess", { set(callback: (event: Event) => void) {
@@ -63,9 +63,9 @@ it("rejects old queued native openers and holds the Page lock throughout privacy
     }
     w.revoking = w.journal!.revokeRead()
   })
-  await a.waitForFunction(() => (window as NativeWindow).purging)
+  await a.waitForFunction(() => (window as unknown as NativeWindow).purging)
   const beforeRelease = await b.evaluate(async scope => {
-    const w = window as NativeWindow
+    const w = window as unknown as NativeWindow
     const first = await w.opening
     let duringRefused = false
     if (first === "refused") {
@@ -73,20 +73,20 @@ it("rejects old queued native openers and holds the Page lock throughout privacy
     }
     return { first, duringRefused }
   }, scope)
-  await a.evaluate(async () => { const w = window as NativeWindow; w.releasePurge!(); await w.revoking })
+  await a.evaluate(async () => { const w = window as unknown as NativeWindow; w.releasePurge!(); await w.revoking })
   const lateWrite = await b.evaluate(async fixture => {
-    const w = window as NativeWindow
+    const w = window as unknown as NativeWindow
     if (!w.journal) return false
     try { await w.journal.persist({ ...fixture, bytes: new Uint8Array([9]) }); return true } catch { return false } finally { await w.journal.close() }
   }, fixture)
   expect({ ...beforeRelease, lateWrite }).toEqual({ first: "refused", duringRefused: true, lateWrite: false })
 }))
 it("rejects read revocation from a closed lifecycle and preserves a fresh authorized mount", () => withBrowser(async (a, b) => {
-  await a.evaluate(async scope => { const w = window as NativeWindow; w.journal = await w.nativeDraft.openNativeDraftJournal(scope); await w.journal.close() }, scope)
-  await b.evaluate(async ({ scope, fixture }) => { const w = window as NativeWindow; w.journal = await w.nativeDraft.openNativeDraftJournal(scope); await w.journal.persist({ ...fixture, bytes: new Uint8Array([7]) }) }, { scope, fixture })
-  const retiredRejected = await a.evaluate(async () => { try { await (window as NativeWindow).journal!.revokeRead(); return false } catch { return true } })
+  await a.evaluate(async scope => { const w = window as unknown as NativeWindow; w.journal = await w.nativeDraft.openNativeDraftJournal(scope); await w.journal.close() }, scope)
+  await b.evaluate(async ({ scope, fixture }) => { const w = window as unknown as NativeWindow; w.journal = await w.nativeDraft.openNativeDraftJournal(scope); await w.journal.persist({ ...fixture, bytes: new Uint8Array([7]) }) }, { scope, fixture })
+  const retiredRejected = await a.evaluate(async () => { try { await (window as unknown as NativeWindow).journal!.revokeRead(); return false } catch { return true } })
   const bytes = await b.evaluate(async scope => {
-    const w = window as NativeWindow; await w.journal!.close()
+    const w = window as unknown as NativeWindow; await w.journal!.close()
     const observer = await w.nativeDraft.openNativeDraftJournal(scope)
     const bytes = (await observer.recovery()).map(row => Array.from(row.draft.bytes)); await observer.close(); return bytes
   }, scope)
