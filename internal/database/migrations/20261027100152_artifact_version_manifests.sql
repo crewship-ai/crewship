@@ -3,6 +3,7 @@
 CREATE TABLE artifact_version_heads (
  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
  page_id TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+ content_type TEXT NOT NULL DEFAULT 'artifact_project' CHECK(content_type IN ('artifact_project','wordcraft','gridcraft')),
  latest_version INTEGER NOT NULL CHECK(latest_version>0),
  shared_version INTEGER NOT NULL DEFAULT 0 CHECK(shared_version>=0),
  PRIMARY KEY(workspace_id,page_id)
@@ -34,3 +35,8 @@ BEGIN SELECT RAISE(ABORT,'artifact page workspace mismatch'); END;
 CREATE TRIGGER artifact_version_scope BEFORE INSERT ON artifact_versions
 WHEN NOT EXISTS(SELECT 1 FROM pages WHERE id=NEW.page_id AND workspace_id=NEW.workspace_id)
 BEGIN SELECT RAISE(ABORT,'artifact page workspace mismatch'); END;
+
+-- A published project/native document never changes storage family in place.
+CREATE TRIGGER artifact_version_family_immutable BEFORE UPDATE OF content_type ON artifact_version_heads
+WHEN OLD.content_type<>NEW.content_type
+BEGIN SELECT RAISE(ABORT,'artifact content family is immutable'); END;

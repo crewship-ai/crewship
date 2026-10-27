@@ -69,8 +69,8 @@ COPY e2e/wordcraft-ce/ ./e2e/wordcraft-ce/
 COPY tools/wordcraft-ce/ ./tools/wordcraft-ce/
 COPY playwright.wordcraft-ce.config.ts ./
 # The browser instantiates this shared closed model with its own pinned Yjs.
-# Copy only the schema source, without the separate Docs service runtime.
-COPY tools/docs-service/schema-core.mjs ./tools/docs-service/
+# Copy only the closed schema modules, without the separate Docs service runtime.
+COPY tools/docs-service/schema-core.mjs tools/docs-service/position-migrations.mjs ./tools/docs-service/
 ARG VERSION=dev
 ARG NEXT_PUBLIC_SENTRY_DSN=""
 ENV NEXT_PUBLIC_CREWSHIP_VERSION=$VERSION
