@@ -58,6 +58,7 @@ func (r *Router) registerPageRoutes() {
 	// create/update/delete paths that write wake-gate rules, and the freshness
 	// sweeper has to run against the same clock and journal.
 	r.pages = p
+	r.registerArtifactProjectCreateRoutes()
 	if r.pageProjectsPath != "" {
 		p.SetProjectStore(&pages.ProjectStore{Directory: r.pageProjectsPath})
 	}

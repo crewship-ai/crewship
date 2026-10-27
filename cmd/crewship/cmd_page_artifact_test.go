@@ -68,3 +68,24 @@ func TestPageArtifactManifestRejectsAmbiguousJSONBeforeNetwork(t *testing.T) {
 		})
 	}
 }
+
+func TestPageArtifactAvailabilityUsesAuthenticatedWorkspaceTransport(t *testing.T) {
+	stub := pageStub(t)
+	route := "/api/v1/pages/artifacts/availability"
+	stub.OnGet(route, func(r *http.Request, _ []byte) (int, []byte, string) {
+		if r.Header.Get("Authorization") != "Bearer page-acceptance-token" || r.URL.Query().Get("workspace_id") != covWSCli3 {
+			t.Errorf("lost authenticated workspace transport")
+		}
+		return 200, []byte(`{"enabled":false}`), "application/json"
+	})
+	cmd := newPageArtifactCommand()
+	cmd.PersistentPreRun = rootCmd.PersistentPreRun
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetArgs([]string{"availability"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if len(stub.CallsFor("GET", route)) != 1 {
+		t.Fatal("availability did not use the authenticated Page client")
+	}
+}

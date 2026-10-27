@@ -340,6 +340,7 @@ POST /api/v1/page-folders roleCreate
 POST /api/v1/page-folders/{slug}/pages roleSelf
 POST /api/v1/page-folders/{slug}/pages:batch roleSelf
 POST /api/v1/pages roleInline
+POST /api/v1/pages/artifacts roleInline
 POST /api/v1/pages/import roleInline
 POST /api/v1/pages/maintenance roleManage
 POST /api/v1/pages/{slug}/application/actions/{panelId}/{actionId} roleCreate

@@ -956,3 +956,9 @@ Above budget, previews return 413 with an explicit too-large message. If both
 slots are occupied, they immediately return 429 and `Retry-After: 1`; there is no
 waiting queue. A canceled caller does not release a slot while synchronous
 computation is still running. Limits are per process, not shared across replicas.
+
+## Artifact project pilot
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_ARTIFACT_PROJECTS_ENABLED` | `false` | Enable the artifact project pilot for an isolated installation. Workspace `artifact_projects` feature flags also enable it. Existing creation policy, current credentials and Page access still apply. |
