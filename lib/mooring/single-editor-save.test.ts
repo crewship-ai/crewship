@@ -399,3 +399,63 @@ it("still journals newer edits after an unknown ACK without automatically retryi
   expect(r.transport.save).toHaveBeenCalledOnce()
   await r.controller.close()
 })
+it("returns an awaitable write-retirement barrier only after the fresh native draft is durable", async () => {
+  const r = rig()
+  let complete!: (value: { bytes: Uint8Array; editorRevision: string }) => void
+  r.engine.snapshot.mockImplementationOnce(() => new Promise(resolve => { complete = resolve }))
+  const retiring = r.controller.revokeWrite()
+  try {
+    expect(retiring).toBeInstanceOf(Promise)
+    expect(r.state).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "read-only" }))
+    await vi.waitFor(() => expect(r.engine.snapshot).toHaveBeenCalledOnce())
+    expect(r.journal.persist).not.toHaveBeenCalled()
+    complete({ bytes: new Uint8Array([4]), editorRevision: "last-unblurred-draft" })
+    await expect(retiring).resolves.toBe(true)
+    expect(r.journal.persist).toHaveBeenLastCalledWith(expect.objectContaining({ editorRevision: "last-unblurred-draft", bytes: new Uint8Array([4]) }))
+    expect(r.transport.save).not.toHaveBeenCalled()
+  } finally { await r.controller.close() }
+})
+it("read revocation interrupts a write-retirement wait without waiting for a hung editor", async () => {
+  const r = rig()
+  r.engine.snapshot.mockImplementationOnce(() => new Promise(() => {}))
+  const retiring = r.controller.revokeWrite()
+  try {
+    expect(retiring).toBeInstanceOf(Promise)
+    await vi.waitFor(() => expect(r.engine.snapshot).toHaveBeenCalledOnce())
+    await r.controller.revokeRead()
+    await expect(retiring).resolves.toBe(false)
+    expect(r.journal.revokeRead).toHaveBeenCalledOnce()
+    expect(r.journal.persist).not.toHaveBeenCalled()
+  } finally { await r.controller.close() }
+})
+it("reports an unconfirmed write retirement when the editor cannot finish before its deadline", async () => {
+  const r = rig()
+  vi.useFakeTimers()
+  r.engine.snapshot.mockImplementationOnce(() => new Promise(() => {}))
+  const retiring = r.controller.revokeWrite()
+  await vi.advanceTimersByTimeAsync(10_001)
+  await expect(retiring).resolves.toBe(false)
+  expect(r.journal.persist).not.toHaveBeenCalled()
+  expect(r.transport.save).not.toHaveBeenCalled()
+  expect(r.controller.revokeWrite()).toBe(retiring)
+  await r.controller.close()
+})
+it("reports a failed write retirement without pretending an undurable draft was captured", async () => {
+  const r = rig()
+  r.journal.persist.mockRejectedValueOnce(new Error("storage unavailable"))
+  await expect(r.controller.revokeWrite()).resolves.toBe(false)
+  expect(r.transport.save).not.toHaveBeenCalled()
+  expect(r.state).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "read-only" }))
+  await r.controller.close()
+})
+it("reuses one write-retirement barrier when its state observer requests retirement again", async () => {
+  const r = rig()
+  let nested: Promise<boolean> | undefined
+  r.state.mockImplementationOnce(() => { nested = r.controller.revokeWrite() })
+  const retiring = r.controller.revokeWrite()
+  try {
+    expect(nested).toBe(retiring)
+    await expect(retiring).resolves.toBe(true)
+    expect(r.engine.snapshot).toHaveBeenCalledOnce()
+  } finally { await r.controller.close() }
+})
