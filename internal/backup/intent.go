@@ -47,6 +47,9 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"artifact_version_blobs": IntentInclude, // binary project assets, encoded losslessly
 	"artifact_versions":      IntentInclude, // all retained whole-project manifests
 
+	"mooring_edit_leases":            IntentExcludeRuntime, // target-local editor generation tombstones; no portable capabilities
+	"mooring_edit_lease_workspaces":  IntentExcludeRuntime, // issued target fences outlive Page deletion
+	"mooring_edit_lease_requests":    IntentExcludeRuntime,
 	"mooring_authority_generations":  IntentExcludeRuntime, // target-local non-ABA tombstones never travel or reset in portable restore
 	"mooring_delivery_gates":         IntentExcludeRuntime,
 	"mooring_delivery_barriers":      IntentExcludeRuntime,

@@ -10,6 +10,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 - **Artifact projects can retain three linked HTML screens and their feedback.** The default-off pilot adds atomic file versions, visible history quotas, conflict-safe publishing, append-only restore, a separately pinned shared version, and element comments addressed to the agent through the original private chat.
+- **Native single-editor documents gain a default-off edit lease boundary.** SQL-backed holder generations fence expired, handed-off and revoked writers; workspace erasure and user deletion remove retained holder identities while preserving the fence. Lease acknowledgements recheck authority after SQL; recovery retires source holders while retaining generations, and portable replacement refuses issued target fences. A target-local workspace issuance marker preserves restore protection after Page deletion. Runtime editor and version-store wiring remain disabled.
 
 - Clear copied-command feedback timers when onboarding unmounts.
 

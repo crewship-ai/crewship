@@ -53,6 +53,8 @@ var workspaceTablesNotBundled = map[string]string{
 	"gridcraft_operations":             "experimental workbook portability is unavailable; dumping a workspace with workbooks is refused",
 	"gridcraft_intents":                "run-bound permission cannot travel in a portable backup",
 	"gridcraft_sessions":               "editor sessions are bound to a live credential and expire within hours",
+	"mooring_edit_leases":              "editor capabilities belong to their installation; retain target-local generation tombstones",
+	"mooring_edit_lease_workspaces":    "target-local issuance fences survive Page deletion; restore must not replace their workspace",
 
 	"document_iteration_intents":        "targeted human-message authority requires fresh admission after recovery",
 	"document_creation_consents":        "one-use human creation permission is bound to the original installation and run",
