@@ -21,6 +21,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Add authenticated artifact project creation and workspace availability endpoints behind the disabled artifact projects flag.
 
+- Artifact creation and publication tools now request stable element IDs so generated screens support precise element comments.
+
 - Clear copied-command feedback timers when onboarding unmounts.
 
 - **Saved Slides pages could look empty.** Page detail and list responses now include native Slides presence and schema metadata, allowing the existing opt-in Slides viewer to recognize saved presentations.
