@@ -13,26 +13,46 @@ import (
 // Native workbook snapshots and receipts are UTF-8 JSON, so the existing TEXT
 // normalizer preserves their bytes. Live intents are excluded separately.
 func safeGridCraftRestoreRow(table string, row map[string]any) (map[string]any, error) {
-	if table != "gridcraft_heads" && table != "gridcraft_operations" {
+	if table != "gridcraft_heads" && table != "gridcraft_operations" && table != "gridcraft_revisions" && table != "gridcraft_audit" && table != "gridcraft_outbox" {
 		return row, nil
 	}
 	copy := make(map[string]any, len(row))
 	for key, value := range row {
 		copy[key] = value
 	}
-	for _, key := range []string{"workspace_id", "page_id"} {
+	keys := []string{"page_id"}
+	if table == "gridcraft_heads" || table == "gridcraft_operations" {
+		keys = append(keys, "workspace_id")
+	}
+	for _, key := range keys {
 		if v, ok := row[key].(string); !ok || v == "" {
 			return nil, fmt.Errorf("backup: invalid workbook %s", key)
 		}
+	}
+	if table != "gridcraft_operations" {
+		column := "rev"
+		if table == "gridcraft_heads" {
+			column = "head_rev"
+		}
+		revision, err := gridcraftPositiveInteger(row[column])
+		if err != nil {
+			return nil, fmt.Errorf("backup: invalid workbook revision")
+		}
+		copy[column] = revision
+	}
+	if table == "gridcraft_heads" || table == "gridcraft_revisions" {
+		snapshot, ok := row["snapshot"].(string)
+		if !ok || len(snapshot) > appengine.MaxSnapshotBytes || !json.Valid([]byte(snapshot)) {
+			return nil, fmt.Errorf("backup: invalid workbook snapshot")
+		}
+	}
+	if table == "gridcraft_revisions" || table == "gridcraft_audit" || table == "gridcraft_outbox" {
+		return copy, nil
 	}
 	if table == "gridcraft_heads" {
 		generation, err := gridcraftPositiveInteger(row["generation"])
 		if err != nil || generation == math.MaxInt64 {
 			return nil, fmt.Errorf("backup: invalid workbook generation")
-		}
-		snapshot, ok := row["snapshot"].(string)
-		if !ok || len(snapshot) > appengine.MaxSnapshotBytes || !json.Valid([]byte(snapshot)) {
-			return nil, fmt.Errorf("backup: invalid workbook snapshot")
 		}
 		copy["generation"] = generation + 1
 	} else {
@@ -66,7 +86,11 @@ func gridcraftPositiveInteger(value any) (int64, error) {
 	case int:
 		n = int64(v)
 	case float64:
-		if v < 1 || v >= float64(math.MaxInt64) || math.Trunc(v) != v {
+		// Generic portable JSON decoding produces float64. At this boundary
+		// a larger original integer may already have rounded down, so adding
+		// one could reissue its old fencing counter. Exact int64/json.Number
+		// inputs remain supported; ambiguous floating counters fail closed.
+		if v < 1 || v >= 1<<53 || math.Trunc(v) != v {
 			return 0, fmt.Errorf("backup: invalid workbook integer")
 		}
 		n = int64(v)
