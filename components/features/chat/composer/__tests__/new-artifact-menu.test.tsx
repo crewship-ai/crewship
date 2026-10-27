@@ -47,4 +47,14 @@ describe("composer + › New artifact", () => {
     await waitFor(() => expect(send).toHaveBeenCalledTimes(1))
     expect(send.mock.calls[0][1]).toEqual({ document_creation_intent: { submission_id: expect.any(String), drafting: true } })
   })
+
+  it("keeps what the person already typed and puts the starter in front", async () => {
+    vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", "true")
+    render(<ChatComposer {...props} />)
+    const textarea = screen.getByRole("textbox")
+    fireEvent.change(textarea, { target: { value: "Use the Q3 numbers" } })
+    fireEvent.click(screen.getByRole("button", { name: "New artifact" }))
+    fireEvent.click(await screen.findByRole("button", { name: /A partner brief from this chat/ }))
+    expect(textarea).toHaveValue("A partner brief from this chat\n\nUse the Q3 numbers")
+  })
 })

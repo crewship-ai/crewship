@@ -4,7 +4,7 @@
 // and Craft request goes to the in-memory mock server; anything else fails the run.
 // No live instance, provider or credentials are used.
 // Run: crewship-heavy node e2e/chat-artifact-project.browser.mjs
-// Screenshots: $CHAT_ARTIFACT_SCREENS or /home/ubuntu/rea-artifacts/dev2/start-20261027/c-screens
+// Screenshots: $CHAT_ARTIFACT_SCREENS or a fresh temporary directory
 import { build } from "esbuild"
 import postcss from "postcss"
 import tailwindcss from "@tailwindcss/postcss"
@@ -15,7 +15,7 @@ import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-const SHOTS = process.env.CHAT_ARTIFACT_SCREENS ?? "/home/ubuntu/rea-artifacts/dev2/start-20261027/c-screens"
+const SHOTS = process.env.CHAT_ARTIFACT_SCREENS ?? await mkdtemp(join(tmpdir(), "crewship-chat-artifact-shots-"))
 const VIEWPORTS = [
   { name: "desktop", width: 1280, height: 860 },
   { name: "desktop-dark", width: 1280, height: 860, dark: true },
@@ -140,6 +140,9 @@ try {
     await viewer.getByText("Comment sent to the agent").waitFor()
     const posted = await page.evaluate(() => window.__mock.state.comments.map(c => ({ selector: c.selector, quote: c.quote, status: c.status, path: c.path, version: c.version })))
     assert.deepEqual(posted, [{ selector: "#plan-team", quote: "Team$24Unlimited agents, shared crews", status: "pending", path: "plans.html", version: 1 }])
+    const dispatched = await page.evaluate(() => window.__dispatched)
+    assert.equal(dispatched.length, 1, "Send to agent starts the agent once")
+    assert.equal(dispatched[0].artifact_project_intent.base_version, 1)
     await queue.scrollIntoViewIfNeeded()
     await shot("05-comment")
 

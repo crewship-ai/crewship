@@ -1,11 +1,11 @@
 import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react"
-import type { ReactNode } from "react"
+import { useState, type ReactNode } from "react"
 import { afterEach, expect, it, vi } from "vitest"
 
 const available = vi.hoisted(() => ({ value: true }))
-vi.mock("../use-artifact-project-data", () => ({ useArtifactProjectsAvailable: () => available.value }))
+vi.mock("../use-artifact-project-data", () => ({ useArtifactProjectsAvailable: (ws: string | null) => Boolean(ws) && available.value }))
 
-import { ArtifactViewerProvider, useArtifactToolCardsEnabled, useArtifactViewer } from "../artifact-viewer-context"
+import { ArtifactViewerProvider, useArtifactToolCardsEnabled, useArtifactViewer, type ArtifactViewerTarget } from "../artifact-viewer-context"
 
 afterEach(() => { cleanup(); available.value = true })
 const wrapper = ({ children }: { children: ReactNode }) => <ArtifactViewerProvider workspaceId="ws-1">{children}</ArtifactViewerProvider>
@@ -62,4 +62,37 @@ it("close does not throw when the opener is gone", () => {
   act(() => result.current.open({ slug: "a" }))
   gone.remove()
   expect(() => act(() => result.current.close())).not.toThrow()
+})
+
+it("turning the provider off keeps its children mounted and hides the feature", () => {
+  let mounts = 0
+  function Probe() {
+    const [id] = useState(() => ++mounts)
+    const viewer = useArtifactViewer()
+    return <span data-testid="probe">{id}:{viewer ? "on" : "off"}:{String(useArtifactToolCardsEnabled())}</span>
+  }
+  const { rerender } = render(<ArtifactViewerProvider workspaceId="ws-1" enabled={false}><Probe /></ArtifactViewerProvider>)
+  expect(screen.getByTestId("probe").textContent).toBe("1:off:false")
+  rerender(<ArtifactViewerProvider workspaceId="ws-1" enabled><Probe /></ArtifactViewerProvider>)
+  expect(screen.getByTestId("probe").textContent).toBe("1:on:true")
+})
+
+it("a target cleared by the owner lets the next open record a fresh opener", () => {
+  function Owned() {
+    const [target, setTarget] = useState<ArtifactViewerTarget | null>(null)
+    return <ArtifactViewerProvider workspaceId="ws-1" target={target} onTargetChange={setTarget}>
+      <button onClick={() => setTarget(null)}>owner-clear</button>
+      <Harness />
+    </ArtifactViewerProvider>
+  }
+  render(<Owned />)
+  fireEvent.click(screen.getByText("opener"))
+  fireEvent.click(screen.getByText("owner-clear"))
+  const second = screen.getByText("owner-clear")
+  second.focus()
+  fireEvent.click(screen.getByText("opener"))
+  screen.getByText("close").focus()
+  fireEvent.click(screen.getByText("close"))
+  // The opener of the second open is the focused element at that time, not a stale one.
+  expect(document.activeElement).toBe(second)
 })

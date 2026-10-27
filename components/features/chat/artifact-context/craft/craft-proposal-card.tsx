@@ -31,7 +31,7 @@ export function CraftProposalCard({ workspaceId, slug, proposal, onCompare }: Cr
   const pending = accept.isPending || reject.isPending
   const Avatar = proposal.author.kind === "agent" ? Bot : User
   return <article aria-label={`${author} prepared a proposal on ${base}`} aria-busy={pending || undefined}
-    className="flex min-w-0 flex-wrap items-center gap-2.5 rounded-[10px] border bg-card px-3 py-2.5 text-sm">
+    className="flex min-w-0 flex-wrap items-center gap-2.5 rounded-card border bg-card px-3 py-2.5 text-sm">
     <span aria-hidden className="grid size-7 shrink-0 place-items-center rounded-full bg-muted"><Avatar className="size-4 text-muted-foreground" /></span>
     <span className="grid min-w-0 flex-[1_1_180px]">
       <b className="font-semibold">{author} prepared a proposal on {base}</b>

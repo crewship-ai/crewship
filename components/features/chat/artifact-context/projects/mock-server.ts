@@ -69,7 +69,6 @@ const CRAFT = /^\/api\/v1\/pages\/([^/]+)\/craft\/(availability|lease|lease\/req
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
 const fail = (status: number, code: string, error: string) => json(status, { error, code })
 const missing = () => new Response("404 page not found", { status: 404, headers: { "content-type": "text/plain" } })
-const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
 function readBody(init?: RequestInit): Record<string, unknown> {
   if (typeof init?.body !== "string") return {}
@@ -79,36 +78,27 @@ function readBody(init?: RequestInit): Record<string, unknown> {
   } catch { return {} }
 }
 
-const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: "\u00a0" }
-const decodeEntities = (text: string) => text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (whole, name: string) => {
-  if (name[0] !== "#") return ENTITIES[name.toLowerCase()] ?? whole
-  const code = name[1] === "x" || name[1] === "X" ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10)
-  return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole
-})
 // Go's unicode.IsSpace, which the backend's strings.Fields splits on.
 const fields = (text: string) => text.split(/[\t\n\v\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+/).filter(Boolean).join(" ")
 
 /**
  * The backend's anchor text for the element with this id: its descendant text
- * nodes joined with nothing, <script> and <style> skipped, entities decoded,
- * then strings.Fields joined by " ". A regex scan, not a parser: enough for
- * fixtures, with nested tags of the same name counted.
+ * nodes joined with nothing, <script> and <style> skipped, then strings.Fields
+ * joined by " ". The id must be unique in the document.
  */
 function elementText(html: string, id: string): string | null {
-  const source = html.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "")
-  const open = new RegExp(`<([a-zA-Z][\\w-]*)\\b[^>]*\\bid=(?:"${escape(id)}"|'${escape(id)}'|${escape(id)}(?=[\\s/>]))[^>]*>`, "g")
-  const matches = [...source.matchAll(open)]
+  const doc = new DOMParser().parseFromString(html, "text/html")
+  const matches = [...doc.querySelectorAll("[id]")].filter(el => el.id === id)
   if (matches.length !== 1) return null
-  const [tag, name] = [matches[0], matches[0][1]]
-  const start = tag.index! + tag[0].length
-  let end = source.length
-  const nested = new RegExp(`<(/?)${escape(name)}\\b[^>]*>`, "gi")
-  nested.lastIndex = start
-  for (let depth = 1, m = nested.exec(source); m; m = nested.exec(source)) {
-    depth += m[1] ? -1 : m[0].endsWith("/>") ? 0 : 1
-    if (depth === 0) { end = m.index; break }
+  let text = ""
+  const walk = (node: Node) => {
+    for (const child of node.childNodes) {
+      if (child.nodeType === Node.TEXT_NODE) text += child.nodeValue ?? ""
+      else if (child.nodeType === Node.ELEMENT_NODE && !/^(script|style)$/i.test((child as Element).tagName)) walk(child)
+    }
   }
-  return fields(decodeEntities(source.slice(start, end).replace(/<!--[\s\S]*?-->/g, "").replace(/<[^>]*>/g, "")))
+  walk(matches[0])
+  return fields(text)
 }
 
 /** Backend rule: the quote equals the element text, or is exactly 500 UTF-8 bytes and a prefix of it. */
