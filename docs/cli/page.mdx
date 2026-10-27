@@ -1881,3 +1881,47 @@ follow-up run. Agent MCP tools are `artifact_create`, `artifact_publish`,
 `artifact_versions`, `artifact_restore`, `artifact_comments` and `artifact_reply`.
 They cannot choose an owner or publish a shared version. Under an admitted
 agent run the CLI uses the same scoped sidecar transport and server authority.
+
+### `crewship page artifact availability`
+
+Read whether the selected workspace enables artifact projects. This uses the
+normal authenticated Page API and returns `{ "enabled": true|false }`; it does
+not authorize a run or create a project.
+
+```bash
+crewship page artifact availability
+```
+
+### `crewship page artifact consent <run-id>`
+
+Explicitly authorize one already-started private chat run. The server derives
+its original human, conversation, message and expiry from the retained run
+principal, then checks current credentials, workspace policy and Page rights.
+An omitted Page target permits one new private project. Use `--page-id` to
+select one existing project instead. This command is for a human CLI session;
+an agent run cannot grant itself permission. Ordinary chat creation uses the
+pre-send **Create artifact project** option instead.
+
+| Flag | Meaning |
+| --- | --- |
+| `--page-id <id>` | Optional immutable ID of the owner's existing artifact project. |
+
+```bash
+crewship page artifact consent RUN_ID
+crewship page artifact consent RUN_ID --page-id PAGE_ID
+```
+
+### `crewship page artifact reply <slug> <comment-id>`
+
+Reply to an anchored comment with the confirmed changed version, or explicitly
+ask for a fresh selection. The server attaches authorship and creation time.
+
+| Flag | Meaning |
+| --- | --- |
+| `--text <text>` | Required reply text describing the saved change or clarification. |
+| `--version <n>` | Required positive version addressed by the reply. |
+| `--needs-clarification` | Ask for a new selection without claiming an edit; permits the original comment version. |
+
+```bash
+crewship page artifact reply demo COMMENT_ID --version 1 --text "Please select the current heading again" --needs-clarification
+```

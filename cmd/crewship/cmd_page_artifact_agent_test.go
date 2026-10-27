@@ -42,3 +42,18 @@ func TestArtifactCLIOriginalRunUsesMCPWithoutProfileOrRedirect(t *testing.T) {
 type artifactAgentRoundTripper func(*http.Request) (*http.Response, error)
 
 func (f artifactAgentRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestArtifactCLIOriginalRunCannotGrantItselfConsent(t *testing.T) {
+	t.Setenv("CREWSHIP_AGENT_TOKEN", "agtv2.test")
+	cmd := &cobra.Command{}
+	cmd.SetContext(t.Context())
+	calls := 0
+	transport := artifactAgentRoundTripper(func(*http.Request) (*http.Response, error) {
+		calls++
+		t.Fatal("agent consent reached a human profile or network")
+		return nil, nil
+	})
+	if err := artifactCLIRequestWithTransport(cmd, "POST", "/api/v1/pages/artifacts/consent", map[string]any{"run_id": "other-run"}, transport); err == nil || calls != 0 {
+		t.Fatal("an agent run granted itself or another run authority", err, calls)
+	}
+}
