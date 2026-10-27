@@ -289,6 +289,21 @@ it("does not warn on a screen with anchorable parts", () => {
   expect(screen.queryByText(/nothing on this screen can take a comment/i)).toBeNull()
 })
 
+it("names version authors You or Agent instead of account and run ids", () => {
+  state.target = { slug: "launch", tab: "versions" }
+  state.snapshot.data = snap({ versions: [
+    { version: 1, message: "First", actor: "user-me", created_at: "2026-10-20T10:00:00Z" },
+    { version: 2, message: "Bolder plans", actor: "agent:cmuxw95k60027db59c6f2:msg_1793118136200864661_c3b6aa1c9005c313", created_at: "2026-10-21T10:00:00Z" },
+    { version: 3, message: "Restore version 1", actor: "cmuxw94hh0001de39519d", created_at: "2026-10-22T10:00:00Z", restored_from: 1 },
+  ] })
+  render(<ArtifactViewerPanel />)
+  const rows = history()
+  expect(rows.getByText("You · First")).toBeInTheDocument()
+  expect(rows.getByText("Agent · Bolder plans")).toBeInTheDocument()
+  expect(rows.getByText("Restore version 1")).toBeInTheDocument()
+  expect(rows.queryByText(/cmuxw9|msg_/)).toBeNull()
+})
+
 it("shares only when the viewer can write, after confirming", () => {
   render(<ArtifactViewerPanel />)
   fireEvent.click(screen.getByRole("button", { name: "Share" }))

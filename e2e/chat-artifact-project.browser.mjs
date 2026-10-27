@@ -180,6 +180,10 @@ try {
     await v3.getByText("Latest", { exact: true }).waitFor()
     const latest = await page.evaluate(() => window.__mock.state.versions.at(-1))
     assert.equal(latest.version, 3); assert.equal(latest.restored_from, 1)
+    // The agent's version carries its run id; it must not widen the viewer.
+    assert.equal(await versions.getByText(/msg_|cmuxw/).count(), 0, "no raw actor id in the history")
+    const overflow = await viewer.evaluate(el => [...el.querySelectorAll("*")].filter(n => n.scrollWidth > n.clientWidth + 1 && /^(auto|scroll)$/.test(getComputedStyle(n).overflowX)).map(n => n.className.toString().slice(0, 60)))
+    assert.deepEqual(overflow, [], "the viewer does not scroll sideways")
     await versions.scrollIntoViewIfNeeded()
     await shot("07-restored")
 

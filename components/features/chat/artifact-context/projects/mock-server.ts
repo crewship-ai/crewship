@@ -253,7 +253,7 @@ export function createArtifactMockServer(initial: ArtifactMockInitial): Artifact
   }
 
   function agentPublish(files: ArtifactFile[], message?: string, reply?: string): number {
-    const next = append({ entrypoint: latest().entrypoint, files, message, actor: "agent", restored_from: null })
+    const next = append({ entrypoint: latest().entrypoint, files, message, actor: "agent:cmuxw95k60027db59c6f2:msg_1793118136200864661_c3b6aa1c9005c313", restored_from: null })
     if (!next) throw new Error("history quota reached")
     for (const entry of state.comments) {
       if (entry.status !== "pending" && entry.status !== "working") continue
