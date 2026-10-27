@@ -1889,3 +1889,15 @@ For a clarification reply against the original comment version:
 ```bash
 crewship page artifact reply demo COMMENT_ID --version 1 --text "Please select the current heading again" --needs-clarification
 ```
+
+### `crewship page artifact availability`
+
+Read whether the current workspace enables artifact projects. An unavailable or
+disabled service does not authorize project creation.
+
+```bash
+crewship page artifact availability
+```
+
+Returns `{ "enabled": false }` when the workspace feature is disabled. The
+command uses the same authenticated workspace client as other Page commands.

@@ -2528,3 +2528,35 @@ The index accepts `audience=personal` for explicitly private Pages owned by the 
 Optional `limit` and `offset` apply after authorization and audience filtering. The default limit is 100 when either paging parameter is present, the maximum is 500, and negative offsets become zero. With neither paging parameter the existing unpaged JSON array is preserved. `crewship api request GET /api/v1/pages --query audience=personal --query limit=20 --format json` requests a personal catalog page.
 
 The private-chat document composer shows the target personal space and its audience before submission. This view and label do not publish a Document, change its audience, enable shared-chat creation, or provide a work-folder sharing operation.
+
+## Artifact project creation
+
+The `artifact_projects` workspace feature is disabled by default. Page creation
+authority and existing workspace policy apply when it is enabled.
+
+### GET /api/v1/pages/artifacts/availability
+
+**Auth:** authenticated workspace member; CLI credentials require `pages:read`.
+**Request:** no body. Select the workspace with `workspace_id` or `X-Workspace-ID`.
+**Response:** JSON `{ "enabled": false }`, or `true` for an enabled workspace.
+**Statuses:** 200 success, 401 invalid authentication, 403 unavailable workspace
+or read scope, 500 internal failure. Availability grants no write authority.
+CLI: `crewship page artifact availability`.
+
+### POST /api/v1/pages/artifacts
+
+**Auth:** authenticated current workspace Page creation authority; CLI
+credentials require `pages:write`. The server determines the human owner.
+**Request:** JSON `slug`, `name`, `entrypoint`, complete `files` and optional
+`message`. Each file requires string `path`, `content` and `media_type`; empty
+content is valid. A new project uses `base_version: 0` when supplied. Paths must
+be unique, relative and safe. Authored HTML can use stable `artifact-`-prefixed
+element IDs for later precise selection; files are preserved as authored.
+**Response:** HTTP 201 JSON `{ "page_id": "...", "slug": "demo", "version": 1,
+"url": "/pages/demo?artifact=1&workspace_id=..." }`. The Page is private and the
+complete version commits atomically. A failure does not acknowledge a version.
+**Statuses:** 201 created, 400 invalid manifest or request, 401 invalid
+authentication, 403 missing current authority, 404 disabled feature, 409 occupied
+address, 413 request/history limit, 500 internal failure, 503 unavailable durable
+storage. Retain the candidate after a refusal. CLI:
+`crewship page artifact create demo --name "Demo" --file manifest.json`.

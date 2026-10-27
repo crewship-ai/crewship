@@ -1369,6 +1369,132 @@
         },
         "type": "object"
       },
+      "ArtifactProjectAvailability": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "ArtifactProjectCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "base_version": {
+            "enum": [
+              0
+            ],
+            "type": "integer"
+          },
+          "entrypoint": {
+            "description": "Canonical relative project path, at most512 UTF8 bytes; absolute paths, traversal, backslashes, query strings and fragments are refused.",
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          },
+          "files": {
+            "description": "Complete atomic file set; omitted files are not in the new version. Paths must be unique. The default server version limit is32MiB of content.",
+            "items": {
+              "$ref": "#/components/schemas/ArtifactProjectFileInput"
+            },
+            "maxItems": 256,
+            "minItems": 1,
+            "type": "array"
+          },
+          "message": {
+            "description": "The server additionally enforces this bound in UTF-8 bytes.",
+            "maxLength": 4096,
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "slug": {
+            "description": "New Page slug; reserved route names are refused.",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "name",
+          "entrypoint",
+          "files"
+        ],
+        "type": "object"
+      },
+      "ArtifactProjectCreateResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "page_id": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "page_id",
+          "slug",
+          "version",
+          "url"
+        ],
+        "type": "object"
+      },
+      "ArtifactProjectError": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "ArtifactProjectFileInput": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "media_type": {
+            "description": "The server additionally enforces this bound in UTF-8 bytes.",
+            "maxLength": 255,
+            "type": "string"
+          },
+          "path": {
+            "description": "Canonical relative project path, at most512 UTF8 bytes; absolute paths, traversal, backslashes, query strings and fragments are refused.",
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "content",
+          "media_type"
+        ],
+        "type": "object"
+      },
       "BulkReplayRequest": {
         "properties": {
           "fingerprint": {
@@ -123999,6 +124125,215 @@
           }
         ],
         "summary": "Get pages access",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/pages/artifacts": {
+      "post": {
+        "description": "Create pages artifacts (POST /api/v1/pages/artifacts).",
+        "operationId": "post_api_v1_pages_artifacts",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtifactProjectCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectCreateResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Create pages artifacts",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/artifacts/availability": {
+      "get": {
+        "description": "Get pages artifacts availability (GET /api/v1/pages/artifacts/availability).",
+        "operationId": "get_api_v1_pages_artifacts_availability",
+        "parameters": [
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectAvailability"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get pages artifacts availability",
         "tags": [
           "pages"
         ],

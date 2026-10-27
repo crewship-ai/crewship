@@ -75,7 +75,7 @@ func (h *PageHandler) artifactProjectEnabled(ctx context.Context) bool {
 }
 func (h *PageHandler) ArtifactProjectAvailability(w http.ResponseWriter, r *http.Request) {
 	artifactCommentHeaders(w)
-	writeJSON(w, 200, map[string]bool{"enabled": h.artifactProjectEnabled(r.Context())})
+	writeJSON(w, 200, artifactProjectAvailabilityResponse{Enabled: h.artifactProjectEnabled(r.Context())})
 }
 func (h *PageHandler) artifactProjectStore(ctx context.Context) *artifacts.VersionStore {
 	return artifacts.NewVersionStore(h.db, artifacts.VersionOptions{Enabled: h.artifactProjectEnabled(ctx)})

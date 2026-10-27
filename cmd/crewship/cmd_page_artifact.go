@@ -97,7 +97,10 @@ func newPageArtifactCommand() *cobra.Command {
 	reply.Flags().Bool("needs-clarification", false, "Ask for a fresh selection without claiming an edit")
 	reply.Flags().String("text", "", "Describe the change or ask for a fresh selection")
 	reply.Flags().Int64("version", 0, "Version addressed by this reply")
-	cmd.AddCommand(reply)
+	availability := &cobra.Command{Use: "availability", Args: cobra.NoArgs, Short: "Read whether this workspace enables artifact projects", RunE: func(cmd *cobra.Command, _ []string) error {
+		return artifactCLIRequest(cmd, "GET", "/api/v1/pages/artifacts/availability", nil)
+	}}
+	cmd.AddCommand(reply, availability)
 	return cmd
 }
 
