@@ -459,3 +459,22 @@ it("reuses one write-retirement barrier when its state observer requests retirem
     expect(r.engine.snapshot).toHaveBeenCalledOnce()
   } finally { await r.controller.close() }
 })
+
+it("flush waits for pending transport and commits its own snapshot without inventing a native save ticket", async () => {
+  const r = rig(), first = deferred<ReturnType<typeof receipt>>()
+  r.engine.snapshot.mockResolvedValueOnce({ bytes: new Uint8Array([1]), editorRevision: "idle" }).mockResolvedValueOnce({ bytes: new Uint8Array([2]), editorRevision: "final" })
+  r.transport.save.mockReturnValueOnce(first.promise)
+  const idle = r.controller.save()
+  await vi.waitFor(() => expect(r.transport.save).toHaveBeenCalledOnce())
+  const flush = r.controller.flush()
+  await vi.waitFor(() => expect(r.engine.snapshot).toHaveBeenCalledTimes(2))
+  expect(r.engine.snapshot.mock.calls[1]).toEqual([expect.any(AbortSignal), undefined])
+  expect(r.transport.save).toHaveBeenCalledOnce()
+  first.resolve(receipt(r.transport.save.mock.calls[0][0]))
+  await Promise.all([idle, flush])
+  expect(r.transport.save).toHaveBeenCalledTimes(2)
+  expect(r.transport.save.mock.calls[1][0]).toMatchObject({ baseVersion: "2", editorRevision: "final" })
+  expect(r.onReceipt).toHaveBeenCalledTimes(2)
+  expect(r.state).toHaveBeenLastCalledWith({ phase: "saved", dirty: false })
+  await r.controller.close()
+})

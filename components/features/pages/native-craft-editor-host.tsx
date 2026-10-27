@@ -240,7 +240,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    // An editor that was never unlocked has no native draft to publish.
    if(!r.coordinator)return r.nativeReadOnly&&!r.writable&&!r.capture
    freezeInput(r);r.ackedVersion=undefined;r.receiptAck=undefined;r.receiptVersion=undefined;setSavedVersion(undefined)
-   await r.coordinator.save()
+   await r.coordinator.flush()
    const acknowledgement=r.receiptAck,version=r.receiptVersion
    if(!acknowledgement||!version||!await acknowledgement)return false
    return live(r)&&r.writable&&r.phase?.phase==='saved'&&!r.phase.dirty&&r.ackedVersion===version&&r.receiptAck===acknowledgement
@@ -275,7 +275,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    const snapshot=await client.read(lifetime.signal);viewNow=leaseView(await client.lease(lifetime.signal));setView(viewNow)
    await mountEditor(snapshot,viewNow.generation??'1');if(dead)return;setBusy(false)
    leaseWatch=setInterval(()=>{const r=current;if(r?.writable&&!owns(viewNow,r.generation))void retireWrite(r).catch(()=>stop('Platnost úprav skončila. Koncept zůstává zachován.'))},1000)
-   reauthorize=setInterval(()=>{void client.reauthorize(lifetime.signal).then(ok=>{if(!ok)throw Error('retired')}).catch(()=>{if(!dead)void retireConnection('Spojení bylo ukončeno. Koncept zůstává zachován.').catch(()=>stop('Přístup editoru se nepotvrdil. Koncept zachován.'))})},30000)
+   reauthorize=setInterval(()=>{void client.reauthorize(lifetime.signal).catch(()=>{if(!dead)void retireConnection('Spojení bylo ukončeno. Koncept zůstává zachován.').catch(()=>stop('Přístup editoru se nepotvrdil. Koncept zachován.'))})},30000)
    void client.events(lifetime.signal,(event,value)=>{
     if(dead)return
     if(event==='session_retired'&&value.draft==='purge'){
