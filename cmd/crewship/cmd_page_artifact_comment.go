@@ -9,12 +9,12 @@ import (
 )
 
 type artifactCommentRequest struct {
-	Version     int64  `json:"version"`
-	Path        string `json:"path"`
-	Selector    string `json:"selector"`
-	Quote       string `json:"quote"`
-	Text        string `json:"text"`
-	SendToAgent bool   `json:"send_to_agent"`
+	Version     int64  `json:"version" yaml:"version"`
+	Path        string `json:"path" yaml:"path"`
+	Selector    string `json:"selector" yaml:"selector"`
+	Quote       string `json:"quote" yaml:"quote"`
+	Text        string `json:"text" yaml:"text"`
+	SendToAgent bool   `json:"send_to_agent" yaml:"send_to_agent"`
 }
 
 func newPageArtifactCommentCommand() *cobra.Command {
