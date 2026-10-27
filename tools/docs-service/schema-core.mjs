@@ -1,3 +1,5 @@
+import { validatePositionMigrations } from './position-migrations.mjs';
+
 // Shared implementation instantiated with the caller's pinned Tiptap/Yjs types.
 // Browser and managed Node use identical closed validators without mixing
 // separate node_modules copies of Yjs in instanceof/relative-position checks.
@@ -123,7 +125,7 @@ function validateJSON(json, version = VERSION) {
 }
 // Yjs 13.6.33's retained Item/content classes are part of this experiment's
 // binary contract. Upgrades must rerun the retained-content regressions.
-function validateRetained(doc, version) {
+function validateRetained(doc, version, migrations) {
   const types = typesFor(version);
   const root = doc.getXmlFragment('default');
   const supportedType = type => type === root || type instanceof Y.XmlText ||
@@ -131,6 +133,7 @@ function validateRetained(doc, version) {
   for (const structs of doc.store.clients.values()) for (const item of structs) {
     // GC carries no recoverable payload. Deleted Items still do.
     if (item instanceof Y.GC) continue;
+    if (migrations && item.parent === migrations) continue; // Fully checked, including retained payloads, before this walk.
     if (!(item instanceof Y.Item) || !supportedType(item.parent)) throw new Error('unsupported retained Yjs parent');
     const content = item.content;
     if (item.parentSub !== null) {
@@ -180,8 +183,8 @@ function validate(doc, version = VERSION) {
   const json = validateJSON(project(doc), version);
   if (Y.encodeStateAsUpdate(doc).length > 1 << 20) throw new Error('document limit');
   // Prevent opaque client-controlled Yjs roots from becoming a covert payload.
-  if ([...doc.share.keys()].some(k => k !== 'default')) throw new Error('unsupported Yjs root');
-  validateRetained(doc, version);
+  const migrations = validatePositionMigrations(doc, Y);
+  validateRetained(doc, version, migrations);
   return json;
 }
 async function outline(doc, version = VERSION) {
