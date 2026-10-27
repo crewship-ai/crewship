@@ -7,9 +7,11 @@ import type { CraftLeaseHolder } from "../projects/types"
 
 interface CraftLockBarProps { workspaceId: string; slug: string; onEdit: () => void }
 
-/** The page route that mounts the WordCraft editor or the GridCraft workbook for this slug. */
+/** The page route that mounts the WordCraft editor or the GridCraft workbook; an `@<page id>` reference opens by id. */
 export function craftEditorHref(workspaceId: string, slug: string): string {
-  return `/pages/${encodeURIComponent(slug)}?${new URLSearchParams({ workspace_id: workspaceId })}`
+  return slug.startsWith("@")
+    ? `/pages?${new URLSearchParams({ ref: slug.slice(1), workspace_id: workspaceId })}`
+    : `/pages/${encodeURIComponent(slug)}?${new URLSearchParams({ workspace_id: workspaceId })}`
 }
 
 const holderName = (holder: CraftLeaseHolder) => holder.kind === "agent" ? `${holder.display_name} (agent)` : holder.display_name
@@ -23,8 +25,13 @@ const BTN = "coarse:min-h-[44px]"
  * Edit opens the editor, which acquires on its own admission. Release and
  * Save version stay in the editor.
  */
-export function CraftLockBar({ workspaceId, slug, onEdit }: CraftLockBarProps) {
-  const { status, requestHandoff, requestedGeneration, heldByMe, requestedByMe } = useCraftLeaseState(workspaceId, slug)
+export function CraftLockBar(props: CraftLockBarProps) {
+  return <CraftLockBarView {...props} lease={useCraftLeaseState(props.workspaceId, props.slug)} />
+}
+
+/** The bar for a host that already reads the lease, so one surface keeps one admission. */
+export function CraftLockBarView({ workspaceId, slug, onEdit, lease }: CraftLockBarProps & { lease: ReturnType<typeof useCraftLeaseState> }) {
+  const { status, requestHandoff, requestedGeneration, heldByMe, requestedByMe } = lease
   if (!status) return null
 
   const { holder, can_write: canWrite } = status
