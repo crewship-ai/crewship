@@ -107,3 +107,15 @@ export function chatSidebarViews(): boolean {
 export function slidesEditorMount(): boolean {
   return process.env.NEXT_PUBLIC_SLIDES_EDITOR === "true"
 }
+
+/**
+ * Gates artifact project cards and the side viewer in chat (multi-screen
+ * HTML projects with versions and anchored comments).
+ *
+ * Default OFF: the `/pages/{slug}/artifact` routes are still in review. Even
+ * with the flag on, nothing renders until the server reports the feature
+ * available for the workspace.
+ */
+export function chatArtifactProjects(): boolean {
+  return process.env.NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS === "true"
+}
