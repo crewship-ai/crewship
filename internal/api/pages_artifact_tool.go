@@ -156,11 +156,11 @@ func (h *PageHandler) ArtifactProjectTool(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
+	r = checked
 	if !h.artifactProjectEnabled(r.Context()) {
 		replyError(w, 404, "artifact projects are disabled")
 		return
 	}
-	r = checked
 	var body struct {
 		Operation string          `json:"operation"`
 		Slug      string          `json:"slug"`
