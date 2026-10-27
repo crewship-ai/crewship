@@ -55,7 +55,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   let preparations = Promise.resolve(), draftWrites = Promise.resolve()
   let lastPersistedSequence = 0, manualCount = 0
   let preparingCount = 0
-  let nextPreparation = 0, lastFailedPreparation = 0
+  let nextPreparation = 0, lastFailedPreparation = 0, nextAutosave = 0
   const lifetime = new AbortController()
   const emit = (phase: NativeSaveState["phase"], reason?: string) => {
     if (!active && phase !== "stopped") return
@@ -69,7 +69,11 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   }
   const unregister = options.journal.onRetire(stop)
   emit("idle")
-  function schedule() { clearTimeout(timer); if (active) timer = setTimeout(() => { void save() }, idleMs) }
+  function schedule() {
+    clearTimeout(timer)
+    const token = ++nextAutosave
+    if (active) timer = setTimeout(() => { if (token === nextAutosave) void save(undefined, token) }, idleMs)
+  }
   function scheduleIfNeeded() {
     if (active && writable && dirty && !blocked && !unconfirmed && !pending && preparingCount === 0 && manualCount === 0) schedule()
   }
@@ -141,7 +145,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     draftWrites = writing.catch(() => {})
     return writing
   }
-  function save(requestId?: string): Promise<void> {
+  function save(requestId?: string, autosaveToken?: number): Promise<void> {
     const manual = requestId !== undefined
     if (manual && (typeof requestId !== "string" || !requestId || requestId.length > 128 || requestId.includes("\0"))) return Promise.reject(new Error("invalid_native_save_ticket"))
     if (manual && manualCount >= 4) return Promise.reject(new Error("native_save_backpressure"))
@@ -150,7 +154,10 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     preparingCount++
     const sequence = ++nextPreparation
     const preparing = preparations.then(async (): Promise<Prepared | undefined> => {
-      if (!active) return
+      // A newer idle request supersedes queued autosaves, but never an active
+      // snapshot or an explicit manual ticket. Capture locally even while the
+      // transport is pending/uncertain; those fences apply only to sending.
+      if (!active || autosaveToken !== undefined && autosaveToken !== nextAutosave) return
       const epoch = edits
       dirty = true
       let stage = "engine"
@@ -211,7 +218,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   function revokeRead() { stop(); unregister(); return options.journal.revokeRead() }
   return {
     edited() { if (!active) return; edits++; dirty = true; emit(writable ? "dirty" : "read-only"); schedule() },
-    save,
+    save: (requestId?: string) => save(requestId),
     async reconcile() { if (active && writable && unconfirmed && !pending && options.transport.reconcile) await transmit(unconfirmed, true) },
     revokeWrite,
     revokeRead,

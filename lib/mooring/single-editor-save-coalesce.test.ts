@@ -38,3 +38,36 @@ it("does not continually schedule redundant versions while the next snapshot is 
     expect(redundant).toBe(false)
   } finally { await controller.close(); vi.unstubAllGlobals() }
 })
+
+it("coalesces edit-triggered autosaves while an earlier native snapshot is preparing", async () => {
+  vi.stubGlobal("crypto", webcrypto)
+  let revision = 0, duplicate!: () => void
+  const repeated = new Promise<boolean>(resolve => { duplicate = () => resolve(true) })
+  const requests: NativeSaveRequest[] = []
+  const controller = createSingleEditorSave({ workspaceId:"w",pageId:"p",applicationId:"wordcraft",enginePin:"fixture",baseVersion:"1",generation:"1",sessionId:"session",idleMs:5,onState(){},journal:{async persist(){},async confirm(){},async recovery(){return []},onRetire(){return()=>{}},async close(){},async revokeRead(){}},engine:{
+    async snapshot() { const captured = revision; if (captured) await new Promise(resolve=>setTimeout(resolve,40)); return {bytes:new Uint8Array([captured]),editorRevision:`revision:${captured}`} },async validate(){},
+  },transport:{async save(r){requests.push(r);if(requests.filter(row=>row.editorRevision==="revision:6").length>=2)duplicate();return {...r,version:String(BigInt(r.baseVersion)+1n),durability:"node",issuedBy:"crewship",phase:"committed",candidateHash:r.contentHash}}}})
+  let deadline: ReturnType<typeof setTimeout> | undefined
+  try {
+    await controller.save()
+    for(let i=1;i<=6;i++){revision=i;controller.edited();await new Promise(resolve=>setTimeout(resolve,10))}
+    const redundant=await Promise.race([repeated,new Promise<boolean>(resolve=>{deadline=setTimeout(()=>resolve(false),1000)})])
+    clearTimeout(deadline)
+    console.log("native-save-burst-review",JSON.stringify(requests.map(r=>({base:r.baseVersion,revision:r.editorRevision,hash:r.contentHash}))))
+    expect(redundant).toBe(false)
+  } finally {clearTimeout(deadline);await controller.close();vi.unstubAllGlobals()}
+})
+
+it("still durably captures newer edits while an older manual snapshot prepares and its ACK is unknown", async () => {
+  vi.stubGlobal("crypto",webcrypto)
+  let started!:()=>void
+  const preparing=new Promise<void>(resolve=>{started=resolve})
+  let stored:string|undefined, revision=1, sends=0
+  const controller=createSingleEditorSave({workspaceId:"w",pageId:"p",applicationId:"wordcraft",enginePin:"fixture",baseVersion:"1",generation:"1",sessionId:"session",idleMs:5,onState(){},journal:{async persist(d){stored=d.editorRevision},async confirm(){},async recovery(){return []},onRetire(){return()=>{}},async close(){},async revokeRead(){}},engine:{async snapshot(_signal,requestId){const captured=revision;if(requestId){started();await new Promise(resolve=>setTimeout(resolve,40))}return {bytes:new Uint8Array([captured]),editorRevision:`revision:${captured}`}},async validate(){}},transport:{async save(){sends++;return new Promise(()=>{})}}})
+  const manual=controller.save("manual-original");void manual.catch(()=>{})
+  try {
+    await preparing;revision=2;controller.edited()
+    await vi.waitFor(()=>expect(stored).toBe("revision:2"))
+    expect(sends).toBe(1)
+  }finally{await controller.close();await manual.catch(()=>{});vi.unstubAllGlobals()}
+})

@@ -375,3 +375,27 @@ it("does not overwrite readonly state when the receipt observer retires write au
   expect(r.state).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "read-only" }))
   await r.controller.close()
 })
+
+it("autosaves a changed opaque editor revision even when its native bytes match the previous save", async () => {
+  const r = rig()
+  await r.controller.save()
+  r.engine.snapshot.mockResolvedValueOnce({ bytes: new Uint8Array([1, 2]), editorRevision: "doc:next:opaque" })
+  r.controller.edited()
+  await vi.waitFor(() => expect(r.transport.save).toHaveBeenCalledTimes(2))
+  const [first, second] = r.transport.save.mock.calls.map(([request]) => request)
+  expect(second.contentHash).toBe(first.contentHash)
+  expect(second.editorRevision).toBe("doc:next:opaque")
+  expect(second.baseVersion).toBe("2")
+  await r.controller.close()
+})
+
+it("still journals newer edits after an unknown ACK without automatically retrying transport", async () => {
+  const r = rig()
+  r.transport.save.mockRejectedValueOnce(new Error("lost acknowledgement"))
+  await r.controller.save()
+  r.engine.snapshot.mockResolvedValueOnce({ bytes: new Uint8Array([3]), editorRevision: "doc:newer:opaque" })
+  r.controller.edited()
+  await vi.waitFor(() => expect(r.journal.persist).toHaveBeenLastCalledWith(expect.objectContaining({ editorRevision: "doc:newer:opaque", bytes: new Uint8Array([3]) })))
+  expect(r.transport.save).toHaveBeenCalledOnce()
+  await r.controller.close()
+})
