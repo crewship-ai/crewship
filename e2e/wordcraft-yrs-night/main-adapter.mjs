@@ -7,7 +7,14 @@ import { resolve } from 'node:path'
 import { MissingContract, eventually } from './run.mjs'
 import { localContext, localURL } from './local.mjs'
 
-export async function setup({ browser, scenario, baseURL, output }) {
+export function requireOwnedProductionTransport() {
+  // The built production editor refuses plaintext iframe URLs, including
+  // loopback. An arbitrary HTTPS URL is not evidence of an owned TLS proxy.
+  throw new MissingContract('Production WordCraft requires owned local TLS transport; the CLI currently supports only the helper HTTP backend. See README owned TLS contract.')
+}
+
+export async function setup({ browser, scenario, baseURL, output, verifyIdentity }) {
+  requireOwnedProductionTransport()
   const fixturePath = process.env.WORDCRAFT_NIGHT_FIXTURE
   if (!fixturePath) throw new MissingContract('WORDCRAFT_NIGHT_FIXTURE is required: disposable per-scenario document paths and two authenticated identities')
   const fixture = JSON.parse(await readFile(fixturePath, 'utf8'))
@@ -21,6 +28,8 @@ export async function setup({ browser, scenario, baseURL, output }) {
   const contexts = []
   try {
     for (const storageState of item.storageStates) contexts.push(await localContext(browser, baseURL, { storageState }))
+    if (typeof verifyIdentity !== 'function') throw new MissingContract('Authenticated product identity verifier is required')
+    await Promise.all(contexts.map(context => verifyIdentity(context)))
     const pages = await Promise.all(contexts.map(context => context.newPage()))
     const backend = await integration.connect({ pages, contexts, baseURL, fixture: item, scenario, output })
     const canvas = page => page.frameLocator('iframe[title="WordCraft editor"]').locator('#wordcraft_canvas')

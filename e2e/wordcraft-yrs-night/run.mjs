@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url'
 import os from 'node:os'
 import { performance } from 'node:perf_hooks'
 import { scenarios } from './scenarios.mjs'
+import { verifyProductIdentity } from './identity.mjs'
 
 export class MissingContract extends Error {}
 export class InconclusiveMeasurement extends Error {}
@@ -107,21 +108,28 @@ async function main() {
     report.base = base.origin
     report.productSHA = process.env.WORDCRAFT_NIGHT_PRODUCT_SHA
     assert.match(report.productSHA ?? '', /^[a-f0-9]{40}$/, 'Record exact tested product SHA')
-    const response = await fetch(new URL('/api/v1/system/version', base), { redirect: 'manual' })
-    assert.equal(response.status, 200)
-    assert.equal((await response.json()).commit, report.productSHA, 'Unexpected product binary')
   } catch (error) { preflight = error }
   for (const number of selected) {
     const result = { scenario: number, status: 'not-run', started: new Date().toISOString() }
     let session
     try {
       if (preflight) throw preflight
-      session = await requireHook(adapter, 'setup')({ browser, scenario: number, baseURL: report.base, output })
+      const verified = new Map()
+      const verifyIdentity = async context => {
+        const actualSHA = await verifyProductIdentity(context, report.base, report.productSHA)
+        verified.set(context, actualSHA)
+        return actualSHA
+      }
+      session = await requireHook(adapter, 'setup')({ browser, scenario: number, baseURL: report.base, output, verifyIdentity })
       assert.equal(session.pages.length, 2)
       assert.notEqual(session.pages[0].context(), session.pages[1].context())
       assert.equal(session.identities.length, 2)
       assert.notEqual(session.identities[0], session.identities[1], 'Two people must be separate authenticated identities')
       requireHook(session, 'close')
+      // Default adapter verifies immediately after authenticating its contexts,
+      // before navigation. Custom adapters still receive this mandatory check
+      // before any scenario input, using the actual returned page contexts.
+      result.productIdentity = await Promise.all(session.pages.map(page => verified.get(page.context()) ?? verifyIdentity(page.context())))
       result.status = 'running'
       result.measurements = await scenarios[number](session, { output, summarize, convergence, saved, verifySaved, requireHook, eventually, text, document })
       result.status = 'passed'

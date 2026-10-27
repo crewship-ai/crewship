@@ -9,11 +9,13 @@ is `failed`. Neither outcome counts as passing acceptance evidence.
 Run infrastructure checks without a server:
 
 ```sh
-crewship-heavy node --test e2e/wordcraft-yrs-night/runner.test.mjs
-crewship-heavy node --test e2e/wordcraft-yrs-night/fuzz.test.mjs
+crewship-heavy node --test e2e/wordcraft-yrs-night/*.unit.mjs
 ```
 
-Run product acceptance inside the supported disposable server lifecycle:
+CLI invocation inside the supported disposable server lifecycle follows. The
+production main adapter currently returns NOT-RUN: the owned TLS transport
+contract below is not implemented. This invocation documents inputs, not a claim
+that the production editor works over the helper's plaintext HTTP origin.
 
 ```sh
 crewship-heavy env \
@@ -31,6 +33,50 @@ The binary must include the real static frontend, native WordCraft editor and
 Mooring release assets. The fixture/integration module must use its real product
 authorization. This runner does not create users through SQL or disable access
 checks. The existing C1 fixture and C1 read endpoint are incompatible with Yrs.
+
+The version endpoint requires authentication. After fixture authentication the
+runner reads `/api/v1/system/version` through each actual page context's shared
+cookie `APIRequestContext`, with redirects disabled. It compares the returned
+commit with the requested exact SHA and records the actual response identity.
+The default adapter receives a `verifyIdentity(context)` callback for this check
+before navigation; custom adapters also receive a mandatory check on their
+returned page contexts before scenario input. No claimed-SHA fallback exists.
+
+Node units use `.unit.mjs` so default Playwright discovery cannot import them as
+browser tests. The discovery regression invokes the actual default configuration
+with `--list`, a non-listening external loopback base and `--pass-with-no-tests`;
+it starts no application server and requires an empty harness suite/error list.
+
+## Owned local production TLS contract — not implemented
+
+Production Next export rejects plaintext editor iframe URLs even on loopback.
+The production main adapter therefore stops before opening a context. Supplying
+an HTTPS environment URL or an `owned:true` declaration does not unlock it.
+The existing HTTP manifest guard and `localURL` remain restricted to their exact
+helper backend origin. Custom HTTP adapters can exercise compatible development
+frontends; that does not qualify the production editor transport.
+
+A later transport implementation must satisfy these boundaries:
+
+- The runner creates an in-process Node `https.Server`, binds it to `127.0.0.1`
+  on an allocated port, checks its live listening address and owns its lifecycle.
+  Ownership comes from the live server instance created by the runner, not a URL,
+  fixture flag or serialized manifest extension.
+- The sole upstream is the exact HTTP backend from the supported running helper
+  manifest. HTTPS requests and WSS upgrades forward to that backend without
+  replacing application responses, receipts, authorization or document content.
+- TLS credentials belong to the disposable fixture. Trust exceptions, if needed
+  for its certificate, stay confined to guarded contexts using that owned origin;
+  no process-wide TLS verification override is allowed.
+- Browser/API/WebSocket guards recognize only the live owned HTTPS/WSS endpoint
+  and its verified upstream mapping, including redirect checks. Authentication
+  and build identity still use real cookie contexts through that transport.
+- Cleanup closes the owned HTTPS listener, tracked sockets and WSS connections;
+  backend shutdown remains the supported helper's responsibility.
+
+Until that implementation is independently reviewed, production scenarios stay
+NOT-RUN. The independent local HTTPS product probe is separate evidence and does
+not make this generic CLI transport implemented.
 
 `WORDCRAFT_NIGHT_SCENARIOS=1,9` selects scenarios; default is all nine.
 `WORDCRAFT_NIGHT_SAMPLES` defaults to 30 and requires at least 20.
