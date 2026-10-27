@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Preview and review versioned artifact projects.** An optional project view adds linked HTML screens, anchored comments, version restore and pinned sharing. Creation controls stay hidden until the server confirms that the default-off artifact project API is enabled.
+
 - Clear copied-command feedback timers when onboarding unmounts.
 
 - Create vendored WordCraft numeric test fixtures exclusively so a competing output file cannot be truncated.
