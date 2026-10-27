@@ -24,9 +24,9 @@ function leaseView(raw:unknown):Lease {
 }
 function owns(view:Lease,generation?:string):boolean{return view.mine&&view.can_write&&view.generation!==null&&(!generation||view.generation===generation)&&typeof view.expires_at==='string'&&Date.parse(view.expires_at)>Date.now()}
 /** The server selects the approved bundle. No query, credentials or alternative executable path is accepted. */
-export function nativeWordFrameURL(snapshot:NativeDocumentSnapshot,hostOrigin:string):string|null {
+export function nativeCraftFrameURL(snapshot:NativeDocumentSnapshot,hostOrigin:string):string|null {
  try{
-  if(snapshot.applicationId!=='wordcraft'||!/^([a-f0-9]{64})$/.test(snapshot.editorBundle))return null
+  if(snapshot.applicationId!=='wordcraft'&&snapshot.applicationId!=='gridcraft'||!/^([a-f0-9]{64})$/.test(snapshot.editorBundle))return null
   if(snapshot.editorURL.startsWith('//')||/[?#]/.test(snapshot.editorURL)||Array.from(snapshot.editorURL).some(c=>c.charCodeAt(0)<=32||c.charCodeAt(0)===127))return null
   const url=new URL(snapshot.editorURL,hostOrigin),host=new URL(hostOrigin)
   const loopback=new Set(['localhost','127.0.0.1','[::1]'])
@@ -41,9 +41,10 @@ interface Props {workspaceId:string;pageId:string;humanId:string;enabled?:boolea
 type Coordinator=ReturnType<typeof createSingleEditorSave>
 interface Runtime {port:NativeEditorPort;frame:HTMLIFrameElement;abort:AbortController;version:string;generation:string;ready:boolean;writable:boolean;nativeReadOnly:boolean;coordinator?:Coordinator;journal?:NativeDraftJournal;phase?:NativeSaveState;ackedVersion?:string;receiptAck?:Promise<boolean>;receiptVersion?:string;edit:number;blocked:boolean;capture?:NativeDraft;retiring?:Promise<boolean>;retirementFinished?:boolean}
 
-/** One authenticated client/session owns both lease controls and the isolated full Word editor. */
+/** One authenticated client/session owns both lease controls and the isolated full Craft editor. */
 export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}:Props){
  const compare=React.useRef<(draft:NativeDraft)=>void>(()=>{}),reconcile=React.useRef<()=>void>(()=>{}),[uncertain,setUncertain]=React.useState(false)
+ const [applicationId,setApplicationId]=React.useState<NativeDocumentSnapshot['applicationId']>()
  const mount=React.useRef<HTMLDivElement>(null),control=React.useRef<(action:NativeCraftLeaseAction,body:{generation?:string;request_id?:string})=>void>(()=>{})
  const [view,setView]=React.useState<Lease>(vacant),[busy,setBusy]=React.useState(false),[label,setLabel]=React.useState('Připojuji…'),[savedVersion,setSavedVersion]=React.useState<string>(),[error,setError]=React.useState<string>(),[dirty,setDirty]=React.useState(false),[recoveries,setRecoveries]=React.useState<NativeRecovery[]>([]),[comparison,setComparison]=React.useState<Comparison>(),[ownsEditor,setOwnsEditor]=React.useState(false),[connectionRetired,setConnectionRetired]=React.useState(false),[quota,setQuota]=React.useState<NativeDocumentSnapshot['quota']>()
  useLeaveGuard(dirty)
@@ -51,6 +52,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   if(!enabled||!humanId||!workspaceId||!pageId)return
   setBusy(true);setConnectionRetired(false)
   const lifetime=new AbortController(),client=createNativeDocumentClient({workspaceId,pageId})
+  let sessionApplication:NativeDocumentSnapshot['applicationId']|undefined
   let dead=false,networkRetired=false,nativeFailed=false,sessionId='',current:Runtime|undefined,transition=false,viewNow=vacant,readerRefresh:Promise<void>|undefined
   let privacyJournal:NativeDraftJournal|undefined,privacyRetirement:Promise<void>|undefined
   let reauthorize:ReturnType<typeof setInterval>|undefined,leaseWatch:ReturnType<typeof setInterval>|undefined
@@ -107,7 +109,8 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   }
   async function mountEditor(snapshot:NativeDocumentSnapshot,generation:string):Promise<Runtime>{
    if(dead)throw Error('retired')
-   const src=nativeWordFrameURL(snapshot,window.location.origin)
+   if(snapshot.applicationId!==sessionApplication)throw Error('native_application_changed')
+   const src=nativeCraftFrameURL(snapshot,window.location.origin)
    if(!src||!editorFrameSupported())throw Error('unsafe_native_editor')
    const previous=current
    if(previous){if(previous.writable||previous.blocked||!previous.nativeReadOnly)throw Error('unsaved_editor_replacement');await previous.coordinator?.close();if(!previous.coordinator)await previous.journal?.close();detach(previous)}
@@ -117,12 +120,12 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    if(!frame)throw Error('isolated_editor_unavailable')
    mount.current?.append(frame)
    if(!frame.contentWindow){frame.remove();throw Error('isolated_editor_unavailable')}
-   frame.title='WordCraft editor';setQuota(snapshot.quota)
+   frame.title=snapshot.applicationId==='gridcraft'?'GridCraft editor':'WordCraft editor';setApplicationId(snapshot.applicationId);setQuota(snapshot.quota)
    let resolve!:(r:Runtime)=>void,reject!:(e:Error)=>void
    const ready=new Promise<Runtime>((done,fail)=>{resolve=done;reject=fail})
    const timer=setTimeout(()=>{reject(Error('native_bootstrap_timeout'));if(r&&live(r))stop('Editor se bezpečně nepřipojil. Koncept nebyl označen jako uložený.')},20000)
    let port:NativeEditorPort
-   try{port=createNativeEditorPort({applicationId:'wordcraft',enginePin:snapshot.enginePin,bundle:snapshot.editorBundle,frame:frame.contentWindow,scope:{workspaceId,pageId,sessionId,baseVersion:snapshot.version,generation},requireAccessProtocol:true,
+   try{port=createNativeEditorPort({applicationId:snapshot.applicationId,enginePin:snapshot.enginePin,bundle:snapshot.editorBundle,frame:frame.contentWindow,scope:{workspaceId,pageId,sessionId,baseVersion:snapshot.version,generation},requireAccessProtocol:true,
     onChanged(){if(r&&live(r)&&r.ready&&r.writable&&!r.blocked){r.edit++;r.ackedVersion=undefined;r.coordinator?.edited();display(r)}},
     onSaveRequest(request){if(r&&live(r)&&r.writable&&!r.blocked&&r.coordinator){r.ackedVersion=undefined;void r.coordinator.save(request.requestId).catch(()=>{if(r&&live(r)){if(request.requestId)r.port.saveFailed(request.requestId,'Uložení nebylo potvrzeno.');display(r)}})}},
     onError(){clearTimeout(timer);reject(Error('native_lifecycle_failure'));if(r&&live(r))failNative(r,'Spojení s editorem skončilo. Poslední změny nejsou potvrzené; původní editor zůstává uzamčený.')},
@@ -199,14 +202,14 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    viewNow=proof;setView(proof)
    // Never import an old local draft. A new generation begins from a fresh server whole read.
    const snapshot=await client.read(lifetime.signal),r=await mountEditor(snapshot,proof.generation!)
-   const journal=await openNativeDraftJournal({human:humanId,workspace:workspaceId,page:pageId,applicationId:'wordcraft'})
+   const journal=await openNativeDraftJournal({human:humanId,workspace:workspaceId,page:pageId,applicationId:snapshot.applicationId})
    if(!live(r)){await journal.close();return}
    r.journal=journal;privacyJournal=journal;const recovery=await journal.recovery();if(!live(r)){await journal.close();return}setRecoveries(recovery)
    const finalProof=leaseView(await client.lease(lifetime.signal))
    if(!live(r)){await journal.close();return}
    if(!owns(finalProof,r.generation)){await journal.close();r.journal=undefined;throw Error('lease_not_current')}
    viewNow=finalProof;setView(finalProof)
-   const coordinator=createSingleEditorSave({workspaceId,pageId,applicationId:'wordcraft',enginePin:snapshot.enginePin,baseVersion:snapshot.version,generation:r.generation,sessionId,journal:wrapJournal(journal,r),engine:{snapshot:(signal,id)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.snapshot(signal,id),validate:(draft,signal)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.validate(draft,signal)},transport:client,
+   const coordinator=createSingleEditorSave({workspaceId,pageId,applicationId:snapshot.applicationId,enginePin:snapshot.enginePin,baseVersion:snapshot.version,generation:r.generation,sessionId,journal:wrapJournal(journal,r),engine:{snapshot:(signal,id)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.snapshot(signal,id),validate:(draft,signal)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.validate(draft,signal)},transport:client,
     onState(state){r.phase=state;display(r);if(state.phase==='read-only'&&r.writable&&!transition){r.writable=false;freezeInput(r);queueMicrotask(()=>{if(live(r))void retireWrite(r).catch(()=>stop('Zápis byl zastaven; přístup editoru se nepotvrdil.'))})}},
     onReceipt(receipt){
      const edit=r.edit
@@ -271,7 +274,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    }).finally(()=>{transition=false;if(!dead)setBusy(false)})
   }
   void(async()=>{
-   const opened=await client.open(lifetime.signal);if(opened.applicationId!=='wordcraft')throw Error('word_only');sessionId=opened.sessionId
+   const opened=await client.open(lifetime.signal);if(opened.applicationId!=='wordcraft'&&opened.applicationId!=='gridcraft')throw Error('unsupported_native_application');sessionApplication=opened.applicationId;sessionId=opened.sessionId
    const snapshot=await client.read(lifetime.signal);viewNow=leaseView(await client.lease(lifetime.signal));setView(viewNow)
    await mountEditor(snapshot,viewNow.generation??'1');if(dead)return;setBusy(false)
    leaseWatch=setInterval(()=>{const r=current;if(r?.writable&&!owns(viewNow,r.generation))void retireWrite(r).catch(()=>stop('Platnost úprav skončila. Koncept zůstává zachován.'))},1000)
@@ -287,9 +290,9 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   })().catch(()=>{if(!dead)stop('Dokument nelze bezpečně otevřít.')})
   return()=>{unregisterPrivacy();window.removeEventListener('message',windowMessage);control.current=()=>{};reconcile.current=()=>{};compare.current=()=>{};stop('Editor uzavřen · koncept zachován',true)}
  },[enabled,humanId,workspaceId,pageId])
- function copy(draft:NativeDraft){const blob=new Blob([new Uint8Array(draft.bytes)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='wordcraft-recovery.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),0)}
+ function copy(draft:NativeDraft){const blob=new Blob([new Uint8Array(draft.bytes)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=`${draft.applicationId}-recovery.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),0)}
  if(!enabled)return <p className="p-6">Nativní editor není zapnutý.</p>
- return <section className="flex h-full min-h-[600px] flex-col" aria-label="WordCraft dokument">
+ return <section className="flex h-full min-h-[600px] flex-col" aria-label={applicationId==='gridcraft'?'GridCraft sešit':'WordCraft dokument'}>
   <NativeCraftLeaseBar view={view} mayEdit={Boolean(humanId)&&!connectionRetired} pending={busy} onAction={(action,body)=>control.current(action,body)}/>
   {!connectionRetired&&view.mine&&view.can_write&&!ownsEditor&&<Button disabled={busy} onClick={()=>control.current('acquire',{})}>Převzít úpravy</Button>}
   <div role="status" className="px-3 py-2"><span>{label}</span>{savedVersion&&<span> · verze {savedVersion}</span>}{quota&&<span className="ml-3 text-muted-foreground">Historie {quota.usedBytes} / {quota.limitBytes} B{quota.warning?' · blíží se limit':''}</span>}</div>

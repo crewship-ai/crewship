@@ -13288,7 +13288,8 @@
         "properties": {
           "application_id": {
             "enum": [
-              "wordcraft"
+              "wordcraft",
+              "gridcraft"
             ],
             "type": "string"
           },
@@ -13331,7 +13332,8 @@
         "properties": {
           "application_id": {
             "enum": [
-              "wordcraft"
+              "wordcraft",
+              "gridcraft"
             ],
             "type": "string"
           },

@@ -83,28 +83,30 @@ func applyCraftNativeEnv(c *CraftNativeConfig) {
 	if value, ok := os.LookupEnv("CREWSHIP_CRAFT_NATIVE_EDITOR_BUNDLE_DIR"); ok {
 		c.EditorBundleDir = value
 	}
-	profile := c.Profiles["wordcraft"]
-	changed := false
-	for _, field := range []struct {
-		env    string
-		target *string
-	}{
-		{"CREWSHIP_CRAFT_NATIVE_WORD_ENGINE_REVISION", &profile.EngineRevision},
-		{"CREWSHIP_CRAFT_NATIVE_WORD_CLI_PATH", &profile.CLIPath},
-		{"CREWSHIP_CRAFT_NATIVE_WORD_CLI_SHA256", &profile.CLISHA256},
-		{"CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_BUNDLE", &profile.EditorBundle},
-		{"CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_URL", &profile.EditorURL},
-	} {
-		if value, ok := os.LookupEnv(field.env); ok {
-			*field.target = value
-			changed = true
+	for _, app := range []struct{ application, prefix string }{{"wordcraft", "WORD"}, {"gridcraft", "GRID"}} {
+		profile := c.Profiles[app.application]
+		changed := false
+		for _, field := range []struct {
+			env    string
+			target *string
+		}{
+			{"ENGINE_REVISION", &profile.EngineRevision},
+			{"CLI_PATH", &profile.CLIPath},
+			{"CLI_SHA256", &profile.CLISHA256},
+			{"EDITOR_BUNDLE", &profile.EditorBundle},
+			{"EDITOR_URL", &profile.EditorURL},
+		} {
+			if value, ok := os.LookupEnv("CREWSHIP_CRAFT_NATIVE_" + app.prefix + "_" + field.env); ok {
+				*field.target = value
+				changed = true
+			}
 		}
-	}
-	if changed {
-		profile.Application = "wordcraft"
-		if c.Profiles == nil {
-			c.Profiles = make(map[string]CraftNativeDocumentProfile)
+		if changed {
+			profile.Application = app.application
+			if c.Profiles == nil {
+				c.Profiles = make(map[string]CraftNativeDocumentProfile)
+			}
+			c.Profiles[app.application] = profile
 		}
-		c.Profiles["wordcraft"] = profile
 	}
 }

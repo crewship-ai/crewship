@@ -34,7 +34,7 @@ mutation is disabled or unavailable. A generic denial does not prove read loss.
 | POST | `/api/v1/pages/{slug}/craft/lease/request-handoff` | `{}`. | `{request_id, generation}`, 201. |
 | POST | `/api/v1/pages/{slug}/craft/lease/handoff` | `{generation: "1", request_id: "public-request-id"}`. | New holder's lease status, 200. |
 | GET | `/api/v1/pages/{slug}/craft/events` | Craft admission header; keep the connection open. | `text/event-stream`: `lease` status or `session_retired` metadata; 200. |
-| POST | `/api/v1/pages/{slug}/craft/initialize` | Existing empty personal Page owner, original human `pages:write`; Word native bytes only. | Atomic native profile, lease and version1, with private admission, 201. |
+| POST | `/api/v1/pages/{slug}/craft/initialize` | Existing empty personal Page owner, original human `pages:write`; Qualified Word or Grid native bytes. | Atomic native profile, lease and version1, with private admission, 201. |
 | GET | `/api/v1/pages/{slug}/craft/document` | Craft admission header. | Complete base64 native bytes, version and pinned editor/engine metadata, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/save` | Bound whole snapshot described below. | Exact committed snapshot receipt, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/import` | Same whole snapshot contract; existing explicit native Page only. | Exact committed snapshot receipt, 200. |
@@ -108,7 +108,8 @@ descriptor again, and rejects repair warnings or lossy roundtrips. Requests neve
 choose an executable, validator callback or profile. A missing application
 profile returns 503. Availability never converts an old Page into this profile.
 
-Initialization accepts only `application_id: "wordcraft"` and base64 `bytes`.
+Initialization accepts `application_id: "wordcraft"` or `"gridcraft"` and base64
+`bytes`; the selected application must have an operator-qualified profile.
 It requires an existing empty personal Page owned by the authenticated human,
 current folder policy and live membership. Crew-owned Pages, existing content,
 read-only credentials, reinitialization and client-supplied pins are refused.
@@ -124,7 +125,9 @@ The native-only operator environment overrides are
 `CREWSHIP_CRAFT_NATIVE_WORD_CLI_PATH`,
 `CREWSHIP_CRAFT_NATIVE_WORD_CLI_SHA256`,
 `CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_BUNDLE` and
-`CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_URL`. These override corresponding YAML
+`CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_URL`. Matching `CREWSHIP_CRAFT_NATIVE_GRID_*`
+overrides select the Grid engine revision, CLI path/hash and editor bundle/URL.
+These override corresponding YAML
 fields without enabling the product flag or any legacy profile. Explicit empty
 values remain empty and fail qualification; every startup/manifest/hash check
 still applies.
@@ -157,7 +160,7 @@ requires its erasure.
 
 The backend has direct-handler and real-Router two-human regression coverage.
 Whole-document routes require an already explicit native Page and a trusted
-qualified profile; only the explicit owner-only Word initializer may create
+qualified profile; only the explicit owner-only native initializer may create
 that profile on an existing empty Page. Page creation, full editor mounting,
 proposals and agent execution,
 one-hour browser acceptance and 2,000 changing saves remain separate work.
