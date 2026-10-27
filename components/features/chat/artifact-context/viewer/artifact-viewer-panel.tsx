@@ -114,6 +114,10 @@ function ViewerBody({ workspaceId, target, onClose, className, variant }: BodyPr
   if (snapshot.error && (status === 403 || status === 404)) {
     return shell(<div className="flex-1" />, <p className="p-6 text-sm text-muted-foreground">You don’t have access to this project</p>)
   }
+  // A terminal 401 means the refresh failed too: withdraw the copy before the sign-in redirect lands.
+  if (snapshot.error && status === 401) {
+    return shell(<div className="flex-1" />, <p className="p-6 text-sm text-muted-foreground">Your session has ended. Sign in again to see this project.</p>)
+  }
   if (!data) {
     if (snapshot.error) {
       return shell(<div className="flex-1" />, <div className="space-y-2 p-6 text-sm">

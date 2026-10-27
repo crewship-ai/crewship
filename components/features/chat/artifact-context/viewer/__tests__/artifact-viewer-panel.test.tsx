@@ -357,6 +357,15 @@ it.each([403, 404])("drops the cached project when a background refresh answers 
   expect(screen.queryByText("Launch site")).toBeNull()
 })
 
+// A terminal 401 (refresh failed too) withdraws the private copy while the sign-in redirect is still pending.
+it("drops the cached project when the session ends with a terminal 401", () => {
+  state.snapshot = { data: snap(), isLoading: false, error: err(401, "unauthorized"), refetch: vi.fn() }
+  render(<ArtifactViewerPanel />)
+  expect(screen.getByText("Your session has ended. Sign in again to see this project.")).toBeInTheDocument()
+  expect(screen.queryByTitle(/Preview of/)).toBeNull()
+  expect(screen.queryByText("Launch site")).toBeNull()
+})
+
 it("keeps the last project through a transient refresh failure", () => {
   state.snapshot = { data: snap(), isLoading: false, error: err(0, "unavailable"), refetch: vi.fn() }
   render(<ArtifactViewerPanel />)
