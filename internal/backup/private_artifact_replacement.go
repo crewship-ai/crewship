@@ -82,7 +82,7 @@ func rejectMooringDeliveryTargetReplacement(ctx context.Context, target privateA
 			args[i] = id
 		}
 	}
-	for _, table := range []string{"mooring_delivery_gates", "mooring_delivery_barriers", "mooring_edit_leases"} {
+	for _, table := range []string{"mooring_delivery_gates", "mooring_delivery_barriers", "mooring_edit_leases", "mooring_edit_lease_workspaces"} {
 		var exists bool
 		if err := target.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?)`, table).Scan(&exists); err != nil {
 			return err
