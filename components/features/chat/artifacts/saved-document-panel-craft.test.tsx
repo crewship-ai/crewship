@@ -64,19 +64,21 @@ it("shows who edits and offers only Request edit while someone else holds the do
   expect(screen.getByText("Saved body")).toBeInTheDocument()
 })
 
-it("on a free document Edit opens the in-place editor, which takes the lease itself", async () => {
+it("on a free document Edit opens the native editor in a new tab, which takes the lease itself", async () => {
   lease.status = base
+  const open = vi.spyOn(window, "open").mockReturnValue(null)
   render(<SavedDocumentPanel {...props()} />)
   await screen.findByText("Free")
   expect(screen.queryByRole("button", { name: "Edit here" })).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: "Edit" }))
-  expect(screen.getByTestId("page-document")).toBeInTheDocument()
+  expect(open).toHaveBeenCalledWith("/pages/craft/editor?page_id=page1&workspace_id=ws1", "_blank", "noopener,noreferrer")
+  expect(screen.queryByTestId("page-document")).toBeNull()
 })
 
-it("my own hold elsewhere links to the full editor by Page reference", async () => {
+it("my own hold elsewhere links to the native editor", async () => {
   lease.status = { ...base, holder: { actor_id: "user:human1", display_name: "Me", kind: "human" } }
   lease.heldByMe = true
   render(<SavedDocumentPanel {...props()} />)
   expect(await screen.findByText("Editing: you")).toBeInTheDocument()
-  expect(screen.getByRole("link", { name: "Open in new tab" }).getAttribute("href")).toBe("/pages?ref=page1&workspace_id=ws1")
+  expect(screen.getByRole("link", { name: "Open in new tab" }).getAttribute("href")).toBe("/pages/craft/editor?page_id=page1&workspace_id=ws1")
 })

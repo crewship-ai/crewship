@@ -8,7 +8,7 @@ import { useDocumentViewerRead, type DocumentViewerReadInput } from "@/hooks/use
 import { DocumentReadonly } from "@/components/features/pages/document-readonly/document-readonly"
 import { PageDocument } from "@/components/features/pages/page-document"
 import { DocumentViewer } from "../artifact-viewer/document-viewer"
-import { CraftLockBarView } from "../artifact-context/craft/craft-lock-bar"
+import { CraftLockBarView, craftEditorHref } from "../artifact-context/craft/craft-lock-bar"
 import { useCraftLeaseState } from "../artifact-context/craft/use-craft-lease"
 import type { DocumentViewerProps } from "../artifact-viewer/types"
 
@@ -53,7 +53,7 @@ export function SavedDocumentPanel({ headerExtra, onClose, ...props }: SavedDocu
             {unsent && <span role="status" className="text-xs text-muted-foreground">Edits not saved yet</span>}
           </>
           : chatCraftLease()
-            ? <CraftEditControl workspaceId={document.target.workspaceId} pageId={document.target.pageId} onEdit={() => setEditing(identity)}>{editHere}</CraftEditControl>
+            ? <CraftEditControl workspaceId={document.target.workspaceId} pageId={document.target.pageId}>{editHere}</CraftEditControl>
             : editHere}
         <Button asChild variant="outline" size="sm" className="coarse:min-h-[44px]">
           <a href={`/pages?${new URLSearchParams({ ref: document.target.pageId, workspace_id: document.target.workspaceId })}`}
@@ -70,13 +70,15 @@ export function SavedDocumentPanel({ headerExtra, onClose, ...props }: SavedDocu
     </div>} />
 }
 
-/** On a native Craft Page the lease decides who edits: the lock bar replaces Edit here. One admission per panel. */
-function CraftEditControl({ workspaceId, pageId, onEdit, children }: { workspaceId: string; pageId: string; onEdit: () => void; children: ReactNode }) {
+/** On a native Craft Page the lease decides who edits: the lock bar replaces Edit here, and Edit
+ *  opens the native editor, which takes the lease on its own admission. One admission per panel. */
+function CraftEditControl({ workspaceId, pageId, children }: { workspaceId: string; pageId: string; children: ReactNode }) {
   const slug = "@" + pageId
   const lease = useCraftLeaseState(workspaceId, slug)
   if (!lease.status) return children
   return <div className="basis-full overflow-hidden rounded-md border">
-    <CraftLockBarView workspaceId={workspaceId} slug={slug} lease={lease} onEdit={onEdit} />
+    <CraftLockBarView workspaceId={workspaceId} slug={slug} lease={lease}
+      onEdit={() => window.open(craftEditorHref(workspaceId, slug), "_blank", "noopener,noreferrer")} />
   </div>
 }
 

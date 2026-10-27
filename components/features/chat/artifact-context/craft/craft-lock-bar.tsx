@@ -7,10 +7,10 @@ import type { CraftLeaseHolder } from "../projects/types"
 
 interface CraftLockBarProps { workspaceId: string; slug: string; onEdit: () => void }
 
-/** The page route that mounts the WordCraft editor or the GridCraft workbook; an `@<page id>` reference opens by id. */
+/** The route that mounts the editor: an `@<page id>` reference opens the native Craft editor, a slug its Page. */
 export function craftEditorHref(workspaceId: string, slug: string): string {
   return slug.startsWith("@")
-    ? `/pages?${new URLSearchParams({ ref: slug.slice(1), workspace_id: workspaceId })}`
+    ? `/pages/craft/editor?${new URLSearchParams({ page_id: slug.slice(1), workspace_id: workspaceId })}`
     : `/pages/${encodeURIComponent(slug)}?${new URLSearchParams({ workspace_id: workspaceId })}`
 }
 
@@ -34,7 +34,9 @@ export function CraftLockBarView({ workspaceId, slug, onEdit, lease }: CraftLock
   const { status, requestHandoff, requestedGeneration, heldByMe, requestedByMe } = lease
   if (!status) return null
 
-  const { holder, can_write: canWrite } = status
+  // can_write is true only for the admission holding the lease, never for this preview; the
+  // editor and the server decide who may write, so it does not gate the actions here.
+  const { holder } = status
   const state = !holder ? "free" : heldByMe || status.mine ? "mine" : "held"
   // Keyed by generation: a new holder (or the same holder re-acquiring) is a
   // new lease, and the earlier request no longer applies to it.
@@ -54,8 +56,7 @@ export function CraftLockBarView({ workspaceId, slug, onEdit, lease }: CraftLock
       <b className="font-semibold">{title}</b>
       <small className="min-w-0 truncate text-xs text-muted-foreground">{detail}</small>
     </span>
-    {!canWrite ? <span className="text-xs text-muted-foreground">Read only</span>
-      : state === "free" ? <Button type="button" size="sm" className={BTN} onClick={onEdit}><Pencil aria-hidden />Edit</Button>
+    {state === "free" ? <Button type="button" size="sm" className={BTN} onClick={onEdit}><Pencil aria-hidden />Edit</Button>
       : state === "mine" ? <Button asChild size="sm" variant="ghost" className={BTN}>
         <a href={craftEditorHref(workspaceId, slug)} target="_blank" rel="noopener noreferrer"><ExternalLink aria-hidden />Open in new tab</a>
       </Button>
