@@ -38,7 +38,7 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
  }, [draftState, draftKey])
  useEffect(() => {
   const receive = (event: MessageEvent) => {
-   if (event.source !== frame.current?.contentWindow || event.data?.token !== token || !manifest) return
+   if (event.origin !== "null" || event.source !== frame.current?.contentWindow || event.data?.token !== token || !manifest) return
    if (typeof event.data.screen === "string" && manifest.files.some(file => file.path === event.data.screen && file.media_type === "text/html")) { setScreenPath(event.data.screen); setAnchor(undefined); return }
    if (!selecting || !data?.can_write || typeof event.data.selector !== "string" || event.data.selector.length > 2000 || typeof event.data.quote !== "string") return
    setAnchor({ version: manifest.version, path, selector: event.data.selector, quote: event.data.quote.slice(0,500) })
