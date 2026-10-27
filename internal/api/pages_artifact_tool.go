@@ -238,11 +238,17 @@ func decodeArtifactProjectJSONBytes(raw []byte, out any) error {
 		return errors.New("artifact JSON must fit 1 MiB of valid UTF-8")
 	}
 	d := json.NewDecoder(bytes.NewReader(raw))
-	var walk func() error
-	walk = func() error {
+	var walk func(int) error
+	walk = func(depth int) error {
+		if depth > 128 {
+			return errors.New("artifact JSON nesting exceeds limit")
+		}
 		tok, err := d.Token()
 		if err != nil {
 			return err
+		}
+		if tok == nil {
+			return errors.New("null artifact fields are not accepted")
 		}
 		switch tok {
 		case json.Delim('{'):
@@ -257,7 +263,7 @@ func decodeArtifactProjectJSONBytes(raw []byte, out any) error {
 					return errors.New("duplicate artifact field")
 				}
 				seen[key] = true
-				if err = walk(); err != nil {
+				if err = walk(depth + 1); err != nil {
 					return err
 				}
 			}
@@ -265,7 +271,7 @@ func decodeArtifactProjectJSONBytes(raw []byte, out any) error {
 			return err
 		case json.Delim('['):
 			for d.More() {
-				if err := walk(); err != nil {
+				if err := walk(0); err != nil {
 					return err
 				}
 			}
@@ -274,7 +280,7 @@ func decodeArtifactProjectJSONBytes(raw []byte, out any) error {
 		}
 		return nil
 	}
-	if err := walk(); err != nil {
+	if err := walk(0); err != nil {
 		return errors.New("one closed artifact object required")
 	}
 	if _, err := d.Token(); err != io.EOF {

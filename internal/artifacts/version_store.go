@@ -11,6 +11,8 @@ import (
 	"path"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 var (
@@ -294,7 +296,7 @@ func (s *VersionStore) publish(ctx context.Context, tx *sql.Tx, k VersionKey, r 
 	if err != nil {
 		return VersionReceipt{}, err
 	}
-	createdAt := time.Now().UTC().Format(time.RFC3339Nano)
+	createdAt := tsformat.Format(time.Now())
 	additional := int64(len(raw) + len(r.Message) + len(actor) + len(createdAt) + 128)
 	for hash, content := range blobs {
 		var count int
