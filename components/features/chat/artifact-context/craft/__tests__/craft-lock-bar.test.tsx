@@ -8,27 +8,33 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }))
 const state = vi.hoisted(() => ({
   available: true,
   lease: null as unknown,
-  acquire: { mutate: (() => {}) as (v: unknown, o?: { onSuccess?: () => void }) => void, isPending: false, isError: false },
-  requestHandoff: { mutate: (() => {}) as (v: unknown, o?: { onSuccess?: () => void }) => void, isPending: false, isError: false },
+  heldByMe: false,
+  requestedByMe: false,
+  requestedGeneration: null as string | null,
+  requestHandoff: { mutate: (() => {}) as (v: unknown) => void, isPending: false, isError: false },
 }))
 vi.mock("../use-craft-lease", () => ({
   useCraftAvailable: () => state.available,
-  useCraftLease: () => ({ data: state.lease }),
-  useCraftLeaseActions: () => ({ acquire: state.acquire, requestHandoff: state.requestHandoff }),
+  useCraftLeaseState: () => ({
+    status: state.available ? state.lease : undefined, requestHandoff: state.requestHandoff,
+    requestedGeneration: state.requestedGeneration, heldByMe: state.heldByMe, requestedByMe: state.requestedByMe,
+  }),
 }))
 
 import { CraftLockBar } from "../craft-lock-bar"
 import { CraftPreview } from "../craft-preview"
 import { CraftStateChip } from "../craft-state-chip"
 
-const lease = (over: Partial<CraftLeaseStatus> = {}): CraftLeaseStatus => ({ holder: null, mine: false, generation: 1, can_write: true, ...over })
-const pavel = { actor_id: "u2", display_name: "Pavel", kind: "human" as const }
+const lease = (over: Partial<CraftLeaseStatus> = {}): CraftLeaseStatus => ({ holder: null, mine: false, generation: "1", can_write: true, requests: [], ...over })
+const pavel = { actor_id: "user:u2", display_name: "Pavel", kind: "human" as const }
 
 beforeEach(() => {
   state.available = true
   state.lease = lease()
-  state.acquire = { mutate: vi.fn((_v, o) => o?.onSuccess?.()), isPending: false, isError: false }
-  state.requestHandoff = { mutate: vi.fn((_v, o) => o?.onSuccess?.()), isPending: false, isError: false }
+  state.heldByMe = false
+  state.requestedByMe = false
+  state.requestedGeneration = null
+  state.requestHandoff = { mutate: vi.fn(() => { state.requestedGeneration = (state.lease as CraftLeaseStatus).generation }), isPending: false, isError: false }
 })
 afterEach(() => { cleanup(); push.mockReset() })
 
@@ -38,48 +44,61 @@ it("renders nothing when Craft is unavailable", () => {
   expect(container.innerHTML).toBe("")
 })
 
-it("offers Edit on a free document, acquires the lease, then opens the editor", () => {
+it("offers Edit on a free document and only opens the editor, which takes the lease itself", () => {
   const onEdit = vi.fn()
   render(<CraftLockBar workspaceId="w" slug="doc" onEdit={onEdit} />)
   expect(screen.getByText("Free")).toBeTruthy()
   expect(screen.getByText("nobody is editing")).toBeTruthy()
   fireEvent.click(screen.getByRole("button", { name: "Edit" }))
-  expect(state.acquire.mutate).toHaveBeenCalledOnce()
   expect(onEdit).toHaveBeenCalledOnce()
 })
 
-it("does not open the editor when acquiring fails", () => {
-  state.acquire = { mutate: vi.fn(), isPending: false, isError: true }
-  const onEdit = vi.fn()
-  render(<CraftLockBar workspaceId="w" slug="doc" onEdit={onEdit} />)
-  fireEvent.click(screen.getByRole("button", { name: "Edit" }))
-  expect(onEdit).not.toHaveBeenCalled()
-  expect(screen.getByText("Could not start editing")).toBeTruthy()
-})
-
-it("shows my own lease with its generation and an Open in new tab link, and no Release without an API", () => {
-  state.lease = lease({ holder: { actor_id: "me", display_name: "Me", kind: "human" }, mine: true, generation: 18 })
+it("recognises my own hold in the editor by account, with an Open in new tab link and no Release", () => {
+  state.lease = lease({ holder: { actor_id: "user:me", display_name: "Me", kind: "human" }, generation: "18" })
+  state.heldByMe = true
   render(<CraftLockBar workspaceId="w 1" slug="q&a" onEdit={() => {}} />)
   expect(screen.getByText("Editing: you")).toBeTruthy()
-  expect(screen.getByText("generation 18 · held while this tab stays connected")).toBeTruthy()
+  expect(screen.getByText("in the editor")).toBeTruthy()
   const link = screen.getByRole("link", { name: "Open in new tab" })
   expect(link.getAttribute("href")).toBe("/pages/q%26a?workspace_id=w+1")
   expect(link.getAttribute("target")).toBe("_blank")
   expect(screen.queryByRole("button", { name: "Release" })).toBeNull()
-  expect(screen.queryByRole("button", { name: "Save version" })).toBeNull()
-  expect(state.acquire.mutate).not.toHaveBeenCalled()
+  expect(screen.queryByRole("button", { name: "Request edit" })).toBeNull()
 })
 
 it("names another human holder and requests an edit handoff", () => {
   state.lease = lease({ holder: pavel })
-  render(<CraftLockBar workspaceId="w" slug="doc" onEdit={() => {}} />)
+  const { rerender } = render(<CraftLockBar workspaceId="w" slug="doc" onEdit={() => {}} />)
   expect(screen.getByText("Editing: Pavel")).toBeTruthy()
   expect(screen.getByText("you see a read-only preview")).toBeTruthy()
   expect(screen.queryByRole("button", { name: "Edit" })).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: "Request edit" }))
   expect(state.requestHandoff.mutate).toHaveBeenCalledOnce()
+  rerender(<CraftLockBar workspaceId="w" slug="doc" onEdit={() => {}} />)
   expect(screen.getByText("Request sent to Pavel · they can hand over or decline")).toBeTruthy()
   expect(screen.queryByRole("button", { name: "Request edit" })).toBeNull()
+})
+
+it("a request made for an earlier generation does not count for a new lease", () => {
+  state.lease = lease({ holder: pavel, generation: "5" })
+  state.requestedGeneration = "4"
+  render(<CraftLockBar workspaceId="w" slug="doc" onEdit={() => {}} />)
+  expect(screen.getByRole("button", { name: "Request edit" })).toBeTruthy()
+})
+
+it("keeps showing my pending request after a reload, from the lease itself", () => {
+  state.lease = lease({ holder: pavel })
+  state.requestedByMe = true
+  render(<CraftLockBar workspaceId="w" slug="doc" onEdit={() => {}} />)
+  expect(screen.getByText("Request sent to Pavel · they can hand over or decline")).toBeTruthy()
+  expect(screen.queryByRole("button", { name: "Request edit" })).toBeNull()
+})
+
+it("says so when the request fails", () => {
+  state.lease = lease({ holder: pavel })
+  state.requestHandoff = { mutate: vi.fn(), isPending: false, isError: true }
+  render(<CraftLockBar workspaceId="w" slug="doc" onEdit={() => {}} />)
+  expect(screen.getByText("Could not request edit")).toBeTruthy()
 })
 
 it("labels an agent holder", () => {
@@ -101,20 +120,17 @@ it("announces holder changes politely", () => {
   expect(screen.getByRole("status").getAttribute("aria-live")).toBe("polite")
 })
 
-it("preview shows the engine, routes Edit to the page editor, and shows the handoff banner when someone waits on my lease", () => {
+it("preview shows the engine and routes Edit to the page editor; no handoff banner, chat never holds the lease", () => {
   render(<CraftPreview workspaceId="w 1" slug="q&a" kind="word" title="Plan"><p>body</p></CraftPreview>)
   expect(screen.getByText("WordCraft")).toBeTruthy()
   expect(screen.getByText("Plan")).toBeTruthy()
   expect(screen.getByText("body")).toBeTruthy()
-  expect(screen.queryByText(/is waiting for handoff/)).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: "Edit" }))
   expect(push).toHaveBeenCalledWith("/pages/q%26a?workspace_id=w+1")
   cleanup()
-  state.lease = lease({ holder: { actor_id: "me", display_name: "Me", kind: "human" }, mine: true, handoff_requested_by: "Scout" })
   render(<CraftPreview workspaceId="w" slug="doc" kind="sheet" title="Model"><p>grid</p></CraftPreview>)
   expect(screen.getByText("GridCraft")).toBeTruthy()
-  expect(screen.getByText("Scout is waiting for handoff")).toBeTruthy()
-  expect(screen.queryByRole("button", { name: "Hand over" })).toBeNull()
+  expect(screen.queryByText(/is waiting for handoff/)).toBeNull()
 })
 
 it("state chip reads Editing: name with a lock, or Free to edit", () => {

@@ -197,6 +197,9 @@ try {
     await craft.getByText("Recovered local draft").waitFor()
     await craft.getByText("Scout prepared a proposal on v5").waitFor()
     await shot("08-craft-locked", craft)
+    await craft.getByRole("button", { name: "Request edit" }).click()
+    await craft.getByText("Request sent to Pavel Srba · they can hand over or decline").waitFor()
+    await shot("09-craft-requested", craft)
 
     const unmocked = await page.evaluate(() => window.__unmocked)
     assert.deepEqual(unmocked, [], `requests outside the mocked artifact/Craft routes: ${unmocked.join(", ")}`)
