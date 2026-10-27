@@ -533,7 +533,7 @@ func (h *PageHandler) GetArtifactProject(w http.ResponseWriter, r *http.Request)
 		artifactProjectError(w, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"page_id": k.PageID, "name": name, "slug": slug, "origin": origin, "enabled": true, "can_write": canWrite, "latest_version": view.State.LatestVersion, "shared_version": view.State.SharedVersion, "manifest": artifactProjectManifest(view.State.Manifest), "versions": artifactProjectVersionInfos(view.Versions), "quota": view.State.Quota, "comments": comments})
+	writeJSON(w, 200, artifactProjectSnapshotResponse{PageID: k.PageID, Name: name, Slug: slug, Origin: origin, Enabled: true, CanWrite: canWrite, LatestVersion: view.State.LatestVersion, SharedVersion: view.State.SharedVersion, Manifest: artifactProjectManifest(view.State.Manifest), Versions: artifactProjectVersionInfos(view.Versions), Quota: view.State.Quota, Comments: comments})
 }
 
 func (h *PageHandler) artifactProjectAttached(ctx context.Context, page string) (bool, error) {
@@ -584,10 +584,10 @@ func (h *PageHandler) artifactProjectMutationAuthority(r *http.Request, k artifa
 	}
 }
 
-func (h *PageHandler) artifactProjectReceipt(r *http.Request, k artifacts.VersionKey, receipt artifacts.VersionReceipt) map[string]any {
+func (h *PageHandler) artifactProjectReceipt(r *http.Request, k artifacts.VersionKey, receipt artifacts.VersionReceipt) artifactProjectMutationResponse {
 	var slug string
 	_ = h.db.QueryRowContext(r.Context(), `SELECT slug FROM pages WHERE id=? AND workspace_id=?`, k.PageID, k.WorkspaceID).Scan(&slug)
-	return map[string]any{"page_id": k.PageID, "slug": slug, "version": receipt.Version, "actor": receipt.Actor, "url": "/pages/" + slug + "?artifact=1&workspace_id=" + k.WorkspaceID}
+	return artifactProjectMutationResponse{PageID: k.PageID, Slug: slug, Version: receipt.Version, Actor: receipt.Actor, URL: "/pages/" + slug + "?artifact=1&workspace_id=" + k.WorkspaceID}
 }
 func artifactProjectVersionInfos(infos []artifacts.VersionInfo) []map[string]any {
 	out := make([]map[string]any, 0, len(infos))

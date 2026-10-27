@@ -1901,3 +1901,13 @@ crewship page artifact availability
 
 Returns `{ "enabled": false }` when the workspace feature is disabled. The
 command uses the same authenticated workspace client as other Page commands.
+
+### `crewship page artifact publish <slug>`
+
+Supply `--base-version` with the exact positive latest project version and
+`--file` with the complete manifest. Use `artifact create` for a new project.
+A conflict leaves the candidate available for deliberate reconciliation.
+
+```bash
+crewship page artifact publish demo --base-version 1 --file manifest.json
+```
