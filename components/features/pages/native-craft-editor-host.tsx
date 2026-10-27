@@ -30,7 +30,7 @@ export function nativeWordFrameURL(snapshot:NativeDocumentSnapshot,hostOrigin:st
   if(snapshot.editorURL.startsWith('//')||/[?#]/.test(snapshot.editorURL)||Array.from(snapshot.editorURL).some(c=>c.charCodeAt(0)<=32||c.charCodeAt(0)===127))return null
   const url=new URL(snapshot.editorURL,hostOrigin),host=new URL(hostOrigin)
   const loopback=new Set(['localhost','127.0.0.1','[::1]'])
-  if(url.username||url.password||url.search||url.hash||url.protocol!=='https:'&&!(process.env.NODE_ENV!=='production'&&url.protocol==='http:'&&host.protocol==='http:'&&loopback.has(url.hostname)&&loopback.has(host.hostname)))return null
+  if(url.username||url.password||url.search||url.hash||url.protocol!=='https:'&&!((process.env.NODE_ENV!=='production'||url.origin===host.origin)&&url.protocol==='http:'&&host.protocol==='http:'&&loopback.has(url.hostname)&&loopback.has(host.hostname)))return null
   if(url.pathname!==(url.origin===host.origin?`/_editor/b/${snapshot.editorBundle}/index.html`:`/b/${snapshot.editorBundle}/index.html`))return null
   for(const [key,value]of Object.entries({host:'port',parent_origin:host.origin,save:'managed',readonly:'1'}))url.searchParams.set(key,value)
   return url.toString()
