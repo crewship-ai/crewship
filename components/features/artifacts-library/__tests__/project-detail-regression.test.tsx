@@ -66,13 +66,13 @@ afterEach(cleanup)
 const open = () => render(<ArtifactsLibrary workspaceId="workspace-1" item="launch" onSelect={vi.fn()} />)
 
 function compose() {
-  fireEvent.click(screen.getByRole("button", { name: "Select", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Select" }))
   const frame = screen.getByTitle(/Preview of/) as HTMLIFrameElement
   act(() => window.dispatchEvent(new MessageEvent("message", {
     source: frame.contentWindow,
     data: { type: "crewship-artifact-select", selector: "#heading", quote: "Hello" },
   })))
-  fireEvent.change(screen.getByRole("textbox", { name: "Comment", exact: true }), { target: { value: saved.text } })
+  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: saved.text } })
 }
 
 it("provides Preview, History and Comments tabs without losing an unsent anchored comment", () => {
@@ -81,10 +81,10 @@ it("provides Preview, History and Comments tabs without losing an unsent anchore
   compose()
   fireEvent.click(screen.getByRole("tab", { name: "History" }))
   expect(screen.getByRole("region", { name: "Version history" })).toBeVisible()
-  fireEvent.click(screen.getByRole("tab", { name: "Comments", exact: true }))
+  fireEvent.click(screen.getByRole("tab", { name: "Comments" }))
   expect(screen.getByRole("region", { name: "Comment queue" })).toBeVisible()
   fireEvent.click(screen.getByRole("tab", { name: "Preview" }))
-  expect(screen.getByRole("textbox", { name: "Comment", exact: true })).toHaveValue(saved.text)
+  expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue(saved.text)
   expect(state.version).toBeUndefined()
   expect(state.comment).not.toHaveBeenCalled()
 })
@@ -104,7 +104,7 @@ it("supports arrow keys and Home and End between detail tabs", () => {
 it("starts the source agent only after saving the exact library comment", async () => {
   open()
   compose()
-  fireEvent.click(screen.getByRole("button", { name: "Send to agent", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
   expect(state.comment).toHaveBeenCalledWith({
     version: 3, path: "index.html", selector: "#heading", quote: "Hello", text: saved.text, send_to_agent: true,
   }, expect.anything())
@@ -117,9 +117,9 @@ it("retries delivery of the saved task without creating a second comment", async
   state.dispatch.mockResolvedValueOnce(false).mockResolvedValueOnce(true)
   open()
   compose()
-  fireEvent.click(screen.getByRole("button", { name: "Send to agent", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
   expect(await screen.findByText("The agent did not start")).toBeInTheDocument()
-  fireEvent.click(screen.getByRole("button", { name: "Retry", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }))
   expect(await screen.findByText("Comment sent to the agent")).toBeInTheDocument()
   expect(state.dispatch).toHaveBeenNthCalledWith(1, saved)
   expect(state.dispatch).toHaveBeenNthCalledWith(2, saved)
@@ -130,7 +130,7 @@ it("never reports agent delivery when the server provides no source chat", async
   state.snapshot!.origin = null
   open()
   compose()
-  fireEvent.click(screen.getByRole("button", { name: "Send to agent", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
   expect(await screen.findByText("Comment saved for the agent")).toBeInTheDocument()
   expect(state.dispatch).not.toHaveBeenCalled()
   expect(screen.queryByText("Comment sent to the agent")).toBeNull()
