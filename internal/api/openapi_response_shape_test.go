@@ -63,6 +63,12 @@ var responseShapeContracts = []struct {
 	{name: "DesignCommentsResponse", pointer: "/components/schemas/DesignCommentsResponse", value: designCommentsResponse{}},
 	{name: "DesignShareResponse", pointer: "/components/schemas/DesignShareResponse", value: designShareResponse{}},
 	{name: "DesignAgentResponse", pointer: "/components/schemas/DesignAgentResponse", value: designAgentResponse{}},
+
+	{name: "ArtifactSlidesProjection", pointer: "/components/schemas/ArtifactSlidesProjection", value: artifacts.ArtifactSlidesProjection{}},
+	{name: "ArtifactSlideAnchor", pointer: "/components/schemas/ArtifactSlideAnchor", value: artifacts.ArtifactSlideAnchor{}},
+	{name: "ArtifactDataCollections", pointer: "/components/schemas/ArtifactDataCollections", value: artifactDataCollectionsResponse{}},
+	{name: "ArtifactDataResponse", pointer: "/components/schemas/ArtifactDataResponse", value: artifactDataResponse{}},
+	{name: "ArtifactDataDocument", pointer: "/components/schemas/ArtifactDataDocument", value: artifactDataDocumentResponse{}},
 	{name: "NativeCraftAgentTaskReceipt", pointer: "/components/schemas/NativeCraftAgentTaskReceipt", value: craftNativeAgentTaskReceipt{}},
 	{name: "NativeCraftAgentStopReceipt", pointer: "/components/schemas/NativeCraftAgentStopReceipt", value: craftNativeAgentStopReceipt{}},
 	{name: "NativeCraftAgentTaskStatus", pointer: "/components/schemas/NativeCraftAgentTaskStatus", value: craftNativeAgentTaskStatus{}},

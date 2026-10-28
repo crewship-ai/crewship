@@ -122,7 +122,7 @@ func TestCovCfgYamlQuote(t *testing.T) {
 		{`a\b`, `"a\\b"`},
 		{"a: b # c", `"a: b # c"`},
 		{`both " and \`, `"both \" and \\"`},
-		{"unicode-→", `"unicode-→"`},
+		{"unicode-→", `"unicode-\u2192"`},
 	}
 	for _, c := range cases {
 		if got := yamlQuote(c.in); got != c.want {
@@ -138,17 +138,17 @@ func TestCovCfgYamlQuote(t *testing.T) {
 func TestCovCfgReconstructSKILLMD(t *testing.T) {
 	// Already-frontmattered body is returned verbatim.
 	withFM := "---\nname: x\n---\nbody"
-	if got := reconstructSKILLMD("slug", "v", "Disp", "desc", withFM); got != withFM {
+	if got := reconstructSKILLMD("slug", "v", "Disp", "desc", withFM, ""); got != withFM {
 		t.Errorf("expected verbatim passthrough, got %q", got)
 	}
 	// Leading whitespace before --- still counts as frontmatter.
 	pre := "  \n---\nname: y\n---\n"
-	if got := reconstructSKILLMD("slug", "v", "Disp", "desc", pre); got != pre {
+	if got := reconstructSKILLMD("slug", "v", "Disp", "desc", pre, ""); got != pre {
 		t.Errorf("expected verbatim passthrough for leading-ws frontmatter")
 	}
 
 	// Full synthesis: distinct display_name, multiline description, vendor.
-	out := reconstructSKILLMD("my-skill", "acme", "My Skill", "line1\r\nline2", "# Body")
+	out := reconstructSKILLMD("my-skill", "acme", "My Skill", "line1\r\nline2", "# Body", "")
 	for _, want := range []string{
 		"---\n",
 		`name: "my-skill"`,
@@ -163,7 +163,7 @@ func TestCovCfgReconstructSKILLMD(t *testing.T) {
 	}
 
 	// display_name equal to slug is omitted; empty description/vendor omitted.
-	out2 := reconstructSKILLMD("same", "", "same", "", "body2")
+	out2 := reconstructSKILLMD("same", "", "same", "", "body2", "")
 	if strings.Contains(out2, "display_name:") {
 		t.Errorf("display_name should be omitted when equal to slug:\n%s", out2)
 	}

@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -185,7 +186,39 @@ func (h *PageHandler) ArtifactProjectTool(w http.ResponseWriter, r *http.Request
 		Slug      string          `json:"slug"`
 		Payload   json.RawMessage `json:"payload"`
 	}
-	if !decodeArtifactProjectToolJSON(w, r, &body, (9<<20)+8192) {
+	raw, err := io.ReadAll(io.LimitReader(r.Body, (9<<20)+8193))
+	if err != nil || len(raw) > (9<<20)+8192 {
+		replyError(w, 413, "artifact request exceeds limit")
+		return
+	}
+	// Only data operations accept arbitrary document keys and null values.
+	// Existing Project operations retain their original closed decoder.
+	var envelope map[string]json.RawMessage
+	if json.Unmarshal(raw, &envelope) != nil {
+		replyError(w, 400, "invalid closed artifact request")
+		return
+	}
+	var operation string
+	_ = json.Unmarshal(envelope["operation"], &operation)
+	dataOperation := operation == "artifact_data_batch" || operation == "artifact_data_read" || operation == "artifact_data_collections"
+	slidesOperation := operation == "artifact_slides_read" || operation == "artifact_export_pdf"
+	if slidesOperation && len(raw) > 1<<20 {
+		replyError(w, 413, "Slides request exceeds limit")
+		return
+	}
+	if dataOperation || slidesOperation {
+		for key := range envelope {
+			if key != "operation" && key != "slug" && key != "payload" {
+				replyError(w, 400, "invalid closed artifact request")
+				return
+			}
+		}
+		err = artifacts.DecodeDataJSON(raw, &body, "operation", "slug", "payload")
+	} else {
+		err = decodeArtifactProjectJSONBytes(raw, &body)
+	}
+	if err != nil {
+		replyError(w, 400, "invalid closed artifact request")
 		return
 	}
 	a, _ := r.Context().Value(artifactRunKey{}).(*artifactRunAuthority)
@@ -200,6 +233,8 @@ func (h *PageHandler) ArtifactProjectTool(w http.ResponseWriter, r *http.Request
 	forward.Header = r.Header.Clone()
 	forward.Header.Set("Content-Type", "application/json")
 	switch body.Operation {
+	case "artifact_slides_read", "artifact_export_pdf":
+		h.forwardArtifactSlidesTool(w, forward, body.Operation, body.Payload)
 	case "artifact_create":
 		var payload map[string]json.RawMessage
 		if decodeArtifactProjectJSONBytes(body.Payload, &payload) != nil {
@@ -214,6 +249,48 @@ func (h *PageHandler) ArtifactProjectTool(w http.ResponseWriter, r *http.Request
 		h.PublishArtifactProject(w, forward)
 	case "artifact_restore":
 		h.RestoreArtifactProject(w, forward)
+	case "artifact_data_batch":
+		var payload struct {
+			Collection  string                `json:"collection"`
+			BaseVersion int64                 `json:"base_version"`
+			Documents   []artifacts.DataWrite `json:"documents"`
+		}
+		if artifacts.DecodeDataJSON(body.Payload, &payload, "collection", "base_version", "documents") != nil {
+			replyError(w, 400, "invalid dashboard data batch")
+			return
+		}
+		forward.SetPathValue("collection", payload.Collection)
+		raw, err := artifacts.MarshalDataJSON(artifacts.DataBatch{BaseVersion: payload.BaseVersion, Documents: payload.Documents})
+		if err != nil {
+			replyError(w, 400, "invalid dashboard data batch")
+			return
+		}
+		forward.Body = io.NopCloser(bytes.NewReader(raw))
+		forward.ContentLength = int64(len(raw))
+		h.BatchArtifactData(w, forward)
+	case "artifact_data_read", "artifact_data_collections":
+		var payload struct {
+			Collection string `json:"collection,omitempty"`
+			Version    int64  `json:"version"`
+		}
+		fields := []string{"version"}
+		if body.Operation == "artifact_data_read" {
+			fields = append(fields, "collection")
+		}
+		if artifacts.DecodeDataJSON(body.Payload, &payload, fields...) != nil || payload.Version < 1 || payload.Version > artifacts.MaxDataVersion {
+			replyError(w, 400, "invalid dashboard data read")
+			return
+		}
+		query := forward.URL.Query()
+		query.Set("version", strconv.FormatInt(payload.Version, 10))
+		forward.URL.RawQuery = query.Encode()
+		forward.Method = http.MethodGet
+		if body.Operation == "artifact_data_read" {
+			forward.SetPathValue("collection", payload.Collection)
+			h.GetArtifactData(w, forward)
+		} else {
+			h.ListArtifactData(w, forward)
+		}
 	case "artifact_versions", "artifact_comments":
 		var payload struct {
 			Version int64 `json:"version"`

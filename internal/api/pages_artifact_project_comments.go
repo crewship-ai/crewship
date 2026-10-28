@@ -11,6 +11,7 @@ import (
 	"golang.org/x/net/html"
 
 	"github.com/crewship-ai/crewship/internal/artifacts"
+	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -23,19 +24,20 @@ type artifactProjectReply struct {
 	CreatedAt          string `json:"created_at"`
 }
 type artifactProjectComment struct {
-	AnsweredVersion int64                  `json:"answered_version,omitempty"`
-	Status          string                 `json:"status"`
-	ID              string                 `json:"id"`
-	Version         int64                  `json:"version"`
-	Path            string                 `json:"path"`
-	Selector        string                 `json:"selector"`
-	Quote           string                 `json:"quote"`
-	Text            string                 `json:"text"`
-	Author          string                 `json:"author"`
-	AuthorKind      string                 `json:"author_kind,omitempty"`
-	TaskID          string                 `json:"task_id,omitempty"`
-	CreatedAt       string                 `json:"created_at"`
-	Replies         []artifactProjectReply `json:"replies"`
+	DeliveryRetryable bool                   `json:"delivery_retryable"`
+	AnsweredVersion   int64                  `json:"answered_version,omitempty"`
+	Status            string                 `json:"status"`
+	ID                string                 `json:"id"`
+	Version           int64                  `json:"version"`
+	Path              string                 `json:"path"`
+	Selector          string                 `json:"selector"`
+	Quote             string                 `json:"quote"`
+	Text              string                 `json:"text"`
+	Author            string                 `json:"author"`
+	AuthorKind        string                 `json:"author_kind,omitempty"`
+	TaskID            string                 `json:"task_id,omitempty"`
+	CreatedAt         string                 `json:"created_at"`
+	Replies           []artifactProjectReply `json:"replies"`
 }
 
 // Attribution comes from the authenticated actor, never from request fields.
@@ -140,6 +142,59 @@ func (h *PageHandler) artifactProjectCommentTx(r *http.Request, k artifacts.Vers
 	}
 	return tx.Commit()
 }
+
+// Retry eligibility is delivery metadata, never an authorization grant. One
+// Page-scoped origin check and one batched task query serve every comment. The
+// committing chat/run guards remain authoritative when the human clicks Retry.
+func (h *PageHandler) artifactProjectRetryableComments(r *http.Request, ctx context.Context, tx *sql.Tx, k artifacts.VersionKey, selectedVersion int64) (map[string]bool, error) {
+	result := make(map[string]bool)
+	user := UserFromContext(ctx)
+	if user == nil || validateContentHumanCredential(r.WithContext(ctx), tx, "pages:write") != nil {
+		return result, nil
+	}
+	if _, err := h.artifactProjectAuthority(r.WithContext(ctx), k, true, false)(ctx, tx); err != nil {
+		return result, nil
+	}
+	var chat, agent, crew string
+	err := tx.QueryRowContext(ctx, `SELECT o.chat_id,o.agent_id,a.crew_id
+ FROM artifact_project_origins o JOIN chats c ON c.id=o.chat_id AND c.workspace_id=o.workspace_id AND c.agent_id=o.agent_id
+ JOIN agents a ON a.id=c.agent_id AND a.workspace_id=c.workspace_id AND a.deleted_at IS NULL
+ JOIN pages p ON p.id=o.page_id AND p.workspace_id=o.workspace_id AND p.owner_user_id=o.human_user_id
+ WHERE o.workspace_id=? AND o.page_id=? AND o.human_user_id=? AND c.created_by=o.human_user_id AND c.visibility='private'`, k.WorkspaceID, k.PageID, user.ID).Scan(&chat, &agent, &crew)
+	if errors.Is(err, sql.ErrNoRows) {
+		return result, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	audience, err := chataudience.CaptureTrustedQuery(ctx, tx, chat, user.ID, nil)
+	if err != nil {
+		return nil, err
+	}
+	if audience == nil || audience.WorkspaceID != k.WorkspaceID || audience.AgentID != agent || !h.artifactAgentPolicyAllows(ctx, k.WorkspaceID, crew) {
+		return result, nil
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT c.id FROM artifact_project_comments c
+ JOIN artifact_project_comment_tasks t ON t.id=c.task_id AND t.comment_id=c.id AND t.workspace_id=c.workspace_id AND t.page_id=c.page_id AND t.base_version=c.version
+ JOIN artifact_version_heads h ON h.workspace_id=c.workspace_id AND h.page_id=c.page_id AND h.latest_version=c.version
+ WHERE c.workspace_id=? AND c.page_id=? AND c.author=? AND c.version=? AND t.status='pending' AND t.active_run_id IS NULL
+ AND NOT EXISTS(SELECT 1 FROM artifact_project_comment_replies reply WHERE reply.comment_id=c.id)
+ AND NOT EXISTS(SELECT 1 FROM artifact_project_message_intents i WHERE i.workspace_id=c.workspace_id AND i.page_id=c.page_id AND i.comment_id=c.id AND i.base_version=c.version)
+ ORDER BY c.created_at,c.id LIMIT 500`, k.WorkspaceID, k.PageID, user.ID, selectedVersion)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		result[id] = true
+	}
+	return result, rows.Err()
+}
+
 func (h *PageHandler) artifactProjectComments(r *http.Request, k artifacts.VersionKey, version int64, sharedOnly bool) (out []artifactProjectComment, err error) {
 	out = []artifactProjectComment{}
 	err = h.artifactProjectCommentTx(r, k, false, func(ctx context.Context, tx *sql.Tx, _ string) error {
@@ -177,7 +232,15 @@ func (h *PageHandler) artifactProjectComments(r *http.Request, k artifacts.Versi
 		if e != nil {
 			return e
 		}
+		retryable := map[string]bool{}
+		if !sharedOnly && owner == user.ID && len(out) > 0 {
+			retryable, e = h.artifactProjectRetryableComments(r, ctx, tx, k, version)
+			if e != nil {
+				return e
+			}
+		}
 		for i := range out {
+			out[i].DeliveryRetryable = retryable[out[i].ID]
 			replies, e := tx.QueryContext(ctx, `SELECT text,version,needs_clarification,author,created_at FROM artifact_project_comment_replies WHERE comment_id=? AND (?=0 OR version=?) ORDER BY created_at,id`, out[i].ID, sharedOnly, version)
 			if e != nil {
 				return e

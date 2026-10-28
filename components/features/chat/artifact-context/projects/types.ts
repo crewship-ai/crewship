@@ -44,6 +44,8 @@ export interface ArtifactComment {
   quote: string
   text: string
   author?: string
+  /** Server-derived delivery metadata; never an execution grant. */
+  delivery_retryable?: boolean
   task_id?: string
   created_at?: string
   /** proposed */
@@ -55,6 +57,8 @@ export interface ArtifactComment {
 
 export interface ArtifactProjectSnapshot {
   page_id: string
+  /** Server classification of the selected authorized version, when the capability is enabled. */
+  artifact_kind?: "slides"
   /** proposed: display name and slug, so a chat card needs no second request. */
   name?: string
   slug?: string
