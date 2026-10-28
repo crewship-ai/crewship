@@ -55,6 +55,8 @@ export interface ArtifactComment {
 
 export interface ArtifactProjectSnapshot {
   page_id: string
+  /** Server classification of the selected authorized version, when the capability is enabled. */
+  artifact_kind?: "slides"
   /** proposed: display name and slug, so a chat card needs no second request. */
   name?: string
   slug?: string

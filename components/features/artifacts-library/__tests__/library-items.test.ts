@@ -5,6 +5,15 @@ import { kindCounts, libraryItems } from "../library-items"
 const page = (over: Partial<WirePage>): WirePage => ({ id: over.slug ?? "p", slug: "p", name: "P", owner: "user/u1", updated_at: "2026-10-27T10:00:00Z", reach: ["owner"], ...over } as WirePage)
 
 describe("library items", () => {
+  it("routes only explicit VersionStore Slides through the artifact viewer", () => {
+    const items = libraryItems([
+      page({ slug: "typed", artifact_kind: "slides", artifact_shared_version: 2, has_slides: false }),
+      page({ slug: "legacy", has_slides: true }),
+    ].map(toPageView))
+    expect(items.map(item => [item.kind, item.projectBacked, item.native, item.sharedVersion])).toEqual([
+      ["slides", true, false, 2], ["slides", false, false, null],
+    ])
+  })
   it("lists only kinds that have a backend, newest first, with the shared version", () => {
     const items = libraryItems([
       page({ slug: "site", name: "Pricing site", artifact_kind: "project", artifact_shared_version: 2, updated_at: "2026-10-27T12:00:00Z" }),

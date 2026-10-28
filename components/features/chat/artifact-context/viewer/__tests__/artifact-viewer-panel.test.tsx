@@ -26,6 +26,7 @@ vi.mock("../../projects/use-artifact-project-data", () => ({
 }))
 
 vi.mock("../artifact-dashboard-preview", () => ({ ArtifactDashboardPreview: () => <div>Bound dashboard</div> }))
+vi.mock("../artifact-slides-preview", () => ({ ArtifactSlidesPreview: () => <div>Typed slides preview</div> }))
 
 import { ArtifactViewerPanel, commentQueueChip } from "../artifact-viewer-panel"
 
@@ -519,4 +520,35 @@ it.each([false, true])("fences a pending comment only when refresh loses authori
     if (queryError) expect(send).not.toHaveBeenCalled()
     else expect(send).toHaveBeenCalledTimes(1)
   })
+})
+
+it.each([["true", "slides", "typed"], ["true", undefined, "unsupported"], ["false", "slides", "legacy"]] as const)("routes the selected deck safely with Slides flag %s and kind %s", (flag, kind, mode) => {
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACT_SLIDES", flag)
+  try {
+    const data = Object.assign(snap(), { artifact_kind: kind })
+    data.manifest.files.push({ path: "deck.json", media_type: "application/json", content: '{"schema_version":1,"order":["intro"]}' })
+    state.snapshot.data = data
+    render(<ArtifactViewerPanel />)
+    if (mode === "typed") {
+      expect(screen.getByText("Typed slides preview")).toBeInTheDocument()
+      expect(screen.getByText("Slides", { exact: true })).toBeInTheDocument()
+    } else if (mode === "unsupported") expect(screen.getByText("This Slides format is unsupported.")).toBeInTheDocument()
+    else expect(screen.getByTitle(/Preview of/)).toHaveAttribute("srcdoc", expect.stringContaining("Big  idea"))
+    if (mode !== "legacy") expect(screen.queryByTitle(/Preview of/)).toBeNull()
+  } finally { vi.unstubAllEnvs() }
+})
+
+it("refuses ambiguous deck and dashboard source without either preview", () => {
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACT_SLIDES", "true")
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACT_DASHBOARDS", "true")
+  try {
+    const data = Object.assign(snap(), { artifact_kind: "slides" })
+    data.manifest.files.push({ path: "deck.json", media_type: "application/json", content: '{}' }, { path: "dashboard.json", media_type: "application/json", content: '{"schema_version":1,"collections":["sales"]}' })
+    state.snapshot.data = data
+    render(<ArtifactViewerPanel />)
+    expect(screen.getByText("This Slides format is unsupported.")).toBeInTheDocument()
+    expect(screen.queryByText("Typed slides preview")).toBeNull()
+    expect(screen.queryByText("Bound dashboard")).toBeNull()
+    expect(screen.queryByTitle(/Preview of/)).toBeNull()
+  } finally { vi.unstubAllEnvs() }
 })

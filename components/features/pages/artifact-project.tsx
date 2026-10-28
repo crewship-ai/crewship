@@ -9,6 +9,8 @@ import { useArtifactProject, type ArtifactAnchor } from "@/hooks/use-artifact-pr
 import { artifactProjectDocument, artifactProjectQuote } from "@/lib/pages/artifact-project-preview"
 import { artifactDashboards } from "@/lib/feature-flags"
 import { ArtifactDashboardPreview } from "@/components/features/chat/artifact-context/viewer/artifact-dashboard-preview"
+import { artifactSlidesMode } from "@/lib/pages/artifact-slides"
+import { ArtifactSlidesPreview } from "@/components/features/chat/artifact-context/viewer/artifact-slides-preview"
 
 export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspaceId: string; slug: string; initialVersion?: number }) {
  const session = useSessionSafe()
@@ -27,9 +29,10 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
  const agent = useArtifactAgentDispatch(workspaceId, data?.page_id, data?.origin, data?.can_write === true && !query.isError)
  const [delivery, setDelivery] = useState<Record<string,string>>({})
  const manifest = data?.manifest
+ const slidesMode = artifactSlidesMode(data?.artifact_kind, manifest?.files ?? [])
  const path = manifest?.files.some(file => file.path === screenPath) ? screenPath : manifest?.entrypoint ?? ""
  const token = useMemo(() => [path, manifest?.version, selecting, typeof crypto !== "undefined" ? Array.from(crypto.getRandomValues(new Uint8Array(16)), value => value.toString(16).padStart(2, "0")).join("") : ""].join(":"), [path, manifest?.version, selecting])
- const source = useMemo(() => manifest ? artifactProjectDocument(manifest.files, path, token, selecting) : "", [manifest, path, token, selecting])
+ const source = useMemo(() => manifest && !slidesMode ? artifactProjectDocument(manifest.files, path, token, selecting) : "", [manifest, path, token, selecting, slidesMode])
  useEffect(() => {
   if (!draftKey) { setDraftState(null); return }
   try { setDraftState({key:draftKey,text:localStorage.getItem(draftKey) ?? ""}); setStorageError(false) } catch { setDraftState({key:draftKey,text:""}); setStorageError(true) }
@@ -62,7 +65,7 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
  return <main className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] min-h-0 flex-col">
   <header className="flex flex-wrap items-center gap-3 border-b p-4">
    <Link href={`/pages/${encodeURIComponent(slug)}?workspace_id=${encodeURIComponent(workspaceId)}`} className="inline-flex items-center text-sm underline coarse:min-h-[44px]">Back to Page</Link>
-   <h1 className="mr-auto text-lg font-semibold">{slug} · Artifact project</h1>
+   <h1 className="mr-auto text-lg font-semibold">{slug} · {slidesMode === "slides" ? "Slides" : "Artifact project"}</h1>
    {!data.can_write && <span className="text-sm text-muted-foreground">Read only</span>}
    <label className="flex items-center gap-2 text-sm">Version<select aria-label="Version" className="rounded border bg-background p-2 coarse:min-h-[44px]" value={viewedVersion} onChange={event => selectVersion(Number(event.target.value))}>{data.versions.map(item => <option key={item.version} value={item.version}>Version {item.version}{item.version === data.shared_version ? " · shared" : ""}</option>)}</select></label>
    {data.can_write && <><Button variant="outline" disabled={restore.isPending} onClick={() => restore.mutate({ version: viewedVersion, base_version: data.latest_version }, { onSuccess: () => { setVersion(undefined); setAnchor(undefined) } })}>Restore version {viewedVersion}</Button><Button variant="outline" disabled={share.isPending} onClick={() => share.mutate({ version: viewedVersion, base_version: data.latest_version })}>Share version {viewedVersion}</Button></>}
@@ -71,8 +74,11 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
   {mutationError && <p role="alert" className="px-4 py-2 text-sm text-destructive">{mutationError.message}</p>}
   <div className="flex min-h-0 flex-1 flex-col md:flex-row">
    <section aria-label="Project screens" className="flex min-h-0 flex-1 flex-col">
-    <nav aria-label="Screens" className="flex flex-wrap gap-2 border-b p-3">{manifest?.files.filter(file => file.media_type === "text/html" || /\.html?$/.test(file.path)).map(file => <Button key={file.path} variant={file.path === path ? "secondary" : "ghost"} onClick={() => { setScreenPath(file.path); setAnchor(undefined) }}>{file.path}</Button>)}{data.can_write && <Button className="ml-auto" variant={selecting ? "secondary" : "outline"} aria-pressed={selecting} onClick={() => setSelecting(!selecting)}>{selecting ? "Cancel selection" : "Select an element"}</Button>}</nav>
-    {artifactDashboards() && manifest?.files.some(file => file.path === "dashboard.json")
+    <nav aria-label="Screens" className="flex flex-wrap gap-2 border-b p-3">{!slidesMode && manifest?.files.filter(file => file.media_type === "text/html" || /\.html?$/.test(file.path)).map(file => <Button key={file.path} variant={file.path === path ? "secondary" : "ghost"} onClick={() => { setScreenPath(file.path); setAnchor(undefined) }}>{file.path}</Button>)}{data.can_write === true && slidesMode !== "unsupported" && <Button className="ml-auto" variant={selecting ? "secondary" : "outline"} aria-pressed={selecting} onClick={() => setSelecting(!selecting)}>{selecting ? "Cancel selection" : "Select an element"}</Button>}</nav>
+    {slidesMode === "unsupported" ? <p role="alert" className="p-4">This Slides format is unsupported.</p>
+     : slidesMode === "slides" && manifest ? <ArtifactSlidesPreview workspaceId={workspaceId} pageId={data.page_id} codeVersion={manifest.version} artifactKind={data.artifact_kind} path={screenPath} title="Artifact preview" selectMode={selecting && data.can_write === true}
+       className="min-h-72 flex-1" onSelect={selection => { setAnchor({ version: manifest.version, path, ...selection }); setSelecting(false) }} onNavigate={next => { setScreenPath(next); setAnchor(undefined) }} />
+     : artifactDashboards() && manifest?.files.some(file => file.path === "dashboard.json")
      ? <ArtifactDashboardPreview workspaceId={workspaceId} pageId={data.page_id} codeVersion={manifest.version} files={manifest.files} path={path} title="Artifact preview" selectMode={selecting && data.can_write}
        className="min-h-72 flex-1" onSelect={selection => { setAnchor({ version: manifest.version, path, ...selection }); setSelecting(false) }} onNavigate={next => { setScreenPath(next); setAnchor(undefined) }} />
      : <iframe ref={frame} key={`${manifest?.version}:${path}:${token}`} title="Artifact preview" data-screen={path} className="min-h-72 w-full flex-1 border-0 bg-white" sandbox="allow-scripts" referrerPolicy="no-referrer" srcDoc={source} />}

@@ -55,6 +55,13 @@ The authored Slides read/export entrypoints link this renderer into the binary.
 Runtime access remains disabled by default behind `artifact_slides`; the Go
 dependency inventory below includes its linked dependencies.
 
+## Artifact Slides font
+
+The packaged Go Regular font in `public/fonts/go-regular/Go-Regular.ttf` is
+identical to `golang.org/x/image/font/gofont/goregular` v0.47.0, copyright
+2016 Bigelow & Holmes Inc. Its BSD-style Go font notice is retained in
+[`public/fonts/go-regular/LICENSE.txt`](public/fonts/go-regular/LICENSE.txt).
+
 ## Go dependencies
 
 Sections below list every direct + transitive Go dependency of the `crewship`

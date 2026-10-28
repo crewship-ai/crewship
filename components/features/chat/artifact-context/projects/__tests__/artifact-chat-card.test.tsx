@@ -121,3 +121,22 @@ it.each([
   renderCard(<ArtifactChatCard slug="onboarding" fallbackName="Dashboard" />)
   expect(screen.getByTestId("artifact-card-kind").textContent).toBe(`${label}Draft`)
 })
+
+it.each([["true", "slides", "Slides"], ["false", "slides", "Project"], ["true", undefined, "Artifact"]] as const)("labels Slides only from selected typed metadata with flag %s", (flag, kind, label) => {
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACT_SLIDES", flag)
+  const data = Object.assign(snapshot({ name: "Slides from tool text" }), { artifact_kind: kind })
+  data.manifest.files.push({ path: "deck.json", media_type: "application/json", content: '{"schema_version":1,"order":["intro"]}' })
+  h.result = query({ data })
+  renderCard(<ArtifactChatCard slug="onboarding" fallbackName="Slides" />)
+  expect(screen.getByTestId("artifact-card-kind").textContent).toBe(`${label}Draft`)
+})
+
+it("labels ambiguous deck and Dashboard markers as an Artifact rather than a positive type", () => {
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACT_SLIDES", "true")
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACT_DASHBOARDS", "true")
+  const data = Object.assign(snapshot(), { artifact_kind: "slides" })
+  data.manifest.files.push({ path: "deck.json", media_type: "application/json", content: '{}' }, { path: "dashboard.json", media_type: "application/json", content: '{"schema_version":1,"collections":["sales"]}' })
+  h.result = query({ data })
+  renderCard(<ArtifactChatCard slug="onboarding" />)
+  expect(screen.getByTestId("artifact-card-kind").textContent).toBe("ArtifactDraft")
+})

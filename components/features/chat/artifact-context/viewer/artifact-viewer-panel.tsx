@@ -16,11 +16,13 @@ import { useArtifactAgentDispatch } from "@/hooks/use-artifact-agent-dispatch"
 import { cn } from "@/lib/utils"
 import { artifactDashboards } from "@/lib/feature-flags"
 import { parseDashboardManifest } from "@/lib/pages/artifact-dashboard"
+import { artifactSlidesMode } from "@/lib/pages/artifact-slides"
 import { useArtifactViewer, type ArtifactViewerTarget } from "../projects/artifact-viewer-context"
 import { useArtifactProjectMutations, useArtifactProjectSnapshot } from "../projects/use-artifact-project-data"
 import type { ArtifactComment, ArtifactProjectSnapshot } from "../projects/types"
 import { ArtifactPreviewFrame, type PreviewSelection } from "./artifact-preview-frame"
 import { ArtifactDashboardPreview } from "./artifact-dashboard-preview"
+import { ArtifactSlidesPreview } from "./artifact-slides-preview"
 import { isValidAnchorSelector, screenLabel, screenLabels } from "./element-select"
 
 export type ArtifactViewerVariant = "pane" | "fullscreen" | "library"
@@ -205,13 +207,16 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
   const shown = data.manifest.version
   const viewingOld = shown !== latest
   const isShared = sharedVersion > 0 && sharedVersion === latest
-  const labels = useMemo(() => screenLabels(data.manifest), [data.manifest])
+  const slidesMode = artifactSlidesMode(data.artifact_kind, data.manifest.files)
+  const labels = useMemo(() => slidesMode
+    ? new Map(data.manifest.files.filter(file => file.media_type === "text/html").map(file => [file.path, screenLabel(file.path)]))
+    : screenLabels(data.manifest), [data.manifest, slidesMode])
   const screens = useMemo(() => [...labels.keys()], [labels])
   const labelOf = (path: string) => labels.get(path) ?? screenLabel(path)
   const screen = screenPath && screens.includes(screenPath) ? screenPath : screens[0] ?? ""
   const html = data.manifest.files.find(file => file.path === screen)?.content ?? ""
   // The server anchors comments by a unique #id only; a screen without ids has nothing to select.
-  const anchorable = useMemo(() => typeof DOMParser === "undefined" || new DOMParser().parseFromString(html, "text/html").querySelector("body [id]") !== null, [html])
+  const anchorable = useMemo(() => slidesMode ? slidesMode === "slides" : typeof DOMParser === "undefined" || new DOMParser().parseFromString(html, "text/html").querySelector("body [id]") !== null, [html, slidesMode])
   const versions = useMemo(() => [...data.versions].sort((a, b) => b.version - a.version), [data.versions])
 
   // "Comment sent" is stale once another version is shown (the agent published) or a new selection starts.
@@ -289,7 +294,7 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
 
   const header = <>
     <h2 className="min-w-0 truncate text-sm font-semibold">{data.name ?? data.slug ?? target.slug}</h2>
-    <Badge variant="outline" className="shrink-0">{artifactDashboards() && parseDashboardManifest(data.manifest.files) ? "Dashboard" : "Project"}</Badge>
+    <Badge variant="outline" className="shrink-0">{slidesMode === "slides" ? "Slides" : slidesMode === "unsupported" ? "Artifact" : artifactDashboards() && parseDashboardManifest(data.manifest.files) ? "Dashboard" : "Project"}</Badge>
     <StatusPill tone={isShared ? "success" : "muted"} label={isShared ? "Shared" : "Draft"} />
     <div className="flex-1" />
   </>
@@ -325,7 +330,7 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
 
   const compactScreens = screens.length > 4
   const subToolbar = <div className="flex shrink-0 items-center gap-1.5 border-b px-3 py-2">
-    {screens.length > 1 && <>
+    {!slidesMode && screens.length > 1 && <>
       {/* Up to four screens stay a segmented control at every width (labels truncate, as in the design);
           only more than that falls back to a select on a narrow pane. */}
       <div className={cn("min-w-0", compactScreens && "hidden @md:block")}>
@@ -338,7 +343,7 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
       </select>}
     </>}
     <div className="flex-1" />
-    {canWrite && !viewingOld && <Button type="button" size="sm" variant={selectMode ? "secondary" : "ghost"} className="h-7 gap-1.5" aria-pressed={selectMode}
+    {canWrite && slidesMode !== "unsupported" && !viewingOld && <Button type="button" size="sm" variant={selectMode ? "secondary" : "ghost"} className="h-7 gap-1.5" aria-pressed={selectMode}
       onClick={() => { if (selectMode) setAnchor(null); else clearCommentNotice(); setSelectMode(on => !on) }}>
       <MousePointerClick className="size-3.5" aria-hidden />Select
     </Button>}
@@ -401,7 +406,9 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
 
   const canvas = <div ref={canvasRef} className="relative rounded-card bg-muted p-3.5">
     <div className={cn("overflow-hidden rounded-md border bg-white", fullscreen ? "h-[max(320px,calc(100dvh-14rem))]" : "h-[min(70vh,560px)] min-h-[320px]")}>
-      {artifactDashboards() && data.manifest.files.some(file => file.path === "dashboard.json")
+      {slidesMode === "unsupported" ? <p role="alert" className="p-4">This Slides format is unsupported.</p>
+        : slidesMode === "slides" ? <ArtifactSlidesPreview workspaceId={workspaceId} pageId={data.page_id} codeVersion={shown} artifactKind={data.artifact_kind} path={screenPath ?? ""} title={`Preview of ${labelOf(screen)}`} selectMode={canWrite && selectMode && !viewingOld} onSelect={select} onNavigate={setScreenPath} />
+        : artifactDashboards() && data.manifest.files.some(file => file.path === "dashboard.json")
         ? <ArtifactDashboardPreview workspaceId={workspaceId} pageId={data.page_id} codeVersion={shown} files={data.manifest.files} path={screen} selectMode={canWrite && selectMode && !viewingOld} title={`Preview of ${labelOf(screen)}`} onSelect={select} onNavigate={setScreenPath} />
         : <ArtifactPreviewFrame html={html} files={data.manifest.files} screens={screens} path={screen} selectMode={canWrite && selectMode && !viewingOld} title={`Preview of ${labelOf(screen)}`}
           highlight={highlight} onSelect={select} onNavigate={setScreenPath} />}

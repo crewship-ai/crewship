@@ -142,6 +142,7 @@ export function parseArtifactProject(raw: unknown): ArtifactProjectSnapshot | nu
   const quota = parseQuota(raw.quota)
   return {
     page_id: raw.page_id,
+    ...(raw.artifact_kind === "slides" ? { artifact_kind: "slides" as const } : {}),
     ...(str(raw.name) && raw.name.trim() ? { name: raw.name } : {}),
     ...(str(raw.slug) && raw.slug ? { slug: raw.slug } : {}),
     ...(origin !== undefined ? { origin } : {}),
