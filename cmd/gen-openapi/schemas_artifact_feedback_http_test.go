@@ -59,3 +59,23 @@ func TestArtifactFeedbackHTTPContractsNamedAndClosed(t *testing.T) {
 		})
 	}
 }
+
+func TestArtifactFeedbackDeliveryRetryMetadataIsRequiredBoolean(t *testing.T) {
+	doc := buildDocument([]route{routeFromKey("GET /api/v1/pages/{slug}/artifact/comments")})
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiled := compileAt(t, raw, "/components/schemas/ArtifactProjectComment")
+	value := map[string]any{"id": "c1", "version": float64(1), "path": "index.html", "selector": "#hero", "quote": "Title", "text": "Change", "author": "owner", "created_at": "2026-10-28T00:00:00Z", "status": "pending", "replies": []any{}}
+	if compiled.Validate(value) == nil {
+		t.Fatal("delivery_retryable must be required")
+	}
+	for _, flag := range []any{false, true, "true", nil, float64(1)} {
+		value["delivery_retryable"] = flag
+		_, boolean := flag.(bool)
+		if (compiled.Validate(value) == nil) != boolean {
+			t.Fatalf("incorrect retry metadata validation for %v", flag)
+		}
+	}
+}

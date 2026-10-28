@@ -61,7 +61,7 @@ func TestArtifactFeedbackAuthorKindIsOptionalAndClosed(t *testing.T) {
 			schema := compileAt(t, raw, "/components/schemas/"+name)
 			body := map[string]any{"text": "Comment", "version": float64(1), "author": "erased", "created_at": "2026-10-27T00:00:00Z"}
 			if name == "ArtifactProjectComment" {
-				for k, v := range map[string]any{"id": "comment", "path": "index.html", "selector": "#hero", "quote": "Hello", "status": "comment", "replies": []any{}} {
+				for k, v := range map[string]any{"id": "comment", "path": "index.html", "selector": "#hero", "quote": "Hello", "status": "comment", "replies": []any{}, "delivery_retryable": false} {
 					body[k] = v
 				}
 			}

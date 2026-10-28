@@ -1573,6 +1573,10 @@
             "format": "date-time",
             "type": "string"
           },
+          "delivery_retryable": {
+            "description": "Owner-only eligibility for manual retry of the exact undelivered pending task at the selected latest version. False for readers, missing authority, claimed tasks or any already accepted delivery intent. Not an execution grant; fresh read and existing admission are still required.",
+            "type": "boolean"
+          },
           "id": {
             "type": "string"
           },
@@ -1626,7 +1630,8 @@
           "author",
           "created_at",
           "status",
-          "replies"
+          "replies",
+          "delivery_retryable"
         ],
         "type": "object"
       },

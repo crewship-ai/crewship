@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
-  ArtifactRequestError, createArtifactComment, fetchArtifactAvailability, fetchArtifactProject, parseArtifactProject,
+  ArtifactRequestError, createArtifactComment, fetchArtifactAvailability, fetchArtifactProject, parseArtifactProject, parseArtifactComment,
   restoreArtifactVersion, shareArtifactVersion,
 } from "../projects/client"
 
@@ -126,3 +126,8 @@ describe("parseArtifactProject", () => {
     expect(parseArtifactProject({ ...snapshot, manifest: { ...snapshot.manifest, files: [{ path: "a" }] } })).toBeNull()
   })
 })
+
+ it.each([true,false,"true",1,null,undefined])("preserves only boolean retry eligibility (%s)",value=>{
+ const parsed=parseArtifactComment({id:"c1",version:1,path:"index.html",text:"Waiting",delivery_retryable:value})!
+ expect(parsed.delivery_retryable).toBe(typeof value==="boolean"?value:undefined)
+ })

@@ -44,6 +44,7 @@ var schemaKeyContracts = []struct {
 	// A zero value of the struct the handler serializes.
 	value any
 }{
+	{name: "ArtifactProjectComment", pointer: "/components/schemas/ArtifactProjectComment", value: artifactProjectComment{}},
 
 	{name: "ArtifactDataCollections", pointer: "/components/schemas/ArtifactDataCollections", value: artifactDataCollectionsResponse{}},
 	{name: "ArtifactDataResponse", pointer: "/components/schemas/ArtifactDataResponse", value: artifactDataResponse{}},

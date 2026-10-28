@@ -129,7 +129,7 @@ function ViewerBody({ workspaceId, target, onClose, className, variant }: BodyPr
       <Skeleton className="h-8 w-full" /><Skeleton className="min-h-40 flex-1" />
     </div>)
   }
-  const props = { data, target, setViewing, refetch: () => void snapshot.refetch(), workspaceId, shell, fullscreen, writeEnabled: !snapshot.error && data.can_write === true }
+  const props = { data, target, setViewing, refetch: () => void snapshot.refetch(), workspaceId, shell, fullscreen, writeEnabled: !snapshot.error && data.can_write === true, readForRetry: async () => { const fresh = await snapshot.refetch(); return fresh && !fresh.error ? fresh.data : undefined } }
   return variant === "library"
     ? <LibraryLoadedViewer {...props} dispatchEnabled={props.writeEnabled} />
     : <LoadedViewer {...props} />
@@ -140,6 +140,7 @@ interface LoadedProps {
   target: ArtifactViewerTarget
   setViewing: (version: number | undefined) => void
   refetch: () => void
+  readForRetry: () => Promise<ArtifactProjectSnapshot | undefined>
   workspaceId: string
   shell: Shell
   fullscreen: boolean
@@ -155,10 +156,10 @@ function LibraryLoadedViewer(props: LoadedProps & { dispatchEnabled: boolean }) 
   return <LoadedViewer {...props} library sendToOrigin={data.origin && dispatchEnabled ? request => agent.dispatch(request.comment) : undefined} />
 }
 
-function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, fullscreen, writeEnabled, library = false, sendToOrigin }: LoadedProps) {
+function LoadedViewer({ data, target, setViewing, refetch, readForRetry, workspaceId, shell, fullscreen, writeEnabled, library = false, sendToOrigin }: LoadedProps) {
   const me = useSessionSafe()?.data?.user?.id
   const canWrite = writeEnabled && data.can_write === true
-  const scope = JSON.stringify([workspaceId, data.page_id])
+  const scope = JSON.stringify([me, workspaceId, data.page_id, data.origin?.chat_id ?? null, data.origin?.agent_id ?? null])
   const permission = useRef({ scope, allowed: canWrite, epoch: 0 })
   if (permission.current.scope !== scope || permission.current.allowed !== canWrite) permission.current = { scope, allowed: canWrite, epoch: permission.current.epoch + 1 }
   const epoch = permission.current.epoch
@@ -172,6 +173,11 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
   const { restore, share, comment } = useArtifactProjectMutations(workspaceId, target.slug)
   // A comment saved for the agent whose chat message did not go out; Retry sends it again.
   const [undispatched, setUndispatched] = useState<ArtifactComment | null>(null)
+  const confirmedDeliveries = useRef(new Set<string>())
+  const retryInFlight = useRef(false)
+  const [checkingRetry, setCheckingRetry] = useState(false)
+  useEffect(() => { retryInFlight.current = false; setCheckingRetry(false) }, [epoch])
+  const deliveryKey = (saved: ArtifactComment) => JSON.stringify([saved.id, saved.task_id, saved.version])
   const [historyOpen, setHistoryOpen] = useState(target.tab === "versions")
   const [activeTab, setActiveTab] = useState(target.tab ?? "preview")
   // A card asking for another section of the same project keeps the viewer (and an unsent comment).
@@ -251,7 +257,7 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
     })
   }
   // The comment is saved as the agent's task; the run starts with a chat message bound to it.
-  const deliveryConfirmed = (saved: ArtifactComment) => Boolean(saved.task_id && data.comments.some(current =>
+  const deliveryConfirmed = (saved: ArtifactComment) => confirmedDeliveries.current.has(deliveryKey(saved)) || Boolean(saved.task_id && data.comments.some(current =>
     current.id === saved.id && current.task_id === saved.task_id && current.version === saved.version &&
     (current.status === "working" || current.status === "answered" || current.status === "needs_clarification" || current.replies?.some(reply => /^agent:/.test(reply.author ?? ""))),
   ))
@@ -263,8 +269,40 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
     setUndispatched(null)
     const started = sendToAgent ? await sendToAgent({ pageId: data.page_id, comment: saved }).catch(() => false) : false
     if (!writeAllowed()) return
-    if (started) setNotice({ text: "Comment sent to the agent", commentOn: saved.version })
+    if (started) { confirmedDeliveries.current.add(deliveryKey(saved)); setNotice({ text: "Comment sent to the agent", commentOn: saved.version }) }
     else setUndispatched(saved)
+  }
+  const recoverable = (snapshot: ArtifactProjectSnapshot, saved: ArtifactComment) =>
+    snapshot.can_write === true && snapshot.origin?.chat_id && snapshot.origin.agent_id &&
+    snapshot.manifest.version === snapshot.latest_version && saved.version === snapshot.latest_version &&
+    saved.delivery_retryable === true && saved.status === "pending" && Boolean(saved.task_id) &&
+    saved.author === me && !saved.answered_version && !saved.replies?.length
+  const queuedRetry = sendToAgent ? data.comments.find(saved => recoverable(data, saved) && !deliveryConfirmed(saved)) : undefined
+  // A legacy immediate failure remains visible until the fresh server snapshot
+  // classifies it. Reopening recovers only explicitly eligible persisted tasks.
+  const localRetry = undispatched && !deliveryConfirmed(undispatched) &&
+    data.comments.find(saved => saved.id === undispatched.id)?.delivery_retryable !== false ? undispatched : undefined
+  const retryComment = localRetry ?? queuedRetry
+  const retry = async (saved: ArtifactComment) => {
+    if (!writeAllowed() || retryInFlight.current || deliveryConfirmed(saved)) return
+    retryInFlight.current = true; setCheckingRetry(true)
+    try {
+      // A cached Waiting task may have been ACKed or claimed while this viewer
+      // was closed. Refresh before any send; only the existing admission grants
+      // execution. Refetch errors and changed identity/origin fail closed.
+      const fresh = await readForRetry().catch(() => undefined)
+      if (!writeAllowed() || !fresh || fresh.page_id !== data.page_id ||
+        fresh.origin?.chat_id !== data.origin?.chat_id || fresh.origin?.agent_id !== data.origin?.agent_id) return
+      const current = fresh.comments.find(candidate => candidate.id === saved.id && candidate.task_id === saved.task_id &&
+        candidate.version === saved.version && candidate.path === saved.path && candidate.selector === saved.selector && candidate.quote === saved.quote)
+      if (!current || !recoverable(fresh, current)) return
+      await dispatch(current)
+    } finally {
+      if (mounted.current && permission.current.epoch === epoch) {
+        retryInFlight.current = false
+        setCheckingRetry(false)
+      }
+    }
   }
   const jumpTo = (c: ArtifactComment) => {
     if (library) setActiveTab("preview")
@@ -359,7 +397,7 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
     </ViewerBanner>}
     {banner === "anchor" && <ViewerBanner tone="info">This element changed. Select it again.</ViewerBanner>}
     {banner === "failed" && <ViewerBanner tone="bad">That did not go through. Nothing was changed; try again.</ViewerBanner>}
-    {canWrite && undispatched && <ViewerBanner tone="warn" title="The agent did not start" action={<Button type="button" size="sm" variant="secondary" className="h-7 shrink-0" onClick={() => void dispatch(undispatched)}>Retry</Button>}>
+    {canWrite && retryComment && <ViewerBanner tone="warn" title="The agent did not start" action={<Button type="button" size="sm" variant="secondary" className="h-7 shrink-0" disabled={checkingRetry} onClick={() => void retry(retryComment)}>Retry</Button>}>
       The comment is saved. Sending it to the agent in this chat did not go through.</ViewerBanner>}
     {viewingOld && shown === sharedVersion && <ViewerBanner tone="info" icon={Eye}
       action={canWrite && <Button type="button" size="sm" variant="secondary" className="h-7 shrink-0" disabled={share.isPending} onClick={() => doShare(latest)}>Share v{latest}</Button>}>
