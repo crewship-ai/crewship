@@ -8,7 +8,7 @@ import { StatusPill } from "@/components/ui/status-pill"
 import { SubBar, SubBarPrimary } from "@/components/layout/sub-bar"
 import { SecondaryPanel } from "@/components/layout/secondary-panel"
 import { PageEmpty, PageError, PageLoading, PageNoResults } from "@/components/layout/page-state"
-import { usePages } from "@/hooks/use-pages"
+import { usePages, type PageCatalogFilter } from "@/hooks/use-pages"
 import { usePageFolders } from "@/hooks/use-page-folders"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { useDocumentViewerRead } from "@/hooks/use-document-viewer-read"
@@ -61,6 +61,9 @@ function StateChips({ item }: { item: LibraryItem }) {
     {item.archived && <StatusPill tone="muted" label="Archived" />}
   </>
 }
+
+/** The server leaves archived and test-made Pages out unless asked (#4444); the Archive and Test items views need them. */
+const CATALOG: PageCatalogFilter = { archived: "include", testItems: "include" }
 
 const meta = (item: LibraryItem) => [item.ownerLabel, item.folder?.name, item.updatedAt ? formatRelativeShort(item.updatedAt.toISOString()) : null].filter(Boolean).join(" · ")
 
@@ -357,7 +360,7 @@ interface ArtifactsLibraryProps {
  * items and repeated runs have their own views and are never deleted here.
  */
 export function ArtifactsLibrary({ workspaceId, item, onSelect, filters: controlled, onFiltersChange }: ArtifactsLibraryProps) {
-  const { pages, loading, error, refresh } = usePages(workspaceId)
+  const { pages, loading, error, refresh } = usePages(workspaceId, undefined, CATALOG)
   const { folders } = usePageFolders(workspaceId)
   const caps = useArtifactCapabilities(workspaceId)
   const sharing = useSharingApi(workspaceId)
